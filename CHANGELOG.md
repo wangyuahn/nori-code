@@ -7,11 +7,6 @@
 - **Bidirectional BFS** — inLinks + outLinks chain traversal
 - **Various fixes** — nori_plan_write Windows paths, session resume providers, noriRules normalization
 
-## v0.1.12
-- Two-phase memory write: `links=[]` auto-search, `links=["None"]` skip, bidirectional link traversal, session resume fix
-
-## v0.1.11 — First public release
-
 Nori Code is a loop-core multi-agent coding tool. The orchestrator is read-only — it searches project memory, enforces custom rules, and delegates all code changes to parallel swarm sub-agents.
 
 ### Core Features
