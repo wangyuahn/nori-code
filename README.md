@@ -30,21 +30,23 @@ The orchestrator is **read-only** — it plans, searches memory, and delegates. 
 
 ## Core Features
 
-**Loop-core orchestration** — plan → implement → review phases, each with configurable mode (rule-enforced / hybrid / llm-autonomous).
+**Loop-core orchestration** — plan → implement → review phases, each with configurable mode (rule-enforced / hybrid / llm-autonomous). Goal mode auto-drives turns through all phases.
 
-**Custom rules engine** — define rules in `nori.yaml` that trigger on phase entry/exit or tool calls. Injected as system prompts. Fully user-editable.
+**Custom rules engine** — define rules in `nori.yaml` that trigger on phase entry/exit or tool calls. 4 condition types: `always`, `on_phase`, `on_tool`, `on_event`. Injected as system prompts. View/edit via `/setting rules`.
 
-**Shared Obsidian memory** — markdown vault with `[[bidirectional links]]`. Agents search before coding, write after decisions. Sub-agents inherit vault access.
+**Shared Obsidian memory** — markdown vault at `~/.nori-code/vault/` with `[[bidirectional links]]`. `nori_memory_search` queries vault (embedding + keyword + link graph). `nori_memory_write` records decisions/analysis/reviews. Note rules enforce mandatory notes at phase boundaries.
 
-**Agent Swarm** — DAG-based parallel task execution with dependency chains and configurable recursion depth.
+**Agent Swarm** — DAG-based parallel task execution with dependency chains and configurable recursion depth (`/settings → Swarm Depth`). `nori_swarm_launch` spawns coder/test/review sub-agents. `nori_ask_parent` lets sub-agents ask the orchestrator for guidance.
 
-**Read-only orchestrator** — main agent cannot write code directly. Must delegate via `nori_swarm_launch`. Togglable via `/settings`.
+**Read-only orchestrator** — main agent cannot write code directly. Must delegate via `nori_swarm_launch` or `nori_plan_write` (for docs). Togglable via `/settings → Read-only Mode`.
+
+**Review gate & scoring** — TurnFlow tracks per-turn activity (files changed, swarm calls, shell commands) and scores 0–10. Exceeding thresholds triggers mandatory/suggested review. Configurable via `/settings → Workflow`.
 
 **Post-code review** — review phase auto-runs tests, lint, type checks, then launches swarm review DAG.
 
-**Tool hints** — on error, the system classifies the failure and suggests recovery tools. Model decides the fix.
+**Tool hints** — on error, the system classifies the failure (compile / test / type / runtime / network / timeout) and suggests recovery tools. Model decides the fix.
 
-**Centralized `/settings`** — all configuration in one GUI selector: model, permission, theme, swarm depth, coder write, note rules.
+**Centralized `/settings`** — model, permission, theme, editor, swarm depth, coder write, note rules, read-only mode, workflow thresholds. All in one GUI selector.
 
 ---
 
@@ -66,6 +68,15 @@ nori --permission auto
 
 Requirements: Node.js ≥ 24.15.0.
 
+After install, configure a model provider:
+
+```sh
+nori
+# In the TUI:
+/provider    # add your API key (OpenAI, Anthropic, DeepSeek, etc.)
+/model       # select a model
+```
+
 ### Build from source
 
 ```sh
@@ -80,14 +91,36 @@ node apps/nori-code/dist/main.mjs
 
 ## Configuration (`nori.yaml`)
 
+Place `nori.yaml` in your project root. If absent, sensible defaults are used (default vault at `~/.nori-code/vault/`).
+
 ```yaml
 phases:
   - name: plan
-    mode: hybrid            # rule-enforced | hybrid | llm-autonomous
+    mode: hybrid
+    hybrid:
+      retrieval_gate:
+        trigger: { mode: on_keywords }
+        max_results: 10
   - name: implement
     mode: llm-autonomous
+    llm_autonomous:
+      max_iterations: 50
   - name: review
     mode: rule-enforced
+    rule_enforced:
+      steps:
+        - type: exec
+          id: run_tests
+          command: "npm test"
+        - type: exec
+          id: lint
+          command: "eslint src/"
+
+workflow:
+  review:
+    suggestion_threshold: 4
+    required_threshold: 7
+    max_gate_continuations: 2
 
 rules:
   definitions:
@@ -96,6 +129,23 @@ rules:
       prompt: "Search Obsidian vault for past decisions before coding."
       enforced: true
       editable: true
+    - name: require_plan_document
+      condition: { type: on_phase, phase: plan, stage: exit }
+      prompt: "Write a plan document before leaving the plan phase."
+      enforced: true
+      editable: false
+
+swarm:
+  max_concurrency: 4
+  max_swarm_depth: 3
+  checks:
+    - id: type_check
+      agent_type: coder
+      on_failure: fix_and_retry
+    - id: test_check
+      agent_type: coder
+      depends_on: [type_check]
+      on_failure: block
 ```
 
 Phase modes:
@@ -109,10 +159,29 @@ Phase modes:
 
 | Command | Action |
 |---------|--------|
-| `/settings` | Open settings GUI (model, permission, theme, swarm depth, coder write, note rules) |
+| `/settings` | Open settings GUI (12 options: model, permission, theme, editor, experiments, updates, usage, coder write, swarm depth, note rules, read-only mode, workflow) |
+| `/settings auto` | Interactive setup wizard (6-step guided configuration) |
 | `/settings permission auto\|yolo\|manual` | Set permission mode |
-| `/setting rules` | View custom rules |
+| `/setting rules` | View/edit custom rules |
+| `/setting note` | Toggle mandatory note rules (analysis/decision/pattern) |
 | `/provider` | Configure third-party model providers |
+
+## Memory Tools
+
+| Tool | Description |
+|------|-------------|
+| `nori_memory_search` | Query vault by keywords. Returns ranked results from embedding + full-text + link graph |
+| `nori_memory_write` | Write notes to vault. Use `[[wiki-links]]` for bidirectional linking |
+| `nori_plan_write` | Write plan docs to project workspace (docs/plans/). Not blocked by read-only mode |
+
+## Swarm Tools
+
+| Tool | Description |
+|------|-------------|
+| `nori_swarm_launch` | Launch DAG-based parallel sub-agents (coder/test/review) |
+| `nori_swarm_status` | Check running swarm progress |
+| `nori_swarm_result` | Retrieve swarm results |
+| `nori_ask_parent` | (subagent only) Ask parent orchestrator for guidance |
 
 ---
 
