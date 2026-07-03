@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import * as path from 'node:path';
+import { homedir } from 'node:os';
 import { relative } from 'pathe';
 import { load as loadYaml } from 'js-yaml';
 import type { NoriMemoryProvider, NoriSwarmProvider } from '../tools/builtin/nori/types';
@@ -466,16 +467,15 @@ export function createNoriProvidersFromConfig(noriConfig: Record<string, unknown
   maxSwarmDepth: number;
   coderWriteEnabled: boolean;
 } | null {
-  if (!noriConfig) return null;
-
-  const obsidian = noriConfig['obsidian'] as Record<string, unknown> | undefined;
+  const obsidian = noriConfig?.['obsidian'] as Record<string, unknown> | undefined;
   const rawVaultPath = (obsidian?.['vault_path'] as string) ?? null;
-  if (!rawVaultPath) return null;
+  // Default vault: ~/.nori-code/vault/
+  const defaultVault = path.join(homedir(), '.nori-code', 'vault');
+  const vaultPath = resolveBaseDir && rawVaultPath
+    ? path.resolve(resolveBaseDir, rawVaultPath)
+    : rawVaultPath ?? defaultVault;
 
-    // Resolve relative paths against the directory containing nori.yaml
-    const vaultPath = resolveBaseDir ? path.resolve(resolveBaseDir, rawVaultPath) : rawVaultPath;
-
-  const swarm = noriConfig['swarm'] as Record<string, unknown> | undefined;
+  const swarm = noriConfig?.['swarm'] as Record<string, unknown> | undefined;
   const maxSwarmDepth = (swarm?.['max_swarm_depth'] as number) ?? 3;
 
   const coderWriteEnabled = (swarm?.['coder_write_enabled'] as boolean) ?? false;
