@@ -51,18 +51,30 @@ The orchestrator is **read-only** — it plans, searches memory, and delegates. 
 ## Quick Start
 
 ```sh
-# 1. Install dependencies
+# Install globally
+npm install -g nori-code
+
+# Start interactive TUI
+nori
+
+# Single task mode
+nori -p "your task"
+
+# Auto-approve mode
+nori --permission auto
+```
+
+Requirements: Node.js ≥ 24.15.0.
+
+### Build from source
+
+```sh
+git clone https://github.com/wangyuahn/nori-code.git
+cd nori-code
 pnpm install
-
-# 2. Build
 pnpm -C apps/nori-code run build
-
-# 3. Run
 node apps/nori-code/dist/main.mjs
 ```
-Or single-task mode: `node apps/nori-code/dist/main.mjs -p "your task"`
-
-Requirements: Node.js ≥ 24.15.0, pnpm.
 
 ---
 
