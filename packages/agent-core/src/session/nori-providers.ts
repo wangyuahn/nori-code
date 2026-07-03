@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, renameSync } from 'node:fs';
 import * as path from 'node:path';
 import { homedir } from 'node:os';
 import { relative } from 'pathe';
@@ -243,6 +243,28 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
     return { path: relative(this.vaultPath, fp).replace(/\\/g, '/') };
   }
 
+  async removeNote(title: string): Promise<boolean> {
+    const normalizedTitle = title.trim();
+    const trashDir = path.join(this.vaultPath, '.trash');
+    for (const fp of this.markdownFiles(this.vaultPath)) {
+      try {
+        const raw = readFileSync(fp, 'utf-8');
+        const { title: noteTitle } = this.parseFrontmatter(raw);
+        if (noteTitle === normalizedTitle) {
+          try {
+            mkdirSync(trashDir, { recursive: true });
+            const dest = path.join(trashDir, path.basename(fp));
+            renameSync(fp, dest);
+          } catch {
+            return false;
+          }
+          return true;
+        }
+      } catch { /* skip unreadable files */ }
+    }
+    return false;
+  }
+
   private markdownFiles(dir: string): string[] {
     const files: string[] = [];
     const stack = [dir];
@@ -254,6 +276,7 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
           const fp = path.join(current, entry);
           const stat = statSync(fp);
           if (stat.isDirectory()) {
+            if (entry === '.trash') continue;
             stack.push(fp);
           } else if (stat.isFile() && entry.endsWith('.md')) {
             files.push(fp);

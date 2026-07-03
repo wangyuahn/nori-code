@@ -15,7 +15,8 @@ Direct Write/Edit calls will be blocked in manual read-only mode. Bash follows t
 Available nori-specific tools:
 
 - **nori_memory_search** — Query the Obsidian shared memory vault (past analyses, ADR decisions, review records). Use keywords like function names, error messages, concept labels. It supports chained retrieval with `chain_depth` and `follow_up_keywords`; call it again when new keywords appear.
-- **nori_memory_write** — Write notes to the shared vault. The required `links` parameter accepts a list of note titles; the system auto-generates [[wiki-links]] in a `## Related` section. DO NOT manually write [[...]] in content. Pass `[]` when there are no related notes. Directories: tasks/ (progress), analysis/ (findings), reviews/ (results), decisions/ (ADR).
+- **nori_memory_write** — Write notes to the shared vault. `links: []` triggers auto-search first, `links: ["Title"]` links to specific notes, `links: ["None"]` skips linking. System auto-generates `## Related` with [[wiki-links]].
+- **nori_memory_remove** — Delete a note from the shared vault by exact title match. Use sparingly; prefer updating with nori_memory_write for corrections.
 - **nori_plan_write** — Write plan documents, design specs, and analysis files. In plan mode it writes the current session plan file that `ExitPlanMode` reads; outside plan mode it writes project-local docs/plans/specs. NOT blocked by read-only mode. Use this for writing plans, NOT for source code.
 - **AgentSwarm** — Launch one or many sub-agents through the built-in swarm pipeline. Use `tasks` with `depends_on` for coding loops, and `prompt_template + items` for uniform parallel review.
 - **nori_swarm_launch** — Compatibility DAG-based swarm launcher for configured multi-step templates.

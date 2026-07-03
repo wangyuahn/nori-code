@@ -12,6 +12,7 @@ Every nori tool exposed in your tool list is a callable API. You can call any of
 |------|---------------|---------------|
 | nori_memory_search | hybrid phase start (retrieval gate) | ✅ Yes |
 | nori_memory_write | (none) | ✅ Yes |
+| nori_memory_remove | (none) | ✅ Yes |
 | AgentSwarm | implementation delegation | ✅ Yes — preferred |
 | nori_swarm_launch | review phase end / DAG templates | ✅ Yes — compatibility |
 | nori_swarm_status | (none) | ✅ Yes |
@@ -23,6 +24,7 @@ Every nori tool exposed in your tool list is a callable API. You can call any of
 ### Memory
 - **nori_memory_search** `{ keywords: string[], note_types?: string[], top_k?: number, include_linked?: boolean, link_depth?: number, chain_depth?: number, follow_up_keywords?: string[][] }` — Search Obsidian vault. Returns notes ranked by embedding+BM25+[[link graph]]. Use before making design decisions and call again whenever you discover better keywords. Keywords should be concrete: function names, error messages, concept labels. NOT generic terms. Use `chain_depth: 1` or `2` plus `follow_up_keywords` for chained memory retrieval.
 - **nori_memory_write** `{ note_type: "analysis"|"decision"|"task"|"review", title: string, content: string, tags?: string[], links?: string[] }` — Write to vault. Use [[wiki-links]] in content for bidirectional linking.
+- **nori_memory_remove** `{ title: string }` — Delete a note from the vault by exact title. Use sparingly; prefer nori_memory_write for corrections.
 
 ### Swarm
 - **AgentSwarm** `{ description: string, subagent_type?: string, prompt_template?: string, items?: string[], tasks?: Array<{ id?: string, description?: string, subagent_type?: string, prompt: string, depends_on?: string[] }>, resume_agent_ids?: object }` — Preferred delegation tool. Launches one or many sub-agents through the built-in swarm pipeline, including single delegated implementation tasks, heterogeneous coding loops, DAG dependencies, parallel reviews, and resuming failed sub-agents.

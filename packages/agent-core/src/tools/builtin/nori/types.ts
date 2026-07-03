@@ -25,6 +25,7 @@ export interface NoriMemoryProvider {
     links?: string[];
     tags?: string[];
   }): Promise<{ path: string }>;
+  removeNote(title: string): Promise<boolean>;
 }
 
 export interface NoriSwarmProvider {

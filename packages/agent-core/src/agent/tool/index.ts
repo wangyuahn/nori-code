@@ -67,8 +67,10 @@ export class ToolManager {
     if (this.agent.obsidianMemory) {
       const memSearch = new b.NoriMemorySearchTool(this.agent.obsidianMemory) as any;
       const memWrite = new b.NoriMemoryWriteTool(this.agent.obsidianMemory) as any;
+      const memRemove = new b.NoriMemoryRemoveTool(this.agent.obsidianMemory) as any;
       this.builtinTools.set(memSearch.name, memSearch);
       this.builtinTools.set(memWrite.name, memWrite);
+      this.builtinTools.set(memRemove.name, memRemove);
     }
     if (this.agent.swarmManager) {
       const swarmLaunch = new b.NoriSwarmLaunchTool(
@@ -546,7 +548,7 @@ export class ToolManager {
           new b.AgentSwarmTool(this.agent.subagentHost, this.agent.swarmMode),
         this.agent.subagentHost &&
           new b.NoriAskParentTool(this.agent),
-        toolServices?.webSearcher && new b.WebSearchTool(toolServices.webSearcher),
+        new b.WebSearchTool(toolServices?.webSearcher),
         toolServices?.urlFetcher && new b.FetchURLTool(toolServices.urlFetcher),
         // Nori tools - registered when the corresponding providers are injected.
         // Plan-write is always available because it does not need an external provider.
@@ -555,6 +557,8 @@ export class ToolManager {
           new b.NoriMemorySearchTool(this.agent.obsidianMemory),
         this.agent.obsidianMemory &&
           new b.NoriMemoryWriteTool(this.agent.obsidianMemory),
+        this.agent.obsidianMemory &&
+          new b.NoriMemoryRemoveTool(this.agent.obsidianMemory),
         this.agent.swarmManager &&
           new b.NoriSwarmLaunchTool(
             this.agent.swarmManager,

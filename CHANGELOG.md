@@ -1,10 +1,14 @@
 # Changelog
 
+## v0.1.13
+- **nori_memory_remove** — delete notes from vault (soft-delete to .trash/)
+- **WebSearch fix** — always available with DuckDuckGo fallback, 10s timeout + abort support
+- **nori_memory_write** — `links: ["None"]` to explicitly skip linking
+- **Bidirectional BFS** — inLinks + outLinks chain traversal
+- **Various fixes** — nori_plan_write Windows paths, session resume providers, noriRules normalization
+
 ## v0.1.12
-- **Two-phase memory write**: `links=[]` triggers auto-search, `links=["None"]` skips linking, `links=["Title"]` writes with [[wiki-links]]
-- **Bidirectional link traversal**: inLinks + outLinks BFS chain lookup
-- **Session resume**: nori providers and rules properly restored on resume
-- **nori_plan_write**: Windows path support
+- Two-phase memory write: `links=[]` auto-search, `links=["None"]` skip, bidirectional link traversal, session resume fix
 
 ## v0.1.11 — First public release
 

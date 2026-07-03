@@ -1,9 +1,8 @@
 /**
- * WebSearchTool — host-injected web search.
+ * WebSearchTool — built-in web search.
  *
- * kimi-core defines the interface; the host provides the real search
- * implementation via `WebSearchProvider`. If no provider is supplied,
- * the tool should not be registered (not exposed to the LLM).
+ * Uses a DuckDuckGo-based default provider when no host-injected
+ * `WebSearchProvider` is supplied, so the tool is always available.
  */
 
 import { z } from 'zod';
@@ -38,13 +37,89 @@ export const WebSearchInputSchema = z.object({
 
 export type WebSearchInput = z.Infer<typeof WebSearchInputSchema>;
 
+// ── Default provider (DuckDuckGo HTML search) ────────────────────────
+
+const DDG_SEARCH_URL = 'https://html.duckduckgo.com/html/';
+
+async function searchWithDuckDuckGo(query: string, signal?: AbortSignal): Promise<WebSearchResult[]> {
+  const url = `${DDG_SEARCH_URL}?q=${encodeURIComponent(query)}`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(new Error('Search timed out after 10 seconds')), 10_000);
+
+  // Forward external abort to our local controller.
+  if (signal) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+    } else {
+      const forward = () => controller.abort(signal.reason);
+      signal.addEventListener('abort', forward, { once: true });
+    }
+  }
+
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`Search request failed with status ${response.status}`);
+    }
+    const html = await response.text();
+    return parseDdgHtmlResults(html);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function parseDdgHtmlResults(html: string): WebSearchResult[] {
+  const results: WebSearchResult[] = [];
+
+  // Each result is in a div with class "result"
+  const resultRegex = /<div[^>]*class="[^"]*result[^"]*"[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi;
+  const linkRegex = /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/i;
+  const snippetRegex = /<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/i;
+
+  let match;
+  while ((match = resultRegex.exec(html)) !== null && results.length < 10) {
+    const block = match[0];
+    const linkMatch = linkRegex.exec(block);
+    const snippetMatch = snippetRegex.exec(block);
+
+    if (!linkMatch) continue;
+
+    const rawUrl = linkMatch[1]!.replace(/&amp;/g, '&');
+    const stripped = rawUrl
+      .replace(/^(?:https?:)?\/\/duckduckgo\.com\/l\/\?uddg=/, '')
+      .replace(/&rut=.*?$/, '');
+    let url: string;
+    try {
+      url = decodeURIComponent(stripped);
+    } catch {
+      url = stripped;
+    }
+    const title = linkMatch[2]!.replace(/<[^>]*>/g, '').trim();
+    const snippet = snippetMatch
+      ? snippetMatch[1]!.replace(/<[^>]*>/g, '').trim()
+      : '';
+
+    if (!title || !url) continue;
+
+    results.push({ title, url, snippet });
+  }
+
+  return results;
+}
+
 // ── Implementation ───────────────────────────────────────────────────
 
 export class WebSearchTool implements BuiltinTool<WebSearchInput> {
   readonly name = 'WebSearch' as const;
   readonly description: string = DESCRIPTION;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(WebSearchInputSchema);
-  constructor(private readonly provider: WebSearchProvider) {}
+  constructor(private readonly provider?: WebSearchProvider) {}
 
   resolveExecution(args: WebSearchInput): ToolExecution {
     const preview = args.query.length > 40 ? `${args.query.slice(0, 40)}…` : args.query;
@@ -62,11 +137,14 @@ export class WebSearchTool implements BuiltinTool<WebSearchInput> {
     args: WebSearchInput,
     {
     toolCallId,
+    signal,
     }: ExecutableToolContext,
   ): Promise<ExecutableToolResult> {
     try {
       const opts: { toolCallId?: string } = { toolCallId };
-      const results = await this.provider.search(args.query, opts);
+      const results = this.provider
+        ? await this.provider.search(args.query, opts)
+        : await searchWithDuckDuckGo(args.query, signal);
       const builder = new ToolResultBuilder({ maxLineLength: null });
 
       if (results.length === 0) {

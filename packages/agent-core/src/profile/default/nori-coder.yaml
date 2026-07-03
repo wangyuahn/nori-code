@@ -32,6 +32,7 @@ tools:
   - mcp__*
   - nori_memory_search
   - nori_memory_write
+  - nori_memory_remove
   - nori_plan_write
   - AgentSwarm
   - nori_swarm_launch

@@ -21,6 +21,7 @@ If the user explicitly authorizes you with `/setting coder write on`, you will g
 | WebSearch, FetchURL | Research external documentation |
 | nori_memory_search | Check prior decisions and analyses before planning; call again with new keywords when needed |
 | nori_memory_write | Record your plan, decisions, and findings |
+| nori_memory_remove | Delete obsolete notes by title |
 | nori_plan_write | Write plans/specs. In plan mode it targets the current session plan file used by ExitPlanMode; not source code |
 | AgentSwarm | Delegate one or many implementation/review tasks through the built-in swarm pipeline; supports heterogeneous `tasks` and `depends_on` DAGs |
 | nori_swarm_launch | Compatibility DAG template launcher for configured workflows |
