@@ -12,7 +12,7 @@ export const WS_PATH = '/api/v1/ws';
  * arbitrary headers on a WebSocket, so the token rides in a subprotocol). The
  * full offered subprotocol is `${WS_BEARER_PROTOCOL_PREFIX}<token>`.
  */
-export const WS_BEARER_PROTOCOL_PREFIX = 'kimi-code.bearer.';
+export const WS_BEARER_PROTOCOL_PREFIX = 'nori-code.bearer.';
 
 export interface IWSGateway {
   readonly _serviceBrand: undefined;
