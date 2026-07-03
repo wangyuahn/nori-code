@@ -24,12 +24,12 @@ export KIMI_CODE_HOME="/path/to/custom/kimi-code"
 
 For the complete data directory structure, see [Data locations](./data-locations.md).
 
-### `KIMI_DISABLE_TELEMETRY`
+### `NORI_DISABLE_TELEMETRY`
 
 Set to `1` to turn off anonymous telemetry reporting (also accepts `true`, `yes`, `y`, case-insensitive):
 
 ```sh
-export KIMI_DISABLE_TELEMETRY=1
+export NORI_DISABLE_TELEMETRY=1
 ```
 
 ### `KIMI_MODEL_*` family
@@ -120,7 +120,7 @@ Switches that control the behavior of subsystems such as telemetry, background t
 
 | Variable | Purpose | Valid values |
 | --- | --- | --- |
-| `KIMI_DISABLE_TELEMETRY` | Disable anonymous telemetry reporting | `1`, `true`, `yes`, `y` (case-insensitive) |
+| `NORI_DISABLE_TELEMETRY` | Disable anonymous telemetry reporting | `1`, `true`, `yes`, `y` (case-insensitive) |
 | `KIMI_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT` | Whether to keep background tasks when the session closes; takes higher priority than `config.toml`. The default is to stop them on exit | Truthy: `1`/`true`/`yes`/`on`; falsy: `0`/`false`/`no`/`off` |
 | `KIMI_CODE_PLUGIN_MARKETPLACE_URL` | Override the plugin marketplace JSON loaded by `/plugins`; useful for dev loopback servers, staging CDN files, or alternate marketplace directories | `https://code.kimi.com/kimi-code/plugins/marketplace.json`; also accepts `http://`, `file://` URLs, and local paths |
 | `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY` | Cap how many AgentSwarm subagents run concurrently during the initial ramp; leave unset for no cap | Positive integer; invalid values fail fast |

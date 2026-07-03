@@ -247,7 +247,7 @@ describe('session routing', () => {
       await handle.flush();
       await getRootLogger().flush();
       const global = await readGlobal();
-      const session = await readFile(join(sessionDir, 'logs', 'kimi-code.log'), 'utf-8');
+      const session = await readFile(join(sessionDir, 'logs', 'nori-code.log'), 'utf-8');
       expect(global).not.toContain('hello');
       expect(session).toContain('hello');
       await handle.close();
@@ -271,7 +271,7 @@ describe('session routing', () => {
       expect(global).not.toMatch(/llm config/);
       expect(global).not.toMatch(/llm request/);
 
-      const session = await readFile(join(sessionDir, 'logs', 'kimi-code.log'), 'utf-8');
+      const session = await readFile(join(sessionDir, 'logs', 'nori-code.log'), 'utf-8');
       expect(session).toMatch(/llm config(?!.*sessionId=ses_abc)/);
       expect(session).toMatch(/llm config(?!.*agentId=main)/);
       expect(session).toMatch(/llm request(?!.*sessionId=ses_abc)/);
@@ -292,7 +292,7 @@ describe('session routing', () => {
       await handle.flush();
       await getRootLogger().flush();
 
-      const session = await readFile(join(sessionDir, 'logs', 'kimi-code.log'), 'utf-8');
+      const session = await readFile(join(sessionDir, 'logs', 'nori-code.log'), 'utf-8');
       expect(session).toMatch(/llm request.*agentId=agent-0/);
       expect(session).toMatch(/llm request(?!.*sessionId=ses_abc)/);
       await handle.close();
@@ -313,7 +313,7 @@ describe('session routing', () => {
       expect(global).toContain('bootstrap event');
       let sessionText = '';
       try {
-        sessionText = await readFile(join(sessionDir, 'logs', 'kimi-code.log'), 'utf-8');
+        sessionText = await readFile(join(sessionDir, 'logs', 'nori-code.log'), 'utf-8');
       } catch {}
       expect(sessionText).not.toContain('bootstrap event');
       await handle.close();
@@ -338,8 +338,8 @@ describe('session routing', () => {
       log.info('ambiguous session id', { sessionId: 'ses_same' });
       await getRootLogger().flush();
 
-      const firstText = await readFile(join(firstDir, 'logs', 'kimi-code.log'), 'utf-8');
-      const secondText = await readFile(join(secondDir, 'logs', 'kimi-code.log'), 'utf-8');
+      const firstText = await readFile(join(firstDir, 'logs', 'nori-code.log'), 'utf-8');
+      const secondText = await readFile(join(secondDir, 'logs', 'nori-code.log'), 'utf-8');
       expect(firstText).toContain('first only');
       expect(firstText).not.toContain('second only');
       expect(firstText).not.toContain('ambiguous session id');
@@ -373,7 +373,7 @@ describe('session routing', () => {
       second.logger.info('still routes after first close');
       await second.flush();
 
-      const text = await readFile(join(sessionDir, 'logs', 'kimi-code.log'), 'utf-8');
+      const text = await readFile(join(sessionDir, 'logs', 'nori-code.log'), 'utf-8');
       expect(text).toContain('still routes after first close');
       await second.close();
     } finally {
@@ -401,7 +401,7 @@ describe('session routing', () => {
       second.logger.info('replacement still routes');
       await second.flush();
 
-      const secondText = await readFile(join(secondDir, 'logs', 'kimi-code.log'), 'utf-8');
+      const secondText = await readFile(join(secondDir, 'logs', 'nori-code.log'), 'utf-8');
       expect(secondText).toContain('replacement still routes');
       await second.close();
     } finally {
@@ -421,7 +421,7 @@ describe('session routing', () => {
       await expect(getRootLogger().flushSession('ses_closing')).resolves.toBe(true);
       await closing;
 
-      const text = await readFile(join(sessionDir, 'logs', 'kimi-code.log'), 'utf-8');
+      const text = await readFile(join(sessionDir, 'logs', 'nori-code.log'), 'utf-8');
       expect(text).toContain('close flush marker');
     } finally {
       await rm(sessionDir, { recursive: true, force: true });

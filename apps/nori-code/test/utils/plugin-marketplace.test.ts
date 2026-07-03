@@ -63,7 +63,7 @@ describe('computeUpdateStatus', () => {
 
 describe('loadPluginMarketplace', () => {
   it('loads a local marketplace file and resolves relative plugin sources', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'kimi-plugin-marketplace-'));
+    const dir = await mkdtemp(join(tmpdir(), 'nori-plugin-marketplace-'));
     const file = join(dir, 'marketplace.json');
     await writeFile(
       file,
@@ -237,7 +237,7 @@ describe('loadPluginMarketplace', () => {
 
   describe('version derivation from a GitHub source', () => {
     async function loadEntry(source: string, version?: string) {
-      const dir = await mkdtemp(join(tmpdir(), 'kimi-plugin-marketplace-'));
+      const dir = await mkdtemp(join(tmpdir(), 'nori-plugin-marketplace-'));
       const file = join(dir, 'marketplace.json');
       await writeFile(
         file,
@@ -293,7 +293,7 @@ describe('loadPluginMarketplace', () => {
 
   describe('latest release resolution for bare GitHub sources', () => {
     async function loadWithLatest(source: string, fetchImpl: typeof fetch) {
-      const dir = await mkdtemp(join(tmpdir(), 'kimi-plugin-marketplace-'));
+      const dir = await mkdtemp(join(tmpdir(), 'nori-plugin-marketplace-'));
       const file = join(dir, 'marketplace.json');
       await writeFile(
         file,
@@ -360,7 +360,7 @@ describe('loadPluginMarketplace', () => {
       const fetchImpl = vi.fn(async () => {
         throw new Error('should not be called');
       }) as unknown as typeof fetch;
-      const dir = await mkdtemp(join(tmpdir(), 'kimi-plugin-marketplace-'));
+      const dir = await mkdtemp(join(tmpdir(), 'nori-plugin-marketplace-'));
       const file = join(dir, 'marketplace.json');
       await writeFile(
         file,
@@ -383,7 +383,7 @@ describe('loadPluginMarketplace', () => {
   });
 
   it('accepts legacy marketplace type aliases as normal plugins', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'kimi-plugin-marketplace-'));
+    const dir = await mkdtemp(join(tmpdir(), 'nori-plugin-marketplace-'));
     const file = join(dir, 'marketplace.json');
     await writeFile(
       file,
@@ -424,7 +424,7 @@ describe('loadPluginMarketplace', () => {
   });
 
   it('rejects an entry without a source', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'kimi-plugin-marketplace-'));
+    const dir = await mkdtemp(join(tmpdir(), 'nori-plugin-marketplace-'));
     const file = join(dir, 'marketplace.json');
     await writeFile(
       file,
@@ -461,7 +461,7 @@ describe('loadPluginMarketplace', () => {
   });
 
   it('rejects malformed marketplace entries', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'kimi-plugin-marketplace-'));
+    const dir = await mkdtemp(join(tmpdir(), 'nori-plugin-marketplace-'));
     const file = join(dir, 'marketplace.json');
     await writeFile(file, JSON.stringify({ plugins: [{ displayName: 'Missing id' }] }), 'utf8');
 
@@ -471,7 +471,7 @@ describe('loadPluginMarketplace', () => {
   });
 
   it('rejects unknown marketplace tier values', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'kimi-plugin-marketplace-'));
+    const dir = await mkdtemp(join(tmpdir(), 'nori-plugin-marketplace-'));
     const file = join(dir, 'marketplace.json');
     await writeFile(
       file,
@@ -487,7 +487,7 @@ describe('loadPluginMarketplace', () => {
   });
 
   it('rejects unknown marketplace entry types', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'kimi-plugin-marketplace-'));
+    const dir = await mkdtemp(join(tmpdir(), 'nori-plugin-marketplace-'));
     const file = join(dir, 'marketplace.json');
     await writeFile(
       file,

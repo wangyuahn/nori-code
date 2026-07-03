@@ -1,6 +1,6 @@
 /**
  * Tests for `agent/cron/manager.ts` P1.8 affordances: the
- * `KIMI_CRON_MANUAL_TICK=1` env disables the auto-tick interval and,
+ * `NORI_CRON_MANUAL_TICK=1` env disables the auto-tick interval and,
  * in the same gate, binds SIGUSR1 to a no-throw `tick()` for benches.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,7 +11,7 @@ import { createAgentStub, createClocks } from './harness/stub';
 describe('CronManager — P1.8 manual tick + SIGUSR1', () => {
   beforeEach(() => {
     // Disable jitter so fire-count assertions are deterministic.
-    vi.stubEnv('KIMI_CRON_NO_JITTER', '1');
+    vi.stubEnv('NORI_CRON_NO_JITTER', '1');
   });
 
   afterEach(() => {
@@ -19,9 +19,9 @@ describe('CronManager — P1.8 manual tick + SIGUSR1', () => {
     vi.useRealTimers();
   });
 
-  describe('KIMI_CRON_MANUAL_TICK=1', () => {
+  describe('NORI_CRON_MANUAL_TICK=1', () => {
     it('does not install setInterval; tick() must be called manually', async () => {
-      vi.stubEnv('KIMI_CRON_MANUAL_TICK', '1');
+      vi.stubEnv('NORI_CRON_MANUAL_TICK', '1');
 
       const stub = createAgentStub();
       const harness = createClocks();
@@ -55,7 +55,7 @@ describe('CronManager — P1.8 manual tick + SIGUSR1', () => {
     });
   });
 
-  describe('without KIMI_CRON_MANUAL_TICK', () => {
+  describe('without NORI_CRON_MANUAL_TICK', () => {
     it('auto-tick fires when fake timers advance past pollIntervalMs', async () => {
       // Fake timers must be in place BEFORE the manager calls
       // setInterval, otherwise the scheduler captures the real one.
@@ -87,12 +87,12 @@ describe('CronManager — P1.8 manual tick + SIGUSR1', () => {
   });
 
   describe('SIGUSR1', () => {
-    // SIGUSR1 binding is opt-in via KIMI_CRON_MANUAL_TICK=1 so that
+    // SIGUSR1 binding is opt-in via NORI_CRON_MANUAL_TICK=1 so that
     // production (1 main agent + N subagents) doesn't pile up listeners
     // and trip Node's MaxListenersExceededWarning cap. All four SIGUSR1
     // tests stub the env before constructing the manager.
     beforeEach(() => {
-      vi.stubEnv('KIMI_CRON_MANUAL_TICK', '1');
+      vi.stubEnv('NORI_CRON_MANUAL_TICK', '1');
     });
 
     it('triggers manager.tick() once per emit (POSIX only)', async () => {
@@ -132,9 +132,9 @@ describe('CronManager — P1.8 manual tick + SIGUSR1', () => {
       }
     });
 
-    it('logs swallowed tick() throws to stderr when KIMI_CRON_DEBUG=1', async () => {
+    it('logs swallowed tick() throws to stderr when NORI_CRON_DEBUG=1', async () => {
       if (process.platform === 'win32') return;
-      vi.stubEnv('KIMI_CRON_DEBUG', '1');
+      vi.stubEnv('NORI_CRON_DEBUG', '1');
 
       const stub = createAgentStub();
       const manager = new CronManager(stub.agent, { pollIntervalMs: null });
@@ -157,9 +157,9 @@ describe('CronManager — P1.8 manual tick + SIGUSR1', () => {
       }
     });
 
-    it('does not write to stderr on tick() throw when KIMI_CRON_DEBUG is unset', async () => {
+    it('does not write to stderr on tick() throw when NORI_CRON_DEBUG is unset', async () => {
       if (process.platform === 'win32') return;
-      // KIMI_CRON_DEBUG intentionally NOT set in this test.
+      // NORI_CRON_DEBUG intentionally NOT set in this test.
 
       const stub = createAgentStub();
       const manager = new CronManager(stub.agent, { pollIntervalMs: null });
@@ -186,7 +186,7 @@ describe('CronManager — P1.8 manual tick + SIGUSR1', () => {
 
       const stub = createAgentStub();
       const before = process.listenerCount('SIGUSR1');
-      // Constructor auto-starts, which binds SIGUSR1 under KIMI_CRON_MANUAL_TICK=1.
+      // Constructor auto-starts, which binds SIGUSR1 under NORI_CRON_MANUAL_TICK=1.
       const manager = new CronManager(stub.agent, { pollIntervalMs: null });
       expect(process.listenerCount('SIGUSR1')).toBe(before + 1);
       await manager.stop();
@@ -209,12 +209,12 @@ describe('CronManager — P1.8 manual tick + SIGUSR1', () => {
       }
     });
 
-    it('does not bind when KIMI_CRON_MANUAL_TICK is unset', async () => {
+    it('does not bind when NORI_CRON_MANUAL_TICK is unset', async () => {
       if (process.platform === 'win32') return;
       // Override the describe-scope stub so the env is genuinely unset.
       vi.unstubAllEnvs();
       // Re-pin jitter so other describe-scope state stays consistent.
-      vi.stubEnv('KIMI_CRON_NO_JITTER', '1');
+      vi.stubEnv('NORI_CRON_NO_JITTER', '1');
 
       const stub = createAgentStub();
       const manager = new CronManager(stub.agent, { pollIntervalMs: null });

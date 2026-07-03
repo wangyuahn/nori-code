@@ -54,10 +54,10 @@ export function registerAcpCommand(parent: Command): void {
         identity,
         uiMode: 'acp',
       });
-      // Forward `KIMI_CODE_HOME` (if set) into `authMethods[0].env` so the
+      // Forward `NORI_CODE_HOME` (if set) into `authMethods[0].env` so the
       // `kimi login` subprocess clients spawn for terminal-auth writes its
       // token under the same data root the ACP server reads from. Used for
-      // sandboxed test setups (Zed's `agent_servers.*.env.KIMI_CODE_HOME =
+      // sandboxed test setups (Zed's `agent_servers.*.env.NORI_CODE_HOME =
       // /tmp/...`). Production runs leave the env unset and the field stays
       // empty.
       const sandboxHome = process.env[NORI_CODE_HOME_ENV];

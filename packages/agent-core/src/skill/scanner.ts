@@ -6,7 +6,7 @@ import type { SkillDefinition, SkillRoot, SkillSource, SkippedSkill } from './ty
 import { normalizeSkillName } from './types';
 
 // Relative to brandHomeDir, which already IS the brand data dir (~/.nori-code or
-// $KIMI_CODE_HOME) — no '.nori-code' segment here, or it would nest twice.
+// $NORI_CODE_HOME) — no '.nori-code' segment here, or it would nest twice.
 const USER_BRAND_DIRS = ['skills'] as const;
 const USER_GENERIC_DIRS = ['.agents/skills'] as const;
 const PROJECT_BRAND_DIRS = ['.nori-code/skills'] as const;
@@ -19,7 +19,7 @@ const MAX_SKILL_SCAN_DEPTH = 8;
 export interface SkillPathContext {
   readonly userHomeDir: string;
   /**
-   * Brand data dir — `KIMI_CODE_HOME`, or `<userHomeDir>/.nori-code` by default.
+   * Brand data dir — `NORI_CODE_HOME`, or `<userHomeDir>/.nori-code` by default.
    * User brand skills live directly under here as `skills/`, so this path
    * carries no `.nori-code` segment of its own (that would double the prefix).
    */

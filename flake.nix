@@ -205,21 +205,21 @@
               runHook preInstall
 
               install -Dm755 \
-                "apps/nori-code/dist-native/bin/${nativeTarget}/kimi" \
-                "$out/bin/kimi"
+                "apps/nori-code/dist-native/bin/${nativeTarget}/nori" \
+                "$out/bin/nori"
 
               runHook postInstall
             '';
 
             postInstall = ''
-              wrapProgram $out/bin/kimi --prefix PATH : ${lib.makeBinPath [ pkgs.ripgrep pkgs.fd ]}
+              wrapProgram $out/bin/nori --prefix PATH : ${lib.makeBinPath [ pkgs.ripgrep pkgs.fd ]}
             '';
 
             meta = {
               description = "Kimi Code CLI";
               homepage = "https://github.com/MoonshotAI/kimi-code";
               license = lib.licenses.mit;
-              mainProgram = "kimi";
+              mainProgram = "nori";
               platforms = systems;
             };
           });
@@ -233,7 +233,7 @@
       apps = forAllSystems (pkgs: {
         nori-code = {
           type = "app";
-          program = "${self.packages.${pkgs.system}.nori-code}/bin/kimi";
+          program = "${self.packages.${pkgs.system}.nori-code}/bin/nori";
         };
         default = self.apps.${pkgs.system}.nori-code;
       });

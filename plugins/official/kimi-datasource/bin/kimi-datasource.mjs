@@ -228,7 +228,7 @@ function appendTrace(text, trace) {
 }
 
 function resolveKimiHome() {
-  const explicit = process.env.KIMI_CODE_HOME?.trim();
+  const explicit = process.env.NORI_CODE_HOME?.trim();
   return explicit && explicit.length > 0 ? explicit : path.join(homedir(), '.nori-code');
 }
 

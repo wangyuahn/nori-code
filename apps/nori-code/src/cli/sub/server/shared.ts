@@ -16,7 +16,7 @@ export const DEFAULT_SERVER_HOST = LOCAL_SERVER_HOST;
 export const DEFAULT_SERVER_PORT = 58627;
 export const DEFAULT_SERVER_ORIGIN = serverOrigin(DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT);
 
-/** Filename (under KIMI_CODE_HOME) of the persistent server bearer token. */
+/** Filename (under NORI_CODE_HOME) of the persistent server bearer token. */
 export const SERVER_TOKEN_FILE = 'server.token';
 
 export const DEFAULT_LOG_LEVEL: ServerLogLevel = 'info';
@@ -223,7 +223,7 @@ export async function ensureServerWebReady(origin: string): Promise<void> {
  * The server writes `<homeDir>/server.token` (0600) on first boot and reuses
  * it across restarts (ROADMAP M5.1); CLI commands that hit a gated REST route
  * read it back here and send it as `Authorization: Bearer <token>`. `homeDir`
- * is the CLI's own KIMI_CODE_HOME resolution (`getDataDir()`).
+ * is the CLI's own NORI_CODE_HOME resolution (`getDataDir()`).
  *
  * Throws a clear error when the file is missing/unreadable — the usual cause
  * is a server that has never been started (no token file yet), or an older

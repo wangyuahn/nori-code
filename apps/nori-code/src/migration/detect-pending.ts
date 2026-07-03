@@ -55,7 +55,7 @@ export async function detectPendingMigration(
 
 /**
  * True when the legacy `.migrated-to-kimi-code` marker records a migration
- * into *this* target home. A marker written for a different `KIMI_CODE_HOME`
+ * into *this* target home. A marker written for a different `NORI_CODE_HOME`
  * must not suppress the prompt — that target has never received migrated data.
  * An unreadable/old marker without `target_path` is treated as "matches"
  * (conservative: do not re-prompt when the marker exists but is ambiguous).

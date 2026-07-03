@@ -167,12 +167,12 @@ describe('persistentToken', () => {
 describe('password', () => {
   it('resolvePasswordHash returns undefined when env is unset or empty', async () => {
     expect(await resolvePasswordHash({})).toBeUndefined();
-    expect(await resolvePasswordHash({ KIMI_CODE_PASSWORD: '' })).toBeUndefined();
+    expect(await resolvePasswordHash({ NORI_CODE_PASSWORD: '' })).toBeUndefined();
   });
 
   it('hashes a set password with bcrypt and verifies correctly', async () => {
     const passwordHash = await resolvePasswordHash({
-      KIMI_CODE_PASSWORD: 'correct-horse-battery-staple',
+      NORI_CODE_PASSWORD: 'correct-horse-battery-staple',
     });
     expect(passwordHash?.startsWith('$2')).toBe(true);
     expect(await verifyPassword('correct-horse-battery-staple', passwordHash)).toBe(

@@ -23,10 +23,10 @@ import { registerWebAliasCommand } from './web-alias';
 export function registerServerCommand(program: Command): void {
   const server = program
     .command('server')
-    .description('Run the local Kimi server (REST + WebSocket + web UI).');
+    .description('Run the local Nori server (REST + WebSocket + web UI).');
 
   buildRunCommand(
-    server.command('run').description('Start the Kimi server (background daemon; use --foreground to attach).'),
+    server.command('run').description('Start the Nori server (background daemon; use --foreground to attach).'),
     { defaultOpen: false },
   );
 

@@ -45,9 +45,9 @@ let workspaceDir: string;
 let server: RunningServer | undefined;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), 'kimi-server-skills-test-'));
+  tmpDir = mkdtempSync(join(tmpdir(), 'nori-server-skills-test-'));
   lockPath = join(tmpDir, 'lock');
-  bridgeHome = mkdtempSync(join(tmpdir(), 'kimi-server-skills-home-'));
+  bridgeHome = mkdtempSync(join(tmpdir(), 'nori-server-skills-home-'));
   workspaceDir = join(tmpDir, 'workspace');
   mkdirSync(workspaceDir, { recursive: true });
 });

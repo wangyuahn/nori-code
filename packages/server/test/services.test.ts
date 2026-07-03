@@ -142,7 +142,7 @@ const tmpHomeDirs: string[] = [];
 
 /** Throwaway `IEnvironmentService` whose homeDir is a fresh temp dir. */
 function tmpEnv(): IEnvironmentService {
-  const dir = mkdtempSync(join(tmpdir(), 'kimi-server-test-'));
+  const dir = mkdtempSync(join(tmpdir(), 'nori-server-test-'));
   tmpHomeDirs.push(dir);
   return { _serviceBrand: undefined, homeDir: dir, configPath: join(dir, 'config.toml') };
 }

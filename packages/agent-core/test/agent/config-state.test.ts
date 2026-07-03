@@ -229,7 +229,7 @@ describe('ConfigState thinking clamp for always-thinking models', () => {
   });
 });
 
-describe('ConfigState.provider applies global KIMI_MODEL_* request config', () => {
+describe('ConfigState.provider applies global NORI_MODEL_* request config', () => {
   function kimiAgent() {
     return testAgent({
       providerManager: new ProviderManager({
@@ -243,8 +243,8 @@ describe('ConfigState.provider applies global KIMI_MODEL_* request config', () =
     });
   }
 
-  it('injects KIMI_MODEL_TEMPERATURE into config.provider (the provider compaction also uses)', () => {
-    vi.stubEnv('KIMI_MODEL_TEMPERATURE', '0.3');
+  it('injects NORI_MODEL_TEMPERATURE into config.provider (the provider compaction also uses)', () => {
+    vi.stubEnv('NORI_MODEL_TEMPERATURE', '0.3');
     try {
       const ctx = kimiAgent();
       ctx.agent.config.update({ modelAlias: 'kimi-code' });
@@ -258,8 +258,8 @@ describe('ConfigState.provider applies global KIMI_MODEL_* request config', () =
     }
   });
 
-  it('injects KIMI_MODEL_THINKING_KEEP into config.provider when thinking is on (so compaction keeps it)', () => {
-    vi.stubEnv('KIMI_MODEL_THINKING_KEEP', 'all');
+  it('injects NORI_MODEL_THINKING_KEEP into config.provider when thinking is on (so compaction keeps it)', () => {
+    vi.stubEnv('NORI_MODEL_THINKING_KEEP', 'all');
     try {
       const ctx = kimiAgent();
       ctx.agent.config.update({ modelAlias: 'kimi-code', thinkingEffort: 'high' });
@@ -275,7 +275,7 @@ describe('ConfigState.provider applies global KIMI_MODEL_* request config', () =
   });
 
   it('does NOT inject thinking.keep into config.provider when thinking is off', () => {
-    vi.stubEnv('KIMI_MODEL_THINKING_KEEP', 'all');
+    vi.stubEnv('NORI_MODEL_THINKING_KEEP', 'all');
     try {
       const ctx = kimiAgent();
       ctx.agent.config.update({ modelAlias: 'kimi-code', thinkingEffort: 'off' });
@@ -290,8 +290,8 @@ describe('ConfigState.provider applies global KIMI_MODEL_* request config', () =
     }
   });
 
-  it('injects KIMI_MODEL_THINKING_EFFORT into config.provider when thinking is on', () => {
-    vi.stubEnv('KIMI_MODEL_THINKING_EFFORT', 'max');
+  it('injects NORI_MODEL_THINKING_EFFORT into config.provider when thinking is on', () => {
+    vi.stubEnv('NORI_MODEL_THINKING_EFFORT', 'max');
     try {
       const ctx = kimiAgent();
       ctx.agent.config.update({ modelAlias: 'kimi-code', thinkingEffort: 'high' });
@@ -306,8 +306,8 @@ describe('ConfigState.provider applies global KIMI_MODEL_* request config', () =
     }
   });
 
-  it('does NOT inject KIMI_MODEL_THINKING_EFFORT into config.provider when thinking is off', () => {
-    vi.stubEnv('KIMI_MODEL_THINKING_EFFORT', 'max');
+  it('does NOT inject NORI_MODEL_THINKING_EFFORT into config.provider when thinking is off', () => {
+    vi.stubEnv('NORI_MODEL_THINKING_EFFORT', 'max');
     try {
       const ctx = kimiAgent();
       ctx.agent.config.update({ modelAlias: 'kimi-code', thinkingEffort: 'off' });

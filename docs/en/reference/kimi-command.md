@@ -170,8 +170,8 @@ kimi server status             # snapshot of installed/running state
 
 Register the server as an OS-managed service so it starts at login and restarts after a crash. The backend picks itself based on the running platform:
 
-- **macOS**: writes a LaunchAgent plist to `~/Library/LaunchAgents/ai.moonshot.kimi-server.plist` and bootstraps it via `launchctl bootstrap gui/<uid>`.
-- **Linux**: writes a `--user` systemd unit to `~/.config/systemd/user/kimi-server.service` and runs `systemctl --user enable --now`.
+- **macOS**: writes a LaunchAgent plist to `~/Library/LaunchAgents/ai.moonshot.nori-server.plist` and bootstraps it via `launchctl bootstrap gui/<uid>`.
+- **Linux**: writes a `--user` systemd unit to `~/.config/systemd/user/nori-server.service` and runs `systemctl --user enable --now`.
 - **Windows**: registers a scheduled task named `KimiServer` via `schtasks /Create /XML`.
 
 | Option | Description |

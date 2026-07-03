@@ -19,9 +19,9 @@ let server: RunningServer | undefined;
 let backend: FakeTerminalBackend;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), 'kimi-server-terminals-'));
+  tmpDir = mkdtempSync(join(tmpdir(), 'nori-server-terminals-'));
   lockPath = join(tmpDir, 'lock');
-  bridgeHome = mkdtempSync(join(tmpdir(), 'kimi-server-terminals-home-'));
+  bridgeHome = mkdtempSync(join(tmpdir(), 'nori-server-terminals-home-'));
   backend = new FakeTerminalBackend();
 });
 

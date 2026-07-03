@@ -12,7 +12,7 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, '../../..');
 const DEFAULT_PLUGINS_ROOT = resolve(REPO_ROOT, 'plugins');
 const DEFAULT_OUT_DIR = resolve(DEFAULT_PLUGINS_ROOT, 'cdn');
-const SENTINEL = '.kimi-plugin-marketplace-build.json';
+const SENTINEL = '.nori-plugin-marketplace-build.json';
 const SKIP_DIRS = new Set(['.git', 'node_modules']);
 const SKIP_FILES = new Set(['.DS_Store']);
 

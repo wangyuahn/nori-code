@@ -55,10 +55,10 @@ let bridgeHome: string;
 const running: RunningServer[] = [];
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), 'kimi-server-start-test-'));
+  tmpDir = mkdtempSync(join(tmpdir(), 'nori-server-start-test-'));
   lockPath = join(tmpDir, 'lock');
   // Isolate KimiCore's `~/.kimi` lookup — bridge construction touches it via plugin discovery.
-  bridgeHome = mkdtempSync(join(tmpdir(), 'kimi-server-start-home-'));
+  bridgeHome = mkdtempSync(join(tmpdir(), 'nori-server-start-home-'));
 });
 
 afterEach(async () => {

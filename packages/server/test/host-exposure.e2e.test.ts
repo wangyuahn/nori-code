@@ -2,7 +2,7 @@
  * Host-exposure hardening (ROADMAP M6.3–M6.7).
  *
  * End-to-end coverage of the §3.5 public-bind hardening stack on a
- * `host: '0.0.0.0'` + `KIMI_CODE_PASSWORD` + `insecureNoTls: true` server:
+ * `host: '0.0.0.0'` + `NORI_CODE_PASSWORD` + `insecureNoTls: true` server:
  *   - M6.3 public-bind gate (no `--insecure-no-tls` → refuse; token-only
  *     (no password) + `insecureNoTls` → boot + token-only warning logged;
  *     password + `insecureNoTls` → boot + warn logged).
@@ -50,7 +50,7 @@ function capturingLogger(): { logger: Logger; lines: string[] } {
 }
 
 beforeEach(() => {
-  prevPassword = process.env['KIMI_CODE_PASSWORD'];
+  prevPassword = process.env['NORI_CODE_PASSWORD'];
 });
 
 afterEach(async () => {
@@ -65,15 +65,15 @@ afterEach(async () => {
     rmSync(dir, { recursive: true, force: true });
   }
   if (prevPassword === undefined) {
-    delete process.env['KIMI_CODE_PASSWORD'];
+    delete process.env['NORI_CODE_PASSWORD'];
   } else {
-    process.env['KIMI_CODE_PASSWORD'] = prevPassword;
+    process.env['NORI_CODE_PASSWORD'] = prevPassword;
   }
 });
 
 describe('non-loopback bind gate (M6.3)', () => {
   it('boots 0.0.0.0 without a password (token-only) and logs the token-only warning', async () => {
-    delete process.env['KIMI_CODE_PASSWORD'];
+    delete process.env['NORI_CODE_PASSWORD'];
     const { lockPath, homeDir } = tmpPaths();
     const { logger, lines } = capturingLogger();
 
@@ -98,7 +98,7 @@ describe('non-loopback bind gate (M6.3)', () => {
   });
 
   it('refuses to bind 0.0.0.0 with a password but without --insecure-no-tls', async () => {
-    process.env['KIMI_CODE_PASSWORD'] = 'test-pw';
+    process.env['NORI_CODE_PASSWORD'] = 'test-pw';
     const { lockPath, homeDir } = tmpPaths();
 
     await expect(
@@ -114,7 +114,7 @@ describe('non-loopback bind gate (M6.3)', () => {
   });
 
   it('boots 0.0.0.0 with a password + insecureNoTls and logs the public warning', async () => {
-    process.env['KIMI_CODE_PASSWORD'] = 'test-pw';
+    process.env['NORI_CODE_PASSWORD'] = 'test-pw';
     const { lockPath, homeDir } = tmpPaths();
     const { logger, lines } = capturingLogger();
 
@@ -150,7 +150,7 @@ describe('dangerous-endpoint downgrade on a public bind (M6.5)', () => {
     server: RunningServer;
     shutdownCalls: string[];
   }> {
-    process.env['KIMI_CODE_PASSWORD'] = 'test-pw';
+    process.env['NORI_CODE_PASSWORD'] = 'test-pw';
     const { lockPath, homeDir } = tmpPaths();
     const shutdownCalls: string[] = [];
     // Capture shutdown requests instead of exiting the process.
@@ -258,11 +258,11 @@ function rawHttpGet(
 describe('public-bind §3.5 end-to-end (M6.7)', () => {
   /**
    * Boot a 0.0.0.0 server using the REAL auth impl (no fixed-token override) so
-   * the password `verifyPassword` path is exercised. `KIMI_CODE_PASSWORD` is set
+   * the password `verifyPassword` path is exercised. `NORI_CODE_PASSWORD` is set
    * so the M6.3 gate passes and the password is itself a valid bearer.
    */
   async function bootPublicReal(): Promise<RunningServer> {
-    process.env['KIMI_CODE_PASSWORD'] = 'test-pw';
+    process.env['NORI_CODE_PASSWORD'] = 'test-pw';
     const { lockPath, homeDir } = tmpPaths();
     const server = await startServer({
       host: '0.0.0.0',
@@ -278,7 +278,7 @@ describe('public-bind §3.5 end-to-end (M6.7)', () => {
 
   /** Boot a 0.0.0.0 server with a deterministic fixed token. */
   async function bootPublicFixed(token = 'real-token'): Promise<RunningServer> {
-    process.env['KIMI_CODE_PASSWORD'] = 'test-pw';
+    process.env['NORI_CODE_PASSWORD'] = 'test-pw';
     const { lockPath, homeDir } = tmpPaths();
     const server = await startServer({
       serviceOverrides: [fixedTokenAuth(token)],

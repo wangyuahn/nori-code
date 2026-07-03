@@ -16,7 +16,7 @@ import {
 const originalEnv = { ...process.env };
 
 beforeEach(() => {
-  delete process.env['KIMI_CODE_HOME'];
+  delete process.env['NORI_CODE_HOME'];
 });
 
 afterEach(() => {
@@ -24,17 +24,17 @@ afterEach(() => {
 });
 
 describe('getDataDir', () => {
-  it('returns ~/.kimi-code when KIMI_CODE_HOME is not set', () => {
+  it('returns ~/.kimi-code when NORI_CODE_HOME is not set', () => {
     expect(getDataDir()).toBe(join(homedir(), '.kimi-code'));
   });
 
-  it('returns KIMI_CODE_HOME when set', () => {
-    process.env['KIMI_CODE_HOME'] = '/tmp/kimi-test-data';
+  it('returns NORI_CODE_HOME when set', () => {
+    process.env['NORI_CODE_HOME'] = '/tmp/kimi-test-data';
     expect(getDataDir()).toBe('/tmp/kimi-test-data');
   });
 
-  it('returns KIMI_CODE_HOME even if it is a relative path', () => {
-    process.env['KIMI_CODE_HOME'] = 'relative/path';
+  it('returns NORI_CODE_HOME even if it is a relative path', () => {
+    process.env['NORI_CODE_HOME'] = 'relative/path';
     expect(getDataDir()).toBe('relative/path');
   });
 });
@@ -44,8 +44,8 @@ describe('getLogDir', () => {
     expect(getLogDir()).toBe(join(homedir(), '.kimi-code', 'logs'));
   });
 
-  it('respects KIMI_CODE_HOME', () => {
-    process.env['KIMI_CODE_HOME'] = '/z';
+  it('respects NORI_CODE_HOME', () => {
+    process.env['NORI_CODE_HOME'] = '/z';
     expect(getLogDir()).toBe(join('/z', 'logs'));
   });
 });
@@ -55,8 +55,8 @@ describe('getBinDir', () => {
     expect(getBinDir()).toBe(join(homedir(), '.kimi-code', 'bin'));
   });
 
-  it('respects KIMI_CODE_HOME', () => {
-    process.env['KIMI_CODE_HOME'] = '/custom-bin-home';
+  it('respects NORI_CODE_HOME', () => {
+    process.env['NORI_CODE_HOME'] = '/custom-bin-home';
     expect(getBinDir()).toBe(join('/custom-bin-home', 'bin'));
   });
 });
@@ -66,8 +66,8 @@ describe('getUpdateStateFile', () => {
     expect(getUpdateStateFile()).toBe(join(homedir(), '.kimi-code', 'updates', 'latest.json'));
   });
 
-  it('respects KIMI_CODE_HOME', () => {
-    process.env['KIMI_CODE_HOME'] = '/updates-home';
+  it('respects NORI_CODE_HOME', () => {
+    process.env['NORI_CODE_HOME'] = '/updates-home';
     expect(getUpdateStateFile()).toBe(join('/updates-home', 'updates', 'latest.json'));
   });
 });
@@ -79,8 +79,8 @@ describe('getUpdateInstallStateFile', () => {
     );
   });
 
-  it('respects KIMI_CODE_HOME', () => {
-    process.env['KIMI_CODE_HOME'] = '/updates-home';
+  it('respects NORI_CODE_HOME', () => {
+    process.env['NORI_CODE_HOME'] = '/updates-home';
     expect(getUpdateInstallStateFile()).toBe(join('/updates-home', 'updates', 'install.json'));
   });
 });
@@ -94,8 +94,8 @@ describe('getInputHistoryFile', () => {
     );
   });
 
-  it('respects KIMI_CODE_HOME', () => {
-    process.env['KIMI_CODE_HOME'] = '/custom/data';
+  it('respects NORI_CODE_HOME', () => {
+    process.env['NORI_CODE_HOME'] = '/custom/data';
     const hash = createHash('md5').update('/proj', 'utf-8').digest('hex');
     expect(getInputHistoryFile('/proj')).toBe(
       join('/custom/data', 'user-history', `${hash}.jsonl`),

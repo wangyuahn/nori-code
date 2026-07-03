@@ -42,7 +42,7 @@ function onKeydown(e: KeyboardEvent): void {
         <h1 id="server-auth-title" class="server-auth-title">Server token required</h1>
         <p class="server-auth-hint">
           This server is protected. Enter the bearer token printed when the server
-          started (or the password set via <code>KIMI_CODE_PASSWORD</code>).
+          started (or the password set via <code>NORI_CODE_PASSWORD</code>).
         </p>
       </div>
       <div class="server-auth-body">

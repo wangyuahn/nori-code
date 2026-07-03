@@ -11,8 +11,8 @@ import { createKimiCodeHostIdentity } from '#/cli/version';
 import { createKimiHarness, log } from '@moonshot-ai/kimi-code-sdk';
 import { __resetRootLoggerForTest } from '../../../../packages/agent-core/src/logging/logger';
 
-const SESSION_LOG = 'logs/kimi-code.log';
-const GLOBAL_LOG = 'logs/global/kimi-code.log';
+const SESSION_LOG = 'logs/nori-code.log';
+const GLOBAL_LOG = 'logs/global/nori-code.log';
 const MAIN_WIRE = 'agents/main/wire.jsonl';
 const ENABLED = process.env['KIMI_E2E'] === '1';
 
@@ -25,23 +25,23 @@ beforeEach(async () => {
   await __resetRootLoggerForTest();
   homeDir = await mkdtemp(join(tmpdir(), 'kimi-cli-log-home-'));
   workDir = await mkdtemp(join(tmpdir(), 'kimi-cli-log-work-'));
-  oldHome = process.env['KIMI_CODE_HOME'];
-  oldLogLevel = process.env['KIMI_LOG_LEVEL'];
-  process.env['KIMI_CODE_HOME'] = homeDir;
-  process.env['KIMI_LOG_LEVEL'] = 'info';
+  oldHome = process.env['NORI_CODE_HOME'];
+  oldLogLevel = process.env['NORI_LOG_LEVEL'];
+  process.env['NORI_CODE_HOME'] = homeDir;
+  process.env['NORI_LOG_LEVEL'] = 'info';
 });
 
 afterEach(async () => {
   await __resetRootLoggerForTest();
   if (oldHome === undefined) {
-    delete process.env['KIMI_CODE_HOME'];
+    delete process.env['NORI_CODE_HOME'];
   } else {
-    process.env['KIMI_CODE_HOME'] = oldHome;
+    process.env['NORI_CODE_HOME'] = oldHome;
   }
   if (oldLogLevel === undefined) {
-    delete process.env['KIMI_LOG_LEVEL'];
+    delete process.env['NORI_LOG_LEVEL'];
   } else {
-    process.env['KIMI_LOG_LEVEL'] = oldLogLevel;
+    process.env['NORI_LOG_LEVEL'] = oldLogLevel;
   }
   await rm(homeDir, { recursive: true, force: true });
   await rm(workDir, { recursive: true, force: true });

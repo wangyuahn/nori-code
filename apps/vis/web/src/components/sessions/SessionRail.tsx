@@ -102,7 +102,7 @@ export function SessionRail() {
 
   async function handleDeleteSession(session: SessionSummary) {
     const label = session.title ?? session.lastPrompt ?? session.sessionId;
-    if (!window.confirm(`Delete session "${label}"?\n\nThis removes its files from KIMI_CODE_HOME.`)) {
+    if (!window.confirm(`Delete session "${label}"?\n\nThis removes its files from NORI_CODE_HOME.`)) {
       return;
     }
     try {

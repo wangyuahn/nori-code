@@ -87,7 +87,7 @@ describe('handleWebCommand', () => {
     getMountedPanel()?.handleInput('\r');
     await pending;
 
-    expect(host.showStatus).toHaveBeenCalledWith('Starting Kimi server and opening web UI…');
+    expect(host.showStatus).toHaveBeenCalledWith('Starting Nori server and opening web UI…');
     expect(host.showStatus).toHaveBeenCalledWith(
       'open http://127.0.0.1:58627/sessions/ses-1#token=tok-1',
       'success',
@@ -110,7 +110,7 @@ describe('handleWebCommand', () => {
     getMountedPanel()?.handleInput('\r');
     await pending;
 
-    expect(host.showStatus).toHaveBeenCalledWith('Starting Kimi server and opening web UI…');
+    expect(host.showStatus).toHaveBeenCalledWith('Starting Nori server and opening web UI…');
     expect(host.showStatus).toHaveBeenCalledWith(
       'open http://127.0.0.1:58627/sessions/ses-1',
       'success',

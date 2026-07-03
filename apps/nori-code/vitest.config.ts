@@ -13,7 +13,7 @@ export default defineConfig({
   test: {
     name: 'cli',
     env: {
-      KIMI_LOG_LEVEL: 'off',
+      NORI_LOG_LEVEL: 'off',
     },
     include: ['test/**/*.test.ts', 'test/**/*.test.tsx'],
   },

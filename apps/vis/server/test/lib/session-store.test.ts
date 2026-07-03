@@ -147,7 +147,7 @@ describe('session-store', () => {
     expect(d!.agents.map((a) => a.agentId).sort()).toEqual(['agent-0', 'main']);
   });
 
-  it('rejects session_index entries that point outside KIMI_CODE_HOME', async () => {
+  it('rejects session_index entries that point outside NORI_CODE_HOME', async () => {
     const { home, cleanup: c } = await buildSessionFixture('sample-main');
     cleanup = c;
     const { writeFile, mkdir } = await import('node:fs/promises');

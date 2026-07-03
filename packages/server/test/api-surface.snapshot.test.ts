@@ -66,8 +66,8 @@ describe('API surface snapshot', () => {
   });
 
   it('matches the documented v1 route table and meta endpoints', async () => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'kimi-server-api-surface-'));
-    bridgeHome = mkdtempSync(join(tmpdir(), 'kimi-server-api-surface-home-'));
+    tmpDir = mkdtempSync(join(tmpdir(), 'nori-server-api-surface-'));
+    bridgeHome = mkdtempSync(join(tmpdir(), 'nori-server-api-surface-home-'));
     const lockPath = join(tmpDir, 'lock');
 
     server = await startServer({

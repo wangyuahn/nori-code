@@ -296,7 +296,7 @@ reason = "no rm"
     await freshRpc.resumeSession({ sessionId: created.id });
     await getRootLogger().flushSession(created.id);
 
-    const logText = await readFile(join(created.sessionDir, 'logs', 'kimi-code.log'), 'utf-8');
+    const logText = await readFile(join(created.sessionDir, 'logs', 'nori-code.log'), 'utf-8');
     expect(logText).toContain('session resume');
     expect(logText).toContain('app_version=1.2.3-test');
   });

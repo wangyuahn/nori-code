@@ -39,7 +39,7 @@ export interface SchtasksManagerDeps {
 const DEFAULT_DEPS: SchtasksManagerDeps = {
   execSchtasks: (args, options) =>
     execFileUtf8('schtasks', args, { windowsHide: true, ...options }),
-  resolveProgram: () => resolveSupervisorProgram(process.argv, process.cwd(), 'kimi.exe'),
+  resolveProgram: () => resolveSupervisorProgram(process.argv, process.cwd(), 'nori.exe'),
   logPath: defaultSupervisorLogPath,
   writeTaskXml: defaultWriteTaskXml,
   taskExists: defaultTaskExists,
@@ -107,7 +107,7 @@ export function createSchtasksManager(
 
     return {
       status: alreadyInstalled ? 'replaced' : 'installed',
-      message: `Kimi server scheduled task ${alreadyInstalled ? 'replaced' : 'installed'} (${KIMI_SERVER_TASK_NAME}, port ${plan.port}).`,
+      message: `Nori server scheduled task ${alreadyInstalled ? 'replaced' : 'installed'} (${KIMI_SERVER_TASK_NAME}, port ${plan.port}).`,
       taskName: KIMI_SERVER_TASK_NAME,
     };
   }
@@ -134,7 +134,7 @@ export function createSchtasksManager(
     if (!(await deps.taskExists())) {
       return {
         ok: false,
-        message: 'Scheduled task is not installed. Run `kimi server install` first.',
+        message: 'Scheduled task is not installed. Run `nori server install` first.',
       };
     }
     const result = await deps.execSchtasks(['/Run', '/TN', KIMI_SERVER_TASK_NAME]);
@@ -144,7 +144,7 @@ export function createSchtasksManager(
         message: `schtasks /Run failed: ${detail(result) ?? 'unknown error'}`,
       };
     }
-    return { ok: true, message: `Kimi server started (${KIMI_SERVER_TASK_NAME}).` };
+    return { ok: true, message: `Nori server started (${KIMI_SERVER_TASK_NAME}).` };
   }
 
   async function stop(): Promise<LifecycleResult> {
@@ -155,7 +155,7 @@ export function createSchtasksManager(
         message: `schtasks /End failed: ${detail(result) ?? 'unknown error'}`,
       };
     }
-    return { ok: true, message: `Kimi server stopped (${KIMI_SERVER_TASK_NAME}).` };
+    return { ok: true, message: `Nori server stopped (${KIMI_SERVER_TASK_NAME}).` };
   }
 
   async function restart(): Promise<LifecycleResult> {
@@ -173,7 +173,7 @@ export function createSchtasksManager(
         message: `schtasks /Run failed during restart: ${detail(run) ?? 'unknown error'}`,
       };
     }
-    return { ok: true, message: `Kimi server restarted (${KIMI_SERVER_TASK_NAME}).` };
+    return { ok: true, message: `Nori server restarted (${KIMI_SERVER_TASK_NAME}).` };
   }
 
   async function status(): Promise<ServiceStatus> {
@@ -226,7 +226,7 @@ export function createSchtasksManager(
 
 
 function defaultWriteTaskXml(xml: string): string {
-  const dir = mkdtempSync(join(tmpdir(), 'kimi-server-task-'));
+  const dir = mkdtempSync(join(tmpdir(), 'nori-server-task-'));
   const xmlPath = join(dir, 'task.xml');
   const bom = Buffer.from([0xff, 0xfe]);
   const body = Buffer.from(xml, 'utf16le');

@@ -12,8 +12,8 @@ import {
 } from '#/session/export/zip';
 import type { ExportSessionPayload, ExportSessionResult, SessionSummary } from '#/rpc/core-api';
 
-const SESSION_LOG_REL = 'logs/kimi-code.log';
-const GLOBAL_LOG_REL = 'logs/global/kimi-code.log';
+const SESSION_LOG_REL = 'logs/nori-code.log';
+const GLOBAL_LOG_REL = 'logs/global/nori-code.log';
 
 export async function exportSessionDirectory(input: {
   readonly request: ExportSessionPayload;

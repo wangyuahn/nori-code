@@ -407,7 +407,7 @@ export const KIMI_ERROR_INFO = {
     title: 'Plugin state failed to load',
     retryable: true,
     public: true,
-    action: 'Fix the installed.json file under $KIMI_CODE_HOME/plugins/ and run /plugins reload.',
+    action: 'Fix the installed.json file under $NORI_CODE_HOME/plugins/ and run /plugins reload.',
   },
 
   'request.invalid': {
@@ -433,7 +433,7 @@ export const KIMI_ERROR_INFO = {
     title: 'Git Bash not found',
     retryable: false,
     public: true,
-    action: 'Install Git for Windows from https://gitforwindows.org/ or set KIMI_SHELL_PATH to a bash.exe.',
+    action: 'Install Git for Windows from https://gitforwindows.org/ or set NORI_SHELL_PATH to a bash.exe.',
   },
 
   not_implemented: {

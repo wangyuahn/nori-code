@@ -4,8 +4,8 @@
  * Lookup order (first hit wins):
  *   1. System PATH (`which rg`) — fastest, respects developer setup
  *   2. Bundled vendor binary (hook; not wired yet — `getVendorRgPath` is a stub)
- *   3. `<KIMI_CODE_HOME>/bin/rg` — persistent cache for this app.
- *   4. CDN download to `<KIMI_CODE_HOME>/bin/` — one-off bootstrap
+ *   3. `<NORI_CODE_HOME>/bin/rg` — persistent cache for this app.
+ *   4. CDN download to `<NORI_CODE_HOME>/bin/` — one-off bootstrap
  *
  * If steps 1-4 all fail, callers receive a structured error they can
  * turn into a user-facing "install ripgrep" hint instead of the naked

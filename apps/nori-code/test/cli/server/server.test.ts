@@ -181,7 +181,7 @@ describe('`kimi server` lifecycle output', () => {
           installArgs = args;
           return {
             status: 'replaced',
-            message: 'Kimi server LaunchAgent replaced at /tmp/kimi.plist (port 9999).',
+            message: 'Nori server LaunchAgent replaced at /tmp/kimi.plist (port 9999).',
             plistPath: '/tmp/kimi.plist',
           };
         },
@@ -196,7 +196,7 @@ describe('`kimi server` lifecycle output', () => {
           host: '127.0.0.1',
           port: 9999,
           logPath: '/tmp/server.log',
-          label: 'ai.moonshot.kimi-server',
+          label: 'ai.moonshot.nori-server',
         }),
       }),
       openUrl,
@@ -242,7 +242,7 @@ describe('`kimi server` lifecycle output', () => {
       resolveManager: () => ({
         install: async () => ({ status: 'installed', message: 'unused' }),
         uninstall: async () => ({ ok: true, message: 'unused' }),
-        start: async () => ({ ok: true, message: 'Kimi server started (ai.moonshot.kimi-server).' }),
+        start: async () => ({ ok: true, message: 'Nori server started (ai.moonshot.nori-server).' }),
         stop: async () => ({ ok: true, message: 'unused' }),
         restart: async () => ({ ok: true, message: 'unused' }),
         status: async () => ({
@@ -252,7 +252,7 @@ describe('`kimi server` lifecycle output', () => {
           host: '127.0.0.1',
           port: 58627,
           logPath: '/tmp/server.log',
-          label: 'ai.moonshot.kimi-server',
+          label: 'ai.moonshot.nori-server',
           notes: ['launchd state: spawn scheduled', 'last exit code: 78 EX_CONFIG'],
         }),
       }),
@@ -959,16 +959,16 @@ describe('spawnDaemonChild', () => {
 
   beforeEach(() => {
     workDir = mkdtempSync(join(tmpdir(), 'kimi-daemon-cwd-'));
-    prevHome = process.env['KIMI_CODE_HOME'];
-    process.env['KIMI_CODE_HOME'] = workDir;
+    prevHome = process.env['NORI_CODE_HOME'];
+    process.env['NORI_CODE_HOME'] = workDir;
     vi.resetModules();
   });
 
   afterEach(() => {
     if (prevHome === undefined) {
-      delete process.env['KIMI_CODE_HOME'];
+      delete process.env['NORI_CODE_HOME'];
     } else {
-      process.env['KIMI_CODE_HOME'] = prevHome;
+      process.env['NORI_CODE_HOME'] = prevHome;
     }
     rmSync(workDir, { recursive: true, force: true });
   });
@@ -1036,16 +1036,16 @@ describe('ensureDaemon surfaces boot failures via early exit', () => {
 
   beforeEach(() => {
     workDir = mkdtempSync(join(tmpdir(), 'kimi-ensure-exit-'));
-    prevHome = process.env['KIMI_CODE_HOME'];
-    process.env['KIMI_CODE_HOME'] = workDir;
+    prevHome = process.env['NORI_CODE_HOME'];
+    process.env['NORI_CODE_HOME'] = workDir;
     vi.resetModules();
   });
 
   afterEach(() => {
     if (prevHome === undefined) {
-      delete process.env['KIMI_CODE_HOME'];
+      delete process.env['NORI_CODE_HOME'];
     } else {
-      process.env['KIMI_CODE_HOME'] = prevHome;
+      process.env['NORI_CODE_HOME'] = prevHome;
     }
     rmSync(workDir, { recursive: true, force: true });
   });
@@ -1252,13 +1252,13 @@ function makeKillDeps(overrides: Partial<KillCommandDeps> = {}): {
 describe('`kimi server kill`', () => {
   const liveLock = { pid: 1234, started_at: '2026-06-17T00:00:00.000Z', port: 58627 };
 
-  it('prints "No running Kimi server." and sends no signal when no live lock exists', async () => {
+  it('prints "No running Nori server." and sends no signal when no live lock exists', async () => {
     const { handleKillCommand } = await import('#/cli/sub/server/kill');
     const { deps, writes, signals } = makeKillDeps({ getLiveLock: () => undefined });
 
     await handleKillCommand(deps);
 
-    expect(writes.join('')).toContain('No running Kimi server.');
+    expect(writes.join('')).toContain('No running Nori server.');
     expect(signals).toEqual([]);
   });
 
@@ -1306,7 +1306,7 @@ describe('`kimi server kill`', () => {
 describe('resolveServerToken', () => {
   let dir: string;
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'kimi-server-token-'));
+    dir = mkdtempSync(join(tmpdir(), 'nori-server-token-'));
   });
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
@@ -1469,16 +1469,16 @@ describe('`kimi server rotate-token`', () => {
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'kimi-rotate-'));
-    prevHome = process.env['KIMI_CODE_HOME'];
-    process.env['KIMI_CODE_HOME'] = dir;
+    prevHome = process.env['NORI_CODE_HOME'];
+    process.env['NORI_CODE_HOME'] = dir;
     vi.resetModules();
   });
 
   afterEach(() => {
     if (prevHome === undefined) {
-      delete process.env['KIMI_CODE_HOME'];
+      delete process.env['NORI_CODE_HOME'];
     } else {
-      process.env['KIMI_CODE_HOME'] = prevHome;
+      process.env['NORI_CODE_HOME'] = prevHome;
     }
     rmSync(dir, { recursive: true, force: true });
   });

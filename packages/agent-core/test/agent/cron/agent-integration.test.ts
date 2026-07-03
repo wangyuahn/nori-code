@@ -1,7 +1,7 @@
 /**
  * Agent + cron wiring smoke: verifies `new Agent(...)` constructs and
  * starts a CronManager, registers the three cron tools, and that
- * `KIMI_DISABLE_CRON=1` short-circuits `CronCreate`.
+ * `NORI_DISABLE_CRON=1` short-circuits `CronCreate`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -50,8 +50,8 @@ describe('Agent + Cron integration (P1.7)', () => {
     }
   });
 
-  it('KIMI_DISABLE_CRON=1 short-circuits CronCreate with a disabled error', () => {
-    vi.stubEnv('KIMI_DISABLE_CRON', '1');
+  it('NORI_DISABLE_CRON=1 short-circuits CronCreate with a disabled error', () => {
+    vi.stubEnv('NORI_DISABLE_CRON', '1');
 
     // We construct a fresh CronCreateTool against the agent's cron
     // manager rather than driving a full tool-dispatch loop — the

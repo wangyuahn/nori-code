@@ -41,7 +41,7 @@ describe('Cron — session E2E (P1.9)', () => {
     // the unjittered schedule, so jitter has no effect on the count
     // itself — this flag is belt-and-braces against any future refactor
     // that widens the jitter window past 10 minutes.
-    vi.stubEnv('KIMI_CRON_NO_JITTER', '1');
+    vi.stubEnv('NORI_CRON_NO_JITTER', '1');
     ctx = testAgent();
   });
 

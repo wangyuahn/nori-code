@@ -43,9 +43,9 @@ describe('getFdAssetName', () => {
 });
 
 describe('detectFdPath', () => {
-  it('prefers the managed fd binary under KIMI_CODE_HOME', () => {
+  it('prefers the managed fd binary under NORI_CODE_HOME', () => {
     tempHome = mkdtempSync(join(tmpdir(), 'kimi-fd-home-'));
-    process.env['KIMI_CODE_HOME'] = tempHome;
+    process.env['NORI_CODE_HOME'] = tempHome;
     mkdirSync(getBinDir(), { recursive: true });
 
     const binaryPath = join(getBinDir(), process.platform === 'win32' ? 'fd.exe' : 'fd');

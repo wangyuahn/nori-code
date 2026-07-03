@@ -62,7 +62,7 @@ const DEFAULT_DEPS: LifecycleCommandDeps = {
 export function addLifecycleCommands(parent: Command, deps: LifecycleCommandDeps = DEFAULT_DEPS): void {
   parent
     .command('install')
-    .description('Install the Kimi server as an OS-managed service (launchd/systemd/schtasks).')
+    .description('Install the Nori server as an OS-managed service (launchd/systemd/schtasks).')
     .option('--port <port>', `Bind port (default ${DEFAULT_SERVER_PORT})`, String(DEFAULT_SERVER_PORT))
     .option(
       '--log-level <level>',
@@ -100,7 +100,7 @@ export function addLifecycleCommands(parent: Command, deps: LifecycleCommandDeps
 
   parent
     .command('uninstall')
-    .description('Uninstall the Kimi server service.')
+    .description('Uninstall the Nori server service.')
     .option('--json', 'Output JSON', false)
     .action(async (opts: JsonCliOptions) => {
       await runLifecycle(deps, opts.json === true, async (mgr) => {
@@ -111,7 +111,7 @@ export function addLifecycleCommands(parent: Command, deps: LifecycleCommandDeps
 
   parent
     .command('start')
-    .description('Start the Kimi server service.')
+    .description('Start the Nori server service.')
     .option('--json', 'Output JSON', false)
     .action(async (opts: JsonCliOptions) => {
       await runLifecycle(deps, opts.json === true, async (mgr) => {
@@ -123,7 +123,7 @@ export function addLifecycleCommands(parent: Command, deps: LifecycleCommandDeps
 
   parent
     .command('stop')
-    .description('Stop the Kimi server service.')
+    .description('Stop the Nori server service.')
     .option('--json', 'Output JSON', false)
     .action(async (opts: JsonCliOptions) => {
       await runLifecycle(deps, opts.json === true, async (mgr) => {
@@ -134,7 +134,7 @@ export function addLifecycleCommands(parent: Command, deps: LifecycleCommandDeps
 
   parent
     .command('restart')
-    .description('Restart the Kimi server service.')
+    .description('Restart the Nori server service.')
     .option('--json', 'Output JSON', false)
     .action(async (opts: JsonCliOptions) => {
       await runLifecycle(deps, opts.json === true, async (mgr) => {
@@ -146,7 +146,7 @@ export function addLifecycleCommands(parent: Command, deps: LifecycleCommandDeps
 
   parent
     .command('status')
-    .description('Show Kimi server service status and connectivity.')
+    .description('Show Nori server service status and connectivity.')
     .option('--json', 'Output JSON', false)
     .action(async (opts: JsonCliOptions) => {
       await runLifecycle(deps, opts.json === true, async (mgr) => {

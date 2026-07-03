@@ -32,9 +32,9 @@ let bridgeHome: string;
 let server: RunningServer | undefined;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), 'kimi-server-fsbrowse-test-'));
+  tmpDir = mkdtempSync(join(tmpdir(), 'nori-server-fsbrowse-test-'));
   lockPath = join(tmpDir, 'lock');
-  bridgeHome = mkdtempSync(join(tmpdir(), 'kimi-server-fsbrowse-home-'));
+  bridgeHome = mkdtempSync(join(tmpdir(), 'nori-server-fsbrowse-home-'));
 });
 
 afterEach(async () => {

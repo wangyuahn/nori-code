@@ -47,9 +47,9 @@ function rmSyncRobust(path: string): void {
 }
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), 'kimi-server-questions-test-'));
+  tmpDir = mkdtempSync(join(tmpdir(), 'nori-server-questions-test-'));
   lockPath = join(tmpDir, 'lock');
-  bridgeHome = mkdtempSync(join(tmpdir(), 'kimi-server-questions-home-'));
+  bridgeHome = mkdtempSync(join(tmpdir(), 'nori-server-questions-home-'));
 });
 
 afterEach(async () => {

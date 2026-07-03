@@ -13,9 +13,9 @@ import { join } from 'node:path';
 import type { EnrichedTelemetryEvent, TelemetryPrimitive } from './types';
 import { isTelemetryPrimitive } from './types';
 
-export const TELEMETRY_ENDPOINT = 'https://telemetry-logs.kimi.com/v1/event';
-export const SERVER_EVENT_PREFIX = 'kfc_';
-export const USER_ID_PREFIX = 'kfc_device_id_';
+export const TELEMETRY_ENDPOINT = '';
+export const SERVER_EVENT_PREFIX = 'nori_';
+export const USER_ID_PREFIX = 'nori_device_id_';
 export const DISK_EVENT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 export const RETRY_BACKOFFS_MS = [1_000, 4_000, 16_000] as const;
 

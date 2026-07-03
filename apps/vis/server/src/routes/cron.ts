@@ -1,11 +1,11 @@
 import { Hono } from 'hono';
 
-import { KIMI_CODE_HOME } from '../config';
+import { NORI_CODE_HOME } from '../config';
 import type { CronTask } from '../lib/agent-record-types';
 import { readSessionDetail } from '../lib/session-store';
 import { listCronTasks } from '../lib/cron-store';
 
-export function cronRoute(home: string = KIMI_CODE_HOME): Hono {
+export function cronRoute(home: string = NORI_CODE_HOME): Hono {
   const r = new Hono();
   r.get('/:id/cron', async (c) => {
     const id = c.req.param('id');

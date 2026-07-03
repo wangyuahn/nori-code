@@ -120,9 +120,9 @@ export class ConfigState {
     // All provider-level request config is applied here so every request built
     // from config.provider — the main loop AND full-history compaction — carries it:
     //   - withThinking: preserve thinking during compaction (#464)
-    //   - sampling params: KIMI_MODEL_TEMPERATURE / KIMI_MODEL_TOP_P
-    //   - thinking.effort: KIMI_MODEL_THINKING_EFFORT (forces an effort, only while thinking is on)
-    //   - thinking.keep: KIMI_MODEL_THINKING_KEEP (only while thinking is on)
+    //   - sampling params: NORI_MODEL_TEMPERATURE / NORI_MODEL_TOP_P
+    //   - thinking.effort: NORI_MODEL_THINKING_EFFORT (forces an effort, only while thinking is on)
+    //   - thinking.keep: NORI_MODEL_THINKING_KEEP (only while thinking is on)
     const provider = createProvider(this.providerConfig).withThinking(this.thinkingEffort);
     const withSampling = applyKimiEnvSamplingParams(provider);
     const withEffort = applyKimiEnvThinkingEffort(withSampling, this.thinkingEffort);

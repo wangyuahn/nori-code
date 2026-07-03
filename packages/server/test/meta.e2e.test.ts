@@ -42,9 +42,9 @@ let server: RunningServer | undefined;
 const bootBaseline = Date.now();
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), 'kimi-server-meta-test-'));
+  tmpDir = mkdtempSync(join(tmpdir(), 'nori-server-meta-test-'));
   lockPath = join(tmpDir, 'lock');
-  bridgeHome = mkdtempSync(join(tmpdir(), 'kimi-server-meta-home-'));
+  bridgeHome = mkdtempSync(join(tmpdir(), 'nori-server-meta-home-'));
 });
 
 afterEach(async () => {
@@ -144,8 +144,8 @@ describe('GET /api/v1/meta — envelope + metaResponseSchema', () => {
     // Use distinct lock paths so both can coexist for the duration of the test.
     const lockA = join(tmpDir, 'lock-a');
     const lockB = join(tmpDir, 'lock-b');
-    const homeA = mkdtempSync(join(tmpdir(), 'kimi-server-meta-home-a-'));
-    const homeB = mkdtempSync(join(tmpdir(), 'kimi-server-meta-home-b-'));
+    const homeA = mkdtempSync(join(tmpdir(), 'nori-server-meta-home-a-'));
+    const homeB = mkdtempSync(join(tmpdir(), 'nori-server-meta-home-b-'));
     const r1 = await startServer({
       serviceOverrides: [fixedTokenAuth()],
       host: '127.0.0.1',

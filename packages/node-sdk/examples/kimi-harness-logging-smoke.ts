@@ -4,8 +4,8 @@ import { join } from 'node:path';
 
 import { createKimiHarness, log } from '@moonshot-ai/kimi-code-sdk';
 
-const SESSION_LOG = 'logs/kimi-code.log';
-const GLOBAL_LOG = 'logs/global/kimi-code.log';
+const SESSION_LOG = 'logs/nori-code.log';
+const GLOBAL_LOG = 'logs/global/nori-code.log';
 const MAIN_WIRE = 'agents/main/wire.jsonl';
 const TEST_HOME = join(homedir(), '.nori-code-test');
 const MAX_LOG_BYTES = 4096;
@@ -28,15 +28,15 @@ async function readSessionLogs(sessionDir: string): Promise<{
 }> {
   const logsDir = join(sessionDir, 'logs');
   const files = (await readdir(logsDir))
-    .filter((file) => file === 'kimi-code.log' || file.startsWith('kimi-code.log.'))
+    .filter((file) => file === 'nori-code.log' || file.startsWith('nori-code.log.'))
     .toSorted();
   const chunks = await Promise.all(files.map((file) => readFile(join(logsDir, file), 'utf-8')));
   return { files, text: chunks.join('\n') };
 }
 
 async function assertRotatedFilesStayBounded(sessionDir: string, files: readonly string[]): Promise<void> {
-  assert(files.includes('kimi-code.log.1'), 'session log did not rotate after exceeding max bytes');
-  assert(!files.includes('kimi-code.log.2'), 'session log kept more archives than configured');
+  assert(files.includes('nori-code.log.1'), 'session log did not rotate after exceeding max bytes');
+  assert(!files.includes('nori-code.log.2'), 'session log kept more archives than configured');
   for (const file of files) {
     const size = (await stat(join(sessionDir, 'logs', file))).size;
     assert(size <= MAX_LOG_BYTES, `${file} exceeded ${MAX_LOG_BYTES} bytes: ${size}`);
@@ -54,11 +54,11 @@ async function describeFiles(dir: string, files: readonly string[]): Promise<str
 
 async function main(): Promise<void> {
   process.env['NORI_CODE_HOME'] = TEST_HOME;
-  process.env['KIMI_LOG_LEVEL'] = 'warn';
-  process.env['KIMI_LOG_SESSION_MAX_BYTES'] = String(MAX_LOG_BYTES);
-  process.env['KIMI_LOG_SESSION_FILES'] = '2';
-  process.env['KIMI_LOG_GLOBAL_MAX_BYTES'] = String(MAX_LOG_BYTES);
-  process.env['KIMI_LOG_GLOBAL_FILES'] = '2';
+  process.env['NORI_LOG_LEVEL'] = 'warn';
+  process.env['NORI_LOG_SESSION_MAX_BYTES'] = String(MAX_LOG_BYTES);
+  process.env['NORI_LOG_SESSION_FILES'] = '2';
+  process.env['NORI_LOG_GLOBAL_MAX_BYTES'] = String(MAX_LOG_BYTES);
+  process.env['NORI_LOG_GLOBAL_FILES'] = '2';
 
   await rm(TEST_HOME, { recursive: true, force: true });
   await mkdir(TEST_HOME, { recursive: true });
@@ -150,7 +150,7 @@ async function main(): Promise<void> {
     assert(withGlobal.manifest.globalLogPath === GLOBAL_LOG, 'bad globalLogPath');
 
     const globalFiles = (await readdir(join(TEST_HOME, 'logs')))
-      .filter((file) => file === 'kimi-code.log' || file.startsWith('kimi-code.log.'))
+      .filter((file) => file === 'nori-code.log' || file.startsWith('nori-code.log.'))
       .toSorted();
     const globalLog = (
       await Promise.all(globalFiles.map((file) => readFile(join(TEST_HOME, 'logs', file), 'utf-8')))
@@ -176,22 +176,22 @@ async function main(): Promise<void> {
         'production defaults are larger; this small cap is only for rotation testing.',
         '',
         'Open these files:',
-        '  - logs/kimi-code.log',
-        '  - logs/kimi-code.log.1',
-        `  - ${summary.sessionDir}/logs/kimi-code.log`,
-        `  - ${summary.sessionDir}/logs/kimi-code.log.1`,
+        '  - logs/nori-code.log',
+        '  - logs/nori-code.log.1',
+        `  - ${summary.sessionDir}/logs/nori-code.log`,
+        `  - ${summary.sessionDir}/logs/nori-code.log.1`,
         '',
         'Rotation evidence:',
         `  - should NOT appear in session logs: ${evictedEntry}`,
         `  - should appear in session logs: ${finalEntry}`,
-        '  - kimi-code.log.1 exists',
-        '  - kimi-code.log.2 does not exist',
+        '  - nori-code.log.1 exists',
+        '  - nori-code.log.2 does not exist',
         '',
         'Export evidence:',
         '  - logging-session.zip includes session logs and wire.jsonl',
-        '  - logging-session.zip does not include logs/global/kimi-code.log',
-        '  - logging-with-global.zip includes only the active global log at logs/global/kimi-code.log',
-        '  - global rotated logs such as ~/.nori-code-test/logs/kimi-code.log.1 are intentionally not bundled',
+        '  - logging-session.zip does not include logs/global/nori-code.log',
+        '  - logging-with-global.zip includes only the active global log at logs/global/nori-code.log',
+        '  - global rotated logs such as ~/.nori-code-test/logs/nori-code.log.1 are intentionally not bundled',
         '',
         'Redaction evidence:',
         '  - must-not-leak should NOT appear',

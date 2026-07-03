@@ -145,8 +145,8 @@ export async function boot(opts: BootOptions = {}): Promise<ServerHarness> {
     ...(opts.serviceOverrides ?? []),
   ];
 
-  const tmpDir = mkdtempSync(join(tmpdir(), 'kimi-server-harness-'));
-  const homeDir = mkdtempSync(join(tmpdir(), 'kimi-server-harness-home-'));
+  const tmpDir = mkdtempSync(join(tmpdir(), 'nori-server-harness-'));
+  const homeDir = mkdtempSync(join(tmpdir(), 'nori-server-harness-home-'));
   const lockPath = join(tmpDir, 'lock');
 
   const server = await startServer({

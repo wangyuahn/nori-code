@@ -66,7 +66,7 @@ describe('createAuthTokenService', () => {
 
   it('isValid accepts the password when a hash is configured', async () => {
     const passwordHash = await resolvePasswordHash({
-      KIMI_CODE_PASSWORD: 'correct horse battery staple',
+      NORI_CODE_PASSWORD: 'correct horse battery staple',
     });
     const svc = createAuthTokenService({ tokenStore: store, passwordHash });
     expect(await svc.isValid('correct horse battery staple')).toBe(true);
@@ -74,7 +74,7 @@ describe('createAuthTokenService', () => {
 
   it('isValid rejects a wrong candidate', async () => {
     const passwordHash = await resolvePasswordHash({
-      KIMI_CODE_PASSWORD: 'correct horse battery staple',
+      NORI_CODE_PASSWORD: 'correct horse battery staple',
     });
     const svc = createAuthTokenService({ tokenStore: store, passwordHash });
     expect(await svc.isValid('wrong')).toBe(false);

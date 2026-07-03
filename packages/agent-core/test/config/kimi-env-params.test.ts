@@ -41,8 +41,8 @@ describe('applyKimiEnvSamplingParams', () => {
 
   it('injects temperature and top_p for a kimi provider', () => {
     const out = applyKimiEnvSamplingParams(kimi(), {
-      KIMI_MODEL_TEMPERATURE: '0.3',
-      KIMI_MODEL_TOP_P: '0.95',
+      NORI_MODEL_TEMPERATURE: '0.3',
+      NORI_MODEL_TOP_P: '0.95',
     });
     const state = genState(out);
     expect(state.temperature).toBe(0.3);
@@ -51,24 +51,24 @@ describe('applyKimiEnvSamplingParams', () => {
 
   it('leaves non-kimi providers untouched', () => {
     const stub = { name: 'stub' } as unknown as ChatProvider;
-    expect(applyKimiEnvSamplingParams(stub, { KIMI_MODEL_TEMPERATURE: '0.3' })).toBe(stub);
+    expect(applyKimiEnvSamplingParams(stub, { NORI_MODEL_TEMPERATURE: '0.3' })).toBe(stub);
   });
 
   it('throws config.invalid for an invalid temperature', () => {
     expectConfigInvalid(() =>
-      applyKimiEnvSamplingParams(kimi(), { KIMI_MODEL_TEMPERATURE: 'abc' }),
+      applyKimiEnvSamplingParams(kimi(), { NORI_MODEL_TEMPERATURE: 'abc' }),
     );
   });
 });
 
 describe('applyKimiEnvThinkingKeep', () => {
   it('injects thinking.keep when thinking is on', () => {
-    const out = applyKimiEnvThinkingKeep(kimi(), 'high', { KIMI_MODEL_THINKING_KEEP: 'all' });
+    const out = applyKimiEnvThinkingKeep(kimi(), 'high', { NORI_MODEL_THINKING_KEEP: 'all' });
     expect(genState(out).extra_body?.thinking?.keep).toBe('all');
   });
 
   it('does NOT inject thinking.keep when thinking is off', () => {
-    const out = applyKimiEnvThinkingKeep(kimi(), 'off', { KIMI_MODEL_THINKING_KEEP: 'all' });
+    const out = applyKimiEnvThinkingKeep(kimi(), 'off', { NORI_MODEL_THINKING_KEEP: 'all' });
     expect(genState(out).extra_body).toBeUndefined();
   });
 
@@ -79,14 +79,14 @@ describe('applyKimiEnvThinkingKeep', () => {
 
   it('leaves non-kimi providers untouched', () => {
     const stub = { name: 'stub' } as unknown as ChatProvider;
-    expect(applyKimiEnvThinkingKeep(stub, 'high', { KIMI_MODEL_THINKING_KEEP: 'all' })).toBe(stub);
+    expect(applyKimiEnvThinkingKeep(stub, 'high', { NORI_MODEL_THINKING_KEEP: 'all' })).toBe(stub);
   });
 });
 
 describe('applyKimiEnvThinkingEffort', () => {
   it('injects thinking.effort when thinking is on', () => {
     const out = applyKimiEnvThinkingEffort(kimi(), 'high', {
-      KIMI_MODEL_THINKING_EFFORT: 'max',
+      NORI_MODEL_THINKING_EFFORT: 'max',
     });
     expect(genState(out).extra_body?.thinking?.effort).toBe('max');
   });
@@ -96,14 +96,14 @@ describe('applyKimiEnvThinkingEffort', () => {
     // the env var injects one anyway, bypassing the support_efforts gate.
     const provider = kimi().withThinking('high');
     const out = applyKimiEnvThinkingEffort(provider, 'high', {
-      KIMI_MODEL_THINKING_EFFORT: 'max',
+      NORI_MODEL_THINKING_EFFORT: 'max',
     });
     expect(genState(out).extra_body?.thinking).toEqual({ type: 'enabled', effort: 'max' });
   });
 
   it('does NOT inject thinking.effort when thinking is off', () => {
     const out = applyKimiEnvThinkingEffort(kimi(), 'off', {
-      KIMI_MODEL_THINKING_EFFORT: 'max',
+      NORI_MODEL_THINKING_EFFORT: 'max',
     });
     expect(genState(out).extra_body).toBeUndefined();
   });
@@ -112,14 +112,14 @@ describe('applyKimiEnvThinkingEffort', () => {
     const provider = kimi();
     expect(applyKimiEnvThinkingEffort(provider, 'high', {})).toBe(provider);
     expect(
-      applyKimiEnvThinkingEffort(provider, 'high', { KIMI_MODEL_THINKING_EFFORT: '  ' }),
+      applyKimiEnvThinkingEffort(provider, 'high', { NORI_MODEL_THINKING_EFFORT: '  ' }),
     ).toBe(provider);
   });
 
   it('leaves non-kimi providers untouched', () => {
     const stub = { name: 'stub' } as unknown as ChatProvider;
     expect(
-      applyKimiEnvThinkingEffort(stub, 'high', { KIMI_MODEL_THINKING_EFFORT: 'max' }),
+      applyKimiEnvThinkingEffort(stub, 'high', { NORI_MODEL_THINKING_EFFORT: 'max' }),
     ).toBe(stub);
   });
 });

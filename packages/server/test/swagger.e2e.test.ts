@@ -21,9 +21,9 @@ let bridgeHome: string;
 let server: RunningServer | undefined;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), 'kimi-server-swagger-test-'));
+  tmpDir = mkdtempSync(join(tmpdir(), 'nori-server-swagger-test-'));
   lockPath = join(tmpDir, 'lock');
-  bridgeHome = mkdtempSync(join(tmpdir(), 'kimi-server-swagger-home-'));
+  bridgeHome = mkdtempSync(join(tmpdir(), 'nori-server-swagger-home-'));
 });
 
 afterEach(async () => {

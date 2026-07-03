@@ -77,7 +77,7 @@ function sessionStartAgent(input: {
           if (plugin === undefined) return skill.content;
           const instructions = plugin.instructions;
           if (instructions === undefined) return skill.content;
-          return `<kimi-plugin-instructions plugin="${plugin.id}">\n${instructions}\n</kimi-plugin-instructions>\n\n${skill.content}`;
+          return `<nori-plugin-instructions plugin="${plugin.id}">\n${instructions}\n</nori-plugin-instructions>\n\n${skill.content}`;
         },
       },
     },
@@ -118,7 +118,7 @@ describe('PluginSessionStartInjector', () => {
     await injector.inject();
     const text = lastReminder(agent);
     expect(text).toContain('<plugin_session_start plugin="superpowers" skill="using-superpowers">');
-    expect(text).toContain('<kimi-plugin-instructions plugin="superpowers">');
+    expect(text).toContain('<nori-plugin-instructions plugin="superpowers">');
     expect(text).toContain('AskUserQuestion');
     expect(text).toContain('TodoList');
     expect(text).toContain('body of skill');
@@ -135,7 +135,7 @@ describe('PluginSessionStartInjector', () => {
     const text = lastReminder(agent);
     expect(text).toContain('<plugin_session_start plugin="superpowers" skill="using-superpowers">');
     expect(text).toContain('body');
-    expect(text).not.toContain('<kimi-plugin-instructions plugin="superpowers">');
+    expect(text).not.toContain('<nori-plugin-instructions plugin="superpowers">');
     expect(text).not.toContain('AskUserQuestion');
   });
 

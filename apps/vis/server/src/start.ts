@@ -5,7 +5,7 @@ import { hostForUrl, resolveHost, resolveKimiCodeHome, resolvePort, resolveVisAu
 import type { WebAsset } from './lib/web-asset';
 
 export interface StartVisServerOptions {
-  /** Sessions home. Defaults to env KIMI_CODE_HOME, else ~/.nori-code. */
+  /** Sessions home. Defaults to env NORI_CODE_HOME, else ~/.nori-code. */
   readonly homeDir?: string;
   /** Port; 0 = auto-pick a free port. Defaults to env PORT, else 3001. */
   readonly port?: number;

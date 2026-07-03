@@ -32,7 +32,7 @@ const USAGE = `Usage:
 
 Options:
   -s, --session <id>   Existing session id to resume and mark
-      --home <dir>     Kimi home dir; defaults to KIMI_CODE_HOME or ~/.nori-code
+      --home <dir>     Kimi home dir; defaults to NORI_CODE_HOME or ~/.nori-code
       --level <level>  error | warn; defaults to error
   -m, --message <text> Marker text; defaults to MANUAL_SESSION_LOG_MARKER_<timestamp>
   -h, --help           Show this help
@@ -54,7 +54,7 @@ async function main(): Promise<void> {
       throw new Error(`Session "${session.id}" resumed without a sessionDir summary`);
     }
 
-    sessionLogPath = join(sessionDir, 'logs', 'kimi-code.log');
+    sessionLogPath = join(sessionDir, 'logs', 'nori-code.log');
     const payload = {
       sessionId: session.id,
       purpose: 'manual-log-marker',
@@ -89,7 +89,7 @@ async function main(): Promise<void> {
     process.stderr.write(
       [
         'error: marker was not found in the session log.',
-        'Check that KIMI_LOG_LEVEL is not "off" and that the session id exists in this KIMI_CODE_HOME.',
+        'Check that NORI_LOG_LEVEL is not "off" and that the session id exists in this NORI_CODE_HOME.',
         '',
       ].join('\n'),
     );

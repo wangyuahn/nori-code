@@ -170,8 +170,8 @@ kimi server status             # 查看安装与运行状态
 
 把服务注册成 OS 管理的进程，开机自启、崩溃后自动重启。根据当前平台选择对应后端：
 
-- **macOS**：写 LaunchAgent plist 到 `~/Library/LaunchAgents/ai.moonshot.kimi-server.plist`，并通过 `launchctl bootstrap gui/<uid>` 启动。
-- **Linux**：写 `--user` systemd unit 到 `~/.config/systemd/user/kimi-server.service`，并执行 `systemctl --user enable --now`。
+- **macOS**：写 LaunchAgent plist 到 `~/Library/LaunchAgents/ai.moonshot.nori-server.plist`，并通过 `launchctl bootstrap gui/<uid>` 启动。
+- **Linux**：写 `--user` systemd unit 到 `~/.config/systemd/user/nori-server.service`，并执行 `systemctl --user enable --now`。
 - **Windows**：通过 `schtasks /Create /XML` 注册名为 `KimiServer` 的计划任务。
 
 | 选项 | 说明 |

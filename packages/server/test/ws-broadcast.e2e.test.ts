@@ -40,9 +40,9 @@ let bridgeHome: string;
 const running: RunningServer[] = [];
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), 'kimi-server-ws-broadcast-'));
+  tmpDir = mkdtempSync(join(tmpdir(), 'nori-server-ws-broadcast-'));
   lockPath = join(tmpDir, 'lock');
-  bridgeHome = mkdtempSync(join(tmpdir(), 'kimi-server-ws-broadcast-home-'));
+  bridgeHome = mkdtempSync(join(tmpdir(), 'nori-server-ws-broadcast-home-'));
 });
 
 afterEach(async () => {

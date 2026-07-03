@@ -19,7 +19,7 @@ body:
     id: version
     attributes:
       label: What version of Nori Code is running?
-      description: Copy the output of `kimi --version` or `/version`
+      description: Copy the output of `nori --version` or `/version`
     validations:
       required: true
   - type: input

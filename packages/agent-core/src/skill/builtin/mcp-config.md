@@ -40,22 +40,22 @@ tools exist and the user didn't name one, ask which.
 Config lives in three files; on key collision, later entries in this
 precedence order override earlier ones.
 
-The kimi-code runtime resolves the user-global directory as `KIMI_CODE_HOME`
+The kimi-code runtime resolves the user-global directory as `NORI_CODE_HOME`
 first, falling back to `~/.nori-code`. Before touching the user-global file,
 resolve the actual directory with Bash so you don't read or write the wrong
-one. Check whether `KIMI_CODE_HOME` is set and fall back to `~/.nori-code`
+one. Check whether `NORI_CODE_HOME` is set and fall back to `~/.nori-code`
 when it is empty:
 
 ```bash
-echo "$KIMI_CODE_HOME"
+echo "$NORI_CODE_HOME"
 echo "$HOME/.nori-code"
 ```
 
 Use the first line when it is non-empty; otherwise use the second line. In the
-rest of this skill, `<KIMI_CODE_HOME>` means that resolved data root —
+rest of this skill, `<NORI_CODE_HOME>` means that resolved data root —
 **never assume `~/.nori-code`**.
 
-- User-global: `<KIMI_CODE_HOME>/mcp.json`. Use for servers you want
+- User-global: `<NORI_CODE_HOME>/mcp.json`. Use for servers you want
   everywhere.
 - Project-root: `<project root>/.mcp.json`, where project root is found
   by walking up from `<cwd>` to the nearest `.git`. Use for

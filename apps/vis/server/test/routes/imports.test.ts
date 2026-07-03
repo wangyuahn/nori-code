@@ -30,7 +30,7 @@ function bundle(): Record<string, string> {
     'manifest.json': JSON.stringify({ sessionId: 'session_orig', kimiCodeVersion: '0.20.2', workspaceDir: '/w/proj', title: 'demo' }),
     'state.json': JSON.stringify({ createdAt: '2026-06-01T00:00:00.000Z', updatedAt: '2026-06-01T01:00:00.000Z', title: 'demo', agents: { main: { homedir: '/orig/agents/main', type: 'main', parentAgentId: null } }, custom: {} }),
     'agents/main/wire.jsonl': `${META}\n${PROMPT}\n`,
-    'logs/kimi-code.log': '2026-06-01T00:00:00.000Z INFO  boot  step=0\n2026-06-01T00:00:01.000Z ERROR  oops  code=500\n',
+    'logs/nori-code.log': '2026-06-01T00:00:00.000Z INFO  boot  step=0\n2026-06-01T00:00:01.000Z ERROR  oops  code=500\n',
   };
 }
 

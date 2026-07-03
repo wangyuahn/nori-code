@@ -1,7 +1,7 @@
 /**
  * Subagent cron suppression: each session can spawn many subagents, and
  * unconditionally starting a CronManager per agent leaks 1s setInterval
- * timers and SIGUSR1 listeners (under KIMI_CRON_MANUAL_TICK=1) that
+ * timers and SIGUSR1 listeners (under NORI_CRON_MANUAL_TICK=1) that
  * never serve any purpose — default subagent profiles don't expose the
  * Cron tools to the LLM. This test pins both halves of the fix:
  *
@@ -22,11 +22,11 @@ const CRON_TOOL_NAMES = ['CronCreate', 'CronList', 'CronDelete'] as const;
 
 describe('Agent + Cron — subagent suppression', () => {
   beforeEach(() => {
-    // SIGUSR1 binding only happens under KIMI_CRON_MANUAL_TICK=1
+    // SIGUSR1 binding only happens under NORI_CRON_MANUAL_TICK=1
     // (see manager.ts bindSigusr1). Using it as the probe lets us
     // observe `start()` vs no-start without poking private fields.
-    vi.stubEnv('KIMI_CRON_MANUAL_TICK', '1');
-    vi.stubEnv('KIMI_CRON_NO_JITTER', '1');
+    vi.stubEnv('NORI_CRON_MANUAL_TICK', '1');
+    vi.stubEnv('NORI_CRON_NO_JITTER', '1');
   });
 
   afterEach(() => {

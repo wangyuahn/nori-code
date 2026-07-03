@@ -94,7 +94,7 @@ describe('CronListTool', () => {
     // Disable jitter so `nextFireAt` is the unmodified ideal — keeps
     // the one-shot-on-`:00` assertion bisectable without needing to
     // reason about a deterministic-but-task-id-dependent offset.
-    vi.stubEnv('KIMI_CRON_NO_JITTER', '1');
+    vi.stubEnv('NORI_CRON_NO_JITTER', '1');
   });
 
   afterEach(() => {
@@ -213,7 +213,7 @@ describe('CronListTool', () => {
   });
 
   it('reports recurring=false for one-shots; jittered nextFireAt is at-or-before the ideal', async () => {
-    // KIMI_CRON_NO_JITTER is set in beforeEach, so the jittered value
+    // NORI_CRON_NO_JITTER is set in beforeEach, so the jittered value
     // equals the ideal: that satisfies "at-or-before" without making
     // the test sensitive to the per-task deterministic offset.
     const { manager, tool } = makeHarness();
@@ -326,7 +326,7 @@ describe('CronListTool', () => {
     // slot — otherwise the model is told the fire is one period away
     // when the scheduler will actually deliver inside the jitter cap.
     vi.unstubAllEnvs();
-    vi.stubEnv('KIMI_CRON_NO_STALE', '1');
+    vi.stubEnv('NORI_CRON_NO_STALE', '1');
     const stub = createAgentStub();
     const harness = createClocks();
     const manager = new CronManager(stub.agent, {

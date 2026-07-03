@@ -106,8 +106,8 @@ export interface ExportSessionPayload {
   readonly sessionId: string;
   readonly outputPath?: string | undefined;
   /**
-   * When true, the active global diagnostic log (`$KIMI_CODE_HOME/logs/kimi-code.log`)
-   * is copied into the zip at `logs/global/kimi-code.log`. Off by default to
+   * When true, the active global diagnostic log (`$NORI_CODE_HOME/logs/nori-code.log`)
+   * is copied into the zip at `logs/global/nori-code.log`. Off by default to
    * avoid bundling events from concurrent sessions / other projects.
    */
   readonly includeGlobalLog?: boolean | undefined;

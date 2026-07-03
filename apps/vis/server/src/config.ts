@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-/** Resolve KIMI_CODE_HOME (env > ~/.nori-code). */
+/** Resolve NORI_CODE_HOME (env > ~/.nori-code). */
 export function resolveKimiCodeHome(): string {
   const envHome = process.env['NORI_CODE_HOME'];
   if (envHome !== undefined && envHome.length > 0) {
@@ -60,4 +60,4 @@ export function resolveVisAuthToken(host: string = resolveHost()): string | unde
   return undefined;
 }
 
-export const KIMI_CODE_HOME: string = resolveKimiCodeHome();
+export const NORI_CODE_HOME: string = resolveKimiCodeHome();

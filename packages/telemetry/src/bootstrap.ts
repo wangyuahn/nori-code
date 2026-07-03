@@ -2,7 +2,7 @@ import { getDefaultTelemetryClient } from './client';
 import { EventSink } from './sink';
 import { AsyncTransport } from './transport';
 
-export const TELEMETRY_DISABLE_ENV = 'KIMI_DISABLE_TELEMETRY';
+export const TELEMETRY_DISABLE_ENV = 'NORI_DISABLE_TELEMETRY';
 
 const TRUE_ENV_VALUES = new Set(['1', 'true', 't', 'yes', 'y']);
 

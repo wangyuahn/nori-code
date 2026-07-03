@@ -12,21 +12,21 @@ import { TEST_IDENTITY } from './test-identity';
 const tempDirs: string[] = [];
 
 const LOG_ENV_KEYS = [
-  'KIMI_LOG_LEVEL',
-  'KIMI_LOG_GLOBAL_MAX_BYTES',
-  'KIMI_LOG_GLOBAL_FILES',
-  'KIMI_LOG_SESSION_MAX_BYTES',
-  'KIMI_LOG_SESSION_FILES',
+  'NORI_LOG_LEVEL',
+  'NORI_LOG_GLOBAL_MAX_BYTES',
+  'NORI_LOG_GLOBAL_FILES',
+  'NORI_LOG_SESSION_MAX_BYTES',
+  'NORI_LOG_SESSION_FILES',
 ] as const;
 
 beforeEach(async () => {
-  process.env['KIMI_LOG_LEVEL'] = 'info';
+  process.env['NORI_LOG_LEVEL'] = 'info';
   await __resetRootLoggerForTest();
 });
 
 afterEach(async () => {
   await __resetRootLoggerForTest();
-  process.env['KIMI_LOG_LEVEL'] = 'off';
+  process.env['NORI_LOG_LEVEL'] = 'off';
   for (const dir of tempDirs.splice(0)) {
     await rm(dir, { recursive: true, force: true });
   }
@@ -119,8 +119,8 @@ describe('Local logging — harness integration', () => {
       (s) => s.id === session.id,
     )!;
 
-    const globalPath = join(homeDir, 'logs', 'kimi-code.log');
-    const sessionLogPath = join(summary.sessionDir, 'logs', 'kimi-code.log');
+    const globalPath = join(homeDir, 'logs', 'nori-code.log');
+    const sessionLogPath = join(summary.sessionDir, 'logs', 'nori-code.log');
 
     // Trigger an export — this flushes both global and session via KimiCore
     const exportOut = join(workDir, 'out.zip');
@@ -152,18 +152,18 @@ describe('Local logging — harness integration', () => {
     const zipBuf = await readFile(result.zipPath);
     const entries = readZipEntries(zipBuf);
     expect(entries.has('agents/main/wire.jsonl')).toBe(true);
-    expect(entries.has('logs/kimi-code.log')).toBe(true);
-    expect(entries.has('logs/global/kimi-code.log')).toBe(false);
-    expect(entries.get('logs/kimi-code.log')!.toString('utf-8')).toContain(
+    expect(entries.has('logs/nori-code.log')).toBe(true);
+    expect(entries.has('logs/global/nori-code.log')).toBe(false);
+    expect(entries.get('logs/nori-code.log')!.toString('utf-8')).toContain(
       'session export marker',
     );
-    expect(result.manifest.sessionLogPath).toBe('logs/kimi-code.log');
+    expect(result.manifest.sessionLogPath).toBe('logs/nori-code.log');
     expect(result.manifest.globalLogPath).toBeUndefined();
     const manifest = JSON.parse(entries.get('manifest.json')!.toString('utf-8')) as Record<
       string,
       unknown
     >;
-    expect(manifest['sessionLogPath']).toBe('logs/kimi-code.log');
+    expect(manifest['sessionLogPath']).toBe('logs/nori-code.log');
     expect(manifest['globalLogPath']).toBeUndefined();
   });
 
@@ -178,7 +178,7 @@ describe('Local logging — harness integration', () => {
 
     const entries = readZipEntries(await readFile(result.zipPath));
     expect(entries.has('agents/main/wire.jsonl')).toBe(true);
-    expect(entries.has('logs/kimi-code.log')).toBe(false);
+    expect(entries.has('logs/nori-code.log')).toBe(false);
     expect(result.manifest.sessionLogPath).toBeUndefined();
     const manifest = JSON.parse(entries.get('manifest.json')!.toString('utf-8')) as Record<
       string,
@@ -187,11 +187,11 @@ describe('Local logging — harness integration', () => {
     expect(manifest['sessionLogPath']).toBeUndefined();
   });
 
-  it('default export includes rotated session log files without requiring active kimi-code.log', async () => {
+  it('default export includes rotated session log files without requiring active nori-code.log', async () => {
     const env = snapshotLogEnv();
-    process.env['KIMI_LOG_LEVEL'] = 'warn';
-    process.env['KIMI_LOG_SESSION_MAX_BYTES'] = '1024';
-    process.env['KIMI_LOG_SESSION_FILES'] = '2';
+    process.env['NORI_LOG_LEVEL'] = 'warn';
+    process.env['NORI_LOG_SESSION_MAX_BYTES'] = '1024';
+    process.env['NORI_LOG_SESSION_FILES'] = '2';
     try {
       const homeDir = await makeTempDir('kimi-log-home-');
       const workDir = await makeTempDir('kimi-log-work-');
@@ -212,13 +212,13 @@ describe('Local logging — harness integration', () => {
 
       const entries = readZipEntries(await readFile(result.zipPath));
       const sessionLogEntries = [...entries.keys()].filter(
-        (entry) => entry === 'logs/kimi-code.log' || entry.startsWith('logs/kimi-code.log.'),
+        (entry) => entry === 'logs/nori-code.log' || entry.startsWith('logs/nori-code.log.'),
       );
       expect(sessionLogEntries.length).toBeGreaterThan(0);
-      expect(sessionLogEntries).toContain('logs/kimi-code.log.1');
-      expect(entries.has('logs/global/kimi-code.log')).toBe(false);
-      if (entries.has('logs/kimi-code.log')) {
-        expect(result.manifest.sessionLogPath).toBe('logs/kimi-code.log');
+      expect(sessionLogEntries).toContain('logs/nori-code.log.1');
+      expect(entries.has('logs/global/nori-code.log')).toBe(false);
+      if (entries.has('logs/nori-code.log')) {
+        expect(result.manifest.sessionLogPath).toBe('logs/nori-code.log');
       } else {
         expect(result.manifest.sessionLogPath).toBeUndefined();
       }
@@ -244,10 +244,10 @@ describe('Local logging — harness integration', () => {
     const zipBuf = await readFile(result.zipPath);
     const entries = readZipEntries(zipBuf);
     expect(entries.has('agents/main/wire.jsonl')).toBe(true);
-    expect(entries.has('logs/global/kimi-code.log')).toBe(true);
-    expect(result.manifest.globalLogPath).toBe('logs/global/kimi-code.log');
+    expect(entries.has('logs/global/nori-code.log')).toBe(true);
+    expect(result.manifest.globalLogPath).toBe('logs/global/nori-code.log');
     // Global log carries entries that don't have a sessionId routed to a sink.
-    expect(entries.get('logs/global/kimi-code.log')!.toString('utf-8')).toContain(
+    expect(entries.get('logs/global/nori-code.log')!.toString('utf-8')).toContain(
       'untagged probe',
     );
   });
@@ -271,8 +271,8 @@ describe('Local logging — harness integration', () => {
     });
 
     const entries = readZipEntries(await readFile(result.zipPath));
-    const globalLog = entries.get('logs/global/kimi-code.log')!.toString('utf-8');
-    const firstLog = await readOptionalFile(join(firstHome, 'logs', 'kimi-code.log'));
+    const globalLog = entries.get('logs/global/nori-code.log')!.toString('utf-8');
+    const firstLog = await readOptionalFile(join(firstHome, 'logs', 'nori-code.log'));
     expect(globalLog).toContain('active-global-export-marker');
     expect(firstLog).not.toContain('active-global-export-marker');
 
@@ -304,8 +304,8 @@ describe('Local logging — harness integration', () => {
       });
 
       const entries = readZipEntries(await readFile(result.zipPath));
-      const sessionLog = entries.get('logs/kimi-code.log')!.toString('utf-8');
-      const globalLog = entries.get('logs/global/kimi-code.log')!.toString('utf-8');
+      const sessionLog = entries.get('logs/nori-code.log')!.toString('utf-8');
+      const globalLog = entries.get('logs/global/nori-code.log')!.toString('utf-8');
       expect(sessionLog).toContain('export session log flush failed');
       expect(sessionLog).toContain('export global log flush failed');
       expect(globalLog).toContain('global untagged marker');
@@ -332,8 +332,8 @@ describe('Local logging — harness integration', () => {
     log.warn('second-home-marker');
     await getRootLogger().flushGlobal();
 
-    const firstLog = await readOptionalFile(join(firstHome, 'logs', 'kimi-code.log'));
-    const secondLog = await readFile(join(secondHome, 'logs', 'kimi-code.log'), 'utf-8');
+    const firstLog = await readOptionalFile(join(firstHome, 'logs', 'nori-code.log'));
+    const secondLog = await readFile(join(secondHome, 'logs', 'nori-code.log'), 'utf-8');
     expect(firstLog).not.toContain('second-home-marker');
     expect(secondLog).toContain('second-home-marker');
 
@@ -359,7 +359,7 @@ describe('Local logging — harness integration', () => {
   it('checks that an empty session log directory does not get a log file', async () => {
     // Sanity: if level is off, no log files should be created
     const env = snapshotLogEnv();
-    process.env['KIMI_LOG_LEVEL'] = 'off';
+    process.env['NORI_LOG_LEVEL'] = 'off';
     try {
       const homeDir = await makeTempDir('kimi-log-home-');
       const workDir = await makeTempDir('kimi-log-work-');
@@ -372,7 +372,7 @@ describe('Local logging — harness integration', () => {
       } catch {
         // intentional — directory may not exist when level=off
       }
-      expect(logsDir).not.toContain('kimi-code.log');
+      expect(logsDir).not.toContain('nori-code.log');
     } finally {
       restoreLogEnv(env);
     }
@@ -384,7 +384,7 @@ describe('Local logging — harness integration', () => {
     log.warn('untagged before close');
     // No `await flush()` here on purpose — close() must do it.
     await harness.close();
-    const globalPath = join(homeDir, 'logs', 'kimi-code.log');
+    const globalPath = join(homeDir, 'logs', 'nori-code.log');
     const text = await readFile(globalPath, 'utf-8');
     expect(text).toContain('untagged before close');
   });

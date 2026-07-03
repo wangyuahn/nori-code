@@ -36,7 +36,7 @@ export async function handleWebCommand(host: SlashCommandHost): Promise<void> {
           value: WEB_CONFIRM,
           label: 'Continue',
           description:
-            'Start the Kimi server (background daemon if needed), open this session in your default browser, and exit the terminal UI.',
+            'Start the Nori server (background daemon if needed), open this session in your default browser, and exit the terminal UI.',
         },
         {
           value: WEB_CANCEL,
@@ -56,7 +56,7 @@ export async function handleWebCommand(host: SlashCommandHost): Promise<void> {
   host.restoreEditor();
   if (!confirmed) return;
 
-  host.showStatus('Starting Kimi server and opening web UI…');
+  host.showStatus('Starting Nori server and opening web UI…');
   let origin: string;
   try {
     ({ origin } = await ensureDaemon({}));

@@ -523,7 +523,7 @@ export class KimiChatProvider implements ChatProvider {
     // Replace extra_body.thinking wholesale so a stale `effort` from a previous
     // withThinking call can never linger on a disabled or non-effort thinking
     // object — but carry over a `keep` set earlier via withExtraBody (the
-    // KIMI_MODEL_THINKING_KEEP path applies keep after withThinking and merges
+    // NORI_MODEL_THINKING_KEEP path applies keep after withThinking and merges
     // on top, so it is unaffected either way).
     const oldExtra = this._generationKwargs.extra_body ?? {};
     const keep = oldExtra.thinking?.keep;

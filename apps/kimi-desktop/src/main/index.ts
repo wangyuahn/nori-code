@@ -97,7 +97,7 @@ function errorHtml(message: string): string {
 
 // --- server auth token --------------------------------------------------------
 
-/** On-disk filename of the daemon's persistent bearer token (under KIMI_CODE_HOME). */
+/** On-disk filename of the daemon's persistent bearer token (under NORI_CODE_HOME). */
 const SERVER_TOKEN_FILE = 'server.token';
 
 /**

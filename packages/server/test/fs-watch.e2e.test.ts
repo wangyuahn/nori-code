@@ -53,9 +53,9 @@ let workspace: string;
 let server: RunningServer | undefined;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), 'kimi-server-fswatch-'));
+  tmpDir = mkdtempSync(join(tmpdir(), 'nori-server-fswatch-'));
   lockPath = join(tmpDir, 'lock');
-  bridgeHome = mkdtempSync(join(tmpdir(), 'kimi-server-fswatch-home-'));
+  bridgeHome = mkdtempSync(join(tmpdir(), 'nori-server-fswatch-home-'));
   workspace = join(tmpDir, 'workspace');
   mkdirSync(workspace, { recursive: true });
   mkdirSync(join(workspace, 'src'), { recursive: true });

@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 
 import { Hono } from 'hono';
 
-import { KIMI_CODE_HOME } from './config';
+import { NORI_CODE_HOME } from './config';
 import { serveWebAsset, type WebAsset } from './lib/web-asset';
 import { blobsRoute } from './routes/blobs';
 import { contextRoute } from './routes/context';
@@ -83,7 +83,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Hono> {
   // /api/* handlers.
   const api = new Hono();
   const authToken = options.authToken;
-  const home = options.homeDir ?? KIMI_CODE_HOME;
+  const home = options.homeDir ?? NORI_CODE_HOME;
   if (authToken !== undefined && authToken.length > 0) {
     api.use('*', async (c, next) => {
       const token = bearerToken(c.req.header('authorization'));

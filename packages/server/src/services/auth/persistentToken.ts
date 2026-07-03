@@ -1,7 +1,7 @@
 /**
  * Persistent server bearer token.
  *
- * The token lives at `<KIMI_CODE_HOME>/server.token` (mode 0600) and is reused
+ * The token lives at `<NORI_CODE_HOME>/server.token` (mode 0600) and is reused
  * across restarts, so a reboot does NOT rotate it. It is generated once on
  * first boot and only changes when the operator explicitly runs
  * `kimi server rotate-token` (which calls {@link rotateServerToken}).
@@ -17,7 +17,7 @@ import { join } from 'node:path';
 
 import { readPrivateFile, writePrivateFile } from './privateFiles';
 
-/** On-disk filename for the persistent token, relative to KIMI_CODE_HOME. */
+/** On-disk filename for the persistent token, relative to NORI_CODE_HOME. */
 export const SERVER_TOKEN_FILE = 'server.token';
 
 /** Absolute path of the persistent token file for a given home dir. */

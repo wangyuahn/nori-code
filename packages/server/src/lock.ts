@@ -1,8 +1,8 @@
 /**
  * Filesystem lock for single-instance server enforcement.
  *
- * The lock is a small JSON file at `<KIMI_CODE_HOME>/server/lock` (defaults
- * to `~/.nori-code/server/lock`; overridable via `KIMI_CODE_HOME` env or
+ * The lock is a small JSON file at `<NORI_CODE_HOME>/server/lock` (defaults
+ * to `~/.nori-code/server/lock`; overridable via `NORI_CODE_HOME` env or
  * `lockPath` for tests). It records the live server's `pid`, `started_at`,
  * and `port`. Acquisition is exclusive (`O_WRONLY | O_CREAT | O_EXCL`) —
  * racing servers can't both win.
@@ -57,7 +57,7 @@ export interface LockContents {
 }
 
 export interface AcquireLockOptions {
-  /** Override default `<KIMI_CODE_HOME>/server/lock` — used in tests. */
+  /** Override default `<NORI_CODE_HOME>/server/lock` — used in tests. */
   lockPath?: string;
   /** Port the server will bind to. Recorded in the lock file for diagnostics. */
   port: number;

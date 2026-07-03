@@ -14,9 +14,9 @@ let bridgeHome: string;
 let server: RunningServer | undefined;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), 'kimi-server-config-test-'));
+  tmpDir = mkdtempSync(join(tmpdir(), 'nori-server-config-test-'));
   lockPath = join(tmpDir, 'lock');
-  bridgeHome = mkdtempSync(join(tmpdir(), 'kimi-server-config-home-'));
+  bridgeHome = mkdtempSync(join(tmpdir(), 'nori-server-config-home-'));
 });
 
 afterEach(async () => {

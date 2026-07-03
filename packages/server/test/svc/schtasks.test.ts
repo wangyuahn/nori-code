@@ -66,15 +66,15 @@ let prevHome: string | undefined;
 
 beforeEach(() => {
   workDir = mkdtempSync(join(tmpdir(), 'kimi-schtasks-test-'));
-  prevHome = process.env['KIMI_CODE_HOME'];
-  process.env['KIMI_CODE_HOME'] = workDir;
+  prevHome = process.env['NORI_CODE_HOME'];
+  process.env['NORI_CODE_HOME'] = workDir;
 });
 
 afterEach(() => {
   if (prevHome === undefined) {
-    delete process.env['KIMI_CODE_HOME'];
+    delete process.env['NORI_CODE_HOME'];
   } else {
-    process.env['KIMI_CODE_HOME'] = prevHome;
+    process.env['NORI_CODE_HOME'] = prevHome;
   }
   rmSync(workDir, { recursive: true, force: true });
 });

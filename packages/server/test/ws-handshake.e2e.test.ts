@@ -66,9 +66,9 @@ let bridgeHome: string;
 const running: RunningServer[] = [];
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), 'kimi-server-ws-handshake-'));
+  tmpDir = mkdtempSync(join(tmpdir(), 'nori-server-ws-handshake-'));
   lockPath = join(tmpDir, 'lock');
-  bridgeHome = mkdtempSync(join(tmpdir(), 'kimi-server-ws-handshake-home-'));
+  bridgeHome = mkdtempSync(join(tmpdir(), 'nori-server-ws-handshake-home-'));
 });
 
 afterEach(async () => {

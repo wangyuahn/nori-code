@@ -678,7 +678,7 @@ describe('resolveSkillRoots ordering and priority', () => {
   });
 });
 
-describe('resolveSkillRoots brand home (KIMI_CODE_HOME)', () => {
+describe('resolveSkillRoots brand home (NORI_CODE_HOME)', () => {
   it('resolves the user brand skills root under brandHomeDir while keeping generic under the real home', async () => {
     const { homeDir, workDir } = await makeWorkspace();
     const brandHomeDir = path.join(homeDir, '..', 'brand-home');

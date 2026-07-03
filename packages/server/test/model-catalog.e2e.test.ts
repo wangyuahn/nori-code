@@ -16,9 +16,9 @@ let bridgeHome: string;
 let server: RunningServer | undefined;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), 'kimi-server-model-catalog-test-'));
+  tmpDir = mkdtempSync(join(tmpdir(), 'nori-server-model-catalog-test-'));
   lockPath = join(tmpDir, 'lock');
-  bridgeHome = mkdtempSync(join(tmpdir(), 'kimi-server-model-catalog-home-'));
+  bridgeHome = mkdtempSync(join(tmpdir(), 'nori-server-model-catalog-home-'));
   // Disable the background refresh scheduler so its startup refresh does not
   // race the route-level assertions in these tests.
   process.env['KIMI_CODE_MODEL_CATALOG_REFRESH_ON_START'] = '0';

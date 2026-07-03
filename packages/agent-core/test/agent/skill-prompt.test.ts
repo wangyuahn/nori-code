@@ -7,7 +7,7 @@ import {
 
 /**
  * Regression coverage for the skill directory being surfaced on the
- * `<kimi-skill-loaded>` block. Without `dir`, an agent that loads a skill
+ * `<nori-skill-loaded>` block. Without `dir`, an agent that loads a skill
  * cannot locate the skill's bundled resources (scripts, templates) by
  * relative path — the bug this guards against.
  */

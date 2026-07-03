@@ -26,7 +26,7 @@ let tmpDir: string;
 let lockPath: string;
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), 'kimi-server-lock-test-'));
+  tmpDir = mkdtempSync(join(tmpdir(), 'nori-server-lock-test-'));
   lockPath = join(tmpDir, 'lock');
 });
 

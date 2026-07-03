@@ -10,15 +10,15 @@ import { parseFloatEnv } from '#/config/resolve';
 type Env = Readonly<Record<string, string | undefined>>;
 
 /**
- * Apply Kimi sampling params (`KIMI_MODEL_TEMPERATURE`, `KIMI_MODEL_TOP_P`) from
+ * Apply Kimi sampling params (`NORI_MODEL_TEMPERATURE`, `NORI_MODEL_TOP_P`) from
  * the environment to a chat provider. Applied at provider construction
  * (`ConfigState.provider`) so every request built from `config.provider` — the
  * main loop AND full-history compaction — carries them, matching kimi-cli where
  * these live on the shared `create_llm` provider. Applies globally to any Kimi
- * provider (not tied to `KIMI_MODEL_NAME`).
+ * provider (not tied to `NORI_MODEL_NAME`).
  *
  * Non-Kimi providers — and Kimi providers with neither var set — are returned
- * unchanged. `max_tokens` is intentionally NOT handled here: `KIMI_MODEL_MAX_TOKENS`
+ * unchanged. `max_tokens` is intentionally NOT handled here: `NORI_MODEL_MAX_TOKENS`
  * already flows through the completion-budget path (`resolveCompletionBudget`).
  */
 export function applyKimiEnvSamplingParams(
@@ -28,16 +28,16 @@ export function applyKimiEnvSamplingParams(
   if (!(provider instanceof KimiChatProvider)) return provider;
 
   const kwargs: GenerationKwargs = {};
-  const temperature = parseFloatEnv(env['KIMI_MODEL_TEMPERATURE'], 'KIMI_MODEL_TEMPERATURE');
+  const temperature = parseFloatEnv(env['NORI_MODEL_TEMPERATURE'], 'NORI_MODEL_TEMPERATURE');
   if (temperature !== undefined) kwargs.temperature = temperature;
-  const topP = parseFloatEnv(env['KIMI_MODEL_TOP_P'], 'KIMI_MODEL_TOP_P');
+  const topP = parseFloatEnv(env['NORI_MODEL_TOP_P'], 'NORI_MODEL_TOP_P');
   if (topP !== undefined) kwargs.top_p = topP;
 
   return Object.keys(kwargs).length > 0 ? provider.withGenerationKwargs(kwargs) : provider;
 }
 
 /**
- * Force a specific thinking effort via `KIMI_MODEL_THINKING_EFFORT`, bypassing
+ * Force a specific thinking effort via `NORI_MODEL_THINKING_EFFORT`, bypassing
  * the model's declared `support_efforts`. Applied in `ConfigState.provider`
  * after `withThinking`, and only while thinking is on — effort has no meaning
  * when thinking is disabled. The value is forwarded verbatim as
@@ -52,13 +52,13 @@ export function applyKimiEnvThinkingEffort(
   env: Env = process.env,
 ): ChatProvider {
   if (!(provider instanceof KimiChatProvider)) return provider;
-  const effort = env['KIMI_MODEL_THINKING_EFFORT']?.trim();
+  const effort = env['NORI_MODEL_THINKING_EFFORT']?.trim();
   if (effort === undefined || effort.length === 0 || thinkingEffort === 'off') return provider;
   return provider.withExtraBody({ thinking: { effort } });
 }
 
 /**
- * Apply the Moonshot preserved-thinking passthrough (`KIMI_MODEL_THINKING_KEEP`
+ * Apply the Moonshot preserved-thinking passthrough (`NORI_MODEL_THINKING_KEEP`
  * -> `thinking.keep`) to a chat provider. Applied in `ConfigState.provider` after
  * `withThinking`, and only while thinking is on — otherwise the API would
  * receive a `thinking.keep` with no accompanying `thinking.type` it honors.
@@ -72,7 +72,7 @@ export function applyKimiEnvThinkingKeep(
   env: Env = process.env,
 ): ChatProvider {
   if (!(provider instanceof KimiChatProvider)) return provider;
-  const keep = env['KIMI_MODEL_THINKING_KEEP']?.trim();
+  const keep = env['NORI_MODEL_THINKING_KEEP']?.trim();
   if (keep === undefined || keep.length === 0 || thinkingEffort === 'off') return provider;
   return provider.withExtraBody({ thinking: { keep } });
 }

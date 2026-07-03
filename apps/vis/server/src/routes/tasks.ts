@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 
-import { KIMI_CODE_HOME } from '../config';
+import { NORI_CODE_HOME } from '../config';
 import type { BackgroundTaskEntry } from '../lib/agent-record-types';
 import { readSessionDetail } from '../lib/session-store';
 import {
@@ -16,7 +16,7 @@ import {
 const DEFAULT_OUTPUT_LIMIT = 256 * 1024;
 const MAX_OUTPUT_LIMIT = 4 * 1024 * 1024;
 
-export function tasksRoute(home: string = KIMI_CODE_HOME): Hono {
+export function tasksRoute(home: string = NORI_CODE_HOME): Hono {
   const r = new Hono();
 
   // List background tasks (process / agent / question) for a session. Tasks are

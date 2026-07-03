@@ -7,7 +7,7 @@
  * task's ideal fire time by a small, **deterministic** per-task
  * offset so a given task always lands at the same jittered point —
  * reschedules and restarts don't drift, and bench reproducibility
- * stays intact when {@link KIMI_CRON_NO_JITTER} is set.
+ * stays intact when {@link NORI_CRON_NO_JITTER} is set.
  *
  * Two flavours:
  *
@@ -76,7 +76,7 @@ function fractionFromId(id: string): number {
 }
 
 function jitterDisabledByEnv(): boolean {
-  return process.env['KIMI_CRON_NO_JITTER'] === '1';
+  return process.env['NORI_CRON_NO_JITTER'] === '1';
 }
 
 /**

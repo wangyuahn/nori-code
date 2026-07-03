@@ -58,7 +58,7 @@ pnpm add -g @moonshot-ai/kimi-code
 安装完成后，验证可执行文件是否就绪：
 
 ```sh
-kimi --version
+nori --version
 ```
 
 **升级**：运行 `kimi upgrade`，CLI 会检查最新版本并展示更新选项。选择 `Install update now` 后根据当前安装来源执行升级；也可以直接用包管理器：

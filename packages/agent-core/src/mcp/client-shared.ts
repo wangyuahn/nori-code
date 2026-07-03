@@ -2,7 +2,7 @@ import { getCoreVersion } from '#/version';
 
 import type { MCPToolDefinition, MCPToolResult } from './types';
 
-export const KIMI_MCP_CLIENT_NAME = 'kimi-code';
+export const KIMI_MCP_CLIENT_NAME = 'nori-code';
 // Resolved from agent-core's package.json so MCP servers see the real version
 // in `initialize` (used for compatibility checks, telemetry, debugging).
 // `getCoreVersion()` falls back to '0.0.0' if the package.json read fails.

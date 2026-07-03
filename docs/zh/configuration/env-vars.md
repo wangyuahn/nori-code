@@ -24,12 +24,12 @@ export KIMI_CODE_HOME="/path/to/custom/kimi-code"
 
 数据目录的完整结构见[数据路径](./data-locations.md)。
 
-### `KIMI_DISABLE_TELEMETRY`
+### `NORI_DISABLE_TELEMETRY`
 
 设为 `1` 关闭匿名遥测上报（也接受 `true`/`yes`/`y`，不区分大小写）：
 
 ```sh
-export KIMI_DISABLE_TELEMETRY=1
+export NORI_DISABLE_TELEMETRY=1
 ```
 
 ### `KIMI_MODEL_*` 系列
@@ -120,7 +120,7 @@ kimi
 
 | 环境变量 | 用途 | 合法值 |
 | --- | --- | --- |
-| `KIMI_DISABLE_TELEMETRY` | 关闭匿名遥测上报 | `1`、`true`、`yes`、`y`（不区分大小写） |
+| `NORI_DISABLE_TELEMETRY` | 关闭匿名遥测上报 | `1`、`true`、`yes`、`y`（不区分大小写） |
 | `KIMI_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT` | 会话关闭时是否保留后台任务，优先级高于 `config.toml`。默认会在退出时停止后台任务 | 真值：`1`/`true`/`yes`/`on`；假值：`0`/`false`/`no`/`off` |
 | `KIMI_CODE_PLUGIN_MARKETPLACE_URL` | 覆盖 `/plugins` 加载的 plugin marketplace JSON，适合 dev loopback server、测试 CDN 文件或替换 marketplace 目录 | `https://code.kimi.com/kimi-code/plugins/marketplace.json`；也接受 `http://`、`file://` URL 和本地路径 |
 | `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY` | 限制 AgentSwarm 初始提升并发阶段可同时运行的子 Agent 数量；不设置表示不限制 | 正整数；非法值会立即失败 |

@@ -293,7 +293,7 @@ describe('resolveUpdateDeviceId', () => {
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'kimi-rollout-device-id-'));
-    process.env['KIMI_CODE_HOME'] = dir;
+    process.env['NORI_CODE_HOME'] = dir;
   });
 
   afterEach(() => {

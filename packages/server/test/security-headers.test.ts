@@ -27,7 +27,7 @@ function tmpPaths(): { lockPath: string; homeDir: string } {
 }
 
 beforeEach(() => {
-  prevPassword = process.env['KIMI_CODE_PASSWORD'];
+  prevPassword = process.env['NORI_CODE_PASSWORD'];
 });
 
 afterEach(async () => {
@@ -42,9 +42,9 @@ afterEach(async () => {
     rmSync(dir, { recursive: true, force: true });
   }
   if (prevPassword === undefined) {
-    delete process.env['KIMI_CODE_PASSWORD'];
+    delete process.env['NORI_CODE_PASSWORD'];
   } else {
-    process.env['KIMI_CODE_PASSWORD'] = prevPassword;
+    process.env['NORI_CODE_PASSWORD'] = prevPassword;
   }
 });
 
@@ -52,7 +52,7 @@ async function boot(host: string): Promise<RunningServer> {
   const { lockPath, homeDir } = tmpPaths();
   if (host !== '127.0.0.1') {
     // Non-loopback binds require a password + TLS opt-out (M6.3).
-    process.env['KIMI_CODE_PASSWORD'] = 'test-pw';
+    process.env['NORI_CODE_PASSWORD'] = 'test-pw';
   }
   const server = await startServer({
     serviceOverrides: [fixedTokenAuth()],

@@ -13,7 +13,7 @@ let dir: string;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'kimi-update-install-lock-'));
-  process.env['KIMI_CODE_HOME'] = dir;
+  process.env['NORI_CODE_HOME'] = dir;
 });
 
 afterEach(() => {

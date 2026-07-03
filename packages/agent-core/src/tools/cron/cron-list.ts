@@ -30,7 +30,7 @@
  *   - `stale`         — mirrors `CronManager.isStale(task)`; see that
  *                       method for the precise rules
  *                       (`recurring && age >= 7 days`, gated by
- *                       `KIMI_CRON_NO_STALE`).
+ *                       `NORI_CRON_NO_STALE`).
  *
  * The tool never throws on malformed cron strings. A defensive
  * try/catch around the parse path lets the record render with the raw

@@ -51,7 +51,7 @@ describe('Session.close stops cron', () => {
     // `session.close()`. Anything short of `unbindSigusr1` running
     // would leak a listener.
     if (process.platform === 'win32') return;
-    vi.stubEnv('KIMI_CRON_MANUAL_TICK', '1');
+    vi.stubEnv('NORI_CRON_MANUAL_TICK', '1');
 
     const before = process.listenerCount('SIGUSR1');
     const { sessionDir, workDir } = await sessionFixture();

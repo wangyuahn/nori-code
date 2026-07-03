@@ -47,7 +47,7 @@ export interface KillCommandDeps {
 export function registerKillCommand(server: Command): void {
   server
     .command('kill')
-    .description('Stop the running Kimi server (graceful API + forced PID kill).')
+    .description('Stop the running Nori server (graceful API + forced PID kill).')
     .action(async () => {
       try {
         await handleKillCommand(DEFAULT_KILL_DEPS);
@@ -61,7 +61,7 @@ export function registerKillCommand(server: Command): void {
 export async function handleKillCommand(deps: KillCommandDeps): Promise<void> {
   const lock = deps.getLiveLock();
   if (!lock) {
-    deps.stdout.write('No running Kimi server.\n');
+    deps.stdout.write('No running Nori server.\n');
     return;
   }
 
@@ -80,19 +80,19 @@ export async function handleKillCommand(deps: KillCommandDeps): Promise<void> {
   deps.signalPid(pid, 'SIGTERM');
 
   if (await waitForExit(pid, TERM_GRACE_MS, deps)) {
-    deps.stdout.write(`Kimi server (pid ${String(pid)}) stopped.\n`);
+    deps.stdout.write(`Nori server (pid ${String(pid)}) stopped.\n`);
     return;
   }
 
   deps.signalPid(pid, 'SIGKILL');
 
   if (await waitForExit(pid, KILL_GRACE_MS, deps)) {
-    deps.stdout.write(`Kimi server (pid ${String(pid)}) killed.\n`);
+    deps.stdout.write(`Nori server (pid ${String(pid)}) killed.\n`);
     return;
   }
 
   throw new Error(
-    `Failed to stop Kimi server (pid ${String(pid)}); insufficient permissions?`,
+    `Failed to stop Nori server (pid ${String(pid)}); insufficient permissions?`,
   );
 }
 

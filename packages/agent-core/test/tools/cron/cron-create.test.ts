@@ -115,7 +115,7 @@ describe('CronCreateTool', () => {
     // Disable jitter so the nextFireAt string we render is the bare
     // ideal time — keeps the format assertions readable without
     // dragging in a jittered offset.
-    vi.stubEnv('KIMI_CRON_NO_JITTER', '1');
+    vi.stubEnv('NORI_CRON_NO_JITTER', '1');
   });
 
   afterEach(() => {
@@ -132,8 +132,8 @@ describe('CronCreateTool', () => {
     expect(tool.description).not.toContain('already passed this year');
     expect(tool.description).not.toContain('350 days');
     // Bench/CI-only env knobs the model never sets must not appear in the prompt.
-    expect(tool.description).not.toContain('KIMI_CRON_NO_STALE');
-    expect(tool.description).not.toContain('KIMI_CRON_NO_JITTER');
+    expect(tool.description).not.toContain('NORI_CRON_NO_STALE');
+    expect(tool.description).not.toContain('NORI_CRON_NO_JITTER');
     // The 8 KiB prompt cap lives in the param describe.
     const params = tool.parameters as { properties: Record<string, { description?: string }> };
     expect(params.properties['prompt']?.description).toContain('8 KiB');
@@ -245,8 +245,8 @@ describe('CronCreateTool', () => {
     expect(stub.telemetryCalls).toHaveLength(0);
   });
 
-  it('returns an error when KIMI_DISABLE_CRON=1', async () => {
-    vi.stubEnv('KIMI_DISABLE_CRON', '1');
+  it('returns an error when NORI_DISABLE_CRON=1', async () => {
+    vi.stubEnv('NORI_DISABLE_CRON', '1');
     const { manager, tool, stub } = makeHarness();
     const msg = assertError(
       await runTool(tool, {
@@ -256,7 +256,7 @@ describe('CronCreateTool', () => {
       }),
     );
     expect(msg).toMatchInlineSnapshot(
-      `"Cron scheduling is disabled (KIMI_DISABLE_CRON=1)."`,
+      `"Cron scheduling is disabled (NORI_DISABLE_CRON=1)."`,
     );
 
     expect(manager.store.list()).toHaveLength(0);

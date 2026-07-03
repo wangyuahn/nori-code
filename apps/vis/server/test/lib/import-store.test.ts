@@ -32,7 +32,7 @@ function validBundle(): Record<string, string> {
     'manifest.json': JSON.stringify({ sessionId: 'session_orig', kimiCodeVersion: '0.20.2', workspaceDir: '/home/u/proj', title: 'imported demo' }),
     'state.json': JSON.stringify({ createdAt: '2026-06-01T00:00:00.000Z', updatedAt: '2026-06-01T01:00:00.000Z', title: 'imported demo', agents: { main: { homedir: '/orig/agents/main', type: 'main', parentAgentId: null } }, custom: {} }),
     'agents/main/wire.jsonl': WIRE,
-    'logs/kimi-code.log': '2026-06-01T00:00:00.000Z INFO  hello  k=v\n',
+    'logs/nori-code.log': '2026-06-01T00:00:00.000Z INFO  hello  k=v\n',
   };
 }
 
@@ -53,7 +53,7 @@ describe('import-store', () => {
     // Extracted to imported/<id>/ with the session shape intact.
     const dir = join(home, 'imported', meta.importId);
     expect((await stat(join(dir, 'agents', 'main', 'wire.jsonl'))).isFile()).toBe(true);
-    expect((await stat(join(dir, 'logs', 'kimi-code.log'))).isFile()).toBe(true);
+    expect((await stat(join(dir, 'logs', 'nori-code.log'))).isFile()).toBe(true);
 
     const ids = await listImportedIds(home);
     expect(ids).toContain(meta.importId);

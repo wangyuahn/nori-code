@@ -1,10 +1,10 @@
 import { Hono } from 'hono';
 import { rm } from 'node:fs/promises';
-import { KIMI_CODE_HOME } from '../config';
+import { NORI_CODE_HOME } from '../config';
 import { revealInOs } from '../lib/reveal';
 import { listSessions, readSessionDetail } from '../lib/session-store';
 
-export function sessionsRoute(home: string = KIMI_CODE_HOME): Hono {
+export function sessionsRoute(home: string = NORI_CODE_HOME): Hono {
   const r = new Hono();
   r.get('/', async (c) => {
     const sessions = await listSessions(home);

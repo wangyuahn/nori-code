@@ -78,7 +78,7 @@ describe('CronDeleteTool', () => {
     // Disable jitter — irrelevant to delete behaviour but keeps the
     // manager construction path consistent with the create / list
     // tests, in case a later assertion grows to read nextFireAt.
-    vi.stubEnv('KIMI_CRON_NO_JITTER', '1');
+    vi.stubEnv('NORI_CRON_NO_JITTER', '1');
   });
 
   afterEach(() => {

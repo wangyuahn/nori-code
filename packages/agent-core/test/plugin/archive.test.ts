@@ -139,45 +139,45 @@ describe('extractZip', () => {
   it('prefers a plugin manifest at the archive root', async () => {
     const destDir = await mkdtemp(path.join(tmpdir(), 'archive-test-'));
     const zipBuffer = await createZipBuffer([
-      { name: 'kimi.plugin.json', data: '{"name":"root"}' },
-      { name: 'examples/demo/kimi.plugin.json', data: '{"name":"demo"}' },
+      { name: 'nori.plugin.json', data: '{"name":"root"}' },
+      { name: 'examples/demo/nori.plugin.json', data: '{"name":"demo"}' },
     ]);
 
     const root = await extractZip(zipBuffer, destDir);
     expect(root).toBe(destDir);
   });
 
-  it('detects plugin root with kimi.plugin.json', async () => {
+  it('detects plugin root with nori.plugin.json', async () => {
     const destDir = await mkdtemp(path.join(tmpdir(), 'archive-test-'));
     const zipBuffer = await createZipBuffer([
-      { name: 'my-plugin/kimi.plugin.json', data: '{"name":"test"}' },
+      { name: 'my-plugin/nori.plugin.json', data: '{"name":"test"}' },
       { name: 'my-plugin/readme.md', data: '# Test' },
     ]);
 
     const root = await extractZip(zipBuffer, destDir);
     expect(root).toBe(path.join(destDir, 'my-plugin'));
-    const manifest = await readFile(path.join(root, 'kimi.plugin.json'), 'utf8');
+    const manifest = await readFile(path.join(root, 'nori.plugin.json'), 'utf8');
     expect(manifest).toBe('{"name":"test"}');
   });
 
-  it('detects plugin root with .kimi-plugin/plugin.json', async () => {
+  it('detects plugin root with .nori-plugin/plugin.json', async () => {
     const destDir = await mkdtemp(path.join(tmpdir(), 'archive-test-'));
     const zipBuffer = await createZipBuffer([
-      { name: 'my-plugin/.kimi-plugin/plugin.json', data: '{"name":"test"}' },
+      { name: 'my-plugin/.nori-plugin/plugin.json', data: '{"name":"test"}' },
       { name: 'my-plugin/skills/demo/SKILL.md', data: '---\nname: demo\n---\nbody' },
     ]);
 
     const root = await extractZip(zipBuffer, destDir);
     expect(root).toBe(path.join(destDir, 'my-plugin'));
-    const manifest = await readFile(path.join(root, '.kimi-plugin', 'plugin.json'), 'utf8');
+    const manifest = await readFile(path.join(root, '.nori-plugin', 'plugin.json'), 'utf8');
     expect(manifest).toBe('{"name":"test"}');
   });
 
   it('detects a single wrapper directory before nested manifests', async () => {
     const destDir = await mkdtemp(path.join(tmpdir(), 'archive-test-'));
     const zipBuffer = await createZipBuffer([
-      { name: 'outer/kimi.plugin.json', data: '{"name":"outer"}' },
-      { name: 'outer/inner/kimi.plugin.json', data: '{"name":"inner"}' },
+      { name: 'outer/nori.plugin.json', data: '{"name":"outer"}' },
+      { name: 'outer/inner/nori.plugin.json', data: '{"name":"inner"}' },
     ]);
 
     const root = await extractZip(zipBuffer, destDir);
@@ -187,7 +187,7 @@ describe('extractZip', () => {
   it('ignores deep nested plugin manifests when there is no root or wrapper manifest', async () => {
     const destDir = await mkdtemp(path.join(tmpdir(), 'archive-test-'));
     const zipBuffer = await createZipBuffer([
-      { name: 'examples/demo/kimi.plugin.json', data: '{"name":"demo"}' },
+      { name: 'examples/demo/nori.plugin.json', data: '{"name":"demo"}' },
       { name: 'examples/demo/readme.md', data: '# Demo' },
     ]);
 
@@ -200,7 +200,7 @@ describe('extractZip', () => {
 
     const destDir = await mkdtemp(path.join(tmpdir(), 'archive-test-'));
     const zipBuffer = await createZipBuffer([
-      { name: 'my-plugin/kimi.plugin.json', data: '{"name":"test"}' },
+      { name: 'my-plugin/nori.plugin.json', data: '{"name":"test"}' },
       { name: 'my-plugin/bin/server', data: '#!/bin/sh\n', mode: 0o100755 },
     ]);
 

@@ -24,7 +24,7 @@ preview before any write.
 - Do **not** write anything until the user has chosen what to migrate, reviewed
   the final preview, and explicitly confirmed applying it.
 - Only write under Kimi Code targets:
-  - User-global: `$KIMI_CODE_HOME` if set, otherwise `~/.nori-code`.
+  - User-global: `$NORI_CODE_HOME` if set, otherwise `~/.nori-code`.
   - Project instructions/skills: `<project root>/.nori-code`, where the project
     root is the nearest parent directory containing `.git`; if no `.git` exists,
     use the current working directory.
@@ -54,7 +54,7 @@ If the user dismisses or refuses the question, stop.
 ### 2. Scan only the chosen categories
 
 Resolve paths explicitly; `~` is the real OS home, and Kimi home follows
-`$KIMI_CODE_HOME` before `~/.nori-code`.
+`$NORI_CODE_HOME` before `~/.nori-code`.
 
 User-level sources:
 
@@ -103,7 +103,7 @@ source and target paths.
 
 Map user-level instruction sources to:
 
-- `$KIMI_CODE_HOME/AGENTS.md`, or `~/.nori-code/AGENTS.md` if the env var is not
+- `$NORI_CODE_HOME/AGENTS.md`, or `~/.nori-code/AGENTS.md` if the env var is not
   set.
 
 Map project-level instruction sources to:
@@ -132,7 +132,7 @@ and cannot be read as UTF-8 text, stop before writing and report the blocker.
 
 Map user-level skill sources to:
 
-- `$KIMI_CODE_HOME/skills/`, or `~/.nori-code/skills/` if the env var is not set.
+- `$NORI_CODE_HOME/skills/`, or `~/.nori-code/skills/` if the env var is not set.
 
 Map project-level skill sources to:
 
@@ -222,7 +222,7 @@ Codex MCP:
 
 For each MCP candidate, choose the target scope in the preview:
 
-- User-level source -> user-global MCP target (`$KIMI_CODE_HOME/mcp.json` or
+- User-level source -> user-global MCP target (`$NORI_CODE_HOME/mcp.json` or
   `~/.nori-code/mcp.json`).
 - Project-level source -> project-local Kimi MCP target (`<cwd>/.nori-code/mcp.json`). If `<cwd>` is not the project root, call this out in the preview so the user understands when Kimi will load it.
 

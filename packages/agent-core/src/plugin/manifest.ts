@@ -16,8 +16,8 @@ import {
   type PluginManifestKind,
 } from './types';
 
-const KIMI_PLUGIN_ROOT_PATH = 'kimi.plugin.json';
-const KIMI_PLUGIN_DIR_PATH = '.kimi-plugin/plugin.json';
+const KIMI_PLUGIN_ROOT_PATH = 'nori.plugin.json';
+const KIMI_PLUGIN_DIR_PATH = '.nori-plugin/plugin.json';
 
 // Fields that look like third-party runtime extensions (Claude / Codex / old
 // Kimi CLI). We do not run them; emit an info diagnostic so plugin authors and
@@ -57,7 +57,7 @@ export async function parseManifest(pluginRoot: string): Promise<ParsedManifestR
   }
 
   const manifestPath = rootJsonExists ? rootJsonPath : dirJsonPath;
-  const manifestKind: PluginManifestKind = rootJsonExists ? 'kimi-plugin-root' : 'kimi-plugin-dir';
+  const manifestKind: PluginManifestKind = rootJsonExists ? 'nori-plugin-root' : 'nori-plugin-dir';
   const shadowedManifestPath = rootJsonExists && dirJsonExists ? dirJsonPath : undefined;
 
   let raw: unknown;
@@ -142,7 +142,7 @@ function recordUnsupportedRuntimeFields(
     if (raw[field] === undefined) continue;
     diagnostics.push({
       severity: 'info',
-      message: `"${field}" is present but not supported by Kimi plugins`,
+      message: `"${field}" is present but not supported by Nori plugins`,
     });
   }
 }

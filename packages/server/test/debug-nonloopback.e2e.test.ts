@@ -24,14 +24,14 @@ let prevPassword: string | undefined;
 const running: RunningServer[] = [];
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), 'kimi-server-debug-loopback-'));
+  tmpDir = mkdtempSync(join(tmpdir(), 'nori-server-debug-loopback-'));
   lockPath = join(tmpDir, 'lock');
-  bridgeHome = mkdtempSync(join(tmpdir(), 'kimi-server-debug-loopback-home-'));
+  bridgeHome = mkdtempSync(join(tmpdir(), 'nori-server-debug-loopback-home-'));
   // M6.3: a non-loopback bind (0.0.0.0) now refuses to start without a
   // password + TLS opt-out. Set a password so the 0.0.0.0 case can boot; the
   // fixed-token override still governs auth (password ≠ token).
-  prevPassword = process.env['KIMI_CODE_PASSWORD'];
-  process.env['KIMI_CODE_PASSWORD'] = 'test-pw';
+  prevPassword = process.env['NORI_CODE_PASSWORD'];
+  process.env['NORI_CODE_PASSWORD'] = 'test-pw';
 });
 
 afterEach(async () => {
@@ -43,9 +43,9 @@ afterEach(async () => {
     }
   }
   if (prevPassword === undefined) {
-    delete process.env['KIMI_CODE_PASSWORD'];
+    delete process.env['NORI_CODE_PASSWORD'];
   } else {
-    process.env['KIMI_CODE_PASSWORD'] = prevPassword;
+    process.env['NORI_CODE_PASSWORD'] = prevPassword;
   }
   rmSync(tmpDir, { recursive: true, force: true });
   rmSync(bridgeHome, { recursive: true, force: true });

@@ -91,9 +91,9 @@ describe('jitteredNextCronRunMs — recurring', () => {
     }
   });
 
-  it('respects KIMI_CRON_NO_JITTER=1 — no offset', () => {
-    const prev = process.env['KIMI_CRON_NO_JITTER'];
-    process.env['KIMI_CRON_NO_JITTER'] = '1';
+  it('respects NORI_CRON_NO_JITTER=1 — no offset', () => {
+    const prev = process.env['NORI_CRON_NO_JITTER'];
+    process.env['NORI_CRON_NO_JITTER'] = '1';
     try {
       const parsed = parseCronExpression('*/5 * * * *');
       const ideal = localDate(2024, 5, 1, 12, 5, 0);
@@ -104,8 +104,8 @@ describe('jitteredNextCronRunMs — recurring', () => {
       );
       expect(jittered).toBe(ideal);
     } finally {
-      if (prev === undefined) delete process.env['KIMI_CRON_NO_JITTER'];
-      else process.env['KIMI_CRON_NO_JITTER'] = prev;
+      if (prev === undefined) delete process.env['NORI_CRON_NO_JITTER'];
+      else process.env['NORI_CRON_NO_JITTER'] = prev;
     }
   });
 });
@@ -158,16 +158,16 @@ describe('oneShotJitteredNextCronRunMs', () => {
     }
   });
 
-  it('respects KIMI_CRON_NO_JITTER=1', () => {
-    const prev = process.env['KIMI_CRON_NO_JITTER'];
-    process.env['KIMI_CRON_NO_JITTER'] = '1';
+  it('respects NORI_CRON_NO_JITTER=1', () => {
+    const prev = process.env['NORI_CRON_NO_JITTER'];
+    process.env['NORI_CRON_NO_JITTER'] = '1';
     try {
       const ideal = localDate(2024, 5, 1, 14, 0, 0);
       const jittered = oneShotJitteredNextCronRunMs({ id: ID_A }, ideal);
       expect(jittered).toBe(ideal);
     } finally {
-      if (prev === undefined) delete process.env['KIMI_CRON_NO_JITTER'];
-      else process.env['KIMI_CRON_NO_JITTER'] = prev;
+      if (prev === undefined) delete process.env['NORI_CRON_NO_JITTER'];
+      else process.env['NORI_CRON_NO_JITTER'] = prev;
     }
   });
 
@@ -270,8 +270,8 @@ describe('id hashing fallback', () => {
 // Belt-and-suspenders: ensure env state we touched is clean after the
 // suite (in case a future test in the same vitest worker reads it).
 beforeEach(() => {
-  delete process.env['KIMI_CRON_NO_JITTER'];
+  delete process.env['NORI_CRON_NO_JITTER'];
 });
 afterEach(() => {
-  delete process.env['KIMI_CRON_NO_JITTER'];
+  delete process.env['NORI_CRON_NO_JITTER'];
 });

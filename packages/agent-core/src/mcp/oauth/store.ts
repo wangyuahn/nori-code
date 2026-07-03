@@ -1,7 +1,7 @@
 /**
  * Small atomic JSON file store used by the MCP OAuth provider to persist
  * tokens, registered client info, and discovery state under
- * `<KIMI_CODE_HOME>/credentials/mcp/` (default
+ * `<NORI_CODE_HOME>/credentials/mcp/` (default
  * `~/.nori-code/credentials/mcp/`).
  *
  * Write semantics: write to `<file>.tmp.<pid>.<rand>` → fsync → rename.

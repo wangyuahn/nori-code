@@ -89,7 +89,7 @@ export function createSystemdManager(
 
     return {
       status: alreadyInstalled ? 'replaced' : 'installed',
-      message: `Kimi server systemd unit ${alreadyInstalled ? 'replaced' : 'installed'} at ${unitPath} (port ${plan.port}).`,
+      message: `Nori server systemd unit ${alreadyInstalled ? 'replaced' : 'installed'} at ${unitPath} (port ${plan.port}).`,
       unitPath,
     };
   }
@@ -117,7 +117,7 @@ export function createSystemdManager(
     if (!existsSync(deps.unitPath())) {
       return {
         ok: false,
-        message: 'systemd unit is not installed. Run `kimi server install` first.',
+        message: 'systemd unit is not installed. Run `nori server install` first.',
       };
     }
     const result = await deps.execSystemctl(['start', KIMI_SERVER_SYSTEMD_UNIT]);
@@ -127,7 +127,7 @@ export function createSystemdManager(
         message: `systemctl --user start failed: ${detail(result) ?? 'unknown error'}`,
       };
     }
-    return { ok: true, message: `Kimi server started (${KIMI_SERVER_SYSTEMD_UNIT}).` };
+    return { ok: true, message: `Nori server started (${KIMI_SERVER_SYSTEMD_UNIT}).` };
   }
 
   async function stop(): Promise<LifecycleResult> {
@@ -138,7 +138,7 @@ export function createSystemdManager(
         message: `systemctl --user stop failed: ${detail(result) ?? 'unknown error'}`,
       };
     }
-    return { ok: true, message: `Kimi server stopped (${KIMI_SERVER_SYSTEMD_UNIT}).` };
+    return { ok: true, message: `Nori server stopped (${KIMI_SERVER_SYSTEMD_UNIT}).` };
   }
 
   async function restart(): Promise<LifecycleResult> {
@@ -149,7 +149,7 @@ export function createSystemdManager(
         message: `systemctl --user restart failed: ${detail(result) ?? 'unknown error'}`,
       };
     }
-    return { ok: true, message: `Kimi server restarted (${KIMI_SERVER_SYSTEMD_UNIT}).` };
+    return { ok: true, message: `Nori server restarted (${KIMI_SERVER_SYSTEMD_UNIT}).` };
   }
 
   async function status(): Promise<ServiceStatus> {

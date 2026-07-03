@@ -145,7 +145,7 @@ describe('AcpServer + AgentSideConnection', () => {
   it('initialize forwards terminalAuthEnv into authMethods[0].env', async () => {
     const harness = {} as KimiHarness;
     const { agentStream, clientStream } = makeInMemoryStreamPair();
-    const terminalAuthEnv = { KIMI_CODE_HOME: '/tmp/kimi-debug' };
+    const terminalAuthEnv = { NORI_CODE_HOME: '/tmp/kimi-debug' };
     new AgentSideConnection(
       (c) => new AcpServer(harness, c, { terminalAuthEnv }),
       agentStream,
@@ -155,7 +155,7 @@ describe('AcpServer + AgentSideConnection', () => {
     const response = await client.initialize({ protocolVersion: 1 });
     expect(response.authMethods).toHaveLength(1);
     const method = response.authMethods?.[0] as { env?: Record<string, string> };
-    expect(method.env).toEqual({ KIMI_CODE_HOME: '/tmp/kimi-debug' });
+    expect(method.env).toEqual({ NORI_CODE_HOME: '/tmp/kimi-debug' });
   });
 
   it('initialize emits legacy _meta["terminal-auth"] when terminalAuthLegacyCommand is set', async () => {
@@ -165,7 +165,7 @@ describe('AcpServer + AgentSideConnection', () => {
       (c) =>
         new AcpServer(harness, c, {
           terminalAuthLegacyCommand: '/abs/path/to/kimi',
-          terminalAuthEnv: { KIMI_CODE_HOME: '/tmp/kimi-debug' },
+          terminalAuthEnv: { NORI_CODE_HOME: '/tmp/kimi-debug' },
         }),
       agentStream,
     );
@@ -185,7 +185,7 @@ describe('AcpServer + AgentSideConnection', () => {
       label: 'Login with Kimi account',
       command: '/abs/path/to/kimi',
       args: ['login'],
-      env: { KIMI_CODE_HOME: '/tmp/kimi-debug' },
+      env: { NORI_CODE_HOME: '/tmp/kimi-debug' },
     });
   });
 

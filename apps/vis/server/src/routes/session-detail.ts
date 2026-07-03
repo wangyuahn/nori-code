@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
-import { KIMI_CODE_HOME } from '../config';
+import { NORI_CODE_HOME } from '../config';
 import { readSessionDetail } from '../lib/session-store';
 
-export function sessionDetailRoute(home: string = KIMI_CODE_HOME): Hono {
+export function sessionDetailRoute(home: string = NORI_CODE_HOME): Hono {
   const r = new Hono();
   r.get('/:id', async (c) => {
     const id = c.req.param('id');

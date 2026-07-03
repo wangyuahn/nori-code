@@ -67,7 +67,7 @@ import type { SessionCronTaskInit } from '../../tools/cron/session-store';
  * Threshold past which a recurring task is flagged `stale: true` on its
  * fire `origin`. One-shot tasks never carry the stale flag — they are
  * one-time, "we always fire at most once" by construction. Disabled by
- * `KIMI_CRON_NO_STALE=1` (bench / acceptance tests).
+ * `NORI_CRON_NO_STALE=1` (bench / acceptance tests).
  *
  * Seven days mirrors the wall-clock "this got forgotten about" window
  * we want the LLM to notice; the figure also matches the auto-expire
@@ -78,15 +78,15 @@ const STALE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
 export interface CronManagerOptions {
   /**
    * Override for tests / bench. Defaults to
-   * `resolveClockSources(process.env.KIMI_CRON_CLOCK)` so production
-   * picks up `KIMI_CRON_CLOCK=file:...` automatically.
+   * `resolveClockSources(process.env.NORI_CRON_CLOCK)` so production
+   * picks up `NORI_CRON_CLOCK=file:...` automatically.
    * When unset, falls through to {@link SYSTEM_CLOCKS}.
    */
   readonly clocks?: ClockSources;
 
   /**
    * Override scheduler poll interval. Defaults handled by the scheduler
-   * (1000ms unless `KIMI_CRON_MANUAL_TICK=1`, which forces `null` here
+   * (1000ms unless `NORI_CRON_MANUAL_TICK=1`, which forces `null` here
    * so the auto-tick `setInterval` is never installed). `null` or `0`
    * means "no automatic timer — caller drives `tick()` manually".
    */
@@ -145,7 +145,7 @@ export class CronManager {
     this.store = new SessionCronStore();
     this.clocks =
       opts.clocks ??
-      resolveClockSources(process.env['KIMI_CRON_CLOCK']) ??
+      resolveClockSources(process.env['NORI_CRON_CLOCK']) ??
       SYSTEM_CLOCKS;
     this.persistStore =
       agent.homedir === undefined
@@ -156,7 +156,7 @@ export class CronManager {
       clocks: this.clocks,
       source: () => this.store.list(),
       isIdle: () => !agent.turn.hasActiveTurn,
-      isKilled: () => process.env['KIMI_DISABLE_CRON'] === '1',
+      isKilled: () => process.env['NORI_DISABLE_CRON'] === '1',
       onFire: (task, ctx) => {
         this.handleFire(task, ctx);
       },
@@ -166,14 +166,14 @@ export class CronManager {
       onAdvanceCursor: (id, lastFiredAt) => {
         this.advanceCursor(id, lastFiredAt);
       },
-      // P1.8: `KIMI_CRON_MANUAL_TICK=1` forces the scheduler into
+      // P1.8: `NORI_CRON_MANUAL_TICK=1` forces the scheduler into
       // manual-drive mode (no setInterval), so bench / time-injected
       // tests can step time forward and call `tick()` explicitly without
       // racing a 1-second auto-tick. Explicit caller overrides
       // (`opts.pollIntervalMs`) lose to the env so a bench can flip the
       // switch from the outside without rebuilding the manager wiring.
       pollIntervalMs:
-        process.env['KIMI_CRON_MANUAL_TICK'] === '1'
+        process.env['NORI_CRON_MANUAL_TICK'] === '1'
           ? null
           : opts.pollIntervalMs,
     });
@@ -363,7 +363,7 @@ export class CronManager {
   /**
    * Stale judgment.
    *
-   *   - `KIMI_CRON_NO_STALE=1` short-circuits to false (bench).
+   *   - `NORI_CRON_NO_STALE=1` short-circuits to false (bench).
    *   - One-shot tasks (`recurring === false`) are never stale — they
    *     fire at most once by construction; flagging them stale would be
    *     a noisy false positive on every backlog wakeup.
@@ -374,7 +374,7 @@ export class CronManager {
    * treated as "we don't know, don't claim stale".
    */
   isStale(task: CronTask): boolean {
-    if (process.env['KIMI_CRON_NO_STALE'] === '1') return false;
+    if (process.env['NORI_CRON_NO_STALE'] === '1') return false;
     if (task.recurring === false) return false;
     const age = this.clocks.wallNow() - task.createdAt;
     return Number.isFinite(age) && age >= STALE_THRESHOLD_MS;
@@ -503,7 +503,7 @@ export class CronManager {
    * Wire `SIGUSR1` to a manual `tick()` so bench scripts can advance the
    * scheduler with `kill -USR1 <pid>` without a custom RPC.
    *
-   * Gated on `KIMI_CRON_MANUAL_TICK=1` for two reasons:
+   * Gated on `NORI_CRON_MANUAL_TICK=1` for two reasons:
    *
    *   1. SIGUSR1 only makes sense when auto-tick is off. When the 1s
    *      interval is running, it already advances the scheduler — a
@@ -526,19 +526,19 @@ export class CronManager {
    * The handler swallows any throw from `tick()` because a signal-driven
    * bench tool must never crash the host process; the tick failure mode
    * is already surfaced via telemetry / logs inside the scheduler.
-   * Set `KIMI_CRON_DEBUG=1` to surface the swallowed error to stderr —
+   * Set `NORI_CRON_DEBUG=1` to surface the swallowed error to stderr —
    * mirrors `scheduler.ts`'s debugLog pattern so bench debugging can
    * see a bad tick.
    */
   private bindSigusr1(): void {
     if (process.platform === 'win32') return;
-    if (process.env['KIMI_CRON_MANUAL_TICK'] !== '1') return;
+    if (process.env['NORI_CRON_MANUAL_TICK'] !== '1') return;
     if (this.sigusr1Handler !== null) return;
     const handler: NodeJS.SignalsListener = () => {
       try {
         this.tick();
       } catch (error) {
-        if (process.env['KIMI_CRON_DEBUG'] === '1') {
+        if (process.env['NORI_CRON_DEBUG'] === '1') {
           const msg = error instanceof Error ? error.message : String(error);
           process.stderr.write(
             `[cron/manager] SIGUSR1 tick threw: ${msg}\n`,

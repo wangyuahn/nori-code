@@ -226,7 +226,7 @@
 - [#1006](https://github.com/MoonshotAI/kimi-code/pull/1006) [`60dfb68`](https://github.com/MoonshotAI/kimi-code/commit/60dfb68a2d4c342cfbad5f48d4d269fb6cdd43c0) - Add server authentication and safe `--host` exposure. The local server now
   requires a per-start bearer token on all API and WebSocket calls (the CLI reads
   it automatically), enforces Host/Origin checks, and gains `--host` with a
-  public-binding hardening tier: mandatory `KIMI_CODE_PASSWORD`, TLS (or
+  public-binding hardening tier: mandatory `NORI_CODE_PASSWORD`, TLS (or
   `--insecure-no-tls`), auth-failure rate limiting, disabled remote
   shutdown/terminals, and security response headers. See `packages/server/SECURITY.md`.
 

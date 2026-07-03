@@ -224,7 +224,7 @@ export async function startServer(opts: ServerStartOptions): Promise<RunningServ
   // explicitly acknowledged that TLS is terminated elsewhere (`insecureNoTls`).
   // Auth is bearer-token based: the persistent token is printed in the startup
   // banner and reused across restarts, so a password is no longer mandatory for
-  // a non-loopback bind — `KIMI_CODE_PASSWORD` remains an optional additional
+  // a non-loopback bind — `NORI_CODE_PASSWORD` remains an optional additional
   // credential. Failing here (before the container is built and before we
   // listen) keeps a public/LAN bind from ever serving plain HTTP by accident.
   // On refusal we release the lock so the operator can retry cleanly.
@@ -249,7 +249,7 @@ export async function startServer(opts: ServerStartOptions): Promise<RunningServ
     if (passwordHash === undefined) {
       pinoLogger.warn(
         { host: opts.host, bindClass },
-        'binding non-loopback host with token-only auth (no KIMI_CODE_PASSWORD) — the bearer token printed in the startup banner is the only credential protecting this server',
+        'binding non-loopback host with token-only auth (no NORI_CODE_PASSWORD) — the bearer token printed in the startup banner is the only credential protecting this server',
       );
     }
     pinoLogger.warn(

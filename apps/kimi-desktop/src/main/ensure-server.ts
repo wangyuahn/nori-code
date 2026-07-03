@@ -16,7 +16,7 @@ interface LockContents {
   port: number;
 }
 
-/** `<KIMI_CODE_HOME>` or `~/.nori-code` — must match the server's `resolveKimiHome`. */
+/** `<NORI_CODE_HOME>` or `~/.nori-code` — must match the server's `resolveKimiHome`. */
 export function kimiHome(): string {
   const override = process.env['NORI_CODE_HOME'];
   if (override !== undefined && override.trim().length > 0) {

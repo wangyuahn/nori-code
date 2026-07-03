@@ -2,11 +2,11 @@ import { Hono } from 'hono';
 import { join } from 'node:path';
 import { readFile } from 'node:fs/promises';
 
-import { KIMI_CODE_HOME } from '../config';
+import { NORI_CODE_HOME } from '../config';
 import { isSafeAgentId, readSessionDetail } from '../lib/session-store';
 import { isSafeBlobHash } from '../lib/blob-resolver';
 
-export function blobsRoute(home: string = KIMI_CODE_HOME): Hono {
+export function blobsRoute(home: string = NORI_CODE_HOME): Hono {
   const r = new Hono();
   r.get('/:id/blobs/:hash', async (c) => {
     const id = c.req.param('id');

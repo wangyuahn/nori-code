@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 
-import { KIMI_CODE_HOME } from '../config';
+import { NORI_CODE_HOME } from '../config';
 import { importSessionZip } from '../lib/import-store';
 import { ZipImportError } from '../lib/zip-import';
 
@@ -9,7 +9,7 @@ import { ZipImportError } from '../lib/zip-import';
  *  `extractZip`. */
 const MAX_ZIP_BYTES = 500 * 1024 * 1024; // 500 MiB
 
-export function importsRoute(home: string = KIMI_CODE_HOME): Hono {
+export function importsRoute(home: string = NORI_CODE_HOME): Hono {
   const r = new Hono();
 
   // Upload a `/export-debug-zip` bundle. The raw zip bytes are the request

@@ -76,7 +76,7 @@ export class ServiceUnsupportedError extends Error {
   readonly exitCode = 2 as const;
   readonly platform: string;
   constructor(platform: string) {
-    super(`Kimi server service management is not yet supported on ${platform}.`);
+    super(`Nori server service management is not yet supported on ${platform}.`);
     this.platform = platform;
   }
 }
@@ -90,7 +90,7 @@ export class ServiceUnavailableError extends Error {
 
   constructor(platform: string, reason: string) {
     super(
-      `${reason} Run \`kimi server run --port <port>\` directly when running inside Docker or another container supervisor.`,
+      `${reason} Run \`nori server run --port <port>\` directly when running inside Docker or another container supervisor.`,
     );
     this.platform = platform;
   }

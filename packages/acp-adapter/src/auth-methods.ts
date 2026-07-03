@@ -20,7 +20,7 @@ import type { AuthMethod } from '@agentclientprotocol/sdk';
  *
  * Optional inputs:
  *  - `env`: extra env vars forwarded to the spawned `kimi login`
- *    subprocess (e.g. `{ KIMI_CODE_HOME: '/tmp/sandbox' }` for tests).
+ *    subprocess (e.g. `{ NORI_CODE_HOME: '/tmp/sandbox' }` for tests).
  *  - `legacyCommand`: absolute path of the agent binary, used to
  *    populate `_meta['terminal-auth'].command` so legacy clients can
  *    spawn `<binary> login` (top-level subcommand). When omitted, the

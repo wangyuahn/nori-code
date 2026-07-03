@@ -36,9 +36,9 @@ function rmSyncRobust(path: string): void {
 }
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), 'kimi-server-fs-git-test-'));
+  tmpDir = mkdtempSync(join(tmpdir(), 'nori-server-fs-git-test-'));
   lockPath = join(tmpDir, 'lock');
-  bridgeHome = mkdtempSync(join(tmpdir(), 'kimi-server-fs-git-home-'));
+  bridgeHome = mkdtempSync(join(tmpdir(), 'nori-server-fs-git-home-'));
   workspace = join(tmpDir, 'workspace');
   mkdirSync(workspace, { recursive: true });
 });

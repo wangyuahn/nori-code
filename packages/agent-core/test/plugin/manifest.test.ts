@@ -10,7 +10,7 @@ async function makePlugin(
   files: Record<string, string>,
   options: { dirs?: readonly string[] } = {},
 ): Promise<string> {
-  const root = await mkdtemp(path.join(tmpdir(), 'kimi-plugin-test-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'nori-plugin-test-'));
   for (const dir of options.dirs ?? []) {
     await mkdir(path.join(root, dir), { recursive: true });
   }
@@ -22,32 +22,32 @@ async function makePlugin(
 }
 
 describe('parseManifest', () => {
-  it('reads a minimal kimi.plugin.json at the plugin root', async () => {
+  it('reads a minimal nori.plugin.json at the plugin root', async () => {
     const root = await makePlugin({
-      'kimi.plugin.json': JSON.stringify({ name: 'demo', version: '1.0.0' }),
+      'nori.plugin.json': JSON.stringify({ name: 'demo', version: '1.0.0' }),
     });
     const result = await parseManifest(root);
     expect(result.manifest?.name).toBe('demo');
     expect(result.manifest?.version).toBe('1.0.0');
-    expect(result.manifestKind).toBe('kimi-plugin-root');
+    expect(result.manifestKind).toBe('nori-plugin-root');
     expect(result.diagnostics).toEqual([]);
   });
 
-  it('prefers root kimi.plugin.json when .kimi-plugin/plugin.json also exists', async () => {
+  it('prefers root nori.plugin.json when .nori-plugin/plugin.json also exists', async () => {
     const root = await makePlugin({
-      'kimi.plugin.json': JSON.stringify({ name: 'root-version', version: '1.0.0' }),
-      '.kimi-plugin/plugin.json': JSON.stringify({ name: 'dir-version' }),
+      'nori.plugin.json': JSON.stringify({ name: 'root-version', version: '1.0.0' }),
+      '.nori-plugin/plugin.json': JSON.stringify({ name: 'dir-version' }),
     });
     const result = await parseManifest(root);
-    expect(result.manifestKind).toBe('kimi-plugin-root');
+    expect(result.manifestKind).toBe('nori-plugin-root');
     expect(result.manifest?.name).toBe('root-version');
-    expect(result.shadowedManifestPath).toBe(path.join(root, '.kimi-plugin/plugin.json'));
+    expect(result.shadowedManifestPath).toBe(path.join(root, '.nori-plugin/plugin.json'));
   });
 
-  it('falls back to .kimi-plugin/plugin.json when kimi.plugin.json is absent', async () => {
+  it('falls back to .nori-plugin/plugin.json when nori.plugin.json is absent', async () => {
     const root = await makePlugin(
       {
-        '.kimi-plugin/plugin.json': JSON.stringify({
+        '.nori-plugin/plugin.json': JSON.stringify({
           name: 'demo',
           version: '1.0.0',
           keywords: ['workflow'],
@@ -60,8 +60,8 @@ describe('parseManifest', () => {
       { dirs: ['skills'] },
     );
     const result = await parseManifest(root);
-    expect(result.manifestKind).toBe('kimi-plugin-dir');
-    expect(result.manifestPath).toBe(path.join(root, '.kimi-plugin/plugin.json'));
+    expect(result.manifestKind).toBe('nori-plugin-dir');
+    expect(result.manifestPath).toBe(path.join(root, '.nori-plugin/plugin.json'));
     expect(result.manifest?.name).toBe('demo');
     expect(result.manifest?.version).toBe('1.0.0');
     expect(result.manifest?.keywords).toEqual(['workflow']);
@@ -71,26 +71,26 @@ describe('parseManifest', () => {
     expect(result.manifest?.skillInstructions).toBe('Use Kimi tools.');
   });
 
-  it('does NOT fall back to .kimi-plugin/plugin.json when kimi.plugin.json is invalid JSON', async () => {
+  it('does NOT fall back to .nori-plugin/plugin.json when nori.plugin.json is invalid JSON', async () => {
     const root = await makePlugin({
-      'kimi.plugin.json': '{ not json',
-      '.kimi-plugin/plugin.json': JSON.stringify({ name: 'dir-version' }),
+      'nori.plugin.json': '{ not json',
+      '.nori-plugin/plugin.json': JSON.stringify({ name: 'dir-version' }),
     });
     const result = await parseManifest(root);
     expect(result.manifest).toBeUndefined();
-    expect(result.manifestKind).toBe('kimi-plugin-root');
+    expect(result.manifestKind).toBe('nori-plugin-root');
     expect(result.diagnostics).toContainEqual(
       expect.objectContaining({
         severity: 'error',
         message: expect.stringContaining('Failed to parse'),
       }),
     );
-    expect(result.shadowedManifestPath).toBe(path.join(root, '.kimi-plugin/plugin.json'));
+    expect(result.shadowedManifestPath).toBe(path.join(root, '.nori-plugin/plugin.json'));
   });
 
   it('rejects names that violate the regex', async () => {
     const root = await makePlugin({
-      'kimi.plugin.json': JSON.stringify({ name: 'Bad Name!' }),
+      'nori.plugin.json': JSON.stringify({ name: 'Bad Name!' }),
     });
     const result = await parseManifest(root);
     expect(result.manifest).toBeUndefined();
@@ -115,7 +115,7 @@ describe('parseManifest', () => {
 
   it('resolves a single skills path', async () => {
     const root = await makePlugin(
-      { 'kimi.plugin.json': JSON.stringify({ name: 'demo', skills: './skills/' }) },
+      { 'nori.plugin.json': JSON.stringify({ name: 'demo', skills: './skills/' }) },
       { dirs: ['skills'] },
     );
     const result = await parseManifest(root);
@@ -125,7 +125,7 @@ describe('parseManifest', () => {
   it('resolves an array of skills paths', async () => {
     const root = await makePlugin(
       {
-        'kimi.plugin.json': JSON.stringify({
+        'nori.plugin.json': JSON.stringify({
           name: 'demo',
           skills: ['./a/', './b/'],
         }),
@@ -138,7 +138,7 @@ describe('parseManifest', () => {
 
   it('rejects a skills path not prefixed with ./', async () => {
     const root = await makePlugin({
-      'kimi.plugin.json': JSON.stringify({ name: 'demo', skills: 'skills/' }),
+      'nori.plugin.json': JSON.stringify({ name: 'demo', skills: 'skills/' }),
     });
     const result = await parseManifest(root);
     expect(result.diagnostics).toContainEqual(
@@ -152,7 +152,7 @@ describe('parseManifest', () => {
 
   it('rejects a skills path that escapes plugin_root', async () => {
     const root = await makePlugin({
-      'kimi.plugin.json': JSON.stringify({ name: 'demo', skills: './../escape' }),
+      'nori.plugin.json': JSON.stringify({ name: 'demo', skills: './../escape' }),
     });
     const result = await parseManifest(root);
     expect(result.diagnostics).toContainEqual(
@@ -165,9 +165,9 @@ describe('parseManifest', () => {
 
   it('rejects a skills path that escapes via a symlink', async () => {
     const root = await makePlugin({
-      'kimi.plugin.json': JSON.stringify({ name: 'demo', skills: './sym' }),
+      'nori.plugin.json': JSON.stringify({ name: 'demo', skills: './sym' }),
     });
-    const outside = await mkdtemp(path.join(tmpdir(), 'kimi-plugin-outside-'));
+    const outside = await mkdtemp(path.join(tmpdir(), 'nori-plugin-outside-'));
     await symlink(outside, path.join(root, 'sym'));
     const result = await parseManifest(root);
     expect(result.diagnostics).toContainEqual(
@@ -180,7 +180,7 @@ describe('parseManifest', () => {
 
   it('warns when skills resolves to a non-directory', async () => {
     const root = await makePlugin({
-      'kimi.plugin.json': JSON.stringify({ name: 'demo', skills: './notes.md' }),
+      'nori.plugin.json': JSON.stringify({ name: 'demo', skills: './notes.md' }),
       'notes.md': 'hi',
     });
     const result = await parseManifest(root);
@@ -194,7 +194,7 @@ describe('parseManifest', () => {
 
   it('falls back to root SKILL.md when skills field is absent', async () => {
     const root = await makePlugin({
-      'kimi.plugin.json': JSON.stringify({ name: 'demo' }),
+      'nori.plugin.json': JSON.stringify({ name: 'demo' }),
       'SKILL.md': '---\nname: root-skill\n---\nbody',
     });
     const result = await parseManifest(root);
@@ -204,7 +204,7 @@ describe('parseManifest', () => {
   it('does not fall back to root SKILL.md when skills field is present', async () => {
     const root = await makePlugin(
       {
-        'kimi.plugin.json': JSON.stringify({ name: 'demo', skills: './skills/' }),
+        'nori.plugin.json': JSON.stringify({ name: 'demo', skills: './skills/' }),
         'SKILL.md': '---\nname: root-skill\n---\nbody',
       },
       { dirs: ['skills'] },
@@ -215,7 +215,7 @@ describe('parseManifest', () => {
 
   it('emits info diagnostics for unsupported runtime extension fields', async () => {
     const root = await makePlugin({
-      'kimi.plugin.json': JSON.stringify({
+      'nori.plugin.json': JSON.stringify({
         name: 'demo',
         tools: { foo: { description: 'x' } },
         configFile: 'cfg.json',
@@ -246,7 +246,7 @@ describe('parseManifest', () => {
 
   it('parses skillInstructions', async () => {
     const root = await makePlugin({
-      'kimi.plugin.json': JSON.stringify({ name: 'demo', skillInstructions: 'Do this.' }),
+      'nori.plugin.json': JSON.stringify({ name: 'demo', skillInstructions: 'Do this.' }),
     });
     const result = await parseManifest(root);
     expect(result.manifest?.skillInstructions).toBe('Do this.');
@@ -254,7 +254,7 @@ describe('parseManifest', () => {
 
   it('parses keywords metadata', async () => {
     const root = await makePlugin({
-      'kimi.plugin.json': JSON.stringify({ name: 'demo', keywords: ['finance', 'workflow'] }),
+      'nori.plugin.json': JSON.stringify({ name: 'demo', keywords: ['finance', 'workflow'] }),
     });
     const result = await parseManifest(root);
     expect(result.manifest?.keywords).toEqual(['finance', 'workflow']);
@@ -262,7 +262,7 @@ describe('parseManifest', () => {
 
   it('reads sessionStart', async () => {
     const root = await makePlugin({
-      'kimi.plugin.json': JSON.stringify({
+      'nori.plugin.json': JSON.stringify({
         name: 'demo',
         sessionStart: { skill: 'using-demo' },
       }),
@@ -288,7 +288,7 @@ describe('parseManifest', () => {
   it('parses plugin mcpServers', async () => {
     const root = await makePlugin(
       {
-        'kimi.plugin.json': JSON.stringify({
+        'nori.plugin.json': JSON.stringify({
           name: 'demo',
           mcpServers: {
             finance: {
@@ -334,7 +334,7 @@ describe('parseManifest', () => {
 
   it('warns and skips invalid plugin mcpServers entries', async () => {
     const root = await makePlugin({
-      'kimi.plugin.json': JSON.stringify({
+      'nori.plugin.json': JSON.stringify({
         name: 'demo',
         mcpServers: {
           bad: { command: '/tmp/unsafe' },
@@ -353,7 +353,7 @@ describe('parseManifest', () => {
 
   it('captures interface.displayName and shortDescription', async () => {
     const root = await makePlugin({
-      'kimi.plugin.json': JSON.stringify({
+      'nori.plugin.json': JSON.stringify({
         name: 'demo',
         interface: { displayName: 'Demo', shortDescription: 'A demo.' },
       }),
@@ -365,7 +365,7 @@ describe('parseManifest', () => {
 
   it('parses a flat hooks array from the manifest', async () => {
     const root = await makePlugin({
-      'kimi.plugin.json': JSON.stringify({
+      'nori.plugin.json': JSON.stringify({
         name: 'demo',
         hooks: [
           { event: 'PreToolUse', matcher: 'Bash', command: './hooks/guard.sh', timeout: 10 },
@@ -383,7 +383,7 @@ describe('parseManifest', () => {
 
   it('warns and skips a hook entry that is missing required fields', async () => {
     const root = await makePlugin({
-      'kimi.plugin.json': JSON.stringify({
+      'nori.plugin.json': JSON.stringify({
         name: 'demo',
         hooks: [{ event: 'PreToolUse' }],
       }),
@@ -397,7 +397,7 @@ describe('parseManifest', () => {
 
   it('warns when hooks is not an array', async () => {
     const root = await makePlugin({
-      'kimi.plugin.json': JSON.stringify({ name: 'demo', hooks: { event: 'Stop', command: 'x' } }),
+      'nori.plugin.json': JSON.stringify({ name: 'demo', hooks: { event: 'Stop', command: 'x' } }),
     });
     const result = await parseManifest(root);
     expect(result.manifest?.hooks).toBeUndefined();
@@ -408,7 +408,7 @@ describe('parseManifest', () => {
 
   it('rejects a hook entry that sets cwd/env (strict schema)', async () => {
     const root = await makePlugin({
-      'kimi.plugin.json': JSON.stringify({
+      'nori.plugin.json': JSON.stringify({
         name: 'demo',
         hooks: [{ event: 'PreToolUse', command: './x.sh', cwd: '/tmp' }],
       }),
@@ -421,7 +421,7 @@ describe('parseManifest', () => {
   it('resolves a commands directory to its .md files', async () => {
     const root = await makePlugin(
       {
-        'kimi.plugin.json': JSON.stringify({ name: 'demo', commands: ['./commands'] }),
+        'nori.plugin.json': JSON.stringify({ name: 'demo', commands: ['./commands'] }),
         'commands/deploy.md': '---\ndescription: Deploy\n---\nbody',
         'commands/env.md': '---\ndescription: Env\n---\nbody',
         'commands/notes.txt': 'ignored',
@@ -439,7 +439,7 @@ describe('parseManifest', () => {
   it('recurses into nested command directories and preserves the namespace', async () => {
     const root = await makePlugin(
       {
-        'kimi.plugin.json': JSON.stringify({ name: 'demo', commands: ['./commands'] }),
+        'nori.plugin.json': JSON.stringify({ name: 'demo', commands: ['./commands'] }),
         'commands/deploy.md': '---\ndescription: Deploy\n---\nbody',
         'commands/frontend/component.md': '---\ndescription: Component\n---\nbody',
         'commands/frontend/deep/nested.md': '---\ndescription: Nested\n---\nbody',
@@ -457,7 +457,7 @@ describe('parseManifest', () => {
 
   it('accepts a single command .md file', async () => {
     const root = await makePlugin({
-      'kimi.plugin.json': JSON.stringify({ name: 'demo', commands: ['./deploy.md'] }),
+      'nori.plugin.json': JSON.stringify({ name: 'demo', commands: ['./deploy.md'] }),
       'deploy.md': '---\ndescription: Deploy\n---\nbody',
     });
     const result = await parseManifest(root);
@@ -468,7 +468,7 @@ describe('parseManifest', () => {
 
   it('warns when commands is not a string or string[]', async () => {
     const root = await makePlugin({
-      'kimi.plugin.json': JSON.stringify({ name: 'demo', commands: { nope: true } }),
+      'nori.plugin.json': JSON.stringify({ name: 'demo', commands: { nope: true } }),
     });
     const result = await parseManifest(root);
     expect(result.manifest?.commands).toBeUndefined();
@@ -482,7 +482,7 @@ describe('parseManifest', () => {
 
   it('warns when a commands entry resolves outside the plugin', async () => {
     const root = await makePlugin({
-      'kimi.plugin.json': JSON.stringify({ name: 'demo', commands: ['../outside.md'] }),
+      'nori.plugin.json': JSON.stringify({ name: 'demo', commands: ['../outside.md'] }),
     });
     const result = await parseManifest(root);
     expect(result.manifest?.commands).toBeUndefined();

@@ -363,7 +363,7 @@ export async function ensureDaemon(options: EnsureDaemonOptions = {}): Promise<E
   }
 
   throw new Error(
-    `Kimi server daemon failed to start within ${String(SPAWN_TIMEOUT_MS)}ms.\n\n` +
+    `Nori server daemon failed to start within ${String(SPAWN_TIMEOUT_MS)}ms.\n\n` +
       formatLogTail(daemonLogPath()),
   );
 }
@@ -376,7 +376,7 @@ function formatDaemonBootFailure(
     exit.signal === null
       ? `exited with code ${String(exit.code)}`
       : `was terminated by signal ${exit.signal}`;
-  return `Kimi server daemon ${reason} during startup.\n\n${formatLogTail(logPath)}`;
+  return `Nori server daemon ${reason} during startup.\n\n${formatLogTail(logPath)}`;
 }
 
 function formatLogTail(logPath: string): string {

@@ -50,9 +50,9 @@ interface TelemetryRecord {
 }
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), 'kimi-server-sessions-test-'));
+  tmpDir = mkdtempSync(join(tmpdir(), 'nori-server-sessions-test-'));
   lockPath = join(tmpDir, 'lock');
-  bridgeHome = mkdtempSync(join(tmpdir(), 'kimi-server-sessions-home-'));
+  bridgeHome = mkdtempSync(join(tmpdir(), 'nori-server-sessions-home-'));
 });
 
 afterEach(async () => {

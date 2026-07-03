@@ -1,9 +1,9 @@
 import { Hono } from 'hono';
-import { KIMI_CODE_HOME } from '../config';
+import { NORI_CODE_HOME } from '../config';
 import { readSessionDetail } from '../lib/session-store';
 import { buildAgentTree } from '../lib/agent-tree';
 
-export function subagentsRoute(home: string = KIMI_CODE_HOME): Hono {
+export function subagentsRoute(home: string = NORI_CODE_HOME): Hono {
   const r = new Hono();
   r.get('/:id/agents', async (c) => {
     const id = c.req.param('id');

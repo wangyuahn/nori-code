@@ -64,7 +64,7 @@ export async function appendMarkerRun(
     ...existing,
     last_migrated_at: run.completedAt,
     migrator_version: run.migratorVersion,
-    // Record the latest run's target so a rerun to a different KIMI_CODE_HOME
+    // Record the latest run's target so a rerun to a different NORI_CODE_HOME
     // updates the marker — otherwise `detectPendingMigration` keeps prompting
     // for the new target even though it was just migrated.
     target_path: run.targetPath,
