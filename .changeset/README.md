@@ -10,7 +10,7 @@ Current publishable packages:
 
 | Package | Directory | Description |
 | --- | --- | --- |
-| `@moonshot-ai/kimi-code` | `apps/kimi-code` | CLI / TUI application — provides the `kimi` command after install |
+| `@moonshot-ai/kimi-code` | `apps/nori-code` | CLI / TUI application — provides the `kimi` command after install |
 | `@moonshot-ai/kimi-code-sdk` | `packages/node-sdk` | Public TypeScript SDK |
 
 All other workspace packages are private internal packages, are not published to npm, and are excluded via `ignore` in `.changeset/config.json`:

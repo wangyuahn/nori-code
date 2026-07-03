@@ -1,7 +1,7 @@
 // Slash-command detection for ACP `session/prompt`.
 //
-// Copied from the TUI's `apps/kimi-code/src/tui/commands/parse.ts` and the
-// skill-resolution slice of `apps/kimi-code/src/tui/commands/resolve.ts`
+// Copied from the TUI's `apps/nori-code/src/tui/commands/parse.ts` and the
+// skill-resolution slice of `apps/nori-code/src/tui/commands/resolve.ts`
 // (`resolveSkillCommand`). ACP only intercepts commands the adapter can execute
 // directly: skills plus the small ACP-owned built-in command set. Other slash
 // inputs are reported as unknown commands instead of being silently sent to the

@@ -3,7 +3,7 @@
 Local REST + WebSocket server that exposes the Kimi Code SDK over a stable wire
 protocol. It hosts `agent-core` sessions and serves them under a single
 `/api/v1` prefix. This package is **private** — it is not published on its own;
-it ships inside the `kimi` CLI (`apps/kimi-code`) and is launched via
+it ships inside the `kimi` CLI (`apps/nori-code`) and is launched via
 `kimi server run`.
 
 ## What it does
@@ -30,7 +30,7 @@ pnpm --filter @moonshot-ai/server build       # tsdown
 
 The public entry point is `startServer(opts)` in `src/start.ts`, which returns a
 `RunningServer`. In production the CLI command `kimi server run`
-(`apps/kimi-code/src/cli/sub/server/run.ts`) imports and calls it. This package
+(`apps/nori-code/src/cli/sub/server/run.ts`) imports and calls it. This package
 has no `dev` script of its own — always start it from the repo root or via the
 CLI.
 
@@ -40,7 +40,7 @@ By default the server listens on `127.0.0.1:58627`; e2e clients target it with
 ## Architecture
 
 ```
-apps/kimi-code (CLI)            apps/kimi-web (browser)
+apps/nori-code (CLI)            apps/kimi-web (browser)
         │                              │
         └──────────┬───────────────────┘
                    │  REST + WebSocket, /api/v1

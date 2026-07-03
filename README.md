@@ -51,21 +51,16 @@ The orchestrator is **read-only** — it plans, searches memory, and delegates. 
 ## Quick Start
 
 ```sh
-# Build from source
-git clone <your-repo-url>
-cd nori-code
+# 1. Install dependencies
 pnpm install
-pnpm -C apps/kimi-code run build
 
-# Start interactive TUI
-node apps/kimi-code/dist/main.mjs
+# 2. Build
+pnpm -C apps/nori-code run build
 
-# Single task mode
-node apps/kimi-code/dist/main.mjs -p "Explain this project structure"
-
-# Auto-approve mode
-node apps/kimi-code/dist/main.mjs --permission auto
+# 3. Run
+node apps/nori-code/dist/main.mjs
 ```
+Or single-task mode: `node apps/nori-code/dist/main.mjs -p "your task"`
 
 Requirements: Node.js ≥ 24.15.0, pnpm.
 
@@ -113,8 +108,8 @@ Phase modes:
 
 ```sh
 pnpm install
-pnpm -C apps/kimi-code run dev    # dev mode with hot reload
-pnpm -C apps/kimi-code run build  # production build
+pnpm -C apps/nori-code run dev    # dev mode with hot reload
+pnpm -C apps/nori-code run build  # production build
 pnpm test                          # run tests
 ```
 

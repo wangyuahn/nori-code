@@ -22,11 +22,11 @@ Pick the one with `headRefName: changeset-release/main`; record `number`, `url` 
 
 ### 2. Read the pre-generated CLI changelog block
 
-changesets already pre-generates `apps/kimi-code/CHANGELOG.md` inside the release PR. Extract the new version block from the diff:
+changesets already pre-generates `apps/nori-code/CHANGELOG.md` inside the release PR. Extract the new version block from the diff:
 
 ```bash
 gh api repos/MoonshotAI/kimi-code/pulls/<RELEASE>/files \
-  --jq '.[] | select(.filename=="apps/kimi-code/CHANGELOG.md") | .patch'
+  --jq '.[] | select(.filename=="apps/nori-code/CHANGELOG.md") | .patch'
 ```
 
 Take the added lines (`+`) from the top `## <version>` down to (but not including) the next `## `. That is the version block to preview.

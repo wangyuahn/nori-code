@@ -6,7 +6,7 @@
  *
  * Pure decision mapping (choices -> MigrationScope) is delegated to the
  * package's `resolveMigrationScope`. Rendering follows the `ChoicePicker`
- * conventions in `apps/kimi-code/src/tui/components/dialogs/choice-picker.ts`.
+ * conventions in `apps/nori-code/src/tui/components/dialogs/choice-picker.ts`.
  *
  * This file implements the ask, progress, and result phases. `beginMigration`
  * drives the real runMigration flow (injectable for tests).

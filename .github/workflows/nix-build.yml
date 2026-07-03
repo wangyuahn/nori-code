@@ -40,7 +40,7 @@ jobs:
             echo "<!-- nix-workspace-sync-bot -->"
             echo "❌ flake.nix workspace lists out of sync"
             echo ""
-            echo "The recursive workspace dependencies of \`apps/kimi-code\` do not match \`flake.nix\`. Please run \`node scripts/check-nix-workspace.mjs\` locally for details."
+            echo "The recursive workspace dependencies of \`apps/nori-code\` do not match \`flake.nix\`. Please run \`node scripts/check-nix-workspace.mjs\` locally for details."
             echo ""
             echo "Typical fix: add the missing package name to \`workspaceNames\` and its path to \`workspacePaths\` in \`flake.nix\`."
             echo "EOF"
@@ -87,7 +87,7 @@ jobs:
         run: exit 1
 
   nix-build:
-    name: nix build .#kimi-code
+    name: nix build .#nori-code
     needs: check-workspace-sync
     runs-on: ubuntu-latest
 
@@ -105,7 +105,7 @@ jobs:
         run: |
           set -euo pipefail
           LOG_FILE="$(mktemp)"
-          if nix build .#kimi-code --print-build-logs 2>&1 | tee "$LOG_FILE"; then
+          if nix build .#nori-code --print-build-logs 2>&1 | tee "$LOG_FILE"; then
             echo "BUILD_FAILED=false" >> "$GITHUB_OUTPUT"
           else
             echo "BUILD_FAILED=true" >> "$GITHUB_OUTPUT"

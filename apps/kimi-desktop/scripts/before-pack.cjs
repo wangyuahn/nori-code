@@ -24,12 +24,12 @@ exports.default = async function beforePack(context) {
   const exe = platform === 'win32' ? 'kimi.exe' : 'kimi';
 
   const desktopRoot = resolve(__dirname, '..');
-  const seaDir = resolve(desktopRoot, '..', 'kimi-code', 'dist-native', 'bin', target);
+  const seaDir = resolve(desktopRoot, '..', 'nori-code', 'dist-native', 'bin', target);
   const seaExe = join(seaDir, exe);
   if (!existsSync(seaExe)) {
     throw new Error(
       `Bundled Kimi server not found for ${target} at ${seaExe}. ` +
-        `Build it for this platform first: \`pnpm -C apps/kimi-code build:native:sea\` ` +
+        `Build it for this platform first: \`pnpm -C apps/nori-code build:native:sea\` ` +
         `(CI builds the SEA on each platform runner before packaging).`,
     );
   }

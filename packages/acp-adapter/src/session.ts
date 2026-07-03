@@ -1496,7 +1496,7 @@ function formatContextUsage(contextUsage: number): string {
  *
  * The parsing/resolution itself is delegated to `./slash` —
  * deliberately duplicated from the TUI's
- * `apps/kimi-code/src/tui/commands/parse.ts` and `resolve.ts` to
+ * `apps/nori-code/src/tui/commands/parse.ts` and `resolve.ts` to
  * avoid an app→package import inversion. See `./slash`'s top-of-file
  * comment for the sync target.
  */

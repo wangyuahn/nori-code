@@ -1,11 +1,11 @@
 ---
 name: write-tui
-description: Use when writing or modifying the kimi-code terminal UI in apps/kimi-code/src/tui — components, dialogs/selectors, slash commands, themes, streaming render, or the KimiTUI controllers. Covers the architecture, where new features go, test placement, the theme system mechanics, and the dialog interaction/visual spec (DESIGN.md).
+description: Use when writing or modifying the kimi-code terminal UI in apps/nori-code/src/tui — components, dialogs/selectors, slash commands, themes, streaming render, or the KimiTUI controllers. Covers the architecture, where new features go, test placement, the theme system mechanics, and the dialog interaction/visual spec (DESIGN.md).
 ---
 
-# Write TUI (apps/kimi-code)
+# Write TUI (apps/nori-code)
 
-The terminal UI lives in `apps/kimi-code/src/tui`. Before writing TUI code, read `apps/kimi-code/AGENTS.md` for the always-on **map, module boundaries, and hard constraints** (printable-key decoding, no chalk named colors, etc.). This skill is the **how-to**: architecture orientation, feature routing, test placement, theme mechanics, and the dialog spec.
+The terminal UI lives in `apps/nori-code/src/tui`. Before writing TUI code, read `apps/nori-code/AGENTS.md` for the always-on **map, module boundaries, and hard constraints** (printable-key decoding, no chalk named colors, etc.). This skill is the **how-to**: architecture orientation, feature routing, test placement, theme mechanics, and the dialog spec.
 
 For any list dialog, selector, input box, or status/toggle list, the interaction and visual rules are normative — see **[DESIGN.md](./DESIGN.md)** in this folder and follow its self-check list before submitting.
 
@@ -68,7 +68,7 @@ Themes are managed centrally under `src/tui/theme/`:
 - `bundle.ts` — packs `colors`, `styles`, `markdownTheme` into a `KimiTUIThemeBundle`.
 - `index.ts` / `detect.ts` — theme type and auto/dark/light resolution.
 
-> **Keep the color-token set in sync.** `ColorPalette` in `colors.ts` is the source of truth for color tokens. When you add, rename, or remove one, update its mirrors in the same change: the custom-theme JSON schema (`apps/kimi-code/src/tui/theme/theme-schema.json`), the token tables in the custom-theme docs (`docs/en/customization/themes.md` and `docs/zh/customization/themes.md`), and the token table in the `custom-theme` built-in skill (`packages/agent-core/src/skill/builtin/custom-theme.md`).
+> **Keep the color-token set in sync.** `ColorPalette` in `colors.ts` is the source of truth for color tokens. When you add, rename, or remove one, update its mirrors in the same change: the custom-theme JSON schema (`apps/nori-code/src/tui/theme/theme-schema.json`), the token tables in the custom-theme docs (`docs/en/customization/themes.md` and `docs/zh/customization/themes.md`), and the token table in the `custom-theme` built-in skill (`packages/agent-core/src/skill/builtin/custom-theme.md`).
 
 Apply / switch flow:
 
@@ -76,7 +76,7 @@ Apply / switch flow:
 - The real apply step is `KimiTUI.applyTheme`: it updates `state.theme`, `state.appState.theme`, and notifies components to refresh their palette.
 - Persist the choice through `saveTuiConfig` — a component must not write the config file itself.
 
-> The **hard color rules** (no chalk named colors, contrast ratios, no module-top-level cached styled functions, add a `ColorPalette` token before inventing a color) are normative and guard-enforced — they live in `apps/kimi-code/AGENTS.md`. This skill only covers the mechanics.
+> The **hard color rules** (no chalk named colors, contrast ratios, no module-top-level cached styled functions, add a `ColorPalette` token before inventing a color) are normative and guard-enforced — they live in `apps/nori-code/AGENTS.md`. This skill only covers the mechanics.
 
 ## Before you submit
 

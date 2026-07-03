@@ -4,7 +4,7 @@
   inputs = {
     # Pinned to the 25.11 release channel because nixpkgs-unstable currently
     # ships nodejs_24 = 24.14.1, which trips the >= 24.15.0 floor that the
-    # native SEA build enforces (see apps/kimi-code/scripts/native/build.mjs).
+    # native SEA build enforces (see apps/nori-code/scripts/native/build.mjs).
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
   };
 
@@ -75,7 +75,7 @@
         ./packages/pi-tui
         ./packages/protocol
         ./packages/telemetry
-        ./apps/kimi-code
+        ./apps/nori-code
         ./apps/kimi-desktop
         ./apps/kimi-web
         ./apps/vis
@@ -97,7 +97,7 @@
         "@moonshot-ai/pi-tui"
         "@moonshot-ai/protocol"
         "@moonshot-ai/kimi-telemetry"
-        "@moonshot-ai/kimi-code"
+        "@moonshot-ai/nori-code"
         "@moonshot-ai/kimi-desktop"
         "@moonshot-ai/kimi-web"
         "@moonshot-ai/vis"
@@ -113,7 +113,7 @@
         let
           nodejs = nodejsFor pkgs;
           pnpm = pnpmFor pkgs;
-          appPackageJson = builtins.fromJSON (builtins.readFile ./apps/kimi-code/package.json);
+          appPackageJson = builtins.fromJSON (builtins.readFile ./apps/nori-code/package.json);
           nativeTarget =
             if pkgs.stdenv.hostPlatform.isLinux && pkgs.stdenv.hostPlatform.isAarch64 then
               "linux-arm64"
@@ -126,8 +126,8 @@
             else
               throw "Unsupported Kimi Code native target for ${pkgs.stdenv.hostPlatform.system}";
 
-          kimi-code = pkgs.stdenv.mkDerivation (finalAttrs: {
-            pname = "kimi-code";
+          nori-code = pkgs.stdenv.mkDerivation (finalAttrs: {
+            pname = "nori-code";
             version = appPackageJson.version;
 
             src = lib.fileset.toSource {
@@ -186,18 +186,18 @@
                 # but not the inspection mode (`-dv`) that 05-verify.mjs runs
                 # afterwards. Disable the verify step for the Nix build; the
                 # release CI keeps it via the unmodified script.
-                substituteInPlace apps/kimi-code/scripts/native/build.mjs \
+                substituteInPlace apps/nori-code/scripts/native/build.mjs \
                   --replace-fail \
                     "await runVerifyStep({ requireGatekeeper: false });" \
                     "// runVerifyStep skipped in nix sandbox (sigtool lacks -dv)"
               ''}
               # The SEA blob step (scripts/native/02-sea-blob.mjs) embeds the
-              # Kimi web assets from apps/kimi-code/dist-web and fails if that
+              # Kimi web assets from apps/nori-code/dist-web and fails if that
               # directory is missing. Build the web app and stage its assets
               # before producing the native executable.
               pnpm --filter=@moonshot-ai/kimi-web run build
-              node apps/kimi-code/scripts/copy-web-assets.mjs
-              pnpm --filter=@moonshot-ai/kimi-code run build:native:sea
+              node apps/nori-code/scripts/copy-web-assets.mjs
+              pnpm --filter=@moonshot-ai/nori-code run build:native:sea
               runHook postBuild
             '';
 
@@ -205,7 +205,7 @@
               runHook preInstall
 
               install -Dm755 \
-                "apps/kimi-code/dist-native/bin/${nativeTarget}/kimi" \
+                "apps/nori-code/dist-native/bin/${nativeTarget}/kimi" \
                 "$out/bin/kimi"
 
               runHook postInstall
@@ -225,17 +225,17 @@
           });
         in
         {
-          inherit kimi-code;
-          default = kimi-code;
+          inherit nori-code;
+          default = nori-code;
         }
       );
 
       apps = forAllSystems (pkgs: {
-        kimi-code = {
+        nori-code = {
           type = "app";
-          program = "${self.packages.${pkgs.system}.kimi-code}/bin/kimi";
+          program = "${self.packages.${pkgs.system}.nori-code}/bin/kimi";
         };
-        default = self.apps.${pkgs.system}.kimi-code;
+        default = self.apps.${pkgs.system}.nori-code;
       });
 
       devShells = forAllSystems (pkgs: {

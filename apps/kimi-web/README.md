@@ -1,6 +1,6 @@
 # Kimi Web
 
-A browser client for Kimi Code — a peer to the TUI (`apps/kimi-code`) that talks
+A browser client for Kimi Code — a peer to the TUI (`apps/nori-code`) that talks
 to a local **server** over REST + WebSocket. Vue 3 + Vite + TypeScript.
 
 ---
@@ -87,15 +87,15 @@ The server's wire protocol has a few things that will bite you if forgotten:
 ## Release & deployment
 
 Kimi Web is **not published as a standalone package**. It ships as the built-in
-web UI of the `kimi` CLI (`apps/kimi-code`).
+web UI of the `kimi` CLI (`apps/nori-code`).
 
 ### Current release flow
 
 1. **Develop** — `pnpm dev:web` (or `pnpm -C apps/kimi-web run dev`).
 2. **Build** — `pnpm -C apps/kimi-web run build` produces `apps/kimi-web/dist`.
-3. **Bundle into CLI** — `pnpm -C apps/kimi-code run build` runs
+3. **Bundle into CLI** — `pnpm -C apps/nori-code run build` runs
    `scripts/copy-web-assets.mjs`, which copies `apps/kimi-web/dist` into
-   `apps/kimi-code/dist-web`.
+   `apps/nori-code/dist-web`.
 4. **Publish** — the root `.github/workflows/release.yml` publishes
    `@moonshot-ai/kimi-code` to npm; `dist-web` is listed in the package `files`
    array, so the built web assets travel with the CLI package.

@@ -1,13 +1,13 @@
 /**
  * `nori provider` sub-command — non-interactive provider management.
  *
- * Mirrors the TUI `/provider` flow (apps/kimi-code/src/tui/commands/provider.ts)
+ * Mirrors the TUI `/provider` flow (apps/nori-code/src/tui/commands/provider.ts)
  * for the custom-registry path so users can import an api.json document, drop
  * a provider, or inspect what is configured without launching the TUI.
  *
  * `add` writes the same `source = { kind: 'apiJson', url, apiKey }` blob the
  * TUI does; the next launch's `refreshAllProviderModels`
- * (apps/kimi-code/src/tui/utils/refresh-providers.ts) groups by URL, retries
+ * (apps/nori-code/src/tui/utils/refresh-providers.ts) groups by URL, retries
  * available API-key candidates, and re-fetches the model list, so periodic
  * refresh is automatic.
  */

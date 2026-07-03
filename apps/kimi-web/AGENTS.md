@@ -4,7 +4,7 @@ Package-local rules for `apps/kimi-web` (`@moonshot-ai/kimi-web`).
 
 ## What it is
 
-The browser web UI for Kimi Code — a peer to the TUI in `apps/kimi-code`. It talks to the local server over REST + WebSocket under `/api/v1`. Stack: Vue 3 + Vite 6 + TypeScript (strict) + vue-i18n v11. (Tailwind was removed; all styling is via design tokens in `src/style.css` + scoped component styles.) There is no client router and no Pinia; state lives in composables/refs and provide/inject.
+The browser web UI for Kimi Code — a peer to the TUI in `apps/nori-code`. It talks to the local server over REST + WebSocket under `/api/v1`. Stack: Vue 3 + Vite 6 + TypeScript (strict) + vue-i18n v11. (Tailwind was removed; all styling is via design tokens in `src/style.css` + scoped component styles.) There is no client router and no Pinia; state lives in composables/refs and provide/inject.
 
 ## Design system (normative — required when modifying the UI)
 

@@ -9,7 +9,7 @@ const RUN_TIMEOUT_MS = 30_000;
 const HEALTH_TIMEOUT_MS = 20_000;
 const HEALTH_POLL_MS = 200;
 
-/** Subset of the server lock JSON we read (apps/kimi-code writes the full shape). */
+/** Subset of the server lock JSON we read (apps/nori-code writes the full shape). */
 interface LockContents {
   pid: number;
   host?: string;
@@ -77,7 +77,7 @@ async function isHealthy(origin: string, timeoutMs: number): Promise<boolean> {
 /**
  * Run the bundled SEA's `server run`, which reuses a live shared daemon or
  * spawns one and exits once it is healthy. All discovery / port / lock logic
- * lives in apps/kimi-code's `ensureDaemon`; we do not reimplement it.
+ * lives in apps/nori-code's `ensureDaemon`; we do not reimplement it.
  */
 function runServerRun(seaPath: string): Promise<void> {
   return new Promise((resolve, reject) => {

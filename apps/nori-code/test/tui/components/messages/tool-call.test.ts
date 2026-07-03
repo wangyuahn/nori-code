@@ -860,7 +860,7 @@ describe('ToolCallComponent', () => {
 
   it('truncates a long file path from the head so the filename stays visible', () => {
     const longPath =
-      'apps/kimi-code/src/tui/components/messages/tool-renderers/long-path/example/final-file.ts';
+      'apps/nori-code/src/tui/components/messages/tool-renderers/long-path/example/final-file.ts';
     const component = new ToolCallComponent(
       {
         id: 'call_long_path',
@@ -873,7 +873,7 @@ describe('ToolCallComponent', () => {
     const out = strip(component.render(100).join('\n'));
     expect(out).toContain('final-file.ts');
     expect(out).toContain('…');
-    expect(out).not.toContain('apps/kimi-code/src/tui/components/messages/tool-renderers/long-pa…');
+    expect(out).not.toContain('apps/nori-code/src/tui/components/messages/tool-renderers/long-pa…');
   });
 
   it('shows Read paths relative to the active workspace', () => {
@@ -881,7 +881,7 @@ describe('ToolCallComponent', () => {
       {
         id: 'call_workspace_read',
         name: 'Read',
-        args: { path: '/tmp/proj-a/apps/kimi-code/src/main.ts' },
+        args: { path: '/tmp/proj-a/apps/nori-code/src/main.ts' },
       },
       {
         tool_call_id: 'call_workspace_read',
@@ -894,7 +894,7 @@ describe('ToolCallComponent', () => {
 
     const out = strip(component.render(100).join('\n'));
     const expectedReadPath =
-      process.platform === 'win32' ? 'apps\\kimi-code\\src\\main.ts' : 'apps/kimi-code/src/main.ts';
+      process.platform === 'win32' ? 'apps\\kimi-code\\src\\main.ts' : 'apps/nori-code/src/main.ts';
     expect(out).toContain(`Used Read (${expectedReadPath})`);
     expect(out).not.toContain('/tmp/proj-a/apps');
     expect(component.getReadSnapshot().filePath).toBe(expectedReadPath);
@@ -961,12 +961,12 @@ describe('ToolCallComponent', () => {
     component.appendSubToolCall({
       id: 'sub_explore_123456:read',
       name: 'Read',
-      args: { path: 'apps/kimi-code/src/tui/utils/background-agent-status.ts' },
+      args: { path: 'apps/nori-code/src/tui/utils/background-agent-status.ts' },
     });
 
     out = strip(component.render(120).join('\n'));
     expect(out).toContain('Explore Agent Running (explore project xxx) · 1 tool · 10s');
-    expect(out).toContain('Using Read (apps/kimi-code/src/tui/utils/background-agent-status.ts)');
+    expect(out).toContain('Using Read (apps/nori-code/src/tui/utils/background-agent-status.ts)');
     expect(out).not.toContain('think1');
     expect(out).toContain('think2');
     expect(out).toContain('think3');

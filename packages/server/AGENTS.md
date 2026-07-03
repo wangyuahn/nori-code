@@ -4,13 +4,13 @@ Package-local rules for `packages/server` (`@moonshot-ai/server`).
 
 ## What it is
 
-The Kimi Code server. It hosts `agent-core` sessions and exposes them over REST + WebSocket under a single `/api/v1` prefix. It is consumed by `apps/kimi-code` (the CLI/TUI) — **do not add a reverse dependency** on the CLI app.
+The Kimi Code server. It hosts `agent-core` sessions and exposes them over REST + WebSocket under a single `/api/v1` prefix. It is consumed by `apps/nori-code` (the CLI/TUI) — **do not add a reverse dependency** on the CLI app.
 
 ## Entry points & launch
 
 - Bootstrap: `src/start.ts` exports `startServer(opts): Promise<RunningServer>`. The public surface is re-exported from `src/index.ts`.
-- Dev: run from the **repo root** with `pnpm dev:server` (auto-restart variant `pnpm dev:server:restart`). This shells into `kimi server run` via `apps/kimi-code`. This package has **no `dev` script** of its own.
-- Prod: the CLI command `kimi server run` (`apps/kimi-code/src/cli/sub/server/run.ts`) imports `startServer`.
+- Dev: run from the **repo root** with `pnpm dev:server` (auto-restart variant `pnpm dev:server:restart`). This shells into `kimi server run` via `apps/nori-code`. This package has **no `dev` script** of its own.
+- Prod: the CLI command `kimi server run` (`apps/nori-code/src/cli/sub/server/run.ts`) imports `startServer`.
 
 ## Layout (`src/`)
 
@@ -49,7 +49,7 @@ Service conventions (naming, file layout, registration) live in `packages/agent-
 
 - **Path alias:** `#/*` maps to `./src/*.ts` (with `#/services/...` variants). Use `#/...`, not `@/`.
 - **Single-instance lock:** `start.ts` calls `acquireLock`; a second start throws `ServerLockedError`. Tests must pass a unique `lockPath`/`port` and use `serviceOverrides`.
-- **Port-busy policy:** the lock is acquired *before* binding, so any `EADDRINUSE` from `listen` is a third-party listener (never another kimi server). `listenWithPortRetry` then walks `port + 1`, `+ 2`, … (capped by `PORT_RETRY_LIMIT`) and calls `lockHandle.updatePort(boundPort)` so the lock advertises the real port. Port `0` (ephemeral) is never retried. The daemon spawner mirrors this in `resolveDaemonPort` (`apps/kimi-code`).
+- **Port-busy policy:** the lock is acquired *before* binding, so any `EADDRINUSE` from `listen` is a third-party listener (never another kimi server). `listenWithPortRetry` then walks `port + 1`, `+ 2`, … (capped by `PORT_RETRY_LIMIT`) and calls `lockHandle.updatePort(boundPort)` so the lock advertises the real port. Port `0` (ephemeral) is never retried. The daemon spawner mirrors this in `resolveDaemonPort` (`apps/nori-code`).
 - **Uniform response envelope** `{ code, msg, data, request_id }` (`envelope.ts`, `error-handler.ts`); request id comes from `request-id.ts` / `genReqId`.
 - **`:action` URL convention** is handled by `routes/action-suffix.ts` (`parseActionSuffix`) — Fastify cannot disambiguate `:id` from `:id:action` on its own.
 - **`FsWatcherService` is created manually and `services.set`-registered after the collection is built** — this is ordering-sensitive; keep the boot wiring in `start.ts`.

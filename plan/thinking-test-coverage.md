@@ -93,7 +93,7 @@
 - **缺口**：effort-capable model（`defaultEffort='high'` 或 middle `supportEfforts`）→ 返回对应 effort，而非 `'on'`；`harness` 缺失（`undefined`）→ `'on'`。
 - **建议**：`makeHarness` 加 effort-capable model（`supportEfforts:['low','high','max']`、`defaultEffort:'high'`），断言 `setThinkingCalls` 收到 `'high'`；另加无 harness 的 `AcpSession.setThinking(true)` → `'on'`。
 
-### apps/kimi-code（TUI）
+### apps/nori-code（TUI）
 
 #### `tui/utils/thinking-config.ts` — `thinkingEffortToConfig` / `isThinkingOn`
 - **现有**：无直接单元测试。仅经 `cli/provider.test.ts` 与 `kimi-tui-message-flow.test.ts` 间接覆盖。

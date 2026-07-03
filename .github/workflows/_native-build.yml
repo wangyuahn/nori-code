@@ -82,29 +82,29 @@ jobs:
         shell: bash
         run: |
           CATALOG_FILE="$RUNNER_TEMP/kimi-code-built-in-catalog.json"
-          node apps/kimi-code/scripts/update-catalog.mjs --out "$CATALOG_FILE"
+          node apps/nori-code/scripts/update-catalog.mjs --out "$CATALOG_FILE"
           echo "KIMI_CODE_BUILT_IN_CATALOG_FILE=$CATALOG_FILE" >> "$GITHUB_ENV"
 
       - name: Build Nori web assets
-        # The SEA blob step embeds apps/kimi-code/dist-web; build the web app
+        # The SEA blob step embeds apps/nori-code/dist-web; build the web app
         # and stage its assets before producing the native executable.
         run: |
           pnpm --filter @moonshot-ai/kimi-web run build
-          node apps/kimi-code/scripts/copy-web-assets.mjs
+          node apps/nori-code/scripts/copy-web-assets.mjs
 
       - name: Build native executable (release profile, macOS signed)
         if: runner.os == 'macOS' && inputs.sign-macos
-        run: pnpm --filter @moonshot-ai/kimi-code run build:native:release
+        run: pnpm --filter @moonshot-ai/nori-code run build:native:release
 
       - name: Build native executable (local profile)
         if: '!(runner.os == ''macOS'' && inputs.sign-macos)'
-        run: pnpm --filter @moonshot-ai/kimi-code run build:native:sea
+        run: pnpm --filter @moonshot-ai/nori-code run build:native:sea
 
       - name: Notarize macOS binary
         if: runner.os == 'macOS' && inputs.sign-macos
         uses: ./.github/actions/macos-notarize
         with:
-          binary-path: ${{ github.workspace }}/apps/kimi-code/dist-native/bin/${{ matrix.target }}/kimi
+          binary-path: ${{ github.workspace }}/apps/nori-code/dist-native/bin/${{ matrix.target }}/kimi
           notarization-key-p8: ${{ secrets.APPLE_NOTARIZATION_KEY_P8 }}
           notarization-key-id: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
           notarization-issuer-id: ${{ secrets.APPLE_NOTARIZATION_ISSUER_ID }}
@@ -114,10 +114,10 @@ jobs:
         uses: ./.github/actions/macos-keychain-cleanup
 
       - name: Smoke test native executable
-        run: pnpm --filter @moonshot-ai/kimi-code run test:native:smoke
+        run: pnpm --filter @moonshot-ai/nori-code run test:native:smoke
 
       - name: Package native artifact
-        run: pnpm --filter @moonshot-ai/kimi-code run package:native
+        run: pnpm --filter @moonshot-ai/nori-code run package:native
 
       - name: Upload native artifact
         uses: actions/upload-artifact@v7
@@ -125,6 +125,6 @@ jobs:
           name: ${{ inputs.upload-artifact-prefix }}-${{ matrix.target }}
           retention-days: ${{ inputs.retention-days }}
           path: |
-            apps/kimi-code/dist-native/artifacts/kimi-code-${{ matrix.target }}.zip
-            apps/kimi-code/dist-native/artifacts/kimi-code-${{ matrix.target }}.zip.sha256
+            apps/nori-code/dist-native/artifacts/kimi-code-${{ matrix.target }}.zip
+            apps/nori-code/dist-native/artifacts/kimi-code-${{ matrix.target }}.zip.sha256
           if-no-files-found: ignore

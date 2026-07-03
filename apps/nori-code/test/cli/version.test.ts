@@ -11,7 +11,7 @@ import {
 } from '#/cli/version';
 
 describe('cli version helpers', () => {
-  it('resolves the host package manifest near apps/kimi-code and reads its version', () => {
+  it('resolves the host package manifest near apps/nori-code and reads its version', () => {
     const pkgPath = getHostPackageJsonPath();
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version: string };
 

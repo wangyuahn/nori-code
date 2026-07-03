@@ -51,21 +51,16 @@ Nori Code 是一个通过 plan → implement → review 循环编排工作的 AI
 ## 快速开始
 
 ```sh
-# 从源码构建
-git clone <仓库地址>
-cd nori-code
+# 1. 安装依赖
 pnpm install
-pnpm -C apps/kimi-code run build
 
-# 启动交互式 TUI
-node apps/kimi-code/dist/main.mjs
+# 2. 构建
+pnpm -C apps/nori-code run build
 
-# 单任务模式
-node apps/kimi-code/dist/main.mjs -p "解释这个项目结构"
-
-# 自动审批模式
-node apps/kimi-code/dist/main.mjs --permission auto
+# 3. 运行
+node apps/nori-code/dist/main.mjs
 ```
+或单任务模式：`node apps/nori-code/dist/main.mjs -p "任务描述"`，自动审批加 `--permission auto`
 
 要求：Node.js ≥ 24.15.0, pnpm。
 
@@ -113,8 +108,8 @@ rules:
 
 ```sh
 pnpm install
-pnpm -C apps/kimi-code run dev    # 开发模式，热重载
-pnpm -C apps/kimi-code run build  # 生产构建
+pnpm -C apps/nori-code run dev    # 开发模式，热重载
+pnpm -C apps/nori-code run build  # 生产构建
 pnpm test                          # 运行测试
 ```
 

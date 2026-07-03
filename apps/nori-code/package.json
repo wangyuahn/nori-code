@@ -1,14 +1,14 @@
 {
-  "name": "@moonshot-ai/kimi-code",
+  "name": "@moonshot-ai/nori-code",
   "version": "0.1.0",
   "description": "The Starting Point for Next-Gen Agents",
   "license": "MIT",
   "author": "Moonshot AI",
-  "homepage": "https://github.com/MoonshotAI/kimi-code/tree/main/apps/kimi-code#readme",
+  "homepage": "https://github.com/MoonshotAI/kimi-code/tree/main/apps/nori-code#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/MoonshotAI/kimi-code.git",
-    "directory": "apps/kimi-code"
+    "directory": "apps/nori-code"
   },
   "bugs": {
     "url": "https://github.com/MoonshotAI/kimi-code/issues"
@@ -23,7 +23,7 @@
     "tui"
   ],
   "bin": {
-    "kimi": "dist/main.mjs"
+    "nori": "dist/main.mjs"
   },
   "files": [
     "dist",

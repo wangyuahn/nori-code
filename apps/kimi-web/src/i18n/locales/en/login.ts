@@ -18,5 +18,5 @@ export default {
   retry: 'Retry',
   closeBtn: 'Close',
   errorTitle: 'The current daemon does not support login yet',
-  errorHint: 'Please upgrade kimi-code and try again',
+  errorHint: 'Please upgrade nori-code and try again',
 } as const;

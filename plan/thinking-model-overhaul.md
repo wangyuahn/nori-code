@@ -152,7 +152,7 @@ withThinking(level: ThinkingLevel): KimiChatProvider {
 ### 4.6 TUI 层
 
 ```ts
-// apps/kimi-code/src/tui/types.ts
+// apps/nori-code/src/tui/types.ts
 AppState.thinkingLevel: ThinkingLevel;   // 唯一字段，删除 thinking: boolean
 ```
 
@@ -242,7 +242,7 @@ const effort = this._supportEfforts.includes(level) ? level : undefined;
 ### 5.4 配置写入
 
 ```ts
-// apps/kimi-code/src/tui/utils/thinking-config.ts
+// apps/nori-code/src/tui/utils/thinking-config.ts
 export function thinkingLevelToConfig(level: ThinkingLevel): ThinkingConfigPatch {
   return level === 'off'
     ? { enabled: false }
@@ -355,7 +355,7 @@ export function thinkingLevelToConfig(level: ThinkingLevel): ThinkingConfigPatch
   - `defaultLevelFor`：不支持 thinking → `'off'`；effort 模型 → `defaultEffort` / 中位；boolean 模型 → `'on'`。
   - `resolveThinkingLevel`：requested 优先；`enabled=false` → `'off'`；always_thinking + `'off'` → 默认档。
   - `ThinkingConfigSchema` 拒绝 `mode`；`KimiConfigSchema` 拒绝 `defaultThinking`。
-- `apps/kimi-code`
+- `apps/nori-code`
   - `model-selector.test.ts`：`'on'` 提交时归一为 `defaultLevelFor`；`ModelSelection.thinking` 类型 `ThinkingLevel`。
   - `effort-selector.test.ts`：类型 `ThinkingLevel`。
   - `thinking-config.test.ts`（新增或并入现有 commands 测试）：`thinkingLevelToConfig('off')` → `{ enabled: false }`；`thinkingLevelToConfig('max')` → `{ enabled: true, effort: 'max' }`。

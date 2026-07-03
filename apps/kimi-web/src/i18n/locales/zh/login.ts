@@ -18,5 +18,5 @@ export default {
   retry: '重试',
   closeBtn: '关闭',
   errorTitle: '当前 daemon 暂不支持登录',
-  errorHint: '请升级 kimi-code 后重试',
+  errorHint: '请升级 nori-code 后重试',
 } as const;

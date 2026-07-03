@@ -8,7 +8,7 @@ export const DEFAULT_CONFIG_FILE_TEXT =
   '# This file starts empty so built-in defaults can apply.\n' +
   '# Login will populate managed Kimi provider and model entries.\n';
 
-// Verbatim from apps/kimi-code/src/tui/config.ts:renderTuiConfig(DEFAULT_TUI_CONFIG)
+// Verbatim from apps/nori-code/src/tui/config.ts:renderTuiConfig(DEFAULT_TUI_CONFIG)
 export const DEFAULT_TUI_RENDER =
   '# ~/.nori-code/tui.toml\n' +
   '# Terminal UI preferences for kimi-code.\n' +

@@ -2,8 +2,8 @@ import { join } from 'node:path';
 
 import { app } from 'electron';
 
-// The bundled backend targets the same 6 platform/arch pairs the kimi-code
-// native SEA build supports (apps/kimi-code/scripts/native/native-deps.mjs).
+// The bundled backend targets the same 6 platform/arch pairs the nori-code
+// native SEA build supports (apps/nori-code/scripts/native/native-deps.mjs).
 const SUPPORTED_TARGETS = new Set([
   'darwin-arm64',
   'darwin-x64',
@@ -31,8 +31,8 @@ function executableName(): string {
  *
  * - packaged: `<resources>/bin/<target>/kimi[.exe]` — placed there by
  *   electron-builder `extraResources`.
- * - dev: `apps/kimi-code/dist-native/bin/<target>/kimi[.exe]` — produced by
- *   `pnpm -C apps/kimi-code build:native:sea`. In dev `app.getAppPath()` is
+ * - dev: `apps/nori-code/dist-native/bin/<target>/kimi[.exe]` — produced by
+ *   `pnpm -C apps/nori-code build:native:sea`. In dev `app.getAppPath()` is
  *   `apps/kimi-desktop`, so the sibling app is one level up.
  */
 export function resolveSeaPath(): string {
@@ -41,5 +41,5 @@ export function resolveSeaPath(): string {
   if (app.isPackaged) {
     return join(process.resourcesPath, 'bin', target, exe);
   }
-  return join(app.getAppPath(), '..', 'kimi-code', 'dist-native', 'bin', target, exe);
+  return join(app.getAppPath(), '..', 'nori-code', 'dist-native', 'bin', target, exe);
 }

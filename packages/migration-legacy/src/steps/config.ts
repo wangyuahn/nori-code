@@ -33,7 +33,7 @@ const REGISTERED_EXPERIMENTAL_FLAGS: ReadonlySet<string> = new Set(
   FLAG_DEFINITIONS.map((definition) => definition.id),
 );
 
-// kimi-code's tui.toml `theme` enum (mirrors apps/kimi-code TuiThemeSchema).
+// kimi-code's tui.toml `theme` enum (mirrors apps/nori-code TuiThemeSchema).
 // A legacy theme outside this set would fail loadTuiConfig()'s whole-file
 // validation, taking the migrated editor command down with it — so drop it.
 const TUI_THEMES: ReadonlySet<string> = new Set(['dark', 'light', 'auto']);

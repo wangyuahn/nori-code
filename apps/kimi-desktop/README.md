@@ -9,7 +9,7 @@ backend, it just opens a native window onto the local Kimi server.
 
 The web UI cannot run on its own — it needs the Kimi Code **server** (REST + WS
 under `/api/v1`). That server already ships as a self-contained single-file
-executable (SEA) built from `apps/kimi-code`, with the web UI bundled inside it.
+executable (SEA) built from `apps/nori-code`, with the web UI bundled inside it.
 
 On launch the app:
 
@@ -33,13 +33,13 @@ Key files:
 
 ## Develop
 
-The dev build loads the SEA from `apps/kimi-code/dist-native/bin/<target>/`, so
+The dev build loads the SEA from `apps/nori-code/dist-native/bin/<target>/`, so
 build the backend once for your platform first:
 
 ```bash
 # one-time (rebuild when kimi-code / kimi-web change):
 pnpm --filter @moonshot-ai/kimi-web run build
-node apps/kimi-code/scripts/copy-web-assets.mjs
+node apps/nori-code/scripts/copy-web-assets.mjs
 pnpm --filter @moonshot-ai/kimi-code run build:native:sea
 
 # then run the desktop app (builds the main process, launches Electron):

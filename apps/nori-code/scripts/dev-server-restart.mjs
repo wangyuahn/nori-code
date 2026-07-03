@@ -4,7 +4,7 @@
 // Spawns `tsx ./src/main.ts server run …extraArgs` once, then on each newline
 // read from stdin SIGTERMs the child and respawns after it has cleanly exited.
 // SIGTERM triggers the server's own `shutdown()` handler
-// (apps/kimi-code/src/cli/sub/server/run.ts) which releases the port lock and
+// (apps/nori-code/src/cli/sub/server/run.ts) which releases the port lock and
 // closes WS conns before exit, so a fresh start can re-acquire 58627 without a
 // stale-lock fight.
 //

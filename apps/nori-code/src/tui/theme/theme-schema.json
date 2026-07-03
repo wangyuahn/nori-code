@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://github.com/moonshot-ai/kimi-code/blob/main/apps/kimi-code/src/tui/theme/theme-schema.json",
+  "$id": "https://github.com/moonshot-ai/kimi-code/blob/main/apps/nori-code/src/tui/theme/theme-schema.json",
   "title": "Nori Code Custom Theme",
   "description": "Schema for Nori Code TUI custom theme definitions",
   "type": "object",

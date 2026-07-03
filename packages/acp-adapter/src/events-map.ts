@@ -469,7 +469,7 @@ export function planFromDisplayBlock(
 /**
  * Build a one-shot ACP `available_commands_update` session
  * notification. The Kimi adapter sits at the SDK layer, beneath the
- * TUI slash-command registry (`apps/kimi-code/src/tui/commands/`),
+ * TUI slash-command registry (`apps/nori-code/src/tui/commands/`),
  * so today we have no in-process source of structured slash commands
  * to enumerate. We still emit the wire-shape once per session so
  * clients that subscribe to the channel see a deterministic empty

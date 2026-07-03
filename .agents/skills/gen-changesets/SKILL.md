@@ -7,9 +7,9 @@ description: Use when generating changesets in the kimi-code repository, includi
 
 `kimi-code` uses changesets to manage versions and changelogs. The current user-facing published package is:
 
-- `@moonshot-ai/kimi-code`: the CLI
+- `@moonshot-ai/nori-code`: the CLI
 
-All other `@moonshot-ai/*` packages are treated as internal packages, including `@moonshot-ai/kimi-code-sdk`, `agent-core`, `kosong`, `kaos`, `kimi-code-oauth`, `kimi-telemetry`, and `migration-legacy`.
+All other `@moonshot-ai/*` packages are treated as internal packages, including `@moonshot-ai/nori-code-sdk`, `agent-core`, `kosong`, `kaos`, `kimi-code-oauth`, `kimi-telemetry`, and `migration-legacy`.
 
 `@moonshot-ai/pi-tui` is a special internal package: it is a private fork (`private: true`) that is never published, but it keeps its own changelog through changesets. It is an exception to Core Rule 4 — see the dedicated section below.
 
@@ -17,9 +17,9 @@ All other `@moonshot-ai/*` packages are treated as internal packages, including 
 
 1. **Inspect the actual changes first.** Use `git status` / `git diff --name-only` to identify which packages were actually changed.
 2. **List packages that changesets can release.** If a changed package is ignored in `.changeset/config.json`, do not put that ignored package in frontmatter together with a non-ignored package; changesets rejects mixed ignored/non-ignored frontmatter.
-3. **Map ignored internal changes to the affected released package.** If an ignored internal package changes CLI output or behavior, list `@moonshot-ai/kimi-code` and describe the actual user-visible or release-artifact change in the changelog text.
-4. **Internal package source changes that enter the CLI bundle must manually list the CLI.** `@moonshot-ai/kimi-code` inline-bundles `@moonshot-ai/*` source, but those internal packages are devDependencies from the CLI's perspective, so changesets will not automatically propagate bumps. If a change enters the CLI output, list `@moonshot-ai/kimi-code`.
-   - **Web app (`@moonshot-ai/kimi-web`) changes always enter the CLI bundle.** `@moonshot-ai/kimi-web` is ignored by changesets (see `.changeset/config.json`) and cannot be mixed with `@moonshot-ai/kimi-code` in one changeset frontmatter. Describe the web change in the changelog text, but list `@moonshot-ai/kimi-code` so the CLI release carries the bundled `dist-web` output.
+3. **Map ignored internal changes to the affected released package.** If an ignored internal package changes CLI output or behavior, list `@moonshot-ai/nori-code` and describe the actual user-visible or release-artifact change in the changelog text.
+4. **Internal package source changes that enter the CLI bundle must manually list the CLI.** `@moonshot-ai/nori-code` inline-bundles `@moonshot-ai/*` source, but those internal packages are devDependencies from the CLI's perspective, so changesets will not automatically propagate bumps. If a change enters the CLI output, list `@moonshot-ai/nori-code`.
+   - **Web app (`@moonshot-ai/kimi-web`) changes always enter the CLI bundle.** `@moonshot-ai/kimi-web` is ignored by changesets (see `.changeset/config.json`) and cannot be mixed with `@moonshot-ai/nori-code` in one changeset frontmatter. Describe the web change in the changelog text, but list `@moonshot-ai/nori-code` so the CLI release carries the bundled `dist-web` output.
 5. **Docs-only and tests-only changes usually do not need a changeset.** README, internal docs, and `test/` changes that do not enter package output do not trigger a CLI bump.
 6. `@moonshot-ai/vis` / `vis-server` / `vis-web` are ignored by changesets and should not be handled.
 
@@ -27,7 +27,7 @@ All other `@moonshot-ai/*` packages are treated as internal packages, including 
 
 1. List the changed packages and check whether each one is ignored by `.changeset/config.json`.
 2. Choose a bump level for each package.
-3. If an ignored internal package change enters the CLI bundle, put `@moonshot-ai/kimi-code` in frontmatter instead of mixing the ignored package into the same changeset.
+3. If an ignored internal package change enters the CLI bundle, put `@moonshot-ai/nori-code` in frontmatter instead of mixing the ignored package into the same changeset.
 4. Create a short kebab-case file under `.changeset/`.
 5. Split unrelated changes into separate changesets; keep one logical change in one file.
 
@@ -87,7 +87,7 @@ An internal package fixes a bug visible to CLI users:
 
 ```markdown
 ---
-"@moonshot-ai/kimi-code": patch
+"@moonshot-ai/nori-code": patch
 ---
 
 Fix occasional loss of tool call results in long conversations.
@@ -97,7 +97,7 @@ A new user-facing slash command (note the short usage hint):
 
 ```markdown
 ---
-"@moonshot-ai/kimi-code": minor
+"@moonshot-ai/nori-code": minor
 ---
 
 Add the /foo slash command to list active sessions. Run /foo to see them.
@@ -107,7 +107,7 @@ A new CLI subcommand:
 
 ```markdown
 ---
-"@moonshot-ai/kimi-code": minor
+"@moonshot-ai/nori-code": minor
 ---
 
 Add the kimi web subcommand to open the web UI. Run kimi web to launch it.
@@ -117,7 +117,7 @@ A new flag on an existing command:
 
 ```markdown
 ---
-"@moonshot-ai/kimi-code": patch
+"@moonshot-ai/nori-code": patch
 ---
 
 Add a --bar flag to skip confirmation prompts. Pass --bar to skip.
@@ -127,7 +127,7 @@ An internal package has an internal-only change, but it enters the CLI bundle:
 
 ```markdown
 ---
-"@moonshot-ai/kimi-code": patch
+"@moonshot-ai/nori-code": patch
 ---
 
 Unify tool execution metadata handling.
@@ -137,7 +137,7 @@ Only SDK source changed, and the CLI does not use it:
 
 ```markdown
 ---
-"@moonshot-ai/kimi-code-sdk": patch
+"@moonshot-ai/nori-code-sdk": patch
 ---
 
 Clarify session status typing for internal SDK callers.
@@ -145,7 +145,7 @@ Clarify session status typing for internal SDK callers.
 
 ## Web app changes
 
-`@moonshot-ai/kimi-web` is ignored by changesets and must **never** appear in a changeset frontmatter. Because the web app is bundled into the CLI release artifact, any web change that ships must list `@moonshot-ai/kimi-code` instead and describe the actual web-facing change in the text.
+`@moonshot-ai/kimi-web` is ignored by changesets and must **never** appear in a changeset frontmatter. Because the web app is bundled into the CLI release artifact, any web change that ships must list `@moonshot-ai/nori-code` instead and describe the actual web-facing change in the text.
 
 - If a PR contains both web UI changes and server API changes, split them into separate changesets so each entry has a focused description.
 - Do not enumerate every micro-tweak; keep it to one sentence that captures what the web user gets.
@@ -154,7 +154,7 @@ Web-only fix:
 
 ```markdown
 ---
-"@moonshot-ai/kimi-code": patch
+"@moonshot-ai/nori-code": patch
 ---
 
 Fix the web chat not scrolling to the bottom after sending a message.
@@ -164,7 +164,7 @@ Web UI plus server APIs in the same PR (split into two changesets):
 
 ```markdown
 ---
-"@moonshot-ai/kimi-code": minor
+"@moonshot-ai/nori-code": minor
 ---
 
 Add the server-hosted web UI, including chat layout and session list behaviors.
@@ -172,7 +172,7 @@ Add the server-hosted web UI, including chat layout and session list behaviors.
 
 ```markdown
 ---
-"@moonshot-ai/kimi-code": minor
+"@moonshot-ai/nori-code": minor
 ---
 
 Add the server REST and WebSocket APIs that power the web UI.
@@ -180,10 +180,10 @@ Add the server REST and WebSocket APIs that power the web UI.
 
 ## `@moonshot-ai/pi-tui` changes
 
-`@moonshot-ai/pi-tui` is a vendored fork that lives in `packages/pi-tui`. It is `private: true` and is never published, but it is **not** ignored by changesets: changesets versions it and writes `packages/pi-tui/CHANGELOG.md` so the fork keeps its own history. Because it is bundled into the CLI like other internal packages, it is an exception to Core Rule 4 — do **not** list `@moonshot-ai/kimi-code` for a change that only touches pi-tui.
+`@moonshot-ai/pi-tui` is a vendored fork that lives in `packages/pi-tui`. It is `private: true` and is never published, but it is **not** ignored by changesets: changesets versions it and writes `packages/pi-tui/CHANGELOG.md` so the fork keeps its own history. Because it is bundled into the CLI like other internal packages, it is an exception to Core Rule 4 — do **not** list `@moonshot-ai/nori-code` for a change that only touches pi-tui.
 
 - Changes that only affect pi-tui (build, package, strict-mode cleanup, renderer fixes): list `@moonshot-ai/pi-tui` only. No CLI changeset.
-- If the same change is also user-visible in the CLI (for example a terminal rendering fix that CLI users can see), add a **separate** changeset that lists `@moonshot-ai/kimi-code` with CLI-focused wording, in addition to the pi-tui changeset. Do not mix both packages in one frontmatter — the two changelogs need different wording.
+- If the same change is also user-visible in the CLI (for example a terminal rendering fix that CLI users can see), add a **separate** changeset that lists `@moonshot-ai/nori-code` with CLI-focused wording, in addition to the pi-tui changeset. Do not mix both packages in one frontmatter — the two changelogs need different wording.
 
 pi-tui-only change:
 
@@ -207,7 +207,7 @@ Clamp the differential render to the visible viewport so scrolling up during str
 
 ```markdown
 ---
-"@moonshot-ai/kimi-code": patch
+"@moonshot-ai/nori-code": patch
 ---
 
 Fix the transcript jumping to the top when scrolling up through history during streaming output.
@@ -218,11 +218,11 @@ Fix the transcript jumping to the top when scrolling up through history during s
 - You are about to write `major` without asking the user.
 - A new user-facing feature entry has no usage hint, or the hint runs to multiple lines and explains design rationale.
 - You guessed wording for a change you do not understand instead of asking the user whether you may dig into the repo.
-- Internal package source enters the CLI bundle, but `@moonshot-ai/kimi-code` is missing.
+- Internal package source enters the CLI bundle, but `@moonshot-ai/nori-code` is missing.
 - A changeset frontmatter mixes ignored internal packages with non-ignored packages.
-- `packages/node-sdk` was not changed, but `@moonshot-ai/kimi-code-sdk` was listed for "internal package sync".
+- `packages/node-sdk` was not changed, but `@moonshot-ai/nori-code-sdk` was listed for "internal package sync".
 - The changelog entry is in Chinese.
 - The wording claims more than the diff actually did.
 - The CLI wording mentions internal package names, class names, or PR numbers.
 - The entry includes real internal identifiers instead of neutral placeholders.
-- A change that only touches `@moonshot-ai/pi-tui` lists `@moonshot-ai/kimi-code` instead of `@moonshot-ai/pi-tui`, or mixes both packages in one frontmatter.
+- A change that only touches `@moonshot-ai/pi-tui` lists `@moonshot-ai/nori-code` instead of `@moonshot-ai/pi-tui`, or mixes both packages in one frontmatter.

@@ -95,7 +95,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build Nori web assets
-        # The SEA blob embeds apps/kimi-code/dist-web; build the web app and
+        # The SEA blob embeds apps/nori-code/dist-web; build the web app and
         # stage its assets before producing the native executable.
         # KIMI_WEB_DESKTOP=1 bakes the internal-build banner into the web bundle
         # (see apps/kimi-web/src/components/InternalBuildBanner.vue); only the
@@ -104,12 +104,12 @@ jobs:
           KIMI_WEB_DESKTOP: '1'
         run: |
           pnpm --filter @moonshot-ai/kimi-web run build
-          node apps/kimi-code/scripts/copy-web-assets.mjs
+          node apps/nori-code/scripts/copy-web-assets.mjs
 
       - name: Build native executable (local profile)
         # The Electron app signs the SEA itself (electron-builder, inside-out),
         # so the native build stays unsigned here.
-        run: pnpm --filter @moonshot-ai/kimi-code run build:native:sea
+        run: pnpm --filter @moonshot-ai/nori-code run build:native:sea
 
       - name: Setup macOS keychain (Developer ID)
         if: runner.os == 'macOS' && inputs.sign-macos

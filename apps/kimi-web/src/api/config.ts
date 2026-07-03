@@ -4,7 +4,7 @@
 import { safeGetString, safeSetString, STORAGE_KEYS } from '../lib/storage';
 
 const CLIENT_ID_KEY = STORAGE_KEYS.clientId;
-const WEB_CLIENT_NAME = 'kimi-code-web';
+const WEB_CLIENT_NAME = 'nori-code-web';
 const WEB_CLIENT_UI_MODE = 'web';
 
 export interface KimiApiConfig {

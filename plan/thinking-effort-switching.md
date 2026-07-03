@@ -26,7 +26,7 @@
 - **全局 effort 已存在**：`ThinkingConfigSchema = { mode?, effort? }`，`resolveThinkingEffort` 已用 `thinking.effort` 作为 `'on'` 的默认值（缺省 `'high'`）。
 - **底层已支持多档**：`ThinkingEffort = 'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'`，`Session.setThinking(level: string)` 接受任意字符串。
 - **kimi provider 当前发 `reasoning_effort`**：`packages/kosong/src/providers/kimi.ts` 的 `withThinking` 目前把 effort 映射成 `reasoning_effort`（与 openai 一致），同时额外发一个 `thinking: { type }`。新接口要求改成在 `thinking` 对象里带 `effort`；过渡期 `reasoning_effort` **仍保留一起传**（加 TODO，后续再删）。
-- **TUI 当前是布尔 On/Off**：`apps/kimi-code/src/tui/components/dialogs/model-selector.ts`，`←/→` 翻转布尔，`On` 左、`Off` 右。
+- **TUI 当前是布尔 On/Off**：`apps/nori-code/src/tui/components/dialogs/model-selector.ts`，`←/→` 翻转布尔，`On` 左、`Off` 右。
 
 ## 3. 设计决策（已确认）
 
@@ -263,7 +263,7 @@ function effortsOf(model: ModelAlias): readonly string[] {
 - `packages/agent-core`（provider-manager 测试）
   - `resolveProviderConfig` 把 `alias.supportEfforts` 透到 kimi provider config。
 
-- `apps/kimi-code/test/tui/components/dialogs/model-selector.test.ts`
+- `apps/nori-code/test/tui/components/dialogs/model-selector.test.ts`
   - 现有 On/Off 用例：`currentThinking` → `currentThinkingLevel`（`'on'`/`'off'`），断言 `thinking` 为字符串。
   - 新增 effort 用例：
     - effort 模型渲染 `[Off] [Low] [High] [Max]`（toggle）/ `[Low] [High] [Max]`（always-on）。
@@ -271,7 +271,7 @@ function effortsOf(model: ModelAlias): readonly string[] {
     - `←/→` 在多档间移动并到端点停止；Enter 下发具体档位。
     - 当前模型高亮运行时档位（`currentThinkingLevel`）。
     - 切到 Off 时下发的 `thinking === 'off'`。
-- `apps/kimi-code/test/tui/components/dialogs/tabbed-model-selector.test.ts`
+- `apps/nori-code/test/tui/components/dialogs/tabbed-model-selector.test.ts`
   - 透传 `currentThinkingLevel`；断言 string 档位透传。
 - `packages/oauth` 现有测试
   - `toModelInfo` 解析 `support_efforts` / `default_effort`。

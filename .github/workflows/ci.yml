@@ -26,7 +26,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - name: Smoke test CLI bundle
-        run: pnpm -C apps/kimi-code run smoke
+        run: pnpm -C apps/nori-code run smoke
 
   test:
     runs-on: ubuntu-latest
@@ -99,7 +99,7 @@ jobs:
       - name: Typecheck
         run: |
           pnpm dlx --package @typescript/native-preview@beta tsgo --version
-          for config in packages/*/tsconfig.json apps/kimi-code/tsconfig.json; do
+          for config in packages/*/tsconfig.json apps/nori-code/tsconfig.json; do
             echo "Typechecking ${config}"
             pnpm dlx --package @typescript/native-preview@beta tsgo -p "${config}" --noEmit
           done

@@ -3,7 +3,7 @@
  * bare-literal comparisons. When the terminal enables the Kitty keyboard
  * protocol (e.g. the VSCode integrated terminal), printable keys arrive as
  * CSI-u sequences, so a bare comparison silently disables the shortcut.
- * See `apps/kimi-code/src/tui/utils/printable-key.ts`.
+ * See `apps/nori-code/src/tui/utils/printable-key.ts`.
  *
  * Every printable-character comparison must first go through
  * `printableChar(data)`. Control characters (codepoint < 32) should use
