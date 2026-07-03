@@ -360,7 +360,20 @@ export class Agent {
 
   get rpcMethods(): PromisableMethods<AgentAPI> {
     return {
-      prompt: (payload) => {
+      prompt: async (payload) => {
+        // NORI auto-loop: when no active goal exists, auto-create one so the
+        // goal driver automatically advances turns through plan→implement→review.
+        // If user already has an active goal (via /goal command), don't override it.
+        if (this.goal.getGoal().goal === null) {
+          const userText = payload.input
+            .filter((p) => p.type === 'text')
+            .map((p) => p.text)
+            .join('\n')
+            .trim();
+          if (userText.length > 0 && !userText.startsWith('/')) {
+            await this.goal.createGoal({ objective: userText }, 'user');
+          }
+        }
         this.turn.prompt(payload.input);
       },
       runShellCommand: (payload) => this.tools.runShellCommand(payload.command, payload.commandId),

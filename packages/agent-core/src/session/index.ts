@@ -1,4 +1,4 @@
-﻿import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import * as path from 'node:path';
 import { load as loadYaml } from 'js-yaml';
@@ -92,6 +92,7 @@ export interface SessionOptions {
     readonly memory: NoriMemoryProvider;
     readonly swarm: NoriSwarmProvider;
     readonly maxSwarmDepth?: number;
+    readonly coderWriteEnabled?: boolean;
   };
 }
 
@@ -329,6 +330,7 @@ export class Session {
           obsidianMemory: effective.memory,
           swarmManager: effective.swarm,
           noriSwarmMaxDepth: effective.maxSwarmDepth ?? 3,
+          coderWriteEnabled: effective.coderWriteEnabled ?? false,
         };
 
     const { agent } = await this.createAgent(agentConfig, {

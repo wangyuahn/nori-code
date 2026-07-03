@@ -1,21 +1,21 @@
 {
-  "name": "@moonshot-ai/nori-code",
+  "name": "nori-code",
   "version": "0.1.0",
-  "description": "The Starting Point for Next-Gen Agents",
+  "description": "Loop-core multi-agent coding tool — plan, delegate, review, repeat.",
   "license": "MIT",
-  "author": "Moonshot AI",
-  "homepage": "https://github.com/MoonshotAI/kimi-code/tree/main/apps/nori-code#readme",
+  "author": "wangyuahn",
+  "homepage": "https://github.com/wangyuahn/nori-code#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MoonshotAI/kimi-code.git",
+    "url": "git+https://github.com/wangyuahn/nori-code.git",
     "directory": "apps/nori-code"
   },
   "bugs": {
-    "url": "https://github.com/MoonshotAI/kimi-code/issues"
+    "url": "https://github.com/wangyuahn/nori-code/issues"
   },
   "keywords": [
-    "kimi",
-    "kimi-code",
+    "nori",
+    "nori-code",
     "cli",
     "agent",
     "coding-agent",

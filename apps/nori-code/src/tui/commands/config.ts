@@ -8,6 +8,24 @@ import {
   type ThinkingEffort,
 } from '@moonshot-ai/kimi-code-sdk';
 
+// ---------------------------------------------------------------------------
+// Local workflow types (mirrors @moonshot-ai/agent-core NoriWorkflowConfig)
+// ---------------------------------------------------------------------------
+
+interface WorkflowConfig {
+  reviewSuggestionThreshold: number;
+  reviewRequiredThreshold: number;
+  maxReviewGateContinuations: number;
+  bugHuntSwarmRequired?: boolean;
+}
+
+const DEFAULT_WORKFLOW_CONFIG: WorkflowConfig = {
+  reviewSuggestionThreshold: 4,
+  reviewRequiredThreshold: 7,
+  maxReviewGateContinuations: 2,
+  bugHuntSwarmRequired: true,
+};
+
 import { EditorSelectorComponent } from '../components/dialogs/editor-selector';
 import { EffortSelectorComponent } from '../components/dialogs/effort-selector';
 import {
@@ -16,7 +34,7 @@ import {
 } from '../components/dialogs/experiments-selector';
 import { modelDisplayName, segmentsFor } from '../components/dialogs/model-selector';
 import { TabbedModelSelectorComponent } from '../components/dialogs/tabbed-model-selector';
-import { ChoicePickerComponent } from '../components/dialogs/choice-picker';
+import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';
 import {
   SettingAutoWizardComponent,
   type WizardAnswers,
@@ -815,6 +833,9 @@ function handleSettingsSelection(host: SlashCommandHost, value: SettingsSelectio
       void applyReadOnlyChoice(host, !host.state.appState.toolsReadonly);
       return;
     }
+    case 'workflow':
+      showWorkflowPicker(host);
+      return;
   }
 }
 
@@ -1089,6 +1110,188 @@ function showNoteRulesPicker(host: SlashCommandHost): void {
       },
       onCancel: () => {
         host.restoreEditor();
+      },
+    }),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Workflow picker
+// ---------------------------------------------------------------------------
+
+function getWorkflowConfig(host: SlashCommandHost): WorkflowConfig {
+  const sessionAny = host.session as any;
+  const mainAgent = sessionAny?.getReadyAgent?.('main');
+  return (mainAgent?.noriWorkflow as WorkflowConfig | undefined) ?? DEFAULT_WORKFLOW_CONFIG;
+}
+
+function setWorkflowConfig(host: SlashCommandHost, patch: Partial<WorkflowConfig>): void {
+  const sessionAny = host.session as any;
+  const mainAgent = sessionAny?.getReadyAgent?.('main');
+  if (!mainAgent) return;
+  if (mainAgent.noriWorkflow === undefined) {
+    (mainAgent as any).noriWorkflow = { ...DEFAULT_WORKFLOW_CONFIG, ...patch };
+  } else {
+    Object.assign(mainAgent.noriWorkflow, patch);
+  }
+}
+
+function showWorkflowPicker(host: SlashCommandHost): void {
+  const config = getWorkflowConfig(host);
+
+  const bugHuntLabel = config.bugHuntSwarmRequired ? 'ON' : 'OFF';
+  const gateLabel = String(config.maxReviewGateContinuations);
+
+  const options: ChoiceOption[] = [
+    {
+      value: 'bug-hunt-swarm',
+      label: `Bug Hunt Swarm: ${bugHuntLabel}`,
+      description: 'Automatically launch AgentSwarm for bug hunt / failure diagnosis requests.',
+    },
+    {
+      value: 'review-thresholds',
+      label: `Review Thresholds: ${config.reviewSuggestionThreshold} / ${config.reviewRequiredThreshold}`,
+      description: 'Set suggestion and required thresholds for auto-review gates.',
+    },
+    {
+      value: 'max-gate-continuations',
+      label: `Max Gate Continuations: ${gateLabel}`,
+      description: 'Maximum times the workflow gate can loop back before giving up.',
+    },
+  ];
+
+  host.mountEditorReplacement(
+    new ChoicePickerComponent({
+      title: 'Workflow',
+      hint: '↑↓ navigate · Enter select · Esc back',
+      options,
+      onSelect: (value) => {
+        host.restoreEditor();
+        switch (value) {
+          case 'bug-hunt-swarm': {
+            const next = !(getWorkflowConfig(host).bugHuntSwarmRequired ?? true);
+            setWorkflowConfig(host, { bugHuntSwarmRequired: next });
+            host.showStatus(`Bug Hunt Swarm: ${next ? 'ON' : 'OFF'}`);
+            break;
+          }
+          case 'review-thresholds':
+            showReviewThresholdPicker(host);
+            return;
+          case 'max-gate-continuations':
+            showGateContinuationsPicker(host);
+            return;
+        }
+      },
+      onCancel: () => {
+        host.restoreEditor();
+      },
+    }),
+  );
+}
+
+function showReviewThresholdPicker(host: SlashCommandHost): void {
+  const config = getWorkflowConfig(host);
+
+  const options: ChoiceOption[] = [
+    {
+      value: 'suggestion',
+      label: `Suggestion Threshold: ${config.reviewSuggestionThreshold}`,
+      description: 'When difficulty score reaches this value, a review gate is suggested.',
+    },
+    {
+      value: 'required',
+      label: `Required Threshold: ${config.reviewRequiredThreshold}`,
+      description: 'When difficulty score reaches this value, a review gate is required.',
+    },
+  ];
+
+  host.mountEditorReplacement(
+    new ChoicePickerComponent({
+      title: 'Review Thresholds',
+      hint: '↑↓ navigate · Enter select · Esc back',
+      options,
+      onSelect: (value) => {
+        if (value === 'suggestion') {
+          host.restoreEditor();
+          showNumberPicker(host, 'Suggestion Threshold', 0, 10, config.reviewSuggestionThreshold, (v) => {
+            setWorkflowConfig(host, { reviewSuggestionThreshold: v });
+            host.showStatus(`Suggestion threshold: ${v}`);
+          });
+          return;
+        }
+        if (value === 'required') {
+          host.restoreEditor();
+          showNumberPicker(host, 'Required Threshold', 0, 10, config.reviewRequiredThreshold, (v) => {
+            setWorkflowConfig(host, { reviewRequiredThreshold: v });
+            host.showStatus(`Required threshold: ${v}`);
+          });
+          return;
+        }
+      },
+      onCancel: () => {
+        host.restoreEditor();
+        showWorkflowPicker(host);
+      },
+    }),
+  );
+}
+
+function showGateContinuationsPicker(host: SlashCommandHost): void {
+  const config = getWorkflowConfig(host);
+
+  const options: ChoiceOption[] = Array.from({ length: 5 }, (_, i) => ({
+    value: String(i + 1),
+    label: `${i + 1}`,
+    description: i + 1 === config.maxReviewGateContinuations ? '(current)' : undefined,
+  }));
+
+  host.mountEditorReplacement(
+    new ChoicePickerComponent({
+      title: 'Max Gate Continuations',
+      hint: '↑↓ navigate · Enter select · Esc back',
+      options,
+      currentValue: String(config.maxReviewGateContinuations),
+      onSelect: (value) => {
+        const v = Number(value);
+        setWorkflowConfig(host, { maxReviewGateContinuations: v });
+        host.restoreEditor();
+        host.showStatus(`Max gate continuations: ${v}`);
+      },
+      onCancel: () => {
+        host.restoreEditor();
+        showWorkflowPicker(host);
+      },
+    }),
+  );
+}
+
+function showNumberPicker(
+  host: SlashCommandHost,
+  title: string,
+  min: number,
+  max: number,
+  current: number,
+  onSelect: (value: number) => void,
+): void {
+  const options: ChoiceOption[] = Array.from({ length: max - min + 1 }, (_, i) => ({
+    value: String(min + i),
+    label: `${min + i}`,
+    description: min + i === current ? '(current)' : undefined,
+  }));
+
+  host.mountEditorReplacement(
+    new ChoicePickerComponent({
+      title,
+      hint: '↑↓ navigate · Enter select · Esc back',
+      options,
+      currentValue: String(current),
+      onSelect: (value) => {
+        host.restoreEditor();
+        onSelect(Number(value));
+      },
+      onCancel: () => {
+        host.restoreEditor();
+        showReviewThresholdPicker(host);
       },
     }),
   );

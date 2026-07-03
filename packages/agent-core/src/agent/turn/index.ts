@@ -45,6 +45,7 @@ import type { RuleContext } from './rule-engine';
 import {
   type NoriReviewActivity,
   type NoriReviewGateDecision,
+  type NoriWorkflowConfig,
   decideNoriWorkflowGate,
   type NoriWorkflowActivity,
   type NoriWorkflowGateDecision,
@@ -125,6 +126,12 @@ export class TurnFlow {
   private noriNotesThisPhase = new Set<string>();
   /** NORI: last known nori phase name, used to detect phase transitions. */
   private noriLastPhase: string | undefined;
+  /** NORI: phase at the start of the current step, used to detect phase transitions. */
+  private noriPhaseAtStepStart: string | undefined;
+  /** NORI: current tool being executed, for rule context (on_tool rules). */
+  private noriCurrentTool: string | undefined;
+  /** NORI: stage of current tool execution, for rule context. */
+  private noriToolStage: 'before' | 'after' | undefined;
   private turnToolNames: string[] = [];
   private turnFilesCreated = 0;
   private turnFilesModified = 0;
@@ -758,17 +765,42 @@ export class TurnFlow {
               await this.agent.injection.inject();
               deduper.beginStep();
 
+              // NORI: detect phase transition before snapshot
+              const previousPhase = this.noriPhaseAtStepStart;
+
+              // NORI: snapshot phase at step start for transition detection
+              this.noriPhaseAtStepStart = this.noriLastPhase;
+
               // === NORI: 注入激活的自定义规则 ===
               const ruleEngine = this.agent.ruleEngine;
               if (ruleEngine) {
                 const currentPhase = this.noriLastPhase ?? (
                   this.agent.noriWorkflow === undefined ? undefined : 'implement'
                 );
-                const ruleCtx: RuleContext = {
+                let activatedRules = ruleEngine.getActivatedRules({
                   currentPhase,
                   phaseStage: currentPhase === undefined ? undefined : 'enter',
-                };
-                const activatedRules = ruleEngine.getActivatedRules(ruleCtx);
+                });
+
+                // If phase changed, also include exit rules for the OLD phase
+                if (
+                  previousPhase !== undefined &&
+                  this.noriLastPhase !== undefined &&
+                  previousPhase !== this.noriLastPhase
+                ) {
+                  const exitRules = ruleEngine.getActivatedRules({
+                    currentPhase: previousPhase,
+                    phaseStage: 'exit',
+                  });
+                  const seen = new Set(activatedRules.map((r) => r.name));
+                  for (const r of exitRules) {
+                    if (!seen.has(r.name)) {
+                      seen.add(r.name);
+                      activatedRules.push(r);
+                    }
+                  }
+                }
+
                 const rulePrompt = ruleEngine.getRulePrompt(activatedRules);
                 const currentPrompt = this.agent.config.systemPrompt;
                 // Idempotent: remove any previously injected nori-rules block
@@ -803,6 +835,31 @@ export class TurnFlow {
                   );
                   this.pendingNoriWorkflowGateContinuation = true;
                 }
+              }
+
+              // NORI phase-switch: when the phase transitions (plan→implement
+              // or implement→review) and the model is done with the current
+              // step, stop the turn so the goal driver starts a fresh turn
+              // with the new phase's rules and context.
+              // Before allowing the switch, check that all required note
+              // types have been written for the current phase.
+              if (
+                stopReason !== 'tool_use' &&
+                !stopForGoalBudget &&
+                this.agent.noriWorkflow !== undefined &&
+                this.noriPhaseAtStepStart !== undefined &&
+                this.noriLastPhase !== undefined &&
+                this.noriLastPhase !== this.noriPhaseAtStepStart
+              ) {
+                const noteHint = this.checkNoriNoteRules(
+                  this.agent.noriWorkflow,
+                  this.noriPhaseAtStepStart,
+                );
+                if (noteHint !== null) {
+                  this.injectNoriNoteReminder(noteHint, this.noriPhaseAtStepStart);
+                  return undefined;
+                }
+                return { stopTurn: true };
               }
 
               return stopForGoalBudget ? { stopTurn: true } : undefined;
@@ -866,6 +923,10 @@ export class TurnFlow {
               return { continue: false };
             },
             prepareToolExecution: async (ctx) => {
+              // NORI: track current tool for rule context (on_tool rules)
+              this.noriCurrentTool = ctx.toolCall.name;
+              this.noriToolStage = 'before';
+
               const cached = deduper.checkSameStep(
                 ctx.toolCall.id,
                 ctx.toolCall.name,
@@ -881,12 +942,32 @@ export class TurnFlow {
                 }
               }
 
+              // pre_swarm_doc_required: block nori_swarm_launch unless a
+              // nori_memory_write has been done this turn.
+              if (
+                ctx.toolCall.name === 'nori_swarm_launch' &&
+                this.agent.noriWorkflow?.preSwarmDocRequired === true &&
+                this.turnMemoryWriteCount <= 0
+              ) {
+                return {
+                  syntheticResult: {
+                    output:
+                      'Pre-swarm documentation is required. Call nori_memory_write first to document your plan/analysis, then retry nori_swarm_launch.',
+                    isError: true,
+                  },
+                };
+              }
+
               return undefined;
             },
             authorizeToolExecution: async (ctx) => {
               return this.agent.permission.beforeToolCall(ctx);
             },
             finalizeToolResult: async (ctx) => {
+              // NORI: track current tool for rule context (on_tool rules)
+              this.noriCurrentTool = ctx.toolCall.name;
+              this.noriToolStage = 'after';
+
               // Resolve dedup BEFORE firing the PostToolUse hook so same-step
               // dups (whose ctx.result is the dedup placeholder) report the
               // original's real outcome, not an empty success.
@@ -1276,23 +1357,24 @@ export class TurnFlow {
    * all enabled requirements are met.
    */
   private checkNoriNoteRules(
-    noriConfig: { rules?: { requireAnalysisNote?: boolean; requireDecisionNote?: boolean; requirePatternNote?: boolean } },
+    workflow: NoriWorkflowConfig,
     phaseName: string,
   ): string | null {
-    const rules = noriConfig.rules;
-    if (!rules) return null;
+    if (!workflow.requireAnalysisNote && !workflow.requireDecisionNote && !workflow.requireReviewNote) {
+      return null;
+    }
 
     const written = this.noriNotesThisPhase;
     const missing: string[] = [];
 
-    if (rules.requireAnalysisNote && !written.has('analysis')) {
+    if (workflow.requireAnalysisNote && !written.has('analysis')) {
       missing.push('analysis');
     }
-    if (rules.requireDecisionNote && !written.has('decision')) {
+    if (workflow.requireDecisionNote && !written.has('decision')) {
       missing.push('decision (ADR)');
     }
-    if (rules.requirePatternNote && !written.has('analysis')) {
-      if (!rules.requireAnalysisNote) {
+    if (workflow.requireReviewNote && !written.has('analysis')) {
+      if (!workflow.requireAnalysisNote) {
         missing.push('pattern (analysis/)');
       }
     }

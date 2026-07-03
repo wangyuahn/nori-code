@@ -11,7 +11,8 @@ export type SettingsSelection =
   | 'coder-write'
   | 'swarm-depth'
   | 'note-rules'
-  | 'read-only';
+  | 'read-only'
+  | 'workflow';
 
 const SETTINGS_OPTIONS: readonly ChoiceOption[] = [
   {
@@ -69,6 +70,11 @@ const SETTINGS_OPTIONS: readonly ChoiceOption[] = [
     label: 'Read-only Mode',
     description: 'Toggle main agent write permission.',
   },
+  {
+    value: 'workflow',
+    label: 'Workflow',
+    description: 'Configure review gate thresholds and auto-review behavior.',
+  },
 ];
 
 function isSettingsSelection(value: string): value is SettingsSelection {
@@ -83,7 +89,8 @@ function isSettingsSelection(value: string): value is SettingsSelection {
     value === 'coder-write' ||
     value === 'swarm-depth' ||
     value === 'note-rules' ||
-    value === 'read-only'
+    value === 'read-only' ||
+    value === 'workflow'
   );
 }
 

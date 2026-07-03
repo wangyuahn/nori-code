@@ -181,7 +181,6 @@ export function decideNoriReviewGate(
     };
   }
 
-  if (activity.swarmReviewCount > 0) return undefined;
   if (!hasImplementationActivity(activity)) return undefined;
 
   const score = scoreNoriReviewDifficulty(activity);
@@ -214,8 +213,6 @@ export function scoreNoriReviewDifficulty(activity: NoriReviewActivity): number 
   score += Math.min(2, activity.filesCreated);
   score += Math.min(2, activity.shellCommandCount);
   score += Math.min(3, activity.agentSwarmCount * 3);
-  score += Math.min(3, activity.noriSwarmLaunchCount * 3);
-
   if (
     changedFiles > 0 &&
     activity.testFilesCreated <= 0 &&

@@ -17,3 +17,5 @@ tools:
   - Grep
   - WebSearch
   - FetchURL
+  - nori_memory_search
+  - nori_plan_write

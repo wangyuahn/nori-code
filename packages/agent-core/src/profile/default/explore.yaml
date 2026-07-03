@@ -34,3 +34,4 @@ tools:
   - Grep
   - WebSearch
   - FetchURL
+  - nori_memory_search

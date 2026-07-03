@@ -464,6 +464,7 @@ export function createNoriProvidersFromConfig(noriConfig: Record<string, unknown
   memory: NoriMemoryProvider;
   swarm: SimpleSwarmProvider;
   maxSwarmDepth: number;
+  coderWriteEnabled: boolean;
 } | null {
   if (!noriConfig) return null;
 
@@ -477,6 +478,7 @@ export function createNoriProvidersFromConfig(noriConfig: Record<string, unknown
   const swarm = noriConfig['swarm'] as Record<string, unknown> | undefined;
   const maxSwarmDepth = (swarm?.['max_swarm_depth'] as number) ?? 3;
 
+  const coderWriteEnabled = (swarm?.['coder_write_enabled'] as boolean) ?? false;
   const swarmProvider = new SimpleSwarmProvider();
   swarmProvider.setNoriConfig(noriConfig);
 
@@ -484,6 +486,7 @@ export function createNoriProvidersFromConfig(noriConfig: Record<string, unknown
     memory: new SimpleMemoryProvider(vaultPath),
     swarm: swarmProvider,
     maxSwarmDepth,
+    coderWriteEnabled,
   };
 }
 
