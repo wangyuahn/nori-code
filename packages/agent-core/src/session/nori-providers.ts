@@ -43,11 +43,25 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
     link_depth?: number;
   }): Promise<Array<{ title: string; path: string; score?: number; excerpt?: string; content?: string }>> {
     const topK = options?.top_k ?? 10;
+    const linkDepth = options?.link_depth ?? 0;
     const typeFilter = options?.type_filter;
-    const results: Array<{ title: string; path: string; score: number; excerpt: string; content: string }> = [];
     const dirs = typeFilter?.length
       ? unique(typeFilter.flatMap(noteTypeDirs)).map(d => path.join(this.vaultPath, d))
       : [this.vaultPath];
+
+    /* ------------------------------------------------------------------ */
+    /*  Pass 1: collect all notes, parse [[wiki-links]], keyword-score      */
+    /* ------------------------------------------------------------------ */
+
+    interface NoteInfo {
+      path: string;
+      title: string;
+      body: string;
+      score: number;        // keyword match score, 0 if no match
+      links: string[];      // outgoing [[wiki-link]] target titles
+    }
+
+    const allNotes: NoteInfo[] = [];
     const seenFiles = new Set<string>();
 
     for (const dir of dirs) {
@@ -57,9 +71,20 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
           if (seenFiles.has(fp)) continue;
           seenFiles.add(fp);
           const raw = readFileSync(fp, 'utf-8');
-          const { title, frontmatter, body } = this.parseFrontmatter(raw);
+          const { title, body } = this.parseFrontmatter(raw);
           const notePath = relative(this.vaultPath, fp).replace(/\\/g, '/');
-          const searchable = `${title}\n${notePath}\n${path.basename(fp)}\n${frontmatter}\n${body}`;
+
+          // Parse [[wiki-links]] from body (handle [[page]] and [[page|alias]])
+          const wikiLinks: string[] = [];
+          const linkRegex = /\[\[([^\]]+)\]\]/g;
+          let match: RegExpExecArray | null;
+          while ((match = linkRegex.exec(body)) !== null) {
+            const linkTarget = (match[1] ?? '').split('|')[0]?.trim();
+            if (linkTarget) wikiLinks.push(linkTarget);
+          }
+
+          // Keyword matching
+          const searchable = `${title}\n${notePath}\n${path.basename(fp)}\n${body}`;
           const lower = searchable.toLowerCase();
           let score = 0;
           for (const kw of keywords) {
@@ -68,17 +93,125 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
             let idx = 0;
             while ((idx = lower.indexOf(needle, idx)) !== -1) { score++; idx++; }
           }
-          if (score > 0) {
-            results.push({
-              title,
-              path: notePath,
-              score,
-              excerpt: body.length > 500 ? body.substring(0, 500) + '...' : body,
-              content: body,
-            });
-          }
+
+          allNotes.push({ path: notePath, title, body, score, links: wikiLinks });
         }
       } catch { /* skip inaccessible dirs */ }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Pass 2: build adjacency list and seed set                           */
+    /* ------------------------------------------------------------------ */
+
+    const titleToIndex = new Map<string, number>();
+    for (let i = 0; i < allNotes.length; i++) {
+      titleToIndex.set(allNotes[i].title, i);
+    }
+
+    // adjacency[i] = indices of notes that note i links TO (outgoing)
+    const adjacency = new Map<number, number[]>();
+    for (let i = 0; i < allNotes.length; i++) {
+      const targets: number[] = [];
+      for (const linkTitle of allNotes[i].links) {
+        const targetIdx = titleToIndex.get(linkTitle);
+        if (targetIdx !== undefined) targets.push(targetIdx);
+      }
+      adjacency.set(i, targets);
+    }
+
+    // Seeds: notes with keyword score > 0
+    const seedScores = new Map<number, number>();
+    for (let i = 0; i < allNotes.length; i++) {
+      if (allNotes[i].score > 0) {
+        seedScores.set(i, allNotes[i].score);
+      }
+    }
+
+    // reverse index: notes that link TO a given note (incoming)
+    const inLinks = new Map<number, number[]>();
+    for (let i = 0; i < allNotes.length; i++) {
+      inLinks.set(i, []);
+    }
+    for (const [src, targets] of adjacency) {
+      for (const dst of targets) {
+        inLinks.get(dst)!.push(src);
+      }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Pass 3: BFS from seeds, chain-score non-seed notes via outgoing links */
+    /* ------------------------------------------------------------------ */
+
+    // resultScores: note index -> best score (seeds keep keyword score, chain notes get best chain score)
+    const resultScores = new Map<number, number>();
+
+    for (const [seedIdx, seedScore] of seedScores) {
+      resultScores.set(seedIdx, seedScore);
+    }
+
+    if (linkDepth >= 1 && seedScores.size > 0) {
+      // chainScores tracks best chain score for NON-seed notes
+      const chainScores = new Map<number, number>();
+
+      for (const [seedIdx, seedScore] of seedScores) {
+        // Level-order BFS from this seed
+        const visited = new Set<number>([seedIdx]);
+        const queue: number[] = [seedIdx];          // note indices
+        const depthOf: number[] = [0];               // parallel depth array
+
+        let front = 0;
+        while (front < queue.length) {
+          const currentIdx = queue[front];
+          const currentDepth = depthOf[front];
+          front++;
+
+          if (currentDepth >= linkDepth) continue;
+
+          const outNeighbors = adjacency.get(currentIdx) ?? [];
+          const inNeighbors = inLinks.get(currentIdx) ?? [];
+          for (const neighborIdx of new Set([...outNeighbors, ...inNeighbors])) {
+            if (visited.has(neighborIdx)) continue;
+            visited.add(neighborIdx);
+            const newDepth = currentDepth + 1;
+            queue.push(neighborIdx);
+            depthOf.push(newDepth);
+
+            if (!seedScores.has(neighborIdx)) {
+              const chainScore = seedScore * Math.pow(0.5, newDepth);
+              const prev = chainScores.get(neighborIdx);
+              if (prev === undefined || chainScore > prev) {
+                chainScores.set(neighborIdx, chainScore);
+              }
+            }
+          }
+        }
+      }
+
+      // Merge chain scores into resultScores
+      for (const [noteIdx, chainScore] of chainScores) {
+        const prev = resultScores.get(noteIdx);
+        if (prev === undefined || chainScore > prev) {
+          resultScores.set(noteIdx, chainScore);
+        }
+      }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Pass 4: build result list, sort by score, truncate to topK          */
+    /* ------------------------------------------------------------------ */
+
+    const results: Array<{ title: string; path: string; score: number; excerpt: string; content: string }> = [];
+
+    for (const [noteIdx, score] of resultScores) {
+      const note = allNotes[noteIdx];
+      if (!note) continue;
+      results.push({
+        title: note.title,
+        path: note.path,
+        score,
+        excerpt: note.body.length > 500 ? note.body.substring(0, 500) + '...' : note.body,
+        content: note.body,
+      });
     }
 
     results.sort((a, b) => b.score - a.score);

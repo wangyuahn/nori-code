@@ -152,7 +152,7 @@ export class Agent {
   /** Mutable current swarm depth, updated as swarms are launched / completed. */
   noriSwarmDepth: number;
 
-  /** When true, bypasses toolsReadonly for Write/Edit/Bash on sub-agents
+  /** When true, bypasses toolsReadonly for Write/Edit on sub-agents
    *  whose profile is nori-coder/coder.  Toggled via /setting coder write. */
   coderWriteEnabled: boolean;
 
@@ -361,9 +361,8 @@ export class Agent {
   get rpcMethods(): PromisableMethods<AgentAPI> {
     return {
       prompt: async (payload) => {
-        // NORI auto-loop: when no active goal exists, auto-create one so the
-        // goal driver automatically advances turns through plan→implement→review.
-        // If user already has an active goal (via /goal command), don't override it.
+        // NORI auto-loop: let the model summarize the task into a goal.
+        // Inject a short instruction to use CreateGoal with a summary.
         if (this.goal.getGoal().goal === null) {
           const userText = payload.input
             .filter((p) => p.type === 'text')
@@ -371,7 +370,13 @@ export class Agent {
             .join('\n')
             .trim();
           if (userText.length > 0 && !userText.startsWith('/')) {
-            await this.goal.createGoal({ objective: userText }, 'user');
+            // Prepend a system message asking the model to summarize and
+            // create a goal before starting the actual work.
+            const goalInstruction = {
+              type: 'text' as const,
+              text: `<system-reminder>\nBefore starting work, summarize this task as a one-sentence goal objective and call CreateGoal with it. Then proceed with your normal workflow.\n</system-reminder>`,
+            };
+            payload.input = [goalInstruction, ...payload.input];
           }
         }
         this.turn.prompt(payload.input);

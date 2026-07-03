@@ -54,6 +54,9 @@ export class NoriMemorySearchTool implements BuiltinTool<NoriMemorySearchInput> 
     _context: ExecutableToolContext,
   ): Promise<ExecutableToolResult> {
     try {
+      if (args.include_linked && !args.link_depth) {
+        args.link_depth = 1;
+      }
       const result = await retrieveNoriMemoryChain(this.memory, args);
       return { output: formatNoriMemoryChainResult(result) };
     } catch (err: unknown) {

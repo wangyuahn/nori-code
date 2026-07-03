@@ -53,18 +53,31 @@ export class ToolManager {
     this.attachMcpTools();
     if (agent.config.hasProvider) {
       this.initializeBuiltinTools();
+    } else {
+      // Register nori tools even without a provider — they don't depend on LLM.
+      this.registerNoriTools();
     }
-    // Register nori tools unconditionally — they don't depend on LLM providers.
-    this.builtinTools.set('NoriPlanWrite', new b.NoriPlanWriteTool(this.agent) as any);
+  }
+
+  /** Register nori tools unconditionally, also called from initializeBuiltinTools. */
+  private registerNoriTools(): void {
+    const planWrite = new b.NoriPlanWriteTool(this.agent) as any;
+    if (this.builtinTools.has(planWrite.name)) return; // already registered
+    this.builtinTools.set(planWrite.name, planWrite);
     if (this.agent.obsidianMemory) {
-      this.builtinTools.set('NoriMemorySearch', new b.NoriMemorySearchTool(this.agent.obsidianMemory) as any);
-      this.builtinTools.set('NoriMemoryWrite', new b.NoriMemoryWriteTool(this.agent.obsidianMemory) as any);
+      const memSearch = new b.NoriMemorySearchTool(this.agent.obsidianMemory) as any;
+      const memWrite = new b.NoriMemoryWriteTool(this.agent.obsidianMemory) as any;
+      this.builtinTools.set(memSearch.name, memSearch);
+      this.builtinTools.set(memWrite.name, memWrite);
     }
     if (this.agent.swarmManager) {
-      this.builtinTools.set('NoriSwarmLaunch', new b.NoriSwarmLaunchTool(
-        this.agent.swarmManager, this.agent.noriSwarmMaxDepth, this.agent.noriSwarmDepth) as any);
-      this.builtinTools.set('NoriSwarmStatus', new b.NoriSwarmStatusTool(this.agent.swarmManager) as any);
-      this.builtinTools.set('NoriSwarmResult', new b.NoriSwarmResultTool(this.agent.swarmManager) as any);
+      const swarmLaunch = new b.NoriSwarmLaunchTool(
+        this.agent.swarmManager, this.agent.noriSwarmMaxDepth, this.agent.noriSwarmDepth) as any;
+      const swarmStatus = new b.NoriSwarmStatusTool(this.agent.swarmManager) as any;
+      const swarmResult = new b.NoriSwarmResultTool(this.agent.swarmManager) as any;
+      this.builtinTools.set(swarmLaunch.name, swarmLaunch);
+      this.builtinTools.set(swarmStatus.name, swarmStatus);
+      this.builtinTools.set(swarmResult.name, swarmResult);
     }
   }
 
@@ -556,6 +569,8 @@ export class ToolManager {
         .filter((tool) => !!tool)
         .map((tool) => [tool.name, tool] as const),
     );
+    // Always re-register nori tools after rebuilding — they don't depend on providers.
+    this.registerNoriTools();
   }
 
   refreshBuiltinTools(): void {

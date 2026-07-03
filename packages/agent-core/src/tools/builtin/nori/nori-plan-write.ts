@@ -65,7 +65,7 @@ export class NoriPlanWriteTool implements BuiltinTool<Input> {
       };
     }
 
-    const firstDir = filePath.split('/')[0];
+    const firstDir = filePath.split(/[\\/]/)[0];
     if (!PLAN_DIRS.some(d => filePath.startsWith(d + '/') || filePath === d || firstDir === d)) {
       return {
         output: `Path "${filePath}" is not allowed. Plan files must be in: ${PLAN_DIRS.join(', ')}`,

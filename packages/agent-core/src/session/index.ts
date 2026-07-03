@@ -976,8 +976,30 @@ export class Session {
         ? undefined
         : await this.resumeAgent(parentAgentId, [...stack, id]);
 
+    // Build agent config with nori providers for main agent, consistent with createMain
+    let config: Partial<AgentOptions> = {};
+    if (meta.type === 'main') {
+      const cwd = this.toolKaos.getcwd();
+      const noriConfig = loadNoriYamlConfig(cwd);
+      const autoProviders = createNoriProvidersFromConfig(noriConfig, cwd);
+      const optionsProviders = this.options.noriProviders;
+      const effective = optionsProviders ?? autoProviders;
+      const noriWorkflow = resolveNoriWorkflowConfig(noriConfig);
+      const noriRules = normalizeNoriRuleDefinitions(noriConfig?.['rules']?.['definitions']);
+      config = { noriRules, noriWorkflow };
+      if (effective !== null) {
+        config = {
+          ...config,
+          obsidianMemory: effective.memory,
+          swarmManager: effective.swarm,
+          noriSwarmMaxDepth: effective.maxSwarmDepth ?? 3,
+          coderWriteEnabled: effective.coderWriteEnabled ?? false,
+        };
+      }
+    }
+
     try {
-      const agent = this.instantiateAgent(id, meta.homedir, meta.type, {}, parentAgentId);
+      const agent = this.instantiateAgent(id, meta.homedir, meta.type, config, parentAgentId);
       const result = await agent.resume();
       this.restoreAgentProfileHandle(agent, meta, parent?.agent);
       await this.refreshMainAgentProfileCapabilities(agent, meta, parent?.agent);

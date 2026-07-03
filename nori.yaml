@@ -213,6 +213,7 @@ rules:
   definitions:
     # 编码前必须搜索记忆
     - name: search_before_code
+      description: search_before_code
       condition: { type: on_phase, phase: implement, stage: enter }
       prompt: |
         Before writing any code, search the Obsidian vault for:
@@ -225,6 +226,7 @@ rules:
 
     # 实现完成前必须检查测试
     - name: require_test_before_exit
+      description: require_test_before_exit
       condition: { type: on_phase, phase: implement, stage: exit }
       prompt: |
         Before leaving the implement phase:
@@ -236,6 +238,7 @@ rules:
 
     # 重要工具调用前搜索记忆
     - name: search_before_swarm
+      description: search_before_swarm
       condition: { type: on_tool, tool: nori_swarm_launch, stage: before }
       prompt: |
         Before launching a swarm, search the vault for:
@@ -248,6 +251,7 @@ rules:
 
     # 计划阶段必须产出分析文档
     - name: require_plan_document
+      description: require_plan_document
       condition: { type: on_phase, phase: plan, stage: exit }
       prompt: |
         Before exiting the plan phase, ensure you have:
@@ -259,6 +263,7 @@ rules:
 
     # 实现阶段必须搜索记忆获取上下文
     - name: use_nori_before_code
+      description: use_nori_before_code
       condition: { type: on_phase, phase: implement, stage: enter }
       prompt: |
         Before implementing any task, use nori_memory_search to retrieve:
@@ -271,6 +276,7 @@ rules:
 
     # Swarm完成后必须检查执行结果
     - name: require_post_swarm_review
+      description: require_post_swarm_review
       condition: { type: on_tool, tool: nori_swarm_launch, stage: after }
       prompt: |
         After the swarm finishes, review its results:
@@ -283,6 +289,7 @@ rules:
 
     # 做出架构决策后必须写入ADR
     - name: write_adr_for_decision
+      description: write_adr_for_decision
       condition: { type: on_phase, phase: implement, stage: exit }
       prompt: |
         Before exiting the implement phase, write an ADR (Architecture Decision Record) if any of:

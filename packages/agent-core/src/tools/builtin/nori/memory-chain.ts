@@ -83,7 +83,7 @@ export async function retrieveNoriMemoryChain(
     const results = await memory.multiRetrieve(unseenKeywords, {
       top_k: query.top_k,
       type_filter: query.note_types,
-      link_depth: query.include_linked ? query.link_depth : 0,
+      link_depth: query.include_linked ? (query.link_depth || 1) : 0,
     });
     return { index, source, keywords: unseenKeywords, results };
   };
