@@ -54,6 +54,18 @@ export class ToolManager {
     if (agent.config.hasProvider) {
       this.initializeBuiltinTools();
     }
+    // Register nori tools unconditionally — they don't depend on LLM providers.
+    this.builtinTools.set('NoriPlanWrite', new b.NoriPlanWriteTool(this.agent) as any);
+    if (this.agent.obsidianMemory) {
+      this.builtinTools.set('NoriMemorySearch', new b.NoriMemorySearchTool(this.agent.obsidianMemory) as any);
+      this.builtinTools.set('NoriMemoryWrite', new b.NoriMemoryWriteTool(this.agent.obsidianMemory) as any);
+    }
+    if (this.agent.swarmManager) {
+      this.builtinTools.set('NoriSwarmLaunch', new b.NoriSwarmLaunchTool(
+        this.agent.swarmManager, this.agent.noriSwarmMaxDepth, this.agent.noriSwarmDepth) as any);
+      this.builtinTools.set('NoriSwarmStatus', new b.NoriSwarmStatusTool(this.agent.swarmManager) as any);
+      this.builtinTools.set('NoriSwarmResult', new b.NoriSwarmResultTool(this.agent.swarmManager) as any);
+    }
   }
 
   protected get toolStore(): ToolStore {
