@@ -17,7 +17,8 @@ Parameters:
 - note_type: 'analysis', 'decision', 'task', or 'review'.
 - title: plain text title.
 - content: full markdown content. DO NOT manually write [[wiki-links]].
-- links (required): [] to trigger auto-search, or list of note titles to link.
+- links (required): [] to trigger auto-search, ["None"] to explicitly skip
+  linking, or list of note titles to link.
 - tags (optional): used as search keywords when links is empty.`;
 
 const NoriMemoryWriteInputSchema = z.object({
@@ -51,10 +52,14 @@ export class NoriMemoryWriteTool implements BuiltinTool<NoriMemoryWriteInput> {
     _context: ExecutableToolContext,
   ): Promise<ExecutableToolResult> {
     try {
+      // links=["None"] is a sentinel meaning "deliberately no links",
+      // not an empty-link search request. Skip directly to Phase 2 write.
+      const isExplicitNone = args.links.length === 1 && args.links[0] === 'None';
+
       // Phase 1: if links is empty, force the model to provide search keywords
       // instead of writing with no links. Return the keywords and results so
       // the model can pick the right note titles and retry with proper links.
-      if (args.links.length === 0) {
+      if (!isExplicitNone && args.links.length === 0) {
         const keywords = args.tags ?? [args.title];
         const results = await this.memory.multiRetrieve(keywords, { top_k: 5 });
         const titles = results.map(r => r.title);
@@ -71,9 +76,9 @@ export class NoriMemoryWriteTool implements BuiltinTool<NoriMemoryWriteInput> {
       }
 
       // Phase 2: links provided, write the note with auto-generated [[wiki-links]]
-      const relatedSection = args.links.length > 0
-        ? args.links.map(l => `- [[${l}]]`).join('\n')
-        : '_None_';
+      const relatedSection = isExplicitNone || args.links.length === 0
+        ? '_None_'
+        : args.links.map(l => `- [[${l}]]`).join('\n');
       const fullContent = args.content + '\n\n## Related\n\n' + relatedSection;
 
       const result = await this.memory.writeNote({
@@ -81,7 +86,7 @@ export class NoriMemoryWriteTool implements BuiltinTool<NoriMemoryWriteInput> {
         title: args.title,
         content: fullContent,
         tags: args.tags,
-        links: args.links,
+        links: isExplicitNone ? [] : args.links,
       });
       return { output: `Note written: ${result.path}` };
     } catch (err: unknown) {
