@@ -1,0 +1,294 @@
+# nori.yaml
+# Nori Code project configuration.
+# This file defines phases, swarm settings, models, and error handling.
+
+version: '1'
+
+project:
+  name: nori-project
+  vault_path: ./nori-vault
+
+# ---------------------------------------------------------------------------
+#  Workflow — adaptive multi-stage orchestration
+# ---------------------------------------------------------------------------
+workflow:
+  review:
+    suggestion_threshold: 4
+    required_threshold: 7
+    max_gate_continuations: 2
+
+# ---------------------------------------------------------------------------
+#  Phases — the three core workflow stages
+# ---------------------------------------------------------------------------
+phases:
+  - name: plan
+    mode: hybrid
+    hybrid:
+      retrieval_gate:
+        trigger:
+          mode: on_keywords
+        ranking:
+          weight_embedding: 0.4
+          weight_fulltext: 0.3
+          weight_bidirectional: 0.3
+        max_results: 10
+      max_retrieval_rounds: 3
+    steps:
+      - name: search_memory
+        type: tool
+        handler: nori_memory_search
+        prompt_template: 'Search existing notes and decisions related to: {{task}}'
+      - name: analyze
+        type: llm
+        prompt_template: 'Analyze the task and existing knowledge. Identify gaps and formulate a plan.'
+      - name: document_plan
+        type: tool
+        handler: nori_memory_write
+        prompt_template: 'Write the plan to the vault as an analysis note.'
+
+  - name: implement
+    mode: llm-autonomous
+    llm_autonomous:
+      tools:
+        - name: Read
+          allowed: true
+        - name: Write
+          allowed: true
+        - name: Edit
+          allowed: true
+        - name: Bash
+          allowed: true
+        - name: Glob
+          allowed: true
+        - name: Grep
+          allowed: true
+        - name: nori_memory_search
+          allowed: true
+        - name: nori_memory_write
+          allowed: true
+      guardrails:
+        - type: max_file_size
+          value: 1048576
+          message: 'File exceeds 1 MB limit.'
+        - type: forbidden_path
+          value: '/etc,/proc,/sys'
+          message: 'Cannot access system paths.'
+      max_iterations: 20
+    steps:
+      - name: load_plan
+        type: tool
+        handler: nori_memory_search
+        prompt_template: 'Load the plan from the vault before starting implementation.'
+      - name: implement_task
+        type: llm
+        prompt_template: 'Implement the planned changes. Follow the plan and write code.'
+      - name: write_decision_note
+        type: tool
+        handler: nori_memory_write
+        prompt_template: 'Document key decisions made during implementation as a decision note.'
+
+  - name: review
+    mode: rule-enforced
+    rule_enforced:
+      steps:
+        - type: tool
+          id: run_tests
+          command: 'pnpm test -- --passWithNoTests 2>&1 || true'
+        - type: tool
+          id: lint_check
+          command: 'pnpm lint 2>&1 || true'
+        - type: llm
+          id: review_diff
+        - type: tool
+          id: write_pattern_note
+          command: 'nori_memory_write'
+    steps:
+      - name: run_tests
+        type: tool
+        handler: Bash
+        prompt_template: 'Run the test suite to verify the implementation.'
+      - name: run_lint
+        type: tool
+        handler: Bash
+        prompt_template: 'Run the linter to check code quality.'
+      - name: review_changes
+        type: llm
+        prompt_template: 'Review the diff. Check for correctness, style, and regressions.'
+      - name: document_pattern
+        type: tool
+        handler: nori_memory_write
+        prompt_template: 'Write a pattern note documenting reusable patterns discovered during review.'
+
+# ---------------------------------------------------------------------------
+#  Swarm — distributed agent execution
+# ---------------------------------------------------------------------------
+swarm:
+  max_concurrency: 4
+  max_swarm_depth: 3
+  default_timeout: 300
+  coder_write_enabled: false
+  checks:
+    - id: type_check
+      agent_type: coder
+      depends_on: []
+      on_failure: fix_and_retry
+    - id: lint_check
+      agent_type: coder
+      depends_on: [type_check]
+      on_failure: report
+    - id: test_check
+      agent_type: coder
+      depends_on: [lint_check]
+      on_failure: block
+    - id: review_gate
+      agent_type: reviewer
+      depends_on: [test_check]
+      on_failure: block
+
+# ---------------------------------------------------------------------------
+#  Models — LLM assignments per role
+# ---------------------------------------------------------------------------
+models:
+  orchestrator:
+    provider: default
+    model: default
+    temperature: 0.3
+  coder:
+    provider: default
+    model: default
+    temperature: 0.1
+  reviewer:
+    provider: default
+    model: default
+    temperature: 0.0
+
+# ---------------------------------------------------------------------------
+#  Obsidian — vault and retrieval configuration
+# ---------------------------------------------------------------------------
+obsidian:
+  vault_path: ./nori-vault
+  retrieval:
+    top_k: 10
+    weights:
+      embedding: 0.4
+      fulltext: 0.3
+      bidirectional: 0.3
+
+# ---------------------------------------------------------------------------
+#  On Error — error handling strategies
+# ---------------------------------------------------------------------------
+on_error:
+  default:
+    action: tell_llm
+    tell_llm:
+      available_tools:
+        - name: Read
+          why: 'Read error logs and related files.'
+        - name: Bash
+          why: 'Run diagnostic commands.'
+        - name: nori_memory_search
+          why: 'Search for known fixes in the vault.'
+  overrides:
+    EACCES:
+      action: skip
+    ENOSPC:
+      action: abort
+    ETIMEDOUT:
+      action: retry
+      retry:
+        max_attempts: 3
+        backoff: exponential
+        backoff_seconds: 2
+    test_failure:
+      action: fallback_phase
+
+# ---------------------------------------------------------------------------
+#  Rules — behavior rules and note-writing flags
+# ---------------------------------------------------------------------------
+rules:
+  pre_swarm_doc_required: false
+  require_analysis_note: true
+  require_decision_note: true
+  require_pattern_note: true
+  definitions:
+    # 编码前必须搜索记忆
+    - name: search_before_code
+      condition: { type: on_phase, phase: implement, stage: enter }
+      prompt: |
+        Before writing any code, search the Obsidian vault for:
+        1. Past architecture decisions related to this task
+        2. Previous code reviews and patterns
+        3. Related analysis notes
+        Use nori_memory_search with concrete keywords.
+      enforced: true
+      editable: true
+
+    # 实现完成前必须检查测试
+    - name: require_test_before_exit
+      condition: { type: on_phase, phase: implement, stage: exit }
+      prompt: |
+        Before leaving the implement phase:
+        1. Run tests to verify your changes work
+        2. Use nori_swarm_launch for post-code review
+        3. Check that no existing tests are broken
+      enforced: true
+      editable: true
+
+    # 重要工具调用前搜索记忆
+    - name: search_before_swarm
+      condition: { type: on_tool, tool: nori_swarm_launch, stage: before }
+      prompt: |
+        Before launching a swarm, search the vault for:
+        - Past swarm execution patterns and results
+        - Similar implementation tasks and their outcomes
+        - Relevant code review notes
+        Use nori_memory_search.
+      enforced: true
+      editable: true
+
+    # 计划阶段必须产出分析文档
+    - name: require_plan_document
+      condition: { type: on_phase, phase: plan, stage: exit }
+      prompt: |
+        Before exiting the plan phase, ensure you have:
+        1. Written a clear plan document (nori_memory_write or nori_plan_write)
+        2. Identified all affected modules and dependencies
+        3. Listed any architectural decisions that need to be made
+      enforced: true
+      editable: false
+
+    # 实现阶段必须搜索记忆获取上下文
+    - name: use_nori_before_code
+      condition: { type: on_phase, phase: implement, stage: enter }
+      prompt: |
+        Before implementing any task, use nori_memory_search to retrieve:
+        1. Architecture Decision Records (ADRs) relevant to this task
+        2. Previously discovered patterns and code review notes
+        3. Reusable utilities and known pitfalls in the codebase
+        Use specific keywords derived from the task description.
+      enforced: true
+      editable: true
+
+    # Swarm完成后必须检查执行结果
+    - name: require_post_swarm_review
+      condition: { type: on_tool, tool: nori_swarm_launch, stage: after }
+      prompt: |
+        After the swarm finishes, review its results:
+        1. Verify all swarm sub-tasks completed without errors
+        2. Check that generated code passes lint and type checks
+        3. Confirm tests introduced or modified by the swarm are green
+        4. Run nori_memory_write to record the swarm outcome for future reference
+      enforced: true
+      editable: true
+
+    # 做出架构决策后必须写入ADR
+    - name: write_adr_for_decision
+      condition: { type: on_phase, phase: implement, stage: exit }
+      prompt: |
+        Before exiting the implement phase, write an ADR (Architecture Decision Record) if any of:
+        1. A new library, framework, or external dependency was introduced
+        2. A significant refactor or design pattern change was applied
+        3. A trade-off was made between competing approaches
+        Use nori_memory_write with tag "adr" in the vault.
+      enforced: true
+      editable: true

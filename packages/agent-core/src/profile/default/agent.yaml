@@ -1,0 +1,54 @@
+name: agent
+description: Default Nori Code agent
+
+systemPromptPath: ./system.md
+promptVars:
+  roleAdditional: ''
+
+tools_readonly: true
+
+tools:
+  - Read
+  - Write
+  - Edit
+  - Grep
+  - Glob
+  - Bash
+  - TaskList
+  - TaskOutput
+  - TaskStop
+  - CronCreate
+  - CronList
+  - CronDelete
+  - ReadMediaFile
+  - TodoList
+  - Skill
+  - WebSearch
+  - AgentSwarm
+  - Agent
+  - FetchURL
+  - AskUserQuestion
+  - EnterPlanMode
+  - ExitPlanMode
+  - CreateGoal
+  - GetGoal
+  - SetGoalBudget
+  - UpdateGoal
+  - mcp__*
+  - nori_memory_search
+  - nori_memory_write
+  - nori_plan_write
+  - nori_swarm_launch
+  - nori_swarm_status
+  - nori_swarm_result
+  - nori_ask_parent
+
+subagents:
+  nori-coder:
+    description: Read-only coding orchestrator. Plans and delegates implementation via AgentSwarm. Does NOT write code directly.
+  coder:
+    description: General software engineering worker. Prefer AgentSwarm/nori-coder orchestration for delegated work.
+  explore:
+    description: Fast codebase exploration with prompt-enforced read-only behavior.
+  plan:
+    description: Read-only implementation planning and architecture design.

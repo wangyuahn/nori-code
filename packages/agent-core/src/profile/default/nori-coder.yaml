@@ -1,0 +1,41 @@
+extends: agent
+name: nori-coder
+description: Read-only coding orchestrator — plans, decomposes, and delegates to swarm sub-agents.
+
+systemPromptPath: ./nori-coder-system.md
+
+promptVars:
+  roleAdditional: |
+    You are a coder orchestrator. You plan coding tasks and delegate 
+    implementation to sub-agents via AgentSwarm.
+  whenToUse: |
+    Use this agent for complex coding tasks that require planning, decomposition,
+    and delegation. The nori-coder will analyze the codebase, create a plan, and
+    delegate implementation to swarm sub-agents. It is read-only by default —
+    all code changes go through spawned sub-agents via AgentSwarm.
+
+tools_readonly: true
+# 该 agent 默认只读。用户可以通过 /setting coder write on 授权 Write/Edit/Bash
+
+tools:
+  - Read
+  - Grep
+  - Glob
+  - WebSearch
+  - FetchURL
+  - ReadMediaFile
+  - TodoList
+  - TaskList
+  - TaskOutput
+  - TaskStop
+  - Skill
+  - mcp__*
+  - nori_memory_search
+  - nori_memory_write
+  - nori_plan_write
+  - AgentSwarm
+  - nori_swarm_launch
+  - nori_swarm_status
+  - nori_swarm_result
+  - nori_ask_parent
+  - Agent
