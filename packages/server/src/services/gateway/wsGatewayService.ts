@@ -88,6 +88,9 @@ export class WSGateway extends Disposable implements IWSGateway {
     const url = req.url ?? '';
     const path = url.split('?', 1)[0];
     if (path !== WS_PATH) {
+      // Let the swarm WS route handle its own upgrades — the swarm listener
+      // runs before us (prependListener) and completes the handshake.
+      if (path === '/api/v1/swarm/ws') return;
       socket.destroy();
       return;
     }

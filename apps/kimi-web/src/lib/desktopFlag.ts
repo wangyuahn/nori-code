@@ -6,7 +6,8 @@
 // The desktop app shares the local kimi daemon with the CLI / browser / TUI, so
 // the web bundle it displays may be served by an already-running external daemon
 // (not the one bundled inside the app). A purely build-time flag is therefore
-// unreliable. Instead, the desktop app appends `?kimi_desktop=1&platform=<os>`
+// unreliable. Instead, the desktop app appends `?kimi_desktop=1` (legacy) or
+// `?nori_desktop=1` (current) plus `&platform=<os>`
 // to the URL it loads (see apps/kimi-desktop/src/main/index.ts); we persist
 // those values in sessionStorage so they survive any in-app navigation or
 // redirect that drops the query string. The compile-time __KIMI_WEB_DESKTOP__
@@ -14,6 +15,7 @@
 // built for the desktop.
 
 const QUERY_KEY = 'kimi_desktop';
+const NORI_QUERY_KEY = 'nori_desktop';
 const PLATFORM_KEY = 'platform';
 const STORAGE_KEY = 'kimi-desktop';
 const PLATFORM_STORAGE_KEY = 'kimi-desktop-platform';
@@ -33,7 +35,7 @@ function detect(): DesktopEnv {
   let platform: string | null = null;
   try {
     const params = new URLSearchParams(window.location.search);
-    if (params.has(QUERY_KEY)) {
+    if (params.has(QUERY_KEY) || params.has(NORI_QUERY_KEY)) {
       sessionStorage.setItem(STORAGE_KEY, '1');
       desktop = true;
     } else {

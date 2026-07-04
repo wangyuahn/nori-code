@@ -492,7 +492,7 @@ function formatReadyBanner(
   return lines.join('\n');
 }
 
-const DEFAULT_RUN_COMMAND_DEPS: RunCommandDeps = {
+export const DEFAULT_RUN_COMMAND_DEPS: RunCommandDeps = {
   startServerBackground,
   startServerForeground,
   openUrl: defaultOpenUrl,

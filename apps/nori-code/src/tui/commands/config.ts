@@ -8,24 +8,6 @@ import {
   type ThinkingEffort,
 } from '@moonshot-ai/kimi-code-sdk';
 
-// ---------------------------------------------------------------------------
-// Local workflow types (mirrors @moonshot-ai/agent-core NoriWorkflowConfig)
-// ---------------------------------------------------------------------------
-
-interface WorkflowConfig {
-  reviewSuggestionThreshold: number;
-  reviewRequiredThreshold: number;
-  maxReviewGateContinuations: number;
-  bugHuntSwarmRequired?: boolean;
-}
-
-const DEFAULT_WORKFLOW_CONFIG: WorkflowConfig = {
-  reviewSuggestionThreshold: 4,
-  reviewRequiredThreshold: 7,
-  maxReviewGateContinuations: 2,
-  bugHuntSwarmRequired: true,
-};
-
 import { EditorSelectorComponent } from '../components/dialogs/editor-selector';
 import { EffortSelectorComponent } from '../components/dialogs/effort-selector';
 import {
@@ -59,6 +41,9 @@ import {
   loadNoteRuleFlags,
   setNoteRuleFlag,
   type NoteRuleFlags,
+  loadWorkflowConfig,
+  saveWorkflowConfig,
+  type WorkflowConfig,
 } from '../utils/nori-config';
 import { thinkingEffortToConfig } from '../utils/thinking-config';
 import { showUsage } from './info';
@@ -1120,19 +1105,31 @@ function showNoteRulesPicker(host: SlashCommandHost): void {
 // ---------------------------------------------------------------------------
 
 function getWorkflowConfig(host: SlashCommandHost): WorkflowConfig {
+  // Read from nori.yaml first, fall back to in-memory on agent
+  const fromFile = loadWorkflowConfig(process.cwd());
   const sessionAny = host.session as any;
   const mainAgent = sessionAny?.getReadyAgent?.('main');
-  return (mainAgent?.noriWorkflow as WorkflowConfig | undefined) ?? DEFAULT_WORKFLOW_CONFIG;
+  const fromAgent = mainAgent?.noriWorkflow as WorkflowConfig | undefined;
+  // Merge: agent runtime overrides file defaults
+  return { ...fromFile, ...(fromAgent ?? {}) };
 }
 
 function setWorkflowConfig(host: SlashCommandHost, patch: Partial<WorkflowConfig>): void {
   const sessionAny = host.session as any;
   const mainAgent = sessionAny?.getReadyAgent?.('main');
-  if (!mainAgent) return;
-  if (mainAgent.noriWorkflow === undefined) {
-    (mainAgent as any).noriWorkflow = { ...DEFAULT_WORKFLOW_CONFIG, ...patch };
-  } else {
-    Object.assign(mainAgent.noriWorkflow, patch);
+  
+  // Persist to nori.yaml
+  const current = loadWorkflowConfig(process.cwd());
+  const next = { ...current, ...patch };
+  saveWorkflowConfig(process.cwd(), next);
+  
+  // Also update runtime agent for immediate effect
+  if (mainAgent) {
+    if (mainAgent.noriWorkflow === undefined) {
+      (mainAgent as any).noriWorkflow = { ...current, ...patch };
+    } else {
+      Object.assign(mainAgent.noriWorkflow, patch);
+    }
   }
 }
 
@@ -1169,7 +1166,7 @@ function showWorkflowPicker(host: SlashCommandHost): void {
         host.restoreEditor();
         switch (value) {
           case 'bug-hunt-swarm': {
-            const next = !(getWorkflowConfig(host).bugHuntSwarmRequired ?? true);
+            const next = !getWorkflowConfig(host).bugHuntSwarmRequired;
             setWorkflowConfig(host, { bugHuntSwarmRequired: next });
             host.showStatus(`Bug Hunt Swarm: ${next ? 'ON' : 'OFF'}`);
             break;

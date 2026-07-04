@@ -15,7 +15,7 @@ promptVars:
     all code changes go through spawned sub-agents via AgentSwarm.
 
 tools_readonly: true
-# 该 agent 默认只读。用户可以通过 /setting coder write on 授权 Write/Edit/Bash
+# 该 agent 默认只读。
 
 tools:
   - Read

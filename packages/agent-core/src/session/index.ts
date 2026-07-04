@@ -978,12 +978,13 @@ export class Session {
 
     // Build agent config with nori providers for main agent, consistent with createMain
     let config: Partial<AgentOptions> = {};
+    let effective: { memory: NoriMemoryProvider; swarm: NoriSwarmProvider; maxSwarmDepth?: number; coderWriteEnabled?: boolean } | null = null;
     if (meta.type === 'main') {
       const cwd = this.toolKaos.getcwd();
       const noriConfig = loadNoriYamlConfig(cwd);
       const autoProviders = createNoriProvidersFromConfig(noriConfig, cwd);
       const optionsProviders = this.options.noriProviders;
-      const effective = optionsProviders ?? autoProviders;
+      effective = optionsProviders ?? autoProviders;
       const noriWorkflow = resolveNoriWorkflowConfig(noriConfig);
       const noriRules = normalizeNoriRuleDefinitions(noriConfig?.['rules']?.['definitions']);
       config = { noriRules, noriWorkflow };
@@ -1003,6 +1004,12 @@ export class Session {
       const result = await agent.resume();
       this.restoreAgentProfileHandle(agent, meta, parent?.agent);
       await this.refreshMainAgentProfileCapabilities(agent, meta, parent?.agent);
+
+      // Wire swarm provider to the resumed agent (lazy wiring), mirroring createMain
+      if (meta.type === 'main' && effective?.swarm && 'wireToAgent' in (effective.swarm as object)) {
+        (effective.swarm as unknown as { wireToAgent(a: Agent): void }).wireToAgent(agent);
+      }
+
       this.agents.set(id, agent);
       return { agent, warning: parent?.warning ?? result.warning };
     } catch (error) {

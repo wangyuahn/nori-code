@@ -25,6 +25,9 @@ import { registerTerminalsRoutes } from './terminals';
 import { registerToolsRoutes } from './tools';
 import { registerWorkspaceFsRoutes } from './workspaceFs';
 import { registerWorkspacesRoutes } from './workspaces';
+import { registerVaultRoutes } from './vault';
+import { registerSwarmStatusRoute } from './swarmStatus';
+import { registerPhaseRoute } from './phase';
 
 interface ApiV1AppHost {
   register(
@@ -125,6 +128,18 @@ export async function registerApiV1Routes(
       apiV1 as unknown as Parameters<typeof registerWorkspaceFsRoutes>[0],
       ix,
     );
+
+    // Nori API routes
+    registerVaultRoutes(apiV1 as unknown as Parameters<typeof registerVaultRoutes>[0], ix);
+    registerSwarmStatusRoute(apiV1 as unknown as Parameters<typeof registerSwarmStatusRoute>[0], ix);
+    registerPhaseRoute(apiV1 as unknown as Parameters<typeof registerPhaseRoute>[0], ix);
+
+    // NOTE: Swarm WebSocket (WS /api/v1/swarm/ws) must be registered on the
+    // main Fastify app instance OUTSIDE this /api/v1 prefix register, because
+    // Fastify upgrade listeners need the raw HTTP server. Call
+    //   import { registerSwarmWsRoute } from './swarmWs';
+    //   registerSwarmWsRoute(app, ix);
+    // from start.ts after registerApiV1Routes().
 
     if (opts.debugEndpoints === true) {
       registerDebugRoutes(

@@ -1,0 +1,25 @@
+{
+  "name": "@moonshot-ai/nori-web",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Nori Code Web UI — Dashboard, Vault browser, and Swarm visualization",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "typescript": "6.0.2",
+    "vite": "^6.3.0",
+    "@vitejs/plugin-react": "^4.4.0"
+  }
+}

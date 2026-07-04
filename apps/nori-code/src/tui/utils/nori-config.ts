@@ -229,3 +229,100 @@ export function setNoteRuleFlag(
 
   writeFileSync(filePath, raw, 'utf-8');
 }
+
+// ---------------------------------------------------------------------------
+//  Workflow config — persisted under workflow: in nori.yaml (top level)
+// ---------------------------------------------------------------------------
+
+export interface WorkflowConfig {
+  reviewSuggestionThreshold: number;
+  reviewRequiredThreshold: number;
+  maxReviewGateContinuations: number;
+  bugHuntSwarmRequired: boolean;
+}
+
+export const DEFAULT_WORKFLOW_CONFIG: WorkflowConfig = {
+  reviewSuggestionThreshold: 4,
+  reviewRequiredThreshold: 7,
+  maxReviewGateContinuations: 2,
+  bugHuntSwarmRequired: true,
+};
+
+/**
+ * Load workflow config from nori.yaml's top-level workflow: section.
+ * Agent-core resolveNoriWorkflowConfig reads workflow.review_suggestion_threshold
+ * (flat top-level format) as a fallback path after workflow.review.* (nested).
+ */
+export function loadWorkflowConfig(cwd: string): WorkflowConfig {
+  const filePath = resolvePath(cwd);
+  const config = { ...DEFAULT_WORKFLOW_CONFIG };
+
+  if (!existsSync(filePath)) return config;
+
+  const raw = readFileSync(filePath, 'utf-8');
+
+  // Parse top-level workflow: block (0-indent key, 2-indent values)
+  const wfMatch = raw.match(/^workflow:\s*\n((?:\s{2}.+\n?)+)/m);
+  if (!wfMatch) return config;
+
+  const block = wfMatch[1];
+  if (block === undefined) return config;
+
+  const intMatch = (key: string): number | undefined => {
+    const m = new RegExp(`^\\s{2}${key}:\\s*(\\d+)`, 'm').exec(block);
+    if (!m || m[1] === undefined) return undefined;
+    return parseInt(m[1], 10);
+  };
+  const boolMatch = (key: string): boolean | undefined => {
+    const m = new RegExp(`^\\s{2}${key}:\\s*(true|false)`, 'm').exec(block);
+    if (!m || m[1] === undefined) return undefined;
+    return m[1] === 'true';
+  };
+
+  const st = intMatch('review_suggestion_threshold');
+  if (st !== undefined) config.reviewSuggestionThreshold = st;
+  const rt = intMatch('review_required_threshold');
+  if (rt !== undefined) config.reviewRequiredThreshold = rt;
+  const mgc = intMatch('max_review_gate_continuations');
+  if (mgc !== undefined) config.maxReviewGateContinuations = mgc;
+  const bhs = boolMatch('bug_hunt_swarm_required');
+  if (bhs !== undefined) config.bugHuntSwarmRequired = bhs;
+
+  return config;
+}
+
+/**
+ * Save workflow config to nori.yaml's top-level workflow: section.
+ * Uses the flat format (workflow.review_suggestion_threshold) that
+ * agent-core resolveNoriWorkflowConfig supports as a fallback path.
+ */
+export function saveWorkflowConfig(cwd: string, config: WorkflowConfig): void {
+  const filePath = resolvePath(cwd);
+
+  const wfYaml = [
+    'workflow:',
+    `  review_suggestion_threshold: ${config.reviewSuggestionThreshold}`,
+    `  review_required_threshold: ${config.reviewRequiredThreshold}`,
+    `  max_review_gate_continuations: ${config.maxReviewGateContinuations}`,
+    `  bug_hunt_swarm_required: ${config.bugHuntSwarmRequired}`,
+    '',
+  ].join('\n');
+
+  if (!existsSync(filePath)) {
+    writeFileSync(filePath, `# nori.yaml\n\n${wfYaml}`, 'utf-8');
+    return;
+  }
+
+  let raw = readFileSync(filePath, 'utf-8');
+
+  // Replace existing top-level workflow block
+  const wfRegex = /^workflow:\s*\n(?:\s{2}.+\n?)+/m;
+  if (wfRegex.test(raw)) {
+    raw = raw.replace(wfRegex, wfYaml);
+  } else {
+    // No workflow block — append at end of file
+    raw = raw.trimEnd() + '\n' + wfYaml;
+  }
+
+  writeFileSync(filePath, raw, 'utf-8');
+}

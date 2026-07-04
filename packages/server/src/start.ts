@@ -25,6 +25,7 @@ import {
 } from './services/pinoLoggerService';
 import { resolveRequestId } from './request-id';
 import { registerApiV1Routes } from './routes/registerApiV1Routes';
+import { registerSwarmWsRoute } from './routes/swarmWs';
 import {
   IConnectionRegistry,
   IRestGateway,
@@ -332,6 +333,16 @@ export async function startServer(opts: ServerStartOptions): Promise<RunningServ
     enableShutdown: bindClass === 'loopback' || allowRemoteShutdown,
     enableTerminals: bindClass === 'loopback' || allowRemoteTerminals,
   });
+
+  // Swarm WebSocket route — must be registered on the raw HTTP server, not
+  // inside the /api/v1 prefix, because Fastify upgrade listeners need the raw
+  // server object. The main WS gateway also uses prependListener, so swarm's
+  // prependListener must fire before the gateway's — registration order matters.
+  try {
+    registerSwarmWsRoute(app as never, ix);
+  } catch (err) {
+    pinoLogger.warn({ err }, 'failed to register swarm WS route');
+  }
 
   app.get('/asyncapi.json', async (_req, reply) => {
     // Reflect the bound host, never the caller-supplied `Host` header (PLAN

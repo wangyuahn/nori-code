@@ -18,6 +18,7 @@ import { registerPsCommand } from './ps';
 import { registerKillCommand } from './kill';
 import { buildRunCommand } from './run';
 import { registerRotateTokenCommand } from './rotate-token';
+import { registerDesktopAliasCommand } from './desktop-alias';
 import { registerWebAliasCommand } from './web-alias';
 
 export function registerServerCommand(program: Command): void {
@@ -44,6 +45,7 @@ export function registerServerCommand(program: Command): void {
   // addLifecycleCommands(server);
 
   registerWebAliasCommand(program);
+  registerDesktopAliasCommand(program);
 }
 
-export { registerWebAliasCommand };
+export { registerDesktopAliasCommand, registerWebAliasCommand };
