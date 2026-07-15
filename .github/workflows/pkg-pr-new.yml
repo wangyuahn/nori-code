@@ -37,7 +37,7 @@ jobs:
         run: pnpm run build:packages
 
       - name: Build Nori web assets
-        run: pnpm --filter @moonshot-ai/kimi-web run build
+        run: pnpm --filter @nori-code/nori-web run build
 
       - name: Generate Nori Code built-in catalog
         shell: bash

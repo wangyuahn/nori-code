@@ -89,7 +89,7 @@ jobs:
         # The SEA blob step embeds apps/nori-code/dist-web; build the web app
         # and stage its assets before producing the native executable.
         run: |
-          pnpm --filter @moonshot-ai/kimi-web run build
+          pnpm --filter @nori-code/nori-web run build
           node apps/nori-code/scripts/copy-web-assets.mjs
 
       - name: Build native executable (release profile, macOS signed)

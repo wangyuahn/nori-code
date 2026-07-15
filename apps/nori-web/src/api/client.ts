@@ -88,6 +88,16 @@ export interface Session {
   current_prompt_id?: string;
   metadata?: { cwd?: string; [key: string]: unknown };
   agent_config?: SessionAgentConfig;
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    cache_creation_tokens: number;
+    total_cost_usd: number;
+    context_tokens: number;
+    context_limit: number;
+    turn_count: number;
+  };
   archived?: boolean;
 }
 
@@ -310,6 +320,7 @@ export interface SwarmStatus {
   task_id?: string;
   description?: string;
   owner_agent_id?: string;
+  parent_swarm_id?: string;
   round?: number;
   started_at?: string;
   usage?: {
@@ -335,6 +346,7 @@ export interface SwarmStatus {
       cache_write: number;
       total: number;
     };
+    live_output_tokens?: number;
     context_tokens?: number;
   }>;
 }

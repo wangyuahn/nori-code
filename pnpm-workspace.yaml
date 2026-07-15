@@ -1,9 +1,6 @@
 packages:
   - packages/*
-  - '!packages/kimi-migration-legacy'
   - apps/*
-  - '!apps/kimi-desktop'
-  - '!apps/kimi-web'
   - apps/vis/server
   - apps/vis/web
 

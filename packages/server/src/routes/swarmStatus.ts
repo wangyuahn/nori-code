@@ -34,6 +34,7 @@ const swarmStatusSchema = z.object({
   task_id: z.string().optional(),
   description: z.string().optional(),
   owner_agent_id: z.string().optional(),
+  parent_swarm_id: z.string().optional(),
   round: z.number().int().positive().optional(),
   started_at: z.string().optional(),
   usage: z.object({
@@ -59,6 +60,7 @@ const swarmStatusSchema = z.object({
       cache_write: z.number().int().nonnegative(),
       total: z.number().int().nonnegative(),
     }).optional(),
+    live_output_tokens: z.number().int().nonnegative().optional(),
     context_tokens: z.number().int().nonnegative().optional(),
   })).optional(),
 });
@@ -89,6 +91,9 @@ export interface SwarmTaskStatusEntry {
   output?: string;
   output_bytes?: number;
   usage?: SwarmTokenUsage;
+  live_output_tokens?: number;
+  /** Current incomplete model step, retained only for live token estimation. */
+  live_output?: string;
   context_tokens?: number;
 }
 
@@ -104,6 +109,7 @@ export interface SwarmStatusEntry {
   task_id?: string;
   description?: string;
   owner_agent_id?: string;
+  parent_swarm_id?: string;
   tool_call_id?: string;
   round?: number;
   started_at?: string;
@@ -137,6 +143,7 @@ export function setSwarmStatus(entry: SwarmStatusEntry): void {
     task_id: entry.task_id,
     description: entry.description,
     owner_agent_id: entry.owner_agent_id,
+    parent_swarm_id: entry.parent_swarm_id,
     round: entry.round,
     started_at: entry.started_at,
     usage: entry.usage,
@@ -261,6 +268,7 @@ export function registerSwarmStatusRoute(app: RouteHost, ix: IInstantiationServi
         task_id: entry?.task_id,
         description: entry?.description,
         owner_agent_id: entry?.owner_agent_id,
+        parent_swarm_id: entry?.parent_swarm_id,
         round: entry?.round,
         started_at: entry?.started_at,
         ...(usage === undefined ? {} : { usage }),

@@ -126,6 +126,16 @@ function countCompletedSwarmTasks(tasks: readonly SwarmTaskStatusEntry[] | undef
   return tasks?.filter(task => ['completed', 'failed', 'cancelled'].includes(task.status)).length ?? 0;
 }
 
+function estimateOutputTokens(text: string): number {
+  let asciiChars = 0;
+  let nonAsciiChars = 0;
+  for (const char of text) {
+    if (char.charCodeAt(0) <= 0x7f) asciiChars++;
+    else nonAsciiChars++;
+  }
+  return Math.ceil(asciiChars / 4) + nonAsciiChars;
+}
+
 export class WSBroadcastService extends Disposable implements IWSBroadcastService {
   readonly _serviceBrand: undefined;
 
@@ -206,6 +216,9 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
         : (prior?.task_count ?? 1);
       const terminal = event.type === 'background.task.terminated';
       const pending = terminal ? undefined : this._takePendingSwarmTool(sid, event.agentId);
+      const parentSwarm = prior?.parent_swarm_id === undefined && event.agentId !== MAIN_AGENT_ID
+        ? findSwarmByAgent(sid, event.agentId)
+        : undefined;
       const status = !terminal
         ? 'running' as const
         : info.status === 'completed'
@@ -221,8 +234,9 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
         task_id: info.taskId,
         description: info.description,
         owner_agent_id: prior?.owner_agent_id ?? event.agentId,
+        parent_swarm_id: prior?.parent_swarm_id ?? parentSwarm?.swarm_id,
         tool_call_id: prior?.tool_call_id ?? pending?.toolCallId,
-        round: prior?.round ?? nextSwarmRound(sid),
+        round: prior?.round ?? parentSwarm?.round ?? nextSwarmRound(sid),
         started_at: prior?.started_at ?? new Date(info.startedAt).toISOString(),
         usage: aggregateSwarmUsage(prior?.tasks),
       });
@@ -256,7 +270,14 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
     if (event.type === 'assistant.delta') {
       this._updateSwarmTask(sid, event.agentId, task => {
         const output = `${task.output ?? ''}${event.delta}`.slice(-MAX_SWARM_OUTPUT_CHARS);
-        return { ...task, output, output_bytes: output.length };
+        const liveOutput = `${task.live_output ?? ''}${event.delta}`.slice(-MAX_SWARM_OUTPUT_CHARS);
+        return {
+          ...task,
+          output,
+          output_bytes: output.length,
+          live_output: liveOutput,
+          live_output_tokens: estimateOutputTokens(liveOutput),
+        };
       }, false);
       return;
     }
@@ -267,6 +288,8 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
       this._updateSwarmTask(sid, event.agentId, task => ({
         ...task,
         usage: addSwarmUsage(task.usage, toSwarmUsage(usage)),
+        live_output: '',
+        live_output_tokens: 0,
       }), false);
       return;
     }
@@ -278,6 +301,8 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
         output: event.resultSummary.slice(-MAX_SWARM_OUTPUT_CHARS),
         output_bytes: event.resultSummary.length,
         usage: event.usage === undefined ? task.usage : toSwarmUsage(event.usage),
+        live_output: '',
+        live_output_tokens: 0,
         context_tokens: event.contextTokens,
       }));
       return;

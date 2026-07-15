@@ -11,7 +11,7 @@ it ships inside the `kimi` CLI (`apps/nori-code`) and is launched via
 - Hosts `agent-core` sessions, prompts, tools, approvals, questions, and
   workspaces in process.
 - Exposes them over **REST** (Fastify) and **WebSocket** (`ws`) under `/api/v1`.
-- Serves the built-in web UI (`apps/kimi-web`) as static assets when a
+- Serves the built-in web UI (`apps/nori-web`) as static assets when a
   `webAssetsDir` is provided.
 - Publishes machine-readable contract docs: `/openapi.json`, `/asyncapi.json`.
 
@@ -40,7 +40,7 @@ By default the server listens on `127.0.0.1:58627`; e2e clients target it with
 ## Architecture
 
 ```
-apps/nori-code (CLI)            apps/kimi-web (browser)
+apps/nori-code (CLI)            apps/nori-web (browser)
         │                              │
         └──────────┬───────────────────┘
                    │  REST + WebSocket, /api/v1

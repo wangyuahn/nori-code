@@ -67,7 +67,6 @@
         ./packages/server
         ./packages/server-e2e
         ./packages/kaos
-        ./packages/kimi-migration-legacy
         ./packages/kosong
         ./packages/migration-legacy
         ./packages/node-sdk
@@ -76,8 +75,8 @@
         ./packages/protocol
         ./packages/telemetry
         ./apps/nori-code
-        ./apps/kimi-desktop
-        ./apps/kimi-web
+        ./apps/nori-desktop
+        ./apps/nori-web
         ./apps/vis
         ./apps/vis/server
         ./apps/vis/web
@@ -85,26 +84,25 @@
       ];
 
       workspaceNames = [
-        "@moonshot-ai/acp-adapter"
-        "@moonshot-ai/agent-core"
-        "@moonshot-ai/server"
-        "@moonshot-ai/server-e2e"
-        "@moonshot-ai/kaos"
-        "@moonshot-ai/kosong"
-        "@moonshot-ai/migration-legacy"
-        "@moonshot-ai/kimi-code-sdk"
-        "@moonshot-ai/kimi-code-oauth"
-        "@moonshot-ai/pi-tui"
-        "@moonshot-ai/protocol"
-        "@moonshot-ai/kimi-telemetry"
-        "@moonshot-ai/nori-code"
-        "@moonshot-ai/kimi-desktop"
-        "@moonshot-ai/kimi-web"
-        "@moonshot-ai/vis"
-        "@moonshot-ai/vis-server"
-        "@moonshot-ai/vis-web"
-        "kimi-code-docs"
-        "kimi-migration-legacy"
+        "@nori-code/acp-adapter"
+        "@nori-code/agent-core"
+        "@nori-code/server"
+        "@nori-code/server-e2e"
+        "@nori-code/kaos"
+        "@nori-code/kosong"
+        "@nori-code/migration-legacy"
+        "@nori-code/sdk"
+        "@nori-code/oauth"
+        "@nori-code/pi-tui"
+        "@nori-code/protocol"
+        "@nori-code/telemetry"
+        "nori-code"
+        "@nori-code/nori-work"
+        "@nori-code/nori-web"
+        "@nori-code/vis"
+        "@nori-code/vis-server"
+        "@nori-code/vis-web"
+        "nori-code-docs"
       ];
     in
     {
@@ -192,12 +190,12 @@
                     "// runVerifyStep skipped in nix sandbox (sigtool lacks -dv)"
               ''}
               # The SEA blob step (scripts/native/02-sea-blob.mjs) embeds the
-              # Kimi web assets from apps/nori-code/dist-web and fails if that
+              # Nori web assets from apps/nori-code/dist-web and fails if that
               # directory is missing. Build the web app and stage its assets
               # before producing the native executable.
-              pnpm --filter=@moonshot-ai/kimi-web run build
+              pnpm --filter=@nori-code/nori-web run build
               node apps/nori-code/scripts/copy-web-assets.mjs
-              pnpm --filter=@moonshot-ai/nori-code run build:native:sea
+              pnpm --filter=nori-code run build:native:sea
               runHook postBuild
             '';
 

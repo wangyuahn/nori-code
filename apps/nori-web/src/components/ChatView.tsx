@@ -1,19 +1,24 @@
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type UIEvent } from 'react';
 import { api, type ApprovalRequest, type GoalSnapshot, type ModelCatalogItem, type PromptAttachment, type QuestionAnswer, type QuestionRequest, type Session, type SessionAgentConfig, type SessionRealtimeStatus, type TokenUsage } from '../api/client';
-import type { ChatMessage, QueuedPrompt } from '../hooks/useChatMessages';
+import type { ChatMessage, QueuedPrompt, TodoItem, ToolCall, WorkBlock } from '../hooks/useChatMessages';
 import { useI18n } from '../i18n';
 import { Icon } from './Icon';
 import { ApprovalPanel } from './ApprovalPanel';
 import { MarkdownView } from './MarkdownView';
 import { QuestionPanel } from './QuestionPanel';
 import { SkillPicker } from './SkillPicker';
+import { UsageOverview } from './UsageOverview';
 
 export interface ChatViewProps {
   session: Session | null;
+  allSessions?: Session[];
   messages: ChatMessage[];
   streaming: string;
   thinking: string;
+  workBlocks?: WorkBlock[];
   isStreaming: boolean;
+  activeAgentCount?: number;
+  activeAgentTokens?: number;
   sessionStatus?: SessionRealtimeStatus | null;
   compacting?: boolean;
   models: ModelCatalogItem[];
@@ -34,6 +39,7 @@ export interface ChatViewProps {
   onResolveQuestion?: (questionId: string, answers: Record<string, QuestionAnswer>) => void | Promise<void>;
   onDismissQuestion?: (questionId: string) => void | Promise<void>;
   queuedPrompts?: QueuedPrompt[];
+  todos?: TodoItem[];
   onCancelQueuedPrompt?: (promptId: string) => void | Promise<void>;
   draftAgentConfig?: SessionAgentConfig;
   rewindLimit?: number;
@@ -54,7 +60,7 @@ const STARTERS = [
 ];
 
 export function ChatView(props: ChatViewProps) {
-  const { session, messages, streaming, thinking, isStreaming, sessionStatus, compacting = false, models, modelsLoading, modelError, onSendMessage, onAbort, onRefreshModels, onModelChange, onThinkingChange, onPermissionChange, onTaskModeChange, onMainWriteChange, onGoalControl, pendingApprovals = [], onResolveApproval, pendingQuestions = [], onResolveQuestion, onDismissQuestion, queuedPrompts = [], onCancelQueuedPrompt, draftAgentConfig, rewindLimit = 10, onRewind } = props;
+  const { session, allSessions = [], messages, streaming, thinking, workBlocks = [], isStreaming, activeAgentCount = 0, activeAgentTokens = 0, sessionStatus, compacting = false, models, modelsLoading, modelError, onSendMessage, onAbort, onRefreshModels, onModelChange, onThinkingChange, onPermissionChange, onTaskModeChange, onMainWriteChange, onGoalControl, pendingApprovals = [], onResolveApproval, pendingQuestions = [], onResolveQuestion, onDismissQuestion, queuedPrompts = [], todos = [], onCancelQueuedPrompt, draftAgentConfig, rewindLimit = 10, onRewind } = props;
   const { tr } = useI18n();
   const [input, setInput] = useState('');
   const [modelNotice, setModelNotice] = useState(false);
@@ -182,15 +188,15 @@ export function ChatView(props: ChatViewProps) {
     <div className="chat-header"><div><span className="eyebrow">{session ? tr('Active conversation', '当前对话') : tr('Start here', '从这里开始')}</span><h1>{session?.title || tr('Start a new conversation', '开始新的对话')}</h1></div><div className="chat-header-meta"><span className={'status-dot' + (session ? ' active' : ' idle')}/>{session ? tr(messages.length + ' messages', messages.length + ' 条消息') : tr('Choose a project or conversation', '选择项目或已有对话')}</div></div>
 
     <div className="chat-messages" ref={messagesScrollRef} onScroll={handleMessagesScroll}>
-      {messages.length === 0 ? <div className="chat-welcome"><div className="welcome-mark"><Icon name="sparkles" size={27}/></div><span className="eyebrow">{tr('Your thoughtful coding partner', '你的智能编程伙伴')}</span><h2>{session ? tr('What should we make better?', '我们要改进什么？') : tr('What would you like to work on?', '你想从哪里开始？')}</h2><p>{session ? tr('Ask Nori to inspect code, plan a feature, fix a bug, or validate an API integration.', '让 Nori 检查代码、规划功能、修复缺陷或验证 API 集成。') : tr('Choose a project folder to start a new task, or open an existing conversation from the sidebar. You can also type below now.', '选择一个项目文件夹开始新任务，或从左侧打开已有对话。你也可以直接在下方输入。')}</p><div className="starter-grid">{STARTERS.map(item => <button key={item.title} className="starter-card" onClick={() => void handleSend(tr(item.prompt, item.promptZh))}><Icon name="sparkles" size={16}/><span><strong>{tr(item.title, item.titleZh)}</strong><small>{tr(item.prompt, item.promptZh)}</small></span></button>)}</div></div> : messages.map(message => <MessageBubble key={message.id} message={message} rewindCount={rewindCounts.get(message.id)} onRewind={onRewind}/>) }
+      {messages.length === 0 ? <div className="chat-welcome"><div className="welcome-mark"><Icon name="sparkles" size={27}/></div><span className="eyebrow">{tr('Your thoughtful coding partner', '你的智能编程伙伴')}</span><h2>{session ? tr('What should we make better?', '我们要改进什么？') : tr('What would you like to work on?', '你想从哪里开始？')}</h2><p>{session ? tr('Ask Nori to inspect code, plan a feature, fix a bug, or validate an API integration.', '让 Nori 检查代码、规划功能、修复缺陷或验证 API 集成。') : tr('Choose a project folder to start a new task, or open an existing conversation from the sidebar. You can also type below now.', '选择一个项目文件夹开始新任务，或从左侧打开已有对话。你也可以直接在下方输入。')}</p>{!session && <UsageOverview sessions={allSessions} models={models}/>}<div className="starter-grid">{STARTERS.map(item => <button key={item.title} className="starter-card" onClick={() => void handleSend(tr(item.prompt, item.promptZh))}><Icon name="sparkles" size={16}/><span><strong>{tr(item.title, item.titleZh)}</strong><small>{tr(item.prompt, item.promptZh)}</small></span></button>)}</div></div> : messages.map(message => <MessageBubble key={message.id} message={message} rewindCount={rewindCounts.get(message.id)} onRewind={onRewind}/>) }
 
-      {isStreaming && <div className="chat-message chat-message-assistant chat-message-streaming"><div className="message-avatar"><span>N</span></div><div className="message-body"><div className="chat-message-role">Nori <span>{pendingApprovals.length > 0 ? tr('waiting for permission', '等待授权') : tr('working', '工作中')}</span></div>{thinking && <details className="chat-work-process" open><summary><Icon name="settings" size={14}/><span>{tr('Work process', '工作过程')}</span><small>{tr('Live', '实时')}</small></summary><div className="chat-work-process-body"><pre>{thinking}</pre></div></details>}<div className="chat-message-content">{streaming ? <MarkdownView content={streaming} /> : (!thinking && <span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span>)}<span className="streaming-cursor"/></div>{streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(streaming))} tokens</div>}<button className="chat-abort-btn" onClick={onAbort}><Icon name="stop" size={13}/> {tr('Stop response', '停止回复')}</button></div></div>}
+      {isStreaming && <div className="chat-message chat-message-assistant chat-message-streaming"><div className="message-avatar"><span>N</span></div><div className="message-body"><div className="chat-message-role">Nori <span>{pendingApprovals.length > 0 ? tr('waiting for permission', '等待授权') : tr('working', '工作中')}</span></div>{(workBlocks.length > 0 || thinking) && <WorkProcess blocks={workBlocks.length > 0 ? workBlocks : [{ id: 'live-thinking', type: 'thinking', text: thinking }]} live/>}<div className="chat-message-content">{streaming ? <MarkdownView content={streaming} /> : (!thinking && workBlocks.length === 0 && <span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span>)}<span className="streaming-cursor"/></div>{streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(streaming))} tokens</div>}<button className="chat-abort-btn" onClick={onAbort}><Icon name="stop" size={13}/> {tr('Stop response', '停止回复')}</button></div></div>}
       <div ref={messagesEndRef}/>
     </div>
 
     <div className="chat-composer-wrap">
       {!followOutput && <button className="chat-jump-latest" onClick={jumpToLatest} title={tr('Jump to latest', '回到最新消息')} aria-label={tr('Jump to latest', '回到最新消息')}><Icon name="chevron-down" size={16}/></button>}
-      {sessionStatus?.goal && <GoalIsland goal={sessionStatus.goal} onControl={onGoalControl} />}
+      <ActivityIsland mainWorking={isStreaming} agentCount={activeAgentCount} agentTokens={activeAgentTokens} goal={sessionStatus?.goal ?? null} todos={todos} onGoalControl={onGoalControl}/>
       {pendingQuestions.length > 0 && onResolveQuestion && onDismissQuestion && <QuestionPanel requests={pendingQuestions} onSubmit={onResolveQuestion} onDismiss={onDismissQuestion}/>}
       {pendingApprovals.length > 0 && onResolveApproval && <ApprovalPanel requests={pendingApprovals} onResolve={onResolveApproval} />}
       <div className={'chat-input-area' + (input || attachments.length > 0 ? ' has-value' : '') + (modelNotice ? ' missing-model' : '')}>
@@ -211,37 +217,70 @@ export function ChatView(props: ChatViewProps) {
   </section>;
 }
 
-function GoalIsland({ goal, onControl }: { goal: GoalSnapshot; onControl?: (action: 'pause' | 'resume' | 'cancel') => void | Promise<void> }) {
+function ActivityIsland({ mainWorking, agentCount, agentTokens, goal, todos, onGoalControl }: { mainWorking: boolean; agentCount: number; agentTokens: number; goal: GoalSnapshot | null; todos: TodoItem[]; onGoalControl?: (action: 'pause' | 'resume' | 'cancel') => void | Promise<void> }) {
   const { tr } = useI18n();
-  const statusLabel = goal.status === 'active'
-    ? tr('Active', '进行中')
-    : goal.status === 'paused'
-      ? tr('Paused', '已暂停')
-      : goal.status === 'blocked'
-        ? tr('Blocked', '受阻')
-        : tr('Complete', '已完成');
-  const budgetItems = [
-    goal.budget.turnBudget === null
-      ? tr(`${goal.turnsUsed} turns`, `${goal.turnsUsed} 轮`)
-      : tr(`${goal.turnsUsed}/${goal.budget.turnBudget} turns`, `${goal.turnsUsed}/${goal.budget.turnBudget} 轮`),
-    goal.budget.tokenBudget === null
-      ? tr(`${formatTokens(goal.tokensUsed)} tokens`, `${formatTokens(goal.tokensUsed)} tokens`)
-      : tr(`${formatTokens(goal.tokensUsed)}/${formatTokens(goal.budget.tokenBudget)} tokens`, `${formatTokens(goal.tokensUsed)}/${formatTokens(goal.budget.tokenBudget)} tokens`),
+  const [phraseIndex, setPhraseIndex] = useState(0);
+  const mainPhrases = [
+    tr('Nori is tracing the threads…', 'Nori 正在理清线索…'),
+    tr('Nori is sharpening the answer…', 'Nori 正在打磨答案…'),
+    tr('Nori is fitting the pieces together…', 'Nori 正在拼好思路…'),
+    tr('Nori is checking the gears…', 'Nori 正在检查齿轮…'),
+  ];
+  const agentPhrases = [
+    tr('Agents are exploring in parallel…', '智能体正在并行探索…'),
+    tr('Agents are comparing notes…', '智能体正在交换发现…'),
+    tr('Agents are mapping the code…', '智能体正在绘制代码脉络…'),
+    tr('Agents are gathering results…', '智能体正在汇总成果…'),
+  ];
+  useEffect(() => {
+    if (!mainWorking && agentCount === 0) return;
+    setPhraseIndex(0);
+    const timer = setInterval(() => setPhraseIndex(current => current + 1), 3_200);
+    return () => clearInterval(timer);
+  }, [agentCount, mainWorking]);
+
+  if (!mainWorking && agentCount === 0 && goal === null && todos.length === 0) return null;
+  const headline = mainWorking
+    ? mainPhrases[phraseIndex % mainPhrases.length]
+    : agentCount > 0
+      ? agentPhrases[phraseIndex % agentPhrases.length]
+      : goal?.objective ?? todos.find(todo => todo.status === 'in_progress')?.title ?? todos[0]?.title ?? '';
+  const completedTodos = todos.filter(todo => todo.status === 'done').length;
+  const summaryParts = [
+    mainWorking ? tr('Nori active', 'Nori 工作中') : '',
+    agentCount > 0 ? tr(`${agentCount} agents`, `${agentCount} 个智能体`) : '',
+    goal ? tr('Goal tracked', '目标跟踪中') : '',
+    todos.length > 0 ? tr(`${completedTodos}/${todos.length} todos`, `${completedTodos}/${todos.length} 待办`) : '',
+  ].filter(Boolean);
+  const icon = mainWorking ? 'sparkles' : agentCount > 0 ? 'swarm' : 'target';
+
+  const goalStatusLabel = goal === null
+    ? ''
+    : goal.status === 'active'
+      ? tr('Active', '进行中')
+      : goal.status === 'paused'
+        ? tr('Paused', '已暂停')
+        : goal.status === 'blocked'
+          ? tr('Blocked', '受阻')
+          : tr('Complete', '已完成');
+  const budgetItems = goal === null ? [] : [
+    goal.budget.turnBudget === null ? tr(`${goal.turnsUsed} turns`, `${goal.turnsUsed} 轮`) : tr(`${goal.turnsUsed}/${goal.budget.turnBudget} turns`, `${goal.turnsUsed}/${goal.budget.turnBudget} 轮`),
+    goal.budget.tokenBudget === null ? `${formatTokens(goal.tokensUsed)} tokens` : `${formatTokens(goal.tokensUsed)}/${formatTokens(goal.budget.tokenBudget)} tokens`,
     formatGoalTime(goal.wallClockMs, tr),
   ];
 
-  return <details className={`goal-island goal-${goal.status}`}>
+  return <details className={`activity-island${goal ? ` goal-${goal.status}` : ''}`}>
     <summary>
-      <span className="goal-island-icon"><Icon name="target" size={14}/></span>
-      <span className="goal-island-copy"><small>{tr('Goal', '目标')} · {statusLabel}</small><strong>{goal.objective}</strong></span>
-      <span className="goal-island-stats">{budgetItems[0]} · {budgetItems[1]}</span>
-      <Icon name="chevron-down" size={14}/>
+      <span className="activity-island-icon"><Icon name={icon} size={14}/></span>
+      <span className="activity-island-copy"><small>{summaryParts.join(' · ')}</small><strong>{headline}</strong></span>
+      <span className="activity-island-stats">{agentTokens > 0 ? `${formatTokens(agentTokens)} tokens` : goal ? goalStatusLabel : tr('Live', '实时')}</span>
+      <Icon name="chevron-down" size={13}/>
     </summary>
-    <div className="goal-island-details">
-      {goal.completionCriterion && <p><span>{tr('Done when', '完成标准')}</span>{goal.completionCriterion}</p>}
-      <div>{budgetItems.map(item => <span key={item}>{item}</span>)}</div>
-      {goal.terminalReason && <p><span>{tr('Status note', '状态说明')}</span>{goal.terminalReason}</p>}
-      {onControl && goal.status !== 'complete' && <div className="goal-island-actions">{goal.status === 'active' ? <button type="button" onClick={() => void onControl('pause')}>{tr('Pause', '暂停')}</button> : <button type="button" onClick={() => void onControl('resume')}>{tr('Resume', '继续')}</button>}<button type="button" className="danger" onClick={() => { if (window.confirm(tr('Cancel this goal?', '取消这个目标吗？'))) void onControl('cancel'); }}>{tr('Cancel goal', '取消目标')}</button></div>}
+    <div className="activity-island-details">
+      {mainWorking && <p><span>{tr('Main model', '主模型')}</span><strong>{mainPhrases[phraseIndex % mainPhrases.length]}</strong></p>}
+      {agentCount > 0 && <p><span>{tr('Background agents', '后台智能体')}</span><strong>{agentPhrases[phraseIndex % agentPhrases.length]} {agentTokens > 0 ? `· ${formatTokens(agentTokens)} tokens` : ''}</strong></p>}
+      {todos.length > 0 && <div className="activity-island-todos"><span>{tr('Todo list', '待办')}</span><ol>{todos.map((todo, index) => <li key={`${todo.title}-${index}`} className={`todo-${todo.status}`}><Icon name={todo.status === 'done' ? 'check' : todo.status === 'in_progress' ? 'sparkles' : 'target'} size={12}/><strong>{todo.title}</strong></li>)}</ol></div>}
+      {goal && <><p><span>{tr('Goal', '目标')}</span><strong>{goal.objective}</strong></p><p><span>{tr('Status', '状态')}</span><strong>{goalStatusLabel}</strong></p><p><span>{tr('Budget', '预算')}</span><strong>{budgetItems.join(' · ')}</strong></p>{goal.completionCriterion && <p><span>{tr('Done when', '完成标准')}</span><strong>{goal.completionCriterion}</strong></p>}{goal.terminalReason && <p><span>{tr('Status note', '状态说明')}</span><strong>{goal.terminalReason}</strong></p>}{onGoalControl && goal.status !== 'complete' && <div className="activity-island-actions">{goal.status === 'active' ? <button type="button" onClick={() => void onGoalControl('pause')}>{tr('Pause', '暂停')}</button> : <button type="button" onClick={() => void onGoalControl('resume')}>{tr('Resume', '继续')}</button>}<button type="button" className="danger" onClick={() => { if (window.confirm(tr('Cancel this goal?', '取消这个目标吗？'))) void onGoalControl('cancel'); }}>{tr('Cancel goal', '取消目标')}</button></div>}</>}
     </div>
   </details>;
 }
@@ -260,17 +299,88 @@ function MessageBubble({ message, rewindCount, onRewind }: { message: ChatMessag
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
   const tools = message.toolCalls ?? [];
-  const hasWork = !isUser && !isSystem && Boolean(message.thinking || tools.length > 0);
-  const workLabel = [message.thinking ? tr('reasoning', '推理') : '', tools.length > 0 ? tr(tools.length + ' tool calls', tools.length + ' 次工具调用') : ''].filter(Boolean).join(' + ');
+  const blocks = message.workBlocks ?? [
+    ...(message.thinking ? [{ id: `${message.id}-thinking`, type: 'thinking' as const, text: message.thinking }] : []),
+    ...tools.map((tool, index) => ({ id: tool.id ?? `${message.id}-tool-${index}`, type: 'tool' as const, tool })),
+  ];
+  const hasWork = !isUser && !isSystem && blocks.length > 0;
   return <article className={'chat-message ' + (isUser ? 'chat-message-user' : isSystem ? 'chat-message-system' : 'chat-message-assistant')}>
     <div className="message-avatar"><span>{isUser ? 'Y' : isSystem ? '!' : 'N'}</span></div><div className="message-body"><div className="chat-message-role">{isUser ? tr('You', '你') : isSystem ? tr('System', '系统') : 'Nori'}{isUser && rewindCount && onRewind && <button className="message-rewind-btn" onClick={() => {
       if (!window.confirm(tr('Rewind the conversation and workspace to before this prompt?', '将对话和代码回溯到此提问之前？'))) return;
       void onRewind(rewindCount);
     }} title={tr('Rewind to before this prompt', '回溯到此提问之前')}><Icon name="refresh" size={12}/>{tr('Rewind', '回溯')}</button>}</div>
-      {hasWork && <details className="chat-work-process"><summary><Icon name="settings" size={14}/><span>{tr('Work process', '工作过程')}</span><small>{workLabel}</small></summary><div className="chat-work-process-body">{message.thinking && <section><strong>{tr('Reasoning', '推理')}</strong><pre>{message.thinking}</pre></section>}{tools.map((tool, index) => <details key={tool.name + '-' + index} className="tool-call"><summary><Icon name="settings" size={13}/> {tool.name}</summary>{tool.result && <pre className="tool-call-result">{tool.result}</pre>}</details>)}</div></details>}
+      {hasWork && <WorkProcess blocks={blocks}/>}
       {message.text && <div className="chat-message-content">{isUser || isSystem ? message.text : <MarkdownView content={message.text} />}</div>}{message.usage && <TokenUsageLine usage={message.usage} />}{message.createdAt && <time className="chat-message-time">{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>}
     </div>
   </article>;
+}
+
+function WorkProcess({ blocks, live = false }: { blocks: WorkBlock[]; live?: boolean }) {
+  const { tr } = useI18n();
+  const toolCount = blocks.filter(block => block.type === 'tool').length;
+  const reasoningCount = blocks.filter(block => block.type === 'thinking').length;
+  const label = [
+    reasoningCount > 0 ? tr('reasoning', '推理') : '',
+    toolCount > 0 ? tr(`${toolCount} tool calls`, `${toolCount} 次工具调用`) : '',
+  ].filter(Boolean).join(' + ');
+  return <details className="chat-work-process">
+    <summary><Icon name="settings" size={14}/><span>{tr('Work process', '工作过程')}</span><small>{live ? tr('Live', '实时') : label}</small></summary>
+    <div className="chat-work-process-body">{blocks.map(block => block.type === 'thinking'
+      ? <section className="work-reasoning-block" key={block.id}><strong>{tr('Reasoning', '推理')}</strong><pre>{block.text}</pre></section>
+      : <CompactToolCall key={block.id} tool={block.tool}/>)}</div>
+  </details>;
+}
+
+function CompactToolCall({ tool }: { tool: ToolCall }) {
+  const { tr } = useI18n();
+  const summary = summarizeToolCall(tool, tr);
+  return <div className={`compact-tool-call tool-${tool.name.toLowerCase()}`} title={tool.result?.slice(0, 600)}>
+    <span className="compact-tool-icon"><Icon name="settings" size={12}/></span>
+    <strong>{tool.name}</strong>
+    {summary && <span>{summary}</span>}
+    <small className={tool.result === undefined ? 'running' : 'done'}>{tool.result === undefined ? tr('Running', '运行中') : tr('Done', '完成')}</small>
+  </div>;
+}
+
+function summarizeToolCall(tool: ToolCall, tr: (english: string, chinese: string) => string): string {
+  const args = typeof tool.args === 'object' && tool.args !== null ? tool.args as Record<string, unknown> : {};
+  const normalized = tool.name.toLowerCase();
+  const path = firstString(args.path, args.file_path, args.filename, args.file);
+  if (normalized === 'edit' || normalized === 'write') {
+    const oldText = firstString(args.old_string, args.old_text) ?? '';
+    const newText = firstString(args.new_string, args.content, args.new_text) ?? '';
+    const resultCounts = diffCounts(tool.result);
+    const additions = resultCounts?.additions ?? countLines(newText);
+    const deletions = resultCounts?.deletions ?? (normalized === 'edit' ? countLines(oldText) : 0);
+    return [path, `+${additions} -${deletions}`].filter(Boolean).join(' · ');
+  }
+  if (normalized === 'agentswarm' || normalized === 'agent_swarm') {
+    const tasks = Array.isArray(args.tasks) ? args.tasks : Array.isArray(args.items) ? args.items : [];
+    const resumed = Array.isArray(args.resume_agent_ids) ? args.resume_agent_ids.length : 0;
+    const count = tasks.length + resumed;
+    return count > 0 ? tr(`${count} agents launched`, `调用 ${count} 个智能体`) : tr('Agent collaboration', '智能体协作');
+  }
+  return path ?? firstString(args.description, args.query, args.command) ?? '';
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  return values.find((value): value is string => typeof value === 'string' && value.length > 0);
+}
+
+function countLines(value: string): number {
+  if (!value) return 0;
+  return value.split(/\r?\n/).length;
+}
+
+function diffCounts(value: string | undefined): { additions: number; deletions: number } | undefined {
+  if (!value?.includes('\n')) return undefined;
+  let additions = 0;
+  let deletions = 0;
+  for (const line of value.split(/\r?\n/)) {
+    if (line.startsWith('+') && !line.startsWith('+++')) additions++;
+    if (line.startsWith('-') && !line.startsWith('---')) deletions++;
+  }
+  return additions > 0 || deletions > 0 ? { additions, deletions } : undefined;
 }
 
 async function readImageAttachment(file: File): Promise<ComposerAttachment> {

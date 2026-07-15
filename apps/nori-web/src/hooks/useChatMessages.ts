@@ -12,12 +12,22 @@ export interface ToolCall {
   result?: string;
 }
 
+export type WorkBlock =
+  | { id: string; type: 'thinking'; text: string }
+  | { id: string; type: 'tool'; tool: ToolCall };
+
+export interface TodoItem {
+  title: string;
+  status: 'pending' | 'in_progress' | 'done';
+}
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
   text: string;
   toolCalls?: ToolCall[];
   thinking?: string;
+  workBlocks?: WorkBlock[];
   createdAt?: string;
   isStreaming?: boolean;
   usage?: TokenUsage;
@@ -54,11 +64,14 @@ export interface UseChatMessagesResult {
   isStreaming: boolean;
   currentStreaming: string;
   currentThinking: string;
+  currentWorkBlocks: WorkBlock[];
   sessionStatus: SessionRealtimeStatus | null;
   compacting: boolean;
   pendingApprovals: ApprovalRequest[];
   pendingQuestions: QuestionRequest[];
   queuedPrompts: QueuedPrompt[];
+  todos: TodoItem[];
+  activeSubagentIds: string[];
   codeChanges: CodeChange[];
   resolveApproval: (approvalId: string, decision: 'approved' | 'rejected' | 'cancelled', options?: { remember?: boolean; feedback?: string; selectedLabel?: string }) => Promise<void>;
   resolveQuestion: (questionId: string, answers: Record<string, QuestionAnswer>) => Promise<void>;
@@ -98,6 +111,9 @@ interface WsPayload {
     inputCacheCreation: number;
   };
   snapshot?: GoalSnapshot | null;
+  isError?: boolean;
+  subagentId?: string;
+  runInBackground?: boolean;
 }
 
 function addTokenUsage(left: TokenUsage | undefined, right: TokenUsage | undefined): TokenUsage | undefined {
@@ -180,7 +196,7 @@ export function apiMessageToChat(m: Message): ChatMessage | null {
         .join('\n')
     : '';
 
-  const toolCalls: ToolCall[] = (m.tool_calls ?? []).map(tc => ({
+  let toolCalls: ToolCall[] = (m.tool_calls ?? []).map(tc => ({
     id: tc.id,
     name: tc.name,
     args: tc.args,
@@ -190,7 +206,7 @@ export function apiMessageToChat(m: Message): ChatMessage | null {
   if (Array.isArray(m.content)) {
     for (const c of m.content) {
       if (c.type === 'tool_use') {
-        toolCalls.push({ id: c.tool_call_id, name: c.tool_name ?? c.name ?? 'tool', args: c.input });
+        toolCalls = mergeToolCalls(toolCalls, [{ id: c.tool_call_id, name: c.tool_name ?? c.name ?? 'tool', args: c.input }]);
       } else if (c.type === 'tool_result') {
         const matching = toolCalls.find(tool => tool.id && tool.id === c.tool_call_id);
         if (matching) matching.result = c.output;
@@ -200,6 +216,7 @@ export function apiMessageToChat(m: Message): ChatMessage | null {
   }
 
   const thinking = m.thinking || thinkingFromContent || undefined;
+  const workBlocks = workBlocksFromMessage(m, toolCalls, thinking);
   if (!text && !thinking && toolCalls.length === 0) return null;
 
   return {
@@ -207,6 +224,7 @@ export function apiMessageToChat(m: Message): ChatMessage | null {
     role: m.role === 'tool' ? 'assistant' : m.role,
     text,
     thinking,
+    workBlocks: workBlocks.length > 0 ? workBlocks : undefined,
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     createdAt: m.created_at,
   };
@@ -236,11 +254,13 @@ export function foldConversationTurns(messages: ChatMessage[]): ChatMessage[] {
     const previous = folded[assistantIndex]!;
     const toolCalls = mergeToolCalls(previous.toolCalls ?? [], message.toolCalls ?? []);
     const thinking = [previous.thinking, message.thinking].filter(Boolean).join('\n\n');
+    const workBlocks = mergeWorkBlocks(previous.workBlocks ?? [], message.workBlocks ?? []);
     const text = [previous.text.trimEnd(), message.text.trimStart()].filter(Boolean).join('\n\n');
     folded[assistantIndex] = {
       ...previous,
       text,
       thinking: thinking || undefined,
+      workBlocks: workBlocks.length > 0 ? workBlocks : undefined,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       createdAt: message.createdAt ?? previous.createdAt,
       usage: addTokenUsage(previous.usage, message.usage),
@@ -248,6 +268,53 @@ export function foldConversationTurns(messages: ChatMessage[]): ChatMessage[] {
   }
 
   return folded;
+}
+
+function workBlocksFromMessage(message: Message, toolCalls: ToolCall[], thinking: string | undefined): WorkBlock[] {
+  const blocks: WorkBlock[] = [];
+  let thinkingIndex = 0;
+  const representedToolIds = new Set<string>();
+
+  for (const content of message.content) {
+    if (content.type === 'thinking') {
+      const text = content.thinking ?? content.text ?? '';
+      if (text) blocks.push({ id: `${message.id}-thinking-${thinkingIndex++}`, type: 'thinking', text });
+      continue;
+    }
+    if (content.type !== 'tool_use' && content.type !== 'tool_result') continue;
+    const id = content.tool_call_id;
+    const tool = id ? toolCalls.find(candidate => candidate.id === id) : undefined;
+    if (tool && (!id || !representedToolIds.has(id))) {
+      blocks.push({ id: id ?? `${message.id}-tool-${blocks.length}`, type: 'tool', tool });
+      if (id) representedToolIds.add(id);
+    }
+  }
+
+  if (thinking && !blocks.some(block => block.type === 'thinking')) {
+    blocks.unshift({ id: `${message.id}-thinking`, type: 'thinking', text: thinking });
+  }
+  for (const tool of toolCalls) {
+    if (tool.id && representedToolIds.has(tool.id)) continue;
+    blocks.push({ id: tool.id ?? `${message.id}-tool-${blocks.length}`, type: 'tool', tool });
+  }
+  return blocks;
+}
+
+function mergeWorkBlocks(previous: WorkBlock[], incoming: WorkBlock[]): WorkBlock[] {
+  const merged = previous.map(block => block.type === 'tool'
+    ? { ...block, tool: { ...block.tool } }
+    : { ...block });
+  for (const block of incoming) {
+    if (block.type === 'tool' && block.tool.id) {
+      const existing = merged.find(candidate => candidate.type === 'tool' && candidate.tool.id === block.tool.id);
+      if (existing?.type === 'tool') {
+        existing.tool = mergeToolCalls([existing.tool], [block.tool])[0]!;
+        continue;
+      }
+    }
+    merged.push(block.type === 'tool' ? { ...block, tool: { ...block.tool } } : { ...block });
+  }
+  return merged;
 }
 
 function appendStreamDelta(current: string, delta: string, offset: number | undefined): { text: string; appended: string } | null {
@@ -272,6 +339,30 @@ function mergeToolCalls(previous: ToolCall[], incoming: ToolCall[]): ToolCall[] 
     }
   }
   return merged;
+}
+
+function todosFromToolArgs(args: unknown): TodoItem[] | undefined {
+  if (typeof args !== 'object' || args === null || !('todos' in args)) return undefined;
+  const value = (args as { todos?: unknown }).todos;
+  if (!Array.isArray(value)) return undefined;
+  return value.flatMap(item => {
+    if (typeof item !== 'object' || item === null) return [];
+    const title = (item as { title?: unknown }).title;
+    const status = (item as { status?: unknown }).status;
+    if (typeof title !== 'string' || !['pending', 'in_progress', 'done'].includes(String(status))) return [];
+    return [{ title, status: status as TodoItem['status'] }];
+  });
+}
+
+function latestTodos(messages: ChatMessage[]): TodoItem[] {
+  let latest: TodoItem[] | undefined;
+  for (const message of messages) {
+    for (const tool of message.toolCalls ?? []) {
+      if (tool.name !== 'TodoList') continue;
+      latest = todosFromToolArgs(tool.args) ?? latest;
+    }
+  }
+  return latest ?? [];
 }
 
 function messageTime(message: ChatMessage): number {
@@ -303,6 +394,22 @@ function mergeHistory(previous: ChatMessage[], remote: ChatMessage[]): ChatMessa
   return merged.sort((a, b) => messageTime(a) - messageTime(b));
 }
 
+function reconcileHistory(previous: ChatMessage[], remote: ChatMessage[]): ChatMessage[] {
+  const claimed = new Set<string>();
+  return remote.map(serverMessage => {
+    const local = previous.find(candidate =>
+      !claimed.has(candidate.id)
+      && candidate.role === serverMessage.role
+      && candidate.text === serverMessage.text
+      && (candidate.thinking ?? '') === (serverMessage.thinking ?? '')
+      && Math.abs(messageTime(candidate) - messageTime(serverMessage)) < 15_000,
+    );
+    if (!local) return serverMessage;
+    claimed.add(local.id);
+    return { ...serverMessage, id: local.id, usage: serverMessage.usage ?? local.usage };
+  });
+}
+
 function normalizeEventType(type: string): string {
   return type.startsWith('event.') ? type.slice('event.'.length) : type;
 }
@@ -316,11 +423,14 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentStreaming, setCurrentStreaming] = useState('');
   const [currentThinking, setCurrentThinking] = useState('');
+  const [currentWorkBlocks, setCurrentWorkBlocks] = useState<WorkBlock[]>([]);
   const [sessionStatus, setSessionStatus] = useState<SessionRealtimeStatus | null>(null);
   const [compacting, setCompacting] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
   const [pendingQuestions, setPendingQuestions] = useState<QuestionRequest[]>([]);
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
+  const [todos, setTodos] = useState<TodoItem[]>([]);
+  const [activeSubagentIds, setActiveSubagentIds] = useState<string[]>([]);
   const [codeChanges, setCodeChanges] = useState<CodeChange[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const sessionRef = useRef(sessionId);
@@ -342,6 +452,8 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
   const historyRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const compactTriggeredRef = useRef(false);
   const compactingRef = useRef(false);
+  const activeToolCallsRef = useRef(new Map<string, ToolCall>());
+  const liveWorkBlocksRef = useRef<WorkBlock[]>([]);
 
   sessionRef.current = sessionId;
 
@@ -352,6 +464,8 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
     thinkingRawRef.current = '';
     setCurrentStreaming('');
     setCurrentThinking('');
+    liveWorkBlocksRef.current = [];
+    setCurrentWorkBlocks([]);
   }, []);
 
   const hydrateInFlight = useCallback(async (targetSessionId: string) => {
@@ -379,7 +493,8 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
       .sort((a, b) => messageTime(a) - messageTime(b)));
     if (sessionRef.current === targetSessionId) {
       hasUserPromptRef.current = history.some(message => message.role === 'user');
-      setMessages(previous => replace ? history : mergeHistory(previous, history));
+      setTodos(latestTodos(history));
+      setMessages(previous => replace ? reconcileHistory(previous, history) : mergeHistory(previous, history));
     }
     return history;
   }, [sessionId]);
@@ -401,6 +516,9 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
     setSessionStatus(null);
     setPendingQuestions([]);
     setQueuedPrompts([]);
+    setTodos([]);
+    setActiveSubagentIds([]);
+    activeToolCallsRef.current.clear();
     setCompacting(false);
     clearDraft();
     if (!sessionId) return;
@@ -568,6 +686,7 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
           role: 'assistant',
           text,
           thinking: thinking || undefined,
+          workBlocks: liveWorkBlocksRef.current.length > 0 ? liveWorkBlocksRef.current : undefined,
           usage: turnUsageRef.current,
           createdAt: new Date().toISOString(),
         };
@@ -671,6 +790,14 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
               thinkingRef.current += reconciled.appended;
               lastStreamActivityAtRef.current = Date.now();
               setCurrentThinking(thinkingRef.current);
+              if (reconciled.appended) {
+                const previous = liveWorkBlocksRef.current;
+                const last = previous.at(-1);
+                liveWorkBlocksRef.current = last?.type === 'thinking'
+                  ? [...previous.slice(0, -1), { ...last, text: last.text + reconciled.appended }]
+                  : [...previous, { id: `live-thinking-${payload.turnId ?? 'turn'}-${previous.length}`, type: 'thinking', text: reconciled.appended }];
+                setCurrentWorkBlocks(liveWorkBlocksRef.current);
+              }
               setIsStreaming(true);
               break;
             }
@@ -697,7 +824,39 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
               scheduleHistoryRefresh();
               break;
             case 'tool.call.started':
+              if (payload.toolCallId && payload.name) {
+                const tool = { id: payload.toolCallId, name: payload.name, args: payload.args };
+                activeToolCallsRef.current.set(payload.toolCallId, tool);
+                liveWorkBlocksRef.current = [...liveWorkBlocksRef.current, { id: payload.toolCallId, type: 'tool', tool }];
+                setCurrentWorkBlocks(liveWorkBlocksRef.current);
+                if (payload.name === 'TodoList') {
+                  const nextTodos = todosFromToolArgs(payload.args);
+                  if (nextTodos !== undefined) setTodos(nextTodos);
+                }
+              }
               setIsStreaming(true);
+              break;
+            case 'tool.result':
+              if (payload.toolCallId) {
+                const result = serializeToolOutput(payload.output ?? payload.result);
+                liveWorkBlocksRef.current = liveWorkBlocksRef.current.map(block => block.type === 'tool' && block.tool.id === payload.toolCallId
+                  ? { ...block, tool: { ...block.tool, result } }
+                  : block);
+                setCurrentWorkBlocks(liveWorkBlocksRef.current);
+                activeToolCallsRef.current.delete(payload.toolCallId);
+              }
+              break;
+            case 'subagent.started':
+              if (payload.subagentId) {
+                setActiveSubagentIds(previous => previous.includes(payload.subagentId!) ? previous : [...previous, payload.subagentId!]);
+              }
+              break;
+            case 'subagent.suspended':
+            case 'subagent.completed':
+            case 'subagent.failed':
+              if (payload.subagentId) {
+                setActiveSubagentIds(previous => previous.filter(id => id !== payload.subagentId));
+              }
               break;
             case 'code.change':
               if (payload.path && payload.operation && payload.diff !== undefined) {
@@ -936,7 +1095,17 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
     await refreshQuestions();
   }, [refreshQuestions, sessionId]);
 
-  return { messages, isStreaming, currentStreaming, currentThinking, sessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, abort };
+  return { messages, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, abort };
+}
+
+function serializeToolOutput(output: unknown): string | undefined {
+  if (output === undefined) return undefined;
+  if (typeof output === 'string') return output;
+  try {
+    return JSON.stringify(output);
+  } catch {
+    return String(output);
+  }
 }
 
 export function shouldIgnoreTranscriptEvent(type: string, agentId?: string): boolean {

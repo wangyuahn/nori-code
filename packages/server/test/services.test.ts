@@ -541,6 +541,19 @@ describe('WSBroadcastService (WS transport pump)', () => {
       runInBackground: true,
     } as unknown as Event);
     bus.publish({
+      type: 'subagent.spawned',
+      sessionId,
+      agentId: 'main',
+      subagentId: 'agent-status-1',
+      subagentName: 'nori-coder',
+      parentToolCallId: 'call-swarm-1',
+      parentAgentId: 'main',
+      description: 'Inspect streaming',
+      swarmIndex: 0,
+      runInBackground: true,
+    } as unknown as Event);
+    expect(getSwarmStatus(swarmId)?.tasks).toHaveLength(1);
+    bus.publish({
       type: 'subagent.started',
       sessionId,
       agentId: 'main',
@@ -553,6 +566,15 @@ describe('WSBroadcastService (WS transport pump)', () => {
       turnId: 0,
       delta: 'live preview',
     } as unknown as Event);
+
+    expect(getSwarmStatus(swarmId)).toMatchObject({
+      tasks: [{
+        status: 'running',
+        output: 'live preview',
+        live_output_tokens: 3,
+      }],
+    });
+
     bus.publish({
       type: 'turn.step.completed',
       sessionId,
@@ -575,6 +597,7 @@ describe('WSBroadcastService (WS transport pump)', () => {
         status: 'running',
         output: 'live preview',
         usage: { input: 13, output: 5, total: 18 },
+        live_output_tokens: 0,
       }],
     });
 
@@ -594,6 +617,76 @@ describe('WSBroadcastService (WS transport pump)', () => {
     });
 
     clearSwarmStatus(swarmId);
+    broadcast.dispose();
+    bus.dispose();
+  });
+
+  it('keeps swarms launched by child agents in their parent round', () => {
+    const bus = new EventService();
+    const broadcast = new WSBroadcastService(
+      bus,
+      testLogger,
+      new FakeSessionClients(),
+      new FakeConnectionRegistry(),
+      makeEnv(),
+    );
+    const sessionId = 'sid_nested_swarm_status';
+
+    const startSwarm = (ownerAgentId: string, toolCallId: string, taskId: string) => {
+      bus.publish({
+        type: 'tool.call.started',
+        sessionId,
+        agentId: ownerAgentId,
+        turnId: 1,
+        toolCallId,
+        name: 'AgentSwarm',
+        args: { tasks: [{ prompt: taskId }] },
+        description: taskId,
+      } as unknown as Event);
+      bus.publish({
+        type: 'background.task.started',
+        sessionId,
+        agentId: ownerAgentId,
+        info: {
+          taskId,
+          description: taskId,
+          status: 'running',
+          detached: true,
+          startedAt: Date.now(),
+          endedAt: null,
+          kind: 'agent',
+          subagentType: 'swarm:1',
+        },
+      } as unknown as Event);
+    };
+
+    startSwarm('main', 'call-root', 'swarm-root');
+    bus.publish({
+      type: 'subagent.spawned',
+      sessionId,
+      agentId: 'main',
+      subagentId: 'agent-parent',
+      subagentName: 'nori-coder',
+      parentToolCallId: 'call-root',
+      parentAgentId: 'main',
+      description: 'Parent agent',
+      swarmIndex: 0,
+      runInBackground: true,
+    } as unknown as Event);
+    startSwarm('agent-parent', 'call-child', 'swarm-child');
+    startSwarm('main', 'call-second-root', 'swarm-second-root');
+
+    expect(getSwarmStatus('swarm-root')).toMatchObject({ round: 1 });
+    expect(getSwarmStatus('swarm-child')).toMatchObject({
+      owner_agent_id: 'agent-parent',
+      parent_swarm_id: 'swarm-root',
+      round: 1,
+    });
+    expect(getSwarmStatus('swarm-second-root')).toMatchObject({ round: 2 });
+
+    clearSwarmStatus('swarm-root');
+    clearSwarmStatus('swarm-child');
+    clearSwarmStatus('swarm-second-root');
     broadcast.dispose();
     bus.dispose();
   });

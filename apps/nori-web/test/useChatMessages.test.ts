@@ -7,6 +7,7 @@ describe('main transcript projection', () => {
     expect(shouldIgnoreTranscriptEvent('assistant.delta', 'agent-2')).toBe(true);
     expect(shouldIgnoreTranscriptEvent('turn.ended', 'agent-2')).toBe(true);
     expect(shouldIgnoreTranscriptEvent('code.change', 'agent-2')).toBe(false);
+    expect(shouldIgnoreTranscriptEvent('subagent.started', 'agent-2')).toBe(false);
     expect(shouldIgnoreTranscriptEvent('assistant.delta', 'main')).toBe(false);
   });
 
@@ -35,6 +36,37 @@ describe('main transcript projection', () => {
     expect(folded).toHaveLength(1);
     expect(folded[0]?.text).toBe('I will inspect the files.\n\nThe issue is in the event projector.');
     expect(folded[0]?.thinking).toBeUndefined();
+  });
+
+  it('keeps tool calls between the reasoning blocks that surrounded them', () => {
+    const first = apiMessageToChat({
+      id: 'step-1',
+      role: 'assistant',
+      created_at: '2026-07-14T00:00:01.000Z',
+      content: [
+        { type: 'thinking', thinking: 'Inspect the target.' },
+        { type: 'tool_use', tool_call_id: 'edit-1', tool_name: 'Edit', input: { path: 'src/a.ts', old_string: 'a', new_string: 'b' } },
+      ],
+    })!;
+    const result = apiMessageToChat({
+      id: 'tool-1',
+      role: 'tool',
+      created_at: '2026-07-14T00:00:02.000Z',
+      content: [{ type: 'tool_result', tool_call_id: 'edit-1', output: 'Updated src/a.ts' }],
+    })!;
+    const second = apiMessageToChat({
+      id: 'step-2',
+      role: 'assistant',
+      created_at: '2026-07-14T00:00:03.000Z',
+      content: [{ type: 'thinking', thinking: 'Verify the change.' }, { type: 'text', text: 'Done.' }],
+    })!;
+
+    const folded = foldConversationTurns([first, result, second]);
+    expect(folded[0]?.workBlocks?.map(block => block.type)).toEqual(['thinking', 'tool', 'thinking']);
+    expect(folded[0]?.workBlocks?.[1]).toMatchObject({
+      type: 'tool',
+      tool: { id: 'edit-1', name: 'Edit', result: 'Updated src/a.ts' },
+    });
   });
 });
 

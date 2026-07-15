@@ -28,7 +28,7 @@ on:
         description: 'Prefix for uploaded artifact name'
         required: false
         type: string
-        default: 'kimi-desktop'
+        default: 'nori-work'
   workflow_call:
     inputs:
       sign-macos:
@@ -45,7 +45,7 @@ on:
         description: 'Prefix for uploaded artifact name'
         required: false
         type: string
-        default: 'kimi-desktop'
+        default: 'nori-work'
     secrets:
       APPLE_CERTIFICATE_P12:
         required: false
@@ -97,13 +97,9 @@ jobs:
       - name: Build Nori web assets
         # The SEA blob embeds apps/nori-code/dist-web; build the web app and
         # stage its assets before producing the native executable.
-        # KIMI_WEB_DESKTOP=1 bakes the internal-build banner into the web bundle
-        # (see apps/kimi-web/src/components/InternalBuildBanner.vue); only the
-        # desktop sets this flag, so the CLI `kimi web` stays banner-free.
-        env:
-          KIMI_WEB_DESKTOP: '1'
+        # Build the Nori Work renderer and stage it for the native executable.
         run: |
-          pnpm --filter @moonshot-ai/kimi-web run build
+          pnpm --filter @nori-code/nori-web run build
           node apps/nori-code/scripts/copy-web-assets.mjs
 
       - name: Build native executable (local profile)
@@ -150,7 +146,7 @@ jobs:
           KIMI_DESKTOP_NOTARIZE: ${{ (runner.os == 'macOS' && inputs.sign-macos) && 'true' || 'false' }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_NOTARIZATION_ISSUER_ID }}
-        run: pnpm --filter @moonshot-ai/kimi-desktop run dist
+        run: pnpm --filter @nori-code/nori-work run dist
 
       - name: Cleanup macOS keychain
         if: always() && runner.os == 'macOS' && inputs.sign-macos
@@ -162,9 +158,9 @@ jobs:
           name: ${{ inputs.upload-artifact-prefix }}-${{ matrix.target }}
           retention-days: ${{ inputs.retention-days }}
           path: |
-            apps/kimi-desktop/dist-app/*.dmg
-            apps/kimi-desktop/dist-app/*.zip
-            apps/kimi-desktop/dist-app/*.exe
-            apps/kimi-desktop/dist-app/*.AppImage
-            apps/kimi-desktop/dist-app/*.deb
+            apps/nori-desktop/dist-app/*.dmg
+            apps/nori-desktop/dist-app/*.zip
+            apps/nori-desktop/dist-app/*.exe
+            apps/nori-desktop/dist-app/*.AppImage
+            apps/nori-desktop/dist-app/*.deb
           if-no-files-found: ignore

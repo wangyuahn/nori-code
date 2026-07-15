@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 import { ChatView } from './components/ChatView';
 import { Dashboard } from './components/Dashboard';
-import { SwarmPanel } from './components/SwarmPanel';
+import { SwarmPanel, runningSwarmAgents, swarmRunTokens } from './components/SwarmPanel';
 import { VaultBrowser } from './components/VaultBrowser';
 import { SettingsPanel } from './components/SettingsPanel';
 import { CodeView } from './components/CodeView';
 import { Icon, type IconName } from './components/Icon';
 import { useSessions, usePhaseStatus, useSwarmWebSocket, useServerStatus } from './hooks/useApi';
 import { useChatMessages } from './hooks/useChatMessages';
-import { api, type FsEntry, type Message, type ModelCatalogItem, type PromptAttachment, type Session, type SessionAgentConfig, type SwarmStatus } from './api/client';
+import { api, type FsEntry, type Message, type ModelCatalogItem, type PromptAttachment, type Session, type SessionAgentConfig } from './api/client';
 import { FileTree } from './components/FileTree';
 import { ProjectFolderPicker } from './components/ProjectFolderPicker';
 import { useI18n } from './i18n';
@@ -80,6 +80,11 @@ export function App() {
     updateSessionProfile,
   } = useSessions();
   const activeSession: Session | null = sessions.find(session => session.id === sessionId) ?? null;
+  const activeSwarmRuns = Array.from(swarm.swarmStatuses.values()).filter(status =>
+    status.session_id === sessionId
+    && (status.status === 'running' || status.status === 'pending'),
+  );
+  const activeAgentTokens = activeSwarmRuns.reduce((total, run) => total + swarmRunTokens(run), 0);
   useEffect(() => { setSelectedProjectFile(null); }, [sessionId]);
   useEffect(() => {
     if (activeSession?.metadata?.cwd) setSelectedProjectRoot(activeSession.metadata.cwd);
@@ -96,7 +101,11 @@ export function App() {
     vault: tr('Vault', '知识库'),
     files: tr('Files', '文件'),
   };
-  const { messages, isStreaming, currentStreaming, currentThinking, sessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, abort } = useChatMessages(sessionId);
+  const { messages, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, abort } = useChatMessages(sessionId);
+  const runningSwarm = runningSwarmAgents(activeSwarmRuns);
+  const activeAgentIds = new Set([...activeSubagentIds, ...runningSwarm.ids]);
+  const activeAgentCount = activeAgentIds.size + runningSwarm.untracked;
+  const hasSwarmActivity = activeSwarmRuns.length > 0;
 
   useEffect(() => {
     const onLimitChanged = (event: Event) => {
@@ -315,10 +324,14 @@ export function App() {
           return (
             <CodeView
               session={activeSession}
+              allSessions={sessions}
               messages={messages}
               streaming={currentStreaming}
               thinking={currentThinking}
+              workBlocks={currentWorkBlocks}
               isStreaming={isStreaming}
+              activeAgentCount={activeAgentCount}
+              activeAgentTokens={activeAgentTokens}
               sessionStatus={sessionStatus}
               compacting={compacting}
               models={models}
@@ -339,6 +352,7 @@ export function App() {
               onResolveQuestion={resolveQuestion}
               onDismissQuestion={dismissQuestion}
               queuedPrompts={queuedPrompts}
+              todos={todos}
               onCancelQueuedPrompt={cancelQueuedPrompt}
               selectedFile={selectedProjectFile}
               codeChanges={codeChanges}
@@ -351,10 +365,14 @@ export function App() {
         return (
           <ChatView
             session={activeSession}
+            allSessions={sessions}
             messages={messages}
             streaming={currentStreaming}
             thinking={currentThinking}
+            workBlocks={currentWorkBlocks}
             isStreaming={isStreaming}
+            activeAgentCount={activeAgentCount}
+            activeAgentTokens={activeAgentTokens}
             sessionStatus={sessionStatus}
             compacting={compacting}
             models={models}
@@ -375,6 +393,7 @@ export function App() {
             onResolveQuestion={resolveQuestion}
             onDismissQuestion={dismissQuestion}
             queuedPrompts={queuedPrompts}
+            todos={todos}
             onCancelQueuedPrompt={cancelQueuedPrompt}
             draftAgentConfig={draftAgentConfig}
             rewindLimit={rewindLimit}
@@ -400,8 +419,8 @@ export function App() {
 
         <nav className="sidebar-primary-nav" aria-label={tr('Primary navigation', '主导航')}>
           {NAV_ITEMS.filter(item => item.key !== 'settings').map(item => (
-            <button key={item.key} className={`sidebar-nav-item${activeView === item.key ? ' active' : ''}`} onClick={() => setActiveView(item.key)} aria-current={activeView === item.key ? 'page' : undefined} title={viewLabels[item.key]}>
-              <Icon name={item.icon} size={17} /><span>{viewLabels[item.key]}</span>
+            <button key={item.key} className={`sidebar-nav-item${activeView === item.key ? ' active' : ''}${item.key === 'swarm' && activeView === 'swarm' ? ' swarm-active' : ''}${item.key === 'swarm' && hasSwarmActivity && activeView !== 'swarm' ? ' activity-pending' : ''}`} onClick={() => setActiveView(item.key)} aria-current={activeView === item.key ? 'page' : undefined} title={viewLabels[item.key]}>
+              <Icon name={item.icon} size={17} /><span>{viewLabels[item.key]}</span>{item.key === 'swarm' && activeAgentCount > 0 && <i className="sidebar-activity-count">{activeAgentCount}</i>}
             </button>
           ))}
         </nav>
@@ -447,7 +466,7 @@ export function App() {
           </div>
         </header>
         <main className={`content-area content-area-${activeView}`}>{renderContent()}</main>
-        <StatusBar sending={isStreaming} swarmStatuses={swarm.swarmStatuses} />
+        <StatusBar sending={isStreaming} activeAgentCount={activeAgentCount} hasSwarmActivity={hasSwarmActivity} />
       </div>
       <ProjectFolderPicker
         open={folderPickerOpen}
@@ -481,13 +500,10 @@ function ViewHeader({
   );
 }
 
-function StatusBar({ sending, swarmStatuses }: { sending: boolean; swarmStatuses: Map<string, SwarmStatus> }) {
+function StatusBar({ sending, activeAgentCount, hasSwarmActivity }: { sending: boolean; activeAgentCount: number; hasSwarmActivity: boolean }) {
   const { tr } = useI18n();
   const { phase } = usePhaseStatus();
   const { connected } = useServerStatus();
-  const agents = Array.from(swarmStatuses.values());
-  const activeCount = agents.filter(agent => agent.status === 'running').length;
-
   return (
     <footer className="status-bar">
       <div className="status-left">
@@ -497,7 +513,7 @@ function StatusBar({ sending, swarmStatuses }: { sending: boolean; swarmStatuses
       </div>
       <div className="status-right">
         <span className="status-item"><span className={`status-dot${connected ? ' success' : ' error'}`} />{connected ? tr('Local server', '本地服务') : tr('Offline', '离线')}</span>
-        <span className="status-item"><Icon name="swarm" size={13} />{activeCount > 0 ? tr(`${activeCount} agents active`, `${activeCount} 个智能体活动中`) : tr('Swarm idle', '协作空闲')}</span>
+        <span className="status-item"><Icon name="swarm" size={13} />{activeAgentCount > 0 ? tr(`${activeAgentCount} agents active`, `${activeAgentCount} 个智能体活动中`) : hasSwarmActivity ? tr('Swarm queued', '协作排队中') : tr('Swarm idle', '协作空闲')}</span>
       </div>
     </footer>
   );

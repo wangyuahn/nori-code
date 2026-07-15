@@ -143,6 +143,7 @@ export function useSwarmWebSocket(): SwarmConnectionState {
                   task_id: typeof msg.task_id === 'string' ? msg.task_id : current?.task_id,
                   description: typeof msg.description === 'string' ? msg.description : current?.description,
                   owner_agent_id: typeof msg.owner_agent_id === 'string' ? msg.owner_agent_id : current?.owner_agent_id,
+                  parent_swarm_id: typeof msg.parent_swarm_id === 'string' ? msg.parent_swarm_id : current?.parent_swarm_id,
                   round: typeof msg.round === 'number' ? msg.round : current?.round,
                   started_at: typeof msg.started_at === 'string' ? msg.started_at : current?.started_at,
                   usage: msg.usage ?? current?.usage,

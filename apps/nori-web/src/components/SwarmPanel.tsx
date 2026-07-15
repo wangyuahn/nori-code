@@ -10,12 +10,8 @@ export function SwarmPanel({ swarm, sessionId }: { swarm: SwarmConnectionState; 
   const runs = Array.from(swarmStatuses.values())
     .filter(status => !sessionId || status.session_id === sessionId)
     .sort((left, right) => (right.round ?? 0) - (left.round ?? 0));
-  const rounds = new Map<number, SwarmStatus[]>();
-  for (const run of runs) {
-    const round = run.round ?? 1;
-    rounds.set(round, [...(rounds.get(round) ?? []), run]);
-  }
-  const swarmTaskIds = new Set(runs.flatMap(run => run.task_id ? [run.task_id] : []));
+  const rounds = groupSwarmRuns(runs);
+  const swarmTaskIds = swarmTaskIdsForRuns(runs);
 
   return (
     <div className="swarm-panel">
@@ -47,7 +43,7 @@ export function SwarmPanel({ swarm, sessionId }: { swarm: SwarmConnectionState; 
       ) : (
         <div className="swarm-round-list">
           {Array.from(rounds.entries()).map(([round, roundRuns]) => (
-            <SwarmRound key={round} round={round} runs={roundRuns} />
+            <SwarmRound key={round} round={round} runs={roundRuns} allRuns={runs} />
           ))}
         </div>
       )}
@@ -58,38 +54,104 @@ export function SwarmPanel({ swarm, sessionId }: { swarm: SwarmConnectionState; 
   );
 }
 
-function SwarmRound({ round, runs }: { round: number; runs: SwarmStatus[] }) {
-  const { tr } = useI18n();
-  const running = runs.some(run => run.status === 'running' || run.status === 'pending');
-  const agentCount = runs.reduce((total, run) => total + run.task_count, 0);
-  const completedCount = runs.reduce((total, run) => total + run.completed_count, 0);
-  const tokens = runs.reduce((total, run) => total + (run.usage?.total ?? 0), 0);
+export function groupSwarmRuns(runs: SwarmStatus[]): Map<number, SwarmStatus[]> {
+  const rounds = new Map<number, SwarmStatus[]>();
+  const runIds = new Set(runs.map(run => run.swarm_id));
+  for (const run of runs.filter(item => !item.parent_swarm_id || !runIds.has(item.parent_swarm_id))) {
+    const round = run.round ?? 1;
+    rounds.set(round, [...(rounds.get(round) ?? []), run]);
+  }
+  return rounds;
+}
 
-  return <details className={`swarm-round${running ? ' running' : ''}`} defaultOpen={running}>
+export function collectSwarmTreeRuns(roots: SwarmStatus[], allRuns: SwarmStatus[]): SwarmStatus[] {
+  const children = new Map<string, SwarmStatus[]>();
+  for (const run of allRuns) {
+    if (!run.parent_swarm_id) continue;
+    children.set(run.parent_swarm_id, [...(children.get(run.parent_swarm_id) ?? []), run]);
+  }
+  const result: SwarmStatus[] = [];
+  const visited = new Set<string>();
+  const visit = (run: SwarmStatus) => {
+    if (visited.has(run.swarm_id)) return;
+    visited.add(run.swarm_id);
+    result.push(run);
+    for (const child of children.get(run.swarm_id) ?? []) visit(child);
+  };
+  for (const root of roots) visit(root);
+  return result;
+}
+
+export function swarmTaskIdsForRuns(runs: SwarmStatus[]): Set<string> {
+  return new Set(runs.flatMap(run => [
+    ...(run.task_id ? [run.task_id] : []),
+    ...(run.tasks?.flatMap(task => [task.id, ...(task.agent_id ? [task.agent_id] : [])]) ?? []),
+  ]));
+}
+
+export function runningSwarmAgents(runs: SwarmStatus[]): { ids: Set<string>; untracked: number } {
+  const ids = new Set<string>();
+  let untracked = 0;
+  for (const run of runs) {
+    if (!run.tasks) {
+      untracked++;
+      continue;
+    }
+    for (const task of run.tasks) {
+      if (task.status === 'running') ids.add(task.agent_id ?? task.id);
+    }
+  }
+  return { ids, untracked };
+}
+
+function SwarmRound({ round, runs, allRuns }: { round: number; runs: SwarmStatus[]; allRuns: SwarmStatus[] }) {
+  const { tr } = useI18n();
+  const treeRuns = collectSwarmTreeRuns(runs, allRuns);
+  const running = treeRuns.some(run => run.status === 'running' || run.status === 'pending');
+  const [open, setOpen] = useState(running);
+  const agentCount = treeRuns.reduce((total, run) => total + run.task_count, 0);
+  const completedCount = treeRuns.reduce((total, run) => total + run.completed_count, 0);
+  const tokens = treeRuns.reduce((total, run) => total + swarmRunTokens(run), 0);
+  const hasLiveTokens = treeRuns.some(run => run.tasks?.some(task => (task.live_output_tokens ?? 0) > 0));
+
+  useEffect(() => {
+    if (running) setOpen(true);
+  }, [running]);
+
+  return <details className={`swarm-round${running ? ' running' : ''}`} open={open} onToggle={event => setOpen(event.currentTarget.open)}>
     <summary>
       <span className={`status-dot ${running ? 'running' : 'done'}`}/>
       <span className="swarm-round-copy"><strong>{tr(`Round ${round}`, `第 ${round} 轮`)}</strong><small>{completedCount}/{agentCount} {tr('agents complete', '个智能体已完成')}</small></span>
-      <span className="swarm-round-meta">{tokens > 0 && <small>{tokens.toLocaleString()} tokens</small>}<span className={`badge badge-${running ? 'info' : 'success'}`}>{running ? tr('Running', '运行中') : tr('Done', '已完成')}</span></span>
+      <span className="swarm-round-meta">{tokens > 0 && <small>{hasLiveTokens ? '~' : ''}{tokens.toLocaleString()} tokens</small>}<span className={`badge badge-${running ? 'info' : 'success'}`}>{running ? tr('Running', '运行中') : tr('Done', '已完成')}</span></span>
     </summary>
-    <div className="swarm-round-body">{runs.map(run => <SwarmRun key={run.swarm_id} run={run}/>)}</div>
+    <div className="swarm-round-body">{runs.map(run => <SwarmRun key={run.swarm_id} run={run} allRuns={allRuns}/>)}</div>
   </details>;
 }
 
-function SwarmRun({ run }: { run: SwarmStatus }) {
+function SwarmRun({ run, allRuns }: { run: SwarmStatus; allRuns: SwarmStatus[] }) {
   const { tr } = useI18n();
   const progress = run.task_count > 0 ? Math.round((run.completed_count / run.task_count) * 100) : 0;
   const tasks = run.tasks ?? [];
+  const childRuns = allRuns.filter(child => child.parent_swarm_id === run.swarm_id);
+  const taskAgentIds = new Set(tasks.flatMap(task => task.agent_id ? [task.agent_id] : []));
+  const unattachedChildren = childRuns.filter(child => !child.owner_agent_id || !taskAgentIds.has(child.owner_agent_id));
+  const tokens = swarmRunTokens(run);
+  const hasLiveTokens = tasks.some(task => (task.live_output_tokens ?? 0) > 0);
   return <section className={`swarm-run swarm-run-${run.status}`}>
     <header>
       <span className={`status-dot ${run.status}`}/>
       <span><strong>{run.description || run.swarm_id}</strong><small>{run.owner_agent_id === 'main' ? tr('Started by Nori', '由 Nori 发起') : tr('Started by an agent', '由智能体发起')}</small></span>
-      <span className="swarm-run-stats"><small>{run.completed_count}/{run.task_count}</small>{run.usage && <small>{run.usage.total.toLocaleString()} tokens</small>}</span>
+      <span className="swarm-run-stats"><small>{run.completed_count}/{run.task_count}</small>{tokens > 0 && <small>{hasLiveTokens ? '~' : ''}{tokens.toLocaleString()} tokens</small>}</span>
     </header>
     <div className="swarm-run-progress"><i style={{ width: `${progress}%` }}/></div>
     <div className="swarm-task-items">
       {tasks.length > 0
-        ? tasks.map(task => <TaskPreview key={task.id} task={task}/>)
+        ? tasks.map(task => {
+          const children = childRuns.filter(child => child.owner_agent_id === task.agent_id);
+          return <div className="swarm-task-branch" key={task.id}><TaskPreview task={task}/>{children.length > 0 && <div className="swarm-child-runs">{children.map(child => <SwarmRun key={child.swarm_id} run={child} allRuns={allRuns}/>)}</div>}</div>;
+        })
         : <PreviewNotice kind="loading" text={tr('Waiting for agents to start…', '正在等待智能体启动…')}/>}
+      {unattachedChildren.length > 0 && <div className="swarm-child-runs swarm-child-runs-unattached">{unattachedChildren.map(child => <SwarmRun key={child.swarm_id} run={child} allRuns={allRuns}/>)}</div>}
     </div>
   </section>;
 }
@@ -143,6 +205,7 @@ type SwarmTask = NonNullable<SwarmStatus['tasks']>[number];
 function TaskPreview({ task }: { task: SwarmTask }) {
   const { tr } = useI18n();
   const output = task.output?.trim() ?? '';
+  const tokenTotal = (task.usage?.total ?? 0) + (task.live_output_tokens ?? 0);
 
   return (
     <details className={`swarm-task-preview swarm-task-preview-${task.status}`}>
@@ -153,7 +216,7 @@ function TaskPreview({ task }: { task: SwarmTask }) {
           <small>{task.id}</small>
         </span>
         <span className="swarm-task-meta">
-          {task.usage ? <small>{task.usage.total.toLocaleString()} tokens</small> : null}
+          {tokenTotal > 0 ? <small>{(task.live_output_tokens ?? 0) > 0 ? '~' : ''}{tokenTotal.toLocaleString()} tokens</small> : null}
           {typeof task.output_bytes === 'number' ? <small>{formatBytes(task.output_bytes)}</small> : null}
           <span className={`badge badge-${taskStatusBadge(task.status)}`}>
             {taskStatusLabel(task.status, tr)}
@@ -175,6 +238,12 @@ function TaskPreview({ task }: { task: SwarmTask }) {
       </div>
     </details>
   );
+}
+
+export function swarmRunTokens(run: SwarmStatus): number {
+  const exact = run.usage?.total ?? run.tasks?.reduce((total, task) => total + (task.usage?.total ?? 0), 0) ?? 0;
+  const live = run.tasks?.reduce((total, task) => total + (task.live_output_tokens ?? 0), 0) ?? 0;
+  return exact + live;
 }
 
 function PreviewNotice({

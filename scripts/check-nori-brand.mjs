@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
@@ -60,8 +60,9 @@ for (const path of filesUnder('packages/agent-core/src/skill/builtin')) {
   if (path.endsWith('.md')) forbid(path, ['Kimi Code', 'kimi-code', '`kimi doctor`']);
 }
 
-expectContains('pnpm-workspace.yaml', "- '!apps/kimi-desktop'", 'legacy desktop app must stay outside the workspace');
-expectContains('pnpm-workspace.yaml', "- '!apps/kimi-web'", 'legacy web app must stay outside the workspace');
+for (const path of ['apps/kimi-desktop', 'apps/kimi-web', 'packages/kimi-migration-legacy']) {
+  if (existsSync(join(root, path))) failures.push(`${path}: retired legacy source must not return`);
+}
 expectContains('apps/nori-desktop/build/icon.svg', 'aria-label="Nori N logo"', 'desktop icon must identify the Nori N');
 expectContains('apps/nori-desktop/src/main/brand.ts', "NORI_PRODUCT_NAME = 'Nori Work'", 'desktop product name is not Nori Work');
 expectContains('apps/nori-desktop/src/main/brand.ts', "NORI_APP_ID = 'com.nori.work'", 'desktop app id is not independent');

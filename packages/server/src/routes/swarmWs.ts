@@ -23,6 +23,7 @@ export interface SwarmStatusPayload {
   task_id?: string;
   description?: string;
   owner_agent_id?: string;
+  parent_swarm_id?: string;
   round?: number;
   started_at?: string;
   usage?: {
@@ -86,6 +87,7 @@ export function registerSwarmWsRoute(app: FastifyInstance, _ix: IInstantiationSe
           task_id: entry.task_id,
           description: entry.description,
           owner_agent_id: entry.owner_agent_id,
+          parent_swarm_id: entry.parent_swarm_id,
           round: entry.round,
           started_at: entry.started_at,
           usage: entry.usage,

@@ -4,14 +4,18 @@ import { WorkspaceInspector } from './WorkspaceInspector';
 import { SplitPane } from './SplitPane';
 import { useFilesystem } from '../hooks/useFilesystem';
 import type { ApprovalRequest, FsEntry, FsReadResponse, ModelCatalogItem, QuestionAnswer, QuestionRequest, Session, SessionAgentConfig, SessionRealtimeStatus } from '../api/client';
-import type { ChatMessage, CodeChange, QueuedPrompt } from '../hooks/useChatMessages';
+import type { ChatMessage, CodeChange, QueuedPrompt, TodoItem, WorkBlock } from '../hooks/useChatMessages';
 
 interface CodeViewProps {
   session: Session | null;
+  allSessions?: Session[];
   messages: ChatMessage[];
   streaming: string;
   thinking: string;
+  workBlocks?: WorkBlock[];
   isStreaming: boolean;
+  activeAgentCount?: number;
+  activeAgentTokens?: number;
   sessionStatus?: SessionRealtimeStatus | null;
   compacting?: boolean;
   models: ModelCatalogItem[];
@@ -33,6 +37,7 @@ interface CodeViewProps {
   onResolveQuestion?: (questionId: string, answers: Record<string, QuestionAnswer>) => void | Promise<void>;
   onDismissQuestion?: (questionId: string) => void | Promise<void>;
   queuedPrompts?: QueuedPrompt[];
+  todos?: TodoItem[];
   onCancelQueuedPrompt?: (promptId: string) => void | Promise<void>;
   selectedFile?: FsEntry | null;
   codeChanges?: CodeChange[];
@@ -43,10 +48,14 @@ interface CodeViewProps {
 
 export function CodeView({
   session,
+  allSessions,
   messages,
   streaming,
   thinking,
+  workBlocks,
   isStreaming,
+  activeAgentCount,
+  activeAgentTokens,
   sessionStatus,
   compacting,
   models,
@@ -68,6 +77,7 @@ export function CodeView({
   onResolveQuestion,
   onDismissQuestion,
   queuedPrompts,
+  todos,
   onCancelQueuedPrompt,
   selectedFile,
   codeChanges = [],
@@ -101,10 +111,14 @@ export function CodeView({
     <SplitPane direction="horizontal" defaultSize={60} minSize={30} maxSize={80}>
       <ChatView
         session={session}
+        allSessions={allSessions}
         messages={messages}
         streaming={streaming}
         thinking={thinking}
+        workBlocks={workBlocks}
         isStreaming={isStreaming}
+        activeAgentCount={activeAgentCount}
+        activeAgentTokens={activeAgentTokens}
         sessionStatus={sessionStatus}
         compacting={compacting}
         models={models}
@@ -125,6 +139,7 @@ export function CodeView({
         onResolveQuestion={onResolveQuestion}
         onDismissQuestion={onDismissQuestion}
         queuedPrompts={queuedPrompts}
+        todos={todos}
         onCancelQueuedPrompt={onCancelQueuedPrompt}
         draftAgentConfig={draftAgentConfig}
         rewindLimit={rewindLimit}
