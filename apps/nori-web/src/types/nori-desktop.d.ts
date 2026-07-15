@@ -7,12 +7,6 @@ export interface FsEntry {
 }
 
 export interface NoriDesktopAPI {
-  getConfig: () => Promise<unknown>;
-  reloadConfig: () => Promise<unknown>;
-  getPhase: () => Promise<unknown>;
-  onPhaseChange: (callback: (phase: string) => void) => () => void;
-  onSwarmUpdate: (callback: (data: unknown) => void) => () => void;
-  onError: (callback: (error: string) => void) => () => void;
   getServerToken?: () => Promise<string | undefined>;
   selectProjectDirectory?: () => Promise<string | undefined>;
   onToggleMode?: (callback: (mode: string) => void) => () => void;
@@ -27,12 +21,6 @@ export interface NoriDesktopAPI {
   // File system methods
   fsReadDir?: (dirPath: string) => Promise<FsEntry[]>;
   fsReadFile?: (filePath: string) => Promise<string>;
-  // Terminal IPC methods
-  terminalCreate?: (opts: { id: string; cols: number; rows: number; cwd?: string }) => Promise<{ ok: boolean }>;
-  terminalWrite?: (opts: { id: string; data: string }) => Promise<{ ok: boolean }>;
-  terminalResize?: (opts: { id: string; cols: number; rows: number }) => Promise<{ ok: boolean }>;
-  terminalDestroy?: (opts: { id: string }) => Promise<{ ok: boolean }>;
-  onTerminalOutput?: (callback: (data: { id: string; data: string }) => void) => () => void;
 }
 
 declare global {

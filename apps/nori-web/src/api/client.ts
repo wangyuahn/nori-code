@@ -464,6 +464,10 @@ interface RequestOptions {
 // === Client Factory ===
 
 export async function getServerToken(): Promise<string | undefined> {
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  const queryParams = new URLSearchParams(window.location.search);
+  const urlToken = hashParams.get('token') || queryParams.get('token');
+  if (urlToken) return urlToken;
   if (!window.noriDesktop?.getServerToken) return undefined;
   try {
     return await window.noriDesktop.getServerToken();

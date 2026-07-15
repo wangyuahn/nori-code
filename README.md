@@ -1,201 +1,146 @@
 # Nori Code
 
-> Loop-core multi-agent coding tool — plan, delegate, review, repeat.
+> A multi-agent coding workspace for planning, implementation, review, and persistent project knowledge.
 
-Nori Code is an AI coding agent that orchestrates work through a plan → implement → review loop. Instead of a single agent doing everything, it acts as a read-only orchestrator that delegates all code changes to parallel swarm sub-agents, backed by an Obsidian-style shared memory vault.
+[中文说明](README.zh-CN.md)
 
-Built on the [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code) (MIT license), Nori Code adds a hybrid rule engine, phase-based workflow enforcement, custom user-defined rules, and deep swarm integration.
+![Nori Work](docs/images/nori-work.png)
 
----
+Nori is available through two connected experiences:
 
-## How It Works
+- **Nori Code**: the terminal CLI/TUI for focused coding workflows.
+- **Nori Work**: the Electron desktop workspace for conversations, files, Git, knowledge, usage, and Agent Swarm activity.
 
-```
-You: "Build a login system"
+Nori is based on [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code) under the MIT license. It retains required upstream compatibility while adding Nori's workflow, memory, desktop, and multi-agent capabilities.
 
-  plan (hybrid)          → Search Obsidian vault → Analyze → Write plan
-     ↓
-  implement (autonomous) → nori_swarm_launch → Coder agents write code
-     ↓                          ↓
-   (custom rules enforced)  ask_parent ←→ orchestrator guidance
-     ↓
-  review (rule-enforced)  → Auto tests + lint + swarm review DAG
-     ↓
-  done                    → Write review note to Obsidian vault
-```
+## Highlights
 
-The orchestrator is **read-only** — it plans, searches memory, and delegates. All Write/Edit/Bash operations go through swarm sub-agents.
-
----
-
-## Core Features
-
-**Loop-core orchestration** — plan → implement → review phases, each with configurable mode (rule-enforced / hybrid / llm-autonomous). Goal mode auto-drives turns through all phases.
-
-**Custom rules engine** — define rules in `nori.yaml` that trigger on phase entry/exit or tool calls. 4 condition types: `always`, `on_phase`, `on_tool`, `on_event`. Injected as system prompts. View/edit via `/setting rules`.
-
-**Shared Obsidian memory** — markdown vault at `~/.nori-code/vault/` with `[[bidirectional links]]`. `nori_memory_search` queries vault (embedding + keyword + link graph). `nori_memory_write` records decisions/analysis/reviews. Note rules enforce mandatory notes at phase boundaries.
-
-**Agent Swarm** — DAG-based parallel task execution with dependency chains and configurable recursion depth (`/settings → Swarm Depth`). `nori_swarm_launch` spawns coder/test/review sub-agents. `nori_ask_parent` lets sub-agents ask the orchestrator for guidance.
-
-**Read-only orchestrator** — main agent cannot write code directly. Must delegate via `nori_swarm_launch` or `nori_plan_write` (for docs). Togglable via `/settings → Read-only Mode`.
-
-**Review gate & scoring** — TurnFlow tracks per-turn activity (files changed, swarm calls, shell commands) and scores 0–10. Exceeding thresholds triggers mandatory/suggested review. Configurable via `/settings → Workflow`.
-
-**Post-code review** — review phase auto-runs tests, lint, type checks, then launches swarm review DAG.
-
-**Tool hints** — on error, the system classifies the failure (compile / test / type / runtime / network / timeout) and suggests recovery tools. Model decides the fix.
-
-**Centralized `/settings`** — model, permission, theme, editor, swarm depth, coder write, note rules, read-only mode, workflow thresholds. All in one GUI selector.
-
----
+- **Plan and Code modes**: Plan mode is read-only. Code mode can optionally allow the main Agent to use Edit and Write, which avoids launching a Swarm for every small change.
+- **Background Agent work**: Agent Swarm and sub-agents continue in the background while the main Agent can keep working. Completion is delivered back into the parent context.
+- **Agent activity tree**: Nori Work groups top-level Swarm rounds and nests Agents launched by other Agents beneath their caller. Live output, Markdown results, status, and token totals are available per Agent.
+- **Streaming conversations**: assistant reasoning, tool calls, and Markdown answers update in place. Tool calls stay at their actual position in the turn instead of being collected at the bottom.
+- **Provider flexibility**: configure API format, base URL, and key for built-in or compatible third-party providers. Models and supported reasoning levels are requested from the provider and selected beside the composer.
+- **Multimodal input**: attach files and, when the selected model supports vision, images.
+- **Project-oriented sessions**: conversations are grouped by project folder, can be collapsed, archived, restored, or deleted.
+- **Workspace inspector**: browse project files and Git status, preview source with syntax highlighting, render Markdown, inspect recent Agent edits, and use Git diff/commit/publish controls.
+- **Project knowledge**: Markdown notes support `[[wiki-links]]`, search, removal, and an interactive bidirectional-link graph.
+- **Usage visibility**: Nori Work shows per-output usage, Agent totals, session totals, context utilization, and an initial-page usage overview.
+- **Permission modes**: Manual asks for every operation, Auto approves ordinary operations according to policy, and Yolo approves all operations.
 
 ## Quick Start
 
+Requirements: Node.js `>=24.15.0`.
+
 ```sh
-# Install globally
 npm install -g nori-code
 
-# Start interactive TUI
+# Interactive terminal UI
 nori
 
-# Single task mode
+# One-shot prompt
 nori -p "your task"
 
-# Auto-approve mode
-nori --permission auto
+# Start the local web workspace
+nori web
 ```
 
-Requirements: Node.js ≥ 24.15.0.
-
-After install, configure a model provider:
-
-```sh
-nori
-# In the TUI:
-/provider    # add your API key (OpenAI, Anthropic, DeepSeek, etc.)
-/model       # select a model
-```
+In the TUI, use `/provider` to configure a provider and `/model` to select a model. Nori Work exposes the same provider settings in its Settings page and model selection in the chat composer.
 
 ### Build from source
 
 ```sh
 git clone https://github.com/wangyuahn/nori-code.git
 cd nori-code
+corepack enable
 pnpm install
-pnpm -C apps/nori-code run build
-node apps/nori-code/dist/main.mjs
+
+pnpm dev:cli
+pnpm dev:web
+pnpm dev:desktop
 ```
 
----
+Build the Windows desktop installer:
 
-## Configuration (`nori.yaml`)
+```sh
+pnpm --filter @nori-code/nori-web build
+pnpm -C apps/nori-code build:native:sea
+pnpm -C apps/nori-code test:native:smoke
+pnpm --filter @nori-code/nori-work dist
+```
 
-Place `nori.yaml` in your project root. If absent, sensible defaults are used (default vault at `~/.nori-code/vault/`).
+The generated installers are written to `apps/nori-desktop/dist-app/`.
+
+## Workflow
+
+Nori can combine model-driven work with deterministic project policy:
+
+```text
+request -> plan -> implement -> verify -> review -> summarize
+             |          |
+             |          +-> background Agent Swarm / sub-agents
+             +-> project memory and rules
+```
+
+The optional `nori.yaml` in a project root controls phases, rules, review thresholds, and Swarm execution. Missing configuration uses runtime defaults.
 
 ```yaml
 phases:
   - name: plan
     mode: hybrid
-    hybrid:
-      retrieval_gate:
-        trigger: { mode: on_keywords }
-        max_results: 10
   - name: implement
     mode: llm-autonomous
-    llm_autonomous:
-      max_iterations: 50
   - name: review
     mode: rule-enforced
     rule_enforced:
       steps:
         - type: exec
-          id: run_tests
-          command: "npm test"
-        - type: exec
-          id: lint
-          command: "eslint src/"
+          id: test
+          command: "pnpm test"
 
 workflow:
   review:
     suggestion_threshold: 4
     required_threshold: 7
-    max_gate_continuations: 2
-
-rules:
-  definitions:
-    - name: search_before_code
-      condition: { type: on_phase, phase: implement, stage: entry }
-      prompt: "Search Obsidian vault for past decisions before coding."
-      enforced: true
-      editable: true
-    - name: require_plan_document
-      condition: { type: on_phase, phase: plan, stage: exit }
-      prompt: "Write a plan document before leaving the plan phase."
-      enforced: true
-      editable: false
 
 swarm:
   max_concurrency: 4
   max_swarm_depth: 3
-  checks:
-    - id: type_check
-      agent_type: coder
-      on_failure: fix_and_retry
-    - id: test_check
-      agent_type: coder
-      depends_on: [type_check]
-      on_failure: block
 ```
 
-Phase modes:
-- **rule-enforced** — deterministic steps, no LLM involvement (tests, lint, build)
-- **hybrid** — forced retrieval gate: model declares keywords → system searches vault → results injected → model continues
-- **llm-autonomous** — model plans and delegates freely, custom rules still enforced
+Configuration is resolved by the current runtime implementation in `packages/agent-core`. Invalid or security-sensitive configuration should fail closed rather than silently widen permissions.
 
----
+## Tools
 
-## Slash Commands
+### Memory
 
-| Command | Action |
-|---------|--------|
-| `/settings` | Open settings GUI (12 options: model, permission, theme, editor, experiments, updates, usage, coder write, swarm depth, note rules, read-only mode, workflow) |
-| `/settings auto` | Interactive setup wizard (6-step guided configuration) |
-| `/settings permission auto\|yolo\|manual` | Set permission mode |
-| `/setting rules` | View/edit custom rules |
-| `/setting note` | Toggle mandatory note rules (analysis/decision/pattern) |
-| `/provider` | Configure third-party model providers |
+| Tool | Purpose |
+| --- | --- |
+| `nori_memory_search` | Search Markdown notes using text, metadata, and link relationships |
+| `nori_memory_write` | Create or update a project note with optional `[[wiki-links]]` |
+| `nori_memory_remove` | Move a matching note into the vault's `.trash` directory |
+| `nori_plan_write` | Write a plan document in the project workspace |
 
-## Memory Tools
+### Agent Swarm
 
-| Tool | Description |
-|------|-------------|
-| `nori_memory_search` | Query vault by keywords. Returns ranked results from embedding + full-text + link graph |
-| `nori_memory_write` | Write notes to vault. Use `[[wiki-links]]` for bidirectional linking |
-| `nori_plan_write` | Write plan docs to project workspace (docs/plans/). Not blocked by read-only mode |
+| Tool | Purpose |
+| --- | --- |
+| `nori_swarm_launch` | Launch a dependency-aware group of background Agents |
+| `nori_swarm_status` | Read live status for a running Swarm |
+| `nori_swarm_result` | Retrieve completed Swarm results |
+| `nori_ask_parent` | Let a child Agent request guidance from its parent |
 
-## Swarm Tools
-
-| Tool | Description |
-|------|-------------|
-| `nori_swarm_launch` | Launch DAG-based parallel sub-agents (coder/test/review) |
-| `nori_swarm_status` | Check running swarm progress |
-| `nori_swarm_result` | Retrieve swarm results |
-| `nori_ask_parent` | (subagent only) Ask parent orchestrator for guidance |
-
----
-
-## Develop
+## Development
 
 ```sh
-pnpm install
-pnpm -C apps/nori-code run dev    # dev mode with hot reload
-pnpm -C apps/nori-code run build  # production build
-pnpm test                          # run tests
+pnpm typecheck
+pnpm lint
+pnpm test
+pnpm build
+pnpm check:brand
 ```
 
----
+Run focused checks while developing, then expand verification according to the affected packages.
 
 ## License
 
-MIT. Based on [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code).
+MIT. Based on [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code), also licensed under MIT.

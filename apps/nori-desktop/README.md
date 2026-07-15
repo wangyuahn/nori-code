@@ -1,108 +1,60 @@
 # Nori Work
 
-An Electron desktop client for Nori (product name **Nori Work**; workspace
-package `@nori-code/nori-work`). It is a thin **shell + process manager** around
-the existing web UI (`apps/nori-web`): it does not reimplement any UI or
-backend, it just opens a native window onto the local Nori server.
+Nori Work is the Electron desktop workspace for Nori Code. The package name is `@nori-code/nori-work`.
 
-## How it works
+![Nori Work](../../docs/images/nori-work.png)
 
-The web UI cannot run on its own — it needs the Nori **server** (REST + WS
-under `/api/v1`). That server already ships as a self-contained single-file
-executable (SEA) built from `apps/nori-code`, with the web UI bundled inside it.
+## Architecture
 
-On launch the app:
+Nori Work combines three existing boundaries instead of duplicating Agent logic:
 
-1. Runs the bundled SEA's `server run`, which reuses a live shared daemon if one
-   is already running, or starts one — exactly the same `ensureDaemon` flow the
-   CLI (`nori web`) uses. The daemon binds the well-known port (`58627`) and
-   writes `~/.nori-code/server/lock`, so the CLI, the browser and the TUI all
-   share the **same** server.
-2. Reads that lock file for the real port and loads the web UI from the daemon's
-   origin (e.g. `http://127.0.0.1:58627`) — same-origin, no CORS, no preload.
+- The **Electron main process** owns the native window, application menu, updater, project-directory picker, notifications, and server lifecycle.
+- The explicit **preload bridge** exposes the small set of approved IPC operations used by the renderer, including server-token lookup and local project file access.
+- The bundled **Nori Web renderer** talks to the local Nori REST/WebSocket server for sessions, streaming events, provider settings, Agent activity, knowledge, and Git operations.
 
-On quit the daemon is **left running**; it self-exits ~60s after the last client
-disconnects, so closing the desktop app never tears down a server another client
-is still using.
+At startup, the desktop process launches or reuses the bundled Nori SEA server, reads `~/.nori-code/server/lock`, obtains its origin and token, and loads the renderer. The shared daemon is left running when the window closes and exits after its idle period when no clients remain.
 
 Key files:
 
-- `src/main/ensure-server.ts` — run the SEA, read the lock, confirm `/healthz`.
-- `src/main/sea-path.ts` — resolve the bundled SEA path (dev vs packaged).
-- `src/main/index.ts` — window, native menu, window-state, loading/error screens.
+- `src/main/index.ts`: application lifecycle, window, menu, tray, and updater wiring.
+- `src/main/ensure-server.ts`: launch/reuse the SEA, read the lock file, and wait for health.
+- `src/main/sea-path.ts`: resolve the development or packaged SEA binary.
+- `src/main/ipc-handlers.ts`: explicit native IPC handlers.
+- `src/preload/index.ts`: isolated renderer bridge.
+- `electron-builder.config.cjs`: installer, platform assets, and signing configuration.
 
-## Develop
+## Development
 
-The dev build loads the SEA from `apps/nori-code/dist-native/bin/<target>/`, so
-build the backend once for your platform first:
+The desktop development build needs a current Web build and a platform-specific SEA:
 
-```bash
-# one-time (rebuild when nori-code / nori-web change):
-pnpm -C apps/nori-web run build
-node apps/nori-code/scripts/copy-web-assets.mjs
+```sh
+pnpm --filter @nori-code/nori-web build
 pnpm -C apps/nori-code build:native:sea
-
-# then run the desktop app (builds the main process, launches Electron):
-pnpm -C apps/nori-desktop run dev      # or: pnpm dev:desktop  (from repo root)
+pnpm -C apps/nori-code test:native:smoke
+pnpm --filter @nori-code/nori-work dev
 ```
 
-Checks:
+Run focused checks with:
 
-```bash
-pnpm -C apps/nori-desktop run typecheck
+```sh
+pnpm --filter @nori-code/nori-web typecheck
+pnpm --filter @nori-code/nori-work typecheck
+pnpm check:brand
 ```
 
-## Package
+## Packaging
 
-`dist` builds the main process and runs electron-builder for the **current**
-platform. `scripts/before-pack.cjs` stages the matching-platform SEA into the
-app's resources (`<resources>/bin/<target>/`) and also stages the built
-`apps/nori-web/dist` assets (`<resources>/nori-web/dist/`).
+`dist` builds the Electron main/preload code and invokes electron-builder for the current platform. The `before-pack` hook stages both the platform SEA and `apps/nori-web/dist` into application resources.
 
-```bash
-# unsigned local build (for your own machine):
-CSC_IDENTITY_AUTO_DISCOVERY=false pnpm -C apps/nori-desktop run dist
-# -> apps/nori-desktop/dist-app/
+```sh
+pnpm --filter @nori-code/nori-web build
+pnpm -C apps/nori-code build:native:sea
+pnpm -C apps/nori-code test:native:smoke
+pnpm --filter @nori-code/nori-work dist
 ```
 
-> Do **not** rename a built `.app` bundle — renaming invalidates its code
-> signature and macOS will report it as "damaged".
+Artifacts are written to `apps/nori-desktop/dist-app/`.
 
-Cross-platform installers are produced in CI (`.github/workflows/desktop-build.yml`),
-which builds the SEA on each platform runner and packages there. SEA injection
-is per-platform (the blob is injected into the host Node binary), so each OS must
-be built on its own runner.
+The updater checks GitHub Releases in packaged builds. A usable release therefore requires the matching installer and update metadata to be uploaded together. Local Windows installers are currently unsigned and may trigger Microsoft Defender SmartScreen.
 
-### macOS signing + notarization
-
-An **unsigned** macOS build shows *"app is damaged and can't be opened"* once it
-has been transferred to another Mac (Gatekeeper quarantine). To distribute it,
-the app must be signed with a **Developer ID Application** certificate and
-notarized by Apple. The config (`electron-builder.config.cjs`) applies the
-hardened runtime + entitlements (`build/entitlements.mac.plist`) to the app and
-the nested SEA, and signing/notarization are environment-driven:
-
-```bash
-NORI_DESKTOP_NOTARIZE=true \
-CSC_NAME="Developer ID Application: … (TEAMID)" \
-APPLE_API_KEY=/path/AuthKey_XXX.p8 APPLE_API_KEY_ID=XXXX APPLE_API_ISSUER=…uuid… \
-pnpm -C apps/nori-desktop run dist
-```
-
-In CI, run the **desktop-build** workflow with `sign-macos: true`; it reuses the
-same Apple secrets / keychain action as the TUI native build
-(`APPLE_CERTIFICATE_P12`, `APPLE_NOTARIZATION_KEY_*`). The resulting `.dmg` opens
-on any Mac without warnings.
-
-> An `Apple Development` certificate is **not** enough — it can sign for your own
-> machine but cannot be notarized. You need a `Developer ID Application` cert.
-
-## v1 scope / not done yet
-
-- **Auto-update**: not implemented (v2).
-- **Windows / Linux signing**: unsigned in v1 (Windows shows a SmartScreen
-  prompt). Only macOS is signed + notarized.
-- **App icon**: builds ship the Nori logo (sourced from the docs site art) on
-  macOS, Windows, and Linux.
-- **First launch may need network**: the SEA resolves its native sidecars
-  (clipboard / koffi) the same way the installed CLI does.
+macOS distribution requires a Developer ID Application certificate and Apple notarization. SEA executables are platform-specific, so CI must build each operating system on its native runner.

@@ -368,10 +368,14 @@ describe('current builtin collaboration tools', () => {
   });
 
   it('AgentSwarm returns before child completion and arms no timeout', async () => {
-    let resolveBatch: (results: QueuedSubagentRunResult<string>[]) => void = () => {};
-    const runQueued = vi.fn(() => new Promise<QueuedSubagentRunResult<string>[]>((resolve) => {
-      resolveBatch = resolve;
-    }));
+    let queued: readonly QueuedSubagentTask<unknown>[] = [];
+    let resolveBatch: (results: QueuedSubagentRunResult<unknown>[]) => void = () => {};
+    const runQueued = (<T>(tasks: readonly QueuedSubagentTask<T>[]) => {
+      queued = tasks;
+      return new Promise<QueuedSubagentRunResult<T>[]>((resolve) => {
+        resolveBatch = resolve as (results: QueuedSubagentRunResult<unknown>[]) => void;
+      });
+    }) satisfies SessionSubagentHost['runQueued'];
     const host = mockSubagentHost({ runQueued });
     const background = createBackgroundManager().manager;
     const tool = new AgentSwarmTool(host, mockSwarmMode(), background);
@@ -392,7 +396,6 @@ describe('current builtin collaboration tools', () => {
       timeoutMs: undefined,
       subagentType: 'swarm:2',
     });
-    const queued = runQueued.mock.calls[0]![0];
     expect(queued).toHaveLength(2);
     expect(queued.every((task) => task.runInBackground && task.timeout === undefined)).toBe(true);
 
@@ -1137,6 +1140,7 @@ describe('current builtin collaboration tools', () => {
         return [];
       }),
       writeNote: vi.fn(),
+      removeNote: vi.fn(async () => false),
     };
     const tool = new NoriMemorySearchTool(memory);
     const properties = (tool.parameters as { properties: Record<string, unknown> }).properties;

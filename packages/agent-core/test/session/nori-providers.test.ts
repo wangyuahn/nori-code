@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'pathe';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -108,7 +108,40 @@ describe('Nori filesystem memory provider', () => {
     expect(results).toHaveLength(1);
     expect(results[0]?.title).toBe('Generic Crawler architecture decision');
   });
+
+  it('removes an exact-title note from retrieval and keeps it in trash', async () => {
+    const root = await tempRoot();
+    const vault = join(root, 'nori-vault');
+    await mkdir(join(vault, 'analysis'), { recursive: true });
+    await writeNote(join(vault, 'analysis', 'obsolete.md'), 'Obsolete memory', 'remove-marker');
+    const providers = createNoriProvidersFromConfig({ obsidian: { vault_path: './nori-vault' } }, root);
+    if (providers === null) throw new Error('expected providers');
+
+    await expect(providers.memory.removeNote(' Obsolete memory ')).resolves.toBe(true);
+    await expect(providers.memory.multiRetrieve(['remove-marker'])).resolves.toEqual([]);
+    await expect(readdir(join(vault, '.trash'))).resolves.toEqual(['obsolete.md']);
+    await expect(providers.memory.removeNote('Obsolete memory')).resolves.toBe(false);
+  });
+
+  it('removes same-named notes without colliding in trash', async () => {
+    const root = await tempRoot();
+    const vault = join(root, 'nori-vault');
+    await mkdir(join(vault, 'analysis'), { recursive: true });
+    await mkdir(join(vault, 'review'), { recursive: true });
+    await writeNote(join(vault, 'analysis', 'shared.md'), 'First memory', 'first');
+    await writeNote(join(vault, 'review', 'shared.md'), 'Second memory', 'second');
+    const providers = createNoriProvidersFromConfig({ obsidian: { vault_path: './nori-vault' } }, root);
+    if (providers === null) throw new Error('expected providers');
+
+    await expect(providers.memory.removeNote('First memory')).resolves.toBe(true);
+    await expect(providers.memory.removeNote('Second memory')).resolves.toBe(true);
+    expect((await readdir(join(vault, '.trash'))).sort()).toEqual(['shared-2.md', 'shared.md']);
+  });
 });
+
+async function writeNote(filePath: string, title: string, body: string): Promise<void> {
+  await writeFile(filePath, ['---', `title: "${title}"`, 'type: analysis', '---', '', body].join('\n'), 'utf-8');
+}
 
 async function tempRoot(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'nori-memory-'));

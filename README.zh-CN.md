@@ -1,201 +1,146 @@
 # Nori Code
 
-> Loop-core 多智能体编码工具 — 规划、分发、审查、循环。
+> 面向规划、实现、审查和项目长期知识的多智能体编程工作区。
 
-Nori Code 是一个通过 plan → implement → review 循环编排工作的 AI 编码智能体。它不自己写代码，而是作为只读编排器，将所有代码变更委派给并行 swarm 子智能体，并以 Obsidian 风格的共享记忆库作为知识底座。
+[English](README.md)
 
-基于 [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code)（MIT 协议）构建，新增混合规则引擎、阶段式工作流强制执行、自定义用户规则和深度 swarm 集成。
+![Nori Work](docs/images/nori-work.png)
 
----
+Nori 提供两个相互连通的使用界面：
 
-## 工作方式
+- **Nori Code**：适合专注编程流程的命令行 CLI/TUI。
+- **Nori Work**：覆盖会话、文件、Git、知识库、用量和 Agent Swarm 活动的 Electron 桌面工作台。
 
-```
-用户: "写一个登录系统"
+Nori 基于 MIT 协议的 [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code) 开发。在保留必要上游兼容性的同时，增加了 Nori 自己的工作流、记忆、桌面端和多智能体能力。
 
-  plan (混合模式)         → 搜索 Obsidian 记忆库 → 分析 → 撰写计划
-     ↓
-  implement (自主模式)    → nori_swarm_launch → Coder 子智能体写代码
-     ↓                          ↓
-   (自定义规则强制执行)     ask_parent ←→ 编排器指导
-     ↓
-  review (规则强制模式)    → 自动测试 + lint + swarm 审查 DAG
-     ↓
-  完成                    → 审查记录写入 Obsidian 记忆库
-```
+## 主要功能
 
-编排器**只读** — 它规划、搜索记忆、分发任务。所有 Write/Edit/Bash 操作通过 swarm 子智能体完成。
-
----
-
-## 核心特性
-
-**Loop-core 编排** — plan → implement → review 三阶段，每阶段可配置模式（规则强制 / 混合 / 自主）。Goal 模式自动驱动 turns 穿越所有阶段。
-
-**自定义规则引擎** — 在 `nori.yaml` 中定义规则，按阶段入口/出口或工具调用触发。4 种条件类型：`always`、`on_phase`、`on_tool`、`on_event`。以系统提示形式注入。`/setting rules` 查看/编辑。
-
-**共享 Obsidian 记忆** — Markdown 记忆库位于 `~/.nori-code/vault/`，支持 `[[双向链接]]`。`nori_memory_search` 查询记忆库。`nori_memory_write` 记录决策/分析/审查。笔记规则在阶段边界强制执行。
-
-**Agent Swarm** — 基于 DAG 的并行任务执行，支持依赖链和可配置递归深度（`/settings → Swarm Depth`）。`nori_swarm_launch` 生成 coder/test/review 子代理。`nori_ask_parent` 让子代理向编排器请求指导。
-
-**只读编排器** — 主代理不能直接写代码。必须通过 `nori_swarm_launch` 或 `nori_plan_write`（文档）委派。可通过 `/settings → Read-only Mode` 切换。
-
-**Review Gate 评分** — TurnFlow 追踪每轮活动（文件变更、swarm 调用、shell 命令）并评分 0–10。超过阈值触发强制/建议审查。`/settings → Workflow` 配置阈值。
-
-**编码后强制审查** — review 阶段自动运行测试、lint、类型检查，然后启动 swarm 审查 DAG。
-
-**工具提示** — 出错时系统分类失败类型（编译/测试/类型/运行时/网络/超时）并建议恢复工具。模型自主决定修复策略。
-
-**集中化 `/settings`** — 模型、权限、主题、编辑器、swarm 深度、coder 写入、笔记规则、只读模式、workflow 阈值。统一 GUI 选择器。
-
----
+- **Plan 与 Code 模式**：Plan 模式始终只读；Code 模式可选择是否允许主 Agent 使用 Edit 和 Write，小任务不必强制启动 Swarm。
+- **Agent 后台执行**：Agent Swarm 和普通子 Agent 在后台继续工作，主 Agent 可以同时处理其他内容；完成结果会重新注入父级上下文。
+- **智能体调用树**：Nori Work 按顶层 Swarm 轮次分组，并将 Agent 调用的子 Agent 显示在调用者节点下。每个 Agent 都可以查看实时输出、Markdown 结果、状态和 Token 总量。
+- **流式会话**：推理、工具调用和 Markdown 回答原位更新；工具卡片显示在实际调用位置，而不是统一堆到回答底部。
+- **第三方模型接入**：可设置 API 格式、Base URL 和 Key，支持内置及兼容的第三方 Provider。模型列表与可用思考强度从 Provider 获取，在发送框旁选择。
+- **多模态输入**：支持上传文件；当所选模型支持视觉能力时可以发送图片。
+- **按项目管理会话**：会话按项目文件夹分组，可折叠、归档、恢复和删除；归档会话也按项目组织。
+- **工作区检查器**：浏览项目文件和 Git 状态，语法高亮预览源码，渲染 Markdown，查看 Agent 最新代码改动，并使用 Git diff、提交和发布功能。
+- **项目知识库**：Markdown 笔记支持 `[[双向链接]]`、搜索、删除以及可缩放、可拖动、可点击的链接图。
+- **用量可视化**：显示单条输出用量、Agent 总量、会话总量和上下文占用比例；初始页提供整体用量概览。
+- **权限模式**：Manual 对全部操作逐项询问；Auto 按策略自动允许普通操作；Yolo 不再询问并允许全部操作。
 
 ## 快速开始
 
+环境要求：Node.js `>=24.15.0`。
+
 ```sh
-# 全局安装
 npm install -g nori-code
 
-# 启动交互式 TUI
+# 启动交互式终端界面
 nori
 
-# 单任务模式
-nori -p "任务描述"
+# 单次任务
+nori -p "你的任务"
 
-# 自动审批模式
-nori --permission auto
+# 启动本地 Web 工作台
+nori web
 ```
 
-要求：Node.js ≥ 24.15.0。
+在 TUI 中使用 `/provider` 配置 Provider，使用 `/model` 选择模型。Nori Work 在设置页提供同一套 Provider 配置，并在聊天发送框中选择模型。
 
-安装后配置模型：
-
-```sh
-nori
-# 进入 TUI:
-/provider    # 添加你的 API key（OpenAI、Anthropic、DeepSeek 等）
-/model       # 选择模型
-```
-
-### 从源码构建
+### 从源码运行
 
 ```sh
 git clone https://github.com/wangyuahn/nori-code.git
 cd nori-code
+corepack enable
 pnpm install
-pnpm -C apps/nori-code run build
-node apps/nori-code/dist/main.mjs
+
+pnpm dev:cli
+pnpm dev:web
+pnpm dev:desktop
 ```
 
----
+构建 Windows 桌面安装包：
 
-## 配置 (`nori.yaml`)
+```sh
+pnpm --filter @nori-code/nori-web build
+pnpm -C apps/nori-code build:native:sea
+pnpm -C apps/nori-code test:native:smoke
+pnpm --filter @nori-code/nori-work dist
+```
 
-将 `nori.yaml` 放在项目根目录。若无此文件，使用合理默认值（默认记忆库 `~/.nori-code/vault/`）。
+安装包输出到 `apps/nori-desktop/dist-app/`。
+
+## 工作流程
+
+Nori 可以把模型驱动的工作与确定性的项目策略组合起来：
+
+```text
+用户请求 -> 规划 -> 实现 -> 验证 -> 审查 -> 总结
+             |       |
+             |       +-> 后台 Agent Swarm / 子 Agent
+             +-> 项目记忆与规则
+```
+
+项目根目录中可选的 `nori.yaml` 用于配置阶段、规则、审查阈值和 Swarm 执行；没有该文件时使用运行时默认值。
 
 ```yaml
 phases:
   - name: plan
     mode: hybrid
-    hybrid:
-      retrieval_gate:
-        trigger: { mode: on_keywords }
-        max_results: 10
   - name: implement
     mode: llm-autonomous
-    llm_autonomous:
-      max_iterations: 50
   - name: review
     mode: rule-enforced
     rule_enforced:
       steps:
         - type: exec
-          id: run_tests
-          command: "npm test"
-        - type: exec
-          id: lint
-          command: "eslint src/"
+          id: test
+          command: "pnpm test"
 
 workflow:
   review:
     suggestion_threshold: 4
     required_threshold: 7
-    max_gate_continuations: 2
-
-rules:
-  definitions:
-    - name: search_before_code
-      condition: { type: on_phase, phase: implement, stage: entry }
-      prompt: "编码前搜索 Obsidian 记忆库中的历史决策"
-      enforced: true
-      editable: true
-    - name: require_plan_document
-      condition: { type: on_phase, phase: plan, stage: exit }
-      prompt: "离开计划阶段前撰写规划文档"
-      enforced: true
-      editable: false
 
 swarm:
   max_concurrency: 4
   max_swarm_depth: 3
-  checks:
-    - id: type_check
-      agent_type: coder
-      on_failure: fix_and_retry
-    - id: test_check
-      agent_type: coder
-      depends_on: [type_check]
-      on_failure: block
 ```
 
-阶段模式：
-- **rule-enforced（规则强制）** — 确定性步骤，无 LLM 参与（测试、lint、构建）
-- **hybrid（混合）** — 强制检索门控：模型声明关键词 → 系统搜索记忆库 → 结果注入 → 模型继续
-- **llm-autonomous（自主）** — 模型自主规划和分发，自定义规则仍然强制执行
+当前配置事实来源是 `packages/agent-core` 中的运行时实现。无效配置或涉及安全的配置不应静默回退到更宽松的权限。
 
----
+## 工具
 
-## 命令
+### 记忆工具
 
-| 命令 | 操作 |
-|------|------|
-| `/settings` | 打开设置面板（12个选项：模型、权限、主题、编辑器、实验、更新、用量、coder 写入、swarm 深度、笔记规则、只读模式、workflow） |
-| `/settings auto` | 交互式配置向导（6 步引导） |
-| `/settings permission auto\|yolo\|manual` | 设置权限模式 |
-| `/setting rules` | 查看/编辑自定义规则 |
-| `/setting note` | 切换强制笔记规则（分析/决策/模式） |
-| `/provider` | 配置第三方模型提供商 |
+| 工具 | 用途 |
+| --- | --- |
+| `nori_memory_search` | 按文本、元数据和链接关系搜索 Markdown 笔记 |
+| `nori_memory_write` | 创建或更新项目笔记，可写入 `[[双向链接]]` |
+| `nori_memory_remove` | 将匹配笔记移动到知识库的 `.trash` 目录 |
+| `nori_plan_write` | 在项目工作区写入规划文档 |
 
-## 记忆工具
+### Agent Swarm 工具
 
-| 工具 | 描述 |
-|------|------|
-| `nori_memory_search` | 关键词查询记忆库。返回 embedding + 全文 + 链接图加权排序结果 |
-| `nori_memory_write` | 写入笔记到记忆库。使用 `[[wiki-links]]` 双向链接 |
-| `nori_plan_write` | 写计划文档到项目工作区（docs/plans/）。不受只读模式限制 |
+| 工具 | 用途 |
+| --- | --- |
+| `nori_swarm_launch` | 启动支持依赖关系的后台 Agent 组 |
+| `nori_swarm_status` | 查看运行中 Swarm 的实时状态 |
+| `nori_swarm_result` | 获取已完成的 Swarm 结果 |
+| `nori_ask_parent` | 子 Agent 向父 Agent 请求指导 |
 
-## Swarm 工具
-
-| 工具 | 描述 |
-|------|------|
-| `nori_swarm_launch` | 启动基于 DAG 的并行子代理（coder/test/review） |
-| `nori_swarm_status` | 检查运行中的 swarm 进度 |
-| `nori_swarm_result` | 获取 swarm 结果 |
-| `nori_ask_parent` | （仅子代理）向父编排器请求指导 |
-
----
-
-## 开发
+## 开发与验证
 
 ```sh
-pnpm install
-pnpm -C apps/nori-code run dev    # 开发模式，热重载
-pnpm -C apps/nori-code run build  # 生产构建
-pnpm test                          # 运行测试
+pnpm typecheck
+pnpm lint
+pnpm test
+pnpm build
+pnpm check:brand
 ```
 
----
+开发时优先运行受影响包的定点检查，提交前再按改动范围扩大验证。
 
 ## 协议
 
-MIT。基于 [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code)。
+MIT。项目基于同样使用 MIT 协议的 [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code)。

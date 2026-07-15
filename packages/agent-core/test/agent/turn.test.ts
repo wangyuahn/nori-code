@@ -187,6 +187,7 @@ describe('Agent turn flow', () => {
         },
       ]),
       writeNote: vi.fn(),
+      removeNote: vi.fn(async () => false),
     };
     const ctx = testAgent();
     Object.assign(ctx.agent, { obsidianMemory: memory });

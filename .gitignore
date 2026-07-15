@@ -9,7 +9,11 @@ coverage/
 .vitest-results/
 .DS_Store
 .playwright-mcp/
-.claude
+.claude/
+.codex/
+.chatgpt/
+.reasonix/
+.codegraph/
 .conductor
 .kimi-stash-dir
 plugins/cdn/
@@ -26,4 +30,4 @@ docker-compose.yml
 docs/superpowers/
 reports/
 .superpowers/
-
+nori-vault/

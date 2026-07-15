@@ -1,31 +1,30 @@
 {
-    "name":  "@nori-code/nori-work",
-    "version":  "0.1.0",
-    "private":  true,
-    "license":  "MIT",
-    "description":  "Nori Work — an independent desktop workspace for Nori Code.",
-    "author":  "Nori",
-    "homepage":  "https://github.com/wangyuahn/nori-code",
-    "type":  "module",
-    "main":  "out/main.cjs",
-    "scripts":  {
-                    "check:brand":  "node ../../scripts/check-nori-brand.mjs",
-                    "prebuild":  "pnpm run check:brand",
-                    "build":  "tsdown",
-                    "start":  "electron .",
-                    "dev":  "tsdown \u0026\u0026 electron .",
-                    "typecheck":  "tsc --noEmit",
-                    "predist":  "pnpm run check:brand",
-                    "dist":  "tsdown \u0026\u0026 electron-builder --config electron-builder.config.cjs"
-                },
-    "devDependencies":  {
-                            "electron":  "33.4.11",
-                            "electron-builder":  "25.1.8",
-                            "tsdown":  "0.22.0",
-                            "typescript":  "6.0.2"
-                        },
-    "dependencies":  {
-                         "electron-updater":  "^6.8.9",
-                         "node-pty":  "^1.1.0"
-                     }
+    "name": "@nori-code/nori-work",
+    "version": "0.1.15",
+    "private": true,
+    "license": "MIT",
+    "description": "Nori Work — an independent desktop workspace for Nori Code.",
+    "author": "Nori",
+    "homepage": "https://github.com/wangyuahn/nori-code",
+    "type": "module",
+    "main": "out/main.cjs",
+    "scripts": {
+        "check:brand": "node ../../scripts/check-nori-brand.mjs",
+        "prebuild": "pnpm run check:brand",
+        "build": "tsdown",
+        "start": "electron .",
+        "dev": "tsdown && electron .",
+        "typecheck": "tsc --noEmit",
+        "predist": "pnpm run check:brand",
+        "dist": "tsdown && electron-builder --config electron-builder.config.cjs"
+    },
+    "devDependencies": {
+        "electron": "33.4.11",
+        "electron-builder": "25.1.8",
+        "tsdown": "0.22.0",
+        "typescript": "6.0.2"
+    },
+    "dependencies": {
+        "electron-updater": "^6.8.9"
+    }
 }

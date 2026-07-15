@@ -837,6 +837,7 @@ describe('SessionSubagentHost', () => {
         },
       ]),
       writeNote: vi.fn(async () => ({ path: 'analysis/unused.md' })),
+      removeNote: vi.fn(async () => false),
     };
     const summary =
       'Investigated the delegated implementation task with the retrieved shared memory context, confirmed the relevant runtime setting behavior, and returned a detailed summary for the parent agent to continue without repeating the lookup. '.repeat(

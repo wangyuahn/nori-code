@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, renameSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, lstatSync, renameSync } from 'node:fs';
 import * as path from 'node:path';
 import { homedir } from 'node:os';
 import { relative } from 'pathe';
@@ -249,6 +249,7 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
 
   async removeNote(title: string): Promise<boolean> {
     const normalizedTitle = title.trim();
+    if (normalizedTitle.length === 0) return false;
     const trashDir = path.join(this.vaultPath, '.trash');
     for (const fp of this.markdownFiles(this.vaultPath)) {
       try {
@@ -257,7 +258,7 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
         if (noteTitle === normalizedTitle) {
           try {
             mkdirSync(trashDir, { recursive: true });
-            const dest = path.join(trashDir, path.basename(fp));
+            const dest = this.availableTrashPath(trashDir, path.basename(fp));
             renameSync(fp, dest);
           } catch {
             return false;
@@ -269,6 +270,16 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
     return false;
   }
 
+  private availableTrashPath(trashDir: string, fileName: string): string {
+    const direct = path.join(trashDir, fileName);
+    if (!existsSync(direct)) return direct;
+    const extension = path.extname(fileName);
+    const stem = path.basename(fileName, extension);
+    let suffix = 2;
+    while (existsSync(path.join(trashDir, `${stem}-${suffix}${extension}`))) suffix++;
+    return path.join(trashDir, `${stem}-${suffix}${extension}`);
+  }
+
   private markdownFiles(dir: string): string[] {
     const files: string[] = [];
     const stack = [dir];
@@ -278,7 +289,7 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
       try {
         for (const entry of readdirSync(current)) {
           const fp = path.join(current, entry);
-          const stat = statSync(fp);
+          const stat = lstatSync(fp);
           if (stat.isDirectory()) {
             if (entry === '.trash') continue;
             stack.push(fp);

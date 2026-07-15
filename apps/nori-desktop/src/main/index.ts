@@ -9,7 +9,6 @@ import { registerUpdateHandlers } from './updater';
 import { resolveSeaPath } from './sea-path';
 import { createTray } from './tray';
 import { BrowserViewManager, registerBrowserIpc } from './browser-view';
-import { registerTerminalIpc } from './terminal';
 import { createSplashWindow } from './splash';
 import {
   configureNoriApplicationIdentity,
@@ -327,11 +326,6 @@ function main(): void {
     // Register browser IPC after createWindow() so browserManager is set.
     if (browserManager) {
       registerBrowserIpc(browserManager);
-    }
-
-    // Register terminal IPC
-    if (mainWindow) {
-      registerTerminalIpc(mainWindow);
     }
 
     const showOrHideRegistered = globalShortcut.register('CmdOrCtrl+Shift+N', () => {
