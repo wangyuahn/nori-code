@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -28,6 +28,33 @@ export function noriHome(): string {
 
 function lockPath(): string {
   return join(noriHome(), 'server', 'lock');
+}
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === 'EPERM';
+  }
+}
+
+function removeMatchingLock(expected: LockContents): void {
+  const current = readLock();
+  if (
+    current === null
+    || current.pid !== expected.pid
+    || current.port !== expected.port
+    || current.host_version !== expected.host_version
+  ) {
+    return;
+  }
+  try {
+    unlinkSync(lockPath());
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
 }
 
 export function serverLogPath(): string {
@@ -157,16 +184,23 @@ export async function ensureServer(seaPath: string, expectedVersion?: string): P
 
   // Production / SEA-available path
   const existingLock = readLock();
-  if (
-    expectedVersion !== undefined &&
-    existingLock?.host_version !== undefined &&
-    existingLock.host_version !== expectedVersion &&
-    await isHealthy(originFromLock(existingLock), 3000)
-  ) {
-    process.stdout.write(
-      `[nori-desktop] replacing server ${existingLock.host_version} with ${expectedVersion}\n`,
-    );
-    await runServerKill(seaPath);
+  if (existingLock !== null) {
+    const existingHealthy = await isHealthy(originFromLock(existingLock), 3000);
+    const versionMismatch = expectedVersion !== undefined
+      && existingLock.host_version !== undefined
+      && existingLock.host_version !== expectedVersion;
+    if (versionMismatch) {
+      process.stdout.write(
+        `[nori-desktop] replacing server ${existingLock.host_version} with ${expectedVersion}\n`,
+      );
+      await runServerKill(seaPath);
+      // A force-killed or already-dead daemon can leave its lock behind. Only
+      // remove the exact lock we inspected, after the kill command has had its
+      // chance to stop the owner, so a concurrent replacement is never erased.
+      if (!await isHealthy(originFromLock(existingLock), 500)) removeMatchingLock(existingLock);
+    } else if (!existingHealthy && !pidAlive(existingLock.pid)) {
+      removeMatchingLock(existingLock);
+    }
   }
   await runServerRun(seaPath);
 

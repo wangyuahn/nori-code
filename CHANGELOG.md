@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- Recover Nori Work startup from stale or incompatible local-server locks, and ensure the bundled backend replaces older globally installed servers before connecting.
+
 ## v0.1.18
 - Fix the settings form so selecting **New Provider** reliably opens a clean, editable provider configuration instead of snapping back to the previous connection.
 - Make custom OpenAI-compatible Provider model discovery accept API roots with or without `/v1`, fall back across both common model endpoints, and report actionable non-JSON response errors.
