@@ -13,6 +13,10 @@ const PROJECT_GIT_CACHE_LIMIT = 12;
 const projectGitStatusCache = new Map<string, FsGitStatusResponse>();
 const projectGitStatusRequests = new Map<string, Promise<FsGitStatusResponse>>();
 
+export interface GitStatusRefreshOptions {
+  force?: boolean;
+}
+
 export function useFilesystem(sessionId: string | null, projectPath?: string) {
   const projectKey = normalizeProjectKey(projectPath, sessionId);
   const initialStatus = projectKey === null ? null : projectGitStatusCache.get(projectKey) ?? null;
@@ -29,12 +33,12 @@ export function useFilesystem(sessionId: string | null, projectPath?: string) {
 
   projectKeyRef.current = projectKey;
 
-  const refreshGitStatus = useCallback((): Promise<FsGitStatusResponse | null> => {
+  const refreshGitStatus = useCallback((options: GitStatusRefreshOptions = {}): Promise<FsGitStatusResponse | null> => {
     if (!sessionId || projectKey === null) return Promise.resolve(null);
 
     const generation = ++gitRefreshGenerationRef.current;
     setGitLoading(true);
-    return loadProjectGitStatus(projectKey, sessionId)
+    return loadProjectGitStatus(projectKey, sessionId, options.force === true)
       .then(status => {
         if (projectKeyRef.current !== projectKey || gitRefreshGenerationRef.current !== generation) {
           return status;
@@ -128,10 +132,14 @@ function rememberProjectGitStatus(projectKey: string, status: FsGitStatusRespons
   }
 }
 
-function loadProjectGitStatus(projectKey: string, sessionId: string): Promise<FsGitStatusResponse> {
-  const existing = projectGitStatusRequests.get(projectKey);
+function loadProjectGitStatus(projectKey: string, sessionId: string, force = false): Promise<FsGitStatusResponse> {
+  const existing = force ? undefined : projectGitStatusRequests.get(projectKey);
   if (existing) return existing;
-  const request = api.sessions.fs.gitStatus(sessionId).then(status => {
+
+  let request!: Promise<FsGitStatusResponse>;
+  request = api.sessions.fs.gitStatus(sessionId).then(status => {
+    const newer = projectGitStatusRequests.get(projectKey);
+    if (newer !== undefined && newer !== request) return newer;
     rememberProjectGitStatus(projectKey, status);
     return status;
   }).finally(() => {

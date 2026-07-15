@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../src/api/client';
-import { apiMessageToChat, foldConversationTurns, promptForRewind, RealtimeSubscriptionGate, shouldIgnoreTranscriptEvent } from '../src/hooks/useChatMessages';
+import { apiMessageToChat, canApplyGeneratedSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, mergeHistory, promptForRewind, RealtimeSubscriptionGate, shouldIgnoreTranscriptEvent, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
 
 describe('realtime subscription readiness', () => {
   it('settles pending sends from the subscribe acknowledgement', async () => {
@@ -28,6 +28,28 @@ describe('realtime subscription readiness', () => {
 });
 
 describe('main transcript projection', () => {
+  it('asks the main agent for a title without exposing the instruction as the user message', () => {
+    const prompt = firstPromptWithTitleInstruction('修复流式输出');
+    const projected = apiMessageToChat(message({ role: 'user', text: prompt }));
+
+    expect(prompt).toContain('<nori-session-title>YOUR TITLE</nori-session-title>');
+    expect(projected?.text).toBe('修复流式输出');
+  });
+
+  it('extracts only an agent-generated title and hides its marker from the answer', () => {
+    const answer = '<nori-session-title>修复流式输出</nori-session-title>\n\n我会先检查事件链。';
+
+    expect(generatedSessionTitle(answer)).toBe('修复流式输出');
+    expect(stripGeneratedSessionTitle(answer)).toBe('我会先检查事件链。');
+    expect(generatedSessionTitle('用户要求修复流式输出')).toBeUndefined();
+  });
+
+  it('only repairs missing or reminder-polluted automatic titles', () => {
+    expect(canApplyGeneratedSessionTitle(undefined)).toBe(true);
+    expect(canApplyGeneratedSessionTitle('<system-reminder>title instruction')).toBe(true);
+    expect(canApplyGeneratedSessionTitle('用户手动命名')).toBe(false);
+  });
+
   it('preserves base64 and URL images from persisted user messages', () => {
     const projected = apiMessageToChat({
       id: 'image-message',
@@ -66,6 +88,21 @@ describe('main transcript projection', () => {
     const second = apiMessageToChat(message({ id: 'a2', role: 'assistant', text: 'The agent completed successfully.' }))!;
     expect(foldConversationTurns([first, boundary, second]).map(item => item.text)).toEqual([
       'Agent started in the background.\n\nThe agent completed successfully.',
+    ]);
+  });
+
+  it('merges a background wake-up answer into the live assistant turn without a refresh', () => {
+    const previous = [
+      { id: 'u1', role: 'user' as const, text: 'Run a swarm', createdAt: '2026-07-14T00:00:00.000Z' },
+      { id: 'a1', role: 'assistant' as const, text: 'The swarm is running.', createdAt: '2026-07-14T00:00:01.000Z' },
+    ];
+    const completedAfterWake = [
+      { id: 'a2', role: 'assistant' as const, text: 'The swarm finished.', createdAt: '2026-07-14T00:00:02.000Z' },
+    ];
+
+    expect(mergeHistory(previous, completedAfterWake)).toMatchObject([
+      { role: 'user', text: 'Run a swarm' },
+      { role: 'assistant', text: 'The swarm is running.\n\nThe swarm finished.' },
     ]);
   });
 

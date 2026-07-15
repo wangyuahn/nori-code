@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api, type FsGitStatusResponse } from '../src/api/client';
 import type { ChatMessage } from '../src/hooks/useChatMessages';
 import { useFilesystem } from '../src/hooks/useFilesystem';
-import { WorkspaceInspector, changedLineStats, collectAttributions, diffPathsToLoad, hasTextChanges, splitDisplayPath } from '../src/components/WorkspaceInspector';
+import { WorkspaceInspector, changedLineStats, collectAttributions, collectToolCodeChanges, combinedCodeChangeDiff, diffPathsToLoad, hasTextChanges, mergeCodeChanges, splitDisplayPath } from '../src/components/WorkspaceInspector';
 import { I18nProvider } from '../src/i18n';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -40,6 +40,74 @@ describe('workspace change presentation', () => {
       agent: 'Nori',
       timestamp: Date.parse('2026-07-15T05:00:00.000Z'),
     }]);
+  });
+
+  it('reconstructs successful Edit changes from history for non-Git projects', () => {
+    const messages: ChatMessage[] = [{
+      id: 'assistant-edit',
+      role: 'assistant',
+      text: '',
+      createdAt: '2026-07-15T10:43:43.244Z',
+      toolCalls: [{
+        id: 'edit-1',
+        name: 'Edit',
+        args: {
+          path: 'C:/Users/sudden/Desktop/games/stardrift.html',
+          old_string: 'background:#ff0000;',
+          new_string: 'background:#050510;',
+        },
+        result: 'Replaced 1 occurrence',
+      }],
+    }];
+
+    expect(collectToolCodeChanges(messages, 'C:/Users/sudden/Desktop/games')).toEqual([{
+      agentId: 'main',
+      operation: 'edit',
+      path: 'stardrift.html',
+      diff: '-background:#ff0000;\n+background:#050510;',
+      occurredAt: '2026-07-15T10:43:43.244Z',
+    }]);
+  });
+
+  it('accumulates repeated changes to the same file instead of replacing the older diff', () => {
+    const changes = [
+      {
+        agentId: 'main',
+        operation: 'edit' as const,
+        path: 'src/app.ts',
+        diff: '-second\n+third',
+        occurredAt: '2026-07-15T11:01:00.000Z',
+      },
+      {
+        agentId: 'main',
+        operation: 'edit' as const,
+        path: 'src/app.ts',
+        diff: '-first\n+second',
+        occurredAt: '2026-07-15T11:00:00.000Z',
+      },
+    ];
+
+    const diff = combinedCodeChangeDiff('src/app.ts', changes);
+    expect(diff).toBe('-second\n+third\n-first\n+second');
+    expect(changedLineStats(diff ?? '')).toEqual({ additions: 2, deletions: 2 });
+  });
+
+  it('deduplicates one tool mutation reported by realtime, live turn, and history', () => {
+    const realtime = {
+      agentId: 'main',
+      operation: 'edit' as const,
+      path: 'probe.txt',
+      diff: '-before\n+after',
+      occurredAt: '2026-07-15T11:00:00.000Z',
+    };
+    const liveTurn = { ...realtime, occurredAt: '2026-07-15T11:00:02.000Z' };
+    const history = { ...realtime, occurredAt: '2026-07-15T11:00:03.000Z' };
+
+    expect(mergeCodeChanges([realtime], [liveTurn, history])).toHaveLength(1);
+    expect(mergeCodeChanges([realtime], [{
+      ...liveTurn,
+      diff: '-after\n+done',
+    }])).toHaveLength(2);
   });
 
   it('excludes binary, rename-only, and metadata-only diffs with no changed lines', () => {
@@ -106,10 +174,191 @@ describe('workspace change presentation', () => {
         await Promise.resolve();
       });
       expect(refreshGitStatus).toHaveBeenCalledTimes(1);
+      expect(refreshGitStatus).toHaveBeenCalledWith({ force: true });
     } finally {
       await act(async () => {
         root.unmount();
       });
+      container.remove();
+    }
+  });
+
+  it('refreshes Git status and loads a changed file when an agent code-change event arrives', async () => {
+    const cleanStatus: FsGitStatusResponse = {
+      branch: 'main', ahead: 0, behind: 0, entries: {}, additions: 0, deletions: 0,
+    };
+    const changedStatus: FsGitStatusResponse = {
+      branch: 'main', ahead: 0, behind: 0, entries: { 'src/agent.ts': 'modified' }, additions: 1, deletions: 1,
+    };
+    const gitStatus = vi.spyOn(api.sessions.fs, 'gitStatus')
+      .mockResolvedValueOnce(cleanStatus)
+      .mockResolvedValueOnce(changedStatus);
+    const diff = vi.spyOn(api.sessions.fs, 'diff').mockResolvedValue({
+      path: 'src/agent.ts',
+      diff: '--- a/src/agent.ts\n+++ b/src/agent.ts\n@@ -1 +1 @@\n-old\n+new',
+      truncated: false,
+    });
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+
+    function Probe({ changed }: { changed: boolean }) {
+      const filesystem = useFilesystem('session-agent-change', '/agent-change-refresh-test');
+      return createElement(I18nProvider, null, createElement(WorkspaceInspector, {
+        sessionId: 'session-agent-change',
+        projectPath: '/agent-change-refresh-test',
+        path: '',
+        file: null,
+        messages: [],
+        codeChanges: changed ? [{
+          agentId: 'agent-worker',
+          operation: 'edit' as const,
+          path: 'src/agent.ts',
+          diff: '-old\n+new',
+          occurredAt: '2026-07-15T10:00:00.000Z',
+        }] : [],
+        gitStatus: filesystem.gitStatus,
+        gitError: filesystem.gitError,
+        gitLoading: filesystem.gitLoading,
+        refreshGitStatus: filesystem.refreshGitStatus,
+        isStreaming: changed,
+      }));
+    }
+
+    try {
+      await act(async () => {
+        root.render(createElement(Probe, { changed: false }));
+        await new Promise(resolve => setTimeout(resolve, 0));
+      });
+      expect(gitStatus).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        root.render(createElement(Probe, { changed: true }));
+        await new Promise(resolve => setTimeout(resolve, 0));
+        await new Promise(resolve => setTimeout(resolve, 0));
+      });
+
+      expect(gitStatus).toHaveBeenCalledTimes(2);
+      expect(diff).not.toHaveBeenCalled();
+      expect(container.textContent).toContain('agent.ts');
+      expect(container.textContent).toContain('agent-worker');
+    } finally {
+      await act(async () => { root.unmount(); });
+      container.remove();
+    }
+  });
+
+  it('uses completed Edit and Write messages as a refresh fallback after realtime events', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const refreshGitStatus = vi.fn(async () => null);
+    const codeChanges = [{
+      agentId: 'main',
+      operation: 'edit' as const,
+      path: 'src/first.ts',
+      diff: '-old\n+new',
+      occurredAt: '2026-07-15T10:00:00.000Z',
+    }];
+    const firstMessage: ChatMessage = {
+      id: 'assistant-first',
+      role: 'assistant',
+      text: '',
+      toolCalls: [{ id: 'edit-first', name: 'Edit', args: { path: 'src/first.ts' }, result: 'done' }],
+    };
+    const render = async (messages: ChatMessage[]) => {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(WorkspaceInspector, {
+          sessionId: 'session-message-fallback',
+          projectPath: '/message-fallback-test',
+          path: '',
+          file: null,
+          messages,
+          codeChanges,
+          gitStatus: null,
+          gitError: null,
+          gitLoading: false,
+          refreshGitStatus,
+          isStreaming: false,
+        })));
+        await Promise.resolve();
+      });
+    };
+
+    try {
+      await render([firstMessage]);
+      expect(refreshGitStatus).toHaveBeenCalledTimes(1);
+
+      await render([firstMessage, {
+        id: 'assistant-second',
+        role: 'assistant',
+        text: '',
+        toolCalls: [{ id: 'write-second', name: 'Write', args: { path: 'src/second.ts' }, result: 'done' }],
+      }]);
+      expect(refreshGitStatus).toHaveBeenCalledTimes(2);
+      expect(refreshGitStatus).toHaveBeenLastCalledWith({ force: true });
+    } finally {
+      await act(async () => { root.unmount(); });
+      container.remove();
+    }
+  });
+
+  it('shows completed Edit history and keeps it after refresh when Git is unavailable', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const refreshGitStatus = vi.fn(async () => null);
+    const refreshMessages = vi.fn(async () => undefined);
+    const diff = vi.spyOn(api.sessions.fs, 'diff');
+    const messages: ChatMessage[] = [{
+      id: 'assistant-non-git-edit',
+      role: 'assistant',
+      text: '',
+      createdAt: '2026-07-15T10:43:43.244Z',
+      toolCalls: [{
+        id: 'edit-non-git',
+        name: 'Edit',
+        args: { path: 'C:/projects/game/index.html', old_string: 'red', new_string: 'black' },
+        result: 'Replaced 1 occurrence',
+      }],
+    }];
+
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(WorkspaceInspector, {
+          sessionId: 'session-non-git',
+          projectPath: 'C:/projects/game',
+          path: '',
+          file: null,
+          messages,
+          codeChanges: [],
+          gitStatus: null,
+          gitError: 'not a Git repository',
+          gitLoading: false,
+          refreshGitStatus,
+          refreshMessages,
+          isStreaming: false,
+        })));
+        await Promise.resolve();
+      });
+
+      expect(container.textContent).toContain('index.html');
+      expect(container.textContent).toContain('+1');
+      expect(container.textContent).toContain('-1');
+      expect(diff).not.toHaveBeenCalled();
+
+      const button = container.querySelector<HTMLButtonElement>('.change-recalculate');
+      await act(async () => {
+        button?.click();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(refreshGitStatus).toHaveBeenCalledWith({ force: true });
+      expect(refreshMessages).toHaveBeenCalledTimes(1);
+      expect(container.textContent).toContain('index.html');
+    } finally {
+      await act(async () => { root.unmount(); });
       container.remove();
     }
   });
@@ -271,6 +520,62 @@ describe('workspace change presentation', () => {
       });
       expect(observed[0]?.gitStatus).toEqual(status);
       expect(observed[1]?.gitStatus).toEqual(status);
+    } finally {
+      await act(async () => { root.unmount(); });
+      container.remove();
+    }
+  });
+
+  it('forces a fresh Git status request and ignores an older in-flight result', async () => {
+    const staleStatus: FsGitStatusResponse = {
+      branch: 'main', ahead: 0, behind: 0, entries: {}, additions: 0, deletions: 0,
+    };
+    const freshStatus: FsGitStatusResponse = {
+      branch: 'main', ahead: 0, behind: 0, entries: { 'src/fresh.ts': 'modified' }, additions: 2, deletions: 1,
+    };
+    let resolveStale!: (value: FsGitStatusResponse) => void;
+    let resolveFresh!: (value: FsGitStatusResponse) => void;
+    const staleRequest = new Promise<FsGitStatusResponse>(resolve => { resolveStale = resolve; });
+    const freshRequest = new Promise<FsGitStatusResponse>(resolve => { resolveFresh = resolve; });
+    const gitStatus = vi.spyOn(api.sessions.fs, 'gitStatus')
+      .mockReturnValueOnce(staleRequest)
+      .mockReturnValueOnce(freshRequest);
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    let observed: ReturnType<typeof useFilesystem> | undefined;
+
+    function Probe() {
+      observed = useFilesystem('session-force-refresh', '/force-refresh-test');
+      return null;
+    }
+
+    try {
+      await act(async () => {
+        root.render(createElement(Probe));
+        await Promise.resolve();
+      });
+      expect(gitStatus).toHaveBeenCalledTimes(1);
+
+      let forced!: Promise<FsGitStatusResponse | null>;
+      await act(async () => {
+        forced = observed!.refreshGitStatus({ force: true });
+        await Promise.resolve();
+      });
+      expect(gitStatus).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        resolveFresh(freshStatus);
+        await forced;
+      });
+      expect(observed?.gitStatus).toEqual(freshStatus);
+
+      await act(async () => {
+        resolveStale(staleStatus);
+        await staleRequest;
+        await Promise.resolve();
+      });
+      expect(observed?.gitStatus).toEqual(freshStatus);
     } finally {
       await act(async () => { root.unmount(); });
       container.remove();

@@ -52,7 +52,7 @@ function promptPartText(part: ContentPart): string | undefined {
 }
 
 function sanitizeAndTruncatePromptText(text: string, maxLength: number): string | undefined {
-  const sanitized = text
+  const sanitized = stripLeadingSystemReminders(text)
     .replaceAll(
       /-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/gi,
       '[redacted]',
@@ -70,4 +70,11 @@ function sanitizeAndTruncatePromptText(text: string, maxLength: number): string 
 
   if (sanitized.length === 0) return undefined;
   return sanitized.slice(0, maxLength);
+}
+
+function stripLeadingSystemReminders(text: string): string {
+  let visibleText = text;
+  const reminder = /^\s*<system-reminder>[\s\S]*?<\/system-reminder>\s*/i;
+  while (reminder.test(visibleText)) visibleText = visibleText.replace(reminder, '');
+  return visibleText;
 }

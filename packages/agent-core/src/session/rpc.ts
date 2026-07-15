@@ -316,17 +316,10 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
     return agent.rpcMethods;
   }
 
-  private needUpdateEasyTitle(metadata: SessionMeta): boolean {
-    if ((metadata as SessionMeta & { nori_smart_title?: unknown }).nori_smart_title === true) return false;
-    if (hasCustomTitle(metadata)) return false;
-    if (!isUntitled(metadata.title)) return false;
-    return true;
-  }
-
   private async updatePromptMetadata(lastPrompt: string | undefined): Promise<void> {
     if (lastPrompt === undefined) return;
 
-    const title = this.needUpdateEasyTitle(this.session.metadata)
+    const title = shouldUpdateEasyTitle(this.session.metadata)
       ? titleFromPromptMetadataText(lastPrompt)
       : undefined;
     const now = new Date().toISOString();
@@ -353,6 +346,18 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
       },
     });
   }
+}
+
+export function shouldUpdateEasyTitle(metadata: SessionMeta): boolean {
+  const custom = metadata.custom as Record<string, unknown> | undefined;
+  if (
+    (metadata as SessionMeta & { nori_smart_title?: unknown }).nori_smart_title === true ||
+    custom?.['nori_smart_title'] === true
+  ) {
+    return false;
+  }
+  if (hasCustomTitle(metadata)) return false;
+  return isUntitled(metadata.title);
 }
 
 function isUntitled(title: unknown): boolean {

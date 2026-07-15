@@ -594,11 +594,22 @@ async function latestAgentWireMtime(sessionDir: string): Promise<number | undefi
 
 function titleFromState(state: SessionSummaryState | undefined): string | undefined {
   if (state === undefined) return undefined;
+  const title = titleCandidateFromState(state);
+  return isHiddenPromptTitle(title) ? undefined : title;
+}
+
+function titleCandidateFromState(state: SessionSummaryState): string | undefined {
   if (typeof state.isCustomTitle === 'boolean' && typeof state.title === 'string') {
     return state.title;
   }
   if (typeof state.customTitle === 'string') return state.customTitle;
   return typeof state.title === 'string' ? state.title : undefined;
+}
+
+function isHiddenPromptTitle(title: string | undefined): boolean {
+  if (title === undefined) return false;
+  const normalized = title.trimStart().toLowerCase();
+  return normalized.startsWith('<system-reminder>') || normalized.startsWith('<nori-session-title>');
 }
 
 async function readOptionalState(sessionDir: string): Promise<SessionSummaryState | undefined> {

@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.18
+- Fix the settings form so selecting **New Provider** reliably opens a clean, editable provider configuration instead of snapping back to the previous connection.
+- Make custom OpenAI-compatible Provider model discovery accept API roots with or without `/v1`, fall back across both common model endpoints, and report actionable non-JSON response errors.
+- Make project changes react to main-agent and subagent `Edit`/`Write` operations in real time, including non-Git workspaces, and rebuild both conversation history and Git state from the refresh control.
+- Cache changes by project across sessions, accumulate repeated edits to the same file, and deduplicate the realtime, live-turn, and persisted-history copies of one mutation.
+- Merge background Agent and Agent Swarm wake-up output into the active assistant turn without requiring a session reload.
+- Generate first-message conversation titles through the main Agent while hiding title reminders and repairing previously polluted titles.
+- Keep Agent Swarm navigation in its normal idle color when no agents are running.
+
 ## v0.1.17
 - Make chat WebSocket readiness acknowledgement-driven across startup and reconnects, and replace incompatible background server versions before Nori Work connects.
 - Preserve and render user images in optimistic messages and reloaded conversation history.

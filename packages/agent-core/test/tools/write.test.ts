@@ -114,12 +114,23 @@ describe('WriteTool', () => {
 
   it('writes content through kaos and reports bytes written', async () => {
     const writeText = vi.fn().mockResolvedValue(5);
-    const tool = new WriteTool(createFakeKaos({ writeText, stat: DIR_STAT }), PERMISSIVE_WORKSPACE);
+    const reportChange = vi.fn();
+    const tool = new WriteTool(
+      createFakeKaos({ writeText, stat: DIR_STAT }),
+      PERMISSIVE_WORKSPACE,
+      reportChange,
+    );
 
     const result = await executeTool(tool, context({ path: '/tmp/new.txt', content: 'hello' }));
 
     expect(writeText).toHaveBeenCalledWith('/tmp/new.txt', 'hello');
     expect(result.output).toContain('Wrote 5 bytes');
+    expect(reportChange).toHaveBeenCalledWith({
+      operation: 'write',
+      path: '/tmp/new.txt',
+      diff: expect.stringContaining('+hello'),
+      occurredAt: expect.any(String),
+    });
   });
 
   it('expands leading tilde paths using the kaos home directory', async () => {

@@ -45,6 +45,7 @@ interface CodeViewProps {
   draftAgentConfig?: SessionAgentConfig;
   rewindLimit?: number;
   onRewind?: (count: number) => string | undefined | Promise<string | undefined>;
+  onRefreshMessages?: () => Promise<void>;
 }
 
 export function CodeView({
@@ -86,6 +87,7 @@ export function CodeView({
   draftAgentConfig,
   rewindLimit,
   onRewind,
+  onRefreshMessages,
 }: CodeViewProps) {
   const [fileContent, setFileContent] = useState<FsReadResponse | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
@@ -164,6 +166,7 @@ export function CodeView({
         gitError={gitError}
         gitLoading={gitLoading}
         refreshGitStatus={refreshGitStatus}
+        refreshMessages={onRefreshMessages}
         isStreaming={isStreaming}
       />
     </SplitPane>

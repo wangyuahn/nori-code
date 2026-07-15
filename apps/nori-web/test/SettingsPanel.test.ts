@@ -121,6 +121,31 @@ describe('SettingsPanel Memory settings', () => {
   });
 });
 
+describe('SettingsPanel Provider settings', () => {
+  it('clears the existing connection when New provider is selected', async () => {
+    vi.mocked(api.providers.list).mockResolvedValue({
+      items: [{
+        id: 'existing-provider',
+        type: 'anthropic',
+        base_url: 'https://existing.example.test',
+        has_api_key: true,
+        status: 'connected',
+      }],
+    });
+    const { container } = await renderSettings({});
+    const configuredProvider = providerControl<HTMLSelectElement>(container, 'Configured provider');
+
+    expect(configuredProvider.value).toBe('existing-provider');
+    expect(providerControl<HTMLInputElement>(container, 'Provider ID').value).toBe('existing-provider');
+
+    await selectValue(configuredProvider, '');
+
+    expect(configuredProvider.value).toBe('');
+    expect(providerControl<HTMLInputElement>(container, 'Provider ID').value).toBe('');
+    expect(providerControl<HTMLInputElement>(container, 'API Base URL').value).toBe('');
+  });
+});
+
 async function renderSettings(config: ConfigResponse) {
   vi.spyOn(api, 'getConfig').mockResolvedValue(config);
   const container = document.createElement('div');
@@ -144,6 +169,12 @@ function memoryInput<T extends HTMLInputElement | HTMLSelectElement>(container: 
   return input;
 }
 
+function providerControl<T extends HTMLInputElement | HTMLSelectElement>(container: HTMLElement, label: string): T {
+  const control = container.querySelector<T>(`[aria-label="${label}"]`);
+  if (!control) throw new Error(`Missing Provider control: ${label}`);
+  return control;
+}
+
 function saveButton(container: HTMLElement) {
   const button = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
     .find(item => item.textContent === 'Save and refresh models');
@@ -156,6 +187,15 @@ async function enterValue(input: HTMLInputElement, value: string) {
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
     setter?.call(input, value);
     input.dispatchEvent(new Event('input', { bubbles: true }));
+    await Promise.resolve();
+  });
+}
+
+async function selectValue(select: HTMLSelectElement, value: string) {
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+    setter?.call(select, value);
+    select.dispatchEvent(new Event('change', { bubbles: true }));
     await Promise.resolve();
   });
 }

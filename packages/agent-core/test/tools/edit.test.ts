@@ -85,12 +85,14 @@ describe('EditTool', () => {
 
   it('replaces a unique first occurrence and writes the updated content', async () => {
     const writeText = vi.fn().mockResolvedValue(0);
+    const reportChange = vi.fn();
     const tool = new EditTool(
       createFakeKaos({
         readText: vi.fn().mockResolvedValue('alpha beta'),
         writeText,
       }),
       PERMISSIVE_WORKSPACE,
+      reportChange,
     );
 
     const result = await executeTool(tool,
@@ -99,6 +101,12 @@ describe('EditTool', () => {
 
     expect(result.output).toContain('Replaced 1 occurrence');
     expect(writeText).toHaveBeenCalledWith('/tmp/a.txt', 'alpha gamma');
+    expect(reportChange).toHaveBeenCalledWith({
+      operation: 'edit',
+      path: '/tmp/a.txt',
+      diff: expect.stringMatching(/-alpha beta[\s\S]*\+alpha gamma/),
+      occurredAt: expect.any(String),
+    });
   });
 
   it('expands leading tilde paths using the kaos home directory', async () => {

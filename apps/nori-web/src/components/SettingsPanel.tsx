@@ -110,6 +110,15 @@ export function SettingsPanel() {
   };
 
   const selectConfiguredProvider = (id: string) => {
+    if (!id) {
+      setProviderId('');
+      setPresetId('custom');
+      setProviderType('openai');
+      setBaseUrl('');
+      setApiKey('');
+      setApiKeyTouched(false);
+      return;
+    }
     const provider = providers.find(item => item.id === id);
     if (!provider) return;
     setProviderId(provider.id);
@@ -193,12 +202,12 @@ export function SettingsPanel() {
     <section className="settings-card">
       <div className="settings-card-heading"><span>Provider</span><h2>{tr('API connection', 'API 连接')}</h2><p>{tr('Configure any compatible API and fetch its models automatically.', '配置任意兼容 API，并自动获取模型列表。')}</p></div>
       <div className="settings-card-body provider-settings-grid">
-        <SettingRow label={tr('Configured provider', '已配置 Provider')} desc={tr('Edit an existing connection or create a new one.', '编辑已有连接或新建连接。')}><select className="input settings-control" value={providers.some(p => p.id === providerId) ? providerId : ''} onChange={e => { selectConfiguredProvider(e.target.value); }}><option value="">{tr('New provider', '新建 Provider')}</option>{providers.map(p => <option key={p.id} value={p.id}>{p.id} · {p.status}</option>)}</select></SettingRow>
+        <SettingRow label={tr('Configured provider', '已配置 Provider')} desc={tr('Edit an existing connection or create a new one.', '编辑已有连接或新建连接。')}><select aria-label={tr('Configured provider', '已配置 Provider')} className="input settings-control" value={providers.some(p => p.id === providerId) ? providerId : ''} onChange={e => { selectConfiguredProvider(e.target.value); }}><option value="">{tr('New provider', '新建 Provider')}</option>{providers.map(p => <option key={p.id} value={p.id}>{p.id} · {p.status}</option>)}</select></SettingRow>
         <SettingRow label={tr('Online preset', '在线预设')} desc={tr('Loaded from models.dev, the same catalog used by Nori CLI.', '来自 models.dev，与 Nori CLI 使用同一目录。')}><select className="input settings-control" value={presetId} onChange={e => { selectPreset(e.target.value); }}><option value="custom">{tr('Custom / manual', '自定义 / 手动')}</option>{presets.map(p => <option key={p.id} value={p.id}>{p.name} ({p.model_count})</option>)}</select></SettingRow>
         {presetWarning && <div className="provider-warning">{tr('Online presets unavailable; manual configuration still works.', '在线预设暂不可用，仍可手动配置。')} {presetWarning}</div>}
-        <SettingRow label="Provider ID" desc={tr('A stable local identifier, such as openrouter.', '稳定的本地标识，例如 openrouter。')}><input className="input settings-control" value={providerId} onChange={e => { setProviderId(e.target.value); }} /></SettingRow>
+        <SettingRow label="Provider ID" desc={tr('A stable local identifier, such as openrouter.', '稳定的本地标识，例如 openrouter。')}><input aria-label="Provider ID" className="input settings-control" value={providerId} onChange={e => { setProviderId(e.target.value); }} /></SettingRow>
         <SettingRow label={tr('API format', 'API 格式')} desc={tr('Choose the request and response protocol.', '选择请求与响应协议。')}><select className="input settings-control" value={providerType} onChange={e => { setProviderType(e.target.value as ProviderType); }}>{API_FORMATS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></SettingRow>
-        <SettingRow label="API Base URL" desc={tr('The model endpoint is derived from this URL.', '模型列表端点会由此地址推导。')}><input className="input settings-control settings-url-input" value={baseUrl} onChange={e => { setBaseUrl(e.target.value); }} placeholder="https://api.example.com/v1" /></SettingRow>
+        <SettingRow label="API Base URL" desc={tr('The model endpoint is derived from this URL.', '模型列表端点会由此地址推导。')}><input aria-label="API Base URL" className="input settings-control settings-url-input" value={baseUrl} onChange={e => { setBaseUrl(e.target.value); }} placeholder="https://api.example.com/v1" /></SettingRow>
         <SettingRow label="API Key" desc={selectedProvider?.has_api_key ? tr('A key is stored. Enter a new value only to replace it.', '密钥已保存；只有输入新值时才会替换。') : tr('Stored only in the local Nori configuration.', '仅保存在本机 Nori 配置中。')}><input type="password" className="input settings-control" value={displayedApiKey} onFocus={() => { if (!apiKeyTouched && selectedProvider?.has_api_key) { setApiKey(''); setApiKeyTouched(true); } }} onChange={e => { setApiKeyTouched(true); setApiKey(e.target.value); }} placeholder="sk-..." /></SettingRow>
       </div>
     </section>

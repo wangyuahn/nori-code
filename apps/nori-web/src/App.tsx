@@ -102,7 +102,7 @@ export function App() {
     vault: tr('Vault', '知识库'),
     files: tr('Files', '文件'),
   };
-  const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, abort } = useChatMessages(sessionId);
+  const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort } = useChatMessages(sessionId, activeSession?.title);
   const runningSwarm = runningSwarmAgents(activeSwarmRuns);
   const activeAgentIds = new Set([...activeSubagentIds, ...runningSwarm.ids]);
   const activeAgentCount = activeAgentIds.size + runningSwarm.untracked;
@@ -381,6 +381,7 @@ export function App() {
               draftAgentConfig={draftAgentConfig}
               rewindLimit={rewindLimit}
               onRewind={rewindToPrompt}
+              onRefreshMessages={refreshMessages}
             />
           );
         }
@@ -443,7 +444,7 @@ export function App() {
 
         <nav className="sidebar-primary-nav" aria-label={tr('Primary navigation', '主导航')}>
           {NAV_ITEMS.filter(item => item.key !== 'settings').map(item => (
-            <button key={item.key} className={`sidebar-nav-item${activeView === item.key ? ' active' : ''}${item.key === 'swarm' && activeView === 'swarm' ? ' swarm-active' : ''}${item.key === 'swarm' && hasSwarmActivity && activeView !== 'swarm' ? ' activity-pending' : ''}`} onClick={() => setActiveView(item.key)} aria-current={activeView === item.key ? 'page' : undefined} title={viewLabels[item.key]}>
+            <button key={item.key} className={`sidebar-nav-item${activeView === item.key ? ' active' : ''}${item.key === 'swarm' && activeAgentCount > 0 && activeView === 'swarm' ? ' swarm-active' : ''}${item.key === 'swarm' && activeAgentCount > 0 && activeView !== 'swarm' ? ' activity-pending' : ''}`} onClick={() => setActiveView(item.key)} aria-current={activeView === item.key ? 'page' : undefined} title={viewLabels[item.key]}>
               <Icon name={item.icon} size={17} /><span>{viewLabels[item.key]}</span>{item.key === 'swarm' && activeAgentCount > 0 && <i className="sidebar-activity-count">{activeAgentCount}</i>}
             </button>
           ))}
@@ -729,7 +730,7 @@ function SessionsList({
               disabled={actionSessionId === session.id}
             >
               <span className={'status-dot' + (session.id === sessionId ? ' active' : ' idle')} />
-              <span className="sidebar-item-copy"><strong>{session.title || session.id.slice(0, 8)}</strong><small>{archived ? tr('Archived', '已归档') : session.status || 'ready'}</small></span>
+              <span className="sidebar-item-copy"><strong>{session.title || tr('Untitled conversation', '未命名会话')}</strong><small>{archived ? tr('Archived', '已归档') : session.status || 'ready'}</small></span>
               {session.message_count !== undefined && session.message_count !== null && <span className="sidebar-item-count">{session.message_count}</span>}
             </button>
           ))}

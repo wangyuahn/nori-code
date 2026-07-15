@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, type FsDiffResponse, type FsGitStatusResponse, type FsReadResponse } from '../api/client';
 import type { ChatMessage, CodeChange } from '../hooks/useChatMessages';
+import type { GitStatusRefreshOptions } from '../hooks/useFilesystem';
 import { useI18n } from '../i18n';
 import { FilePreview } from './FilePreview';
 import { Icon } from './Icon';
@@ -18,11 +19,12 @@ interface WorkspaceInspectorProps {
   gitStatus: FsGitStatusResponse | null;
   gitError: string | null;
   gitLoading: boolean;
-  refreshGitStatus: () => Promise<FsGitStatusResponse | null>;
+  refreshGitStatus: (options?: GitStatusRefreshOptions) => Promise<FsGitStatusResponse | null>;
+  refreshMessages?: () => Promise<void>;
   isStreaming: boolean;
 }
 
-export function WorkspaceInspector({ sessionId, projectPath, path, file, loading, messages, codeChanges, gitStatus, gitError, gitLoading, refreshGitStatus }: WorkspaceInspectorProps) {
+export function WorkspaceInspector({ sessionId, projectPath, path, file, loading, messages, codeChanges, gitStatus, gitError, gitLoading, refreshGitStatus, refreshMessages }: WorkspaceInspectorProps) {
   const { tr } = useI18n();
   const [tab, setTab] = useState<InspectorTab>('changes');
   const [textChangeCount, setTextChangeCount] = useState<number>();
@@ -35,11 +37,18 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
     setTextChangeCount(undefined);
   }, [projectPath]);
 
-  const latestCodeChange = codeChanges[0]?.occurredAt;
+  const latestCodeChange = codeChanges[0];
+  const codeChangeRefreshKey = latestCodeChange
+    ? [latestCodeChange.agentId, latestCodeChange.operation, latestCodeChange.path, latestCodeChange.occurredAt, latestCodeChange.diff].join('\u0000')
+    : '';
+  const toolMutationRefreshKey = latestToolMutationKey(messages) ?? '';
+  const mutationRefreshKey = codeChangeRefreshKey || toolMutationRefreshKey
+    ? `${codeChangeRefreshKey}\u0001${toolMutationRefreshKey}`
+    : '';
   useEffect(() => {
-    if (!sessionId || !latestCodeChange) return;
-    void refreshGitStatus();
-  }, [latestCodeChange, refreshGitStatus, sessionId]);
+    if (!sessionId || !mutationRefreshKey) return;
+    void refreshGitStatus({ force: true });
+  }, [mutationRefreshKey, refreshGitStatus, sessionId]);
 
   return <section className="workspace-inspector">
     <div className="inspector-tabs" role="tablist" aria-label={tr('Inspector', '检查器')}>
@@ -49,7 +58,7 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
     </div>
     <div className="inspector-content">
       {tab === 'preview' && <FilePreview path={path} file={file} loading={loading} />}
-      {tab === 'changes' && <ChangesPanel sessionId={sessionId} projectPath={projectPath} status={gitStatus} messages={messages} codeChanges={codeChanges} onRefreshGitStatus={refreshGitStatus} onCountChange={setTextChangeCount} />}
+      {tab === 'changes' && <ChangesPanel sessionId={sessionId} projectPath={projectPath} status={gitStatus} messages={messages} codeChanges={codeChanges} onRefreshGitStatus={refreshGitStatus} onRefreshMessages={refreshMessages} onCountChange={setTextChangeCount} />}
       {tab === 'git' && <GitPanel sessionId={sessionId} projectPath={projectPath} status={gitStatus} error={gitError} loading={gitLoading} onRefresh={refreshGitStatus} />}
     </div>
   </section>;
@@ -57,6 +66,22 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
 
 function InspectorTabButton({ active, icon, label, count, onClick }: { active: boolean; icon: 'files' | 'diff' | 'git-branch'; label: string; count?: number; onClick: () => void }) {
   return <button type="button" role="tab" aria-selected={active} className={active ? 'active' : ''} onClick={onClick}><Icon name={icon} size={14}/><span>{label}</span>{count ? <small>{count}</small> : null}</button>;
+}
+
+function latestToolMutationKey(messages: ChatMessage[]): string | undefined {
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex--) {
+    const message = messages[messageIndex];
+    if (!message) continue;
+    const tools = message.toolCalls ?? [];
+    for (let toolIndex = tools.length - 1; toolIndex >= 0; toolIndex--) {
+      const tool = tools[toolIndex];
+      if (!tool || (tool.name !== 'Edit' && tool.name !== 'Write')) continue;
+      const args = tool.args && typeof tool.args === 'object' ? tool.args as Record<string, unknown> : {};
+      const path = typeof args['path'] === 'string' ? args['path'] : '';
+      return [message.id, tool.id ?? '', tool.name, path, tool.result ?? ''].join('\u0000');
+    }
+  }
+  return undefined;
 }
 
 interface Attribution {
@@ -72,6 +97,7 @@ interface ProjectDiffCache {
 
 const PROJECT_DIFF_CACHE_LIMIT = 12;
 const projectDiffCaches = new Map<string, ProjectDiffCache>();
+const projectCodeChangeCaches = new Map<string, CodeChange[]>();
 
 export function collectAttributions(messages: ChatMessage[]): Attribution[] {
   const attributions: Attribution[] = [];
@@ -87,13 +113,14 @@ export function collectAttributions(messages: ChatMessage[]): Attribution[] {
   return attributions.sort((left, right) => right.timestamp - left.timestamp);
 }
 
-function ChangesPanel({ sessionId, projectPath, status, messages, codeChanges, onRefreshGitStatus, onCountChange }: { sessionId: string | null; projectPath?: string; status: FsGitStatusResponse | null; messages: ChatMessage[]; codeChanges: CodeChange[]; onRefreshGitStatus: () => Promise<FsGitStatusResponse | null>; onCountChange: (count: number | undefined) => void }) {
+function ChangesPanel({ sessionId, projectPath, status, messages, codeChanges, onRefreshGitStatus, onRefreshMessages, onCountChange }: { sessionId: string | null; projectPath?: string; status: FsGitStatusResponse | null; messages: ChatMessage[]; codeChanges: CodeChange[]; onRefreshGitStatus: (options?: GitStatusRefreshOptions) => Promise<FsGitStatusResponse | null>; onRefreshMessages?: () => Promise<void>; onCountChange: (count: number | undefined) => void }) {
   const { tr } = useI18n();
   const [diffs, setDiffs] = useState<Record<string, FsDiffResponse>>({});
   const [pendingPaths, setPendingPaths] = useState<Set<string>>(new Set());
   const [failedPaths, setFailedPaths] = useState<Set<string>>(new Set());
   const [reloadVersion, setReloadVersion] = useState(0);
   const [recalculating, setRecalculating] = useState(false);
+  const [projectChanges, setProjectChanges] = useState<CodeChange[]>([]);
   const projectKey = normalizeProjectKey(projectPath, sessionId);
   const cacheProjectRef = useRef<string | null>(null);
   const diffCacheRef = useRef<Record<string, FsDiffResponse>>({});
@@ -104,12 +131,34 @@ function ChangesPanel({ sessionId, projectPath, status, messages, codeChanges, o
   const mountedRef = useRef(true);
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
-  const paths = useMemo(() => Object.keys(status?.entries ?? {}), [status?.entries]);
+  const incomingChanges = useMemo(() => mergeCodeChanges(
+    codeChanges.map(change => ({ ...change, path: projectRelativePath(change.path, projectPath) })),
+    collectToolCodeChanges(messages, projectPath),
+  ), [codeChanges, messages, projectPath]);
+  const incomingChangesKey = useMemo(() => incomingChanges
+    .map(change => [change.agentId, change.operation, change.path, change.diff, change.occurredAt].join('\u0000'))
+    .join('\u0001'), [incomingChanges]);
+
+  useEffect(() => {
+    if (projectKey === null) {
+      setProjectChanges(incomingChanges);
+      return;
+    }
+    const merged = mergeCodeChanges(projectCodeChangeCaches.get(projectKey) ?? [], incomingChanges);
+    rememberProjectCodeChanges(projectKey, merged);
+    setProjectChanges(merged);
+  }, [incomingChanges, incomingChangesKey, projectKey]);
+
+  const paths = useMemo(() => [...new Set([
+    ...projectChanges.map(change => change.path),
+    ...Object.keys(status?.entries ?? {}),
+  ])], [projectChanges, status?.entries]);
   const pathsKey = useMemo(() => paths.join('\u0000'), [paths]);
-  const attributions = useMemo(() => [
-    ...codeChanges.map(change => ({ path: change.path, agent: change.agentId === 'main' ? 'Nori' : change.agentId, timestamp: Date.parse(change.occurredAt) || 0 })),
-    ...collectAttributions(messages),
-  ].sort((left, right) => right.timestamp - left.timestamp), [codeChanges, messages]);
+  const attributions = useMemo(() => projectChanges.map(change => ({
+    path: change.path,
+    agent: change.agentId === 'main' ? 'Nori' : change.agentId,
+    timestamp: Date.parse(change.occurredAt) || 0,
+  })), [projectChanges]);
   const orderedPaths = useMemo(() => [...paths].sort((left, right) => {
     const leftTime = attributions.find(item => item.path === left || item.path.endsWith(`/${left}`))?.timestamp ?? 0;
     const rightTime = attributions.find(item => item.path === right || item.path.endsWith(`/${right}`))?.timestamp ?? 0;
@@ -154,7 +203,8 @@ function ChangesPanel({ sessionId, projectPath, status, messages, codeChanges, o
       return;
     }
 
-    const missingPaths = diffPathsToLoad(paths, diffCacheRef.current, pendingPathsRef.current, failedPathsRef.current);
+    const gitDiffPaths = paths.filter(path => resolvedDiff(path, projectChanges, {}) === undefined);
+    const missingPaths = diffPathsToLoad(gitDiffPaths, diffCacheRef.current, pendingPathsRef.current, failedPathsRef.current);
     setDiffs({ ...diffCacheRef.current });
     setFailedPaths(new Set(failedPathsRef.current));
     if (missingPaths.length === 0) {
@@ -195,13 +245,17 @@ function ChangesPanel({ sessionId, projectPath, status, messages, codeChanges, o
       setPendingPaths(new Set(pendingPathsRef.current));
       rememberProjectDiffCache(projectKey, diffCacheRef.current, failedPathsRef.current);
     });
-  }, [onCountChange, pathsKey, projectKey, reloadVersion]);
+  }, [onCountChange, pathsKey, projectChanges, projectKey, reloadVersion]);
 
   const visiblePaths = useMemo(() => orderedPaths.filter(path => {
-    const diff = resolvedDiff(path, codeChanges, diffs);
+    const diff = resolvedDiff(path, projectChanges, diffs);
     if (diff === undefined) return false;
     return hasTextChanges(diff);
-  }), [codeChanges, diffs, orderedPaths]);
+  }), [diffs, orderedPaths, projectChanges]);
+  const visibleStats = useMemo(() => visiblePaths.reduce((total, path) => {
+    const stats = changedLineStats(resolvedDiff(path, projectChanges, diffs) ?? '');
+    return { additions: total.additions + stats.additions, deletions: total.deletions + stats.deletions };
+  }, { additions: 0, deletions: 0 }), [diffs, projectChanges, visiblePaths]);
 
   useEffect(() => {
     if (pendingPaths.size === 0) onCountChange(visiblePaths.length);
@@ -211,7 +265,10 @@ function ChangesPanel({ sessionId, projectPath, status, messages, codeChanges, o
     if (!sessionId || recalculating) return;
     setRecalculating(true);
     try {
-      await onRefreshGitStatus();
+      await Promise.all([
+        onRefreshGitStatus({ force: true }),
+        onRefreshMessages?.(),
+      ]);
       generationRef.current++;
       diffCacheRef.current = {};
       pendingPathsRef.current = new Set();
@@ -228,7 +285,7 @@ function ChangesPanel({ sessionId, projectPath, status, messages, codeChanges, o
   };
 
   return <div className="changes-panel">
-    <header className="inspector-section-header"><div><strong>{tr('Project changes', '项目更改')}</strong><span>{tr('Cached by project · newest first', '按项目缓存 · 最新更改优先')}</span></div><span className="diff-stats"><b>+{status?.additions ?? 0}</b><i>-{status?.deletions ?? 0}</i><button type="button" className="change-recalculate" onClick={() => void recalculate()} disabled={!sessionId || recalculating} title={tr('Recalculate project changes', '重新计算项目更改')}><Icon name="refresh" size={12}/></button></span></header>
+    <header className="inspector-section-header"><div><strong>{tr('Project changes', '项目更改')}</strong><span>{recalculating ? tr('Refreshing Git status and diffs…', '正在刷新 Git 状态和差异…') : tr('Cached by project · newest first', '按项目缓存 · 最新更改优先')}</span></div><span className="diff-stats"><b>+{visibleStats.additions}</b><i>-{visibleStats.deletions}</i><button type="button" className="change-recalculate" onClick={() => void recalculate()} disabled={!sessionId || recalculating} title={tr('Recalculate project changes', '重新计算项目更改')} aria-label={tr('Recalculate project changes', '重新计算项目更改')}>{recalculating ? <span className="spinner"/> : <Icon name="refresh" size={12}/>}</button></span></header>
     {!sessionId ? <InspectorEmpty text={tr('Open a conversation to track changes.', '打开会话后可跟踪更改。')} />
       : orderedPaths.length === 0 ? <InspectorEmpty text={tr('No uncommitted changes.', '没有未提交的更改。')} />
       : pendingPaths.size === orderedPaths.length ? <div className="inspector-empty"><span className="spinner"/><span>{tr('Reading text changes…', '正在读取文本更改…')}</span></div>
@@ -237,7 +294,7 @@ function ChangesPanel({ sessionId, projectPath, status, messages, codeChanges, o
     {failedPaths.size > 0 && <div className="change-load-status error">{tr(`${failedPaths.size} diffs could not be loaded.`, `${failedPaths.size} 项 diff 读取失败。`)}</div>}
     <div className="change-list">{visiblePaths.map((path, index) => {
       const exact = attributions.find(item => item.path === path || item.path.endsWith(`/${path}`));
-      const rawDiff = resolvedDiff(path, codeChanges, diffs) ?? '';
+      const rawDiff = resolvedDiff(path, projectChanges, diffs) ?? '';
       return <ChangeCard
         key={path}
         path={path}
@@ -248,6 +305,96 @@ function ChangesPanel({ sessionId, projectPath, status, messages, codeChanges, o
       />;
     })}</div></>}
   </div>;
+}
+
+export function collectToolCodeChanges(messages: ChatMessage[], projectPath?: string): CodeChange[] {
+  const changes: CodeChange[] = [];
+  for (const message of messages) {
+    for (const tool of message.toolCalls ?? []) {
+      if ((tool.name !== 'Edit' && tool.name !== 'Write') || tool.result === undefined) continue;
+      const args = tool.args && typeof tool.args === 'object' ? tool.args as Record<string, unknown> : {};
+      const rawPath = typeof args['path'] === 'string' ? args['path'] : '';
+      if (!rawPath) continue;
+      const diff = tool.name === 'Edit'
+        ? changedTextDiff(args['old_string'], args['new_string'])
+        : addedTextDiff(args['content']);
+      if (!diff) continue;
+      changes.push({
+        agentId: 'main',
+        operation: tool.name === 'Edit' ? 'edit' : 'write',
+        path: projectRelativePath(rawPath, projectPath),
+        diff,
+        occurredAt: message.createdAt ?? new Date(0).toISOString(),
+      });
+    }
+  }
+  return changes.sort((left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt));
+}
+
+function changedTextDiff(before: unknown, after: unknown): string {
+  if (typeof before !== 'string' || typeof after !== 'string') return '';
+  return compactOperationLines([
+    ...before.replaceAll('\r\n', '\n').split('\n').map(line => `-${line}`),
+    ...after.replaceAll('\r\n', '\n').split('\n').map(line => `+${line}`),
+  ]);
+}
+
+function addedTextDiff(content: unknown): string {
+  if (typeof content !== 'string') return '';
+  return compactOperationLines(content.replaceAll('\r\n', '\n').split('\n').map(line => `+${line}`));
+}
+
+function compactOperationLines(lines: string[]): string {
+  return lines.length <= 40
+    ? lines.join('\n')
+    : [...lines.slice(0, 40), `... ${String(lines.length - 40)} more changed lines`].join('\n');
+}
+
+function projectRelativePath(path: string, projectPath?: string): string {
+  const normalized = path.replaceAll('\\', '/');
+  const root = projectPath?.trim().replaceAll('\\', '/').replace(/\/+$/, '');
+  if (!root) return normalized;
+  const prefix = `${root}/`;
+  return normalized.toLocaleLowerCase().startsWith(prefix.toLocaleLowerCase())
+    ? normalized.slice(prefix.length)
+    : normalized;
+}
+
+export function mergeCodeChanges(existing: CodeChange[], incoming: CodeChange[]): CodeChange[] {
+  const ordered = [...incoming, ...existing]
+    .sort((left, right) => codeChangeTimestamp(right) - codeChangeTimestamp(left));
+  const merged: CodeChange[] = [];
+  for (const change of ordered) {
+    const duplicate = merged.some(candidate =>
+      candidate.operation === change.operation
+      && candidate.path === change.path
+      && candidate.diff.trim() === change.diff.trim()
+      && timestampsOverlap(candidate, change)
+    );
+    if (!duplicate) merged.push(change);
+  }
+  return merged.slice(0, 100);
+}
+
+function timestampsOverlap(left: CodeChange, right: CodeChange): boolean {
+  const leftTime = codeChangeTimestamp(left);
+  const rightTime = codeChangeTimestamp(right);
+  return leftTime === 0 || rightTime === 0 || Math.abs(leftTime - rightTime) <= 30_000;
+}
+
+function codeChangeTimestamp(change: CodeChange): number {
+  const timestamp = Date.parse(change.occurredAt);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function rememberProjectCodeChanges(projectKey: string, changes: CodeChange[]): void {
+  projectCodeChangeCaches.delete(projectKey);
+  projectCodeChangeCaches.set(projectKey, changes);
+  while (projectCodeChangeCaches.size > PROJECT_DIFF_CACHE_LIMIT) {
+    const oldest = projectCodeChangeCaches.keys().next().value;
+    if (oldest === undefined) break;
+    projectCodeChangeCaches.delete(oldest);
+  }
 }
 
 function normalizeProjectKey(projectPath: string | undefined, sessionId: string | null): string | null {
@@ -279,9 +426,17 @@ export function diffPathsToLoad(
   return paths.filter(path => diffs[path] === undefined && !pending.has(path) && !failed.has(path));
 }
 
+export function combinedCodeChangeDiff(path: string, codeChanges: CodeChange[]): string | undefined {
+  const operationDiffs = codeChanges
+    .filter(item => item.path === path || item.path.endsWith(`/${path}`))
+    .map(item => item.diff.trimEnd())
+    .filter(diff => compactChangedLines(diff).length > 0);
+  return operationDiffs.length > 0 ? operationDiffs.join('\n') : undefined;
+}
+
 function resolvedDiff(path: string, codeChanges: CodeChange[], diffs: Record<string, FsDiffResponse>): string | undefined {
-  const live = codeChanges.find(item => item.path === path || item.path.endsWith(`/${path}`));
-  if (live?.diff && compactChangedLines(live.diff).length > 0) return live.diff;
+  const liveDiff = combinedCodeChangeDiff(path, codeChanges);
+  if (liveDiff !== undefined) return liveDiff;
   return diffs[path]?.diff;
 }
 
@@ -314,7 +469,7 @@ export function splitDisplayPath(path: string): { directory: string; fileName: s
   };
 }
 
-function GitPanel({ sessionId, projectPath, status, error, loading, onRefresh }: { sessionId: string | null; projectPath?: string; status: FsGitStatusResponse | null; error: string | null; loading: boolean; onRefresh: () => Promise<FsGitStatusResponse | null> }) {
+function GitPanel({ sessionId, projectPath, status, error, loading, onRefresh }: { sessionId: string | null; projectPath?: string; status: FsGitStatusResponse | null; error: string | null; loading: boolean; onRefresh: (options?: GitStatusRefreshOptions) => Promise<FsGitStatusResponse | null> }) {
   const { tr } = useI18n();
   const [selectedPath, setSelectedPath] = useState('');
   const [diff, setDiff] = useState<FsDiffResponse | null>(null);

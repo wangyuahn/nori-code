@@ -519,6 +519,26 @@ describe('toProtocolSession adapter', () => {
     expect(proto.metadata['other_key']).toBe('x');
   });
 
+  it('does not expose a hidden title instruction from persisted metadata', () => {
+    const summary: SessionSummary = {
+      id: 'sess_hidden_title',
+      workDir: '/tmp/wd',
+      sessionDir: '/tmp/sd',
+      createdAt: 0,
+      updatedAt: 0,
+    };
+    const meta: SessionMeta = {
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      title: '<system-reminder>Generate a title.</system-reminder>',
+      isCustomTitle: false,
+      agents: {},
+      custom: {},
+    };
+
+    expect(toProtocolSession(summary, meta).title).toBe('');
+  });
+
   it('preserves custom metadata from the summary when SessionMeta is unavailable', () => {
     const summary: SessionSummary = {
       id: 'sess_summary_meta',

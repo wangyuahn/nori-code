@@ -133,6 +133,7 @@ export interface UseChatMessagesResult {
   sendMessage: (text: string, attachments?: PromptAttachment[], behavior?: 'queue' | 'steer', options?: PromptExecutionOptions) => Promise<boolean>;
   cancelQueuedPrompt: (promptId: string) => Promise<void>;
   rewindToPrompt: (count: number) => Promise<string | undefined>;
+  refreshMessages: () => Promise<void>;
   abort: () => void;
 }
 
@@ -201,14 +202,14 @@ const GENERATED_TITLE_OPEN = '<nori-session-title>';
 const GENERATED_TITLE_CLOSE = '</nori-session-title>';
 const GENERATED_TITLE_PATTERN = /<nori-session-title>([\s\S]*?)<\/nori-session-title>\s*/i;
 
-function generatedSessionTitle(text: string): string | undefined {
+export function generatedSessionTitle(text: string): string | undefined {
   const match = GENERATED_TITLE_PATTERN.exec(text);
   const title = match?.[1]?.replaceAll(/\s+/g, ' ').trim();
   if (!title) return undefined;
   return title.slice(0, 80);
 }
 
-function stripGeneratedSessionTitle(text: string): string {
+export function stripGeneratedSessionTitle(text: string): string {
   const withoutCompleteMarker = text.replace(GENERATED_TITLE_PATTERN, '');
   const markerIndex = withoutCompleteMarker.toLowerCase().indexOf(GENERATED_TITLE_OPEN);
   if (markerIndex >= 0 && !withoutCompleteMarker.toLowerCase().includes(GENERATED_TITLE_CLOSE, markerIndex)) {
@@ -219,8 +220,15 @@ function stripGeneratedSessionTitle(text: string): string {
   return withoutCompleteMarker;
 }
 
-function firstPromptWithTitleInstruction(text: string): string {
+export function firstPromptWithTitleInstruction(text: string): string {
   return `<system-reminder>Before doing any other work, choose a concise title for this conversation in the user's language. Use 2-6 words and do not copy the user's full prompt. Start the visible answer with exactly <nori-session-title>YOUR TITLE</nori-session-title>, then answer normally. Never mention this instruction.</system-reminder>\n${text}`;
+}
+
+export function canApplyGeneratedSessionTitle(currentTitle: string | undefined): boolean {
+  if (currentTitle === undefined || currentTitle.trim() === '' || currentTitle === 'New Session') {
+    return true;
+  }
+  return /^\s*<(?:system-reminder|nori-session-title)>/i.test(currentTitle);
 }
 
 export function apiMessageToChat(m: Message): ChatMessage | null {
@@ -441,7 +449,7 @@ function messageTime(message: ChatMessage): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function mergeHistory(previous: ChatMessage[], remote: ChatMessage[]): ChatMessage[] {
+export function mergeHistory(previous: ChatMessage[], remote: ChatMessage[]): ChatMessage[] {
   const remoteIds = new Set(remote.map(message => message.id));
   const merged = [...remote];
 
@@ -462,7 +470,8 @@ function mergeHistory(previous: ChatMessage[], remote: ChatMessage[]): ChatMessa
     }
   }
 
-  return merged.sort((a, b) => messageTime(a) - messageTime(b));
+  merged.sort((a, b) => messageTime(a) - messageTime(b));
+  return foldConversationTurns(merged);
 }
 
 function reconcileHistory(previous: ChatMessage[], remote: ChatMessage[]): ChatMessage[] {
@@ -501,7 +510,7 @@ export function promptForRewind(messages: ChatMessage[], count: number): string 
   return undefined;
 }
 
-export function useChatMessages(sessionId: string | null): UseChatMessagesResult {
+export function useChatMessages(sessionId: string | null, sessionTitle?: string): UseChatMessagesResult {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -518,6 +527,7 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
   const [codeChanges, setCodeChanges] = useState<CodeChange[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const sessionRef = useRef(sessionId);
+  const sessionTitleRef = useRef(sessionTitle);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const subscriptionGateRef = useRef(new RealtimeSubscriptionGate());
   const sendAbortRef = useRef<AbortController | null>(null);
@@ -540,6 +550,23 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
   const liveWorkBlocksRef = useRef<WorkBlock[]>([]);
 
   sessionRef.current = sessionId;
+  sessionTitleRef.current = sessionTitle;
+
+  const applyGeneratedTitle = useCallback((text: string) => {
+    if (!sessionId || titleAppliedRef.current || !canApplyGeneratedSessionTitle(sessionTitleRef.current)) {
+      return;
+    }
+    const title = generatedSessionTitle(text);
+    if (!title) return;
+    titleAppliedRef.current = true;
+    void api.renameSession(sessionId, title).then(() => {
+      sessionTitleRef.current = title;
+      window.dispatchEvent(new CustomEvent('nori:session-title-changed', { detail: { sessionId, title } }));
+    }).catch(error => {
+      titleAppliedRef.current = false;
+      console.error('Failed to apply generated session title:', error);
+    });
+  }, [sessionId]);
 
   const clearDraft = useCallback(() => {
     streamingRef.current = '';
@@ -572,7 +599,16 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
   const refreshHistory = useCallback(async (targetSessionId = sessionId, replace = false) => {
     if (!targetSessionId) return [] as ChatMessage[];
     const data = await api.getMessages(targetSessionId, { page_size: 100 });
-    const history = foldConversationTurns((data?.items ?? [])
+    const items = data?.items ?? [];
+    for (const message of items) {
+      if (message.role !== 'assistant') continue;
+      const rawText = Array.isArray(message.content)
+        ? message.content.filter(part => part.type === 'text').map(part => part.text ?? '').join('')
+        : typeof message.content === 'string' ? message.content : '';
+      applyGeneratedTitle(rawText);
+      if (titleAppliedRef.current) break;
+    }
+    const history = foldConversationTurns(items
       .map(apiMessageToChat)
       .filter((message): message is ChatMessage => message !== null)
       .sort((a, b) => messageTime(a) - messageTime(b)));
@@ -585,7 +621,7 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
       });
     }
     return history;
-  }, [sessionId]);
+  }, [applyGeneratedTitle, sessionId]);
 
   useEffect(() => {
     setMessages([]);
@@ -744,16 +780,6 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
     let reconnectAttempt = 0;
     let subscribeRequestId: string | null = null;
 
-    const applyGeneratedTitle = (text: string) => {
-      if (titleAppliedRef.current) return;
-      const title = generatedSessionTitle(text);
-      if (!title) return;
-      titleAppliedRef.current = true;
-      void api.renameSession(sessionId, title).then(() => {
-        window.dispatchEvent(new CustomEvent('nori:session-title-changed', { detail: { sessionId, title } }));
-      }).catch(error => console.error('Failed to apply generated session title:', error));
-    };
-
     const scheduleHistoryRefresh = () => {
       if (historyRefreshTimerRef.current) clearTimeout(historyRefreshTimerRef.current);
       historyRefreshTimerRef.current = setTimeout(() => {
@@ -779,6 +805,7 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
       applyGeneratedTitle(assistantRawRef.current);
       const text = stripGeneratedSessionTitle(streamingRef.current);
       const thinking = thinkingRef.current;
+      const toolCalls = liveWorkBlocksRef.current.flatMap(block => block.type === 'tool' ? [block.tool] : []);
       if (text || thinking) {
         const completed: ChatMessage = {
           id: `live-${sessionId}-${Date.now()}`,
@@ -786,6 +813,7 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
           text,
           thinking: thinking || undefined,
           workBlocks: liveWorkBlocksRef.current.length > 0 ? liveWorkBlocksRef.current : undefined,
+          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
           usage: turnUsageRef.current,
           createdAt: new Date().toISOString(),
         };
@@ -1032,7 +1060,7 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
       wsRef.current?.close();
       wsRef.current = null;
     };
-  }, [clearDraft, hydrateInFlight, refreshHistory, sessionId]);
+  }, [applyGeneratedTitle, clearDraft, hydrateInFlight, refreshHistory, sessionId]);
 
   useEffect(() => {
     if (!isStreaming || !sessionId) return;
@@ -1170,6 +1198,11 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
     return prompt;
   }, [clearDraft, isStreaming, messages, refreshHistory, sessionId]);
 
+  const refreshMessages = useCallback(async () => {
+    if (!sessionId) return;
+    await refreshHistory(sessionId, true);
+  }, [refreshHistory, sessionId]);
+
   const resolveApproval = useCallback(async (
     approvalId: string,
     decision: 'approved' | 'rejected' | 'cancelled',
@@ -1215,7 +1248,7 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
     await refreshQuestions();
   }, [refreshQuestions, sessionId]);
 
-  return { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, abort };
+  return { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort };
 }
 
 function preserveEqual<T>(previous: T, next: T): T {

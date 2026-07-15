@@ -3134,6 +3134,8 @@ kbd {
 .diff-stats i { color: var(--nori-danger); font-style: normal; font-weight: 650; }
 .change-recalculate { display: grid; width: 24px; height: 24px; place-items: center; padding: 0; border: 1px solid var(--nori-border); border-radius: 4px; color: var(--nori-text-muted); background: var(--nori-control); cursor: pointer; }
 .change-recalculate:hover { color: var(--nori-text); border-color: var(--nori-border-active); }
+.change-recalculate:disabled { cursor: wait; opacity: .75; }
+.change-recalculate .spinner { width: 12px; height: 12px; }
 .change-list { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 7px; padding: 8px; overflow-y: auto; }
 .change-entry { overflow: hidden; flex: none; border: 1px solid var(--nori-border); border-radius: 6px; background: var(--nori-surface); }
 .change-entry.open { border-color: var(--nori-border-strong); }

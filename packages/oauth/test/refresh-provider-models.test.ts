@@ -107,6 +107,57 @@ describe('refreshProviderModels', () => {
     expect(harness.config().defaultModel).toBe('custom/gpt-new');
   });
 
+  it('falls back to /v1/models when a custom provider root returns HTML', async () => {
+    const fetchMock = vi.fn(async (input: string) => input.endsWith('/v1/models')
+      ? jsonResponse({ data: [{ id: 'custom-chat' }] })
+      : new Response('<!doctype html><title>Gateway</title>', {
+        status: 200,
+        headers: { 'Content-Type': 'text/html' },
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+    const harness = makeHost({
+      providers: {
+        custom: {
+          type: 'openai',
+          baseUrl: 'https://gateway.example',
+          apiKey: 'secret',
+        },
+      },
+      models: {},
+    });
+
+    const result = await refreshProviderModels(harness.host, { providerId: 'custom' });
+
+    expect(fetchMock.mock.calls.map(([input]) => input)).toEqual([
+      'https://gateway.example/models',
+      'https://gateway.example/v1/models',
+    ]);
+    expect(result.failed).toEqual([]);
+    expect(harness.config().models?.['custom/custom-chat']).toBeDefined();
+  });
+
+  it('reports an actionable error when every custom model endpoint returns HTML', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<!doctype html><title>Gateway</title>', {
+      status: 200,
+      headers: { 'Content-Type': 'text/html' },
+    })));
+    const harness = makeHost({
+      providers: {
+        custom: {
+          type: 'openai',
+          baseUrl: 'https://gateway.example',
+          apiKey: 'secret',
+        },
+      },
+      models: {},
+    });
+
+    const result = await refreshProviderModels(harness.host, { providerId: 'custom' });
+
+    expect(result.failed[0]?.reason).toContain('returned HTML');
+    expect(result.failed[0]?.reason).not.toContain('Unexpected token');
+  });
+
   it('uses the Anthropic model endpoint and required headers', async () => {
     const fetchMock = vi.fn(async () => jsonResponse({
       data: [{ id: 'claude-sonnet-4', display_name: 'Claude Sonnet 4' }],

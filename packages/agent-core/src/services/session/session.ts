@@ -113,7 +113,7 @@ export function toProtocolSession(
     cwd,
   };
 
-  const title = meta?.title ?? summary.title ?? '';
+  const title = visibleSessionTitle(meta?.title ?? summary.title);
   const workspaceId = encodeWorkDirKey(summary.workDir);
   const totalUsage = summary.usage?.total;
   const messageCount = summary.messageCount ?? 0;
@@ -148,4 +148,9 @@ export function toProtocolSession(
     message_count: messageCount,
     last_seq: 0,
   };
+}
+
+function visibleSessionTitle(title: string | undefined): string {
+  if (title === undefined) return '';
+  return /^\s*<(?:system-reminder|nori-session-title)>/i.test(title) ? '' : title;
 }

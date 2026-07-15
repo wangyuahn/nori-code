@@ -75,6 +75,32 @@ function trimSlash(value: string): string {
   return value.replace(/\/+$/, '');
 }
 
+function openAIModelUrls(configuredBase: string): string[] {
+  const base = trimSlash(configuredBase)
+    .replace(/\/chat\/completions$/i, '')
+    .replace(/\/responses$/i, '');
+  if (/\/models$/i.test(base)) return [base];
+  if (/\/v\d+(?:beta)?$/i.test(base)) return [base + '/models'];
+  return [base + '/models', base + '/v1/models'];
+}
+
+async function readModelPayload(response: Response, url: string): Promise<unknown> {
+  const body = await response.text();
+  if (!response.ok) {
+    const detail = body.trim().slice(0, 300);
+    throw new Error('Model request failed (HTTP ' + response.status + ')' + (detail ? ': ' + detail : '.'));
+  }
+  try {
+    return JSON.parse(body) as unknown;
+  } catch {
+    const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
+    const kind = contentType.includes('text/html') || /^\s*</.test(body) ? 'HTML' : 'non-JSON data';
+    throw new Error(
+      `Model endpoint ${url} returned ${kind}. Check that API Base URL points to an OpenAI-compatible API root.`,
+    );
+  }
+}
+
 function isChatModel(id: string): boolean {
   const lower = id.toLowerCase();
   return !lower.includes('embedding') && !/(^|[-_/])embed($|[-_/])/.test(lower);
@@ -163,13 +189,13 @@ async function discoverModels(
   const configuredBase = stringField(provider, 'baseUrl');
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (host.userAgent) headers['User-Agent'] = host.userAgent;
-  let url: string;
+  let urls: string[];
 
   switch (type) {
     case 'anthropic': {
       if (apiKey === undefined) throw new Error('API key is required to request Anthropic models.');
       const base = trimSlash(configuredBase ?? 'https://api.anthropic.com').replace(/\/v1$/, '');
-      url = base + '/v1/models';
+      urls = [base + '/v1/models'];
       headers['x-api-key'] = apiKey;
       headers['anthropic-version'] = '2023-06-01';
       break;
@@ -177,8 +203,8 @@ async function discoverModels(
     case 'google-genai': {
       if (apiKey === undefined) throw new Error('API key is required to request Gemini models.');
       const base = trimSlash(configuredBase ?? 'https://generativelanguage.googleapis.com');
-      url = base.endsWith('/v1beta') ? base + '/models' : base + '/v1beta/models';
-      url += (url.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(apiKey);
+      const url = base.endsWith('/v1beta') ? base + '/models' : base + '/v1beta/models';
+      urls = [url + (url.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(apiKey)];
       break;
     }
     case 'vertexai':
@@ -187,7 +213,7 @@ async function discoverModels(
     case 'openai_responses':
     case 'kimi': {
       if (configuredBase === undefined) throw new Error('Base URL is required for this provider.');
-      url = trimSlash(configuredBase) + '/models';
+      urls = openAIModelUrls(configuredBase);
       if (apiKey !== undefined) headers['Authorization'] = 'Bearer ' + apiKey;
       break;
     }
@@ -198,16 +224,19 @@ async function discoverModels(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
   try {
-    const response = await fetch(url, { headers, signal: controller.signal });
-    if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      const detail = body.trim().slice(0, 300);
-      throw new Error('Model request failed (HTTP ' + response.status + ')' + (detail ? ': ' + detail : '.'));
+    const failures: Error[] = [];
+    for (const url of urls) {
+      try {
+        const response = await fetch(url, { headers, signal: controller.signal });
+        const endpointCapabilities = isOfficialKimiCodingEndpoint(configuredBase)
+          ? OFFICIAL_KIMI_CODING_INPUT_CAPABILITIES
+          : [];
+        return normalizeModels(await readModelPayload(response, url), endpointCapabilities);
+      } catch (error) {
+        failures.push(error instanceof Error ? error : new Error(String(error)));
+      }
     }
-    const endpointCapabilities = isOfficialKimiCodingEndpoint(configuredBase)
-      ? OFFICIAL_KIMI_CODING_INPUT_CAPABILITIES
-      : [];
-    return normalizeModels(await response.json(), endpointCapabilities);
+    throw failures.at(-1) ?? new Error('Model discovery failed.');
   } finally {
     clearTimeout(timer);
   }
