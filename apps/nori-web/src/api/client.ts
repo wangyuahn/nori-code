@@ -17,7 +17,7 @@ export interface MessageContent {
   status?: string;
   tool_call_id?: string;
   tool_name?: string;
-  source?: PromptImageSource;
+  source?: MessageImageSource;
   file_id?: string;
   media_type?: string;
   size?: number;
@@ -28,6 +28,11 @@ export interface PromptImageSource {
   media_type: string;
   data: string;
 }
+
+export type MessageImageSource =
+  | PromptImageSource
+  | { kind: 'url'; url: string }
+  | { kind: 'file'; file_id: string };
 
 export interface PromptImage {
   kind: 'image';

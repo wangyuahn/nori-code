@@ -25,6 +25,7 @@ export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
   text: string;
+  images?: ChatImage[];
   toolCalls?: ToolCall[];
   thinking?: string;
   workBlocks?: WorkBlock[];
@@ -32,6 +33,58 @@ export interface ChatMessage {
   isStreaming?: boolean;
   usage?: TokenUsage;
   turnBoundary?: boolean;
+}
+
+export interface ChatImage {
+  src: string;
+  alt: string;
+}
+
+interface RealtimeSubscriptionWaiter {
+  resolve: (ready: boolean) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+export class RealtimeSubscriptionGate {
+  private ready = false;
+  private readonly waiters = new Set<RealtimeSubscriptionWaiter>();
+
+  markPending(): void {
+    this.ready = false;
+  }
+
+  markReady(): void {
+    this.ready = true;
+    this.settle(true);
+  }
+
+  reset(): void {
+    this.ready = false;
+    this.settle(false);
+  }
+
+  wait(timeoutMs = 30_000): Promise<boolean> {
+    if (this.ready) return Promise.resolve(true);
+    return new Promise(resolve => {
+      const waiter: RealtimeSubscriptionWaiter = {
+        resolve,
+        timer: setTimeout(() => {
+          this.finish(waiter, false);
+        }, timeoutMs),
+      };
+      this.waiters.add(waiter);
+    });
+  }
+
+  private settle(ready: boolean): void {
+    for (const waiter of this.waiters) this.finish(waiter, ready);
+  }
+
+  private finish(waiter: RealtimeSubscriptionWaiter, ready: boolean): void {
+    if (!this.waiters.delete(waiter)) return;
+    clearTimeout(waiter.timer);
+    waiter.resolve(ready);
+  }
 }
 
 export interface CodeChange {
@@ -196,6 +249,21 @@ export function apiMessageToChat(m: Message): ChatMessage | null {
         .map((c: MessageContent) => c.thinking ?? c.text ?? '')
         .join('\n')
     : '';
+  const images = Array.isArray(m.content)
+    ? m.content.flatMap((content, index) => {
+        if (content.type !== 'image' || content.source === undefined) return [];
+        if (content.source.kind === 'url') {
+          return [{ src: content.source.url, alt: `Attached image ${String(index + 1)}` }];
+        }
+        if (content.source.kind === 'base64') {
+          return [{
+            src: `data:${content.source.media_type};base64,${content.source.data}`,
+            alt: `Attached image ${String(index + 1)}`,
+          }];
+        }
+        return [];
+      })
+    : [];
 
   let toolCalls: ToolCall[] = (m.tool_calls ?? []).map(tc => ({
     id: tc.id,
@@ -218,12 +286,13 @@ export function apiMessageToChat(m: Message): ChatMessage | null {
 
   const thinking = m.thinking || thinkingFromContent || undefined;
   const workBlocks = workBlocksFromMessage(m, toolCalls, thinking);
-  if (!text && !thinking && toolCalls.length === 0) return null;
+  if (!text && !thinking && toolCalls.length === 0 && images.length === 0) return null;
 
   return {
     id: m.id,
     role: m.role === 'tool' ? 'assistant' : m.role,
     text,
+    images: images.length > 0 ? images : undefined,
     thinking,
     workBlocks: workBlocks.length > 0 ? workBlocks : undefined,
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
@@ -450,7 +519,7 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
   const wsRef = useRef<WebSocket | null>(null);
   const sessionRef = useRef(sessionId);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const subscriptionReadyRef = useRef(false);
+  const subscriptionGateRef = useRef(new RealtimeSubscriptionGate());
   const sendAbortRef = useRef<AbortController | null>(null);
   const promptIdRef = useRef<string | null>(null);
   const sendStartedAtRef = useRef(0);
@@ -522,7 +591,7 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
     setMessages([]);
     setMessagesLoading(Boolean(sessionId));
     setIsStreaming(false);
-    subscriptionReadyRef.current = false;
+    subscriptionGateRef.current.reset();
     promptIdRef.current = null;
     hasUserPromptRef.current = false;
     titleAppliedRef.current = false;
@@ -673,6 +742,7 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
 
     let disposed = false;
     let reconnectAttempt = 0;
+    let subscribeRequestId: string | null = null;
 
     const applyGeneratedTitle = (text: string) => {
       if (titleAppliedRef.current) return;
@@ -745,10 +815,11 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
             return;
           }
           reconnectAttempt = 0;
-          subscriptionReadyRef.current = false;
+          subscriptionGateRef.current.markPending();
+          subscribeRequestId = controlId('subscribe');
           socket.send(JSON.stringify({
             type: 'subscribe',
-            id: controlId('subscribe'),
+            id: subscribeRequestId,
             payload: { session_ids: [sessionId] },
           }));
         };
@@ -768,9 +839,10 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
             return;
           }
           if (data.type === 'ack') {
-            const accepted = data.payload?.accepted ?? data.payload?.accepted_subscriptions ?? [];
-            if (data.code === 0 && accepted.includes(sessionId)) {
-              subscriptionReadyRef.current = true;
+            if (data.id !== subscribeRequestId) return;
+            const accepted = data.payload?.accepted ?? data.payload?.accepted_subscriptions;
+            if (data.code === 0 && Array.isArray(accepted) && accepted.includes(sessionId)) {
+              subscriptionGateRef.current.markReady();
             }
             return;
           }
@@ -932,7 +1004,7 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
 
         socket.onclose = () => {
           if (wsRef.current === socket) wsRef.current = null;
-          subscriptionReadyRef.current = false;
+          subscriptionGateRef.current.markPending();
           if (!disposed) {
             const delay = Math.min(1000 * 2 ** reconnectAttempt, 8000);
             reconnectAttempt += 1;
@@ -956,7 +1028,7 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
       if (historyRefreshTimerRef.current) clearTimeout(historyRefreshTimerRef.current);
       historyRefreshTimerRef.current = null;
       reconnectTimerRef.current = null;
-      subscriptionReadyRef.current = false;
+      subscriptionGateRef.current.reset();
       wsRef.current?.close();
       wsRef.current = null;
     };
@@ -986,11 +1058,7 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
   }, [clearDraft, hydrateInFlight, isStreaming, refreshHistory, sessionId]);
 
   const waitForSubscription = useCallback(async (): Promise<boolean> => {
-    const deadline = Date.now() + 8_000;
-    while (!subscriptionReadyRef.current && Date.now() < deadline) {
-      await new Promise(resolve => setTimeout(resolve, 40));
-    }
-    return subscriptionReadyRef.current;
+    return subscriptionGateRef.current.wait();
   }, []);
 
   const sendMessage = useCallback(async (text: string, attachments: PromptAttachment[] = [], behavior: 'queue' | 'steer' = 'queue', options: PromptExecutionOptions = {}) => {
@@ -1008,12 +1076,20 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
     const shouldGenerateTitle = !hasUserPromptRef.current;
     hasUserPromptRef.current = true;
     const visibleText = trimmed || (attachments.length === 1 ? `[${attachments[0]?.name ?? 'attachment'}]` : `[${attachments.length} attachments]`);
+    const visibleImages = attachments.flatMap(attachment => attachment.kind === 'image'
+      ? [{
+          src: `data:${attachment.source.media_type};base64,${attachment.source.data}`,
+          alt: attachment.name,
+        }]
+      : []);
+    const localMessageId = `local-user-${Date.now()}`;
     if (!activeBeforeSubmit) {
       clearDraft();
       setMessages(previous => [...previous, {
-        id: `local-user-${Date.now()}`,
+        id: localMessageId,
         role: 'user',
         text: visibleText,
+        images: visibleImages.length > 0 ? visibleImages : undefined,
         createdAt: new Date().toISOString(),
       }]);
     }
@@ -1035,7 +1111,7 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
         if (behavior === 'steer') {
           await api.sessions.prompts.steer(sessionId, [response.prompt_id]);
           setQueuedPrompts(previous => previous.filter(item => item.id !== response.prompt_id));
-          setMessages(previous => [...previous, { id: response.user_message_id, role: 'user', text: visibleText, createdAt: response.created_at }]);
+          setMessages(previous => [...previous, { id: response.user_message_id, role: 'user', text: visibleText, images: visibleImages.length > 0 ? visibleImages : undefined, createdAt: response.created_at }]);
         }
       } else {
         promptIdRef.current = response.prompt_id;
@@ -1043,6 +1119,10 @@ export function useChatMessages(sessionId: string | null): UseChatMessagesResult
       return true;
     } catch (error) {
       if (controller.signal.aborted) return false;
+      if (shouldGenerateTitle) hasUserPromptRef.current = false;
+      if (!activeBeforeSubmit) {
+        setMessages(previous => previous.filter(message => message.id !== localMessageId));
+      }
       setMessages(previous => [...previous, {
         id: `send-error-${Date.now()}`,
         role: 'system',

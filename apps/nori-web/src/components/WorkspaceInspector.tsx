@@ -49,7 +49,7 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
     </div>
     <div className="inspector-content">
       {tab === 'preview' && <FilePreview path={path} file={file} loading={loading} />}
-      {tab === 'changes' && <ChangesPanel sessionId={sessionId} projectPath={projectPath} status={gitStatus} messages={messages} codeChanges={codeChanges} onCountChange={setTextChangeCount} />}
+      {tab === 'changes' && <ChangesPanel sessionId={sessionId} projectPath={projectPath} status={gitStatus} messages={messages} codeChanges={codeChanges} onRefreshGitStatus={refreshGitStatus} onCountChange={setTextChangeCount} />}
       {tab === 'git' && <GitPanel sessionId={sessionId} projectPath={projectPath} status={gitStatus} error={gitError} loading={gitLoading} onRefresh={refreshGitStatus} />}
     </div>
   </section>;
@@ -87,12 +87,13 @@ export function collectAttributions(messages: ChatMessage[]): Attribution[] {
   return attributions.sort((left, right) => right.timestamp - left.timestamp);
 }
 
-function ChangesPanel({ sessionId, projectPath, status, messages, codeChanges, onCountChange }: { sessionId: string | null; projectPath?: string; status: FsGitStatusResponse | null; messages: ChatMessage[]; codeChanges: CodeChange[]; onCountChange: (count: number | undefined) => void }) {
+function ChangesPanel({ sessionId, projectPath, status, messages, codeChanges, onRefreshGitStatus, onCountChange }: { sessionId: string | null; projectPath?: string; status: FsGitStatusResponse | null; messages: ChatMessage[]; codeChanges: CodeChange[]; onRefreshGitStatus: () => Promise<FsGitStatusResponse | null>; onCountChange: (count: number | undefined) => void }) {
   const { tr } = useI18n();
   const [diffs, setDiffs] = useState<Record<string, FsDiffResponse>>({});
   const [pendingPaths, setPendingPaths] = useState<Set<string>>(new Set());
   const [failedPaths, setFailedPaths] = useState<Set<string>>(new Set());
   const [reloadVersion, setReloadVersion] = useState(0);
+  const [recalculating, setRecalculating] = useState(false);
   const projectKey = normalizeProjectKey(projectPath, sessionId);
   const cacheProjectRef = useRef<string | null>(null);
   const diffCacheRef = useRef<Record<string, FsDiffResponse>>({});
@@ -206,13 +207,11 @@ function ChangesPanel({ sessionId, projectPath, status, messages, codeChanges, o
     if (pendingPaths.size === 0) onCountChange(visiblePaths.length);
   }, [onCountChange, pendingPaths.size, visiblePaths.length]);
 
-  if (!sessionId) return <InspectorEmpty text={tr('Open a conversation to track changes.', '打开会话后可跟踪更改。')} />;
-  if (orderedPaths.length === 0) return <InspectorEmpty text={tr('No uncommitted changes.', '没有未提交的更改。')} />;
-  if (pendingPaths.size === orderedPaths.length) return <div className="inspector-empty"><span className="spinner"/><span>{tr('Reading text changes…', '正在读取文本更改…')}</span></div>;
-  if (visiblePaths.length === 0 && pendingPaths.size === 0 && failedPaths.size === 0) return <InspectorEmpty text={tr('No text changes to display.', '没有可显示的文本行更改。')} />;
-
-  return <div className="changes-panel">
-    <header className="inspector-section-header"><div><strong>{tr('Project changes', '项目更改')}</strong><span>{tr('Cached by project · newest first', '按项目缓存 · 最新更改优先')}</span></div><span className="diff-stats"><b>+{status?.additions ?? 0}</b><i>-{status?.deletions ?? 0}</i><button type="button" className="change-recalculate" onClick={() => {
+  const recalculate = async () => {
+    if (!sessionId || recalculating) return;
+    setRecalculating(true);
+    try {
+      await onRefreshGitStatus();
       generationRef.current++;
       diffCacheRef.current = {};
       pendingPathsRef.current = new Set();
@@ -223,8 +222,18 @@ function ChangesPanel({ sessionId, projectPath, status, messages, codeChanges, o
       setFailedPaths(new Set());
       onCountChange(undefined);
       setReloadVersion(version => version + 1);
-    }} title={tr('Recalculate project changes', '重新计算项目更改')}><Icon name="refresh" size={12}/></button></span></header>
-    {pendingPaths.size > 0 && <div className="change-load-status"><span className="spinner"/>{tr(`Reading ${pendingPaths.size} changes…`, `正在读取 ${pendingPaths.size} 项更改…`)}</div>}
+    } finally {
+      setRecalculating(false);
+    }
+  };
+
+  return <div className="changes-panel">
+    <header className="inspector-section-header"><div><strong>{tr('Project changes', '项目更改')}</strong><span>{tr('Cached by project · newest first', '按项目缓存 · 最新更改优先')}</span></div><span className="diff-stats"><b>+{status?.additions ?? 0}</b><i>-{status?.deletions ?? 0}</i><button type="button" className="change-recalculate" onClick={() => void recalculate()} disabled={!sessionId || recalculating} title={tr('Recalculate project changes', '重新计算项目更改')}><Icon name="refresh" size={12}/></button></span></header>
+    {!sessionId ? <InspectorEmpty text={tr('Open a conversation to track changes.', '打开会话后可跟踪更改。')} />
+      : orderedPaths.length === 0 ? <InspectorEmpty text={tr('No uncommitted changes.', '没有未提交的更改。')} />
+      : pendingPaths.size === orderedPaths.length ? <div className="inspector-empty"><span className="spinner"/><span>{tr('Reading text changes…', '正在读取文本更改…')}</span></div>
+      : visiblePaths.length === 0 && pendingPaths.size === 0 && failedPaths.size === 0 ? <InspectorEmpty text={tr('No text changes to display.', '没有可显示的文本行更改。')} />
+      : <>{pendingPaths.size > 0 && <div className="change-load-status"><span className="spinner"/>{tr(`Reading ${pendingPaths.size} changes…`, `正在读取 ${pendingPaths.size} 项更改…`)}</div>}
     {failedPaths.size > 0 && <div className="change-load-status error">{tr(`${failedPaths.size} diffs could not be loaded.`, `${failedPaths.size} 项 diff 读取失败。`)}</div>}
     <div className="change-list">{visiblePaths.map((path, index) => {
       const exact = attributions.find(item => item.path === path || item.path.endsWith(`/${path}`));
@@ -237,7 +246,7 @@ function ChangesPanel({ sessionId, projectPath, status, messages, codeChanges, o
         diff={rawDiff}
         defaultOpen={index === 0}
       />;
-    })}</div>
+    })}</div></>}
   </div>;
 }
 

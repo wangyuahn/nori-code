@@ -14,6 +14,7 @@ interface LockContents {
   pid: number;
   host?: string;
   port: number;
+  host_version?: string;
 }
 
 /** `<NORI_CODE_HOME>` or `~/.nori-code` — must match the server's home directory resolver. */
@@ -52,12 +53,25 @@ export function readLock(): LockContents | null {
         pid: parsed.pid,
         port: parsed.port,
         host: typeof parsed.host === 'string' ? parsed.host : undefined,
+        host_version: typeof parsed.host_version === 'string' ? parsed.host_version : undefined,
       };
     }
     return null;
   } catch {
     return null;
   }
+}
+
+function runServerKill(seaPath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile(seaPath, ['server', 'kill'], { timeout: RUN_TIMEOUT_MS }, (error, _stdout, stderr) => {
+      if (error) {
+        reject(new Error(`nori server kill failed: ${error.message}\n${stderr}`.trim()));
+        return;
+      }
+      resolve();
+    });
+  });
 }
 
 export function originFromLock(lock: LockContents): string {
@@ -117,7 +131,7 @@ export interface EnsureServerResult {
  * the browser and the TUI: it reuses a running daemon or starts one that the
  * others can reuse — never a private, app-only server.
  */
-export async function ensureServer(seaPath: string): Promise<EnsureServerResult> {
+export async function ensureServer(seaPath: string, expectedVersion?: string): Promise<EnsureServerResult> {
   // Development mode: if the SEA binary doesn't exist, don't try to start it.
   // Instead, check if the user already has a Nori dev server running
   // (started via `pnpm -C apps/nori-code dev:server` in another terminal).
@@ -142,6 +156,18 @@ export async function ensureServer(seaPath: string): Promise<EnsureServerResult>
   }
 
   // Production / SEA-available path
+  const existingLock = readLock();
+  if (
+    expectedVersion !== undefined &&
+    existingLock?.host_version !== undefined &&
+    existingLock.host_version !== expectedVersion &&
+    await isHealthy(originFromLock(existingLock), 3000)
+  ) {
+    process.stdout.write(
+      `[nori-desktop] replacing server ${existingLock.host_version} with ${expectedVersion}\n`,
+    );
+    await runServerKill(seaPath);
+  }
   await runServerRun(seaPath);
 
   const lock = readLock();
@@ -149,6 +175,15 @@ export async function ensureServer(seaPath: string): Promise<EnsureServerResult>
     throw new Error(`Nori server lock not found at ${lockPath()} after starting the server.`);
   }
   const origin = originFromLock(lock);
+  if (
+    expectedVersion !== undefined &&
+    lock.host_version !== undefined &&
+    lock.host_version !== expectedVersion
+  ) {
+    throw new Error(
+      `Nori server version ${lock.host_version} is incompatible with Nori Work ${expectedVersion}.`,
+    );
+  }
 
   const deadline = Date.now() + HEALTH_TIMEOUT_MS;
   while (Date.now() < deadline) {

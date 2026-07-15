@@ -520,8 +520,7 @@ export class ToolManager {
         new b.BashTool(kaos, cwd, background, {
           allowBackground,
         }),
-        (modelCapabilities.image_in || modelCapabilities.video_in) &&
-          new b.ReadMediaFileTool(kaos, workspace, modelCapabilities, videoUploader),
+        new b.ReadMediaFileTool(kaos, workspace, modelCapabilities, videoUploader),
         new b.EnterPlanModeTool(this.agent),
         new b.ExitPlanModeTool(this.agent),
         // Goal tools are main-agent-only.

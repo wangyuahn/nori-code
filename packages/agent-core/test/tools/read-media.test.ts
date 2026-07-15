@@ -14,6 +14,7 @@ import {
   ReadMediaFileTool,
 } from '../../src/tools/builtin/file/read-media';
 import { MEDIA_SNIFF_BYTES, sniffImageDimensions } from '../../src/tools/support/file-type';
+import { testAgent } from '../agent/harness/agent';
 import { createFakeKaos, PERMISSIVE_WORKSPACE } from './fixtures/fake-kaos';
 import { executeTool } from './fixtures/execute-tool';
 
@@ -112,15 +113,18 @@ describe('ReadMediaFileTool', () => {
     expect(description).toMatch(/text file/i);
   });
 
-  it('throws when constructed without image or video capability', () => {
-    expect(
-      () =>
-        new ReadMediaFileTool(
-          createFakeKaos(),
-          PERMISSIVE_WORKSPACE,
-          capabilities({ image_in: false, video_in: false }),
-        ),
-    ).toThrow(/image_in or video_in/);
+  it('stays available when model capabilities are unknown and rejects unsupported media at execution', async () => {
+    const noMediaCapabilities = capabilities({ image_in: false, video_in: false });
+    const tool = makeReadMediaTool({ modelCapabilities: noMediaCapabilities });
+    const result = await executeTool(tool, {
+      turnId: 't1',
+      toolCallId: 'unsupported-media',
+      args: { path: '/workspace/sample.png' },
+      signal,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('does not support image input');
   });
 
   it('returns a system/text/image/text wrap for PNG files', async () => {
@@ -534,24 +538,19 @@ describe('ReadMediaFileTool', () => {
     expect(tool.description).toContain('supports image and video files for the current model');
   });
 
-  it('omits the tool from the toolset when the model has neither image_in nor video_in', () => {
-    // Strict skip semantics: construction returns a sentinel the loader can
-    // use to drop the tool entirely, instead of registering a tool that
-    // always errors. Currently TS throws a regular Error — fail-unimplemented
-    // surfaces the gap.
-    let caught: unknown = null;
-    const construct = (): ReadMediaFileTool =>
-      new ReadMediaFileTool(
-        createFakeKaos(),
-        PERMISSIVE_WORKSPACE,
-        capabilities({ image_in: false, video_in: false }),
-      );
-    try {
-      construct();
-    } catch (error) {
-      caught = error;
-    }
-    expect((caught as { name?: string } | null)?.name).toBe('SkipThisTool');
+  it('registers the tool even when catalog capabilities are missing or stale', () => {
+    const ctx = testAgent();
+    ctx.configure({
+      tools: ['ReadMediaFile'],
+      modelCapabilities: capabilities({ image_in: false, video_in: false }),
+    });
+
+    expect(ctx.agent.tools.data()).toContainEqual(expect.objectContaining({
+      name: 'ReadMediaFile',
+      active: true,
+      source: 'builtin',
+    }));
+    expect(ctx.agent.tools.loopTools.map(tool => tool.name)).toContain('ReadMediaFile');
   });
 
   it('allows absolute media paths outside workspace but rejects relative escapes', async () => {

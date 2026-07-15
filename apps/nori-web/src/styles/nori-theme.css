@@ -3082,6 +3082,9 @@ kbd {
 .main-write-toggle input:checked { border-color: color-mix(in srgb, var(--nori-cyan) 70%, var(--nori-border)); background: color-mix(in srgb, var(--nori-cyan) 22%, var(--nori-control)); }
 .main-write-toggle input:checked::after { background: var(--nori-cyan); transform: translateX(11px); }
 .composer-attachments { display: flex; gap: 7px; padding: 2px 0 5px; overflow-x: auto; }
+.chat-message-images { display: flex; max-width: 100%; flex-wrap: wrap; gap: 8px; margin: 2px 0 9px; }
+.chat-message-images img { width: auto; max-width: min(100%, 420px); max-height: 320px; border: 1px solid var(--nori-border); border-radius: 6px; background: var(--nori-bg); object-fit: contain; }
+.chat-message-user .chat-message-images { justify-content: flex-end; }
 .composer-queue { display: flex; min-width: 0; align-items: center; gap: 5px; padding-bottom: 5px; overflow-x: auto; color: var(--nori-text-muted); font-size: 8px; }
 .composer-queue > span { flex: none; color: var(--nori-warning); font-weight: 700; }
 .composer-queue > div { display: flex; min-width: 90px; max-width: 210px; flex: none; align-items: center; gap: 4px; padding: 3px 4px 3px 7px; border: 1px solid var(--nori-border); border-radius: 4px; background: var(--nori-bg); }

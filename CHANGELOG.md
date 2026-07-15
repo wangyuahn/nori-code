@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.17
+- Make chat WebSocket readiness acknowledgement-driven across startup and reconnects, and replace incompatible background server versions before Nori Work connects.
+- Preserve and render user images in optimistic messages and reloaded conversation history.
+- Keep `ReadMediaFile` registered for every configured profile while reporting unsupported model media capabilities at execution time.
+- Keep the project-change recalculation control visible in clean and empty states, refreshing Git status before rebuilding the project diff cache.
+
 ## v0.1.16
 - Restore authenticated real-time WebSocket streaming, including continued output after tool calls.
 - Stabilize workspace file and Git refreshes, nested-repository detection, and Windows untracked-file diffs.

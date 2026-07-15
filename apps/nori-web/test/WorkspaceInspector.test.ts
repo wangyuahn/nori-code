@@ -67,6 +67,53 @@ describe('workspace change presentation', () => {
     expect(diffPathsToLoad(['src/a.ts'], cached, new Set(), new Set())).toEqual([]);
   });
 
+  it('keeps the recalculate button available when the project has no changes', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const refreshGitStatus = vi.fn(async () => ({
+      branch: 'main',
+      ahead: 0,
+      behind: 0,
+      entries: {},
+      additions: 0,
+      deletions: 0,
+    }));
+
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(WorkspaceInspector, {
+          sessionId: 'session-empty',
+          projectPath: '/empty-project',
+          path: '',
+          file: null,
+          messages: [],
+          codeChanges: [],
+          gitStatus: await refreshGitStatus(),
+          gitError: null,
+          gitLoading: false,
+          refreshGitStatus,
+          isStreaming: false,
+        })));
+      });
+      refreshGitStatus.mockClear();
+
+      const button = container.querySelector<HTMLButtonElement>('.change-recalculate');
+      expect(button).not.toBeNull();
+      expect(button?.disabled).toBe(false);
+      await act(async () => {
+        button?.click();
+        await Promise.resolve();
+      });
+      expect(refreshGitStatus).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
   it('keeps cached diffs across new messages and same-path Git updates', async () => {
     const diff = vi.spyOn(api.sessions.fs, 'diff').mockImplementation(async (_sessionId, path) => ({
       path,

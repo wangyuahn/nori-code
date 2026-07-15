@@ -134,11 +134,6 @@ export class ReadMediaFileTool implements BuiltinTool<ReadMediaFileInput> {
     private readonly capabilities: ModelCapability,
     private readonly videoUploader?: VideoUploader | undefined,
   ) {
-    if (!capabilities.image_in && !capabilities.video_in) {
-      const skip = new Error('ReadMediaFile requires image_in or video_in capability');
-      skip.name = 'SkipThisTool';
-      throw skip;
-    }
     this.description = buildDescription(capabilities);
   }
 

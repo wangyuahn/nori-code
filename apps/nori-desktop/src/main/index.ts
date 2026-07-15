@@ -149,7 +149,7 @@ function errorHtml(message: string): string {
 async function connect(win: BrowserWindow): Promise<void> {
   await win.loadURL(dataUrl(loadingHtml()));
   try {
-    const { origin } = await ensureServer(resolveSeaPath());
+    const { origin } = await ensureServer(resolveSeaPath(), app.getVersion());
     process.stdout.write(`[nori-desktop] connected to ${origin}\n`);
     if (!win.isDestroyed()) {
       // Resolve nori-web dist path (packaged vs dev)

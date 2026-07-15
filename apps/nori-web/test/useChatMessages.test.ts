@@ -1,8 +1,50 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../src/api/client';
-import { apiMessageToChat, foldConversationTurns, promptForRewind, shouldIgnoreTranscriptEvent } from '../src/hooks/useChatMessages';
+import { apiMessageToChat, foldConversationTurns, promptForRewind, RealtimeSubscriptionGate, shouldIgnoreTranscriptEvent } from '../src/hooks/useChatMessages';
+
+describe('realtime subscription readiness', () => {
+  it('settles pending sends from the subscribe acknowledgement', async () => {
+    const gate = new RealtimeSubscriptionGate();
+    const waiting = gate.wait(1_000);
+
+    gate.markReady();
+
+    await expect(waiting).resolves.toBe(true);
+    await expect(gate.wait(1_000)).resolves.toBe(true);
+  });
+
+  it('keeps waiters pending through reconnects and cancels them on session reset', async () => {
+    const gate = new RealtimeSubscriptionGate();
+    const reconnecting = gate.wait(1_000);
+    gate.markPending();
+    gate.markReady();
+    await expect(reconnecting).resolves.toBe(true);
+
+    gate.markPending();
+    const staleSession = gate.wait(1_000);
+    gate.reset();
+    await expect(staleSession).resolves.toBe(false);
+  });
+});
 
 describe('main transcript projection', () => {
+  it('preserves base64 and URL images from persisted user messages', () => {
+    const projected = apiMessageToChat({
+      id: 'image-message',
+      role: 'user',
+      created_at: '2026-07-15T00:00:00.000Z',
+      content: [
+        { type: 'image', source: { kind: 'base64', media_type: 'image/png', data: 'aGVsbG8=' } },
+        { type: 'image', source: { kind: 'url', url: 'https://example.com/image.png' } },
+      ],
+    });
+
+    expect(projected?.images).toEqual([
+      { src: 'data:image/png;base64,aGVsbG8=', alt: 'Attached image 1' },
+      { src: 'https://example.com/image.png', alt: 'Attached image 2' },
+    ]);
+  });
+
   it('ignores subagent transcript events but keeps shared code changes', () => {
     expect(shouldIgnoreTranscriptEvent('assistant.delta', 'agent-2')).toBe(true);
     expect(shouldIgnoreTranscriptEvent('turn.ended', 'agent-2')).toBe(true);

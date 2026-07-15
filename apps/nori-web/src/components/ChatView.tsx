@@ -469,6 +469,7 @@ function MessageBubble({ message, rewindCount, onRewind }: { message: ChatMessag
       void onRewind(rewindCount);
     }} title={tr('Rewind to before this prompt', '回溯到此提问之前')}><Icon name="refresh" size={12}/>{tr('Rewind', '回溯')}</button>}</div>
       {hasWork && <WorkProcess blocks={blocks}/>}
+      {message.images && message.images.length > 0 && <div className="chat-message-images">{message.images.map((image, index) => <img key={`${image.src.slice(0, 80)}-${String(index)}`} src={image.src} alt={image.alt} loading="lazy" />)}</div>}
       {message.text && <div className="chat-message-content">{isUser || isSystem ? message.text : <MarkdownView content={message.text} />}</div>}{message.usage && <TokenUsageLine usage={message.usage} />}{message.createdAt && <time className="chat-message-time">{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>}
     </div>
   </article>;

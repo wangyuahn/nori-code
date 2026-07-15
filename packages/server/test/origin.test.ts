@@ -36,6 +36,10 @@ describe('originHost', () => {
   it('returns undefined for a malformed origin', () => {
     expect(originHost('not a url')).toBeUndefined();
   });
+
+  it('returns undefined for Electron file origins without a network host', () => {
+    expect(originHost('file://')).toBeUndefined();
+  });
 });
 
 describe('isOriginAllowed', () => {
@@ -58,11 +62,16 @@ describe('isOriginAllowed', () => {
   it('treats a malformed origin as absent (allowed)', () => {
     expect(isOriginAllowed('not a url', 'h', [])).toBe(true);
   });
+
+  it('allows Electron file origins while still rejecting network cross-origins', () => {
+    expect(isOriginAllowed('file://', '127.0.0.1:58627', [])).toBe(true);
+    expect(isOriginAllowed('http://evil.example', '127.0.0.1:58627', [])).toBe(false);
+  });
 });
 
 describe('parseCorsOrigins', () => {
   it('splits, trims, and drops empties', () => {
-    expect(parseCorsOrigins({ KIMI_CODE_CORS_ORIGINS: ' https://a.com, https://b.com, ' })).toEqual([
+    expect(parseCorsOrigins({ NORI_CODE_CORS_ORIGINS: ' https://a.com, https://b.com, ' })).toEqual([
       'https://a.com',
       'https://b.com',
     ]);

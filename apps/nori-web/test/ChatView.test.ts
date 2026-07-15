@@ -24,6 +24,21 @@ afterEach(async () => {
 });
 
 describe('chat image attachments', () => {
+  it('renders images stored in chat history', async () => {
+    const { container } = await renderChat({
+      messages: [{
+        id: 'user-image',
+        role: 'user',
+        text: 'Please inspect this screenshot.',
+        images: [{ src: 'data:image/png;base64,aGVsbG8=', alt: 'screen.png' }],
+      }],
+    });
+
+    const image = container.querySelector<HTMLImageElement>('.chat-message-images img');
+    expect(image?.src).toBe('data:image/png;base64,aGVsbG8=');
+    expect(image?.alt).toBe('screen.png');
+  });
+
   it('uses catalog capabilities instead of model names', () => {
     expect(modelSupportsImageInput(model('custom-model', ['image_in']))).toBe(true);
     expect(modelSupportsImageInput(model('vision-in-name-only', ['tool_use']))).toBe(false);

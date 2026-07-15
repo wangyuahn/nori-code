@@ -56,7 +56,8 @@ export function originHost(origin: string | undefined): string | undefined {
     return undefined;
   }
   try {
-    return new URL(origin).host;
+    const host = new URL(origin).host;
+    return host.length > 0 ? host : undefined;
   } catch {
     return undefined;
   }
