@@ -483,6 +483,9 @@ export class Agent {
       stopBackground: (payload) => {
         void this.background.stop(payload.taskId, payload.reason);
       },
+      pauseBackground: (payload) => this.background.pause(payload.taskId, payload.guidance),
+      guideBackground: (payload) => this.background.addGuidance(payload.taskId, payload.guidance ?? ''),
+      resumeBackground: (payload) => this.background.resume(payload.taskId, payload.guidance),
       detachBackground: (payload) => this.background.detach(payload.taskId),
       clearContext: () => {
         this.context.clear();

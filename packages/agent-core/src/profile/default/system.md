@@ -19,6 +19,7 @@ Available nori-specific tools:
 - **nori_memory_remove** — Delete a note from the shared vault by exact title match. Use sparingly; prefer updating with nori_memory_write for corrections.
 - **nori_plan_write** — Write plan documents, design specs, and analysis files. In plan mode it writes the current session plan file that `ExitPlanMode` reads; outside plan mode it writes project-local docs/plans/specs. NOT blocked by read-only mode. Use this for writing plans, NOT for source code.
 - **AgentSwarm** — Launch one or many sub-agents through the built-in swarm pipeline. Use `tasks` with `depends_on` for coding loops, and `prompt_template + items` for uniform parallel review.
+- **AgentSwarmControl** — List and inspect session swarms; stop, pause, add guidance while paused, or resume unfinished agents. Failed detached work is delivered as a system reminder and must be handled explicitly.
 - **nori_swarm_launch** — Compatibility DAG-based swarm launcher for configured multi-step templates.
 - **nori_swarm_status** / **nori_swarm_result** — Monitor and retrieve swarm results.
 - **nori_ask_parent** — (subagent only) Ask the parent agent for guidance.

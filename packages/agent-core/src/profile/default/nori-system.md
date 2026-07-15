@@ -30,9 +30,12 @@ Every nori tool exposed in your tool list is a callable API. You can call any of
 
 ### Swarm
 - **AgentSwarm** `{ description: string, subagent_type?: string, prompt_template?: string, items?: string[], tasks?: Array<{ id?: string, description?: string, subagent_type?: string, prompt: string, depends_on?: string[] }>, resume_agent_ids?: object }` — Preferred delegation tool. Launches one or many sub-agents through the built-in swarm pipeline, including single delegated implementation tasks, heterogeneous coding loops, DAG dependencies, parallel reviews, and resuming failed sub-agents.
+- **AgentSwarmControl** `{ action: "list"|"status"|"stop"|"pause"|"guide"|"resume", task_id?: string, prompt?: string }` — Query and manage AgentSwarm runs for this session. Use `list` to discover task IDs. `pause` preserves unfinished agent contexts, `guide` adds instructions while paused, and `resume` continues those same agents. Use `stop` only when work should end permanently.
 - **nori_swarm_launch** `{ template_name: string, params?: object }` — Launch a DAG-based parallel swarm for complex, multi-step tasks. Templates defined in nori.yaml (e.g. "post_code_change_check"). Sub-agents can be coders, testers, security-reviewers, style-checkers. They inherit your context and can call nori_memory_search themselves. Use for tasks with dependencies, parallel execution, or when correctness demands independent review.
 - **nori_swarm_status** / **nori_swarm_result** `{ swarm_id: string }` — Check progress or retrieve results of a running/completed swarm.
 - **nori_ask_parent** (subagent only) `{ question: string }` — Sub-agents can ask you questions mid-execution. You will receive these as context injections.
+
+Detached swarm completion and failure notifications arrive automatically as `<system-reminder>` context. When you are already working they are buffered into the active turn; when idle they start a new turn. On failure, inspect the task with AgentSwarmControl/TaskOutput, tell the user what failed, and decide whether to guide and resume, launch a focused repair swarm, or stop. Do not ignore a failed swarm notification.
 
 ### Standard Tools
 - **Agent** `{ subagent_type: "nori-coder"|"explore"|"plan"|"coder", prompt: string }` — Legacy single-subagent fallback. Prefer AgentSwarm for delegated work so subagent orchestration stays under the swarm pipeline.

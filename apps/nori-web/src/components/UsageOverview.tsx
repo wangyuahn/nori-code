@@ -82,7 +82,8 @@ export function summarizeUsage(sessions: Session[], range: UsageRange, now = new
     const day = localDayKey(date);
     activityByDay.set(day, (activityByDay.get(day) ?? 0) + Math.max(1, messageCount));
     activityByHour.set(date.getHours(), (activityByHour.get(date.getHours()) ?? 0) + Math.max(1, messageCount));
-    const model = session.agent_config?.model || 'Unknown';
+    const model = session.agent_config?.model?.trim();
+    if (!model || model.toLowerCase() === 'unknown') continue;
     const prior = byModel.get(model) ?? { sessions: 0, messages: 0, tokens: 0 };
     byModel.set(model, { sessions: prior.sessions + 1, messages: prior.messages + messageCount, tokens: prior.tokens + sessionTokens });
   }
@@ -91,7 +92,7 @@ export function summarizeUsage(sessions: Session[], range: UsageRange, now = new
   const streaks = calculateStreaks(activeDayKeys, now);
   const models = [...byModel.entries()]
     .map(([model, value]) => ({ model, ...value }))
-    .sort((left, right) => right.tokens - left.tokens || right.messages - left.messages || right.sessions - left.sessions);
+    .sort((left, right) => right.sessions - left.sessions || right.messages - left.messages || right.tokens - left.tokens);
   const peakHour = [...activityByHour.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] ?? null;
 
   return {
@@ -102,7 +103,7 @@ export function summarizeUsage(sessions: Session[], range: UsageRange, now = new
     currentStreak: streaks.current,
     longestStreak: streaks.longest,
     peakHour,
-    favoriteModel: models[0]?.model ?? '-',
+    favoriteModel: models[0]?.model ?? (filtered.length === 0 ? 'Unknown' : '-'),
     activityByDay,
     models,
   };

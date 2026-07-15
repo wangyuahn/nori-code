@@ -1,5 +1,14 @@
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import {
+  appendFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
@@ -37,6 +46,21 @@ async function writeSessionState(
   const statePath = join(sessionDir, 'state.json');
   await writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`, 'utf-8');
   return statePath;
+}
+
+async function writeMainWire(
+  sessionDir: string,
+  records: readonly Record<string, unknown>[],
+): Promise<string> {
+  const agentDir = join(sessionDir, 'agents', 'main');
+  await mkdir(agentDir, { recursive: true });
+  const wirePath = join(agentDir, 'wire.jsonl');
+  await writeFile(
+    wirePath,
+    records.map((record) => `${JSON.stringify(record)}\n`).join(''),
+    'utf-8',
+  );
+  return wirePath;
 }
 
 describe('SessionStore.list', () => {
@@ -284,6 +308,191 @@ describe('SessionStore.list', () => {
       'ses_no_state',
     ]);
     expect(sessions.every((session) => session.title === undefined)).toBe(true);
+  });
+
+  it('summarizes main-agent usage, real user prompts, and the used model', async () => {
+    const homeDir = await makeTempDir();
+    const workDir = await makeTempDir();
+    const store = new SessionStore(homeDir);
+    const created = await store.create({ id: 'ses_wire_summary', workDir });
+    const usage = (
+      inputOther: number,
+      output: number,
+      inputCacheRead: number,
+      inputCacheCreation: number,
+    ) => ({ inputOther, output, inputCacheRead, inputCacheCreation });
+
+    const wirePath = await writeMainWire(created.sessionDir, [
+      { type: 'config.update', modelAlias: 'configured-first' },
+      { type: 'turn.prompt', input: [], origin: { kind: 'user' } },
+      {
+        type: 'turn.prompt',
+        input: [],
+        origin: { kind: 'skill_activation', trigger: 'user-slash' },
+      },
+      { type: 'turn.prompt', input: [], origin: { kind: 'system_trigger', name: 'goal' } },
+      {
+        type: 'context.append_message',
+        message: { role: 'user', content: [], origin: { kind: 'user' } },
+      },
+      {
+        type: 'context.append_message',
+        message: {
+          role: 'user',
+          content: [],
+          origin: { kind: 'skill_activation', trigger: 'user-slash' },
+        },
+      },
+      { type: 'usage.record', model: 'unknown', usage: usage(1, 2, 3, 4) },
+      { type: 'usage.record', model: 'used-model', usage: usage(6, 6, 6, 6) },
+      { type: 'usage.record', model: 'used-model', usage: usage(6, 6, 6, 6) },
+      { type: 'usage.record', model: 'less-used-later', usage: usage(10, 10, 10, 10) },
+      { type: 'usage.record', model: 'broken-model', usage: { inputOther: 99 } },
+      { type: 'config.update', modelAlias: 'configured-later' },
+    ]);
+    const subagentDir = join(created.sessionDir, 'agents', 'agent-1');
+    await mkdir(subagentDir, { recursive: true });
+    await writeFile(
+      join(subagentDir, 'wire.jsonl'),
+      `${JSON.stringify({ type: 'usage.record', model: 'subagent-model', usage: usage(1_000, 1_000, 1_000, 1_000) })}\n`,
+      'utf-8',
+    );
+
+    const initialExpected = {
+      messageCount: 2,
+      model: 'used-model',
+      usage: {
+        byModel: {
+          unknown: usage(1, 2, 3, 4),
+          'used-model': usage(12, 12, 12, 12),
+          'less-used-later': usage(10, 10, 10, 10),
+        },
+        total: usage(23, 24, 25, 26),
+      },
+    };
+    expect((await store.list({ workDir }))[0]).toMatchObject(initialExpected);
+    expect(await store.get(created.id)).toMatchObject(initialExpected);
+    expect((await store.list({ workDir }))[0]).toMatchObject(initialExpected);
+
+    await appendFile(
+      wirePath,
+      `${JSON.stringify({ type: 'usage.record', model: 'dominant-after-append', usage: usage(100, 100, 100, 100) })}\n`,
+      'utf-8',
+    );
+
+    const refreshedExpected = {
+      messageCount: 2,
+      model: 'dominant-after-append',
+      usage: {
+        byModel: {
+          unknown: usage(1, 2, 3, 4),
+          'used-model': usage(12, 12, 12, 12),
+          'less-used-later': usage(10, 10, 10, 10),
+          'dominant-after-append': usage(100, 100, 100, 100),
+        },
+        total: usage(123, 124, 125, 126),
+      },
+    };
+    expect((await store.list({ workDir }))[0]).toMatchObject(refreshedExpected);
+    expect(await store.get(created.id)).toMatchObject(refreshedExpected);
+  });
+
+  it('falls back to historical user context messages when turn prompts are absent', async () => {
+    const homeDir = await makeTempDir();
+    const workDir = await makeTempDir();
+    const store = new SessionStore(homeDir);
+    const created = await store.create({ id: 'ses_context_message_count', workDir });
+    await writeMainWire(created.sessionDir, [
+      {
+        type: 'context.append_message',
+        message: { role: 'user', content: [], origin: { kind: 'user' } },
+      },
+      {
+        type: 'context.append_message',
+        message: { role: 'user', content: [], origin: { kind: 'user' } },
+      },
+      {
+        type: 'context.append_message',
+        message: { role: 'user', content: [], origin: { kind: 'injection', variant: 'rules' } },
+      },
+      {
+        type: 'context.append_message',
+        message: { role: 'assistant', content: [] },
+      },
+    ]);
+
+    expect((await store.list({ workDir }))[0]?.messageCount).toBe(2);
+  });
+
+  it('reuses main-wire summaries until mtime or size changes', async () => {
+    const homeDir = await makeTempDir();
+    const workDir = await makeTempDir();
+    const store = new SessionStore(homeDir);
+    const created = await store.create({ id: 'ses_wire_cache', workDir });
+    const record = (model: string) => JSON.stringify({
+      type: 'usage.record',
+      model,
+      usage: { inputOther: 1, output: 2, inputCacheRead: 3, inputCacheCreation: 4 },
+    });
+    const firstContent = record('model-a');
+    const secondContent = record('model-b');
+    expect(firstContent).toHaveLength(secondContent.length);
+    const wirePath = join(created.sessionDir, 'agents', 'main', 'wire.jsonl');
+    await mkdir(dirname(wirePath), { recursive: true });
+    const fixedTime = new Date('2030-04-18T12:00:00.000Z');
+    await writeFile(wirePath, firstContent, 'utf-8');
+    await utimes(wirePath, fixedTime, fixedTime);
+
+    expect((await store.list({ workDir }))[0]?.model).toBe('model-a');
+
+    await writeFile(wirePath, secondContent, 'utf-8');
+    await utimes(wirePath, fixedTime, fixedTime);
+    expect((await stat(wirePath)).size).toBe(Buffer.byteLength(firstContent));
+    expect((await store.list({ workDir }))[0]?.model).toBe('model-a');
+
+    await writeFile(wirePath, `${secondContent}\n`, 'utf-8');
+    await utimes(wirePath, fixedTime, fixedTime);
+    expect((await store.list({ workDir }))[0]?.model).toBe('model-b');
+  });
+
+  it('keeps listing sessions when main wire records are missing or corrupted', async () => {
+    const homeDir = await makeTempDir();
+    const workDir = await makeTempDir();
+    const store = new SessionStore(homeDir);
+    const missing = await store.create({ id: 'ses_wire_missing', workDir });
+    const damaged = await store.create({ id: 'ses_wire_damaged', workDir });
+    const wirePath = join(damaged.sessionDir, 'agents', 'main', 'wire.jsonl');
+    await mkdir(dirname(wirePath), { recursive: true });
+    await writeFile(
+      wirePath,
+      [
+        JSON.stringify({ type: 'turn.prompt', input: [], origin: { kind: 'user' } }),
+        JSON.stringify({
+          type: 'usage.record',
+          model: 'valid-before-damage',
+          usage: { inputOther: 1, output: 2, inputCacheRead: 3, inputCacheCreation: 4 },
+        }),
+        '{bad json',
+        JSON.stringify({ type: 'turn.prompt', input: [], origin: { kind: 'user' } }),
+      ].join('\n') + '\n',
+      'utf-8',
+    );
+
+    const sessions = await store.list({ workDir });
+    expect(sessions.map((session) => session.id).toSorted()).toEqual([
+      damaged.id,
+      missing.id,
+    ].toSorted());
+    expect(sessions.find((session) => session.id === missing.id)).toMatchObject({
+      messageCount: 0,
+    });
+    expect(sessions.find((session) => session.id === damaged.id)).toMatchObject({
+      messageCount: 1,
+      model: 'valid-before-damage',
+      usage: {
+        total: { inputOther: 1, output: 2, inputCacheRead: 3, inputCacheCreation: 4 },
+      },
+    });
   });
 
   it('sorts by filesystem activity descending', async () => {

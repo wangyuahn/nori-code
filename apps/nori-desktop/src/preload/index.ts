@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 contextBridge.exposeInMainWorld('noriDesktop', {
   getServerToken: () => ipcRenderer.invoke('nori:getServerToken') as Promise<string | undefined>,
   selectProjectDirectory: () => ipcRenderer.invoke('nori:selectProjectDirectory') as Promise<string | undefined>,
+  saveMarkdown: (input: { suggestedName: string; content: string }) => ipcRenderer.invoke('nori:saveMarkdown', input) as Promise<string | undefined>,
   onToggleMode: (callback: (mode: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, mode: string) => callback(mode);
     ipcRenderer.on('nori:toggleMode', handler);

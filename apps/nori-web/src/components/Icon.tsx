@@ -16,6 +16,8 @@ export type IconName =
   | 'plus'
   | 'send'
   | 'stop'
+  | 'pause'
+  | 'play'
   | 'sparkles'
   | 'moon'
   | 'sun'
@@ -55,6 +57,8 @@ export function Icon({ name, size = 18, ...props }: IconProps) {
     plus: <path d="M12 5v14M5 12h14"/>,
     send: <><path d="M12 19V5"/><path d="m6.5 10.5 5.5-5.5 5.5 5.5"/></>,
     stop: <rect x="7" y="7" width="10" height="10" rx="2"/>,
+    pause: <path d="M8 5v14M16 5v14"/>,
+    play: <path d="m8 5 11 7-11 7Z"/>,
     sparkles: <><path d="m12 3 1.2 3.8L17 8l-3.8 1.2L12 13l-1.2-3.8L7 8l3.8-1.2Z"/><path d="m19 14 .7 2.3L22 17l-2.3.7L19 20l-.7-2.3L16 17l2.3-.7Z"/><path d="m5 13 .7 2.3L8 16l-2.3.7L5 19l-.7-2.3L2 16l2.3-.7Z"/></>,
     moon: <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>,
     sun: <><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"/></>,

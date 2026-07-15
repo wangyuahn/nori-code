@@ -315,7 +315,11 @@ export class Session {
     // Auto-detect nori.yaml from cwd and create providers
     const cwd = this.toolKaos.getcwd();
     const noriConfig = loadNoriYamlConfig(cwd);
-    const autoProviders = createNoriProvidersFromConfig(noriConfig, cwd);
+    const autoProviders = createNoriProvidersFromConfig(
+      noriConfig,
+      this.options.config ?? { providers: {} },
+      cwd,
+    );
     const noriWorkflow = resolveNoriWorkflowConfig(noriConfig);
 
     // Prefer explicit options providers, fall back to auto-detected
@@ -982,7 +986,11 @@ export class Session {
     if (meta.type === 'main') {
       const cwd = this.toolKaos.getcwd();
       const noriConfig = loadNoriYamlConfig(cwd);
-      const autoProviders = createNoriProvidersFromConfig(noriConfig, cwd);
+      const autoProviders = createNoriProvidersFromConfig(
+        noriConfig,
+        this.options.config ?? { providers: {} },
+        cwd,
+      );
       const optionsProviders = this.options.noriProviders;
       effective = optionsProviders ?? autoProviders;
       const noriWorkflow = resolveNoriWorkflowConfig(noriConfig);

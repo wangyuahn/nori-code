@@ -49,6 +49,7 @@ export type { ProcessBackgroundTaskInfo } from './process-task';
 export { QuestionBackgroundTask } from './question-task';
 export type { QuestionBackgroundTaskInfo } from './question-task';
 export { SwarmBackgroundTask } from './swarm-task';
+export type { SwarmTaskControl } from './swarm-task';
 export { BackgroundTaskPersistence } from './persist';
 export type {
   BackgroundTaskInfo,
@@ -475,6 +476,38 @@ export class BackgroundManager {
     return results.filter((info): info is BackgroundTaskInfo => info !== undefined);
   }
 
+  async pause(taskId: string, guidance?: string): Promise<BackgroundTaskInfo | undefined> {
+    const entry = this.tasks.get(taskId);
+    if (entry === undefined) return undefined;
+    if (TERMINAL_STATUSES.has(entry.status)) return this.toInfo(entry);
+    if (entry.task.pause === undefined) throw new Error(`Background task "${taskId}" cannot be paused.`);
+    await entry.task.pause(guidance);
+    await this.persistLive(entry);
+    return this.toInfo(entry);
+  }
+
+  async addGuidance(taskId: string, guidance: string): Promise<BackgroundTaskInfo | undefined> {
+    const entry = this.tasks.get(taskId);
+    if (entry === undefined) return undefined;
+    if (TERMINAL_STATUSES.has(entry.status)) return this.toInfo(entry);
+    if (entry.task.addGuidance === undefined) {
+      throw new Error(`Background task "${taskId}" does not accept guidance.`);
+    }
+    await entry.task.addGuidance(guidance);
+    await this.persistLive(entry);
+    return this.toInfo(entry);
+  }
+
+  async resume(taskId: string, guidance?: string): Promise<BackgroundTaskInfo | undefined> {
+    const entry = this.tasks.get(taskId);
+    if (entry === undefined) return undefined;
+    if (TERMINAL_STATUSES.has(entry.status)) return this.toInfo(entry);
+    if (entry.task.resume === undefined) throw new Error(`Background task "${taskId}" cannot be resumed.`);
+    await entry.task.resume(guidance);
+    await this.persistLive(entry);
+    return this.toInfo(entry);
+  }
+
   /**
    * Wait for a task to reach a terminal state.
    * Returns immediately if already terminal. Times out after `timeoutMs`.
@@ -660,7 +693,11 @@ export class BackgroundManager {
   private async restoreBackgroundTaskNotification(info: BackgroundTaskInfo): Promise<void> {
     const context = await this.buildBackgroundTaskNotificationContext(info);
     if (context === undefined) return;
-    this.agent.context.appendUserMessage(context.content, context.origin);
+    if (info.status === 'completed') {
+      this.agent.context.appendUserMessage(context.content, context.origin);
+    } else {
+      this.agent.turn.steer(context.content, context.origin);
+    }
     this.fireNotificationHook(context.notification);
   }
 
@@ -680,34 +717,42 @@ export class BackgroundManager {
     if (this.deliveredNotificationKeys.has(key)) return;
 
     this.scheduledNotificationKeys.add(key);
-    let output = await this.getOutputSnapshot(info.taskId, 0);
-    if (!output.fullOutputAvailable) {
-      output = await this.getOutputSnapshot(info.taskId, NOTIFICATION_FALLBACK_PREVIEW_BYTES);
+    try {
+      let output = await this.getOutputSnapshot(info.taskId, 0);
+      if (!output.fullOutputAvailable) {
+        output = await this.getOutputSnapshot(info.taskId, NOTIFICATION_FALLBACK_PREVIEW_BYTES);
+      }
+      if (this.isTerminalNotificationSuppressed(info.taskId)) {
+        this.scheduledNotificationKeys.delete(key);
+        return undefined;
+      }
+      const notification: BackgroundTaskNotification = {
+        id: origin.notificationId,
+        category: 'task',
+        type: `task.${info.status}`,
+        source_kind: 'background_task',
+        source_id: info.taskId,
+        agent_id: info.kind === 'agent' ? info.agentId : undefined,
+        title: `Background ${info.kind} ${info.status}`,
+        severity: info.status === 'completed' ? 'info' : 'warning',
+        body: buildBackgroundTaskNotificationBody(info),
+        children: backgroundTaskNotificationChildren(output),
+      };
+      const content = [
+        {
+          type: 'text',
+          text: [
+            '<system-reminder>',
+            renderNotificationXml(notification),
+            '</system-reminder>',
+          ].join('\n'),
+        },
+      ] as const;
+      return { content, origin, notification };
+    } catch (error) {
+      this.scheduledNotificationKeys.delete(key);
+      throw error;
     }
-    if (this.isTerminalNotificationSuppressed(info.taskId)) return undefined;
-    const notification: BackgroundTaskNotification = {
-      id: origin.notificationId,
-      category: 'task',
-      type: `task.${info.status}`,
-      source_kind: 'background_task',
-      source_id: info.taskId,
-      agent_id: info.kind === 'agent' ? info.agentId : undefined,
-      title: `Background ${info.kind} ${info.status}`,
-      severity: info.status === 'completed' ? 'info' : 'warning',
-      body: buildBackgroundTaskNotificationBody(info),
-      children: backgroundTaskNotificationChildren(output),
-    };
-    const content = [
-      {
-        type: 'text',
-        text: [
-          '<system-reminder>',
-          renderNotificationXml(notification),
-          '</system-reminder>',
-        ].join('\n'),
-      },
-    ] as const;
-    return { content, origin, notification };
   }
 
   private fireNotificationHook(notification: BackgroundTaskNotification): void {

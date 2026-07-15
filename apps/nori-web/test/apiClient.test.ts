@@ -1,10 +1,41 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { getServerToken } from '../src/api/client';
+import { createClient, getServerToken, getWebSocketProtocols } from '../src/api/client';
 
 afterEach(() => {
   window.history.replaceState(null, '', '/');
   delete window.noriDesktop;
+  vi.unstubAllGlobals();
+});
+
+describe('prompt execution options', () => {
+  it('maps goal and swarm commands to the existing prompt API fields', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      code: 0,
+      msg: 'ok',
+      data: {
+        prompt_id: 'prompt-1',
+        user_message_id: 'message-1',
+        status: 'running',
+        content: [{ type: 'text', text: 'ship the release' }],
+        created_at: '2026-07-15T00:00:00.000Z',
+      },
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createClient('http://localhost:3000');
+
+    await client.sendPrompt('session-1', 'ship the release', [], {
+      goalObjective: 'ship the release',
+      swarmMode: true,
+    });
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({
+      goal_objective: 'ship the release',
+      swarm_mode: true,
+      content: [{ type: 'text', text: 'ship the release' }],
+    });
+  });
 });
 
 describe('getServerToken', () => {
@@ -23,5 +54,12 @@ describe('getServerToken', () => {
     window.history.replaceState(null, '', '/');
     window.noriDesktop = { getServerToken: vi.fn(async () => 'desktop-token') };
     await expect(getServerToken()).resolves.toBe('desktop-token');
+  });
+
+  it('uses the bearer WebSocket subprotocol required by browser clients', async () => {
+    window.history.replaceState(null, '', '/#token=stream-token');
+    await expect(getWebSocketProtocols()).resolves.toEqual([
+      'nori-code.bearer.stream-token',
+    ]);
   });
 });

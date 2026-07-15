@@ -60,9 +60,10 @@ export class ModelCatalogService
 
   async listModels(): Promise<readonly ModelCatalogItem[]> {
     const config = await this._readConfig();
-    return Object.entries(config.models ?? {}).map(([modelId, alias]) =>
-      toProtocolModel(modelId, alias),
-    );
+    return Object.entries(config.models ?? {}).map(([modelId, alias]) => {
+      const provider = config.providers[alias.provider];
+      return toProtocolModel(modelId, alias, provider);
+    });
   }
 
   async listProviders(): Promise<readonly ProviderCatalogItem[]> {
@@ -94,7 +95,7 @@ export class ModelCatalogService
     const updatedAlias = updated.models?.[modelId] ?? alias;
     return {
       default_model: modelId,
-      model: toProtocolModel(modelId, updatedAlias),
+      model: toProtocolModel(modelId, updatedAlias, updated.providers[updatedAlias.provider]),
     };
   }
 

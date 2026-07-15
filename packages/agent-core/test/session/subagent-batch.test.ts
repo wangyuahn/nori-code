@@ -192,6 +192,52 @@ describe('SubagentBatch scheduling contract', () => {
     }
   });
 
+  it('pauses active agents and resumes the same agent with added guidance', async () => {
+    const resumed = createControlledPromise<{ result: string }>();
+    const resumeCalls: Array<{ agentId: string; prompt: string }> = [];
+    const launcher: SubagentBatchLauncher = {
+      spawn: async (options) => ({
+        agentId: 'agent-paused',
+        profileName: options.profileName,
+        resumed: false,
+        completion: new Promise((_, reject) => {
+          options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+        }),
+      }),
+      resume: async (agentId, options) => {
+        resumeCalls.push({ agentId, prompt: options.prompt });
+        return {
+          agentId,
+          profileName: 'coder',
+          resumed: true,
+          completion: resumed,
+        };
+      },
+      retry: async () => { throw new Error('retry was not expected'); },
+    };
+    const batch = new SubagentBatch(launcher, [queuedTask(1)]);
+    const running = batch.run();
+
+    await Promise.resolve();
+    await Promise.resolve();
+    batch.pause('Focus on the failing renderer test.');
+    expect(batch.isPaused).toBe(true);
+    batch.addGuidance('Keep the existing public API.');
+    await Promise.resolve();
+    await Promise.resolve();
+    batch.resume();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(resumeCalls).toHaveLength(1);
+    expect(resumeCalls[0]).toMatchObject({ agentId: 'agent-paused' });
+    expect(resumeCalls[0]!.prompt).toContain('Focus on the failing renderer test.');
+    expect(resumeCalls[0]!.prompt).toContain('Keep the existing public API.');
+
+    resumed.resolve({ result: 'done' });
+    await expect(running).resolves.toMatchObject([{ agentId: 'agent-paused', status: 'completed' }]);
+  });
+
   it('normal phase keeps processing completions while waiting for the next launch', async () => {
     vi.useFakeTimers();
     try {

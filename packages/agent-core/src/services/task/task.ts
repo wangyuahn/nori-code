@@ -98,6 +98,7 @@ export interface TaskOutputSnapshot {
 export interface GetTaskOptions {
   readonly withOutput?: boolean;
   readonly outputBytes?: number;
+  readonly agentId?: string;
 }
 
 export function toProtocolTask(
@@ -123,6 +124,9 @@ export function toProtocolTask(
   }
   if (info.kind === 'process' && 'command' in info && typeof info.command === 'string') {
     base.command = info.command;
+  }
+  if (info.kind === 'agent' && info.paused !== undefined) {
+    base.paused = info.paused;
   }
   if (output !== undefined) {
     base.output_preview = output.preview;
@@ -162,7 +166,10 @@ export interface ITaskService {
    *   - `TaskAlreadyFinishedError` → 40904 (daemon emits custom envelope
    *      with `data:{cancelled:false}`)
    */
-  cancel(sessionId: string, taskId: string): Promise<{ cancelled: true }>;
+  cancel(sessionId: string, taskId: string, agentId?: string): Promise<{ cancelled: true }>;
+  pause(sessionId: string, taskId: string, guidance?: string, agentId?: string): Promise<BackgroundTask>;
+  guide(sessionId: string, taskId: string, guidance: string, agentId?: string): Promise<BackgroundTask>;
+  resume(sessionId: string, taskId: string, guidance?: string, agentId?: string): Promise<BackgroundTask>;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare

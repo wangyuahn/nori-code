@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../src/api/client';
-import { apiMessageToChat, foldConversationTurns, shouldIgnoreTranscriptEvent } from '../src/hooks/useChatMessages';
+import { apiMessageToChat, foldConversationTurns, promptForRewind, shouldIgnoreTranscriptEvent } from '../src/hooks/useChatMessages';
 
 describe('main transcript projection', () => {
   it('ignores subagent transcript events but keeps shared code changes', () => {
@@ -18,13 +18,12 @@ describe('main transcript projection', () => {
     }
   });
 
-  it('keeps separate assistant turns around a hidden trigger', () => {
+  it('keeps one assistant turn around a hidden wake-up trigger', () => {
     const first = apiMessageToChat(message({ id: 'a1', role: 'assistant', text: 'Agent started in the background.' }))!;
     const boundary = apiMessageToChat(message({ id: 'wake', role: 'user', text: 'done', originKind: 'background_task' }))!;
     const second = apiMessageToChat(message({ id: 'a2', role: 'assistant', text: 'The agent completed successfully.' }))!;
     expect(foldConversationTurns([first, boundary, second]).map(item => item.text)).toEqual([
-      'Agent started in the background.',
-      'The agent completed successfully.',
+      'Agent started in the background.\n\nThe agent completed successfully.',
     ]);
   });
 
@@ -67,6 +66,21 @@ describe('main transcript projection', () => {
       type: 'tool',
       tool: { id: 'edit-1', name: 'Edit', result: 'Updated src/a.ts' },
     });
+  });
+});
+
+describe('conversation rewind prompt', () => {
+  it('returns the requested user prompt counting back from the latest turn', () => {
+    const messages = [
+      { id: 'u1', role: 'user' as const, text: 'first prompt' },
+      { id: 'a1', role: 'assistant' as const, text: 'first answer' },
+      { id: 'u2', role: 'user' as const, text: 'second prompt' },
+    ];
+
+    expect(promptForRewind(messages, 1)).toBe('second prompt');
+    expect(promptForRewind(messages, 2)).toBe('first prompt');
+    expect(promptForRewind(messages, 0)).toBeUndefined();
+    expect(promptForRewind(messages, 3)).toBeUndefined();
   });
 });
 

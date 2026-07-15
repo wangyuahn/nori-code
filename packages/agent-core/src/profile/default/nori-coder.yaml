@@ -35,6 +35,7 @@ tools:
   - nori_memory_remove
   - nori_plan_write
   - AgentSwarm
+  - AgentSwarmControl
   - nori_swarm_launch
   - nori_swarm_status
   - nori_swarm_result

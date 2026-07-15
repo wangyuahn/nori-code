@@ -170,6 +170,9 @@ export interface SessionSummary {
   readonly archived?: boolean | undefined;
   readonly metadata?: JsonObject | undefined;
   readonly additionalDirs?: readonly string[];
+  readonly usage?: UsageStatus | undefined;
+  readonly messageCount?: number | undefined;
+  readonly model?: string | undefined;
 }
 
 export interface PromptPayload {
@@ -254,6 +257,10 @@ export interface StopBackgroundPayload {
   readonly taskId: string;
   /** Free-form human-readable reason persisted with the task record. */
   readonly reason?: string;
+}
+export interface ManageBackgroundPayload {
+  readonly taskId: string;
+  readonly guidance?: string;
 }
 export interface DetachBackgroundPayload {
   readonly taskId: string;
@@ -414,6 +421,9 @@ export interface AgentAPI {
   unregisterTool: (payload: UnregisterToolPayload) => void;
   setActiveTools: (payload: SetActiveToolsPayload) => void;
   stopBackground: (payload: StopBackgroundPayload) => void;
+  pauseBackground: (payload: ManageBackgroundPayload) => Promise<BackgroundTaskInfo | undefined>;
+  guideBackground: (payload: ManageBackgroundPayload) => Promise<BackgroundTaskInfo | undefined>;
+  resumeBackground: (payload: ManageBackgroundPayload) => Promise<BackgroundTaskInfo | undefined>;
   detachBackground: (payload: DetachBackgroundPayload) => BackgroundTaskInfo | undefined;
   clearContext: (payload: EmptyPayload) => void;
   activateSkill: (payload: ActivateSkillPayload) => void;

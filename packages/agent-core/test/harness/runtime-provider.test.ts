@@ -155,6 +155,70 @@ describe('resolveRuntimeProvider model metadata', () => {
     });
   });
 
+  it('adds image and video input for the exact official Kimi Coding endpoint', () => {
+    const resolved = resolveRuntimeProvider({
+      config: {
+        ...BASE_CONFIG,
+        providers: {
+          'managed:kimi-code': {
+            type: 'anthropic',
+            apiKey: 'test-key',
+            baseUrl: 'https://api.kimi.com/coding',
+          },
+        },
+        models: {
+          'kimi-code/kimi-for-coding': {
+            provider: 'managed:kimi-code',
+            model: 'kimi-for-coding',
+            maxContextSize: 262144,
+            capabilities: ['thinking', 'tool_use'],
+          },
+        },
+      },
+    });
+
+    expect(resolved.modelCapabilities).toMatchObject({
+      image_in: true,
+      video_in: true,
+      thinking: true,
+      tool_use: true,
+    });
+  });
+
+  it.each([
+    ['lookalike hostname', 'https://api.kimi.com.evil.test/coding'],
+    ['lookalike path', 'https://api.kimi.com/coding-other'],
+    ['non-TLS endpoint', 'http://api.kimi.com/coding'],
+  ])('does not add media input for a %s', (_label, baseUrl) => {
+    const resolved = resolveRuntimeProvider({
+      config: {
+        ...BASE_CONFIG,
+        providers: {
+          'managed:kimi-code': {
+            type: 'anthropic',
+            apiKey: 'test-key',
+            baseUrl,
+          },
+        },
+        models: {
+          'kimi-code/kimi-for-coding': {
+            provider: 'managed:kimi-code',
+            model: 'kimi-for-coding',
+            maxContextSize: 262144,
+            capabilities: ['thinking', 'tool_use'],
+          },
+        },
+      },
+    });
+
+    expect(resolved.modelCapabilities).toMatchObject({
+      image_in: false,
+      video_in: false,
+      thinking: true,
+      tool_use: true,
+    });
+  });
+
   it('rejects provider model names that are not configured aliases', () => {
     expect(() =>
       resolveRuntimeProvider({

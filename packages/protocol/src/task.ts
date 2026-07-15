@@ -25,5 +25,6 @@ export const backgroundTaskSchema = z.object({
   completed_at: isoDateTimeSchema.optional(),
   output_preview: z.string().optional(),
   output_bytes: z.number().int().nonnegative().optional(),
+  paused: z.boolean().optional(),
 });
 export type BackgroundTask = z.infer<typeof backgroundTaskSchema>;

@@ -13,6 +13,7 @@ import {
   type HookDefConfig,
   type KimiConfig,
   type LoopControl,
+  type MemoryConfig,
   type ModelAlias,
   type MoonshotServiceConfig,
   type OAuthRef,
@@ -308,6 +309,8 @@ export function transformTomlData(data: Record<string, unknown>): Record<string,
       result[targetKey] = transformPermissionData(value);
     } else if (targetKey === 'services' && isPlainObject(value)) {
       result[targetKey] = transformRecord(value, transformServiceData, snakeToCamel);
+    } else if (targetKey === 'memory' && isPlainObject(value)) {
+      result[targetKey] = transformPlainObject(value);
     } else if (targetKey === 'loopControl' && isPlainObject(value)) {
       result[targetKey] = transformLoopControlData(value);
     } else if (targetKey === 'background' && isPlainObject(value)) {
@@ -487,6 +490,7 @@ export function configToTomlData(config: KimiConfig): Record<string, unknown> {
   setRecordSection(out, 'models', config.models, modelToToml);
   setSection(out, 'thinking', config.thinking, thinkingToToml);
   setSection(out, 'services', config.services, servicesToToml);
+  setSection(out, 'memory', config.memory, memoryToToml);
   setSection(out, 'loop_control', config.loopControl, loopControlToToml);
   setSection(out, 'background', config.background, backgroundToToml);
   setSection(out, 'experimental', config.experimental, experimentalToToml);
@@ -630,6 +634,14 @@ function servicesToToml(services: ServicesConfig, rawServices: unknown): Record<
     out['moonshot_fetch'] = serviceToToml(services.moonshotFetch);
   } else {
     delete out['moonshot_fetch'];
+  }
+  return out;
+}
+
+function memoryToToml(memory: MemoryConfig, rawMemory: unknown): Record<string, unknown> {
+  const out = cloneRecord(rawMemory);
+  for (const [key, value] of Object.entries(memory)) {
+    setDefined(out, camelToSnake(key), value);
   }
   return out;
 }

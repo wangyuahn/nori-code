@@ -244,6 +244,13 @@ export interface ModelCatalogItem {
   max_context_size: number;
   max_output_size?: number;
   capabilities?: string[];
+  /** Raw managed-Kimi catalog compatibility before capabilities are flattened. */
+  supports_image_in?: boolean;
+  /** Runtime/session catalog compatibility used by older server builds. */
+  capability?: { image_in?: boolean };
+  model_capabilities?: { image_in?: boolean };
+  /** models.dev/custom-registry shape before input modalities are flattened. */
+  modalities?: { input?: string[] };
   support_efforts?: string[];
   default_effort?: string;
 }
@@ -313,7 +320,7 @@ export interface Note {
 
 export interface SwarmStatus {
   swarm_id: string;
-  status: 'pending' | 'running' | 'done' | 'failed';
+  status: 'pending' | 'running' | 'paused' | 'done' | 'failed' | 'stopped';
   task_count: number;
   completed_count: number;
   session_id?: string;
@@ -380,6 +387,11 @@ export interface PromptResponse {
   status: 'running' | 'queued';
   content: MessageContent[];
   created_at: string;
+}
+
+export interface PromptExecutionOptions {
+  goalObjective?: string;
+  swarmMode?: boolean;
 }
 
 export interface PromptListResponse {
@@ -475,6 +487,11 @@ export async function getServerToken(): Promise<string | undefined> {
     return undefined;
   }
 
+}
+
+export async function getWebSocketProtocols(): Promise<string[]> {
+  const token = await getServerToken();
+  return token ? [`nori-code.bearer.${token}`] : [];
 }
 
 export function getServerOrigin(): string {
@@ -622,6 +639,12 @@ export function createClient(
     swarm: {
       status: (swarmId: string, signal?: AbortSignal) =>
         request<SwarmStatus>(`/swarm/status/${encodeURIComponent(swarmId)}`, undefined, { signal }),
+      control: (swarmId: string, action: 'stop' | 'pause' | 'guide' | 'resume', prompt?: string) =>
+        request<{ swarm_id: string; status: SwarmStatus['status'] }>(
+          `/swarm/${encodeURIComponent(swarmId)}/${action}`,
+          undefined,
+          { method: 'POST', body: prompt?.trim() ? { prompt: prompt.trim() } : {} },
+        ),
     },
 
     // --- Phase ---
@@ -670,13 +693,15 @@ export function createClient(
           page_size: params?.page_size,
         }),
 
-      sendPrompt: (sessionId: string, text: string, attachments: PromptAttachment[] = []) =>
+      sendPrompt: (sessionId: string, text: string, attachments: PromptAttachment[] = [], options: PromptExecutionOptions = {}) =>
         request<PromptResponse>(
           `/sessions/${encodeURIComponent(sessionId)}/prompts`,
           undefined,
           {
             method: 'POST',
             body: {
+              goal_objective: options.goalObjective,
+              swarm_mode: options.swarmMode,
               content: [
                 ...(text ? [{ type: 'text' as const, text }] : []),
                 ...attachments.map(attachment => attachment.kind === 'image'
@@ -714,11 +739,11 @@ export function createClient(
           { method: 'POST' },
         ),
 
-      compact: (id: string) =>
+      compact: (id: string, instruction?: string) =>
         request<Record<string, never>>(
           `/sessions/${encodeURIComponent(id)}:compact`,
           undefined,
-          { method: 'POST', body: {} },
+          { method: 'POST', body: instruction?.trim() ? { instruction: instruction.trim() } : {} },
         ),
 
       undo: (id: string, count: number) =>
@@ -937,13 +962,15 @@ export function createClient(
         page_size: params?.page_size,
       }),
 
-    sendPrompt: (sessionId: string, text: string, attachments: PromptAttachment[] = []) =>
+    sendPrompt: (sessionId: string, text: string, attachments: PromptAttachment[] = [], options: PromptExecutionOptions = {}) =>
       request<PromptResponse>(
         `/sessions/${encodeURIComponent(sessionId)}/prompts`,
         undefined,
         {
           method: 'POST',
           body: {
+            goal_objective: options.goalObjective,
+            swarm_mode: options.swarmMode,
             content: [
               ...(text ? [{ type: 'text' as const, text }] : []),
               ...attachments.map(attachment => attachment.kind === 'image'

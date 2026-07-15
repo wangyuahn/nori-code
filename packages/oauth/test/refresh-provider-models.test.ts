@@ -4,6 +4,7 @@ import {
   refreshProviderModels,
   type RefreshProviderHost,
 } from '../src/refresh-provider-models';
+import { isOfficialKimiCodingEndpoint } from '../src/provider-capabilities';
 import type { ManagedKimiConfigShape } from '../src/custom-registry';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -43,6 +44,14 @@ afterEach(() => {
 });
 
 describe('refreshProviderModels', () => {
+  it('recognizes only the exact official Kimi Coding endpoint', () => {
+    expect(isOfficialKimiCodingEndpoint('https://api.kimi.com/coding')).toBe(true);
+    expect(isOfficialKimiCodingEndpoint('https://api.kimi.com/coding/v1/')).toBe(true);
+    expect(isOfficialKimiCodingEndpoint('http://api.kimi.com/coding')).toBe(false);
+    expect(isOfficialKimiCodingEndpoint('https://api.kimi.com.evil.test/coding')).toBe(false);
+    expect(isOfficialKimiCodingEndpoint('https://api.kimi.com/coding-other')).toBe(false);
+  });
+
   it('discovers OpenAI-compatible models and replaces stale aliases', async () => {
     const fetchMock = vi.fn(async () => jsonResponse({
       data: [
@@ -128,8 +137,49 @@ describe('refreshProviderModels', () => {
     );
   });
 
+  it('refreshes unchanged Kimi model ids when raw image capabilities change', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      data: [{
+        id: 'kimi-for-coding',
+        display_name: 'Kimi for Coding',
+        context_length: 262144,
+        supports_reasoning: true,
+      }],
+    })));
+    const harness = makeHost({
+      providers: {
+        'kimi-code': {
+          type: 'anthropic',
+          baseUrl: 'https://api.kimi.com/coding',
+          apiKey: 'kimi-key',
+        },
+      },
+      models: {
+        'kimi-code/kimi-for-coding': {
+          provider: 'kimi-code',
+          model: 'kimi-for-coding',
+          displayName: 'Kimi for Coding',
+          maxContextSize: 262144,
+          capabilities: ['tool_use', 'thinking'],
+        },
+      },
+    });
+
+    const result = await refreshProviderModels(harness.host, { providerId: 'kimi-code' });
+
+    expect(result.changed).toEqual([
+      expect.objectContaining({ providerId: 'kimi-code', added: 0, removed: 0 }),
+    ]);
+    expect(result.unchanged).toEqual([]);
+    expect(harness.config().models?.['kimi-code/kimi-for-coding']).toEqual(
+      expect.objectContaining({
+        capabilities: expect.arrayContaining(['tool_use', 'thinking', 'image_in', 'video_in']),
+      }),
+    );
+  });
+
   it('normalizes Gemini model names and sends the API key as a query parameter', async () => {
-    const fetchMock = vi.fn(async () => jsonResponse({
+    const fetchMock = vi.fn(async (_input: string) => jsonResponse({
       models: [{
         name: 'models/gemini-2.5-pro',
         displayName: 'Gemini 2.5 Pro',

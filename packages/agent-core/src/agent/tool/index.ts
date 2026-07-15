@@ -553,6 +553,7 @@ export class ToolManager {
           ),
         this.agent.subagentHost &&
           new b.AgentSwarmTool(this.agent.subagentHost, this.agent.swarmMode, background),
+        this.agent.subagentHost && new b.AgentSwarmControlTool(background),
         this.agent.subagentHost &&
           new b.NoriAskParentTool(this.agent),
         new b.WebSearchTool(toolServices?.webSearcher),

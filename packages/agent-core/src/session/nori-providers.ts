@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { homedir } from 'node:os';
 import { relative } from 'pathe';
 import { load as loadYaml } from 'js-yaml';
+import type { KimiConfig, MemoryConfig } from '../config';
 import type { NoriMemoryProvider, NoriSwarmProvider } from '../tools/builtin/nori/types';
 import type { Agent } from '../agent';
 import type { QueuedSubagentTask, SubagentResult } from './subagent-batch';
@@ -24,44 +25,120 @@ interface SwarmState {
   task_results: Record<string, { status: string; output?: { analysis_summary?: string } }>;
 }
 
+interface MemoryRetrieveOptions {
+  top_k?: number;
+  type_filter?: string[];
+  weights?: { embedding: number; fulltext: number; graph: number };
+  link_depth?: number;
+}
+
+interface MemoryNoteInfo {
+  filePath: string;
+  path: string;
+  title: string;
+  body: string;
+  fulltextScore: number;
+  graphScore: number;
+  links: string[];
+  mtimeMs: number;
+  size: number;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Simple Memory Provider (filesystem-based, Obsidian-style vault)    */
 /* ------------------------------------------------------------------ */
 
 class SimpleMemoryProvider implements NoriMemoryProvider {
-  constructor(private readonly vaultPath: string) {
+  constructor(protected readonly vaultPath: string) {
     mkdirSync(vaultPath, { recursive: true });
     for (const dir of MEMORY_NOTE_DIRS) {
       mkdirSync(path.join(vaultPath, dir), { recursive: true });
     }
   }
 
-  async multiRetrieve(keywords: string[], options?: {
-    top_k?: number;
-    type_filter?: string[];
-    weights?: { embedding: number; fulltext: number; graph: number };
-    link_depth?: number;
-  }): Promise<Array<{ title: string; path: string; score?: number; excerpt?: string; content?: string }>> {
+  async multiRetrieve(keywords: string[], options?: MemoryRetrieveOptions): Promise<Array<{ title: string; path: string; score?: number; excerpt?: string; content?: string }>> {
     const topK = options?.top_k ?? 10;
+    const notes = this.scoreNotes(keywords, options);
+    return notes
+      .map((note) => ({
+        title: note.title,
+        path: note.path,
+        score: note.fulltextScore > 0 ? note.fulltextScore : note.graphScore,
+        excerpt: excerpt(note.body),
+        content: note.body,
+      }))
+      .filter((note) => note.score > 0)
+      .toSorted((a, b) => b.score - a.score)
+      .slice(0, topK);
+  }
+
+  protected scoreNotes(keywords: string[], options?: MemoryRetrieveOptions): MemoryNoteInfo[] {
+    const allNotes = this.collectNotes(keywords, options?.type_filter);
     const linkDepth = options?.link_depth ?? 0;
-    const typeFilter = options?.type_filter;
-    const dirs = typeFilter?.length
-      ? unique(typeFilter.flatMap(noteTypeDirs)).map(d => path.join(this.vaultPath, d))
-      : [this.vaultPath];
-
-    /* ------------------------------------------------------------------ */
-    /*  Pass 1: collect all notes, parse [[wiki-links]], keyword-score      */
-    /* ------------------------------------------------------------------ */
-
-    interface NoteInfo {
-      path: string;
-      title: string;
-      body: string;
-      score: number;        // keyword match score, 0 if no match
-      links: string[];      // outgoing [[wiki-link]] target titles
+    const titleToIndex = new Map<string, number>();
+    for (let i = 0; i < allNotes.length; i++) {
+      const note = allNotes[i];
+      if (note !== undefined) titleToIndex.set(note.title, i);
     }
 
-    const allNotes: NoteInfo[] = [];
+    const adjacency = new Map<number, number[]>();
+    for (let i = 0; i < allNotes.length; i++) {
+      const note = allNotes[i];
+      if (note === undefined) continue;
+      adjacency.set(
+        i,
+        note.links.flatMap((linkTitle) => {
+          const target = titleToIndex.get(linkTitle);
+          return target === undefined ? [] : [target];
+        }),
+      );
+    }
+
+    const seedScores = new Map<number, number>();
+    for (let i = 0; i < allNotes.length; i++) {
+      const note = allNotes[i];
+      if (note !== undefined && note.fulltextScore > 0) seedScores.set(i, note.fulltextScore);
+    }
+
+    if (linkDepth < 1 || seedScores.size === 0) return allNotes;
+
+    const inLinks = new Map<number, number[]>();
+    for (let i = 0; i < allNotes.length; i++) inLinks.set(i, []);
+    for (const [source, targets] of adjacency) {
+      for (const target of targets) inLinks.get(target)?.push(source);
+    }
+
+    for (const [seedIndex, seedScore] of seedScores) {
+      const visited = new Set<number>([seedIndex]);
+      const queue: Array<{ index: number; depth: number }> = [{ index: seedIndex, depth: 0 }];
+      for (let cursor = 0; cursor < queue.length; cursor++) {
+        const current = queue[cursor];
+        if (current === undefined || current.depth >= linkDepth) continue;
+        const neighbors = new Set([
+          ...(adjacency.get(current.index) ?? []),
+          ...(inLinks.get(current.index) ?? []),
+        ]);
+        for (const neighborIndex of neighbors) {
+          if (visited.has(neighborIndex)) continue;
+          visited.add(neighborIndex);
+          const depth = current.depth + 1;
+          queue.push({ index: neighborIndex, depth });
+          const note = allNotes[neighborIndex];
+          if (note !== undefined && !seedScores.has(neighborIndex)) {
+            note.graphScore = Math.max(note.graphScore, seedScore * Math.pow(0.5, depth));
+          }
+        }
+      }
+    }
+
+    return allNotes;
+  }
+
+  private collectNotes(keywords: string[], typeFilter?: string[]): MemoryNoteInfo[] {
+    const dirs = typeFilter?.length
+      ? unique(typeFilter.flatMap(noteTypeDirs)).map((dir) => path.join(this.vaultPath, dir))
+      : [this.vaultPath];
+    const allNotes: MemoryNoteInfo[] = [];
     const seenFiles = new Set<string>();
 
     for (const dir of dirs) {
@@ -72,9 +149,7 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
           seenFiles.add(fp);
           const raw = readFileSync(fp, 'utf-8');
           const { title, body } = this.parseFrontmatter(raw);
-          const notePath = relative(this.vaultPath, fp).replace(/\\/g, '/');
-
-          // Parse [[wiki-links]] from body (handle [[page]] and [[page|alias]])
+          const notePath = relative(this.vaultPath, fp).replaceAll('\\', '/');
           const wikiLinks: string[] = [];
           const linkRegex = /\[\[([^\]]+)\]\]/g;
           let match: RegExpExecArray | null;
@@ -83,7 +158,6 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
             if (linkTarget) wikiLinks.push(linkTarget);
           }
 
-          // Keyword matching
           const searchable = `${title}\n${notePath}\n${path.basename(fp)}\n${body}`;
           const lower = searchable.toLowerCase();
           let score = 0;
@@ -94,132 +168,22 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
             while ((idx = lower.indexOf(needle, idx)) !== -1) { score++; idx++; }
           }
 
-          allNotes.push({ path: notePath, title, body, score, links: wikiLinks });
+          const stat = lstatSync(fp);
+          allNotes.push({
+            filePath: fp,
+            path: notePath,
+            title,
+            body,
+            fulltextScore: score,
+            graphScore: 0,
+            links: wikiLinks,
+            mtimeMs: stat.mtimeMs,
+            size: stat.size,
+          });
         }
       } catch { /* skip inaccessible dirs */ }
     }
-
-    /* ------------------------------------------------------------------ */
-    /*  Pass 2: build adjacency list and seed set                           */
-    /* ------------------------------------------------------------------ */
-
-    const titleToIndex = new Map<string, number>();
-    for (let i = 0; i < allNotes.length; i++) {
-      const note = allNotes[i];
-      if (note !== undefined) titleToIndex.set(note.title, i);
-    }
-
-    // adjacency[i] = indices of notes that note i links TO (outgoing)
-    const adjacency = new Map<number, number[]>();
-    for (let i = 0; i < allNotes.length; i++) {
-      const targets: number[] = [];
-      const note = allNotes[i];
-      if (note === undefined) continue;
-      for (const linkTitle of note.links) {
-        const targetIdx = titleToIndex.get(linkTitle);
-        if (targetIdx !== undefined) targets.push(targetIdx);
-      }
-      adjacency.set(i, targets);
-    }
-
-    // Seeds: notes with keyword score > 0
-    const seedScores = new Map<number, number>();
-    for (let i = 0; i < allNotes.length; i++) {
-      const note = allNotes[i];
-      if (note !== undefined && note.score > 0) {
-        seedScores.set(i, note.score);
-      }
-    }
-
-    // reverse index: notes that link TO a given note (incoming)
-    const inLinks = new Map<number, number[]>();
-    for (let i = 0; i < allNotes.length; i++) {
-      inLinks.set(i, []);
-    }
-    for (const [src, targets] of adjacency) {
-      for (const dst of targets) {
-        inLinks.get(dst)!.push(src);
-      }
-    }
-
-    /* ------------------------------------------------------------------ */
-    /*  Pass 3: BFS from seeds, chain-score non-seed notes via outgoing links */
-    /* ------------------------------------------------------------------ */
-
-    // resultScores: note index -> best score (seeds keep keyword score, chain notes get best chain score)
-    const resultScores = new Map<number, number>();
-
-    for (const [seedIdx, seedScore] of seedScores) {
-      resultScores.set(seedIdx, seedScore);
-    }
-
-    if (linkDepth >= 1 && seedScores.size > 0) {
-      // chainScores tracks best chain score for NON-seed notes
-      const chainScores = new Map<number, number>();
-
-      for (const [seedIdx, seedScore] of seedScores) {
-        // Level-order BFS from this seed
-        const visited = new Set<number>([seedIdx]);
-        const queue: number[] = [seedIdx];          // note indices
-        const depthOf: number[] = [0];               // parallel depth array
-
-        let front = 0;
-        while (front < queue.length) {
-          const currentIdx = queue[front]!;
-          const currentDepth = depthOf[front]!;
-          front++;
-
-          if (currentDepth >= linkDepth) continue;
-
-          const outNeighbors = adjacency.get(currentIdx) ?? [];
-          const inNeighbors = inLinks.get(currentIdx) ?? [];
-          for (const neighborIdx of new Set([...outNeighbors, ...inNeighbors])) {
-            if (visited.has(neighborIdx)) continue;
-            visited.add(neighborIdx);
-            const newDepth = currentDepth + 1;
-            queue.push(neighborIdx);
-            depthOf.push(newDepth);
-
-            if (!seedScores.has(neighborIdx)) {
-              const chainScore = seedScore * Math.pow(0.5, newDepth);
-              const prev = chainScores.get(neighborIdx);
-              if (prev === undefined || chainScore > prev) {
-                chainScores.set(neighborIdx, chainScore);
-              }
-            }
-          }
-        }
-      }
-
-      // Merge chain scores into resultScores
-      for (const [noteIdx, chainScore] of chainScores) {
-        const prev = resultScores.get(noteIdx);
-        if (prev === undefined || chainScore > prev) {
-          resultScores.set(noteIdx, chainScore);
-        }
-      }
-    }
-
-    /* ------------------------------------------------------------------ */
-    /*  Pass 4: build result list, sort by score, truncate to topK          */
-    /* ------------------------------------------------------------------ */
-
-    const results: Array<{ title: string; path: string; score: number; excerpt: string; content: string }> = [];
-
-    for (const [noteIdx, score] of resultScores) {
-      const note = allNotes[noteIdx];
-      if (!note) continue;
-      results.push({
-        title: note.title,
-        path: note.path,
-        score,
-        excerpt: note.body.length > 500 ? note.body.substring(0, 500) + '...' : note.body,
-        content: note.body,
-      });
-    }
-
-    results.sort((a, b) => b.score - a.score);
-    return results.slice(0, topK);
+    return allNotes;
   }
 
   async writeNote(params: {
@@ -229,14 +193,14 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
     mkdirSync(dir, { recursive: true });
     const dateStr = new Date().toISOString().split('T')[0];
     const safeName = params.title
-      .replace(/[<>:\"/\\|?*]/g, '-').replace(/\s+/g, '-').toLowerCase().substring(0, 80);
+      .replaceAll(/[<>:"/\\|?*]/g, '-').replaceAll(/\s+/g, '-').toLowerCase().slice(0, 80);
     const fileName = dateStr + '-' + safeName + '.md';
     const fp = path.join(dir, fileName);
 
     const tagsYaml = params.tags?.length ? '\ntags: [' + params.tags.join(', ') + ']' : '';
     const linksYaml = params.links?.length ? '\nlinks: [' + params.links.join(', ') + ']' : '';
     const fm = [
-      '---', 'title: \"' + params.title + '\"', 'type: ' + params.note_type,
+      '---', 'title: "' + params.title + '"', 'type: ' + params.note_type,
       'date: ' + dateStr,
       ...(tagsYaml ? [tagsYaml.trim()] : []),
       ...(linksYaml ? [linksYaml.trim()] : []),
@@ -244,7 +208,7 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
     ].filter(l => l.length > 0).join('\n');
 
     writeFileSync(fp, fm + '\n\n' + params.content, 'utf-8');
-    return { path: relative(this.vaultPath, fp).replace(/\\/g, '/') };
+    return { path: relative(this.vaultPath, fp).replaceAll('\\', '/') };
   }
 
   async removeNote(title: string): Promise<boolean> {
@@ -280,7 +244,7 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
     return path.join(trashDir, `${stem}-${suffix}${extension}`);
   }
 
-  private markdownFiles(dir: string): string[] {
+  protected markdownFiles(dir: string): string[] {
     const files: string[] = [];
     const stack = [dir];
     while (stack.length > 0) {
@@ -304,8 +268,8 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
     return files;
   }
 
-  private parseFrontmatter(content: string): { title: string; frontmatter: string; body: string } {
-    const normalized = content.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  protected parseFrontmatter(content: string): { title: string; frontmatter: string; body: string } {
+    const normalized = content.replace(/^\uFEFF/, '').replaceAll('\r\n', '\n');
     const m = normalized.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
     if (!m) return { title: 'Untitled', frontmatter: '', body: normalized };
     const frontmatter = m[1] ?? '';
@@ -313,6 +277,236 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
     const tm = frontmatter.match(/^title:\s*['"]?(.+?)['"]?\s*$/m);
     return { title: tm?.[1] ?? 'Untitled', frontmatter, body };
   }
+}
+
+interface CachedEmbedding {
+  mtimeMs: number;
+  size: number;
+  vector: number[];
+}
+
+class VectorMemoryProvider extends SimpleMemoryProvider {
+  private readonly cache = new Map<string, CachedEmbedding>();
+
+  constructor(vaultPath: string, private readonly config: MemoryConfig) {
+    super(vaultPath);
+  }
+
+  override async multiRetrieve(
+    keywords: string[],
+    options?: MemoryRetrieveOptions,
+  ): Promise<Array<{ title: string; path: string; score?: number; excerpt?: string; content?: string }>> {
+    const endpoint = this.embeddingEndpoint();
+    const apiKey = requiredConfig(this.config.apiKey, 'api_key');
+    const model = requiredConfig(this.config.model, 'model');
+    const query = keywords.map((keyword) => keyword.trim()).filter(Boolean).join(' ');
+    if (query.length === 0) return [];
+
+    const notes = this.scoreNotes(keywords, options);
+    if (notes.length === 0) return [];
+    const queryVector = (await this.embed(endpoint, apiKey, model, [query]))[0];
+    if (queryVector === undefined) throw new Error('Memory embedding response is missing query data');
+
+    const noteVectors = new Map<string, number[]>();
+    const missing: MemoryNoteInfo[] = [];
+    for (const note of notes) {
+      const cached = this.cache.get(note.filePath);
+      if (cached?.mtimeMs === note.mtimeMs && cached.size === note.size) {
+        noteVectors.set(note.filePath, cached.vector);
+      } else {
+        missing.push(note);
+      }
+    }
+
+    for (let offset = 0; offset < missing.length; offset += 64) {
+      const batch = missing.slice(offset, offset + 64);
+      const vectors = await this.embed(
+        endpoint,
+        apiKey,
+        model,
+        batch.map((note) => `${note.title}\n${note.path}\n${note.body}`),
+      );
+      for (let index = 0; index < batch.length; index++) {
+        const note = batch[index];
+        const vector = vectors[index];
+        if (note === undefined || vector === undefined) continue;
+        if (vector.length !== queryVector.length) {
+          throw new Error('Memory embedding response contains inconsistent dimensions');
+        }
+        this.cache.set(note.filePath, {
+          mtimeMs: note.mtimeMs,
+          size: note.size,
+          vector,
+        });
+        noteVectors.set(note.filePath, vector);
+      }
+    }
+
+    const weights = normalizeWeights(options?.weights);
+    const maxFulltext = Math.max(0, ...notes.map((note) => note.fulltextScore));
+    const maxGraph = Math.max(0, ...notes.map((note) => note.graphScore));
+    return notes
+      .map((note) => {
+        const vector = noteVectors.get(note.filePath);
+        const semantic = vector === undefined ? 0 : Math.max(0, cosineSimilarity(queryVector, vector));
+        const fulltext = maxFulltext === 0 ? 0 : note.fulltextScore / maxFulltext;
+        const graph = maxGraph === 0 ? 0 : note.graphScore / maxGraph;
+        const score =
+          weights.embedding * semantic +
+          weights.fulltext * fulltext +
+          weights.graph * graph;
+        return {
+          title: note.title,
+          path: note.path,
+          score,
+          excerpt: excerpt(note.body),
+          content: note.body,
+        };
+      })
+      .filter((note) => note.score > 0)
+      .toSorted((a, b) => b.score - a.score)
+      .slice(0, options?.top_k ?? 10);
+  }
+
+  private embeddingEndpoint(): string {
+    const providerType = requiredConfig(this.config.providerType as string | undefined, 'provider_type');
+    if (providerType !== 'openai' && providerType !== 'openai_responses') {
+      throw new Error(`Unsupported memory embedding provider type: ${providerType}`);
+    }
+    const baseUrl = requiredConfig(this.config.baseUrl, 'base_url');
+    let url: URL;
+    try {
+      url = new URL(baseUrl);
+    } catch {
+      throw new Error('Memory embedding base_url must be a valid URL');
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      throw new Error('Memory embedding base_url must use HTTP or HTTPS');
+    }
+    url.pathname = `${url.pathname.replace(/\/+$/, '')}/embeddings`;
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  }
+
+  private async embed(
+    endpoint: string,
+    apiKey: string,
+    model: string,
+    input: string[],
+  ): Promise<number[][]> {
+    const headers = new Headers(this.config.customHeaders);
+    headers.set('authorization', `Bearer ${apiKey}`);
+    headers.set('content-type', 'application/json');
+    let response: Response;
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ model, input }),
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch {
+      throw new Error('Memory embedding request failed');
+    }
+    if (!response.ok) {
+      throw new Error(`Memory embedding request failed with HTTP ${String(response.status)}`);
+    }
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new Error('Memory embedding response is not valid JSON');
+    }
+    return parseEmbeddingResponse(payload, input.length);
+  }
+}
+
+function excerpt(body: string): string {
+  return body.length > 500 ? `${body.slice(0, 500)}...` : body;
+}
+
+function requiredConfig<T>(value: T | undefined, name: string): T {
+  if (typeof value === 'string' && value.trim().length === 0) {
+    throw new Error(`Memory vector retrieval requires memory.${name}`);
+  }
+  if (value === undefined) throw new Error(`Memory vector retrieval requires memory.${name}`);
+  return typeof value === 'string' ? value.trim() as T : value;
+}
+
+function normalizeWeights(
+  weights: MemoryRetrieveOptions['weights'],
+): { embedding: number; fulltext: number; graph: number } {
+  const defaults = { embedding: 0.7, fulltext: 0.2, graph: 0.1 };
+  if (weights === undefined) return defaults;
+  const sanitized = {
+    embedding: validWeight(weights.embedding),
+    fulltext: validWeight(weights.fulltext),
+    graph: validWeight(weights.graph),
+  };
+  const total = sanitized.embedding + sanitized.fulltext + sanitized.graph;
+  if (total === 0) return defaults;
+  return {
+    embedding: sanitized.embedding / total,
+    fulltext: sanitized.fulltext / total,
+    graph: sanitized.graph / total,
+  };
+}
+
+function validWeight(value: number): number {
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function cosineSimilarity(left: readonly number[], right: readonly number[]): number {
+  if (left.length === 0 || left.length !== right.length) return 0;
+  let dot = 0;
+  let leftMagnitude = 0;
+  let rightMagnitude = 0;
+  for (let index = 0; index < left.length; index++) {
+    const leftValue = left[index] ?? 0;
+    const rightValue = right[index] ?? 0;
+    dot += leftValue * rightValue;
+    leftMagnitude += leftValue * leftValue;
+    rightMagnitude += rightValue * rightValue;
+  }
+  if (leftMagnitude === 0 || rightMagnitude === 0) return 0;
+  return dot / Math.sqrt(leftMagnitude * rightMagnitude);
+}
+
+function parseEmbeddingResponse(payload: unknown, expectedCount: number): number[][] {
+  if (typeof payload !== 'object' || payload === null || !Array.isArray((payload as { data?: unknown }).data)) {
+    throw new Error('Memory embedding response must contain a data array');
+  }
+  const data = (payload as { data: unknown[] }).data;
+  if (data.length !== expectedCount) {
+    throw new Error('Memory embedding response count does not match the request');
+  }
+  const vectors: Array<number[] | undefined> = Array.from({ length: expectedCount });
+  let dimensions: number | undefined;
+  for (const item of data) {
+    if (typeof item !== 'object' || item === null) {
+      throw new Error('Memory embedding response contains an invalid item');
+    }
+    const { index, embedding } = item as { index?: unknown; embedding?: unknown };
+    if (!Number.isInteger(index) || (index as number) < 0 || (index as number) >= expectedCount) {
+      throw new Error('Memory embedding response contains an invalid index');
+    }
+    if (!Array.isArray(embedding) || embedding.length === 0 || !embedding.every(Number.isFinite)) {
+      throw new Error('Memory embedding response contains an invalid vector');
+    }
+    if (dimensions !== undefined && dimensions !== embedding.length) {
+      throw new Error('Memory embedding response contains inconsistent dimensions');
+    }
+    dimensions = embedding.length;
+    if (vectors[index as number] !== undefined) {
+      throw new Error('Memory embedding response contains a duplicate index');
+    }
+    vectors[index as number] = embedding as number[];
+  }
+  if (vectors.some((vector) => vector === undefined)) {
+    throw new Error('Memory embedding response is missing an index');
+  }
+  return vectors as number[][];
 }
 
 const MEMORY_NOTE_DIRS = [
@@ -367,12 +561,12 @@ class SimpleSwarmProvider implements NoriSwarmProvider {
   async launchDag(
     templateName: string,
     params: Record<string, unknown>,
-    depth: number,
+    _depth: number,
   ): Promise<{ swarm_id: string }> {
     const h = this.host();
     if (!h) throw new Error('No subagent host available');
 
-    const swarmId = 'swarm_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+    const swarmId = 'swarm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
 
     // Build tasks from nori.yaml swarm.checks or fallback templates
     const checkDefs = this.resolveCheckDefs(templateName, params);
@@ -395,7 +589,7 @@ class SimpleSwarmProvider implements NoriSwarmProvider {
       task_results: {},
     });
 
-    this.executeSwarm(swarmId, tasks).catch(err => {
+    this.executeSwarm(swarmId, tasks).catch(() => {
       const existing = this.activeSwarms.get(swarmId);
       if (existing) existing.status = 'failed';
     });
@@ -469,11 +663,7 @@ class SimpleSwarmProvider implements NoriSwarmProvider {
   }
 
   /** Default checks when no nori.yaml swarm.checks are defined. */
-  private defaultChecks(params: Record<string, unknown>): SwarmCheckDef[] {
-    const taskDesc =
-      (params['description'] as string | undefined) ??
-      (params['prompt'] as string | undefined) ??
-      'implementation task';
+  private defaultChecks(_params: Record<string, unknown>): SwarmCheckDef[] {
     return [
       {
         id: 'code_implementation',
@@ -523,8 +713,6 @@ class SimpleSwarmProvider implements NoriSwarmProvider {
     const taskDesc = (params['description'] as string | undefined) ?? check.id;
     const filesChanged = (params['changed_files'] as string[] | undefined) ?? [];
     const isCoder = check.agent_type === 'coder' || check.agent_type === 'nori-coder';
-    const isReviewer = !isCoder;
-
     let prompt = '';
 
     if (isCoder) {
@@ -585,7 +773,7 @@ class SimpleSwarmProvider implements NoriSwarmProvider {
     }
 
     if (context) {
-      prompt += '\n\n**Context from orchestrator**:\n> ' + context.replace(/\n/g, '\n> ');
+      prompt += '\n\n**Context from orchestrator**:\n> ' + context.replaceAll('\n', '\n> ');
     }
 
     prompt += '\n\n## Expected Output\n\n';
@@ -632,7 +820,11 @@ export function loadNoriYamlConfig(cwd: string): Record<string, unknown> | null 
  * Create nori providers from a nori.yaml configuration object.
  * Returns null if nori.yaml is not present or has no vault_path configured.
  */
-export function createNoriProvidersFromConfig(noriConfig: Record<string, unknown> | null, resolveBaseDir?: string): {
+export function createNoriProvidersFromConfig(
+  noriConfig: Record<string, unknown> | null,
+  kimiConfig: KimiConfig,
+  resolveBaseDir?: string,
+): {
   memory: NoriMemoryProvider;
   swarm: SimpleSwarmProvider;
   maxSwarmDepth: number;
@@ -654,7 +846,9 @@ export function createNoriProvidersFromConfig(noriConfig: Record<string, unknown
   if (noriConfig !== null) swarmProvider.setNoriConfig(noriConfig);
 
   return {
-    memory: new SimpleMemoryProvider(vaultPath),
+    memory: kimiConfig.memory?.vectorEnabled
+      ? new VectorMemoryProvider(vaultPath, kimiConfig.memory)
+      : new SimpleMemoryProvider(vaultPath),
     swarm: swarmProvider,
     maxSwarmDepth,
     coderWriteEnabled,

@@ -42,6 +42,7 @@ import {
   AgentSwarmTool,
   AgentSwarmToolInputSchema,
 } from '../../src/tools/builtin/collaboration/agent-swarm';
+import { AgentSwarmControlTool } from '../../src/tools/builtin/collaboration/agent-swarm-control';
 import {
   NoriAskParentInputSchema,
   NoriAskParentTool,
@@ -292,6 +293,55 @@ describe('current builtin file and shell tools', () => {
 });
 
 describe('current builtin collaboration tools', () => {
+  it('AgentSwarmControl delegates session-wide tasks and preserves standalone fallback', async () => {
+    const running = {
+      taskId: 'swarm-nested',
+      description: 'Nested review',
+      status: 'running' as const,
+      startedAt: 1,
+      endedAt: null,
+      kind: 'agent' as const,
+      subagentType: 'swarm:2',
+    };
+    const paused = { ...running, paused: true };
+    const listAgentSwarms = vi.fn(async () => [
+      { ownerAgentId: 'agent-nested', task: running },
+    ]);
+    const controlAgentSwarm = vi.fn(async () => paused);
+    const host = mockSubagentHost({ listAgentSwarms, controlAgentSwarm });
+    const sessionFixture = createBackgroundManager();
+    (sessionFixture.agent as typeof sessionFixture.agent & {
+      subagentHost: SessionSubagentHost;
+    }).subagentHost = host;
+    const sessionTool = new AgentSwarmControlTool(sessionFixture.manager);
+
+    const listed = await executeTool(sessionTool, context({ action: 'list' as const }));
+    const pausedResult = await executeTool(
+      sessionTool,
+      context({ action: 'pause' as const, task_id: 'swarm-nested', prompt: 'hold' }),
+    );
+
+    expect(listed.output).toContain('task_id=swarm-nested status=running');
+    expect(pausedResult.output).toContain('task_id=swarm-nested status=paused');
+    expect(controlAgentSwarm).toHaveBeenCalledWith('swarm-nested', 'pause', 'hold');
+
+    const standalone = createBackgroundManager().manager;
+    vi.spyOn(standalone, 'getTask').mockReturnValue(running);
+    const stop = vi.spyOn(standalone, 'stop').mockResolvedValue({
+      ...running,
+      status: 'killed',
+      endedAt: 2,
+    });
+    const standaloneTool = new AgentSwarmControlTool(standalone);
+    const stopped = await executeTool(
+      standaloneTool,
+      context({ action: 'stop' as const, task_id: 'swarm-nested' }),
+    );
+
+    expect(stopped.output).toContain('task_id=swarm-nested status=killed');
+    expect(stop).toHaveBeenCalledWith('swarm-nested', 'Stopped by the main agent.');
+  });
+
   it('AskUserQuestion exposes parameters and asks through rpc in yolo mode', async () => {
     const tool = new AskUserQuestionTool({
       experimentalFlags: new FlagResolver({}, FLAG_DEFINITIONS),

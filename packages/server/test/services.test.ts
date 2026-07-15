@@ -611,6 +611,8 @@ describe('WSBroadcastService (WS transport pump)', () => {
       contextTokens: 23,
     } as unknown as Event);
     expect(getSwarmStatus(swarmId)).toMatchObject({
+      status: 'done',
+      task_count: 1,
       completed_count: 1,
       usage: { input: 23, output: 7, total: 30 },
       tasks: [{ status: 'completed', output: 'final result', context_tokens: 23 }],

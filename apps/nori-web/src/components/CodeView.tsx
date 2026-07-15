@@ -10,6 +10,7 @@ interface CodeViewProps {
   session: Session | null;
   allSessions?: Session[];
   messages: ChatMessage[];
+  messagesLoading?: boolean;
   streaming: string;
   thinking: string;
   workBlocks?: WorkBlock[];
@@ -26,11 +27,11 @@ interface CodeViewProps {
   onThinkingChange: (effort: string) => void | Promise<void>;
   onPermissionChange: (mode: 'auto' | 'yolo' | 'manual') => void | Promise<void>;
   onTaskModeChange: (mode: 'plan' | 'code') => void | Promise<void>;
+  onRunSlashCommand: ChatViewProps['onRunSlashCommand'];
   onMainWriteChange: (enabled: boolean) => void | Promise<void>;
   onGoalControl?: (action: 'pause' | 'resume' | 'cancel') => void | Promise<void>;
   onSendMessage: ChatViewProps['onSendMessage'];
   onAbort: () => void;
-  onModeChange?: (mode: 'work') => void;
   pendingApprovals?: ApprovalRequest[];
   onResolveApproval?: (approvalId: string, decision: 'approved' | 'rejected' | 'cancelled', options?: { remember?: boolean; feedback?: string; selectedLabel?: string }) => void | Promise<void>;
   pendingQuestions?: QuestionRequest[];
@@ -43,13 +44,14 @@ interface CodeViewProps {
   codeChanges?: CodeChange[];
   draftAgentConfig?: SessionAgentConfig;
   rewindLimit?: number;
-  onRewind?: (count: number) => void | Promise<void>;
+  onRewind?: (count: number) => string | undefined | Promise<string | undefined>;
 }
 
 export function CodeView({
   session,
   allSessions,
   messages,
+  messagesLoading,
   streaming,
   thinking,
   workBlocks,
@@ -66,11 +68,11 @@ export function CodeView({
   onThinkingChange,
   onPermissionChange,
   onTaskModeChange,
+  onRunSlashCommand,
   onMainWriteChange,
   onGoalControl,
   onSendMessage,
   onAbort,
-  onModeChange,
   pendingApprovals,
   onResolveApproval,
   pendingQuestions,
@@ -87,7 +89,10 @@ export function CodeView({
 }: CodeViewProps) {
   const [fileContent, setFileContent] = useState<FsReadResponse | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
-  const { readFile, gitStatus, refreshGitStatus } = useFilesystem(session?.id ?? null);
+  const { readFile, gitStatus, gitError, gitLoading, refreshGitStatus } = useFilesystem(
+    session?.id ?? null,
+    session?.metadata?.cwd,
+  );
 
   useEffect(() => {
     setFileContent(null);
@@ -113,6 +118,7 @@ export function CodeView({
         session={session}
         allSessions={allSessions}
         messages={messages}
+        messagesLoading={messagesLoading}
         streaming={streaming}
         thinking={thinking}
         workBlocks={workBlocks}
@@ -129,6 +135,7 @@ export function CodeView({
         onThinkingChange={onThinkingChange}
         onPermissionChange={onPermissionChange}
         onTaskModeChange={onTaskModeChange}
+        onRunSlashCommand={onRunSlashCommand}
         onMainWriteChange={onMainWriteChange}
         onGoalControl={onGoalControl}
         onSendMessage={onSendMessage}
@@ -147,12 +154,15 @@ export function CodeView({
       />
       <WorkspaceInspector
         sessionId={session?.id ?? null}
+        projectPath={session?.metadata?.cwd}
         path={selectedFile?.path ?? ''}
         file={fileContent}
         loading={fileLoading}
         messages={messages}
         codeChanges={codeChanges}
         gitStatus={gitStatus}
+        gitError={gitError}
+        gitLoading={gitLoading}
         refreshGitStatus={refreshGitStatus}
         isStreaming={isStreaming}
       />

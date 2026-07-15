@@ -92,7 +92,9 @@ export class WriteTool implements BuiltinTool<WriteInput> {
 
     try {
       const mode = args.mode ?? 'overwrite';
-      const before = await this.kaos.readText(safePath).catch(() => '');
+      const before = await Promise.resolve()
+        .then(() => this.kaos.readText(safePath))
+        .catch(() => '');
       if (mode === 'append') {
         await this.kaos.writeText(safePath, args.content, { mode: 'a' });
       } else {

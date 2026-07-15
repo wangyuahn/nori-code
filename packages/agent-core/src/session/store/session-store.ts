@@ -8,7 +8,11 @@ import type { SessionIndexEntry } from '#/session/store/session-index';
 import { appendSessionIndexEntry, readSessionIndex, removeSessionIndexEntry } from '#/session/store/session-index';
 import { encodeWorkDirKey, normalizeWorkDir } from '#/session/store/workdir-key';
 import type { JsonObject, ListSessionsPayload, SessionSummary } from '#/rpc/core-api';
-import { FileSystemAgentRecordPersistence, type AgentRecordOf } from '../../agent/records';
+import {
+  FileSystemAgentRecordPersistence,
+  type AgentRecord,
+  type AgentRecordOf,
+} from '../../agent/records';
 
 const SessionSummaryStateSchema = z.object({
   archived: z.boolean().optional(),
@@ -22,6 +26,22 @@ const SessionSummaryStateSchema = z.object({
 const FORKED_SESSION_DROPPED_FILES = ['upcoming-goals.json'] as const;
 
 type SessionSummaryState = z.infer<typeof SessionSummaryStateSchema>;
+type SummaryUsage = NonNullable<SessionSummary['usage']>;
+type SummaryTokenUsage = NonNullable<SummaryUsage['total']>;
+
+interface MainWireSummary {
+  readonly usage?: SummaryUsage | undefined;
+  readonly messageCount: number;
+  readonly model?: string | undefined;
+}
+
+interface MainWireSummaryCacheEntry {
+  readonly mtimeMs: number;
+  readonly size: number;
+  readonly summary: Promise<MainWireSummary>;
+}
+
+const EMPTY_MAIN_WIRE_SUMMARY: MainWireSummary = { messageCount: 0 };
 
 export interface CreateSessionRecordInput {
   readonly id: string;
@@ -39,6 +59,7 @@ export type SessionStoreOptions = Record<string, never>;
 
 export class SessionStore {
   readonly sessionsDir: string;
+  private readonly mainWireSummaryCache = new Map<string, MainWireSummaryCacheEntry>();
 
   constructor(
     readonly homeDir: string,
@@ -168,6 +189,7 @@ export class SessionStore {
   async delete(id: string): Promise<void> {
     const entry = await this.findExistingSessionEntry(id);
     await rm(entry.sessionDir, { recursive: true, force: false });
+    this.mainWireSummaryCache.delete(join(entry.sessionDir, 'agents', 'main', 'wire.jsonl'));
     await removeSessionIndexEntry(this.homeDir, this.sessionsDir, id);
   }
 
@@ -326,11 +348,14 @@ export class SessionStore {
   ): Promise<SessionSummary> {
     const dirStat = await stat(sessionDir);
     const state = await readOptionalState(sessionDir);
-    const [stateInfo, wireInfo, agentsWireMtime] = await Promise.all([
+    const mainWirePath = join(sessionDir, 'agents', 'main', 'wire.jsonl');
+    const [stateInfo, wireInfo, agentsWireMtime, mainWireInfo] = await Promise.all([
       statIfExists(join(sessionDir, 'state.json')),
       statIfExists(join(sessionDir, 'wire.jsonl')),
       latestAgentWireMtime(sessionDir),
+      statIfExists(mainWirePath),
     ]);
+    const mainWireSummary = await this.readMainWireSummary(mainWirePath, mainWireInfo);
     return {
       id,
       workDir,
@@ -346,8 +371,158 @@ export class SessionStore {
       title: titleFromState(state),
       lastPrompt: state?.lastPrompt,
       metadata: metadataFromState(state),
+      usage: mainWireSummary.usage,
+      messageCount: mainWireSummary.messageCount,
+      model: mainWireSummary.model,
     };
   }
+
+  private async readMainWireSummary(
+    wirePath: string,
+    wireInfo: FileInfo | undefined,
+  ): Promise<MainWireSummary> {
+    if (wireInfo === undefined) return EMPTY_MAIN_WIRE_SUMMARY;
+
+    const cached = this.mainWireSummaryCache.get(wirePath);
+    if (cached?.mtimeMs === wireInfo.mtimeMs && cached.size === wireInfo.size) {
+      return cached.summary;
+    }
+
+    const summary = summarizeMainWire(wirePath);
+    this.mainWireSummaryCache.set(wirePath, {
+      mtimeMs: wireInfo.mtimeMs,
+      size: wireInfo.size,
+      summary,
+    });
+    return summary;
+  }
+}
+
+async function summarizeMainWire(wirePath: string): Promise<MainWireSummary> {
+  const persistence = new FileSystemAgentRecordPersistence(wirePath);
+  const byModel: Record<string, SummaryTokenUsage> = {};
+  let total: SummaryTokenUsage | undefined;
+  let promptCount = 0;
+  let contextUserCount = 0;
+  let configuredModel: string | undefined;
+
+  try {
+    for await (const record of persistence.read()) {
+      if (record.type === 'usage.record') {
+        const usage = validTokenUsage(record.usage);
+        if (usage === undefined) continue;
+
+        total = total === undefined ? usage : addTokenUsage(total, usage);
+        const rawModel = typeof record.model === 'string' ? record.model.trim() : '';
+        if (rawModel !== '') {
+          byModel[rawModel] = byModel[rawModel] === undefined
+            ? usage
+            : addTokenUsage(byModel[rawModel], usage);
+        }
+        continue;
+      }
+
+      if (record.type === 'config.update') {
+        configuredModel = knownModel(record.modelAlias) ?? configuredModel;
+        continue;
+      }
+
+      if (isRealUserPrompt(record)) promptCount++;
+      if (isRealUserContextMessage(record)) contextUserCount++;
+    }
+  } catch {
+    // Keep the valid prefix when a later record is damaged.
+  }
+
+  return {
+    ...(total === undefined
+      ? {}
+      : {
+          usage: {
+            ...(Object.keys(byModel).length === 0 ? {} : { byModel }),
+            total,
+          },
+        }),
+    messageCount: Math.max(promptCount, contextUserCount),
+    model: mostUsedKnownModel(byModel) ?? configuredModel,
+  };
+}
+
+function isRealUserPrompt(record: AgentRecord): boolean {
+  if (record.type !== 'turn.prompt') return false;
+  return isRealUserOrigin(record.origin);
+}
+
+function isRealUserContextMessage(record: AgentRecord): boolean {
+  if (record.type !== 'context.append_message') return false;
+  const message = record.message;
+  return isRecord(message) && message['role'] === 'user' && isRealUserOrigin(message['origin']);
+}
+
+function isRealUserOrigin(origin: unknown): boolean {
+  if (origin === undefined) return true;
+  if (!isRecord(origin)) return false;
+  if (origin['kind'] === 'user') return true;
+  return (
+    (origin['kind'] === 'skill_activation' || origin['kind'] === 'plugin_command') &&
+    origin['trigger'] === 'user-slash'
+  );
+}
+
+function mostUsedKnownModel(byModel: Readonly<Record<string, SummaryTokenUsage>>): string | undefined {
+  let selected: string | undefined;
+  let selectedTokens = -1;
+  for (const [rawModel, usage] of Object.entries(byModel)) {
+    const model = knownModel(rawModel);
+    if (model === undefined) continue;
+    const tokens = totalTokens(usage);
+    if (tokens <= selectedTokens) continue;
+    selected = model;
+    selectedTokens = tokens;
+  }
+  return selected;
+}
+
+function knownModel(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const model = value.trim();
+  return model !== '' && model.toLowerCase() !== 'unknown' ? model : undefined;
+}
+
+function validTokenUsage(value: unknown): SummaryTokenUsage | undefined {
+  if (!isRecord(value)) return undefined;
+  const inputOther = validTokenCount(value['inputOther']);
+  const output = validTokenCount(value['output']);
+  const inputCacheRead = validTokenCount(value['inputCacheRead']);
+  const inputCacheCreation = validTokenCount(value['inputCacheCreation']);
+  if (
+    inputOther === undefined ||
+    output === undefined ||
+    inputCacheRead === undefined ||
+    inputCacheCreation === undefined
+  ) {
+    return undefined;
+  }
+  return { inputOther, output, inputCacheRead, inputCacheCreation };
+}
+
+function validTokenCount(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+function addTokenUsage(left: SummaryTokenUsage, right: SummaryTokenUsage): SummaryTokenUsage {
+  return {
+    inputOther: left.inputOther + right.inputOther,
+    output: left.output + right.output,
+    inputCacheRead: left.inputCacheRead + right.inputCacheRead,
+    inputCacheCreation: left.inputCacheCreation + right.inputCacheCreation,
+  };
+}
+
+function totalTokens(usage: SummaryTokenUsage): number {
+  return usage.inputOther + usage.output + usage.inputCacheRead + usage.inputCacheCreation;
 }
 
 function metadataFromState(state: SessionSummaryState | undefined): JsonObject | undefined {
@@ -488,7 +663,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-async function statIfExists(path: string): Promise<{ readonly mtimeMs: number } | undefined> {
+interface FileInfo {
+  readonly mtimeMs: number;
+  readonly size: number;
+}
+
+async function statIfExists(path: string): Promise<FileInfo | undefined> {
   try {
     return await stat(path);
   } catch {

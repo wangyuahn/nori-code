@@ -309,6 +309,45 @@ describe('POST /api/v1/sessions/{sid}/fs:git_status (W11.2)', { timeout: process
     expect(env.code).toBe(40908);
   });
 
+  it('uses the only direct child Git repository and prefixes its paths', async () => {
+    const repository = join(workspace, 'nori-workspace');
+    mkdirSync(repository, { recursive: true });
+    const env = {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'test',
+      GIT_AUTHOR_EMAIL: 'test@example.com',
+      GIT_COMMITTER_NAME: 'test',
+      GIT_COMMITTER_EMAIL: 'test@example.com',
+    };
+    execFileSync('git', ['init', '-b', 'main'], { cwd: repository, stdio: 'pipe', env });
+    writeFileSync(join(repository, 'seed.txt'), 'seed\n');
+    execFileSync('git', ['add', 'seed.txt'], { cwd: repository, stdio: 'pipe', env });
+    execFileSync('git', ['commit', '-m', 'seed', '--no-gpg-sign'], { cwd: repository, stdio: 'pipe', env });
+    writeFileSync(join(repository, 'seed.txt'), 'changed\n');
+
+    const r = await bootDaemon();
+    const sid = await createSession(r);
+    const statusResponse = await appOf(r).inject({
+      method: 'POST',
+      url: `/api/v1/sessions/${sid}/fs:git_status`,
+      payload: {},
+    });
+    const status = envelopeOf<{ branch: string; entries: Record<string, string> }>(statusResponse.json());
+    expect(status.code).toBe(0);
+    expect(status.data?.branch).toBe('main');
+    expect(status.data?.entries).toEqual({ 'nori-workspace/seed.txt': 'modified' });
+
+    const diffResponse = await appOf(r).inject({
+      method: 'POST',
+      url: `/api/v1/sessions/${sid}/fs:diff`,
+      payload: { path: 'nori-workspace/seed.txt' },
+    });
+    const diff = envelopeOf<{ path: string; diff: string }>(diffResponse.json());
+    expect(diff.code).toBe(0);
+    expect(diff.data?.path).toBe('nori-workspace/seed.txt');
+    expect(diff.data?.diff).toContain('+changed');
+  });
+
   it('path filter that escapes cwd → 41304', async () => {
     initRepo();
 

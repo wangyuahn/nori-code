@@ -101,6 +101,14 @@ function seedCatalogConfig(): void {
       'model = "kimi-k2"',
       'max_context_size = 131072',
       '',
+      '[memory]',
+      'vector_enabled = true',
+      'provider_type = "openai_responses"',
+      'base_url = "https://embeddings.example.test/v1"',
+      'api_key = "memory-secret"',
+      'model = "text-embedding-test"',
+      'custom_headers = { "X-Secret" = "hidden" }',
+      '',
     ].join('\n'),
   );
 }
@@ -115,6 +123,7 @@ describe('config routes', () => {
     const env = envelopeOf<{
       default_model: string;
       providers: Record<string, unknown>;
+      memory: Record<string, unknown>;
     }>(res.json());
     expect(env.code).toBe(0);
     expect(env.data?.default_model).toBe('k2');
@@ -129,6 +138,15 @@ describe('config routes', () => {
         has_api_key: false,
       },
     });
+    expect(env.data?.memory).toEqual({
+      vector_enabled: true,
+      provider_type: 'openai_responses',
+      base_url: 'https://embeddings.example.test/v1',
+      model: 'text-embedding-test',
+      has_api_key: true,
+    });
+    expect(JSON.stringify(env.data)).not.toContain('memory-secret');
+    expect(JSON.stringify(env.data)).not.toContain('X-Secret');
   });
 
   it('POST /config merges changes and persists to disk', async () => {
@@ -151,6 +169,27 @@ describe('config routes', () => {
     const getEnv = envelopeOf<{ default_model: string }>(getRes.json());
     expect(getEnv.code).toBe(0);
     expect(getEnv.data?.default_model).toBe('gpt4o');
+  });
+
+  it('POST /config patches memory while preserving an omitted API key', async () => {
+    seedCatalogConfig();
+    const r = await bootDaemon();
+
+    const setRes = await appOf(r).inject({
+      method: 'POST',
+      url: '/api/v1/config',
+      payload: { memory: { model: 'text-embedding-updated' } },
+    });
+    const setEnv = envelopeOf<{ memory: Record<string, unknown> }>(setRes.json());
+
+    expect(setEnv.code).toBe(0);
+    expect(setEnv.data?.memory).toMatchObject({
+      model: 'text-embedding-updated',
+      has_api_key: true,
+    });
+    const text = readFileSync(join(bridgeHome, 'config.toml'), 'utf-8');
+    expect(text).toContain('api_key = "memory-secret"');
+    expect(text).toContain('model = "text-embedding-updated"');
   });
 
   it('POST /config rejects invalid config values', async () => {

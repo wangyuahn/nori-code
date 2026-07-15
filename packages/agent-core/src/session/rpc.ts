@@ -18,6 +18,7 @@ import type {
   GetBackgroundPayload,
   McpServerInfo,
   McpStartupMetrics,
+  ManageBackgroundPayload,
   PromptPayload,
   RunShellCommandPayload,
   ReconnectMcpServerPayload,
@@ -212,6 +213,18 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
 
   async stopBackground({ agentId, ...payload }: AgentScopedPayload<StopBackgroundPayload>) {
     return (await this.getAgent(agentId)).stopBackground(payload);
+  }
+
+  async pauseBackground({ agentId, ...payload }: AgentScopedPayload<ManageBackgroundPayload>) {
+    return (await this.getAgent(agentId)).pauseBackground(payload);
+  }
+
+  async guideBackground({ agentId, ...payload }: AgentScopedPayload<ManageBackgroundPayload>) {
+    return (await this.getAgent(agentId)).guideBackground(payload);
+  }
+
+  async resumeBackground({ agentId, ...payload }: AgentScopedPayload<ManageBackgroundPayload>) {
+    return (await this.getAgent(agentId)).resumeBackground(payload);
   }
 
   async detachBackground({ agentId, ...payload }: AgentScopedPayload<DetachBackgroundPayload>) {

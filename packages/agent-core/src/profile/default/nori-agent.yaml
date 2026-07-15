@@ -28,6 +28,7 @@ tools:
   - ExitPlanMode
   - AskUserQuestion
   - AgentSwarm
+  - AgentSwarmControl
   - Agent
   - CronCreate
   - CronDelete

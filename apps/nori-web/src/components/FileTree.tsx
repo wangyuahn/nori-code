@@ -17,7 +17,7 @@ const STATUS_LABELS: Partial<Record<FsGitStatus, string>> = {
 
 export function FileTree({ sessionId, projectPath, selectedPath, onSelectFile }: FileTreeProps) {
   const { tr } = useI18n();
-  const filesystem = useFilesystem(sessionId);
+  const filesystem = useFilesystem(sessionId, projectPath);
   const [rootEntries, setRootEntries] = useState<FsEntry[]>([]);
   const [loading, setLoading] = useState(false);
 

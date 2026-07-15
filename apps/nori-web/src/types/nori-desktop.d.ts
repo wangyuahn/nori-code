@@ -9,6 +9,7 @@ export interface FsEntry {
 export interface NoriDesktopAPI {
   getServerToken?: () => Promise<string | undefined>;
   selectProjectDirectory?: () => Promise<string | undefined>;
+  saveMarkdown?: (input: { suggestedName: string; content: string }) => Promise<string | undefined>;
   onToggleMode?: (callback: (mode: string) => void) => () => void;
   // Browser IPC methods (optional — may not exist in all environments)
   browserNavigate?: (url: string) => void;
@@ -28,5 +29,3 @@ declare global {
     noriDesktop?: NoriDesktopAPI;
   }
 }
-
-export {};

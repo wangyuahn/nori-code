@@ -213,7 +213,7 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
       const parsedCount = Number.parseInt(info.subagentType.split(':')[1] ?? '', 10);
       const taskCount = Number.isFinite(parsedCount) && parsedCount > 0
         ? parsedCount
-        : (prior?.task_count ?? 1);
+        : Math.max(prior?.task_count ?? 0, prior?.tasks?.length ?? 0, 1);
       const terminal = event.type === 'background.task.terminated';
       const pending = terminal ? undefined : this._takePendingSwarmTool(sid, event.agentId);
       const parentSwarm = prior?.parent_swarm_id === undefined && event.agentId !== MAIN_AGENT_ID
@@ -223,7 +223,9 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
         ? 'running' as const
         : info.status === 'completed'
           ? 'done' as const
-          : 'failed' as const;
+          : info.status === 'killed'
+            ? 'stopped' as const
+            : 'failed' as const;
       setSwarmStatus({
         ...prior,
         swarm_id: info.taskId,
@@ -257,13 +259,23 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
       };
       updateSwarmStatus(swarm.swarm_id, current => {
         const tasks = upsertSwarmTask(current.tasks, task);
-        return { ...current, tasks, completed_count: countCompletedSwarmTasks(tasks) };
+        return {
+          ...current,
+          tasks,
+          task_count: Math.max(current.task_count, tasks.length),
+          completed_count: countCompletedSwarmTasks(tasks),
+        };
       });
       return;
     }
 
     if (event.type === 'subagent.started') {
       this._updateSwarmTask(sid, event.subagentId, task => ({ ...task, status: 'running' }));
+      return;
+    }
+
+    if (event.type === 'subagent.suspended') {
+      this._updateSwarmTask(sid, event.subagentId, task => ({ ...task, status: 'paused' }));
       return;
     }
 
@@ -338,10 +350,19 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
     if (swarm === undefined) return;
     updateSwarmStatus(swarm.swarm_id, current => {
       const tasks = current.tasks?.map(task => task.agent_id === agentId ? update(task) : task);
+      const taskCount = Math.max(current.task_count, tasks?.length ?? 0);
+      const completedCount = countCompletedSwarmTasks(tasks);
+      const allTasksSettled = taskCount > 0
+        && tasks !== undefined
+        && tasks.length >= taskCount
+        && completedCount >= taskCount;
+      const failed = tasks?.some(task => task.status === 'failed' || task.status === 'cancelled') ?? false;
       return {
         ...current,
         tasks,
-        completed_count: countCompletedSwarmTasks(tasks),
+        status: allTasksSettled ? (failed ? 'failed' : 'done') : current.status,
+        task_count: taskCount,
+        completed_count: completedCount,
         usage: aggregateSwarmUsage(tasks),
       };
     }, notify);

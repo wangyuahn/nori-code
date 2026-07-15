@@ -1,5 +1,9 @@
 import { createDecorator } from '../../di';
 import { effectiveModelAlias, type KimiConfig, type ModelAlias, type ProviderConfig } from '../../config';
+import {
+  isOfficialKimiCodingEndpoint,
+  OFFICIAL_KIMI_CODING_INPUT_CAPABILITIES,
+} from '@nori-code/oauth';
 import type {
   ModelCatalogItem,
   ProviderCatalogItem,
@@ -57,14 +61,21 @@ export class ModelNotFoundError extends Error {
 export function toProtocolModel(
   modelId: string,
   alias: ModelAlias,
+  provider?: ProviderConfig,
 ): ModelCatalogItem {
   const effective = effectiveModelAlias(alias);
+  const capabilities = new Set(effective.capabilities ?? []);
+  if (isOfficialKimiCodingEndpoint(provider?.baseUrl)) {
+    for (const capability of OFFICIAL_KIMI_CODING_INPUT_CAPABILITIES) {
+      capabilities.add(capability);
+    }
+  }
   return {
     provider: effective.provider,
     model: modelId,
     display_name: effective.displayName ?? effective.model,
     max_context_size: effective.maxContextSize,
-    capabilities: effective.capabilities,
+    capabilities: capabilities.size > 0 ? [...capabilities] : undefined,
     support_efforts: effective.supportEfforts,
     default_effort: effective.defaultEffort,
   };

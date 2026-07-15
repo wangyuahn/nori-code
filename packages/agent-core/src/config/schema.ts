@@ -37,6 +37,17 @@ export const ProviderConfigSchema = z.object({
 
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 
+export const MemoryConfigSchema = z.object({
+  vectorEnabled: z.boolean().optional(),
+  providerType: z.enum(['openai', 'openai_responses']).optional(),
+  baseUrl: z.string().optional(),
+  apiKey: z.string().optional(),
+  model: z.string().optional(),
+  customHeaders: StringRecordSchema.optional(),
+});
+
+export type MemoryConfig = z.infer<typeof MemoryConfigSchema>;
+
 const ModelAliasBaseSchema = z.object({
   provider: z.string(),
   model: z.string(),
@@ -248,6 +259,7 @@ export const KimiConfigSchema = z.object({
   permission: PermissionConfigSchema.optional(),
   hooks: z.array(HookDefSchema).optional(),
   services: ServicesConfigSchema.optional(),
+  memory: MemoryConfigSchema.optional(),
   mergeAllAvailableSkills: z.boolean().optional(),
   extraSkillDirs: z.array(z.string()).optional(),
   loopControl: LoopControlSchema.optional(),
@@ -273,6 +285,7 @@ const ServicesConfigPatchSchema = z.object({
   moonshotSearch: MoonshotServiceConfigPatchSchema.optional(),
   moonshotFetch: MoonshotServiceConfigPatchSchema.optional(),
 });
+const MemoryConfigPatchSchema = MemoryConfigSchema.partial();
 
 export const KimiConfigPatchSchema = z
   .object({
@@ -288,6 +301,7 @@ export const KimiConfigPatchSchema = z
     permission: PermissionConfigPatchSchema.optional(),
     hooks: z.array(HookDefSchema).optional(),
     services: ServicesConfigPatchSchema.optional(),
+    memory: MemoryConfigPatchSchema.optional(),
     mergeAllAvailableSkills: z.boolean().optional(),
     extraSkillDirs: z.array(z.string()).optional(),
     loopControl: LoopControlPatchSchema.optional(),

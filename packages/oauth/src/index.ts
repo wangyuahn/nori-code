@@ -28,6 +28,11 @@ export { OAuthManager, defaultRefreshThreshold, newInstanceId } from './oauth-ma
 
 export { extractApiErrorMessage, readApiErrorMessage } from './api-error';
 
+export {
+  isOfficialKimiCodingEndpoint,
+  OFFICIAL_KIMI_CODING_INPUT_CAPABILITIES,
+} from './provider-capabilities';
+
 export { isRecord } from './utils';
 
 export {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent, type WheelEvent } from 'react';
+import { useEffect, useRef, useState, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
 import { forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY, type SimulationLinkDatum, type SimulationNodeDatum } from 'd3-force';
 import type { Note } from '../api/client';
 import { useI18n } from '../i18n';
@@ -14,13 +14,41 @@ const COLORS: Record<Note['type'], string> = {
   task: '#e8ad3d',
 };
 
+const CLICK_MOVE_THRESHOLD = 5;
+const TYPE_CLUSTER_STRENGTH = 0.035;
+
+export function forceSameType(strength = TYPE_CLUSTER_STRENGTH) {
+  let nodes: GraphNode[] = [];
+  const force = (alpha: number) => {
+    const centroids = new Map<Note['type'], { x: number; y: number; count: number }>();
+    for (const node of nodes) {
+      const centroid = centroids.get(node.note.type) ?? { x: 0, y: 0, count: 0 };
+      centroid.x += node.x ?? 0;
+      centroid.y += node.y ?? 0;
+      centroid.count += 1;
+      centroids.set(node.note.type, centroid);
+    }
+
+    for (const node of nodes) {
+      const centroid = centroids.get(node.note.type);
+      if (!centroid || centroid.count < 2) continue;
+      const factor = strength * alpha;
+      node.vx = (node.vx ?? 0) + (centroid.x / centroid.count - (node.x ?? 0)) * factor;
+      node.vy = (node.vy ?? 0) + (centroid.y / centroid.count - (node.y ?? 0)) * factor;
+    }
+  };
+  force.initialize = (nextNodes: GraphNode[]) => { nodes = nextNodes; };
+  return force;
+}
+
 export function VaultGraph({ notes, onOpenNote }: { notes: LinkedNote[]; onOpenNote: (note: Note) => void }) {
   const { tr } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
   const simulationRef = useRef<ReturnType<typeof forceSimulation<GraphNode>> | null>(null);
   const topologyKeyRef = useRef('');
   const positionsRef = useRef(new Map<string, { x: number; y: number }>());
-  const dragRef = useRef<{ node: GraphNode; startX: number; startY: number } | null>(null);
+  const dragRef = useRef<{ node: GraphNode; startX: number; startY: number; moved: boolean } | null>(null);
+  const suppressClickRef = useRef<string | null>(null);
   const panRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
   const [size, setSize] = useState({ width: 900, height: 620 });
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
@@ -40,9 +68,8 @@ export function VaultGraph({ notes, onOpenNote }: { notes: LinkedNote[]; onOpenN
   }, []);
 
   useEffect(() => {
-    const topologyKey = notes
-      .map(note => `${note.path || `${note.type}:${note.title}`}\0${[...(note.links ?? []), ...extractWikiLinks(note.content ?? '')].sort().join('\0')}`)
-      .sort()
+    const topologyKey = sorted(notes
+      .map(note => `${note.path || `${note.type}:${note.title}`}\0${note.type}\0${sorted([...(note.links ?? []), ...extractWikiLinks(note.content ?? '')]).join('\0')}`))
       .join('\u0001');
     if (topologyKeyRef.current === topologyKey) return;
     topologyKeyRef.current = topologyKey;
@@ -50,7 +77,7 @@ export function VaultGraph({ notes, onOpenNote }: { notes: LinkedNote[]; onOpenN
     const nodes: GraphNode[] = notes.map(note => {
       const id = note.path || `${note.type}:${note.title}`;
       const position = positionsRef.current.get(id);
-      return { id, note, ...(position ?? {}) };
+      return { id, note, ...position };
     });
     const byTitle = new Map(nodes.map(node => [normalizeTitle(node.note.title), node]));
     const links: GraphLink[] = [];
@@ -59,7 +86,7 @@ export function VaultGraph({ notes, onOpenNote }: { notes: LinkedNote[]; onOpenN
       for (const target of new Set([...(node.note.links ?? []), ...extractWikiLinks(node.note.content ?? '')])) {
         const resolved = byTitle.get(normalizeTitle(target));
         if (!resolved || resolved.id === node.id) continue;
-        const key = [node.id, resolved.id].sort().join('\0');
+        const key = sorted([node.id, resolved.id]).join('\0');
         if (seen.has(key)) continue;
         seen.add(key);
         links.push({ source: node.id, target: resolved.id });
@@ -75,6 +102,7 @@ export function VaultGraph({ notes, onOpenNote }: { notes: LinkedNote[]; onOpenN
       .force('link', forceLink<GraphNode, GraphLink>(graph.links).id(node => node.id).distance(95).strength(0.45))
       .force('charge', forceManyBody().strength(-240))
       .force('collision', forceCollide<GraphNode>().radius(25))
+      .force('type-cluster', forceSameType())
       .force('center', forceCenter(size.width / 2, size.height / 2))
       .force('x', forceX<GraphNode>(size.width / 2).strength(0.045))
       .force('y', forceY<GraphNode>(size.height / 2).strength(0.06))
@@ -103,7 +131,8 @@ export function VaultGraph({ notes, onOpenNote }: { notes: LinkedNote[]; onOpenN
   const startDrag = (event: PointerEvent<SVGGElement>, node: GraphNode) => {
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = { node, startX: event.clientX, startY: event.clientY };
+    dragRef.current = { node, startX: event.clientX, startY: event.clientY, moved: false };
+    suppressClickRef.current = null;
     node.fx = node.x;
     node.fy = node.y;
     simulationRef.current?.alphaTarget(0.2).restart();
@@ -111,6 +140,7 @@ export function VaultGraph({ notes, onOpenNote }: { notes: LinkedNote[]; onOpenN
   const moveDrag = (event: PointerEvent<SVGGElement>) => {
     const drag = dragRef.current;
     if (!drag) return;
+    drag.moved ||= pointerMovedBeyondClickThreshold(drag, event);
     const point = graphPosition(event);
     drag.node.fx = point.x;
     drag.node.fy = point.y;
@@ -139,13 +169,24 @@ export function VaultGraph({ notes, onOpenNote }: { notes: LinkedNote[]; onOpenN
     const rect = event.currentTarget.getBoundingClientRect();
     zoom(viewport.scale * Math.exp(-event.deltaY * 0.0012), event.clientX - rect.left, event.clientY - rect.top);
   };
-  const endDrag = () => {
+  const endDrag = (event: PointerEvent<SVGGElement>) => {
     const drag = dragRef.current;
     if (!drag) return;
+    drag.moved ||= pointerMovedBeyondClickThreshold(drag, event);
     drag.node.fx = null;
     drag.node.fy = null;
     simulationRef.current?.alphaTarget(0);
+    suppressClickRef.current = drag.moved || event.type === 'pointercancel' ? drag.node.id : null;
     dragRef.current = null;
+  };
+  const openNode = (event: MouseEvent<SVGGElement>, node: GraphNode) => {
+    if (suppressClickRef.current === node.id) {
+      suppressClickRef.current = null;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    onOpenNote(node.note);
   };
 
   return <div className="vault-graph" ref={containerRef}>
@@ -161,13 +202,22 @@ export function VaultGraph({ notes, onOpenNote }: { notes: LinkedNote[]; onOpenN
         const target = link.target as GraphNode;
         return <line key={`${source.id}-${target.id}-${index}`} x1={source.x} y1={source.y} x2={target.x} y2={target.y} />;
       })}</g>
-      <g className="vault-graph-nodes">{graph.nodes.map(node => <g key={node.id} transform={`translate(${node.x ?? size.width / 2},${node.y ?? size.height / 2})`} onPointerDown={event => startDrag(event, node)} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onClick={() => onOpenNote(node.note)} tabIndex={0} role="button" aria-label={node.note.title} onKeyDown={event => { if (event.key === 'Enter') onOpenNote(node.note); }}>
+      <g className="vault-graph-nodes">{graph.nodes.map(node => <g key={node.id} transform={`translate(${node.x ?? size.width / 2},${node.y ?? size.height / 2})`} onPointerDown={event => startDrag(event, node)} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onClick={event => { openNode(event, node); }} tabIndex={0} role="button" aria-label={node.note.title} onKeyDown={event => { if (event.key === 'Enter') onOpenNote(node.note); }}>
         <circle r="8" fill={COLORS[node.note.type]} />
         <circle className="vault-graph-node-ring" r="13" stroke={COLORS[node.note.type]} />
         <text x="17" y="4">{truncate(node.note.title, 30)}</text>
       </g>)}</g></g>
     </svg>}
   </div>;
+}
+
+function pointerMovedBeyondClickThreshold(
+  drag: { startX: number; startY: number },
+  event: PointerEvent<SVGGElement>,
+): boolean {
+  const deltaX = event.clientX - drag.startX;
+  const deltaY = event.clientY - drag.startY;
+  return deltaX * deltaX + deltaY * deltaY > CLICK_MOVE_THRESHOLD * CLICK_MOVE_THRESHOLD;
 }
 
 function IconPlaceholder({ symbol }: { symbol: string }) {
@@ -184,4 +234,10 @@ function normalizeTitle(value: string): string {
 
 function truncate(value: string, length: number): string {
   return value.length > length ? `${value.slice(0, length - 1)}…` : value;
+}
+
+function sorted<T>(values: readonly T[]): T[] {
+  // ES2022 renderer target: keep a non-mutating sort without Array#toSorted.
+  // oxlint-disable-next-line unicorn/no-array-sort
+  return [...values].sort();
 }

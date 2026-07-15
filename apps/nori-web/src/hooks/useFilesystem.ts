@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type FsEntry, type FsGitStatus, type FsGitStatusResponse, type FsReadResponse } from '../api/client';
 
 export type { FsEntry, FsGitStatus, FsReadResponse };
@@ -9,36 +9,77 @@ function toErrorMessage(error: unknown): string {
 
 const HIDDEN_BUILD_DIRECTORIES = new Set(['.git', 'node_modules', 'dist', 'dist-app', 'build', 'coverage', '.next', '.turbo']);
 
-export function useFilesystem(sessionId: string | null) {
-  const [error, setError] = useState<string | null>(null);
-  const [gitStatuses, setGitStatuses] = useState<Record<string, FsGitStatus>>({});
-  const [branch, setBranch] = useState<string | null>(null);
-  const [gitStatus, setGitStatus] = useState<FsGitStatusResponse | null>(null);
+const PROJECT_GIT_CACHE_LIMIT = 12;
+const projectGitStatusCache = new Map<string, FsGitStatusResponse>();
+const projectGitStatusRequests = new Map<string, Promise<FsGitStatusResponse>>();
 
-  const refreshGitStatus = useCallback(async (): Promise<FsGitStatusResponse | null> => {
-    if (!sessionId) return null;
-    try {
-      const status = await api.sessions.fs.gitStatus(sessionId);
-      setGitStatuses(status.entries);
-      setBranch(status.branch || null);
-      setGitStatus(status);
-      return status;
-    } catch {
-      setGitStatuses({});
-      setBranch(null);
-      setGitStatus(null);
-      return null;
-    }
-  }, [sessionId]);
+export function useFilesystem(sessionId: string | null, projectPath?: string) {
+  const projectKey = normalizeProjectKey(projectPath, sessionId);
+  const initialStatus = projectKey === null ? null : projectGitStatusCache.get(projectKey) ?? null;
+  const [error, setError] = useState<string | null>(null);
+  const [gitStatuses, setGitStatuses] = useState<Record<string, FsGitStatus>>(initialStatus?.entries ?? {});
+  const [branch, setBranch] = useState<string | null>(initialStatus?.branch || null);
+  const [gitStatus, setGitStatus] = useState<FsGitStatusResponse | null>(initialStatus);
+  const [gitError, setGitError] = useState<string | null>(null);
+  const [gitLoading, setGitLoading] = useState(false);
+  const gitStatusesRef = useRef<Record<string, FsGitStatus>>(initialStatus?.entries ?? {});
+  const projectKeyRef = useRef(projectKey);
+  const appliedProjectKeyRef = useRef(projectKey);
+  const gitRefreshGenerationRef = useRef(0);
+
+  projectKeyRef.current = projectKey;
+
+  const refreshGitStatus = useCallback((): Promise<FsGitStatusResponse | null> => {
+    if (!sessionId || projectKey === null) return Promise.resolve(null);
+
+    const generation = ++gitRefreshGenerationRef.current;
+    setGitLoading(true);
+    return loadProjectGitStatus(projectKey, sessionId)
+      .then(status => {
+        if (projectKeyRef.current !== projectKey || gitRefreshGenerationRef.current !== generation) {
+          return status;
+        }
+        gitStatusesRef.current = status.entries;
+        setGitStatuses(previous => sameValue(previous, status.entries) ? previous : status.entries);
+        setBranch(status.branch || null);
+        setGitStatus(previous => sameValue(previous, status) ? previous : status);
+        setGitError(null);
+        return status;
+      })
+      .catch(error => {
+        if (projectKeyRef.current === projectKey && gitRefreshGenerationRef.current === generation) {
+          // Keep the last successful status visible. A transient process/API
+          // failure must not turn a known repository into a non-repository.
+          setGitError(toErrorMessage(error));
+        }
+        return null;
+      })
+      .finally(() => {
+        if (projectKeyRef.current === projectKey && gitRefreshGenerationRef.current === generation) {
+          setGitLoading(false);
+        }
+      });
+  }, [projectKey, sessionId]);
 
   useEffect(() => {
-    setError(null);
-    setGitStatuses({});
-    setBranch(null);
-    setGitStatus(null);
+    const projectChanged = appliedProjectKeyRef.current !== projectKey;
+    if (projectChanged) {
+      appliedProjectKeyRef.current = projectKey;
+      gitRefreshGenerationRef.current++;
+      const cached = projectKey === null ? undefined : projectGitStatusCache.get(projectKey);
+      const entries = cached?.entries ?? {};
+      setError(null);
+      gitStatusesRef.current = entries;
+      setGitStatuses(entries);
+      setBranch(cached?.branch || null);
+      setGitStatus(cached ?? null);
+      setGitError(null);
+      setGitLoading(false);
+    }
     if (!sessionId) return;
+    if (projectKey !== null && projectGitStatusCache.has(projectKey)) return;
     void refreshGitStatus();
-  }, [refreshGitStatus, sessionId]);
+  }, [projectKey, refreshGitStatus, sessionId]);
 
   const readDir = useCallback(async (path: string): Promise<FsEntry[]> => {
     if (!sessionId) return [];
@@ -49,13 +90,13 @@ export function useFilesystem(sessionId: string | null) {
         .filter(entry => entry.kind !== 'directory' || !HIDDEN_BUILD_DIRECTORIES.has(entry.name))
         .map(entry => ({
           ...entry,
-          git_status: entry.git_status ?? gitStatuses[entry.path],
+          git_status: entry.git_status ?? gitStatusesRef.current[entry.path],
         }));
-    } catch (caught) {
-      setError(toErrorMessage(caught));
+    } catch (error) {
+      setError(toErrorMessage(error));
       return [];
     }
-  }, [gitStatuses, sessionId]);
+  }, [sessionId]);
 
   const readFile = useCallback(async (path: string): Promise<FsReadResponse | null> => {
     if (!sessionId) return null;
@@ -63,11 +104,45 @@ export function useFilesystem(sessionId: string | null) {
       const result = await api.sessions.fs.read(sessionId, path);
       setError(null);
       return result;
-    } catch (caught) {
-      setError(toErrorMessage(caught));
+    } catch (error) {
+      setError(toErrorMessage(error));
       return null;
     }
   }, [sessionId]);
 
-  return { error, branch, gitStatus, gitStatuses, refreshGitStatus, readDir, readFile };
+  return { error, branch, gitStatus, gitError, gitLoading, gitStatuses, refreshGitStatus, readDir, readFile };
+}
+
+function normalizeProjectKey(projectPath: string | undefined, sessionId: string | null): string | null {
+  const normalized = projectPath?.trim().replaceAll('\\', '/').replace(/\/+$/, '').toLocaleLowerCase();
+  return normalized || (sessionId ? `session:${sessionId}` : null);
+}
+
+function rememberProjectGitStatus(projectKey: string, status: FsGitStatusResponse): void {
+  projectGitStatusCache.delete(projectKey);
+  projectGitStatusCache.set(projectKey, status);
+  while (projectGitStatusCache.size > PROJECT_GIT_CACHE_LIMIT) {
+    const oldest = projectGitStatusCache.keys().next().value;
+    if (oldest === undefined) break;
+    projectGitStatusCache.delete(oldest);
+  }
+}
+
+function loadProjectGitStatus(projectKey: string, sessionId: string): Promise<FsGitStatusResponse> {
+  const existing = projectGitStatusRequests.get(projectKey);
+  if (existing) return existing;
+  const request = api.sessions.fs.gitStatus(sessionId).then(status => {
+    rememberProjectGitStatus(projectKey, status);
+    return status;
+  }).finally(() => {
+    if (projectGitStatusRequests.get(projectKey) === request) {
+      projectGitStatusRequests.delete(projectKey);
+    }
+  });
+  projectGitStatusRequests.set(projectKey, request);
+  return request;
+}
+
+function sameValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }

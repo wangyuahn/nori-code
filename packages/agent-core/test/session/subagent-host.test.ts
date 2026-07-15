@@ -7,6 +7,7 @@ import { APIStatusError, type Message, type ToolCall } from '@nori-code/kosong';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Agent, AgentOptions } from '../../src/agent';
+import type { BackgroundTaskInfo } from '../../src/agent/background';
 import { AGENT_WIRE_PROTOCOL_VERSION } from '../../src/agent/records';
 import type { ResolvedAgentProfile } from '../../src/profile';
 import type { SDKSessionRPC } from '../../src/rpc';
@@ -40,6 +41,72 @@ afterEach(async () => {
 });
 
 describe('SessionSubagentHost', () => {
+  it('aggregates swarms across session agent metadata and routes controls to the owner', async () => {
+    const main = testAgent();
+    const child = testAgent({ type: 'sub' });
+    const nested = testAgent({ type: 'sub' });
+    const childSwarm = swarmTaskInfo('swarm-child', 'Child swarm');
+    const nestedSwarm = swarmTaskInfo('swarm-nested', 'Nested swarm');
+
+    vi.spyOn(main.agent.background, 'list').mockReturnValue([]);
+    vi.spyOn(child.agent.background, 'list').mockReturnValue([childSwarm]);
+    vi.spyOn(nested.agent.background, 'list').mockReturnValue([nestedSwarm]);
+    vi.spyOn(nested.agent.background, 'getTask').mockReturnValue(nestedSwarm);
+    const stop = vi.spyOn(nested.agent.background, 'stop').mockResolvedValue(nestedSwarm);
+    const pause = vi.spyOn(nested.agent.background, 'pause').mockResolvedValue(nestedSwarm);
+    const guide = vi.spyOn(nested.agent.background, 'addGuidance').mockResolvedValue(nestedSwarm);
+    const resume = vi.spyOn(nested.agent.background, 'resume').mockResolvedValue(nestedSwarm);
+
+    const agents = new Map([
+      ['main', main.agent],
+      ['agent-child', child.agent],
+      ['agent-nested', nested.agent],
+    ]);
+    const ensureAgentResumed = vi.fn(async (id: string) => {
+      const agent = agents.get(id);
+      if (agent === undefined) throw new Error(`Agent "${id}" was not found`);
+      return agent;
+    });
+    const session = {
+      metadata: {
+        agents: {
+          main: { homedir: '/main', type: 'main', parentAgentId: null },
+          'agent-child': { homedir: '/child', type: 'sub', parentAgentId: 'main' },
+          'agent-nested': {
+            homedir: '/nested',
+            type: 'sub',
+            parentAgentId: 'agent-child',
+          },
+        },
+      },
+      ensureAgentResumed,
+    } as unknown as Session;
+    const host = new SessionSubagentHost(session, 'main');
+
+    await expect(host.listAgentSwarms()).resolves.toEqual([
+      { ownerAgentId: 'agent-child', task: childSwarm },
+      { ownerAgentId: 'agent-nested', task: nestedSwarm },
+    ]);
+    await expect(host.controlAgentSwarm('swarm-nested', 'stop', 'stop now')).resolves.toBe(
+      nestedSwarm,
+    );
+    await expect(host.controlAgentSwarm('swarm-nested', 'pause', 'hold')).resolves.toBe(
+      nestedSwarm,
+    );
+    await expect(host.controlAgentSwarm('swarm-nested', 'guide', 'focus tests')).resolves.toBe(
+      nestedSwarm,
+    );
+    await expect(host.controlAgentSwarm('swarm-nested', 'resume', 'continue')).resolves.toBe(
+      nestedSwarm,
+    );
+
+    expect(stop).toHaveBeenCalledWith('swarm-nested', 'stop now');
+    expect(pause).toHaveBeenCalledWith('swarm-nested', 'hold');
+    expect(guide).toHaveBeenCalledWith('swarm-nested', 'focus tests');
+    expect(resume).toHaveBeenCalledWith('swarm-nested', 'continue');
+    expect(ensureAgentResumed).toHaveBeenCalledWith('agent-nested');
+  });
+
   it('emits a suspended event for a requeued child', () => {
     const parent = testAgent();
     parent.configure();
@@ -260,9 +327,11 @@ describe('SessionSubagentHost', () => {
       signal,
     });
 
-    await expect(handle.completion).resolves.toMatchObject({
+    const completion = await handle.completion;
+    expect(completion).toMatchObject({
       result: 'Investigated the request and completed the child task end to end. The relevant module was located, its behavior traced through every call site, and the requested change applied and verified against the existing test suite.',
     });
+    expect(parent.agent.usage.data().total).toEqual(completion.usage);
     expect(handle.agentId).toBe('agent-0');
     expect(handle.profileName).toBe('explore');
 
@@ -308,6 +377,8 @@ describe('SessionSubagentHost', () => {
       'Glob',
       'Grep',
       'Read',
+      'WebSearch',
+      'nori_plan_write',
     ]);
     expect(child.llmCalls[0]?.history).toMatchObject([
       {
@@ -407,6 +478,7 @@ describe('SessionSubagentHost', () => {
       'Glob',
       'Grep',
       'Read',
+      'WebSearch',
       'Write',
       'nori_plan_write',
     ]);
@@ -967,6 +1039,57 @@ describe('SessionSubagentHost', () => {
         }),
       }),
     );
+  });
+
+  it('accounts usage before a failed child turn without double counting on resume', async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.agent.permission.setMode('yolo');
+
+    const child = testAgent({
+      type: 'sub',
+      permission: { parent: parent.agent.permission },
+    });
+    child.configure({ tools: ['Read'] });
+    child.agent.useProfile(
+      profile({ name: 'explore', tools: ['Read'], systemPrompt: 'explore prompt' }),
+    );
+    child.mockNextResponse({ type: 'text', text: 'Too short.' });
+
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': {
+        homedir: '/tmp/kimi-session/agents/agent-0',
+        type: 'sub',
+        parentAgentId: 'main',
+      },
+    });
+    const host = new SessionSubagentHost(session, 'main');
+
+    const failed = await host.resume('agent-0', {
+      parentToolCallId: 'call_failed',
+      prompt: 'Start work',
+      description: 'Start work',
+      runInBackground: true,
+      signal,
+    });
+    await expect(failed.completion).rejects.toThrow();
+    expect(parent.agent.usage.data().total).toEqual(child.agent.usage.data().total);
+
+    child.mockNextResponse({
+      type: 'text',
+      text: 'Resumed after the interruption, completed the remaining work, verified the result with focused tests, reviewed the affected call paths, and returned a sufficiently detailed technical summary without repeating usage from the earlier failed attempt. The final state is ready for the parent agent to consume directly.',
+    });
+    const resumed = await host.resume('agent-0', {
+      parentToolCallId: 'call_resumed',
+      prompt: 'Continue work',
+      description: 'Continue work',
+      runInBackground: true,
+      signal,
+    });
+    await expect(resumed.completion).resolves.toMatchObject({
+      result: expect.stringContaining('Resumed after the interruption'),
+    });
+    expect(parent.agent.usage.data().total).toEqual(child.agent.usage.data().total);
   });
 
   it('runQueued resumes tasks that carry an existing agent id', async () => {
@@ -1644,6 +1767,18 @@ function fakeSession(
       },
     ),
   } as unknown as Session;
+}
+
+function swarmTaskInfo(taskId: string, description: string): BackgroundTaskInfo {
+  return {
+    taskId,
+    description,
+    status: 'running',
+    startedAt: 1,
+    endedAt: null,
+    kind: 'agent',
+    subagentType: 'swarm:2',
+  };
 }
 
 function contextProfile(): ResolvedAgentProfile {

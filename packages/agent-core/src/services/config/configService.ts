@@ -62,14 +62,32 @@ function toConfigResponse(config: KimiConfig): ConfigResponse {
     permission: config.permission,
     hooks: config.hooks,
     services: config.services,
+    memory: config.memory === undefined
+      ? undefined
+      : {
+          vector_enabled: config.memory.vectorEnabled,
+          provider_type: config.memory.providerType,
+          base_url: config.memory.baseUrl,
+          model: config.memory.model,
+          has_api_key: nonEmpty(config.memory.apiKey) !== undefined,
+        },
     merge_all_available_skills: config.mergeAllAvailableSkills,
     extra_skill_dirs: config.extraSkillDirs,
     loop_control: config.loopControl,
     background: config.background,
     experimental: config.experimental,
     telemetry: config.telemetry,
-    raw: config.raw,
+    raw: redactMemoryFromRaw(config.raw),
   };
+}
+
+function redactMemoryFromRaw(
+  raw: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (raw === undefined) return undefined;
+  const redacted = { ...raw };
+  delete redacted['memory'];
+  return redacted;
 }
 
 function hasProviderCredential(provider: ProviderConfig): boolean {

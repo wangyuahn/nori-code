@@ -145,6 +145,9 @@ function createTaskServiceOverride(
       throw new TaskNotFoundError('s', 't');
     },
     cancel: async () => ({ cancelled: true as const }),
+    pause: async () => { throw new TaskNotFoundError('s', 't'); },
+    guide: async () => { throw new TaskNotFoundError('s', 't'); },
+    resume: async () => { throw new TaskNotFoundError('s', 't'); },
   };
   return { ...defaultImpl, ...stub };
 }

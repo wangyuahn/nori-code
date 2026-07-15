@@ -60,7 +60,7 @@ export function useVaultNotes(typeFilter?: string) {
   }, [typeFilter]);
 
   useEffect(() => {
-    refresh();
+    void refresh();
     return () => { controllerRef.current?.abort(); };
   }, [refresh]);
 
@@ -87,7 +87,7 @@ export function usePhaseStatus() {
         timer = setTimeout(poll, 3000);
       }
     };
-    poll();
+    void poll();
 
     return () => { active = false; clearTimeout(timer); };
   }, []);
@@ -175,7 +175,7 @@ export function useSwarmWebSocket(): SwarmConnectionState {
       connect(wsUrl);
     };
 
-    buildUrlAndConnect();
+    void buildUrlAndConnect();
 
     return () => {
       unmounted = true;
@@ -189,7 +189,7 @@ export function useSwarmWebSocket(): SwarmConnectionState {
 
   const allIdsKey = Array.from(swarmStatuses.keys()).sort().join('|');
   const activeIdsKey = Array.from(swarmStatuses.values())
-    .filter(status => status.status === 'running' || status.status === 'pending')
+    .filter(status => status.status === 'running' || status.status === 'pending' || status.status === 'paused')
     .map(status => status.swarm_id)
     .sort()
     .join('|');
@@ -259,7 +259,7 @@ export function useConfig() {
   }, []);
 
   useEffect(() => {
-    refresh();
+    void refresh();
   }, [refresh]);
 
   const saveConfig = useCallback(async (patch: Record<string, unknown>) => {
@@ -268,7 +268,7 @@ export function useConfig() {
       setSaving(true);
       setSaveError(null);
       setSaveSuccess(false);
-      if (successTimerRef.current != null) {
+      if (successTimerRef.current !== null) {
         clearTimeout(successTimerRef.current);
         successTimerRef.current = null;
       }
@@ -295,7 +295,7 @@ export function useConfig() {
   // Cleanup timer on unmount
   useEffect(() => {
     return () => {
-      if (successTimerRef.current != null) {
+      if (successTimerRef.current !== null) {
         clearTimeout(successTimerRef.current);
       }
     };
@@ -336,7 +336,7 @@ export function useSessions() {
   }, []);
 
   useEffect(() => {
-    refresh();
+    void refresh();
   }, [refresh]);
 
   useEffect(() => {
@@ -385,7 +385,7 @@ export function useSessions() {
     }
   }, [refresh, sessionId, sessions]);
 
-  const switchSession = useCallback((id: string) => {
+  const switchSession = useCallback((id: string | null) => {
     setSessionId(id);
   }, []);
 
@@ -497,7 +497,7 @@ export function useServerStatus() {
       }
       if (active) setTimeout(poll, 5000);
     };
-    poll();
+    void poll();
     return () => { active = false; };
   }, []);
 

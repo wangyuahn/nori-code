@@ -2,6 +2,10 @@ import type { Logger } from '#/logging/types';
 import type { ProviderConfig as KosongProviderConfig, ModelCapability, ProviderRequestAuth } from '@nori-code/kosong';
 import { APIStatusError, getModelCapability, UNKNOWN_CAPABILITY } from '@nori-code/kosong';
 import {
+  isOfficialKimiCodingEndpoint,
+  OFFICIAL_KIMI_CODING_INPUT_CAPABILITIES,
+} from '@nori-code/oauth';
+import {
   effectiveModelAlias,
   type KimiConfig,
   type ModelAlias,
@@ -229,10 +233,13 @@ function resolveModelCapabilities(
 ): ModelCapability {
   const declared = new Set((alias.capabilities ?? []).map((c) => c.trim().toLowerCase()));
   const detected = getModelCapability(provider.type, provider.model);
+  const endpointCapabilities = isOfficialKimiCodingEndpoint(provider.baseUrl)
+    ? new Set<string>(OFFICIAL_KIMI_CODING_INPUT_CAPABILITIES)
+    : undefined;
 
   return {
-    image_in: declared.has('image_in') || detected.image_in,
-    video_in: declared.has('video_in') || detected.video_in,
+    image_in: declared.has('image_in') || detected.image_in || endpointCapabilities?.has('image_in') === true,
+    video_in: declared.has('video_in') || detected.video_in || endpointCapabilities?.has('video_in') === true,
     audio_in: declared.has('audio_in') || detected.audio_in,
     thinking: declared.has('thinking') || declared.has('always_thinking') || detected.thinking,
     tool_use: declared.has('tool_use') || detected.tool_use,

@@ -123,6 +123,14 @@ custom_headers = { "X-Search" = "1" }
 base_url = "https://api.kimi.com/coding/v1/fetch"
 api_key = "sk-fetch"
 
+[memory]
+vector_enabled = true
+provider_type = "openai"
+base_url = "https://embeddings.example.test/v1"
+api_key = "sk-memory"
+model = "text-embedding-test"
+custom_headers = { "X-Tenant" = "team-a" }
+
 [notifications]
 claim_stale_after_ms = 15000
 `;
@@ -195,6 +203,14 @@ describe('harness config TOML loader', () => {
     ]);
     expect(config.services?.moonshotSearch?.customHeaders).toEqual({ 'X-Search': '1' });
     expect(config.services?.moonshotFetch?.apiKey).toBe('sk-fetch');
+    expect(config.memory).toEqual({
+      vectorEnabled: true,
+      providerType: 'openai',
+      baseUrl: 'https://embeddings.example.test/v1',
+      apiKey: 'sk-memory',
+      model: 'text-embedding-test',
+      customHeaders: { 'X-Tenant': 'team-a' },
+    });
 
     expect('theme' in config).toBe(false);
     expect(config.raw?.['theme']).toBe('dark');
@@ -337,6 +353,10 @@ removed_flag = true
     expect(text).toContain('GOOGLE_CLOUD_PROJECT = "project-1"');
     expect(text).toContain('theme = "dark"');
     expect(text).toContain('claim_stale_after_ms = 15000');
+    expect(text).toContain('[memory]');
+    expect(text).toContain('vector_enabled = true');
+    expect(text).toContain('provider_type = "openai"');
+    expect(parseConfigString(text, configPath).memory).toEqual(config.memory);
     expect(text).toContain('[[hooks]]');
     expect(text).toContain('event = "PreToolUse"');
     expect(text).toContain('command = "echo pre"');
@@ -521,6 +541,19 @@ micro_compaction = false
     expect(merged.experimental).toEqual({
       'micro_compaction': true,
     });
+  });
+
+  it('deep-merges memory patches without clearing an omitted API key', () => {
+    const base = parseConfigString(COMPLETE_TOML);
+
+    const merged = mergeConfigPatch(base, {
+      memory: {
+        model: 'text-embedding-updated',
+      },
+    });
+
+    expect(merged.memory?.model).toBe('text-embedding-updated');
+    expect(merged.memory?.apiKey).toBe('sk-memory');
   });
 
   it('rejects unknown fields in config patches', () => {

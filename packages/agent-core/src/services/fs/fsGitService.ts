@@ -2,6 +2,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { promises as fs } from 'node:fs';
+import { isAbsolute, join, relative } from 'node:path';
 
 import { Disposable, InstantiationType, registerSingleton } from '../../di';
 import type {
@@ -46,23 +47,17 @@ export class FsGitService extends Disposable implements IFsGitService {
   ): Promise<FsGitStatusResponse> {
     const session = await this.sessions.get(sessionId);
     const cwd = session.metadata.cwd;
-    const realCwd = await fs.realpath(cwd);
+    const workspaceCwd = await fs.realpath(cwd);
+    const realCwd = await this.resolveRepositoryCwd(workspaceCwd);
 
     let filterSet: Set<string> | undefined;
     if (req.paths !== undefined && req.paths.length > 0) {
       filterSet = new Set();
       for (const p of req.paths) {
-        const safe = await resolveSafePath(realCwd, p);
-        filterSet.add(safe.relative);
+        const safe = await resolveSafePath(workspaceCwd, p);
+        const repoRelative = repositoryRelativePath(realCwd, safe.absolute);
+        if (repoRelative !== null) filterSet.add(repoRelative);
       }
-    }
-
-    const insideRes = await runCommand('git', ['rev-parse', '--is-inside-work-tree'], realCwd);
-    if (insideRes.exitCode !== 0 || insideRes.stdout.trim() !== 'true') {
-      throw new FsGitUnavailableError(
-        realCwd,
-        insideRes.stderr.trim() || `git rev-parse exit ${insideRes.exitCode}`,
-      );
     }
 
     const porcRes = await runCommand(
@@ -79,6 +74,12 @@ export class FsGitService extends Disposable implements IFsGitService {
     }
 
     const result = parsePorcelain(porcRes.stdout, filterSet);
+    const repositoryPrefix = posixPath(relative(workspaceCwd, realCwd));
+    if (repositoryPrefix) {
+      result.entries = Object.fromEntries(
+        Object.entries(result.entries).map(([path, value]) => [`${repositoryPrefix}/${path}`, value]),
+      );
+    }
 
     // Aggregate line stats against HEAD. Only worth a second spawn when the
     // tree is dirty AND there is a HEAD to diff against (a repo with no commits
@@ -138,17 +139,11 @@ export class FsGitService extends Disposable implements IFsGitService {
   async diff(sessionId: string, req: FsDiffRequest): Promise<FsDiffResponse> {
     const session = await this.sessions.get(sessionId);
     const cwd = session.metadata.cwd;
-    const realCwd = await fs.realpath(cwd);
-    const safe = await resolveSafePath(realCwd, req.path);
-    const rel = safe.relative;
-
-    const insideRes = await runCommand('git', ['rev-parse', '--is-inside-work-tree'], realCwd);
-    if (insideRes.exitCode !== 0 || insideRes.stdout.trim() !== 'true') {
-      throw new FsGitUnavailableError(
-        realCwd,
-        insideRes.stderr.trim() || `git rev-parse exit ${insideRes.exitCode}`,
-      );
-    }
+    const workspaceCwd = await fs.realpath(cwd);
+    const realCwd = await this.resolveRepositoryCwd(workspaceCwd);
+    const safe = await resolveSafePath(workspaceCwd, req.path);
+    const rel = repositoryRelativePath(realCwd, safe.absolute);
+    if (rel === null || rel.length === 0) throw new FsPathNotFoundError(req.path);
 
     const statusRes = await runCommand(
       'git',
@@ -172,9 +167,10 @@ export class FsGitService extends Disposable implements IFsGitService {
     // gets an all-added hunk. `git diff --no-index` exits 1 when files differ.
     let diffRes: RunResult;
     if (untracked || !hasHead) {
+      const nullDevice = process.platform === 'win32' ? 'NUL' : '/dev/null';
       diffRes = await runCommand(
         'git',
-        ['diff', '--no-color', '--no-index', '--', '/dev/null', rel],
+        ['diff', '--no-color', '--no-index', '--', nullDevice, rel],
         realCwd,
       );
       if (diffRes.exitCode !== 0 && diffRes.exitCode !== 1) {
@@ -209,7 +205,7 @@ export class FsGitService extends Disposable implements IFsGitService {
     const full = diffRes.stdout;
     const truncated = full.length > DIFF_MAX_BYTES;
     return {
-      path: rel,
+      path: safe.relative,
       diff: truncated ? full.slice(0, DIFF_MAX_BYTES) : full,
       truncated,
     };
@@ -217,8 +213,8 @@ export class FsGitService extends Disposable implements IFsGitService {
 
   async commit(sessionId: string, req: FsGitCommitRequest): Promise<FsGitCommitResponse> {
     const session = await this.sessions.get(sessionId);
-    const cwd = await fs.realpath(session.metadata.cwd);
-    await this.assertRepository(cwd);
+    const workspaceCwd = await fs.realpath(session.metadata.cwd);
+    const cwd = await this.resolveRepositoryCwd(workspaceCwd);
 
     const add = await runCommand('git', ['add', '-A', '--', '.'], cwd);
     if (add.exitCode !== 0) {
@@ -241,8 +237,8 @@ export class FsGitService extends Disposable implements IFsGitService {
 
   async push(sessionId: string, req: FsGitPushRequest): Promise<FsGitPushResponse> {
     const session = await this.sessions.get(sessionId);
-    const cwd = await fs.realpath(session.metadata.cwd);
-    await this.assertRepository(cwd);
+    const workspaceCwd = await fs.realpath(session.metadata.cwd);
+    const cwd = await this.resolveRepositoryCwd(workspaceCwd);
 
     const branchResult = await runCommand('git', ['branch', '--show-current'], cwd);
     const branch = req.branch ?? branchResult.stdout.trim();
@@ -270,12 +266,41 @@ export class FsGitService extends Disposable implements IFsGitService {
     };
   }
 
-  private async assertRepository(cwd: string): Promise<void> {
-    const result = await runCommand('git', ['rev-parse', '--is-inside-work-tree'], cwd);
-    if (result.exitCode !== 0 || result.stdout.trim() !== 'true') {
-      throw new FsGitUnavailableError(cwd, result.stderr.trim() || 'not a Git repository');
+  private async resolveRepositoryCwd(workspaceCwd: string): Promise<string> {
+    const direct = await runCommand('git', ['rev-parse', '--is-inside-work-tree'], workspaceCwd);
+    if (direct.exitCode === 0 && direct.stdout.trim() === 'true') return workspaceCwd;
+
+    const entries = await fs.readdir(workspaceCwd, { withFileTypes: true }).catch(() => []);
+    const candidates: string[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const candidate = join(workspaceCwd, entry.name);
+      const hasGitMarker = await fs.stat(join(candidate, '.git')).then(() => true).catch(() => false);
+      if (!hasGitMarker) continue;
+      const check = await runCommand('git', ['rev-parse', '--is-inside-work-tree'], candidate);
+      if (check.exitCode === 0 && check.stdout.trim() === 'true') candidates.push(candidate);
     }
+    if (candidates.length === 1) return candidates[0]!;
+    throw new FsGitUnavailableError(
+      workspaceCwd,
+      direct.stderr.trim() || (candidates.length > 1
+        ? 'multiple nested Git repositories; select one repository folder'
+        : 'not a Git repository'),
+    );
   }
+}
+
+function repositoryRelativePath(repositoryCwd: string, absolutePath: string): string | null {
+  const value = relative(repositoryCwd, absolutePath);
+  if (value === '') return '';
+  if (isAbsolute(value) || value === '..' || value.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`)) {
+    return null;
+  }
+  return posixPath(value);
+}
+
+function posixPath(value: string): string {
+  return value.replaceAll('\\', '/');
 }
 
 interface RunResult {

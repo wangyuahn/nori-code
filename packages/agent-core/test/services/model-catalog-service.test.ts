@@ -195,6 +195,37 @@ describe('ModelCatalogService', () => {
     expect(getCalls).toEqual([{ reload: true }, { reload: true }]);
   });
 
+  it('advertises official Kimi Coding endpoint input capabilities for stale aliases', async () => {
+    const configRef: { current: KimiConfig } = {
+      current: {
+        providers: {
+          kimi: {
+            type: 'anthropic',
+            apiKey: 'test-key',
+            baseUrl: 'https://api.kimi.com/coding/v1',
+          },
+        },
+        models: {
+          'kimi/kimi-for-coding': {
+            provider: 'kimi',
+            model: 'kimi-for-coding',
+            maxContextSize: 262144,
+            capabilities: ['thinking', 'tool_use'],
+          },
+        },
+      },
+    };
+    const { core } = makeCore(configRef);
+    const svc = new ModelCatalogService(makeEnv(), core, makeEventService().svc);
+
+    await expect(svc.listModels()).resolves.toEqual([
+      expect.objectContaining({
+        model: 'kimi/kimi-for-coding',
+        capabilities: ['thinking', 'tool_use', 'image_in', 'video_in'],
+      }),
+    ]);
+  });
+
   it('gets one provider or throws ProviderNotFoundError', async () => {
     const configRef = { current: catalogConfig() };
     const { core } = makeCore(configRef);
@@ -251,19 +282,24 @@ describe('ModelCatalogService', () => {
             provider: KIMI_CODE_PROVIDER_NAME,
             model: 'kimi-for-coding',
             maxContextSize: 131_072,
-            capabilities: ['thinking'],
+            capabilities: ['tool_use', 'thinking'],
           },
         },
       },
     };
     const { core, removeCalls, setCalls } = makeCore(configRef);
     const svc = ModelCatalogService._createForTest(makeEnv(), core, authFacade());
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      data: [{
+        id: 'kimi-for-coding',
+        context_length: 131_072,
+        supports_reasoning: true,
+      }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
 
-    // refreshProviderModels is a no-op stub — returns empty results without
-    // touching the core config.
     await expect(svc.refreshOAuthProviderModels()).resolves.toEqual({
       changed: [],
-      unchanged: [],
+      unchanged: [KIMI_CODE_PROVIDER_NAME],
       failed: [],
     });
 

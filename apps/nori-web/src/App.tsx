@@ -13,6 +13,7 @@ import { FileTree } from './components/FileTree';
 import { ProjectFolderPicker } from './components/ProjectFolderPicker';
 import { useI18n } from './i18n';
 import { loadRewindLimit } from './rewindPreferences';
+import type { ChatSlashCommandName } from './utils/chat-slash-commands';
 
 type View = 'chat' | 'dashboard' | 'swarm' | 'vault' | 'settings';
 type SidebarTab = 'sessions' | 'vault' | 'files';
@@ -82,7 +83,7 @@ export function App() {
   const activeSession: Session | null = sessions.find(session => session.id === sessionId) ?? null;
   const activeSwarmRuns = Array.from(swarm.swarmStatuses.values()).filter(status =>
     status.session_id === sessionId
-    && (status.status === 'running' || status.status === 'pending'),
+    && (status.status === 'running' || status.status === 'pending' || status.status === 'paused'),
   );
   const activeAgentTokens = activeSwarmRuns.reduce((total, run) => total + swarmRunTokens(run), 0);
   useEffect(() => { setSelectedProjectFile(null); }, [sessionId]);
@@ -101,7 +102,7 @@ export function App() {
     vault: tr('Vault', '知识库'),
     files: tr('Files', '文件'),
   };
-  const { messages, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, abort } = useChatMessages(sessionId);
+  const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, abort } = useChatMessages(sessionId);
   const runningSwarm = runningSwarmAgents(activeSwarmRuns);
   const activeAgentIds = new Set([...activeSubagentIds, ...runningSwarm.ids]);
   const activeAgentCount = activeAgentIds.size + runningSwarm.untracked;
@@ -212,7 +213,10 @@ export function App() {
     if (window.noriDesktop?.selectProjectDirectory) {
       const cwd = await window.noriDesktop.selectProjectDirectory();
       if (!cwd) return false;
-      return createConversation(cwd, firstMessage);
+      if (firstMessage) return createConversation(cwd, firstMessage);
+      setSelectedProjectRoot(cwd);
+      switchSession(null);
+      return true;
     }
     setPendingInitialMessage(firstMessage ?? null);
     setFolderPickerOpen(true);
@@ -221,8 +225,12 @@ export function App() {
 
   const startNewConversation = async () => {
     const cwd = activeSession?.metadata?.cwd ?? selectedProjectRoot;
+    if (activeSession?.agent_config) {
+      setDraftAgentConfig(previous => ({ ...previous, ...activeSession.agent_config }));
+    }
     if (cwd) {
-      await createConversation(cwd);
+      setSelectedProjectRoot(cwd);
+      switchSession(null);
     } else {
       await chooseProject();
     }
@@ -237,6 +245,18 @@ export function App() {
     const firstMessage = { text, attachments };
     if (selectedProjectRoot) return createConversation(selectedProjectRoot, firstMessage);
     return chooseProject(firstMessage);
+  };
+
+  const handleRunSlashCommand = async (command: ChatSlashCommandName, args: string) => {
+    if (!activeSession) return false;
+    if (command === 'compact') {
+      await api.sessions.compact(activeSession.id, args);
+      return true;
+    }
+    if (command === 'goal') {
+      return sendMessage(args, [], 'queue', { goalObjective: args });
+    }
+    return sendMessage(args, [], 'queue', { swarmMode: true });
   };
 
   useEffect(() => {
@@ -284,10 +304,10 @@ export function App() {
     switch (activeView) {
       case 'dashboard':
         return (
-          <div className="view-page">
+          <div className="view-page view-page-wide">
             <div className="view-stack">
               <ViewHeader eyebrow={tr('Workspace', '工作区')} title={tr('Overview', '概览')} description={tr('Track the current phase, swarm activity, and knowledge captured by Nori.', '跟踪当前阶段、智能体协作动态以及 Nori 沉淀的知识。')} />
-              <Dashboard swarm={swarm} />
+              <Dashboard swarm={swarm} sessions={sessions} models={models} />
             </div>
           </div>
         );
@@ -296,7 +316,7 @@ export function App() {
           <div className="view-page">
             <div className="view-stack">
               <ViewHeader eyebrow={tr('Coordination', '协作')} title={tr('Swarm', '智能体协作')} description={tr('See every active agent and follow task progress in real time.', '查看所有活动智能体并实时跟踪任务进度。')} />
-              <SwarmPanel swarm={swarm} sessionId={sessionId} />
+              <SwarmPanel swarm={swarm} sessionId={sessionId} sessions={sessions} />
             </div>
           </div>
         );
@@ -326,6 +346,7 @@ export function App() {
               session={activeSession}
               allSessions={sessions}
               messages={messages}
+              messagesLoading={messagesLoading}
               streaming={currentStreaming}
               thinking={currentThinking}
               workBlocks={currentWorkBlocks}
@@ -342,6 +363,7 @@ export function App() {
               onThinkingChange={changeThinking}
               onPermissionChange={changePermission}
               onTaskModeChange={changeTaskMode}
+              onRunSlashCommand={handleRunSlashCommand}
               onMainWriteChange={changeMainWrite}
               onGoalControl={controlGoal}
               onSendMessage={handleSendMessage}
@@ -367,6 +389,7 @@ export function App() {
             session={activeSession}
             allSessions={sessions}
             messages={messages}
+            messagesLoading={messagesLoading}
             streaming={currentStreaming}
             thinking={currentThinking}
             workBlocks={currentWorkBlocks}
@@ -383,6 +406,7 @@ export function App() {
             onThinkingChange={changeThinking}
             onPermissionChange={changePermission}
             onTaskModeChange={changeTaskMode}
+            onRunSlashCommand={handleRunSlashCommand}
             onMainWriteChange={changeMainWrite}
             onGoalControl={controlGoal}
             onSendMessage={handleSendMessage}
@@ -475,7 +499,13 @@ export function App() {
           const firstMessage = pendingInitialMessage ?? undefined;
           setFolderPickerOpen(false);
           setPendingInitialMessage(null);
-          void createConversation(cwd, firstMessage);
+          if (firstMessage) {
+            void createConversation(cwd, firstMessage);
+          } else {
+            setSelectedProjectRoot(cwd);
+            switchSession(null);
+            setActiveView('chat');
+          }
         }}
       />
     </div>
@@ -565,6 +595,9 @@ function SessionsList({
   const [archiveCollapsed, setArchiveCollapsed] = useState(true);
   const [contextMenu, setContextMenu] = useState<{ session: Session; x: number; y: number } | null>(null);
   const [actionSessionId, setActionSessionId] = useState<string | null>(null);
+  const [actionDialog, setActionDialog] = useState<{ action: 'rename' | 'fork'; session: Session; value: string } | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -606,30 +639,58 @@ function SessionsList({
 
   const runSessionAction = async (action: 'archive' | 'delete' | 'rename' | 'fork' | 'export', session: Session) => {
     setContextMenu(null);
+    setActionError(null);
+    setActionNotice(null);
     if (action === 'delete' && !window.confirm(tr(
       `Delete "${session.title || session.id}" permanently?`,
       `确定永久删除“${session.title || session.id}”吗？`,
     ))) return;
     if (action === 'rename') {
-      const title = window.prompt(tr('Conversation title', '会话标题'), session.title || '');
-      if (!title?.trim() || title.trim() === session.title) return;
-      await onRenameSession(session.id, title.trim());
+      setActionDialog({ action, session, value: session.title || '' });
       return;
     }
     if (action === 'fork') {
-      const title = window.prompt(tr('Fork title (optional)', 'Fork 标题（可选）'), `${tr('Fork', '分支')}: ${session.title || session.id.slice(0, 8)}`);
-      if (title === null) return;
-      await onForkSession(session.id, title.trim() || undefined);
-      return;
-    }
-    if (action === 'export') {
-      await exportSessionMarkdown(session);
+      setActionDialog({ action, session, value: `${tr('Fork', '分支')}: ${session.title || session.id.slice(0, 8)}` });
       return;
     }
     setActionSessionId(session.id);
     try {
-      if (action === 'archive') await onArchiveSession(session.id);
-      else await onDeleteSession(session.id);
+      if (action === 'export') {
+        const exported = await exportSessionMarkdown(session);
+        if (exported) setActionNotice(tr('Markdown exported.', 'Markdown 已导出。'));
+      } else if (action === 'archive') {
+        await onArchiveSession(session.id);
+      } else {
+        await onDeleteSession(session.id);
+      }
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : tr('Session action failed.', '会话操作失败。'));
+    } finally {
+      setActionSessionId(null);
+    }
+  };
+
+  const submitActionDialog = async () => {
+    if (!actionDialog) return;
+    const value = actionDialog.value.trim();
+    if (actionDialog.action === 'rename' && (!value || value === actionDialog.session.title)) {
+      setActionDialog(null);
+      return;
+    }
+    setActionError(null);
+    setActionNotice(null);
+    setActionSessionId(actionDialog.session.id);
+    try {
+      if (actionDialog.action === 'rename') {
+        await onRenameSession(actionDialog.session.id, value);
+        setActionNotice(tr('Conversation renamed.', '会话已重命名。'));
+      } else {
+        await onForkSession(actionDialog.session.id, value || undefined);
+        setActionNotice(tr('Conversation forked.', '会话分支已创建。'));
+      }
+      setActionDialog(null);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : tr('Session action failed.', '会话操作失败。'));
     } finally {
       setActionSessionId(null);
     }
@@ -669,7 +730,7 @@ function SessionsList({
             >
               <span className={'status-dot' + (session.id === sessionId ? ' active' : ' idle')} />
               <span className="sidebar-item-copy"><strong>{session.title || session.id.slice(0, 8)}</strong><small>{archived ? tr('Archived', '已归档') : session.status || 'ready'}</small></span>
-              {session.message_count != null && <span className="sidebar-item-count">{session.message_count}</span>}
+              {session.message_count !== undefined && session.message_count !== null && <span className="sidebar-item-count">{session.message_count}</span>}
             </button>
           ))}
         </div>}
@@ -717,11 +778,20 @@ function SessionsList({
         {!contextMenu.session.archived && <button role="menuitem" onClick={() => void runSessionAction('archive', contextMenu.session)}><Icon name="archive" size={14} />{tr('Archive session', '归档会话')}</button>}
         <button className="danger" role="menuitem" onClick={() => void runSessionAction('delete', contextMenu.session)}><Icon name="trash" size={14} />{tr('Delete session', '删除会话')}</button>
       </div>}
+      {(actionError || actionNotice) && <div className={`session-action-notice${actionError ? ' error' : ''}`} role="status">{actionError ?? actionNotice}</div>}
+      {actionDialog && <div className="session-action-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && actionSessionId === null) setActionDialog(null); }}>
+        <form className="session-action-dialog" role="dialog" aria-modal="true" aria-labelledby="session-action-title" onSubmit={event => { event.preventDefault(); void submitActionDialog(); }}>
+          <header><div><span>{tr('Conversation', '会话')}</span><h2 id="session-action-title">{actionDialog.action === 'rename' ? tr('Rename conversation', '重命名会话') : tr('Fork conversation', '创建会话分支')}</h2></div><button type="button" onClick={() => setActionDialog(null)} disabled={actionSessionId !== null} aria-label={tr('Close', '关闭')}><Icon name="close" size={14}/></button></header>
+          <label><span>{actionDialog.action === 'rename' ? tr('New title', '新标题') : tr('Fork title', '分支标题')}</span><input autoFocus value={actionDialog.value} onChange={event => setActionDialog(previous => previous ? { ...previous, value: event.target.value } : previous)} placeholder={tr('Conversation title', '会话标题')}/></label>
+          {actionError && <p className="error">{actionError}</p>}
+          <footer><button type="button" onClick={() => setActionDialog(null)} disabled={actionSessionId !== null}>{tr('Cancel', '取消')}</button><button type="submit" className="primary" disabled={actionSessionId !== null || (actionDialog.action === 'rename' && !actionDialog.value.trim())}>{actionSessionId !== null ? <span className="spinner spinner-small"/> : actionDialog.action === 'rename' ? tr('Rename', '重命名') : tr('Create fork', '创建分支')}</button></footer>
+        </form>
+      </div>}
     </div>
   );
 }
 
-async function exportSessionMarkdown(session: Session): Promise<void> {
+async function exportSessionMarkdown(session: Session): Promise<boolean> {
   const response = await api.sessions.getMessages(session.id, { page_size: 100 });
   const lines = [`# ${session.title || session.id}`, '', `> ${session.metadata?.cwd ?? ''}`, ''];
   for (const message of response.items as Message[]) {
@@ -735,13 +805,21 @@ async function exportSessionMarkdown(session: Session): Promise<void> {
     if (thinking) lines.push('<details>', '<summary>Work process</summary>', '', thinking, '', '</details>', '');
     if (text) lines.push(text, '');
   }
-  const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+  const content = lines.join('\n');
+  const suggestedName = `${safeDownloadName(session.title || session.id)}.md`;
+  if (window.noriDesktop?.saveMarkdown) {
+    return (await window.noriDesktop.saveMarkdown({ suggestedName, content })) !== undefined;
+  }
+  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = `${safeDownloadName(session.title || session.id)}.md`;
+  anchor.download = suggestedName;
+  document.body.appendChild(anchor);
   anchor.click();
-  URL.revokeObjectURL(url);
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  return true;
 }
 
 function safeDownloadName(value: string): string {

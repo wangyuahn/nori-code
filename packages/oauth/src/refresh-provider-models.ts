@@ -3,6 +3,10 @@ import type {
   ManagedKimiModelAlias,
 } from './custom-registry';
 import type { ManagedKimiOAuthRef } from './stubs';
+import {
+  isOfficialKimiCodingEndpoint,
+  OFFICIAL_KIMI_CODING_INPUT_CAPABILITIES,
+} from './provider-capabilities';
 
 export interface RefreshProviderHost {
   getConfig(): Promise<ManagedKimiConfigShape>;
@@ -82,8 +86,12 @@ function normalizeEfforts(value: unknown): string[] | undefined {
   return efforts.length > 0 ? [...new Set(efforts)] : undefined;
 }
 
-function capabilitiesFor(record: ProviderRecord, id: string): string[] {
-  const capabilities = new Set<string>(['tool_use']);
+function capabilitiesFor(
+  record: ProviderRecord,
+  id: string,
+  endpointCapabilities: readonly string[] = [],
+): string[] {
+  const capabilities = new Set<string>(['tool_use', ...endpointCapabilities]);
   const raw = record['capabilities'];
   if (Array.isArray(raw)) {
     for (const item of raw) {
@@ -92,6 +100,9 @@ function capabilitiesFor(record: ProviderRecord, id: string): string[] {
   }
   const reasoning = record['reasoning'] ?? record['supports_reasoning'] ?? record['supportsThinking'];
   if (reasoning === true || /(^|[-_.])(o[134]|reason|thinking)/i.test(id)) capabilities.add('thinking');
+  if (record['supports_image_in'] === true || record['supportsImageInput'] === true) capabilities.add('image_in');
+  if (record['supports_audio_in'] === true || record['supportsAudioInput'] === true) capabilities.add('audio_in');
+  if (record['supports_video_in'] === true || record['supportsVideoInput'] === true) capabilities.add('video_in');
   const modalities = recordField(record, 'modalities');
   const inputs = modalities?.['input'];
   if (Array.isArray(inputs)) {
@@ -102,7 +113,10 @@ function capabilitiesFor(record: ProviderRecord, id: string): string[] {
   return [...capabilities];
 }
 
-function normalizeModels(payload: unknown): DiscoveredModel[] {
+function normalizeModels(
+  payload: unknown,
+  endpointCapabilities: readonly string[] = [],
+): DiscoveredModel[] {
   if (typeof payload !== 'object' || payload === null) throw new Error('Model endpoint returned an invalid JSON object.');
   const root = payload as Record<string, unknown>;
   const rawItems = Array.isArray(root['data'])
@@ -127,7 +141,7 @@ function normalizeModels(payload: unknown): DiscoveredModel[] {
       id,
       displayName: stringField(record, 'display_name') ?? stringField(record, 'displayName') ?? stringField(record, 'name'),
       maxContextSize: positiveInteger(record['context_window'], record['context_length'], record['max_context_size'], record['inputTokenLimit']),
-      capabilities: capabilitiesFor(record, id),
+      capabilities: capabilitiesFor(record, id, endpointCapabilities),
       supportEfforts: efforts,
       defaultEffort: stringField(record, 'default_effort'),
     });
@@ -163,7 +177,7 @@ async function discoverModels(
     case 'google-genai': {
       if (apiKey === undefined) throw new Error('API key is required to request Gemini models.');
       const base = trimSlash(configuredBase ?? 'https://generativelanguage.googleapis.com');
-      url = /\/v1beta$/.test(base) ? base + '/models' : base + '/v1beta/models';
+      url = base.endsWith('/v1beta') ? base + '/models' : base + '/v1beta/models';
       url += (url.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(apiKey);
       break;
     }
@@ -190,7 +204,10 @@ async function discoverModels(
       const detail = body.trim().slice(0, 300);
       throw new Error('Model request failed (HTTP ' + response.status + ')' + (detail ? ': ' + detail : '.'));
     }
-    return normalizeModels(await response.json());
+    const endpointCapabilities = isOfficialKimiCodingEndpoint(configuredBase)
+      ? OFFICIAL_KIMI_CODING_INPUT_CAPABILITIES
+      : [];
+    return normalizeModels(await response.json(), endpointCapabilities);
   } finally {
     clearTimeout(timer);
   }
@@ -207,9 +224,24 @@ function aliasesForProvider(config: ManagedKimiConfigShape, providerId: string):
 }
 
 function sameModels(current: Array<[string, ManagedKimiModelAlias]>, discovered: DiscoveredModel[]): boolean {
-  const currentIds = current.map(([, alias]) => alias.model).sort();
-  const nextIds = discovered.map((model) => model.id).sort();
-  return JSON.stringify(currentIds) === JSON.stringify(nextIds);
+  if (current.length !== discovered.length) return false;
+  const previousByModel = new Map(current.map(([, alias]) => [alias.model, alias]));
+  for (const model of discovered) {
+    const existing = previousByModel.get(model.id);
+    if (existing === undefined) return false;
+    if (model.maxContextSize !== undefined && existing.maxContextSize !== model.maxContextSize) return false;
+    if (model.displayName !== undefined && existing.displayName !== model.displayName) return false;
+    if (model.defaultEffort !== undefined && existing.defaultEffort !== model.defaultEffort) return false;
+    if (!sameStringSet(existing.capabilities ?? ['tool_use'], model.capabilities ?? existing.capabilities ?? ['tool_use'])) return false;
+    if (!sameStringSet(existing.supportEfforts ?? [], model.supportEfforts ?? existing.supportEfforts ?? [])) return false;
+  }
+  return true;
+}
+
+function sameStringSet(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) return false;
+  const values = new Set(left);
+  return right.every(value => values.has(value));
 }
 
 export async function refreshProviderModels(

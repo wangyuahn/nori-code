@@ -12,6 +12,7 @@ export interface AgentBackgroundTaskInfo extends BackgroundTaskInfoBase {
   readonly agentId?: string;
   /** Subagent profile name. */
   readonly subagentType?: string;
+  readonly paused?: boolean;
 }
 
 export class AgentBackgroundTask implements BackgroundTask {

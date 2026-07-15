@@ -15,7 +15,12 @@ import {
   type UpdateSessionMetadataPayload,
 } from '../../src';
 import { TestInstantiationService } from '../../src/di/test';
-import { emptySessionUsage, type Event, type Session } from '@nori-code/protocol';
+import {
+  emptySessionUsage,
+  type Event,
+  type Session,
+  type UsageStatus,
+} from '@nori-code/protocol';
 
 import {
   IApprovalService,
@@ -49,6 +54,7 @@ interface FakeBridgeState {
   resumedIds: string[];
   contexts: Map<string, AgentContextData>;
   postUndoContexts: Map<string, AgentContextData>;
+  usages: Map<string, UsageStatus>;
 }
 
 function makeFakeBridge(state: FakeBridgeState): ICoreProcessService {
@@ -202,7 +208,11 @@ function makeFakeBridge(state: FakeBridgeState): ICoreProcessService {
     }),
     getPermission: vi.fn().mockResolvedValue({ mode: 'manual' }),
     getPlan: vi.fn().mockResolvedValue(null),
-    getUsage: vi.fn().mockResolvedValue({}),
+    getUsage: vi
+      .fn()
+      .mockImplementation(async ({ sessionId }: { sessionId: string }) => {
+        return state.usages.get(sessionId) ?? {};
+      }),
     getNoriRuntimeSettings: vi.fn().mockResolvedValue({
       coderWriteEnabled: true,
       toolsReadonly: false,
@@ -234,6 +244,7 @@ function freshState(): FakeBridgeState {
     resumedIds: [],
     contexts: new Map(),
     postUndoContexts: new Map(),
+    usages: new Map(),
   };
 }
 
@@ -446,6 +457,46 @@ describe('toProtocolSession adapter', () => {
     expect(proto.title).toBe('');
   });
 
+  it('maps persisted usage, prompt count, and model from the summary', () => {
+    const summary: SessionSummary = {
+      id: 'sess_persisted_usage',
+      workDir: '/tmp/wd-usage',
+      sessionDir: '/tmp/sd-usage',
+      createdAt: 0,
+      updatedAt: 0,
+      model: 'kimi-k2.5',
+      messageCount: 3,
+      usage: {
+        byModel: {
+          'kimi-k2.5': {
+            inputOther: 11,
+            output: 22,
+            inputCacheRead: 33,
+            inputCacheCreation: 44,
+          },
+        },
+        total: {
+          inputOther: 11,
+          output: 22,
+          inputCacheRead: 33,
+          inputCacheCreation: 44,
+        },
+      },
+    };
+
+    expect(toProtocolSession(summary)).toMatchObject({
+      agent_config: { model: 'kimi-k2.5' },
+      message_count: 3,
+      usage: {
+        input_tokens: 11,
+        output_tokens: 22,
+        cache_read_tokens: 33,
+        cache_creation_tokens: 44,
+        turn_count: 3,
+      },
+    });
+  });
+
   it('enriches title + cwd from SessionMeta when available', () => {
     const summary: SessionSummary = {
       id: 'sess_03',
@@ -630,6 +681,58 @@ describe('SessionService.list', () => {
     const page = await svc.list({ workDir: '/tmp/nonexistent' });
     expect(page.items).toEqual([]);
     expect(page.has_more).toBe(false);
+  });
+
+  it('keeps persisted usage for cold sessions and lets live usage override it', async () => {
+    const original = state.sessions.find((session) => session.workDir === '/tmp/b')!;
+    state.sessions = state.sessions.map((session) =>
+      session.id === original.id
+        ? {
+            ...session,
+            model: 'persisted-model',
+            messageCount: 4,
+            usage: {
+              total: {
+                inputOther: 10,
+                output: 20,
+                inputCacheRead: 30,
+                inputCacheCreation: 40,
+              },
+            },
+          }
+        : session
+    );
+
+    const cold = (await svc.list({ workDir: '/tmp/b' })).items[0]!;
+    expect(cold).toMatchObject({
+      agent_config: { model: 'persisted-model' },
+      message_count: 4,
+      usage: {
+        input_tokens: 10,
+        output_tokens: 20,
+        cache_read_tokens: 30,
+        cache_creation_tokens: 40,
+      },
+    });
+
+    state.usages.set(original.id, {
+      total: {
+        inputOther: 100,
+        output: 200,
+        inputCacheRead: 300,
+        inputCacheCreation: 400,
+      },
+    });
+    const loaded = (await svc.list({ workDir: '/tmp/b' })).items[0]!;
+    expect(loaded).toMatchObject({
+      message_count: 4,
+      usage: {
+        input_tokens: 100,
+        output_tokens: 200,
+        cache_read_tokens: 300,
+        cache_creation_tokens: 400,
+      },
+    });
   });
 
   it('excludeEmpty drops sessions without a lastPrompt before pagination', async () => {

@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { SwarmStatus } from '../src/api/client';
-import { collectSwarmTreeRuns, groupSwarmRuns, runningSwarmAgents, swarmRunTokens, swarmTaskIdsForRuns } from '../src/components/SwarmPanel';
+import {
+  collectSwarmTreeRuns,
+  groupSwarmRuns,
+  groupSwarmRunsByProject,
+  runningSwarmAgents,
+  swarmRunProgress,
+  swarmRunTokens,
+  swarmTaskIdsForRuns,
+} from '../src/components/SwarmPanel';
 
 describe('SwarmPanel projections', () => {
   it('groups runs by their session round', () => {
@@ -60,6 +68,37 @@ describe('SwarmPanel projections', () => {
     expect([...activity.ids].sort()).toEqual(['running-1', 'running-2']);
     expect(activity.untracked).toBe(0);
   });
+
+  it('derives completed progress from task snapshots when aggregate fields are stale', () => {
+    expect(swarmRunProgress({
+      ...run('swarm-stale', 1),
+      task_count: 0,
+      completed_count: 0,
+      tasks: [
+        { id: 'agent-1', label: 'One', status: 'completed' },
+        { id: 'agent-2', label: 'Two', status: 'completed' },
+      ],
+    })).toEqual({ total: 2, completed: 2, running: false, status: 'done' });
+  });
+
+  it('groups swarm runs by project and conversation', () => {
+    const groups = groupSwarmRunsByProject([
+      { ...run('swarm-a', 1), session_id: 'session-a' },
+      { ...run('swarm-b', 1), session_id: 'session-b' },
+      { ...run('swarm-c', 2), session_id: 'session-a' },
+    ], [
+      session('session-a', 'Project A', 'C:\\work\\alpha'),
+      session('session-b', 'Project B', 'C:\\work\\beta'),
+    ]);
+
+    expect(groups.map(group => ({
+      key: group.key,
+      sessions: group.sessions.map(item => ({ title: item.title, runs: item.runs.map(run => run.swarm_id) })),
+    }))).toEqual([
+      { key: 'C:/work/alpha', sessions: [{ title: 'Project A', runs: ['swarm-a', 'swarm-c'] }] },
+      { key: 'C:/work/beta', sessions: [{ title: 'Project B', runs: ['swarm-b'] }] },
+    ]);
+  });
 });
 
 function run(id: string, round: number): SwarmStatus {
@@ -69,5 +108,16 @@ function run(id: string, round: number): SwarmStatus {
     task_count: 1,
     completed_count: 0,
     round,
+  };
+}
+
+function session(id: string, title: string, cwd: string) {
+  return {
+    id,
+    title,
+    status: 'ready',
+    created_at: '2026-07-15T00:00:00.000Z',
+    updated_at: '2026-07-15T00:00:00.000Z',
+    metadata: { cwd },
   };
 }

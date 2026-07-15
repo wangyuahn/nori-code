@@ -36,6 +36,18 @@ const RATE_LIMIT_RETRY_FACTOR = 2;
 const RATE_LIMIT_CAPACITY_SHRINK_INTERVAL_MS = 2000;
 const RATE_LIMIT_CAPACITY_RECOVERY_INTERVAL_MS = 3 * 60 * 1000;
 const RATE_LIMIT_SUSPENDED_REASON = 'Provider rate limit; subagent requeued for retry.';
+const MANUAL_PAUSE_MESSAGE = 'Swarm paused; subagent will resume with its existing context.';
+
+export class SwarmPausedError extends Error {
+  constructor() {
+    super(MANUAL_PAUSE_MESSAGE);
+    this.name = 'SwarmPausedError';
+  }
+}
+
+export function isSwarmPauseReason(value: unknown): boolean {
+  return value instanceof SwarmPausedError;
+}
 
 const AGENT_SWARM_MAX_CONCURRENCY_ENV = 'NORI_CODE_AGENT_SWARM_MAX_CONCURRENCY';
 
@@ -103,6 +115,8 @@ type TaskState<T> = {
   readonly task: QueuedSubagentTask<T>;
   agentId?: string;
   retryAgentId?: string;
+  resumeAgentId?: string;
+  guidanceOffset: number;
   retryCount: number;
   retryReadyAt: number;
   started: boolean;
@@ -114,6 +128,7 @@ type ActiveAttempt<T> = {
   cleanup: () => void;
   ready: boolean;
   timedOut: boolean;
+  paused: boolean;
 };
 
 export type SubagentBatchOptions = {
@@ -149,6 +164,8 @@ export class SubagentBatch<T> {
   private lastCapacityRecoveryAt: number | undefined;
   private globalRetryIntervalMs = RATE_LIMIT_RETRY_BASE_MS;
   private nextRateLimitLaunchAt = 0;
+  private paused = false;
+  private readonly guidance: string[] = [];
 
   constructor(
     private readonly launcher: SubagentBatchLauncher,
@@ -161,6 +178,7 @@ export class SubagentBatch<T> {
       task,
       retryCount: 0,
       retryReadyAt: 0,
+      guidanceOffset: 0,
       started: false,
     }));
     this.pending = [...this.states];
@@ -174,6 +192,41 @@ export class SubagentBatch<T> {
         this.fail(this.batchSignal?.reason ?? new Error('Aborted'));
       }
     };
+  }
+
+  get isPaused(): boolean {
+    return this.paused;
+  }
+
+  pause(guidance?: string): void {
+    if (this.finished) return;
+    this.addGuidance(guidance);
+    this.paused = true;
+    this.clearNormalTimer();
+    this.clearRateLimitTimer();
+    for (const attempt of this.active) {
+      attempt.paused = true;
+      if (attempt.state.agentId !== undefined) {
+        this.launcher.suspended?.({
+          task: attempt.state.task,
+          agentId: attempt.state.agentId,
+          reason: MANUAL_PAUSE_MESSAGE,
+        });
+      }
+      attempt.controller.abort(new SwarmPausedError());
+    }
+  }
+
+  addGuidance(guidance?: string): void {
+    const normalized = guidance?.trim();
+    if (normalized) this.guidance.push(normalized);
+  }
+
+  resume(guidance?: string): void {
+    if (this.finished) return;
+    this.addGuidance(guidance);
+    this.paused = false;
+    this.schedule();
   }
 
   run(): Promise<Array<SubagentResult<T>>> {
@@ -205,6 +258,7 @@ export class SubagentBatch<T> {
     if (this.finished) return;
     if (this.finishIfComplete()) return;
     if (this.controller.signal.aborted) return;
+    if (this.paused) return;
 
     if (this.rateLimitMode) {
       this.scheduleRateLimitLaunch();
@@ -275,7 +329,7 @@ export class SubagentBatch<T> {
   }
 
   private startAttempt(state: TaskState<T>): void {
-    if (this.finished || this.controller.signal.aborted) return;
+    if (this.finished || this.controller.signal.aborted || this.paused) return;
 
     const attempt: ActiveAttempt<T> = {
       state,
@@ -283,6 +337,7 @@ export class SubagentBatch<T> {
       cleanup: () => {},
       ready: false,
       timedOut: false,
+      paused: false,
     };
     attempt.cleanup = this.linkAttemptSignals(attempt, state.task);
     this.active.add(attempt);
@@ -298,11 +353,12 @@ export class SubagentBatch<T> {
   }
 
   private async runAttempt(attempt: ActiveAttempt<T>): Promise<AttemptOutcome<T>> {
-    const task = attempt.state.task;
+    const state = attempt.state;
+    const task = state.task;
     const runOptions: RunSubagentOptions = {
       parentToolCallId: task.parentToolCallId,
       parentToolCallUuid: task.parentToolCallUuid,
-      prompt: task.prompt,
+      prompt: this.promptForAttempt(state),
       description: task.description,
       swarmIndex: task.swarmIndex,
       runInBackground: task.runInBackground,
@@ -316,8 +372,10 @@ export class SubagentBatch<T> {
     let handle: SubagentHandle;
     try {
       attempt.controller.signal.throwIfAborted();
-      if (attempt.state.retryAgentId !== undefined) {
-        handle = await this.launcher.retry(attempt.state.retryAgentId, runOptions);
+      if (state.retryAgentId !== undefined) {
+        handle = await this.launcher.retry(state.retryAgentId, runOptions);
+      } else if (state.resumeAgentId !== undefined) {
+        handle = await this.launcher.resume(state.resumeAgentId, runOptions);
       } else if (task.kind === 'resume') {
         handle = await this.launcher.resume(task.resumeAgentId, runOptions);
       } else {
@@ -389,6 +447,12 @@ export class SubagentBatch<T> {
     if (!this.releaseAttempt(attempt)) return;
     if (this.finished) return;
 
+    if (attempt.paused && (!('status' in outcome) || outcome.status !== 'completed')) {
+      this.requeuePaused(attempt);
+      this.schedule();
+      return;
+    }
+
     if ('status' in outcome) {
       this.results[attempt.state.index] = outcome;
     } else if (this.isOnlyUnfinishedTask(attempt.state)) {
@@ -408,6 +472,11 @@ export class SubagentBatch<T> {
   private handleAttemptError(attempt: ActiveAttempt<T>, error: unknown): void {
     if (!this.releaseAttempt(attempt)) return;
     if (this.finished) return;
+    if (attempt.paused) {
+      this.requeuePaused(attempt);
+      this.schedule();
+      return;
+    }
     this.results[attempt.state.index] = {
       task: attempt.state.task,
       agentId: attempt.state.agentId,
@@ -458,6 +527,30 @@ export class SubagentBatch<T> {
         now + RATE_LIMIT_RETRY_BASE_MS,
       );
     }
+  }
+
+  private requeuePaused(attempt: ActiveAttempt<T>): void {
+    const state = attempt.state;
+    state.retryAgentId = undefined;
+    state.retryReadyAt = 0;
+    if (state.agentId !== undefined) state.resumeAgentId = state.agentId;
+    if (!this.pending.includes(state)) this.pending.unshift(state);
+  }
+
+  private promptForAttempt(state: TaskState<T>): string {
+    const additions = this.guidance.slice(state.guidanceOffset);
+    state.guidanceOffset = this.guidance.length;
+    if (additions.length === 0 && state.resumeAgentId === undefined) return state.task.prompt;
+    const reminder = additions.length > 0
+      ? additions.join('\n\n')
+      : 'Continue the unfinished task from the point where this agent was paused.';
+    return [
+      state.task.prompt,
+      '',
+      '<system-reminder>',
+      reminder,
+      '</system-reminder>',
+    ].join('\n');
   }
 
   private enterRateLimitMode(now: number): void {

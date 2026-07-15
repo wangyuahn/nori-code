@@ -23,11 +23,21 @@ interface RouteHost {
       reply: { send(payload: unknown): void },
     ) => Promise<void> | void,
   ): unknown;
+  post(
+    path: string,
+    options: { schema?: Record<string, unknown> },
+    handler: (
+      req: { id: string; params: Record<string, unknown>; body: unknown },
+      reply: { send(payload: unknown): void },
+    ) => Promise<void> | void,
+  ): unknown;
 }
+
+const swarmExecutionStatusSchema = z.enum(['pending', 'running', 'paused', 'done', 'failed', 'stopped']);
 
 const swarmStatusSchema = z.object({
   swarm_id: z.string(),
-  status: z.enum(['pending', 'running', 'done', 'failed']),
+  status: swarmExecutionStatusSchema,
   task_count: z.number(),
   completed_count: z.number(),
   session_id: z.string().optional(),
@@ -69,6 +79,15 @@ const swarmIdParamsSchema = z.object({
   swarm_id: z.string(),
 });
 
+const swarmActionParamsSchema = z.object({
+  swarm_id: z.string().min(1),
+  action: z.enum(['stop', 'pause', 'guide', 'resume']),
+});
+
+const swarmActionBodySchema = z.object({
+  prompt: z.string().trim().min(1).optional(),
+});
+
 // ---------------------------------------------------------------------------
 // In-memory swarm-state store
 // ---------------------------------------------------------------------------
@@ -99,7 +118,7 @@ export interface SwarmTaskStatusEntry {
 
 export interface SwarmStatusEntry {
   swarm_id: string;
-  status: 'pending' | 'running' | 'done' | 'failed';
+  status: 'pending' | 'running' | 'paused' | 'done' | 'failed' | 'stopped';
   task_count: number;
   completed_count: number;
   tasks?: SwarmTaskStatusEntry[];
@@ -237,14 +256,27 @@ export function registerSwarmStatusRoute(app: RouteHost, ix: IInstantiationServi
       const entry = swarmState.get(swarmId);
       let tasks = entry?.tasks;
       let usage = entry?.usage ?? aggregateTaskUsage(tasks);
+      let status = entry?.status ?? ('pending' as const);
       if (entry?.session_id !== undefined && entry.task_id !== undefined) {
         try {
           const task = await ix.invokeFunction((a) =>
             a.get(ITaskService).get(entry.session_id!, entry.task_id!, {
               withOutput: true,
               outputBytes: 128_000,
+              agentId: entry.owner_agent_id,
             }),
           );
+          status = task.paused
+            ? 'paused'
+            : task.status === 'cancelled'
+              ? 'stopped'
+              : task.status === 'failed'
+                ? 'failed'
+                : task.status === 'completed'
+                  ? 'done'
+                  : status === 'paused'
+                    ? 'running'
+                    : status;
           if (tasks === undefined || tasks.length === 0) {
             tasks = [{
               id: task.id,
@@ -261,7 +293,7 @@ export function registerSwarmStatusRoute(app: RouteHost, ix: IInstantiationServi
       }
       reply.send(okEnvelope({
         swarm_id: swarmId,
-        status: entry?.status ?? ('pending' as const),
+        status,
         task_count: entry?.task_count ?? 0,
         completed_count: entry?.completed_count ?? 0,
         session_id: entry?.session_id,
@@ -277,4 +309,40 @@ export function registerSwarmStatusRoute(app: RouteHost, ix: IInstantiationServi
     },
   );
   app.get(route.path, route.options, route.handler as Parameters<RouteHost['get']>[2]);
+
+  const actionRoute = defineRoute(
+    {
+      method: 'POST',
+      path: '/swarm/{swarm_id}/{action}',
+      params: swarmActionParamsSchema,
+      body: swarmActionBodySchema,
+      success: { data: z.object({ swarm_id: z.string(), status: swarmExecutionStatusSchema }) },
+      description: 'Stop, pause, guide, or resume a swarm run',
+      tags: ['swarm'],
+    },
+    async (req, reply) => {
+      const { swarm_id: swarmId, action } = req.params;
+      const { prompt } = req.body;
+      const entry = swarmState.get(swarmId);
+      if (entry?.session_id === undefined || entry.task_id === undefined) {
+        throw new Error(`Swarm "${swarmId}" is not available for control.`);
+      }
+      const ownerAgentId = entry.owner_agent_id ?? 'main';
+      const service = ix.invokeFunction((a) => a.get(ITaskService));
+      if (action === 'stop') {
+        await service.cancel(entry.session_id, entry.task_id, ownerAgentId);
+      } else if (action === 'pause') {
+        await service.pause(entry.session_id, entry.task_id, prompt, ownerAgentId);
+      } else if (action === 'guide') {
+        if (prompt === undefined) throw new Error('prompt is required when adding swarm guidance.');
+        await service.guide(entry.session_id, entry.task_id, prompt, ownerAgentId);
+      } else {
+        await service.resume(entry.session_id, entry.task_id, prompt, ownerAgentId);
+      }
+      const status = action === 'stop' ? 'stopped' : action === 'resume' ? 'running' : 'paused';
+      updateSwarmStatus(swarmId, current => ({ ...current, status }));
+      reply.send(okEnvelope({ swarm_id: swarmId, status }, req.id));
+    },
+  );
+  app.post(actionRoute.path, actionRoute.options, actionRoute.handler as Parameters<RouteHost['post']>[2]);
 }

@@ -8,6 +8,15 @@ export const providerConfigResponseSchema = z.object({
 });
 export type ProviderConfigResponse = z.infer<typeof providerConfigResponseSchema>;
 
+export const memoryConfigResponseSchema = z.object({
+  vector_enabled: z.boolean().optional(),
+  provider_type: z.enum(['openai', 'openai_responses']).optional(),
+  base_url: z.string().optional(),
+  model: z.string().optional(),
+  has_api_key: z.boolean(),
+});
+export type MemoryConfigResponse = z.infer<typeof memoryConfigResponseSchema>;
+
 export const configResponseSchema = z.object({
   providers: z.record(z.string(), providerConfigResponseSchema).default({}),
   default_provider: z.string().optional(),
@@ -21,6 +30,7 @@ export const configResponseSchema = z.object({
   permission: z.unknown().optional(),
   hooks: z.array(z.unknown()).optional(),
   services: z.unknown().optional(),
+  memory: memoryConfigResponseSchema.optional(),
   merge_all_available_skills: z.boolean().optional(),
   extra_skill_dirs: z.array(z.string()).optional(),
   loop_control: z.unknown().optional(),
@@ -44,6 +54,16 @@ export const patchConfigRequestSchema = z.object({
   permission: z.unknown().optional(),
   hooks: z.array(z.unknown()).optional(),
   services: z.unknown().optional(),
+  memory: z
+    .object({
+      vector_enabled: z.boolean().optional(),
+      provider_type: z.enum(['openai', 'openai_responses']).optional(),
+      base_url: z.string().optional(),
+      api_key: z.string().optional(),
+      model: z.string().optional(),
+      custom_headers: z.record(z.string(), z.string()).optional(),
+    })
+    .optional(),
   merge_all_available_skills: z.boolean().optional(),
   extra_skill_dirs: z.array(z.string()).optional(),
   loop_control: z.unknown().optional(),

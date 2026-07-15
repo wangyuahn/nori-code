@@ -1,0 +1,1 @@
+Query and manage AgentSwarm runs owned by the current agent. List or inspect swarm task IDs, stop work, pause without losing unfinished agents, add guidance while paused, and resume with the existing agent context.

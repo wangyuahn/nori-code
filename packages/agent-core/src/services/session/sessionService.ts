@@ -77,6 +77,21 @@ function mapRealtimeUsage(usage: UsageStatus | undefined): SessionStatusResponse
   };
 }
 
+function mapSessionUsage(usage: UsageStatus | undefined): Session['usage'] | undefined {
+  const total = usage?.total;
+  if (total === undefined) return undefined;
+  return {
+    input_tokens: total.inputOther,
+    output_tokens: total.output,
+    cache_read_tokens: total.inputCacheRead,
+    cache_creation_tokens: total.inputCacheCreation,
+    total_cost_usd: 0,
+    context_tokens: 0,
+    context_limit: 0,
+    turn_count: 0,
+  };
+}
+
 function canUndoHistory(history: readonly ContextMessage[], count: number): boolean {
   let found = 0;
   for (let i = history.length - 1; i >= 0; i--) {
@@ -326,9 +341,11 @@ export class SessionService extends Disposable implements ISessionService {
     const hasMore = slice.length > pageSize;
 
     const items = await Promise.all(
-      pageSummaries.map(async (s) =>
-        this._patchSessionStatus(toProtocolSession(s, await this.tryGetMeta(s.id)))
-      ),
+      pageSummaries.map(async (s) => {
+        const session = this._patchSessionStatus(toProtocolSession(s, await this.tryGetMeta(s.id)));
+        await this._attachUsage(session);
+        return session;
+      }),
     );
 
     const filtered =
@@ -344,7 +361,9 @@ export class SessionService extends Disposable implements ISessionService {
       throw new SessionNotFoundError(id);
     }
     const meta = await this.tryGetMeta(id);
-    return this._patchSessionStatus(toProtocolSession(summary, meta));
+    const session = this._patchSessionStatus(toProtocolSession(summary, meta));
+    await this._attachUsage(session);
+    return session;
   }
 
   async update(id: string, input: SessionUpdate): Promise<Session> {
@@ -399,7 +418,9 @@ export class SessionService extends Disposable implements ISessionService {
     const allAfter = await this.core.rpc.listSessions({});
     const summaryAfter = allAfter.find((s) => s.id === id) ?? summary;
     const meta = await this.tryGetMeta(id);
-    return this._patchSessionStatus(toProtocolSession(summaryAfter, meta));
+    const session = this._patchSessionStatus(toProtocolSession(summaryAfter, meta));
+    await this._attachUsage(session);
+    return session;
   }
 
   async fork(id: string, input: SessionFork): Promise<Session> {
@@ -447,9 +468,11 @@ export class SessionService extends Disposable implements ISessionService {
     const pageSize = Math.min(Math.max(requestedSize, 1), MAX_PAGE_SIZE);
     const pageSummaries = slice.slice(0, pageSize);
     const items = await Promise.all(
-      pageSummaries.map(async (s) =>
-        this._patchSessionStatus(toProtocolSession(s, await this.tryGetMeta(s.id)))
-      ),
+      pageSummaries.map(async (s) => {
+        const session = this._patchSessionStatus(toProtocolSession(s, await this.tryGetMeta(s.id)));
+        await this._attachUsage(session);
+        return session;
+      }),
     );
     const filtered =
       query.status !== undefined
@@ -642,6 +665,15 @@ export class SessionService extends Disposable implements ISessionService {
       return meta;
     } catch {
       return undefined;
+    }
+  }
+
+  private async _attachUsage(session: Session): Promise<void> {
+    try {
+      const usage = await this.core.rpc.getUsage({ sessionId: session.id, agentId: 'main' });
+      session.usage = mapSessionUsage(usage) ?? session.usage;
+    } catch {
+      // Unloaded historical sessions keep their persisted protocol fallback.
     }
   }
 

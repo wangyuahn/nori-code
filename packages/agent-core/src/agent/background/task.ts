@@ -62,6 +62,10 @@ export interface BackgroundTask {
   readonly timeoutMs?: number;
 
   start(sink: BackgroundTaskSink): void | Promise<void>;
+  pause?(guidance?: string): void | Promise<void>;
+  addGuidance?(guidance: string): void | Promise<void>;
+  resume?(guidance?: string): void | Promise<void>;
+  isPaused?(): boolean;
   onDetach?(): void;
   forceStop?(): Promise<void>;
   toInfo(base: BackgroundTaskInfoBase): BackgroundTaskInfo;

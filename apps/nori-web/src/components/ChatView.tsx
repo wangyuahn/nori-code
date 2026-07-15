@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type Key
 import { api, type ApprovalRequest, type GoalSnapshot, type ModelCatalogItem, type PromptAttachment, type QuestionAnswer, type QuestionRequest, type Session, type SessionAgentConfig, type SessionRealtimeStatus, type TokenUsage } from '../api/client';
 import type { ChatMessage, QueuedPrompt, TodoItem, ToolCall, WorkBlock } from '../hooks/useChatMessages';
 import { useI18n } from '../i18n';
+import { chatSlashCommandSuggestions, resolveChatSlashCommand, type ChatSlashCommand, type ChatSlashCommandName } from '../utils/chat-slash-commands';
 import { Icon } from './Icon';
 import { ApprovalPanel } from './ApprovalPanel';
 import { MarkdownView } from './MarkdownView';
@@ -13,6 +14,7 @@ export interface ChatViewProps {
   session: Session | null;
   allSessions?: Session[];
   messages: ChatMessage[];
+  messagesLoading?: boolean;
   streaming: string;
   thinking: string;
   workBlocks?: WorkBlock[];
@@ -31,6 +33,7 @@ export interface ChatViewProps {
   onThinkingChange: (effort: string) => void | Promise<void>;
   onPermissionChange: (mode: 'auto' | 'yolo' | 'manual') => void | Promise<void>;
   onTaskModeChange: (mode: 'plan' | 'code') => void | Promise<void>;
+  onRunSlashCommand: (command: ChatSlashCommandName, args: string) => boolean | void | Promise<boolean | void>;
   onMainWriteChange: (enabled: boolean) => void | Promise<void>;
   onGoalControl?: (action: 'pause' | 'resume' | 'cancel') => void | Promise<void>;
   pendingApprovals?: ApprovalRequest[];
@@ -43,7 +46,7 @@ export interface ChatViewProps {
   onCancelQueuedPrompt?: (promptId: string) => void | Promise<void>;
   draftAgentConfig?: SessionAgentConfig;
   rewindLimit?: number;
-  onRewind?: (count: number) => void | Promise<void>;
+  onRewind?: (count: number) => string | undefined | Promise<string | undefined>;
 }
 
 interface ComposerAttachment {
@@ -59,14 +62,42 @@ const STARTERS = [
   { title: 'Check recent changes', titleZh: '检查最近的更改', prompt: 'Review the current uncommitted changes for bugs, regressions, and missing tests.', promptZh: '审查当前未提交的更改，查找缺陷、回归和缺失的测试。' },
 ];
 
+export function modelSupportsImageInput(model: ModelCatalogItem | undefined): boolean {
+  if (!model) return false;
+  const mappedCapability = model.capabilities?.some(
+    capability => capability.trim().toLowerCase() === 'image_in',
+  ) ?? false;
+  const imageInputModality = model.modalities?.input?.some(
+    modality => modality.trim().toLowerCase() === 'image',
+  ) ?? false;
+  return mappedCapability
+    || model.supports_image_in === true
+    || model.capability?.image_in === true
+    || model.model_capabilities?.image_in === true
+    || imageInputModality;
+}
+
+function imageUnsupportedMessage(
+  hasSelectedModel: boolean,
+  tr: (english: string, chinese: string) => string,
+): string {
+  return hasSelectedModel
+    ? tr('The selected model does not support image input. Choose a multimodal model to attach images.', '所选模型不支持图片输入，请选择多模态模型后再添加图片。')
+    : tr('Select a multimodal model before attaching images.', '请先选择支持图片输入的多模态模型。');
+}
+
 export function ChatView(props: ChatViewProps) {
-  const { session, allSessions = [], messages, streaming, thinking, workBlocks = [], isStreaming, activeAgentCount = 0, activeAgentTokens = 0, sessionStatus, compacting = false, models, modelsLoading, modelError, onSendMessage, onAbort, onRefreshModels, onModelChange, onThinkingChange, onPermissionChange, onTaskModeChange, onMainWriteChange, onGoalControl, pendingApprovals = [], onResolveApproval, pendingQuestions = [], onResolveQuestion, onDismissQuestion, queuedPrompts = [], todos = [], onCancelQueuedPrompt, draftAgentConfig, rewindLimit = 10, onRewind } = props;
+  const { session, allSessions = [], messages, messagesLoading = false, streaming, thinking, workBlocks = [], isStreaming, activeAgentCount = 0, activeAgentTokens = 0, sessionStatus, compacting = false, models, modelsLoading, modelError, onSendMessage, onAbort, onRefreshModels, onModelChange, onThinkingChange, onPermissionChange, onTaskModeChange, onRunSlashCommand, onMainWriteChange, onGoalControl, pendingApprovals = [], onResolveApproval, pendingQuestions = [], onResolveQuestion, onDismissQuestion, queuedPrompts = [], todos = [], onCancelQueuedPrompt, draftAgentConfig, rewindLimit = 10, onRewind } = props;
   const { tr } = useI18n();
   const [input, setInput] = useState('');
   const [modelNotice, setModelNotice] = useState(false);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [commandNotice, setCommandNotice] = useState<string | null>(null);
+  const [commandMenuDismissed, setCommandMenuDismissed] = useState(false);
+  const [commandSelection, setCommandSelection] = useState(0);
+  const [commandRunning, setCommandRunning] = useState(false);
   const [followOutput, setFollowOutput] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
@@ -80,7 +111,10 @@ export function ChatView(props: ChatViewProps) {
   const selectedPermission = session?.agent_config?.permission_mode ?? draftAgentConfig?.permission_mode ?? 'manual';
   const selectedTaskMode = (sessionStatus?.plan_mode ?? session?.agent_config?.plan_mode ?? draftAgentConfig?.plan_mode) ? 'plan' : 'code';
   const selectedMainWrite = sessionStatus?.main_write_enabled ?? session?.agent_config?.main_write_enabled ?? draftAgentConfig?.main_write_enabled ?? false;
-  const imageCapable = selectedModel?.capabilities?.some(capability => ['image', 'image_in', 'vision'].includes(capability.toLowerCase())) ?? false;
+  const commandSuggestions = chatSlashCommandSuggestions(input);
+  const commandMenuOpen = !commandMenuDismissed && commandSuggestions.length > 0;
+  const imageCapable = modelSupportsImageInput(selectedModel);
+  const streamingContinuesAssistant = messages.at(-1)?.role === 'assistant';
   const rewindCounts = new Map<string, number>();
   let promptsFromEnd = 0;
   for (let index = messages.length - 1; index >= 0; index--) {
@@ -104,27 +138,31 @@ export function ChatView(props: ChatViewProps) {
     setAttachments([]);
     setAttachmentsLoading(false);
     setAttachmentError(null);
+    setCommandNotice(null);
+    setCommandMenuDismissed(false);
+    setCommandSelection(0);
   }, [session?.id]);
-  useEffect(() => {
-    if (!imageCapable) setAttachments(previous => previous.filter(item => item.attachment.kind !== 'image'));
-  }, [imageCapable]);
-
   const addFiles = useCallback(async (files: FileList | File[]) => {
     const available = Math.max(0, 6 - attachments.length);
     const selected = Array.from(files).slice(0, available);
     if (selected.length === 0) return;
-    setAttachmentError(null);
+    const unsupportedImages = selected.filter(file => file.type.startsWith('image/'));
+    const filesToLoad = imageCapable
+      ? selected
+      : selected.filter(file => !file.type.startsWith('image/'));
+    setAttachmentError(unsupportedImages.length > 0 && !imageCapable
+      ? imageUnsupportedMessage(Boolean(selectedModelId), tr)
+      : null);
+    if (filesToLoad.length === 0) return;
     setAttachmentsLoading(true);
     try {
-      const results = await Promise.allSettled(selected.map(file => file.type.startsWith('image/')
-        ? imageCapable
-          ? readImageAttachment(file)
-          : Promise.reject(new Error(tr('The selected model does not support images.', '所选模型不支持图片。')))
+      const results = await Promise.allSettled(filesToLoad.map(file => file.type.startsWith('image/')
+        ? readImageAttachment(file)
         : uploadFileAttachment(file)));
       const loaded = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
       const failed = results.filter(result => result.status === 'rejected');
       if (loaded.length > 0) setAttachments(previous => [...previous, ...loaded].slice(0, 6));
-      if (failed.length > 0) {
+      if (failed.length > 0 && unsupportedImages.length === 0) {
         setAttachmentError(tr(
           `${failed.length} file${failed.length === 1 ? '' : 's'} could not be attached.`,
           `${failed.length} 个文件添加失败。`,
@@ -133,7 +171,7 @@ export function ChatView(props: ChatViewProps) {
     } catch (error) {
       setAttachmentError(error instanceof Error ? error.message : tr('Unable to attach file.', '无法添加文件。'));
     } finally { setAttachmentsLoading(false); }
-  }, [attachments.length, imageCapable, tr]);
+  }, [attachments.length, imageCapable, selectedModelId, tr]);
 
   const removeAttachment = (item: ComposerAttachment) => {
     setAttachments(previous => previous.filter(candidate => candidate.id !== item.id));
@@ -144,6 +182,10 @@ export function ChatView(props: ChatViewProps) {
     const text = (override ?? input).trim();
     if (!text && attachments.length === 0) return;
     if (!selectedModelId) { setModelNotice(true); return; }
+    if (!imageCapable && attachments.some(item => item.attachment.kind === 'image')) {
+      setAttachmentError(imageUnsupportedMessage(true, tr));
+      return;
+    }
     followOutputRef.current = true;
     setFollowOutput(true);
     if (attachmentsLoading) return;
@@ -156,19 +198,132 @@ export function ChatView(props: ChatViewProps) {
         if (item.attachment.kind === 'file') void api.files.delete(item.attachment.file_id).catch(() => undefined);
       }
     }
-  }, [attachments, attachmentsLoading, input, onSendMessage, selectedModelId]);
+  }, [attachments, attachmentsLoading, imageCapable, input, onSendMessage, selectedModelId, tr]);
+
+  const selectSlashCommand = (command: ChatSlashCommand) => {
+    setInput(`/${command.name}${command.argumentHint ? ' ' : ''}`);
+    setCommandSelection(0);
+    setCommandNotice(null);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  const runSlashCommand = async () => {
+    const resolution = resolveChatSlashCommand(input);
+    if (resolution.kind === 'none') {
+      setCommandNotice(tr('Unknown slash command.', '未知的斜杠命令。'));
+      return;
+    }
+    if (resolution.kind === 'error') {
+      setCommandNotice(tr(resolution.message, resolution.messageZh));
+      return;
+    }
+    if (!session) {
+      setCommandNotice(tr('Open a conversation before running this command.', '请先打开一个会话再执行此命令。'));
+      return;
+    }
+    if (isStreaming || compacting) {
+      setCommandNotice(tr('Wait for the current task to finish before running this command.', '请等当前任务完成后再执行此命令。'));
+      return;
+    }
+    if (attachments.length > 0) {
+      setCommandNotice(tr('Remove attachments before running a slash command.', '执行斜杠命令前请先移除附件。'));
+      return;
+    }
+    if (resolution.value.command.name !== 'compact' && !selectedModelId) {
+      setModelNotice(true);
+      return;
+    }
+    setCommandRunning(true);
+    setCommandNotice(null);
+    try {
+      const accepted = await onRunSlashCommand(resolution.value.command.name, resolution.value.args);
+      if (accepted === false) return;
+      setInput('');
+      setCommandMenuDismissed(false);
+      setCommandNotice(resolution.value.command.name === 'compact'
+        ? tr('Conversation context compacted.', '已压缩对话上下文。')
+        : null);
+    } catch (error) {
+      setCommandNotice(error instanceof Error ? error.message : tr('Command failed.', '命令执行失败。'));
+    } finally {
+      setCommandRunning(false);
+    }
+  };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void handleSend(); }
+    if (event.nativeEvent.isComposing) return;
+    if (commandMenuOpen) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const direction = event.key === 'ArrowDown' ? 1 : -1;
+        setCommandSelection(current => (current + direction + commandSuggestions.length) % commandSuggestions.length);
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setCommandMenuDismissed(true);
+        return;
+      }
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        const command = commandSuggestions[commandSelection] ?? commandSuggestions[0];
+        if (command) selectSlashCommand(command);
+        return;
+      }
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        const firstToken = input.trim().split(/\s+/, 1)[0]?.slice(1).toLowerCase();
+        const command = commandSuggestions[commandSelection] ?? commandSuggestions[0];
+        if (command && firstToken !== command.name) selectSlashCommand(command);
+        else void runSlashCommand();
+        return;
+      }
+    }
+    if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && !isStreaming && pendingApprovals.length === 0 && pendingQuestions.length === 0) {
+      event.preventDefault();
+      void onTaskModeChange(selectedTaskMode === 'plan' ? 'code' : 'plan');
+      return;
+    }
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      if (input.trim().startsWith('/')) void runSlashCommand();
+      else void handleSend();
+    }
   };
 
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-    if (!imageCapable || event.clipboardData.files.length === 0) return;
+    if (event.clipboardData.files.length === 0) return;
     const hasImage = Array.from(event.clipboardData.files).some(file => file.type.startsWith('image/'));
     if (!hasImage) return;
     event.preventDefault();
+    if (!imageCapable) {
+      setAttachmentError(imageUnsupportedMessage(Boolean(selectedModelId), tr));
+      return;
+    }
     void addFiles(event.clipboardData.files);
   };
+
+  const handleModelChange = (modelId: string) => {
+    const nextModel = models.find(model => model.model === modelId);
+    if (!modelSupportsImageInput(nextModel) && attachments.some(item => item.attachment.kind === 'image')) {
+      setAttachments(previous => previous.filter(item => item.attachment.kind !== 'image'));
+      setAttachmentError(tr(
+        'That model does not support image input. Attached images were removed.',
+        '该模型不支持图片输入，已移除附加的图片。',
+      ));
+    } else {
+      setAttachmentError(null);
+    }
+    void onModelChange(modelId);
+  };
+
+  const handleRewind = useCallback(async (count: number) => {
+    if (!onRewind) return;
+    const prompt = await onRewind(count);
+    if (prompt === undefined) return;
+    setInput(prompt);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [onRewind]);
 
   const handleMessagesScroll = (event: UIEvent<HTMLDivElement>) => {
     const element = event.currentTarget;
@@ -188,9 +343,9 @@ export function ChatView(props: ChatViewProps) {
     <div className="chat-header"><div><span className="eyebrow">{session ? tr('Active conversation', '当前对话') : tr('Start here', '从这里开始')}</span><h1>{session?.title || tr('Start a new conversation', '开始新的对话')}</h1></div><div className="chat-header-meta"><span className={'status-dot' + (session ? ' active' : ' idle')}/>{session ? tr(messages.length + ' messages', messages.length + ' 条消息') : tr('Choose a project or conversation', '选择项目或已有对话')}</div></div>
 
     <div className="chat-messages" ref={messagesScrollRef} onScroll={handleMessagesScroll}>
-      {messages.length === 0 ? <div className="chat-welcome"><div className="welcome-mark"><Icon name="sparkles" size={27}/></div><span className="eyebrow">{tr('Your thoughtful coding partner', '你的智能编程伙伴')}</span><h2>{session ? tr('What should we make better?', '我们要改进什么？') : tr('What would you like to work on?', '你想从哪里开始？')}</h2><p>{session ? tr('Ask Nori to inspect code, plan a feature, fix a bug, or validate an API integration.', '让 Nori 检查代码、规划功能、修复缺陷或验证 API 集成。') : tr('Choose a project folder to start a new task, or open an existing conversation from the sidebar. You can also type below now.', '选择一个项目文件夹开始新任务，或从左侧打开已有对话。你也可以直接在下方输入。')}</p>{!session && <UsageOverview sessions={allSessions} models={models}/>}<div className="starter-grid">{STARTERS.map(item => <button key={item.title} className="starter-card" onClick={() => void handleSend(tr(item.prompt, item.promptZh))}><Icon name="sparkles" size={16}/><span><strong>{tr(item.title, item.titleZh)}</strong><small>{tr(item.prompt, item.promptZh)}</small></span></button>)}</div></div> : messages.map(message => <MessageBubble key={message.id} message={message} rewindCount={rewindCounts.get(message.id)} onRewind={onRewind}/>) }
+      {messagesLoading ? <div className="chat-history-loading" role="status"><span className="spinner"/><strong>{tr('Loading conversation…', '正在加载会话…')}</strong></div> : messages.length === 0 ? <div className="chat-welcome"><div className="welcome-mark"><Icon name="sparkles" size={27}/></div><span className="eyebrow">{tr('Your thoughtful coding partner', '你的智能编程伙伴')}</span><h2>{session ? tr('What should we make better?', '我们要改进什么？') : tr('What would you like to work on?', '你想从哪里开始？')}</h2><p>{session ? tr('Ask Nori to inspect code, plan a feature, fix a bug, or validate an API integration.', '让 Nori 检查代码、规划功能、修复缺陷或验证 API 集成。') : tr('Choose a project folder to start a new task, or open an existing conversation from the sidebar. You can also type below now.', '选择一个项目文件夹开始新任务，或从左侧打开已有对话。你也可以直接在下方输入。')}</p><UsageOverview sessions={allSessions} models={models}/><div className="starter-grid">{STARTERS.map(item => <button key={item.title} className="starter-card" onClick={() => void handleSend(tr(item.prompt, item.promptZh))}><Icon name="sparkles" size={16}/><span><strong>{tr(item.title, item.titleZh)}</strong><small>{tr(item.prompt, item.promptZh)}</small></span></button>)}</div></div> : messages.map(message => <MessageBubble key={message.id} message={message} rewindCount={rewindCounts.get(message.id)} onRewind={handleRewind}/>) }
 
-      {isStreaming && <div className="chat-message chat-message-assistant chat-message-streaming"><div className="message-avatar"><span>N</span></div><div className="message-body"><div className="chat-message-role">Nori <span>{pendingApprovals.length > 0 ? tr('waiting for permission', '等待授权') : tr('working', '工作中')}</span></div>{(workBlocks.length > 0 || thinking) && <WorkProcess blocks={workBlocks.length > 0 ? workBlocks : [{ id: 'live-thinking', type: 'thinking', text: thinking }]} live/>}<div className="chat-message-content">{streaming ? <MarkdownView content={streaming} /> : (!thinking && workBlocks.length === 0 && <span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span>)}<span className="streaming-cursor"/></div>{streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(streaming))} tokens</div>}<button className="chat-abort-btn" onClick={onAbort}><Icon name="stop" size={13}/> {tr('Stop response', '停止回复')}</button></div></div>}
+      {isStreaming && <div className={`chat-message chat-message-assistant chat-message-streaming${streamingContinuesAssistant ? ' continuation' : ''}`}>{!streamingContinuesAssistant && <div className="message-avatar"><span>N</span></div>}<div className="message-body">{!streamingContinuesAssistant && <div className="chat-message-role">Nori <span>{pendingApprovals.length > 0 ? tr('waiting for permission', '等待授权') : tr('working', '工作中')}</span></div>}{(workBlocks.length > 0 || thinking) && <WorkProcess blocks={workBlocks.length > 0 ? workBlocks : [{ id: 'live-thinking', type: 'thinking', text: thinking }]} live/>}<div className="chat-message-content">{streaming ? <MarkdownView content={streaming} /> : (!thinking && workBlocks.length === 0 && <span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span>)}<span className="streaming-cursor"/></div>{streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(streaming))} tokens</div>}<button className="chat-abort-btn" onClick={onAbort}><Icon name="stop" size={13}/> {tr('Stop response', '停止回复')}</button></div></div>}
       <div ref={messagesEndRef}/>
     </div>
 
@@ -198,21 +353,25 @@ export function ChatView(props: ChatViewProps) {
       {!followOutput && <button className="chat-jump-latest" onClick={jumpToLatest} title={tr('Jump to latest', '回到最新消息')} aria-label={tr('Jump to latest', '回到最新消息')}><Icon name="chevron-down" size={16}/></button>}
       <ActivityIsland mainWorking={isStreaming} agentCount={activeAgentCount} agentTokens={activeAgentTokens} goal={sessionStatus?.goal ?? null} todos={todos} onGoalControl={onGoalControl}/>
       {pendingQuestions.length > 0 && onResolveQuestion && onDismissQuestion && <QuestionPanel requests={pendingQuestions} onSubmit={onResolveQuestion} onDismiss={onDismissQuestion}/>}
-      {pendingApprovals.length > 0 && onResolveApproval && <ApprovalPanel requests={pendingApprovals} onResolve={onResolveApproval} />}
+      {pendingApprovals.length > 0 && onResolveApproval && <ApprovalPanel requests={pendingApprovals} onResolve={(id, decision, options) => { void onResolveApproval(id, decision, options); }} />}
       <div className={'chat-input-area' + (input || attachments.length > 0 ? ' has-value' : '') + (modelNotice ? ' missing-model' : '')}>
       {queuedPrompts.length > 0 && <div className="composer-queue"><span>{tr('Queued', '排队中')} {queuedPrompts.length}</span>{queuedPrompts.map(prompt => <div key={prompt.id} title={prompt.text}><span>{prompt.text}</span>{onCancelQueuedPrompt && <button type="button" onClick={() => void onCancelQueuedPrompt(prompt.id)} title={tr('Remove queued prompt', '移除排队消息')} aria-label={tr('Remove queued prompt', '移除排队消息')}><Icon name="close" size={11}/></button>}</div>)}</div>}
       {(attachments.length > 0 || attachmentsLoading) && <div className="composer-attachments">{attachments.map(item => <div className={`composer-attachment attachment-${item.attachment.kind}`} key={item.id}>{item.preview ? <img src={item.preview} alt={item.name}/> : <span className="composer-file-icon"><Icon name="files" size={19}/></span>}<span title={item.name}>{item.name}</span><button type="button" onClick={() => removeAttachment(item)} aria-label={tr('Remove file', '移除文件')}><Icon name="close" size={12}/></button></div>)}{attachmentsLoading && <div className="composer-attachment composer-attachment-loading"><span className="composer-file-icon"><span className="spinner spinner-small"/></span><span>{tr('Uploading…', '正在上传…')}</span></div>}</div>}
-      <textarea ref={inputRef} className="chat-input" placeholder={session ? tr('Ask Nori about this project…', '向 Nori 询问此项目…') : tr('Describe what you want to work on…', '告诉 Nori 你想做什么…')} value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown} onPaste={handlePaste} rows={1} aria-label={tr('Message Nori', '向 Nori 发送消息')}/>
+      {commandMenuOpen && <div className="composer-command-menu" id="composer-command-menu" role="listbox" aria-label={tr('Slash commands', '斜杠命令')}>
+        {commandSuggestions.map((command, index) => <button key={command.name} type="button" id={`composer-command-${command.name}`} role="option" aria-selected={index === commandSelection} className={index === commandSelection ? 'active' : ''} onMouseDown={event => event.preventDefault()} onClick={() => selectSlashCommand(command)}><code>/{command.name}{command.argumentHint ? ` ${command.argumentHint}` : ''}</code><span>{tr(command.description, command.descriptionZh)}</span></button>)}
+      </div>}
+      <textarea ref={inputRef} className="chat-input" placeholder={session ? tr('Ask Nori about this project…', '向 Nori 询问此项目…') : tr('Describe what you want to work on…', '告诉 Nori 你想做什么…')} value={input} onChange={event => { setInput(event.target.value); setCommandMenuDismissed(false); setCommandSelection(0); setCommandNotice(null); }} onKeyDown={handleKeyDown} onPaste={handlePaste} rows={1} aria-label={tr('Message Nori', '向 Nori 发送消息')} aria-autocomplete="list" aria-expanded={commandMenuOpen} aria-controls={commandMenuOpen ? 'composer-command-menu' : undefined} aria-activedescendant={commandMenuOpen ? `composer-command-${commandSuggestions[commandSelection]?.name ?? commandSuggestions[0]?.name}` : undefined}/>
       <SessionUsageBar status={sessionStatus} compacting={compacting} />
       <div className="composer-mode-row"><div className="composer-task-mode" role="group" aria-label={tr('Task mode', '任务模式')}><button type="button" className={selectedTaskMode === 'plan' ? 'active' : ''} onClick={() => void onTaskModeChange('plan')} disabled={isStreaming}>{tr('Plan', '规划')}</button><button type="button" className={selectedTaskMode === 'code' ? 'active' : ''} onClick={() => void onTaskModeChange('code')} disabled={isStreaming}>{tr('Code', '执行')}</button></div>{selectedTaskMode === 'code' && <label className="main-write-toggle" title={tr('Allow the main model to use Edit and Write directly.', '允许主模型直接使用 Edit 和 Write。')}><input type="checkbox" checked={selectedMainWrite} disabled={isStreaming} onChange={event => void onMainWriteChange(event.target.checked)}/><span>{tr('Main edits', '主模型编辑')}</span></label>}</div>
       <div className="composer-footer"><div className="composer-model-controls">
-        <select className={'composer-select model-select' + (!selectedModelId ? ' invalid' : '')} value={selectedModelId} disabled={isStreaming || modelsLoading} onChange={e => void onModelChange(e.target.value)} aria-label={tr('Model', '模型')}><option value="">{modelsLoading ? tr('Loading models…', '正在加载模型…') : tr('Select model', '选择模型')}</option>{models.map(model => <option key={model.model} value={model.model}>{model.display_name || model.model}</option>)}</select>
+        <select className={'composer-select model-select' + (!selectedModelId ? ' invalid' : '')} value={selectedModelId} disabled={isStreaming || modelsLoading} onChange={e => handleModelChange(e.target.value)} aria-label={tr('Model', '模型')}><option value="">{modelsLoading ? tr('Loading models…', '正在加载模型…') : tr('Select model', '选择模型')}</option>{models.map(model => <option key={model.model} value={model.model}>{model.display_name || model.model}</option>)}</select>
         {efforts.length > 0 && <select className="composer-select thinking-select" value={selectedThinking} disabled={isStreaming} onChange={e => void onThinkingChange(e.target.value)} aria-label={tr('Thinking effort', '思考等级')}><option value="off">{tr('Thinking off', '关闭思考')}</option>{efforts.map(effort => <option key={effort} value={effort}>{tr('Thinking', '思考')} · {effort}</option>)}</select>}
         <select className={`composer-select permission-select permission-${selectedPermission}`} value={selectedPermission} disabled={isStreaming} onChange={event => void onPermissionChange(event.target.value as 'auto' | 'yolo' | 'manual')} aria-label={tr('Permission mode', '权限模式')} title={tr('Auto approves normal tools; YOLO asks nothing; Manual asks before commands and changes.', '自动模式放行常规工具；YOLO 不询问；手动模式在命令和更改前询问。')}><option value="auto">AUTO</option><option value="yolo">YOLO</option><option value="manual">MANUAL</option></select>
         <SkillPicker sessionId={session?.id ?? null} disabled={isStreaming}/>
         <button className="composer-refresh" onClick={onRefreshModels} disabled={modelsLoading} title={tr('Refresh model list', '刷新模型列表')} aria-label={tr('Refresh model list', '刷新模型列表')}><Icon name="refresh" size={14}/></button>
-      </div><div className="composer-submit-actions"><input ref={imageInputRef} className="composer-image-input" type="file" multiple onChange={event => { if (event.target.files) void addFiles(event.target.files); event.target.value = ''; }}/><button type="button" className="composer-image-button" onClick={() => imageInputRef.current?.click()} disabled={attachmentsLoading || attachments.length >= 6} title={tr('Attach files', '添加文件')} aria-label={tr('Attach files', '添加文件')}><Icon name="paperclip" size={15}/></button>{isStreaming && <button className="chat-steer-btn" onClick={() => void handleSend(undefined, 'steer')} disabled={attachmentsLoading || (!input.trim() && attachments.length === 0)} title={tr('Steer the active task now', '立即调整当前任务')} aria-label={tr('Steer the active task now', '立即调整当前任务')}><Icon name="sparkles" size={15}/></button>}<button className="chat-send-btn" onClick={() => void handleSend()} disabled={attachmentsLoading || (!input.trim() && attachments.length === 0)} title={isStreaming ? tr('Queue message', '排队发送') : tr('Send message', '发送消息')} aria-label={isStreaming ? tr('Queue message', '排队发送') : tr('Send message', '发送消息')}><Icon name="send" size={16}/></button></div></div>
-      {(modelNotice || modelError || attachmentError) && <div className="composer-error" role="status">{modelNotice ? tr('Select a model before sending.', '请先选择模型') : modelError ?? attachmentError}</div>}
+      </div><div className="composer-submit-actions"><input ref={imageInputRef} className="composer-image-input" type="file" multiple onChange={event => { if (event.target.files) void addFiles(event.target.files); event.target.value = ''; }}/><button type="button" className="composer-image-button" onClick={() => imageInputRef.current?.click()} disabled={attachmentsLoading || attachments.length >= 6 || commandRunning} title={tr('Attach files', '添加文件')} aria-label={tr('Attach files', '添加文件')}><Icon name="paperclip" size={15}/></button>{isStreaming && <button className="chat-steer-btn" onClick={() => void handleSend(undefined, 'steer')} disabled={attachmentsLoading || (!input.trim() && attachments.length === 0)} title={tr('Steer the active task now', '立即调整当前任务')} aria-label={tr('Steer the active task now', '立即调整当前任务')}><Icon name="sparkles" size={15}/></button>}<button className="chat-send-btn" onClick={() => input.trim().startsWith('/') ? void runSlashCommand() : void handleSend()} disabled={commandRunning || attachmentsLoading || (!input.trim() && attachments.length === 0)} title={isStreaming ? tr('Queue message', '排队发送') : tr('Send message', '发送消息')} aria-label={isStreaming ? tr('Queue message', '排队发送') : tr('Send message', '发送消息')}><Icon name="send" size={16}/></button></div></div>
+      {(modelNotice || modelError || attachmentError) && <div className="composer-error" role="status">{modelNotice ? tr('Select a model before sending.', '请先选择模型') : attachmentError ?? modelError}</div>}
+      {commandNotice && <div className="composer-command-notice" role="status">{commandNotice}</div>}
     </div></div>
   </section>;
 }

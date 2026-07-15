@@ -1,9 +1,11 @@
 import { usePhaseStatus, useVaultNotes, type SwarmConnectionState } from '../hooks/useApi';
 import { useI18n } from '../i18n';
+import type { ModelCatalogItem, Session } from '../api/client';
+import { UsageOverview } from './UsageOverview';
 
 const PHASES = ['plan', 'implement', 'review'] as const;
 
-export function Dashboard({ swarm }: { swarm: SwarmConnectionState }) {
+export function Dashboard({ swarm, sessions, models }: { swarm: SwarmConnectionState; sessions: Session[]; models: ModelCatalogItem[] }) {
   const { tr } = useI18n();
   const { phase } = usePhaseStatus();
   const { swarmStatuses, connected } = swarm;
@@ -20,7 +22,8 @@ export function Dashboard({ swarm }: { swarm: SwarmConnectionState }) {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 720 }}>
+    <div className="dashboard-layout">
+      <div className="dashboard-main">
       {/* Phase */}
       <div className="card">
         <div className="card-header">{tr('Phase', '阶段')}</div>
@@ -46,14 +49,14 @@ export function Dashboard({ swarm }: { swarm: SwarmConnectionState }) {
       <div className="grid-2">
         <div className="card">
           <div className="card-header">{tr('Connection', '连接')}</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div className="dashboard-connection-stat">
             <span className={`status-dot ${connected ? 'active' : 'error'}`} />
-            <span style={{ fontSize: 18, fontWeight: 600 }}>{connected ? tr('Live', '已连接') : tr('Offline', '离线')}</span>
+            <span>{connected ? tr('Live', '已连接') : tr('Offline', '离线')}</span>
           </div>
         </div>
         <div className="card">
           <div className="card-header">{tr('Swarm', '智能体协作')}</div>
-          <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--nori-cyan)' }}>
+          <div className="dashboard-swarm-stat">
             {activeCount > 0 ? tr(`${activeCount} active`, `${activeCount} 个活动中`) : doneCount > 0 ? tr(`${doneCount} done`, `${doneCount} 个已完成`) : '—'}
           </div>
           <div style={{ fontSize: 11, color: 'var(--nori-text-muted)' }}>{tr(`${agents.length} total`, `共 ${agents.length} 个`)}</div>
@@ -63,7 +66,7 @@ export function Dashboard({ swarm }: { swarm: SwarmConnectionState }) {
       {/* Vault stats */}
       <div className="card">
         <div className="card-header">{tr('Vault', '知识库')}</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, textAlign: 'center' }}>
+        <div className="dashboard-vault-grid">
           {Object.entries(vaultCounts).map(([key, count]) => (
             <div key={key}>
               <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--nori-cyan)' }}>{count}</div>
@@ -88,6 +91,10 @@ export function Dashboard({ swarm }: { swarm: SwarmConnectionState }) {
           ))}
         </div>
       )}
+      </div>
+      <aside className="dashboard-usage">
+        <UsageOverview sessions={sessions} models={models}/>
+      </aside>
     </div>
   );
 }

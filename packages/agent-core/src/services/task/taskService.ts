@@ -43,7 +43,8 @@ export class TaskService extends Disposable implements ITaskService {
     options?: GetTaskOptions,
   ): Promise<BackgroundTask> {
     await this._requireSession(sessionId);
-    const raw = await this._getAllRaw(sessionId);
+    const agentId = options?.agentId ?? MAIN_AGENT_ID;
+    const raw = await this._getAllRaw(sessionId, agentId);
     const found = raw.find((t) => t.taskId === taskId);
     if (found === undefined) {
       throw new TaskNotFoundError(sessionId, taskId);
@@ -55,7 +56,7 @@ export class TaskService extends Disposable implements ITaskService {
       try {
         const preview = await this.core.rpc.getBackgroundOutput({
           sessionId,
-          agentId: MAIN_AGENT_ID,
+          agentId,
           taskId,
           tail: tailBytes,
         });
@@ -70,12 +71,12 @@ export class TaskService extends Disposable implements ITaskService {
     return toProtocolTask(sessionId, found, output);
   }
 
-  async cancel(sessionId: string, taskId: string): Promise<{ cancelled: true }> {
+  async cancel(sessionId: string, taskId: string, agentId = MAIN_AGENT_ID): Promise<{ cancelled: true }> {
     await this._requireSession(sessionId);
     // Pre-fetch so we can distinguish the 40406 (not found) and 40904 (already
     // finished) cases deterministically — agent-core's `stopBackground` is a
     // fire-and-forget call that doesn't surface this.
-    const raw = await this._getAllRaw(sessionId);
+    const raw = await this._getAllRaw(sessionId, agentId);
     const found = raw.find((t) => t.taskId === taskId);
     if (found === undefined) {
       throw new TaskNotFoundError(sessionId, taskId);
@@ -86,10 +87,46 @@ export class TaskService extends Disposable implements ITaskService {
     }
     await this.core.rpc.stopBackground({
       sessionId,
-      agentId: MAIN_AGENT_ID,
+      agentId,
       taskId,
     });
     return { cancelled: true };
+  }
+
+  async pause(
+    sessionId: string,
+    taskId: string,
+    guidance?: string,
+    agentId = MAIN_AGENT_ID,
+  ): Promise<BackgroundTask> {
+    await this._requireActiveTask(sessionId, taskId, agentId);
+    const info = await this.core.rpc.pauseBackground({ sessionId, agentId, taskId, guidance });
+    if (info === undefined) throw new TaskNotFoundError(sessionId, taskId);
+    return toProtocolTask(sessionId, info);
+  }
+
+  async guide(
+    sessionId: string,
+    taskId: string,
+    guidance: string,
+    agentId = MAIN_AGENT_ID,
+  ): Promise<BackgroundTask> {
+    await this._requireActiveTask(sessionId, taskId, agentId);
+    const info = await this.core.rpc.guideBackground({ sessionId, agentId, taskId, guidance });
+    if (info === undefined) throw new TaskNotFoundError(sessionId, taskId);
+    return toProtocolTask(sessionId, info);
+  }
+
+  async resume(
+    sessionId: string,
+    taskId: string,
+    guidance?: string,
+    agentId = MAIN_AGENT_ID,
+  ): Promise<BackgroundTask> {
+    await this._requireActiveTask(sessionId, taskId, agentId);
+    const info = await this.core.rpc.resumeBackground({ sessionId, agentId, taskId, guidance });
+    if (info === undefined) throw new TaskNotFoundError(sessionId, taskId);
+    return toProtocolTask(sessionId, info);
   }
 
   // --- internals ------------------------------------------------------------
@@ -103,16 +140,25 @@ export class TaskService extends Disposable implements ITaskService {
 
   private async _getAllRaw(
     sessionId: string,
+    agentId = MAIN_AGENT_ID,
   ): Promise<ReadonlyArray<Awaited<ReturnType<typeof this.core.rpc.getBackground>>[number]>> {
     try {
       return await this.core.rpc.getBackground({
         sessionId,
-        agentId: MAIN_AGENT_ID,
+        agentId,
       });
     } catch {
       // Session not loaded; treat as empty.
       return [];
     }
+  }
+
+  private async _requireActiveTask(sessionId: string, taskId: string, agentId: string): Promise<void> {
+    const raw = await this._getAllRaw(sessionId, agentId);
+    const found = raw.find((task) => task.taskId === taskId);
+    if (found === undefined) throw new TaskNotFoundError(sessionId, taskId);
+    const status = toProtocolTask(sessionId, found).status;
+    if (isTerminalStatus(status)) throw new TaskAlreadyFinishedError(sessionId, taskId, status);
   }
 }
 

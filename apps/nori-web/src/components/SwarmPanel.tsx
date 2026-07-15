@@ -1,24 +1,36 @@
 import { useEffect, useState } from 'react';
 import type { SwarmConnectionState } from '../hooks/useApi';
-import { api, type BackgroundTask, type SwarmStatus } from '../api/client';
+import { api, type BackgroundTask, type Session, type SwarmStatus } from '../api/client';
 import { useI18n } from '../i18n';
 import { MarkdownView } from './MarkdownView';
+import { Icon } from './Icon';
 
-export function SwarmPanel({ swarm, sessionId }: { swarm: SwarmConnectionState; sessionId?: string | null }) {
+export function SwarmPanel({
+  swarm,
+  sessionId,
+  sessions,
+}: {
+  swarm: SwarmConnectionState;
+  sessionId?: string | null;
+  sessions: Session[];
+}) {
   const { tr } = useI18n();
   const { swarmStatuses, connected, error } = swarm;
   const runs = Array.from(swarmStatuses.values())
-    .filter(status => !sessionId || status.session_id === sessionId)
-    .sort((left, right) => (right.round ?? 0) - (left.round ?? 0));
-  const rounds = groupSwarmRuns(runs);
-  const swarmTaskIds = swarmTaskIdsForRuns(runs);
+    .sort((left, right) => {
+      const timeDifference = Date.parse(right.started_at ?? '') - Date.parse(left.started_at ?? '');
+      return Number.isNaN(timeDifference) || timeDifference === 0
+        ? (right.round ?? 0) - (left.round ?? 0)
+        : timeDifference;
+    });
+  const projectGroups = groupSwarmRunsByProject(runs, sessions);
 
   return (
     <div className="swarm-panel">
       <header className="swarm-panel-header">
         <div>
           <strong>{tr('Agent rounds', '智能体轮次')}</strong>
-          <span>{tr('Live output and token usage for this conversation', '当前会话的实时输出与 token 消耗')}</span>
+          <span>{tr('Live output grouped by project and conversation', '按项目与会话查看实时输出和 token 消耗')}</span>
         </div>
         <div className="live-indicator">
           <span className={`status-dot ${connected ? 'active' : 'error'}`} />
@@ -41,17 +53,133 @@ export function SwarmPanel({ swarm, sessionId }: { swarm: SwarmConnectionState; 
           </div>
         </div>
       ) : (
-        <div className="swarm-round-list">
-          {Array.from(rounds.entries()).map(([round, roundRuns]) => (
-            <SwarmRound key={round} round={round} runs={roundRuns} allRuns={runs} />
+        <div className="swarm-project-list">
+          {projectGroups.map(project => (
+            <SwarmProject
+              key={project.key}
+              project={project}
+              currentSessionId={sessionId}
+            />
           ))}
         </div>
       )}
-      {sessionId && (
-        <BackgroundTasksPanel sessionId={sessionId} swarmTaskIds={swarmTaskIds}/>
-      )}
     </div>
   );
+}
+
+export interface SwarmSessionGroup {
+  key: string;
+  sessionId?: string;
+  title: string;
+  runs: SwarmStatus[];
+}
+
+export interface SwarmProjectGroup {
+  key: string;
+  path?: string;
+  sessions: SwarmSessionGroup[];
+}
+
+export function groupSwarmRunsByProject(
+  runs: SwarmStatus[],
+  sessions: Session[],
+): SwarmProjectGroup[] {
+  const sessionById = new Map(sessions.map(session => [session.id, session]));
+  const projects = new Map<string, SwarmProjectGroup>();
+  const sessionGroups = new Map<string, SwarmSessionGroup>();
+
+  for (const run of runs) {
+    const session = run.session_id ? sessionById.get(run.session_id) : undefined;
+    const cwd = session?.metadata?.cwd?.trim().replaceAll('\\', '/').replace(/\/+$/, '');
+    const projectKey = cwd || '__unassigned__';
+    let project = projects.get(projectKey);
+    if (project === undefined) {
+      project = { key: projectKey, path: cwd, sessions: [] };
+      projects.set(projectKey, project);
+    }
+
+    const sessionKey = `${projectKey}:${run.session_id ?? '__unknown__'}`;
+    let sessionGroup = sessionGroups.get(sessionKey);
+    if (sessionGroup === undefined) {
+      sessionGroup = {
+        key: sessionKey,
+        sessionId: run.session_id,
+        title: session?.title || run.session_id?.slice(0, 8) || 'Unknown conversation',
+        runs: [],
+      };
+      sessionGroups.set(sessionKey, sessionGroup);
+      project.sessions.push(sessionGroup);
+    }
+    sessionGroup.runs.push(run);
+  }
+
+  return [...projects.values()];
+}
+
+function SwarmProject({
+  project,
+  currentSessionId,
+}: {
+  project: SwarmProjectGroup;
+  currentSessionId?: string | null;
+}) {
+  const { tr } = useI18n();
+  const name = project.path?.split('/').filter(Boolean).at(-1)
+    ?? tr('Unassigned project', '未指定项目');
+  const path = project.path ?? tr('Project information unavailable', '项目路径不可用');
+
+  return <section className="swarm-project-group">
+    <header className="swarm-project-heading" title={path}>
+      <span><strong>{name}</strong><small>{path}</small></span>
+      <small>{project.sessions.length} {tr('conversations', '个会话')}</small>
+    </header>
+    <div className="swarm-session-list">
+      {project.sessions.map(group => (
+        <SwarmSession
+          key={group.key}
+          group={group}
+          current={group.sessionId === currentSessionId}
+        />
+      ))}
+    </div>
+  </section>;
+}
+
+function SwarmSession({ group, current }: { group: SwarmSessionGroup; current: boolean }) {
+  const { tr } = useI18n();
+  const rounds = groupSwarmRuns(group.runs);
+  const treeRuns = collectSwarmTreeRuns([...rounds.values()].flat(), group.runs);
+  const progress = treeRuns.map(swarmRunProgress);
+  const running = progress.some(item => item.running);
+  const paused = !running && progress.some(item => item.status === 'paused');
+  const [open, setOpen] = useState(current || running);
+  const swarmTaskIds = swarmTaskIdsForRuns(group.runs);
+
+  useEffect(() => {
+    if (current || running) setOpen(true);
+  }, [current, running]);
+
+  return <details
+    className={`swarm-session-group${current ? ' current' : ''}`}
+    open={open}
+    onToggle={event => setOpen(event.currentTarget.open)}
+  >
+    <summary>
+      <span className={`status-dot ${running ? 'running' : paused ? 'paused' : 'done'}`}/>
+      <span><strong>{group.title}</strong><small>{group.sessionId ?? tr('Unknown conversation', '未知会话')}</small></span>
+      <span className={`badge badge-${running ? 'info' : paused ? 'warning' : 'success'}`}>{running ? tr('Running', '运行中') : paused ? tr('Paused', '已暂停') : tr('Done', '已完成')}</span>
+    </summary>
+    <div className="swarm-session-body">
+      <div className="swarm-round-list">
+        {Array.from(rounds.entries()).map(([round, roundRuns]) => (
+          <SwarmRound key={round} round={round} runs={roundRuns} allRuns={group.runs}/>
+        ))}
+      </div>
+      {current && group.sessionId && (
+        <BackgroundTasksPanel sessionId={group.sessionId} swarmTaskIds={swarmTaskIds}/>
+      )}
+    </div>
+  </details>;
 }
 
 export function groupSwarmRuns(runs: SwarmStatus[]): Map<number, SwarmStatus[]> {
@@ -94,7 +222,7 @@ export function runningSwarmAgents(runs: SwarmStatus[]): { ids: Set<string>; unt
   let untracked = 0;
   for (const run of runs) {
     if (!run.tasks) {
-      untracked++;
+      if (swarmRunProgress(run).running) untracked++;
       continue;
     }
     for (const task of run.tasks) {
@@ -104,13 +232,37 @@ export function runningSwarmAgents(runs: SwarmStatus[]): { ids: Set<string>; unt
   return { ids, untracked };
 }
 
+export function swarmRunProgress(run: SwarmStatus): {
+  total: number;
+  completed: number;
+  running: boolean;
+  status: SwarmStatus['status'];
+} {
+  const tasks = run.tasks ?? [];
+  const total = Math.max(run.task_count, tasks.length, 1);
+  const completedFromTasks = tasks.filter(task => isTaskFinished(task.status)).length;
+  const explicitlyFinished = run.status === 'done' || run.status === 'failed' || run.status === 'stopped';
+  const tasksFinished = tasks.length >= total && completedFromTasks >= total;
+  const completed = explicitlyFinished
+    ? total
+    : Math.min(total, Math.max(run.completed_count, completedFromTasks));
+  const failed = run.status === 'failed'
+    || tasks.some(task => task.status === 'failed' || task.status === 'cancelled');
+  const status = explicitlyFinished || tasksFinished
+    ? (run.status === 'stopped' ? 'stopped' : failed ? 'failed' : 'done')
+    : run.status;
+  return { total, completed, running: status === 'running' || status === 'pending', status };
+}
+
 function SwarmRound({ round, runs, allRuns }: { round: number; runs: SwarmStatus[]; allRuns: SwarmStatus[] }) {
   const { tr } = useI18n();
   const treeRuns = collectSwarmTreeRuns(runs, allRuns);
-  const running = treeRuns.some(run => run.status === 'running' || run.status === 'pending');
+  const progressByRun = treeRuns.map(swarmRunProgress);
+  const running = progressByRun.some(progress => progress.running);
+  const paused = !running && progressByRun.some(progress => progress.status === 'paused');
   const [open, setOpen] = useState(running);
-  const agentCount = treeRuns.reduce((total, run) => total + run.task_count, 0);
-  const completedCount = treeRuns.reduce((total, run) => total + run.completed_count, 0);
+  const agentCount = progressByRun.reduce((total, progress) => total + progress.total, 0);
+  const completedCount = progressByRun.reduce((total, progress) => total + progress.completed, 0);
   const tokens = treeRuns.reduce((total, run) => total + swarmRunTokens(run), 0);
   const hasLiveTokens = treeRuns.some(run => run.tasks?.some(task => (task.live_output_tokens ?? 0) > 0));
 
@@ -120,9 +272,9 @@ function SwarmRound({ round, runs, allRuns }: { round: number; runs: SwarmStatus
 
   return <details className={`swarm-round${running ? ' running' : ''}`} open={open} onToggle={event => setOpen(event.currentTarget.open)}>
     <summary>
-      <span className={`status-dot ${running ? 'running' : 'done'}`}/>
+      <span className={`status-dot ${running ? 'running' : paused ? 'paused' : 'done'}`}/>
       <span className="swarm-round-copy"><strong>{tr(`Round ${round}`, `第 ${round} 轮`)}</strong><small>{completedCount}/{agentCount} {tr('agents complete', '个智能体已完成')}</small></span>
-      <span className="swarm-round-meta">{tokens > 0 && <small>{hasLiveTokens ? '~' : ''}{tokens.toLocaleString()} tokens</small>}<span className={`badge badge-${running ? 'info' : 'success'}`}>{running ? tr('Running', '运行中') : tr('Done', '已完成')}</span></span>
+      <span className="swarm-round-meta">{tokens > 0 && <small>{hasLiveTokens ? '~' : ''}{tokens.toLocaleString()} tokens</small>}<span className={`badge badge-${running ? 'info' : paused ? 'warning' : 'success'}`}>{running ? tr('Running', '运行中') : paused ? tr('Paused', '已暂停') : tr('Done', '已完成')}</span></span>
     </summary>
     <div className="swarm-round-body">{runs.map(run => <SwarmRun key={run.swarm_id} run={run} allRuns={allRuns}/>)}</div>
   </details>;
@@ -130,20 +282,57 @@ function SwarmRound({ round, runs, allRuns }: { round: number; runs: SwarmStatus
 
 function SwarmRun({ run, allRuns }: { run: SwarmStatus; allRuns: SwarmStatus[] }) {
   const { tr } = useI18n();
-  const progress = run.task_count > 0 ? Math.round((run.completed_count / run.task_count) * 100) : 0;
+  const runProgress = swarmRunProgress(run);
+  const progress = Math.round((runProgress.completed / runProgress.total) * 100);
   const tasks = run.tasks ?? [];
   const childRuns = allRuns.filter(child => child.parent_swarm_id === run.swarm_id);
   const taskAgentIds = new Set(tasks.flatMap(task => task.agent_id ? [task.agent_id] : []));
   const unattachedChildren = childRuns.filter(child => !child.owner_agent_id || !taskAgentIds.has(child.owner_agent_id));
   const tokens = swarmRunTokens(run);
   const hasLiveTokens = tasks.some(task => (task.live_output_tokens ?? 0) > 0);
-  return <section className={`swarm-run swarm-run-${run.status}`}>
+  const [guidance, setGuidance] = useState('');
+  const [busy, setBusy] = useState<'stop' | 'pause' | 'guide' | 'resume' | null>(null);
+  const [controlError, setControlError] = useState<string | null>(null);
+  const controllable = runProgress.status === 'running'
+    || runProgress.status === 'pending'
+    || runProgress.status === 'paused';
+
+  const control = async (action: 'stop' | 'pause' | 'guide' | 'resume') => {
+    if (busy !== null) return;
+    if (action === 'stop' && !window.confirm(tr('Stop this swarm?', '停止这个智能体协作任务吗？'))) return;
+    setBusy(action);
+    setControlError(null);
+    try {
+      await api.swarm.control(run.swarm_id, action, guidance);
+      if (action === 'guide' || action === 'resume') setGuidance('');
+    } catch (error) {
+      setControlError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return <section className={`swarm-run swarm-run-${runProgress.status}`}>
     <header>
-      <span className={`status-dot ${run.status}`}/>
+      <span className={`status-dot ${runProgress.status}`}/>
       <span><strong>{run.description || run.swarm_id}</strong><small>{run.owner_agent_id === 'main' ? tr('Started by Nori', '由 Nori 发起') : tr('Started by an agent', '由智能体发起')}</small></span>
-      <span className="swarm-run-stats"><small>{run.completed_count}/{run.task_count}</small>{tokens > 0 && <small>{hasLiveTokens ? '~' : ''}{tokens.toLocaleString()} tokens</small>}</span>
+      <span className="swarm-run-stats">
+        <small>{runProgress.completed}/{runProgress.total}</small>
+        {tokens > 0 && <small>{hasLiveTokens ? '~' : ''}{tokens.toLocaleString()} tokens</small>}
+        {controllable && <span className="swarm-run-controls">
+          {runProgress.status === 'paused'
+            ? <button type="button" onClick={() => void control('resume')} disabled={busy !== null} title={tr('Resume swarm', '恢复协作')}><Icon name="play" size={12}/></button>
+            : <button type="button" onClick={() => void control('pause')} disabled={busy !== null} title={tr('Pause swarm', '暂停协作')}><Icon name="pause" size={12}/></button>}
+          <button type="button" className="danger" onClick={() => void control('stop')} disabled={busy !== null} title={tr('Stop swarm', '停止协作')}><Icon name="stop" size={11}/></button>
+        </span>}
+      </span>
     </header>
     <div className="swarm-run-progress"><i style={{ width: `${progress}%` }}/></div>
+    {runProgress.status === 'paused' && <div className="swarm-guidance">
+      <input value={guidance} onChange={event => setGuidance(event.target.value)} placeholder={tr('Add guidance before resuming', '在恢复前追加引导指令')} disabled={busy !== null}/>
+      <button type="button" onClick={() => void control('guide')} disabled={!guidance.trim() || busy !== null}>{busy === 'guide' ? tr('Adding…', '添加中…') : tr('Add', '追加')}</button>
+    </div>}
+    {controlError && <div className="swarm-control-error">{controlError}</div>}
     <div className="swarm-task-items">
       {tasks.length > 0
         ? tasks.map(task => {
@@ -267,6 +456,7 @@ function PreviewNotice({
 function taskStatusBadge(status: string): string {
   if (status === 'done' || status === 'completed') return 'success';
   if (status === 'running') return 'info';
+  if (status === 'paused') return 'warning';
   if (status === 'failed' || status === 'cancelled') return 'danger';
   return 'muted';
 }
@@ -277,6 +467,7 @@ function taskStatusLabel(
 ): string {
   if (status === 'done' || status === 'completed') return tr('Done', '已完成');
   if (status === 'running') return tr('Running', '运行中');
+  if (status === 'paused') return tr('Paused', '已暂停');
   if (status === 'failed') return tr('Failed', '失败');
   if (status === 'cancelled') return tr('Cancelled', '已取消');
   if (status === 'pending' || status === 'queued') return tr('Pending', '等待中');

@@ -41,7 +41,6 @@ import { renderUserPromptHookBlockResult, renderUserPromptHookResult } from '../
 import { canonicalTelemetryArgs, isPlainRecord } from './canonical-args';
 import { ToolCallDeduplicator } from './tool-dedup';
 import { budgetToolResultForModel } from './tool-result-budget';
-import type { RuleContext } from './rule-engine';
 import {
   type NoriReviewActivity,
   type NoriReviewGateDecision,
@@ -341,6 +340,12 @@ export class TurnFlow {
     return true;
   }
 
+  private launchBufferedSteerIfIdle(): void {
+    if (this.activeTurn !== null || this.agent.fullCompaction.isCompacting) return;
+    const next = this.steerBuffer.shift();
+    if (next !== undefined) this.launch(next.input, next.origin);
+  }
+
   /**
    * Replay inputs (prompts or steers) that were deferred while a manual compaction
    * held the context. Called by `FullCompaction` once the compaction lifecycle
@@ -356,8 +361,7 @@ export class TurnFlow {
       this.flushSteerBuffer();
       return;
     }
-    const next = this.steerBuffer.shift()!;
-    this.launch(next.input, next.origin);
+    this.launchBufferedSteerIfIdle();
   }
 
   finishResume(): void {
@@ -412,6 +416,7 @@ export class TurnFlow {
     } finally {
       if (ownsActiveTurn()) {
         this.activeTurn = null;
+        this.launchBufferedSteerIfIdle();
       }
     }
   }
@@ -646,6 +651,7 @@ export class TurnFlow {
       this.agent.goal.getGoal().goal?.status !== 'active'
     ) {
       this.activeTurn = null;
+      this.launchBufferedSteerIfIdle();
     }
     if (this.agent.swarmMode.shouldAutoExit) {
       this.agent.swarmMode.exit();

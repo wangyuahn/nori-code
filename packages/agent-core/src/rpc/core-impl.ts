@@ -80,6 +80,7 @@ import type {
   ListSessionsPayload,
   McpServerInfo,
   McpStartupMetrics,
+  ManageBackgroundPayload,
   PluginInfo,
   PluginSummary,
   PromptPayload,
@@ -699,6 +700,18 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
 
   stopBackground({ sessionId, ...payload }: SessionAgentPayload<StopBackgroundPayload>) {
     return this.sessionApi(sessionId).stopBackground(payload);
+  }
+
+  pauseBackground({ sessionId, ...payload }: SessionAgentPayload<ManageBackgroundPayload>) {
+    return this.sessionApi(sessionId).pauseBackground(payload);
+  }
+
+  guideBackground({ sessionId, ...payload }: SessionAgentPayload<ManageBackgroundPayload>) {
+    return this.sessionApi(sessionId).guideBackground(payload);
+  }
+
+  resumeBackground({ sessionId, ...payload }: SessionAgentPayload<ManageBackgroundPayload>) {
+    return this.sessionApi(sessionId).resumeBackground(payload);
   }
 
   detachBackground({ sessionId, ...payload }: SessionAgentPayload<DetachBackgroundPayload>) {

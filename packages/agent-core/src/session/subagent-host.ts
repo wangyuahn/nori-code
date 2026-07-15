@@ -5,6 +5,7 @@ import {
 } from '@nori-code/kosong';
 
 import type { Agent } from '../agent';
+import type { BackgroundManager, BackgroundTaskInfo } from '../agent/background';
 import type { PromptOrigin } from '../agent/context';
 import { ErrorCodes, type KimiErrorPayload } from '../errors';
 import { DenyAllPermissionPolicy } from '../agent/permission/policies/deny-all';
@@ -23,6 +24,7 @@ import { collectGitContext } from './git-context';
 import type { Session } from './index';
 import {
   SubagentBatch,
+  isSwarmPauseReason,
   resolveSwarmMaxConcurrency,
   type SubagentResult,
   type SubagentSuspendedEvent,
@@ -119,6 +121,13 @@ export type SubagentHandle = {
   readonly completion: Promise<SubagentCompletion>;
 };
 
+export interface SessionAgentSwarm {
+  readonly ownerAgentId: string;
+  readonly task: BackgroundTaskInfo;
+}
+
+export type AgentSwarmControlAction = 'stop' | 'pause' | 'guide' | 'resume';
+
 export class SessionSubagentHost {
   private readonly activeChildren = new Map<
     string,
@@ -127,6 +136,7 @@ export class SessionSubagentHost {
       runInBackground: boolean;
     }
   >();
+  private readonly accountedUsageByAgent = new Map<string, TokenUsage>();
 
   // Nori runtime settings propagated through nested subagents.
   private _noriSwarmDepth: number = 0;
@@ -151,6 +161,39 @@ export class SessionSubagentHost {
     private readonly ownerAgentId: string,
   ) {}
 
+  async listAgentSwarms(): Promise<readonly SessionAgentSwarm[]> {
+    const swarms: SessionAgentSwarm[] = [];
+    for (const { ownerAgentId, background } of await this.sessionBackgroundManagers()) {
+      for (const task of background.list(false)) {
+        if (isAgentSwarmTask(task)) swarms.push({ ownerAgentId, task });
+      }
+    }
+    return swarms;
+  }
+
+  async controlAgentSwarm(
+    taskId: string,
+    action: AgentSwarmControlAction,
+    prompt?: string,
+  ): Promise<BackgroundTaskInfo | undefined> {
+    for (const { background } of await this.sessionBackgroundManagers()) {
+      const task = background.getTask(taskId);
+      if (task === undefined || !isAgentSwarmTask(task)) continue;
+      switch (action) {
+        case 'stop':
+          return background.stop(taskId, prompt);
+        case 'pause':
+          return background.pause(taskId, prompt);
+        case 'guide':
+          if (prompt === undefined) throw new Error('Guidance prompt is required.');
+          return background.addGuidance(taskId, prompt);
+        case 'resume':
+          return background.resume(taskId, prompt);
+      }
+    }
+    return undefined;
+  }
+
   async spawn(options: SpawnSubagentOptions): Promise<SubagentHandle> {
     options.signal.throwIfAborted();
 
@@ -170,13 +213,15 @@ export class SessionSubagentHost {
       retrievalGate: this._noriRetrievalGate,
     });
 
-    const completion = this.runWithActiveChild(id, options, async (runOptions) => {
+    const completion = this.runWithActiveChild(id, agent, options, async (runOptions) => {
       this.emitSubagentSpawned(parent, id, profile.name, runOptions);
       try {
         await this.configureChild(parent, agent, profile);
         return await this.runPromptTurn(parent, id, agent, profile.name, runOptions);
       } catch (error) {
-        this.emitSubagentFailed(parent, id, runOptions, error);
+        if (!isSwarmPauseReason(runOptions.signal.reason)) {
+          this.emitSubagentFailed(parent, id, runOptions, error);
+        }
         throw error;
       }
     });
@@ -188,16 +233,34 @@ export class SessionSubagentHost {
     };
   }
 
+  private async sessionBackgroundManagers(): Promise<
+    Array<{ readonly ownerAgentId: string; readonly background: BackgroundManager }>
+  > {
+    const agentIds = new Set([
+      ...Object.keys(this.session.metadata.agents),
+      this.ownerAgentId,
+    ]);
+    return Promise.all(
+      Array.from(agentIds, async (ownerAgentId) => ({
+        ownerAgentId,
+        background: (await this.session.ensureAgentResumed(ownerAgentId)).background,
+      })),
+    );
+  }
+
   async resume(agentId: string, options: RunSubagentOptions): Promise<SubagentHandle> {
     options.signal.throwIfAborted();
     const { parent, child, profileName } = await this.ensureIdleSubagent(agentId);
-    const completion = this.runWithActiveChild(agentId, options, async (runOptions) => {
+    this.rememberUsageBaseline(agentId, child);
+    const completion = this.runWithActiveChild(agentId, child, options, async (runOptions) => {
       this.emitSubagentSpawned(parent, agentId, profileName, runOptions);
       try {
         child.config.update({ modelAlias: parent.config.modelAlias });
         return await this.runPromptTurn(parent, agentId, child, profileName, runOptions);
       } catch (error) {
-        this.emitSubagentFailed(parent, agentId, runOptions, error);
+        if (!isSwarmPauseReason(runOptions.signal.reason)) {
+          this.emitSubagentFailed(parent, agentId, runOptions, error);
+        }
         throw error;
       }
     });
@@ -207,7 +270,8 @@ export class SessionSubagentHost {
   async retry(agentId: string, options: RunSubagentOptions): Promise<SubagentHandle> {
     options.signal.throwIfAborted();
     const { parent, child, profileName } = await this.ensureIdleSubagent(agentId);
-    const completion = this.runWithActiveChild(agentId, options, async (runOptions) => {
+    this.rememberUsageBaseline(agentId, child);
+    const completion = this.runWithActiveChild(agentId, child, options, async (runOptions) => {
       try {
         runOptions.signal.throwIfAborted();
         child.config.update({ modelAlias: parent.config.modelAlias });
@@ -219,7 +283,9 @@ export class SessionSubagentHost {
         this.observeFirstRequest(child, runOptions);
         return await this.waitForChildCompletion(parent, agentId, child, profileName, runOptions);
       } catch (error) {
-        this.emitSubagentFailed(parent, agentId, runOptions, error);
+        if (!isSwarmPauseReason(runOptions.signal.reason)) {
+          this.emitSubagentFailed(parent, agentId, runOptions, error);
+        }
         throw error;
       }
     });
@@ -249,6 +315,19 @@ export class SessionSubagentHost {
   async runQueued<T>(tasks: readonly QueuedSubagentTask<T>[]): Promise<Array<SubagentResult<T>>> {
     const maxConcurrency = resolveSwarmMaxConcurrency();
     return new SubagentBatch(this, tasks, { maxConcurrency }).run();
+  }
+
+  async runQueuedControlled<T>(
+    tasks: readonly QueuedSubagentTask<T>[],
+    observe: (batch: SubagentBatch<T> | undefined) => void,
+  ): Promise<Array<SubagentResult<T>>> {
+    const batch = new SubagentBatch(this, tasks, { maxConcurrency: resolveSwarmMaxConcurrency() });
+    observe(batch);
+    try {
+      return await batch.run();
+    } finally {
+      observe(undefined);
+    }
   }
 
   suspended(event: SubagentSuspendedEvent): void {
@@ -389,6 +468,7 @@ export class SessionSubagentHost {
 
   private runWithActiveChild(
     childId: string,
+    child: Agent,
     options: RunSubagentOptions,
     run: (options: RunSubagentOptions) => Promise<SubagentCompletion>,
   ): Promise<SubagentCompletion> {
@@ -399,7 +479,8 @@ export class SessionSubagentHost {
       runInBackground: options.runInBackground,
     });
 
-    return run({ ...options, signal: controller.signal }).finally(() => {
+    return run({ ...options, signal: controller.signal }).finally(async () => {
+      await this.accountChildUsage(childId, child).catch(() => undefined);
       unlinkAbortSignal();
       this.activeChildren.delete(childId);
     });
@@ -524,7 +605,7 @@ export class SessionSubagentHost {
       await runChildTurnToCompletion(child, options.signal);
       result = lastAssistantText(child);
     }
-    const usage = child.usage.data().total;
+    const usage = await this.accountChildUsage(childId, child);
     parent.emitEvent({
       type: 'subagent.completed',
       subagentId: childId,
@@ -534,6 +615,23 @@ export class SessionSubagentHost {
     });
     this.triggerSubagentStop(parent, profileName, result);
     return { result, usage };
+  }
+
+  private rememberUsageBaseline(agentId: string, child: Agent): void {
+    if (this.accountedUsageByAgent.has(agentId)) return;
+    const usage = child.usage.data().total;
+    if (usage !== undefined) this.accountedUsageByAgent.set(agentId, usage);
+  }
+
+  private async accountChildUsage(agentId: string, child: Agent): Promise<TokenUsage | undefined> {
+    const cumulativeUsage = child.usage.data().total;
+    const usage = usageDelta(cumulativeUsage, this.accountedUsageByAgent.get(agentId));
+    if (usage !== undefined && usageTotal(usage) > 0) {
+      const main = await this.session.ensureAgentResumed('main');
+      main.usage.record(child.config.modelAlias ?? 'unknown', usage, 'session');
+    }
+    if (cumulativeUsage !== undefined) this.accountedUsageByAgent.set(agentId, cumulativeUsage);
+    return usage;
   }
 
   private async configureChild(
@@ -722,6 +820,10 @@ ${
   }
 }
 
+function isAgentSwarmTask(task: BackgroundTaskInfo): boolean {
+  return task.kind === 'agent' && task.subagentType?.startsWith('swarm') === true;
+}
+
 function parseNoriRetrievalQuery(
   text: string,
   maxResults: number,
@@ -828,6 +930,21 @@ function toStringArray(value: unknown): string[] | undefined {
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
   return strings.length === 0 ? undefined : strings;
+}
+
+function usageDelta(current: TokenUsage | undefined, previous: TokenUsage | undefined): TokenUsage | undefined {
+  if (current === undefined) return undefined;
+  if (previous === undefined) return { ...current };
+  return {
+    inputOther: Math.max(0, current.inputOther - previous.inputOther),
+    output: Math.max(0, current.output - previous.output),
+    inputCacheRead: Math.max(0, current.inputCacheRead - previous.inputCacheRead),
+    inputCacheCreation: Math.max(0, current.inputCacheCreation - previous.inputCacheCreation),
+  };
+}
+
+function usageTotal(usage: TokenUsage): number {
+  return usage.inputOther + usage.output + usage.inputCacheRead + usage.inputCacheCreation;
 }
 
 function stripJsonFence(text: string): string {

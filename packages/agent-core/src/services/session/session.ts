@@ -115,6 +115,20 @@ export function toProtocolSession(
 
   const title = meta?.title ?? summary.title ?? '';
   const workspaceId = encodeWorkDirKey(summary.workDir);
+  const totalUsage = summary.usage?.total;
+  const messageCount = summary.messageCount ?? 0;
+  const usage = totalUsage === undefined
+    ? emptySessionUsage()
+    : {
+        input_tokens: totalUsage.inputOther,
+        output_tokens: totalUsage.output,
+        cache_read_tokens: totalUsage.inputCacheRead,
+        cache_creation_tokens: totalUsage.inputCacheCreation,
+        total_cost_usd: 0,
+        context_tokens: 0,
+        context_limit: 0,
+        turn_count: messageCount,
+      };
 
   return {
     id: summary.id,
@@ -127,11 +141,11 @@ export function toProtocolSession(
     last_prompt: summary.lastPrompt,
     metadata: mergedMetadata,
     agent_config: {
-      model: '',
+      model: summary.model ?? '',
     },
-    usage: emptySessionUsage(),
+    usage,
     permission_rules: [],
-    message_count: 0,
+    message_count: messageCount,
     last_seq: 0,
   };
 }

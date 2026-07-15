@@ -33,6 +33,21 @@ describe('usage overview aggregation', () => {
     ];
     expect(summarizeUsage(sessions, '7d', now)).toMatchObject({ sessions: 1, messages: 3, tokens: 15 });
   });
+
+  it('ignores unknown models when choosing the most frequently used real model', () => {
+    const now = new Date(2026, 6, 15, 12);
+    const sessions = [
+      session('unknown-a', new Date(2026, 6, 15, 8), 0, '', [0, 0, 0, 0]),
+      session('unknown-b', new Date(2026, 6, 15, 9), 0, 'Unknown', [0, 0, 0, 0]),
+      session('real-a', new Date(2026, 6, 15, 10), 2, 'model-a', [10, 2, 0, 0]),
+      session('real-b', new Date(2026, 6, 15, 11), 1, 'model-a', [8, 1, 0, 0]),
+      session('real-c', new Date(2026, 6, 15, 12), 20, 'model-b', [1_000, 500, 0, 0]),
+    ];
+
+    const summary = summarizeUsage(sessions, 'all', now);
+    expect(summary.favoriteModel).toBe('model-a');
+    expect(summary.models.map(model => model.model)).toEqual(['model-a', 'model-b']);
+  });
 });
 
 function session(

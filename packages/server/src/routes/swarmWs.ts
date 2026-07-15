@@ -16,7 +16,7 @@ import { listSwarmStatuses } from './swarmStatus';
 export interface SwarmStatusPayload {
   type: 'swarm_status';
   swarm_id: string;
-  status: 'pending' | 'running' | 'done' | 'failed';
+  status: 'pending' | 'running' | 'paused' | 'done' | 'failed' | 'stopped';
   task_count: number;
   completed_count: number;
   session_id?: string;

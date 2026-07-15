@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.1.16
+- Restore authenticated real-time WebSocket streaming, including continued output after tool calls.
+- Stabilize workspace file and Git refreshes, nested-repository detection, and Windows untracked-file diffs.
+- Add responsive usage dashboards, lazy session creation, reliable rename/fork actions, and native Markdown export.
+- Improve change cards with explicit agent attribution, metadata-only filtering, collapsible diffs, and filename-preserving paths.
+- Add loading feedback, consolidated assistant turns, and focused regression coverage for the updated desktop workflow.
+- Run Agent and Agent Swarm work in the background with completion/failure wakeups, nested task management, usage accounting, and per-session activity views.
+- Add project-scoped change caching, shared Git refreshes, slash commands, Plan/Code switching, multimodal Kimi capability detection, and richer Swarm controls.
+- Add an independent OpenAI-compatible embedding provider for vector Memory retrieval, with separate credentials, secure configuration responses, caching, and hybrid semantic/full-text/link scoring.
+
 ## v0.1.13
 - **nori_memory_remove** — delete notes from vault (soft-delete to .trash/)
 - **WebSearch fix** — always available with DuckDuckGo fallback, 10s timeout + abort support
