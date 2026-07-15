@@ -28,7 +28,7 @@
  */
 
 import { createDecorator } from '../../di';
-import type { AuthSummary } from '@moonshot-ai/protocol';
+import type { AuthSummary } from '@nori-code/protocol';
 
 export interface IAuthSummaryService {
   readonly _serviceBrand: undefined;

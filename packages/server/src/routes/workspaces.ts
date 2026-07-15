@@ -9,9 +9,9 @@ import {
   updateWorkspaceRequestSchema,
   updateWorkspaceResponseSchema,
   workspaceIdParamSchema,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 
-import { IWorkspaceRegistry, WorkspaceNotFoundError, WorkspaceRootNotFoundError, type IInstantiationService } from '@moonshot-ai/agent-core';
+import { IWorkspaceRegistry, WorkspaceNotFoundError, WorkspaceRootNotFoundError, type IInstantiationService } from '@nori-code/agent-core';
 
 import { errEnvelope, okEnvelope } from '../envelope';
 import { defineRoute } from '../middleware/defineRoute';

@@ -1,7 +1,7 @@
 /**
  * WS upgrade auth (ROADMAP M3).
  *
- * M3.1 adds the `kimi-code.bearer.<token>` subprotocol parser; M3.2 wires it
+ * M3.1 adds the `nori-code.bearer.<token>` subprotocol parser; M3.2 wires it
  * into the upgrade path. The parser is exercised as pure unit cases first; the
  * upgrade-path cases boot `startServer` with a fixed-token
  * `IAuthTokenService` injected through `wsGatewayOptions.authTokenService`.
@@ -30,15 +30,15 @@ describe('extractWsBearerToken', () => {
   });
 
   it('extracts the token from a single bearer subprotocol', () => {
-    expect(extractWsBearerToken('kimi-code.bearer.TOKEN')).toBe('TOKEN');
+    expect(extractWsBearerToken('nori-code.bearer.TOKEN')).toBe('TOKEN');
   });
 
   it('finds the bearer subprotocol among a comma-separated list', () => {
-    expect(extractWsBearerToken('other, kimi-code.bearer.TOKEN2')).toBe('TOKEN2');
+    expect(extractWsBearerToken('other, nori-code.bearer.TOKEN2')).toBe('TOKEN2');
   });
 
   it('returns undefined for an empty token', () => {
-    expect(extractWsBearerToken('kimi-code.bearer.')).toBeUndefined();
+    expect(extractWsBearerToken('nori-code.bearer.')).toBeUndefined();
   });
 
   it('returns undefined when no subprotocol matches', () => {
@@ -209,11 +209,11 @@ describe('ws upgrade auth', () => {
   it('accepts a valid bearer subprotocol and echoes it', async () => {
     const r = await spawn();
     const conn = await openConn(wsUrl(r.address), {
-      protocols: ['kimi-code.bearer.test-token'],
+      protocols: ['nori-code.bearer.test-token'],
     });
 
     await receiveType(conn, 'server_hello', 1000);
-    expect(conn.ws.protocol).toBe('kimi-code.bearer.test-token');
+    expect(conn.ws.protocol).toBe('nori-code.bearer.test-token');
 
     conn.ws.close();
     await conn.closed;
@@ -235,7 +235,7 @@ describe('ws upgrade auth', () => {
   it('rejects a wrong bearer token without server_hello', async () => {
     const r = await spawn();
     await expectRejected(wsUrl(r.address), {
-      protocols: ['kimi-code.bearer.wrong'],
+      protocols: ['nori-code.bearer.wrong'],
     });
   });
 
@@ -247,6 +247,6 @@ describe('ws upgrade auth', () => {
   it('rejects upgrades to a non-/api/v1/ws path', async () => {
     const r = await spawn();
     const badUrl = r.address.replace(/^http:\/\//, 'ws://') + '/api/v1/other';
-    await expectRejected(badUrl, { protocols: ['kimi-code.bearer.test-token'] });
+    await expectRejected(badUrl, { protocols: ['nori-code.bearer.test-token'] });
   });
 });

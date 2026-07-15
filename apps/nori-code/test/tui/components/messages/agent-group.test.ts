@@ -1,4 +1,4 @@
-import type { TUI } from '@moonshot-ai/pi-tui';
+import type { TUI } from '@nori-code/pi-tui';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentGroupComponent } from '#/tui/components/messages/agent-group';

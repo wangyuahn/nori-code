@@ -12,7 +12,7 @@ import {
   resolveKimiCodeOAuthKey,
   resolveKimiTokenStorageName,
   type TokenInfo,
-} from '@moonshot-ai/kimi-code-oauth';
+} from '@nori-code/oauth';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createKimiHarness, ErrorCodes, KimiError } from '#/index';

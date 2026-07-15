@@ -14,7 +14,7 @@ import {
 
 import { type InstallSource, type UpdateTarget } from './types';
 
-export const CHANGELOG_URL = 'https://moonshotai.github.io/kimi-code/en/release-notes/changelog.html';
+export const CHANGELOG_URL = 'https://github.com/wangyuahn/nori-code/releases';
 
 export type InstallPromptChoiceValue = 'install' | 'skip';
 

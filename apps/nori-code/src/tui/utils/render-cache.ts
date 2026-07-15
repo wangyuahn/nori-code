@@ -13,7 +13,7 @@
  * compare cached vs. uncached runs in the same process).
  */
 
-let enabled = process.env['KIMI_TUI_NO_RENDER_CACHE'] !== '1';
+let enabled = (process.env['NORI_TUI_NO_RENDER_CACHE'] ?? process.env['KIMI_TUI_NO_RENDER_CACHE']) !== '1';
 
 export function isRenderCacheEnabled(): boolean {
   return enabled;

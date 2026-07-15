@@ -13,7 +13,7 @@ import type {
   FsSearchHit,
   FsSearchRequest,
   FsSearchResponse,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 import ignore, { type Ignore } from 'ignore';
 
 import { ISessionService } from '../session/session';

@@ -1,4 +1,4 @@
-# @moonshot-ai/kaos
+# @nori-code/kaos
 
 Execution environment abstraction used by Kimi Code.
 

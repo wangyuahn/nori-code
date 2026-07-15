@@ -105,14 +105,17 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
 
     const titleToIndex = new Map<string, number>();
     for (let i = 0; i < allNotes.length; i++) {
-      titleToIndex.set(allNotes[i].title, i);
+      const note = allNotes[i];
+      if (note !== undefined) titleToIndex.set(note.title, i);
     }
 
     // adjacency[i] = indices of notes that note i links TO (outgoing)
     const adjacency = new Map<number, number[]>();
     for (let i = 0; i < allNotes.length; i++) {
       const targets: number[] = [];
-      for (const linkTitle of allNotes[i].links) {
+      const note = allNotes[i];
+      if (note === undefined) continue;
+      for (const linkTitle of note.links) {
         const targetIdx = titleToIndex.get(linkTitle);
         if (targetIdx !== undefined) targets.push(targetIdx);
       }
@@ -122,8 +125,9 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
     // Seeds: notes with keyword score > 0
     const seedScores = new Map<number, number>();
     for (let i = 0; i < allNotes.length; i++) {
-      if (allNotes[i].score > 0) {
-        seedScores.set(i, allNotes[i].score);
+      const note = allNotes[i];
+      if (note !== undefined && note.score > 0) {
+        seedScores.set(i, note.score);
       }
     }
 
@@ -161,8 +165,8 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
 
         let front = 0;
         while (front < queue.length) {
-          const currentIdx = queue[front];
-          const currentDepth = depthOf[front];
+          const currentIdx = queue[front]!;
+          const currentDepth = depthOf[front]!;
           front++;
 
           if (currentDepth >= linkDepth) continue;
@@ -370,7 +374,7 @@ class SimpleSwarmProvider implements NoriSwarmProvider {
       description: 'swarm:' + check.id,
       swarmIndex: idx,
       swarmItem: check.id,
-      runInBackground: false,
+      runInBackground: true,
     }));
 
     // Fire-and-forget: launch all tasks concurrently via SubagentBatch
@@ -636,7 +640,7 @@ export function createNoriProvidersFromConfig(noriConfig: Record<string, unknown
 
   const coderWriteEnabled = (swarm?.['coder_write_enabled'] as boolean) ?? false;
   const swarmProvider = new SimpleSwarmProvider();
-  swarmProvider.setNoriConfig(noriConfig);
+  if (noriConfig !== null) swarmProvider.setNoriConfig(noriConfig);
 
   return {
     memory: new SimpleMemoryProvider(vaultPath),

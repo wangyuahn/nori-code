@@ -13,7 +13,7 @@
 
 import { basename, join } from 'pathe';
 
-import type { Kaos } from '@moonshot-ai/kaos';
+import type { Kaos } from '@nori-code/kaos';
 
 export const LIST_DIR_ROOT_WIDTH = 30;
 export const LIST_DIR_CHILD_WIDTH = 10;

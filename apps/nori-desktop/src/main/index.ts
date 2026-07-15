@@ -1,15 +1,28 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { app, BrowserWindow, Menu, shell } from 'electron';
-import type { MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, globalShortcut, Menu, screen, session, shell } from 'electron';
 
-import { ensureServer, noriHome, serverLogPath } from './ensure-server';
+import { ensureServer, serverLogPath } from './ensure-server';
 import { registerIpcHandlers } from './ipc-handlers';
+import { registerUpdateHandlers } from './updater';
 import { resolveSeaPath } from './sea-path';
 import { createTray } from './tray';
+import { BrowserViewManager, registerBrowserIpc } from './browser-view';
+import { registerTerminalIpc } from './terminal';
+import { createSplashWindow } from './splash';
+import {
+  configureNoriApplicationIdentity,
+  NORI_PRODUCT_NAME,
+  NORI_PROTOCOL,
+  noriRuntimeIconPath,
+} from './brand';
+
+configureNoriApplicationIdentity();
 
 let mainWindow: BrowserWindow | null = null;
+let splashWindow: BrowserWindow | null = null;
+let browserManager: BrowserViewManager | null = null;
 
 // --- window state persistence -------------------------------------------------
 
@@ -29,21 +42,46 @@ function stateFile(): string {
 function loadBounds(): WindowBounds {
   try {
     const parsed = JSON.parse(readFileSync(stateFile(), 'utf-8')) as Partial<WindowBounds>;
-    if (typeof parsed.width === 'number' && typeof parsed.height === 'number') {
-      return {
-        width: parsed.width,
-        height: parsed.height,
-        x: typeof parsed.x === 'number' ? parsed.x : undefined,
-        y: typeof parsed.y === 'number' ? parsed.y : undefined,
-      };
+    if (typeof parsed.width !== 'number' || typeof parsed.height !== 'number') {
+      return DEFAULT_BOUNDS;
     }
+
+    let width = parsed.width;
+    let height = parsed.height;
+    let x = typeof parsed.x === 'number' ? parsed.x : undefined;
+    let y = typeof parsed.y === 'number' ? parsed.y : undefined;
+
+    const displays = screen.getAllDisplays();
+    const primaryDisplay = screen.getPrimaryDisplay();
+
+    let display = primaryDisplay;
+    if (x !== undefined && y !== undefined) {
+      const cx = x;
+      const cy = y;
+      const onADisplay = displays.some((d) => {
+        const { x: dx, y: dy, width: dw, height: dh } = d.workArea;
+        return cx >= dx && cx < dx + dw && cy >= dy && cy < dy + dh;
+      });
+      if (onADisplay) {
+        display = screen.getDisplayNearestPoint({ x: cx, y: cy });
+      } else {
+        x = undefined;
+        y = undefined;
+      }
+    }
+
+    width = Math.min(width, display.workArea.width);
+    height = Math.min(height, display.workArea.height);
+
+    return { width, height, x, y };
   } catch {
-    // No saved state yet, or it is unreadable — fall back to defaults.
+    // No saved state yet, or it is unreadable - fall back to defaults.
   }
   return DEFAULT_BOUNDS;
 }
 
 function saveBounds(win: BrowserWindow): void {
+  if (win.isDestroyed()) return;
   try {
     const bounds = win.getBounds();
     mkdirSync(dirname(stateFile()), { recursive: true });
@@ -81,39 +119,30 @@ const SCREEN_STYLE = `
   </style>
 `;
 
+function usesChineseUi(): boolean {
+  return app.getLocale().toLowerCase().startsWith('zh');
+}
+
 function loadingHtml(): string {
+  const status = usesChineseUi() ? '正在启动 Nori 本地服务...' : 'Starting the local Nori service...';
   return `<!doctype html><meta charset="utf-8">${SCREEN_STYLE}
     <div class="spinner"></div>
-    <h1>Nori Desktop</h1>
-    <p>Starting local service…</p>`;
+    <h1>Nori Work</h1>
+    <p>${status}</p>`;
 }
 
 function errorHtml(message: string): string {
   const safe = message.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  const title = usesChineseUi() ? '无法启动本地服务' : 'Unable to start the local service';
+  const logLabel = usesChineseUi() ? '服务日志' : 'Service log';
+  const help = usesChineseUi()
+    ? '请重启 Nori Work，或先检查服务日志。'
+    : 'Restart Nori Work, or inspect the service log first.';
   return `<!doctype html><meta charset="utf-8">${SCREEN_STYLE}
-    <h1>无法启动本地服务</h1>
+    <h1>${title}</h1>
     <p>${safe}</p>
-    <p>查看日志：<code>${serverLogPath()}</code></p>
-    <p>菜单 → Nori Code Desktop → 重试连接，或先检查日志。</p>`;
-}
-
-// --- server auth token --------------------------------------------------------
-
-/** On-disk filename of the daemon's persistent bearer token (under NORI_CODE_HOME). */
-const SERVER_TOKEN_FILE = 'server.token';
-
-/**
- * Read the daemon's bearer token so the web UI can authenticate without showing
- * the manual token dialog on a fresh launch. Returns undefined when the token
- * cannot be read (the web UI then falls back to the dialog).
- */
-function readServerToken(): string | undefined {
-  try {
-    const token = readFileSync(join(noriHome(), SERVER_TOKEN_FILE), 'utf-8').trim();
-    return token.length > 0 ? token : undefined;
-  } catch {
-    return undefined;
-  }
+    <p>${logLabel}: <code>${serverLogPath()}</code></p>
+    <p>${help}</p>`;
 }
 
 // --- connect flow -------------------------------------------------------------
@@ -124,24 +153,25 @@ async function connect(win: BrowserWindow): Promise<void> {
     const { origin } = await ensureServer(resolveSeaPath());
     process.stdout.write(`[nori-desktop] connected to ${origin}\n`);
     if (!win.isDestroyed()) {
-      const token = readServerToken();
-
       // Resolve nori-web dist path (packaged vs dev)
       const noriWebDist = app.isPackaged
         ? join(process.resourcesPath, 'nori-web', 'dist', 'index.html')
         : join(app.getAppPath(), '..', 'nori-web', 'dist', 'index.html');
 
-      // Pass server origin + token via hash fragment
-      const params = new URLSearchParams();
-      params.set('server', origin);
-      if (token) params.set('token', token);
+      // Pass only the server origin via hash fragment; the token is fetched
+      // securely through the preload bridge instead of the URL.
+      const hash = new URLSearchParams({ server: origin }).toString();
 
       process.stdout.write(`[nori-desktop] loading nori-web from ${noriWebDist}\n`);
-      await win.loadFile(noriWebDist, { hash: params.toString() });
+      await win.loadFile(noriWebDist, { hash });
+      splashWindow?.close();
+      splashWindow = null;
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`[nori-desktop] ensureServer failed: ${message}\n`);
+    splashWindow?.close();
+    splashWindow = null;
     if (!win.isDestroyed()) {
       await win.loadURL(dataUrl(errorHtml(message)));
     }
@@ -153,8 +183,10 @@ function createWindow(): void {
     ...loadBounds(),
     minWidth: 720,
     minHeight: 480,
-    backgroundColor: '#0b0b0c',
-    title: 'Nori Desktop',
+    backgroundColor: '#111111',
+    autoHideMenuBar: true,
+    title: NORI_PRODUCT_NAME,
+    icon: noriRuntimeIconPath(),
     // macOS: hide the native title bar and float the traffic lights over the
     // content; the web UI reserves a draggable strip at the top to clear them.
     // 'default' on other platforms (they keep their native title bar).
@@ -162,15 +194,43 @@ function createWindow(): void {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      webSecurity: true,
+      sandbox: true,
       preload: join(__dirname, 'preload.cjs'),
     },
   });
+  win.setMenu(null);
+  win.setMenuBarVisibility(false);
   mainWindow = win;
+  browserManager = new BrowserViewManager(win);
+  // Note: create() is NOT called here - lazy init; the renderer triggers it.
   createTray(win);
   // Keep the window title as the product name. The web page sets document.title
   // ("Nori Code Web"), which would otherwise replace it.
   win.webContents.on('page-title-updated', (event) => {
     event.preventDefault();
+  });
+  // Block unexpected external navigation and open http(s) links in the system browser.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http:') || url.startsWith('https:')) {
+      void shell.openExternal(url).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        process.stderr.write(`[nori-desktop] failed to open external url: ${message}\n`);
+      });
+    }
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-navigate', (event, url) => {
+    const currentUrl = win.webContents.getURL();
+    if (url !== currentUrl) {
+      event.preventDefault();
+      if (url.startsWith('http:') || url.startsWith('https:')) {
+        void shell.openExternal(url).catch((error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          process.stderr.write(`[nori-desktop] failed to open external url: ${message}\n`);
+        });
+      }
+    }
   });
   win.on('close', () => {
     saveBounds(win);
@@ -183,62 +243,42 @@ function createWindow(): void {
   void connect(win);
 }
 
-// --- native menu --------------------------------------------------------------
+// --- protocol + single-instance helpers --------------------------------------
 
-function buildMenu(): void {
-  const isMac = process.platform === 'darwin';
-  const appMenu: MenuItemConstructorOptions = {
-    label: 'Nori Code Desktop',
-    submenu: [
-      ...(isMac ? [{ role: 'about' as const }, { type: 'separator' as const }] : []),
-      {
-        label: '重试连接',
-        click: () => {
-          if (mainWindow !== null) {
-            void connect(mainWindow);
-          } else {
-            createWindow();
-          }
-        },
-      },
-      {
-        label: '打开 Nori 服务日志',
-        click: () => {
-          void shell.openPath(serverLogPath());
-        },
-      },
-      { type: 'separator' },
-      isMac ? { role: 'quit' } : { role: 'close' },
-    ],
-  };
+function focusMainWindow(): void {
+  if (mainWindow !== null && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.show();
+    mainWindow.focus();
+  }
+}
 
-  const template: MenuItemConstructorOptions[] = [
-    appMenu,
-    { role: 'editMenu' },
-    {
-      label: 'View',
-      submenu: [
-        { role: 'reload' },
-        { role: 'forceReload' },
-        { role: 'toggleDevTools' },
-        { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
-        { type: 'separator' },
-        { role: 'togglefullscreen' },
-      ],
-    },
-    { role: 'windowMenu' },
-  ];
+function parseProtocolUrl(args: string[]): string | undefined {
+  return args.find((arg) => arg.startsWith(`${NORI_PROTOCOL}://`));
+}
 
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+function logProtocolUrl(url: string): void {
+  process.stdout.write(`[nori-desktop] protocol url: ${url}\n`);
 }
 
 // --- app lifecycle ------------------------------------------------------------
 
 function main(): void {
-  // The shared daemon is deliberately left running on quit — it self-exits ~60s
+  // Register only Nori Work's own protocol; do not share another product identity.
+  const protocolRegistered = app.setAsDefaultProtocolClient(NORI_PROTOCOL);
+  if (!protocolRegistered) {
+    process.stderr.write('[nori-desktop] failed to register nori-work:// protocol handler\n');
+  }
+
+  const gotTheLock = app.requestSingleInstanceLock();
+  if (!gotTheLock) {
+    app.quit();
+    return;
+  }
+
+  // The shared daemon is deliberately left running on quit - it self-exits ~60s
   // after the last client disconnects, so we never tear down a server another
   // client (CLI / browser / TUI) may still be using.
   app.on('window-all-closed', () => {
@@ -247,10 +287,78 @@ function main(): void {
     }
   });
 
+  app.on('will-quit', () => {
+    globalShortcut.unregisterAll();
+  });
+
+  app.on('second-instance', (_event, argv) => {
+    const url = parseProtocolUrl(argv);
+    if (url) {
+      logProtocolUrl(url);
+    }
+    focusMainWindow();
+  });
+
+  app.on('open-url', (_event, url) => {
+    if (url.startsWith(`${NORI_PROTOCOL}://`)) {
+      logProtocolUrl(url);
+    }
+    focusMainWindow();
+  });
+
+  app.on('open-file', (_event, path) => {
+    if (path.startsWith(`${NORI_PROTOCOL}://`)) {
+      logProtocolUrl(path);
+    }
+    focusMainWindow();
+  });
+
   void app.whenReady().then(() => {
-    buildMenu();
+    Menu.setApplicationMenu(null);
     registerIpcHandlers();
+    registerUpdateHandlers();
+    session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
+      callback(false);
+    });
+
+    splashWindow = createSplashWindow();
     createWindow();
+
+    // Register browser IPC after createWindow() so browserManager is set.
+    if (browserManager) {
+      registerBrowserIpc(browserManager);
+    }
+
+    // Register terminal IPC
+    if (mainWindow) {
+      registerTerminalIpc(mainWindow);
+    }
+
+    const showOrHideRegistered = globalShortcut.register('CmdOrCtrl+Shift+N', () => {
+      if (mainWindow === null) {
+        createWindow();
+        return;
+      }
+      if (mainWindow.isMinimized() || !mainWindow.isVisible()) {
+        mainWindow.show();
+        mainWindow.focus();
+      } else {
+        mainWindow.hide();
+      }
+    });
+    if (!showOrHideRegistered) {
+      process.stderr.write('[nori-desktop] failed to register CmdOrCtrl+Shift+N shortcut\n');
+    }
+
+    const toggleModeRegistered = globalShortcut.register('CmdOrCtrl+Shift+W', () => {
+      if (mainWindow !== null && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('nori:toggleMode', 'toggle');
+      }
+    });
+    if (!toggleModeRegistered) {
+      process.stderr.write('[nori-desktop] failed to register CmdOrCtrl+Shift+W shortcut\n');
+    }
+
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         createWindow();

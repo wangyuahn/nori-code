@@ -1,4 +1,4 @@
-import type { ModelCapability } from '@moonshot-ai/kosong';
+import type { ModelCapability } from '@nori-code/kosong';
 import { describe, expect, it } from 'vitest';
 
 import { ReadMediaFileTool } from '../../src/tools/builtin/file/read-media';

@@ -23,14 +23,14 @@ export type {
   ProcessBackgroundTaskInfo,
   AgentBackgroundTaskInfo,
   QuestionBackgroundTaskInfo,
-} from '@moonshot-ai/agent-core';
-export { AGENT_WIRE_PROTOCOL_VERSION } from '@moonshot-ai/agent-core';
-export type { Message, ContentPart, ToolCall, TokenUsage } from '@moonshot-ai/kosong';
+} from '@nori-code/agent-core';
+export { AGENT_WIRE_PROTOCOL_VERSION } from '@nori-code/agent-core';
+export type { Message, ContentPart, ToolCall, TokenUsage } from '@nori-code/kosong';
 
 // Local bindings for the upstream types referenced by the vis-only DTOs
 // below. The `export type { … }` re-export above forwards the names to
 // consumers but does NOT bring them into this module's scope.
-import type { AgentRecord, BackgroundTaskInfo } from '@moonshot-ai/agent-core';
+import type { AgentRecord, BackgroundTaskInfo } from '@nori-code/agent-core';
 
 /**
  * Persistent representation of a cron task.

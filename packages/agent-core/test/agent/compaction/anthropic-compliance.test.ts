@@ -14,8 +14,8 @@
 // These tests drive the real compaction/projection functions, run their output
 // through the real AnthropicChatProvider conversion, and assert the wire request
 // is well-formed — so a regression in any single layer turns red here.
-import { createProvider } from '@moonshot-ai/kosong';
-import type { Message, Tool } from '@moonshot-ai/kosong';
+import { createProvider } from '@nori-code/kosong';
+import type { Message, Tool } from '@nori-code/kosong';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ContextMessage } from '../../../src/agent/context';

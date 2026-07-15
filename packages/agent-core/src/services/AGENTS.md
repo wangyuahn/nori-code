@@ -1,7 +1,7 @@
 # In-process services (`packages/agent-core/src/services`)
 
 In-process service layer for the kimi-code server, now hosted inside
-`@moonshot-ai/agent-core` (merged from the former `@moonshot-ai/services`
+`@nori-code/agent-core` (merged from the former `@nori-code/services`
 package). Every public member follows the VSCode platform-service convention
 so DI wiring, docstrings, and call-site ergonomics stay uniform.
 
@@ -110,7 +110,7 @@ no new suffixes get reintroduced.
 Adding a new service: create the folder + contracts + impl pair, add a
 bottom-of-file `registerSingleton(IXxxService, XxxService,
 InstantiationType.Delayed)` in the impl, then re-export the contracts and impl
-from `index.ts` so importing `@moonshot-ai/agent-core` runs the registration
+from `index.ts` so importing `@nori-code/agent-core` runs the registration
 side effect. Server bootstrap consumes `getSingletonServiceDescriptors()` for
 descriptor-only services; only override the registry entry (via
 `services.set(I, prebuiltInstance)` or `services.set(I, new SyncDescriptor(C,
@@ -141,7 +141,7 @@ This layer uses the registry-based wiring pattern modelled on
      `registerSingleton(IXxxService, new SyncDescriptor(XxxService, [optionsBag]))`.
 
 2. **Consumers seed from `getSingletonServiceDescriptors()` directly**.
-   Importing `@moonshot-ai/agent-core` loads the package barrel, whose impl
+   Importing `@nori-code/agent-core` loads the package barrel, whose impl
    re-exports run the `registerSingleton(...)` side effects.
 
 3. **Server-side `services.set(...)` may override** the registry-derived

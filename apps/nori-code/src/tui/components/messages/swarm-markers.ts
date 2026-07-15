@@ -1,4 +1,4 @@
-import { truncateToWidth, type Component } from '@moonshot-ai/pi-tui';
+import { truncateToWidth, type Component } from '@nori-code/pi-tui';
 
 import { STATUS_BULLET } from '#/tui/constant/symbols';
 import { currentTheme } from '#/tui/theme';

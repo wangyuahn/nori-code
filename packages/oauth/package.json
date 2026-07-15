@@ -1,21 +1,21 @@
 {
-  "name": "@moonshot-ai/kimi-code-oauth",
+  "name": "@nori-code/oauth",
   "version": "0.2.2",
   "private": true,
-  "description": "Kimi OAuth toolkit for managed Kimi Code authentication",
+  "description": "Provider-neutral OAuth toolkit for Nori Code",
   "license": "MIT",
-  "author": "Moonshot AI",
-  "homepage": "https://github.com/MoonshotAI/kimi-code/tree/main/packages/oauth#readme",
+  "author": "Nori",
+  "homepage": "https://github.com/wangyuahn/nori-code/tree/main/packages/oauth#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MoonshotAI/kimi-code.git",
+    "url": "git+https://github.com/wangyuahn/nori-code.git",
     "directory": "packages/oauth"
   },
   "bugs": {
-    "url": "https://github.com/MoonshotAI/kimi-code/issues"
+    "url": "https://github.com/wangyuahn/nori-code/issues"
   },
   "keywords": [
-    "kimi",
+    "nori",
     "oauth",
     "authentication",
     "auth",

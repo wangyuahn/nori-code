@@ -64,10 +64,9 @@ describe('fetchCustomRegistry', () => {
   it('parses a kokub-shaped 200 response into three providers', async () => {
     const fetchMock = vi.fn(async () => makeJsonResponse(makeKokubResponseBody()));
 
-    const result = await fetchCustomRegistry(
-      KOKUB_SOURCE,
-      fetchMock as unknown as typeof fetch,
-    );
+    const result = await fetchCustomRegistry(KOKUB_SOURCE, {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
 
     expect(Object.keys(result)).toHaveLength(3);
     expect(result['registry_chat-completions']?.type).toBe('openai');
@@ -94,7 +93,7 @@ describe('fetchCustomRegistry', () => {
 
     await fetchCustomRegistry(
       { kind: 'apiJson', url: KOKUB_SOURCE.url, apiKey: '' },
-      fetchMock as unknown as typeof fetch,
+      { fetchImpl: fetchMock as unknown as typeof fetch },
     );
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -108,11 +107,10 @@ describe('fetchCustomRegistry', () => {
     const fetchMock = vi.fn(async () => makeJsonResponse(makeKokubResponseBody()));
     const controller = new AbortController();
 
-    await fetchCustomRegistry(
-      KOKUB_SOURCE,
-      fetchMock as unknown as typeof fetch,
-      controller.signal,
-    );
+    await fetchCustomRegistry(KOKUB_SOURCE, {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      signal: controller.signal,
+    });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const call = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
@@ -124,10 +122,9 @@ describe('fetchCustomRegistry', () => {
       async () => makeJsonResponse({ error: { message: 'invalid bearer' } }, 401),
     );
 
-    const error = await fetchCustomRegistry(
-      KOKUB_SOURCE,
-      fetchMock as unknown as typeof fetch,
-    ).catch((caught: unknown) => caught);
+    const error = await fetchCustomRegistry(KOKUB_SOURCE, {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    }).catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(CustomRegistryApiError);
     expect((error as CustomRegistryApiError).status).toBe(401);
@@ -138,7 +135,9 @@ describe('fetchCustomRegistry', () => {
     const fetchMock = vi.fn(async () => makeJsonResponse(['not', 'an', 'object']));
 
     await expect(
-      fetchCustomRegistry(KOKUB_SOURCE, fetchMock as unknown as typeof fetch),
+      fetchCustomRegistry(KOKUB_SOURCE, {
+        fetchImpl: fetchMock as unknown as typeof fetch,
+      }),
     ).rejects.toThrow(/expected a JSON object/);
   });
 
@@ -152,7 +151,7 @@ describe('fetchCustomRegistry', () => {
             id: 'unknown-type',
             name: 'Unknown Type',
             api: 'https://example.test/v1',
-            type: 'google-genai',
+            type: 'totally-unknown',
             models: { 'm-1': { id: 'm-1' } },
           },
           'registry_chat-completions': goodEntry,
@@ -161,10 +160,9 @@ describe('fetchCustomRegistry', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     try {
-      const result = await fetchCustomRegistry(
-        KOKUB_SOURCE,
-        fetchMock as unknown as typeof fetch,
-      );
+      const result = await fetchCustomRegistry(KOKUB_SOURCE, {
+        fetchImpl: fetchMock as unknown as typeof fetch,
+      });
 
       expect(Object.keys(result)).toEqual(['registry_chat-completions']);
       expect(result['broken-entry']).toBeUndefined();
@@ -179,6 +177,164 @@ describe('fetchCustomRegistry', () => {
     } finally {
       warnSpy.mockRestore();
     }
+  });
+
+  it('sends User-Agent when userAgent is provided and omits it otherwise', async () => {
+    const fetchMock = vi.fn(async () => makeJsonResponse(makeKokubResponseBody()));
+
+    await fetchCustomRegistry(KOKUB_SOURCE, {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      userAgent: 'kimi-code-cli/1.2.3',
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const withAgent = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect((withAgent[1].headers as Record<string, string>)['User-Agent']).toBe(
+      'kimi-code-cli/1.2.3',
+    );
+
+    fetchMock.mockClear();
+    await fetchCustomRegistry(KOKUB_SOURCE, {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    const withoutAgent = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect((withoutAgent[1].headers as Record<string, string>)['User-Agent']).toBeUndefined();
+  });
+
+  it('accepts registry keys as provider/model ids and normalizes OpenAI-compatible fields', async () => {
+    const fetchMock = vi.fn(async () =>
+      makeJsonResponse({
+        acme: {
+          base_url: '  https://gateway.example.test/v1///  ',
+          type: 'openai-compatible',
+          models: {
+            'acme-chat': { name: 'Acme Chat' },
+          },
+        },
+      }),
+    );
+
+    const result = await fetchCustomRegistry(KOKUB_SOURCE, {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    expect(result['acme']).toEqual({
+      id: 'acme',
+      name: 'acme',
+      api: 'https://gateway.example.test/v1',
+      type: 'openai',
+      models: {
+        'acme-chat': { id: 'acme-chat', name: 'Acme Chat' },
+      },
+    });
+  });
+
+  it('normalizes common protocol aliases and baseUrl spelling', async () => {
+    const fetchMock = vi.fn(async () =>
+      makeJsonResponse({
+        chat: {
+          api: 'https://chat.example.test/v1',
+          protocol: 'chat-completions',
+          models: { chat: {} },
+        },
+        responses: {
+          baseUrl: 'https://responses.example.test/v1/',
+          type: 'responses',
+          models: { responses: {} },
+        },
+        messages: {
+          api: 'https://messages.example.test',
+          type: 'anthropic-messages',
+          models: { messages: {} },
+        },
+        gemini: {
+          api: 'https://gemini.example.test',
+          type: 'google',
+          models: { gemini: {} },
+        },
+        vertex: {
+          api: 'https://vertex.example.test',
+          type: 'vertex-ai',
+          project: ' demo-project ',
+          location: ' us-central1 ',
+          models: { vertex: {} },
+        },
+      }),
+    );
+
+    const result = await fetchCustomRegistry(KOKUB_SOURCE, {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    expect(result['chat']?.type).toBe('openai');
+    expect(result['responses']?.type).toBe('openai_responses');
+    expect(result['responses']?.api).toBe('https://responses.example.test/v1');
+    expect(result['messages']?.type).toBe('anthropic');
+    expect(result['gemini']?.type).toBe('google-genai');
+    expect(result['vertex']).toMatchObject({
+      type: 'vertexai',
+      project: 'demo-project',
+      location: 'us-central1',
+    });
+  });
+
+  it('rejects registries where every provider has an invalid URL or no valid models', async () => {
+    const fetchMock = vi.fn(async () =>
+      makeJsonResponse({
+        unsafe: {
+          api: 'file:///etc/passwd',
+          type: 'openai',
+          models: { m: {} },
+        },
+        empty: {
+          api: 'https://empty.example.test/v1',
+          type: 'openai',
+          models: {},
+        },
+      }),
+    );
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      await expect(
+        fetchCustomRegistry(KOKUB_SOURCE, {
+          fetchImpl: fetchMock as unknown as typeof fetch,
+        }),
+      ).rejects.toThrow(/did not contain any supported providers/);
+      expect(warnSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('parses support_efforts and default_effort into model entries', async () => {
+    const fetchMock = vi.fn(async () =>
+      makeJsonResponse({
+        'registry_responses': {
+          id: 'registry_responses',
+          name: 'Responses Registry',
+          api: 'https://registry.example.test/v1',
+          type: 'openai_responses',
+          models: {
+            'o3-mini': {
+              id: 'o3-mini',
+              support_efforts: ['low', 'medium', 'high'],
+              default_effort: 'medium',
+            },
+          },
+        },
+      }),
+    );
+
+    const result = await fetchCustomRegistry(KOKUB_SOURCE, {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    const model = result['registry_responses']?.models['o3-mini'];
+    expect(model).toBeDefined();
+    expect(model!.support_efforts).toEqual(['low', 'medium', 'high']);
+    expect(model!.default_effort).toBe('medium');
   });
 });
 
@@ -221,6 +377,50 @@ describe('applyCustomRegistryProvider', () => {
     const claude = config.models?.['registry_chat-completions/claude-opus-4-7'];
     expect(claude).toBeDefined();
     expect((claude as { displayName: string }).displayName).toBe('Claude Opus 4.7');
+  });
+
+  it('writes Vertex AI runtime flags and optional project/location fields', () => {
+    const config: ManagedKimiConfigShape = { providers: {} };
+    const entry: CustomRegistryProviderEntry = {
+      id: 'vertex',
+      name: 'Vertex',
+      api: 'https://vertex.example.test',
+      type: 'vertexai',
+      project: 'demo-project',
+      location: 'us-central1',
+      models: { gemini: { id: 'gemini' } },
+    };
+
+    applyCustomRegistryProvider(config, entry, KOKUB_SOURCE);
+
+    expect(config.providers['vertex']).toMatchObject({
+      type: 'vertexai',
+      baseUrl: 'https://vertex.example.test',
+      vertexai: true,
+      project: 'demo-project',
+      location: 'us-central1',
+    });
+    expect(config.providers['vertex']?.['apiKey']).toBeUndefined();
+    expect(config.providers['vertex']?.['source']).toEqual(KOKUB_SOURCE);
+  });
+
+  it('does not mistake an output-token limit for the total context window', () => {
+    const config: ManagedKimiConfigShape = { providers: {} };
+    const entry: CustomRegistryProviderEntry = {
+      id: 'output-only',
+      name: 'Output only',
+      api: 'https://output.example.test/v1',
+      type: 'openai',
+      models: {
+        model: { id: 'model', limit: { output: 8192 } },
+      },
+    };
+
+    applyCustomRegistryProvider(config, entry, KOKUB_SOURCE);
+
+    expect(config.models?.['output-only/model']?.maxContextSize).toBe(
+      CUSTOM_REGISTRY_DEFAULT_MAX_CONTEXT,
+    );
   });
 
   it('falls back to the model id for displayName when name is absent', () => {
@@ -328,8 +528,7 @@ describe('applyCustomRegistryProvider', () => {
           provider: 'registry_chat-completions',
           model: 'gpt-5.5',
           maxContextSize: 131072,
-          supportEfforts: ['low', 'high', 'max'],
-          defaultEffort: 'high',
+          customHint: 'kept',
         } as Record<string, unknown>,
       },
     };
@@ -349,10 +548,74 @@ describe('applyCustomRegistryProvider', () => {
     );
 
     const alias = config.models?.['registry_chat-completions/gpt-5.5'];
-    expect(alias?.['supportEfforts']).toEqual(['low', 'high', 'max']);
-    expect(alias?.['defaultEffort']).toBe('high');
-    // Upstream-owned fields are still refreshed.
+    // Non-remote-owned hand-edited fields survive a refresh.
+    expect(alias?.['customHint']).toBe('kept');
+    // Remote-owned fields are refreshed (upstream did not declare them here).
+    expect(alias?.['supportEfforts']).toBeUndefined();
+    expect(alias?.['defaultEffort']).toBeUndefined();
     expect(alias?.['displayName']).toBe('GPT 5.5');
+  });
+
+  it('produces an alias with supportEfforts/defaultEffort and refreshes them as remote-owned fields', () => {
+    const config: ManagedKimiConfigShape = { providers: {} };
+    const firstEntry: CustomRegistryProviderEntry = {
+      id: 'rich',
+      name: 'Rich Provider',
+      api: 'https://rich.example/v1',
+      type: 'openai',
+      models: {
+        'thinker': {
+          id: 'thinker',
+          support_efforts: ['low', 'high'],
+          default_effort: 'low',
+        },
+      },
+    };
+
+    applyCustomRegistryProvider(config, firstEntry, {
+      kind: 'apiJson',
+      url: 'https://rich.example/api.json',
+      apiKey: 'sk-rich',
+    });
+
+    let alias = config.models?.['rich/thinker'] as {
+      supportEfforts: readonly string[];
+      defaultEffort: string;
+    };
+    expect(alias.supportEfforts).toEqual(['low', 'high']);
+    expect(alias.defaultEffort).toBe('low');
+
+    // Refresh with updated remote values; because supportEfforts/defaultEffort
+    // are in CUSTOM_REGISTRY_MODEL_FIELDS, they are overwritten rather than
+    // preserved from the first import.
+    applyCustomRegistryProvider(
+      config,
+      {
+        id: 'rich',
+        name: 'Rich Provider',
+        api: 'https://rich.example/v1',
+        type: 'openai',
+        models: {
+          'thinker': {
+            id: 'thinker',
+            support_efforts: ['low', 'medium', 'high'],
+            default_effort: 'medium',
+          },
+        },
+      },
+      {
+        kind: 'apiJson',
+        url: 'https://rich.example/api.json',
+        apiKey: 'sk-rich',
+      },
+    );
+
+    alias = config.models?.['rich/thinker'] as {
+      supportEfforts: readonly string[];
+      defaultEffort: string;
+    };
+    expect(alias.supportEfforts).toEqual(['low', 'medium', 'high']);
+    expect(alias.defaultEffort).toBe('medium');
   });
 });
 
@@ -623,5 +886,15 @@ describe('capabilitiesFromCustomEntry', () => {
         reasoning: false,
       }),
     ).toEqual([]);
+  });
+
+  it('adds thinking when support_efforts is non-empty even if reasoning is false', () => {
+    expect(
+      capabilitiesFromCustomEntry({
+        id: 'm',
+        reasoning: false,
+        support_efforts: ['low', 'medium', 'high'],
+      }),
+    ).toEqual(['thinking']);
   });
 });

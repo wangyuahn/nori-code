@@ -22,7 +22,7 @@
 
 import type { Server as HttpServer } from 'node:http';
 
-import { createDecorator } from '@moonshot-ai/agent-core';
+import { createDecorator } from '@nori-code/agent-core';
 
 /**
  * Minimum shape we need from a Fastify instance. Avoids the strict-generic

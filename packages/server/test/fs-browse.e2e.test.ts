@@ -24,7 +24,7 @@ import type {
   FsBrowseResponse,
   FsHomeResponse,
   Workspace,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 
 let tmpDir: string;
 let lockPath: string;

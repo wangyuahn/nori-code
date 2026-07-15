@@ -5,8 +5,8 @@ import {
   truncateToWidth,
   visibleWidth,
   type Focusable,
-} from '@moonshot-ai/pi-tui';
-import type { ExperimentalFeatureState } from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/pi-tui';
+import type { ExperimentalFeatureState } from '@nori-code/sdk';
 
 import { SELECT_POINTER } from '#/tui/constant/symbols';
 import { currentTheme } from '#/tui/theme';
@@ -199,7 +199,7 @@ function featureDetail(feature: ExperimentalFeatureState): string {
 function sourceLabel(feature: ExperimentalFeatureState): string {
   switch (feature.source) {
     case 'master-env':
-      return 'locked by KIMI_CODE_EXPERIMENTAL_FLAG';
+      return 'locked by NORI_CODE_EXPERIMENTAL_FLAG';
     case 'env':
       return `locked by ${feature.env}`;
     case 'config':

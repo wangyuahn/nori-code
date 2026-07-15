@@ -16,7 +16,7 @@
  * but describe a different stream and would corrupt the accumulation.
  */
 
-import type { Event, InFlightToolCall, InFlightTurn } from '@moonshot-ai/protocol';
+import type { Event, InFlightToolCall, InFlightTurn } from '@nori-code/protocol';
 
 const MAIN_AGENT_ID = 'main';
 

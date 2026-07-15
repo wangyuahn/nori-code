@@ -1,7 +1,7 @@
 import { Readable, type Writable } from 'node:stream';
 
-import type { KaosProcess } from '@moonshot-ai/kaos';
-import type { Message } from '@moonshot-ai/kosong';
+import type { KaosProcess } from '@nori-code/kaos';
+import type { Message } from '@nori-code/kosong';
 import { describe, expect, it, vi } from 'vitest';
 
 import { renderNotificationXml } from '../../src/agent/context/notification-xml';

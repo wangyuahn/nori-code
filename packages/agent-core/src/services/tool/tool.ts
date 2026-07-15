@@ -14,12 +14,12 @@
  * doesn't differentiate per-session, and `setActiveTools` is the only
  * per-session knob. Documented gap in `ToolService`.
  *
- * **Anti-corruption**: imports `@moonshot-ai/agent-core` only for the
+ * **Anti-corruption**: imports `@nori-code/agent-core` only for the
  * `createDecorator` value.
  */
 
 import { createDecorator } from '../../di';
-import type { ToolDescriptor, ToolSource } from '@moonshot-ai/protocol';
+import type { ToolDescriptor, ToolSource } from '@nori-code/protocol';
 
 // ---------------------------------------------------------------------------
 // Adapter helpers (tool side of former adapter/tool-adapter.ts)
@@ -27,7 +27,7 @@ import type { ToolDescriptor, ToolSource } from '@moonshot-ai/protocol';
 
 /**
  * In-process minimal shape we accept for tool conversion. Mirrors
- * `@moonshot-ai/agent-core` `ToolInfo` without taking a runtime dependency on
+ * `@nori-code/agent-core` `ToolInfo` without taking a runtime dependency on
  * its exact shape (the adapter is the boundary).
  */
 export interface AgentCoreToolInfoLike {

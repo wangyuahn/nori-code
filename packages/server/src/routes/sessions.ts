@@ -3,6 +3,7 @@
 import {
   ErrorCode,
   archiveSessionResponseSchema,
+  removeSessionResponseSchema,
   compactSessionRequestSchema,
   compactSessionResponseSchema,
   createSessionChildRequestSchema,
@@ -22,13 +23,14 @@ import {
   undoSessionResponseSchema,
   workspaceIdSchema,
   type Event,
-} from '@moonshot-ai/protocol';
-import { IPromptService, ISessionService, SessionNotFoundError, SessionUndoUnavailableError, ErrorCodes, KimiError, IWorkspaceRegistry, WorkspaceNotFoundError, IEventService, type IInstantiationService, type SessionClientTelemetry } from '@moonshot-ai/agent-core';
+} from '@nori-code/protocol';
+import { IPromptService, ISessionService, SessionNotFoundError, SessionUndoUnavailableError, ErrorCodes, KimiError, IWorkspaceRegistry, WorkspaceNotFoundError, IEventService, type IInstantiationService, type SessionClientTelemetry } from '@nori-code/agent-core';
 import { z } from 'zod';
 
 
 import { errEnvelope, okEnvelope } from '../envelope';
 import { defineRoute } from '../middleware/defineRoute';
+import { restoreWorkspaceCheckpoint } from '../services/rewind/workspaceRewind';
 import { parseActionSuffix } from './action-suffix';
 
 interface SessionRouteHost {
@@ -141,10 +143,10 @@ function clientTelemetryFromHeaders(
   headers: Record<string, unknown>,
 ): SessionClientTelemetry | undefined {
   const client: SessionClientTelemetry = {
-    id: headerString(headers, 'x-kimi-client-id'),
-    name: headerString(headers, 'x-kimi-client-name'),
-    version: headerString(headers, 'x-kimi-client-version'),
-    uiMode: headerString(headers, 'x-kimi-client-ui-mode'),
+    id: headerString(headers, 'x-nori-client-id'),
+    name: headerString(headers, 'x-nori-client-name'),
+    version: headerString(headers, 'x-nori-client-version'),
+    uiMode: headerString(headers, 'x-nori-client-ui-mode'),
   };
   return Object.values(client).some((value) => value !== undefined) ? client : undefined;
 }
@@ -410,7 +412,7 @@ export function registerSessionsRoutes(
       path: '/sessions/{tail}',
       params: sessionActionTailParamSchema,
       body: sessionActionRequestSchema,
-      success: { data: z.union([sessionSchema, compactSessionResponseSchema, undoSessionResponseSchema, sessionAbortResponseSchema, startBtwSessionResponseSchema, archiveSessionResponseSchema]) },
+      success: { data: z.union([sessionSchema, compactSessionResponseSchema, undoSessionResponseSchema, sessionAbortResponseSchema, startBtwSessionResponseSchema, archiveSessionResponseSchema, removeSessionResponseSchema]) },
       errors: {
         [ErrorCode.VALIDATION_FAILED]: { detailsSchema },
         [ErrorCode.SESSION_NOT_FOUND]: {},
@@ -427,7 +429,7 @@ export function registerSessionsRoutes(
         const { tail } = req.params;
         const parsed = parseActionSuffix({
           tail,
-          allowedActions: ['fork', 'compact', 'undo', 'abort', 'btw', 'archive'] as const,
+          allowedActions: ['fork', 'compact', 'undo', 'abort', 'btw', 'archive', 'delete'] as const,
           resourceLabel: 'session',
         });
         if (parsed.kind !== 'action') {
@@ -485,10 +487,17 @@ export function registerSessionsRoutes(
           return;
         }
 
+        if (parsed.action === 'delete') {
+          const result = await ix.invokeFunction((a) =>
+            a.get(ISessionService).delete!(parsed.id),
+          );
+          reply.send(okEnvelope(result, req.id));
+          return;
+        }
+
         const body = undoSessionRequestSchema.parse(req.body);
-        const result = await ix.invokeFunction((a) =>
-          a.get(ISessionService).undo(parsed.id, body),
-        );
+        const result = await ix.invokeFunction((a) => a.get(ISessionService).undo(parsed.id, body));
+        await restoreWorkspaceCheckpoint(parsed.id, body.count).catch(() => false);
         reply.send(okEnvelope(result, req.id));
       } catch (err) {
         sendMappedError(reply, req.id, err);

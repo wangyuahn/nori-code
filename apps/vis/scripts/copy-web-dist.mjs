@@ -15,7 +15,7 @@ try {
   await stat(src);
 } catch {
   process.stderr.write(`[copy-web-dist] source missing: ${src}\n`);
-  process.stderr.write('Did you run `pnpm --filter @moonshot-ai/vis-web build` first?\n');
+  process.stderr.write('Did you run `pnpm --filter @nori-code/vis-web build` first?\n');
   process.exit(1);
 }
 

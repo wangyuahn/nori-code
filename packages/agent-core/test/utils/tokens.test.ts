@@ -1,4 +1,4 @@
-import type { ContentPart } from '@moonshot-ai/kosong';
+import type { ContentPart } from '@nori-code/kosong';
 import { describe, expect, it } from 'vitest';
 
 import {

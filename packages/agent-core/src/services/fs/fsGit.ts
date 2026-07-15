@@ -6,10 +6,14 @@ import type { IDisposable } from '../../di';
 import type {
   FsDiffRequest,
   FsDiffResponse,
+  FsGitCommitRequest,
+  FsGitCommitResponse,
+  FsGitPushRequest,
+  FsGitPushResponse,
   FsGitStatus,
   FsGitStatusRequest,
   FsGitStatusResponse,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 
 export class FsGitUnavailableError extends Error {
   readonly cwd: string;
@@ -31,6 +35,10 @@ export interface IFsGitService extends IDisposable {
   ): Promise<FsGitStatusResponse>;
 
   diff(sessionId: string, req: FsDiffRequest): Promise<FsDiffResponse>;
+
+  commit(sessionId: string, req: FsGitCommitRequest): Promise<FsGitCommitResponse>;
+
+  push(sessionId: string, req: FsGitPushRequest): Promise<FsGitPushResponse>;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare

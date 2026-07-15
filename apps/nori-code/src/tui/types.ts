@@ -7,7 +7,7 @@ import type {
   PromptPart,
   ThinkingEffort,
   ToolInputDisplay,
-} from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/sdk';
 
 import type { NotificationsConfig, UpgradePreferences } from './config';
 import type { PendingApproval, PendingQuestion } from './reverse-rpc/types';

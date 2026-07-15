@@ -19,7 +19,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { TelemetryClient, TelemetryProperties } from '@moonshot-ai/agent-core';
+import type { TelemetryClient, TelemetryProperties } from '@nori-code/agent-core';
 import { pino } from 'pino';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
@@ -124,7 +124,7 @@ interface Conn {
 
 function openConn(url: string): Promise<Conn> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url, ['kimi-code.bearer.test-token']);
+    const ws = new WebSocket(url, ['nori-code.bearer.test-token']);
     const queue: WsFrame[] = [];
     const waiters: Array<(frame: WsFrame) => void> = [];
     let closedResolve: (v: { code: number; reason: string }) => void;

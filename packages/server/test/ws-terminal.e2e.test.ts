@@ -2,8 +2,8 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { SyncDescriptor, ITerminalService, TerminalService } from '@moonshot-ai/agent-core';
-import type { Terminal } from '@moonshot-ai/protocol';
+import { SyncDescriptor, ITerminalService, TerminalService } from '@nori-code/agent-core';
+import type { Terminal } from '@nori-code/protocol';
 import { pino } from 'pino';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
@@ -127,7 +127,7 @@ async function openSocket(r: RunningServer): Promise<{
   const received: Record<string, unknown>[] = [];
   const ws = await new Promise<WebSocket>((resolve, reject) => {
     const sock = new WebSocket(r.address.replace('http://', 'ws://') + '/api/v1/ws', [
-      'kimi-code.bearer.test-token',
+      'nori-code.bearer.test-token',
     ]);
     sock.on('message', (data) => {
       received.push(JSON.parse(rawDataToString(data)) as Record<string, unknown>);

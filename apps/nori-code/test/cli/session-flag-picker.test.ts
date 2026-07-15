@@ -18,7 +18,7 @@ function parse(argv: string[]): CLIOptions {
     writeOut: () => {},
     writeErr: () => {},
   });
-  program.parse(['node', 'kimi', ...argv]);
+  program.parse(['node', 'nori', ...argv]);
   if (captured === undefined) {
     throw new Error('Main action handler was not called');
   }

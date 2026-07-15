@@ -8,7 +8,7 @@ export interface ExitableProcess {
 }
 
 /**
- * Schedule a best-effort force-exit for a completed headless (`kimi -p`) run.
+ * Schedule a best-effort force-exit for a completed headless (`nori -p`) run.
  *
  * Print mode does not call `process.exit()`; it relies on the Node event loop
  * draining once the run is done. If a stray ref'd handle survives shutdown — a

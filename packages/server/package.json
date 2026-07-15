@@ -1,17 +1,17 @@
 {
-  "name": "@moonshot-ai/server",
+  "name": "@nori-code/server",
   "version": "0.2.4",
   "private": true,
-  "description": "Local REST + WebSocket server exposing kimi-code SDK over a stable wire protocol.",
+  "description": "Local REST and WebSocket server for Nori Work and Nori Code.",
   "license": "MIT",
-  "author": "Moonshot AI",
+  "author": "Nori",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MoonshotAI/kimi-code.git",
+    "url": "git+https://github.com/wangyuahn/nori-code.git",
     "directory": "packages/server"
   },
   "bugs": {
-    "url": "https://github.com/MoonshotAI/kimi-code/issues"
+    "url": "https://github.com/wangyuahn/nori-code/issues"
   },
   "type": "module",
   "imports": {
@@ -41,8 +41,8 @@
   "dependencies": {
     "@fastify/multipart": "^10.0.0",
     "@fastify/swagger": "^9.7.0",
-    "@moonshot-ai/agent-core": "workspace:^",
-    "@moonshot-ai/protocol": "workspace:^",
+    "@nori-code/agent-core": "workspace:^",
+    "@nori-code/protocol": "workspace:^",
     "bcryptjs": "^2.4.3",
     "fastify": "^5.1.0",
     "pino": "^9.5.0",
@@ -50,6 +50,7 @@
     "smol-toml": "^1.6.1",
     "ulid": "^3.0.1",
     "ws": "^8.18.0",
+    "yaml": "^2.8.3",
     "zod": "catalog:",
     "zod-to-json-schema": "^3.25.2"
   },

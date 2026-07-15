@@ -13,7 +13,7 @@ import {
   type WriteTextFileRequest,
   type WriteTextFileResponse,
 } from '@agentclientprotocol/sdk';
-import { log, type KimiHarness, type Session } from '@moonshot-ai/kimi-code-sdk';
+import { log, type KimiHarness, type Session } from '@nori-code/sdk';
 import { Jimp } from 'jimp';
 
 import { AcpServer } from '../src/server';

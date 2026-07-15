@@ -12,7 +12,7 @@
  * metadata.
  */
 
-import { Container, Text, Spacer } from '@moonshot-ai/pi-tui';
+import { Container, Text, Spacer } from '@nori-code/pi-tui';
 
 import { currentTheme } from '#/tui/theme';
 import type { SkillActivationTrigger } from '#/tui/types';

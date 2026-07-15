@@ -34,7 +34,7 @@
  */
 
 import type { SessionConfigOption, SessionConfigSelectOption } from '@agentclientprotocol/sdk';
-import type { KimiHarness } from '@moonshot-ai/kimi-code-sdk';
+import type { KimiHarness } from '@nori-code/sdk';
 
 import { ACP_MODES, type AcpModeId } from './modes';
 import { listModelsFromHarness, type AcpModelEntry } from './model-catalog';

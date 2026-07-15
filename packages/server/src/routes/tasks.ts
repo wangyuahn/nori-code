@@ -29,8 +29,8 @@ import {
   getTaskResponseSchema,
   listTasksQuerySchema,
   listTasksResponseSchema,
-} from '@moonshot-ai/protocol';
-import { ITaskService, SessionNotFoundError, TaskAlreadyFinishedError, TaskNotFoundError, type IInstantiationService } from '@moonshot-ai/agent-core';
+} from '@nori-code/protocol';
+import { ITaskService, SessionNotFoundError, TaskAlreadyFinishedError, TaskNotFoundError, type IInstantiationService } from '@nori-code/agent-core';
 import { z } from 'zod';
 
 

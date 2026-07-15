@@ -21,8 +21,8 @@ import { join } from 'node:path';
 import { pino } from 'pino';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import type { Event, SessionSnapshotResponse } from '@moonshot-ai/protocol';
-import { IEventService, IPromptService, PromptService } from '@moonshot-ai/agent-core';
+import type { Event, SessionSnapshotResponse } from '@nori-code/protocol';
+import { IEventService, IPromptService, PromptService } from '@nori-code/agent-core';
 
 import { IRestGateway, IWSBroadcastService, startServer, type RunningServer } from '../src';
 import { fixedTokenAuth } from './helpers/serverHarness';

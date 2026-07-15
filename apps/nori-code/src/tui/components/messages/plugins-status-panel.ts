@@ -1,4 +1,4 @@
-import type { PluginInfo, PluginSummary } from '@moonshot-ai/kimi-code-sdk';
+import type { PluginInfo, PluginSummary } from '@nori-code/sdk';
 
 import { currentTheme } from '#/tui/theme';
 import {
@@ -69,10 +69,10 @@ export function buildPluginsInfoLines(input: PluginsInfoPanelInput): readonly st
   const trustLine = (() => {
     const label = pluginTrustLabel(info);
     if (label === 'official') {
-      return `${muted('Trust:')}  ${success(OFFICIAL_BADGE)} ${muted('(Kimi-built and -maintained)')}`;
+      return `${muted('Trust:')}  ${success(OFFICIAL_BADGE)} ${muted('(Nori-published and maintained)')}`;
     }
     if (label === 'curated') {
-      return `${muted('Trust:')}  ${primary(CURATED_BADGE)} ${muted('(Kimi-reviewed, upstream-maintained)')}`;
+      return `${muted('Trust:')}  ${primary(CURATED_BADGE)} ${muted('(Nori-reviewed, upstream-maintained)')}`;
     }
     return `${muted('Trust:')}  ${muted(THIRD_PARTY_BADGE)}`;
   })();

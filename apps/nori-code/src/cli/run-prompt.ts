@@ -4,7 +4,7 @@ import {
   shutdownTelemetry,
   track,
   withTelemetryContext,
-} from '@moonshot-ai/kimi-telemetry';
+} from '@nori-code/telemetry';
 import chalk from 'chalk';
 import {
   createKimiHarness,
@@ -16,7 +16,7 @@ import {
   type Session,
   type SessionStatus,
   type TelemetryClient,
-} from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/sdk';
 import { resolve } from 'pathe';
 
 import { CLI_SHUTDOWN_TIMEOUT_MS, PROMPT_CLEANUP_TIMEOUT_MS } from '#/constant/app';
@@ -123,7 +123,7 @@ export async function runPrompt(
     },
     sessionStartedProperties: { permission: undefined, plan: false, afk: true },
   });
-  log.info('kimi-code starting', {
+  log.info('nori-code starting', {
     version,
     uiMode: PROMPT_UI_MODE,
     nodeVersion: process.version,
@@ -147,7 +147,7 @@ export async function runPrompt(
     // Bound cleanup so a wedged shutdown step (e.g. a SessionEnd hook, MCP
     // shutdown, or a connection blackholed by a restrictive firewall) cannot
     // keep a completed headless run alive forever. The cleanup keeps running in
-    // the background if it overruns; the caller (`kimi -p`) force-exits shortly
+    // the background if it overruns; the caller (`nori -p`) force-exits shortly
     // after, so any straggling work is torn down with the process.
     await raceWithTimeout(pending, PROMPT_CLEANUP_TIMEOUT_MS);
   };
@@ -373,7 +373,7 @@ function requireConfiguredModel(...models: readonly (string | undefined)[]): str
   const model = configuredModel(...models);
   if (model === undefined) {
     throw new Error(
-      'No model configured. Run `kimi` and use /login to sign in, then retry; or set default_model in config.toml.',
+      'No model configured. Run `nori provider catalog add <providerId>` or `nori provider add <registryUrl>`, then set default_model in config.toml.',
     );
   }
   return model;

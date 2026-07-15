@@ -1,4 +1,4 @@
-import { APIConnectionError, emptyUsage, isRetryableGenerateError } from '@moonshot-ai/kosong';
+import { APIConnectionError, emptyUsage, isRetryableGenerateError } from '@nori-code/kosong';
 import { describe, expect, it } from 'vitest';
 
 import type { KimiConfig } from '#/config';

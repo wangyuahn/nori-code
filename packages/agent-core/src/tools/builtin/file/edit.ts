@@ -8,7 +8,7 @@
  * Kaos I/O.
  */
 
-import type { Kaos } from '@moonshot-ai/kaos';
+import type { Kaos } from '@nori-code/kaos';
 import { z } from 'zod';
 
 import type { BuiltinTool } from '../../../agent/tool';
@@ -20,6 +20,7 @@ import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-m
 import type { WorkspaceConfig } from '../../support/workspace';
 import { materializeModelText, toModelTextView } from './line-endings';
 import EDIT_DESCRIPTION from './edit.md?raw';
+import { summarizeChangedLines, type CodeChangeReporter } from './change-summary';
 
 // `old_string` must be non-empty: the non-replace_all branch walks
 // occurrences with `content.indexOf("", pos)`, which would loop forever
@@ -63,6 +64,7 @@ export class EditTool implements BuiltinTool<EditInput> {
   constructor(
     private readonly kaos: Kaos,
     private readonly workspace: WorkspaceConfig,
+    private readonly reportChange?: CodeChangeReporter,
   ) {}
 
   resolveExecution(args: EditInput): ToolExecution {
@@ -134,6 +136,7 @@ export class EditTool implements BuiltinTool<EditInput> {
           safePath,
           materializeModelText(newContent, modelView.lineEndingStyle),
         );
+        this.reportChange?.({ operation: 'edit', path: args.path, diff: summarizeChangedLines(content, newContent), occurredAt: new Date().toISOString() });
         return { output: `Replaced 1 occurrence in ${args.path}` };
       }
 
@@ -149,6 +152,7 @@ export class EditTool implements BuiltinTool<EditInput> {
         safePath,
         materializeModelText(newContent, modelView.lineEndingStyle),
       );
+      this.reportChange?.({ operation: 'edit', path: args.path, diff: summarizeChangedLines(content, newContent), occurredAt: new Date().toISOString() });
       return { output: `Replaced ${String(replacementCount)} occurrences in ${args.path}` };
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;

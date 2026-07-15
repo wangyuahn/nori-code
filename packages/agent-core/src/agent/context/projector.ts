@@ -1,4 +1,4 @@
-import type { ContentPart, Message, TextPart } from '@moonshot-ai/kosong';
+import type { ContentPart, Message, TextPart } from '@nori-code/kosong';
 
 import { ErrorCodes, KimiError } from '../../errors';
 import type { ContextMessage } from './types';

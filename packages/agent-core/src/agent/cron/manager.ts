@@ -36,7 +36,7 @@
  * `task.recurring !== false` to keep that default behaviour even when
  * the field is omitted by the caller.
  */
-import type { ContentPart } from '@moonshot-ai/kosong';
+import type { ContentPart } from '@nori-code/kosong';
 
 import type { Agent } from '../index';
 import type { CronJobOrigin, CronMissedOrigin } from '../context/types';

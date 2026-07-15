@@ -14,8 +14,8 @@ const WEB_CANCEL = 'cancel';
 /**
  * `/web` — hand the current session off to the browser.
  *
- * Equivalent to `kimi server run` (ensures the background daemon is up) plus
- * `kimi web` (opens the browser), but deep-linked to the active session and
+ * Equivalent to `nori server run` (ensures the background daemon is up) plus
+ * `nori web` (opens the browser), but deep-linked to the active session and
  * followed by shutting down this terminal UI. A confirmation step spells out
  * the consequences and only proceeds when the user presses Enter on Continue.
  */
@@ -66,7 +66,7 @@ export async function handleWebCommand(host: SlashCommandHost): Promise<void> {
   }
 
   // Resolve the persistent token so the opened browser auto-authenticates via
-  // the `#token=` fragment — matching the `kimi web` subcommand. Show the URL
+  // the `#token=` fragment — matching the `nori web` subcommand. Show the URL
   // and token in green under the status line so they can be copied before the
   // terminal exits. Best-effort: an older/never-started server has no token
   // file, so we fall back to the plain URL and skip the token line.
@@ -84,7 +84,7 @@ export async function handleWebCommand(host: SlashCommandHost): Promise<void> {
 /**
  * Build the deep-link URL the web UI recognises for a session. When a token is
  * known it rides in the `#token=` fragment (never sent to the server, so never
- * logged), so the browser authenticates on load just like `kimi web`.
+ * logged), so the browser authenticates on load just like `nori web`.
  */
 export function webSessionUrl(origin: string, sessionId: string, token?: string): string {
   const base = `${origin.replace(/\/+$/, '')}/sessions/${encodeURIComponent(sessionId)}`;

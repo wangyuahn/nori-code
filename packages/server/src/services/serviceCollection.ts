@@ -2,8 +2,8 @@ import {
   getSingletonServiceDescriptors,
   ServiceCollection,
   SyncDescriptor,
-} from '@moonshot-ai/agent-core';
-import * as Services from '@moonshot-ai/agent-core';
+} from '@nori-code/agent-core';
+import * as Services from '@nori-code/agent-core';
 import type { Logger as PinoLogger } from 'pino';
 
 import type { FastifyLike } from '#/services/gateway/restGateway';

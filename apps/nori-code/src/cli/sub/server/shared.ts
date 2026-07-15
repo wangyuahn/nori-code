@@ -1,5 +1,5 @@
 /**
- * Shared helpers for `kimi server …` subcommands.
+ * Shared helpers for `nori server …` subcommands.
  *
  * Owns the default host/port, option parsers, and health/readiness probes that
  * `run`, `web`, and `status` all use.
@@ -8,7 +8,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { ServerLogLevel } from '@moonshot-ai/server';
+import type { ServerLogLevel } from '@nori-code/server';
 
 export const LOCAL_SERVER_HOST = '127.0.0.1';
 export const DEFAULT_LAN_HOST = '0.0.0.0';
@@ -71,7 +71,7 @@ export interface ServerCliOptions {
   allowRemoteTerminals?: boolean;
   /** Extra `Host` header values to allow (`--allowed-host`). */
   allowedHost?: string[];
-  /** Internal flag set by the daemon spawner (`kimi web`). */
+  /** Internal flag set by the daemon spawner (`nori web`). */
   daemon?: boolean;
   /** Internal flag set by the daemon spawner / tests. */
   idleGraceMs?: string;
@@ -209,7 +209,7 @@ export async function ensureServerWebReady(origin: string): Promise<void> {
   } catch (error) {
     const reason = error instanceof Error ? ` (${error.message})` : '';
     throw new Error(
-      `Server at ${origin} does not serve the Kimi web UI${reason}. Stop the existing server and rerun \`kimi server run\`.`,
+      `Server at ${origin} does not serve the Nori web UI${reason}. Stop the existing server and rerun \`nori server run\`.`,
       { cause: error },
     );
   } finally {

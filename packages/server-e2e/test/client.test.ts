@@ -23,7 +23,7 @@ import {
   type ProviderCatalogItem,
   type Session,
   type SessionStatusResponse,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 
 import { DaemonClient, EnvelopeError } from '../src/index.js';
 import { fetchWithReport } from '../src/report.js';

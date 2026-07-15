@@ -10,8 +10,8 @@
  * sees the actual error message, not a synthetic summary.
  */
 
-import type { Component } from '@moonshot-ai/pi-tui';
-import { Text } from '@moonshot-ai/pi-tui';
+import type { Component } from '@nori-code/pi-tui';
+import { Text } from '@nori-code/pi-tui';
 
 import { currentTheme } from '#/tui/theme';
 import { sanitizeShellOutput } from '#/tui/utils/shell-output';

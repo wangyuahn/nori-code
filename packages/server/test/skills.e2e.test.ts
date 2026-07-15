@@ -32,7 +32,7 @@ import { pino } from 'pino';
 import {
   activateSkillResultSchema,
   listSkillsResponseSchema,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { IRestGateway, startServer, type RunningServer } from '../src';

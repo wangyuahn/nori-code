@@ -7,12 +7,12 @@ import {
   deleteAllKittyImages,
   resetCapabilitiesCache,
   setCapabilities,
-} from '@moonshot-ai/pi-tui';
-import type { ApprovalRequest, ApprovalResponse, Event } from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/pi-tui';
+import type { ApprovalRequest, ApprovalResponse, Event } from '@nori-code/sdk';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ApprovalPanelComponent } from '#/tui/components/dialogs/approval-panel';
-import { KIMI_CODE_PLUGIN_MARKETPLACE_URL } from '#/constant/app';
+import { NORI_CODE_PLUGIN_MARKETPLACE_URL } from '#/constant/app';
 import { MOON_SPINNER_FRAMES } from '#/tui/constant/rendering';
 import {
   AgentSwarmProgressComponent,
@@ -118,8 +118,7 @@ function makeStartupInput(): KimiTUIStartupInput {
     cliOptions: {
       session: undefined,
       continue: false,
-      yolo: false,
-      auto: false,
+      permission: undefined,
       plan: false,
       model: undefined,
       outputFormat: undefined,
@@ -350,7 +349,7 @@ function countOccurrences(haystack: string, needle: string): number {
 
 const tempDirs: string[] = [];
 const originalKimiCodeHome = process.env['NORI_CODE_HOME'];
-const originalPluginMarketplaceUrl = process.env['KIMI_CODE_PLUGIN_MARKETPLACE_URL'];
+const originalPluginMarketplaceUrl = process.env['NORI_CODE_PLUGIN_MARKETPLACE_URL'];
 const originalVisual = process.env['VISUAL'];
 const originalEditor = process.env['EDITOR'];
 
@@ -384,9 +383,9 @@ afterEach(async () => {
     process.env['VISUAL'] = originalVisual;
   }
   if (originalPluginMarketplaceUrl === undefined) {
-    delete process.env['KIMI_CODE_PLUGIN_MARKETPLACE_URL'];
+    delete process.env['NORI_CODE_PLUGIN_MARKETPLACE_URL'];
   } else {
-    process.env['KIMI_CODE_PLUGIN_MARKETPLACE_URL'] = originalPluginMarketplaceUrl;
+    process.env['NORI_CODE_PLUGIN_MARKETPLACE_URL'] = originalPluginMarketplaceUrl;
   }
   if (originalEditor === undefined) {
     delete process.env['EDITOR'];
@@ -3691,7 +3690,7 @@ command = "vim"
       }),
       'utf8',
     );
-    process.env['KIMI_CODE_PLUGIN_MARKETPLACE_URL'] = marketplacePath;
+    process.env['NORI_CODE_PLUGIN_MARKETPLACE_URL'] = marketplacePath;
     const session = makeSession();
     const { driver } = await makeDriver(session);
 
@@ -3740,7 +3739,7 @@ command = "vim"
       }),
       'utf8',
     );
-    process.env['KIMI_CODE_PLUGIN_MARKETPLACE_URL'] = marketplacePath;
+    process.env['NORI_CODE_PLUGIN_MARKETPLACE_URL'] = marketplacePath;
     const installPlugin = vi.fn(async () => {
       throw new Error('install failed');
     });
@@ -3918,7 +3917,7 @@ command = "vim"
           'https://code.kimi.com/kimi-code/plugins/official/kimi-datasource.zip',
         );
       });
-      expect(globalThis.fetch).toHaveBeenCalledWith(KIMI_CODE_PLUGIN_MARKETPLACE_URL);
+      expect(globalThis.fetch).toHaveBeenCalledWith(NORI_CODE_PLUGIN_MARKETPLACE_URL);
     } finally {
       vi.stubGlobal('fetch', originalFetch);
     }
@@ -3926,7 +3925,7 @@ command = "vim"
 
   it('shows an inline Official error when the marketplace is unreachable, keeping the panel open', async () => {
     const originalFetch = globalThis.fetch;
-    process.env['KIMI_CODE_PLUGIN_MARKETPLACE_URL'] = 'https://example.test/marketplace.json';
+    process.env['NORI_CODE_PLUGIN_MARKETPLACE_URL'] = 'https://example.test/marketplace.json';
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => {

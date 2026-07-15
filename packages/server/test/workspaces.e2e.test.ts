@@ -26,7 +26,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { IRestGateway, startServer, type RunningServer } from '../src';
 import { fixedTokenAuth } from './helpers/serverHarness';
-import type { Workspace } from '@moonshot-ai/protocol';
+import type { Workspace } from '@nori-code/protocol';
 
 let tmpDir: string;
 let lockPath: string;

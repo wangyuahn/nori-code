@@ -19,7 +19,7 @@
  * helpers stay private so callers cannot bypass the limits.
  */
 
-import type { ContentPart } from '@moonshot-ai/kosong';
+import type { ContentPart } from '@nori-code/kosong';
 
 import { compressImageContentParts } from '../tools/support/image-compress';
 import type { MCPContentBlock, MCPToolResult } from './types';

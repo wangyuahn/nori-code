@@ -1,6 +1,6 @@
 import { dirname, join } from 'pathe';
 
-import type { Kaos } from '@moonshot-ai/kaos';
+import type { Kaos } from '@nori-code/kaos';
 
 import { normalizeAdditionalDirs } from '../config';
 import { listDirectory } from '../tools/support/list-directory';

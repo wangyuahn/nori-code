@@ -1,4 +1,4 @@
-import { truncateToWidth, visibleWidth, type Component } from '@moonshot-ai/pi-tui';
+import { truncateToWidth, visibleWidth, type Component } from '@nori-code/pi-tui';
 import chalk from 'chalk';
 
 import {

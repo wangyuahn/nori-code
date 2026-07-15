@@ -20,8 +20,8 @@ import {
   truncateToWidth,
   visibleWidth,
   type Focusable,
-} from '@moonshot-ai/pi-tui';
-import type { PermissionMode } from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/pi-tui';
+import type { PermissionMode } from '@nori-code/sdk';
 import { currentTheme } from '#/tui/theme';
 import { SELECT_POINTER, CURRENT_MARK } from '#/tui/constant/symbols';
 import type { AppState } from '../../types';
@@ -126,7 +126,7 @@ function wrapDescription(text: string, width: number): string[] {
 function buildModelOptions(appState: AppState): StepOption[] {
   const entries = Object.entries(appState.availableModels);
   if (entries.length === 0) {
-    return [{ value: '__none__', label: '(no models available)', description: 'Run /login or /provider to add a model.' }];
+    return [{ value: '__none__', label: '(no models available)', description: 'Run /provider to add a model.' }];
   }
   return entries.map(([alias]) => ({
     value: alias,

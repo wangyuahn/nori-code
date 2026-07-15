@@ -1,5 +1,6 @@
-import { InstantiationService, resolveConfigPath, resolveKimiHome, setUnexpectedErrorHandler, IApprovalService, IAuthSummaryService, IEnvironmentService, IEventService, ICoreProcessService, IModelCatalogService, IMcpService, IMessageService, IOAuthService, IFileStore, IFsGitService, IFsSearchService, IFsService, IFsWatcher, ILogService, IPromptService, IQuestionService, ISessionService, ISkillService, ITaskService, ITerminalService, IToolService, IWorkspaceFsService, IWorkspaceRegistry, FsPathEscapesError, FsWatchLimitError, FsWatcherService, SessionNotFoundError, createConnectionLookup, resolveSafePath, type ServiceIdentifier, type CoreProcessServiceOptions } from '@moonshot-ai/agent-core';
-import { ErrorCode, createAsyncApiDocument } from '@moonshot-ai/protocol';
+import { InstantiationService, resolveConfigPath, setUnexpectedErrorHandler, IApprovalService, IAuthSummaryService, IEnvironmentService, IEventService, ICoreProcessService, IModelCatalogService, IMcpService, IMessageService, IOAuthService, IFileStore, IFsGitService, IFsSearchService, IFsService, IFsWatcher, ILogService, IPromptService, IQuestionService, ISessionService, ISkillService, ITaskService, ITerminalService, IToolService, IWorkspaceFsService, IWorkspaceRegistry, FsPathEscapesError, FsWatchLimitError, FsWatcherService, SessionNotFoundError, createConnectionLookup, resolveSafePath, type ServiceIdentifier, type CoreProcessServiceOptions } from '@nori-code/agent-core';
+import { ErrorCode, createAsyncApiDocument } from '@nori-code/protocol';
+import { resolveNoriHome } from './home';
 import Fastify from 'fastify';
 import { promises as fspPromises } from 'node:fs';
 import {
@@ -98,7 +99,7 @@ export interface ServerStartOptions {
 
   /**
    * Extra `Host` header values to allow, in addition to the default allowlist
-   * and `KIMI_CODE_ALLOWED_HOSTS`. A leading dot matches a domain suffix.
+   * and `NORI_CODE_ALLOWED_HOSTS`. A leading dot matches a domain suffix.
    */
   allowedHosts?: readonly string[];
 
@@ -126,7 +127,7 @@ export async function startServer(opts: ServerStartOptions): Promise<RunningServ
     port: opts.port,
     host: opts.host,
     lockPath: opts.lockPath,
-    // Record the host build identity so `kimi server status` can detect a
+    // Record the host build identity so `nori server status` can detect a
     // build-mismatched server.
     hostVersion: opts.coreProcessOptions?.identity?.version,
     entry: process.argv[1],
@@ -199,11 +200,12 @@ export async function startServer(opts: ServerStartOptions): Promise<RunningServ
 
   await registerOpenApi();
 
+  const homeDir = resolveNoriHome(opts.coreProcessOptions?.homeDir);
   const envService: IEnvironmentService = {
     _serviceBrand: undefined,
-    homeDir: resolveKimiHome(opts.coreProcessOptions?.homeDir),
+    homeDir,
     configPath: resolveConfigPath({
-      homeDir: opts.coreProcessOptions?.homeDir,
+      homeDir,
       configPath: opts.coreProcessOptions?.configPath,
     }),
   };
@@ -214,7 +216,7 @@ export async function startServer(opts: ServerStartOptions): Promise<RunningServ
   // optional bcrypt password hash — both awaited here, then supplied to the
   // collection via `serviceOverrides` so tests can inject a fixed-token impl
   // that wins (last-wins) over this default. The store re-reads the file when
-  // its mtime changes, so `kimi server rotate-token` takes effect without a
+  // its mtime changes, so `nori server rotate-token` takes effect without a
   // restart; the file is intentionally kept on shutdown (dispose is a no-op).
   const tokenStore = await createTokenStore(envService.homeDir);
   const passwordHash = await resolvePasswordHash(process.env);
@@ -596,7 +598,7 @@ export async function startServer(opts: ServerStartOptions): Promise<RunningServ
     throw error;
   }
   // If we retried onto a different port, advertise the real one in the lock so
-  // `kimi server status` / `kill` / `ps` can find this daemon.
+  // `nori server status` / `kill` / `ps` can find this daemon.
   if (boundPort !== opts.port) {
     lockHandle.updatePort(boundPort);
   }
@@ -692,10 +694,10 @@ export interface ListenWithPortRetryOptions {
  * third-party process.
  *
  * Why this is the right layer: {@link startServer} acquires the single-instance
- * lock *before* listening, so by the time we reach `listen` a live kimi server
+ * lock *before* listening, so by the time we reach `listen` a live nori server
  * would already have thrown `ServerLockedError`. Any `EADDRINUSE` here is
  * therefore a third-party listener, and bumping the port is the desired policy
- * ("if the port is taken by something other than kimi server itself, +1").
+ * ("if the port is taken by something other than nori server itself, +1").
  *
  * Port `0` (OS-assigned ephemeral) is never retried: the kernel already picks a
  * free port, so `EADDRINUSE` cannot arise from a specific-port conflict.

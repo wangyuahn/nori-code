@@ -7,7 +7,7 @@ import type {
   KimiConfigPatch,
   SetKimiConfigPayload,
 } from '../../src';
-import { KIMI_CODE_PROVIDER_NAME } from '@moonshot-ai/kimi-code-oauth';
+import { KIMI_CODE_PROVIDER_NAME } from '@nori-code/oauth';
 
 import {
   type ICoreProcessService,
@@ -20,7 +20,7 @@ import {
 } from '../../src/services';
 import type { ServicesAuthFacade } from '../../src/services/auth/managedAuth';
 import type { IEventService } from '../../src/services/event/event';
-import type { Event as ProtocolEvent } from '@moonshot-ai/protocol';
+import type { Event as ProtocolEvent } from '@nori-code/protocol';
 
 afterEach(() => {
   vi.unstubAllGlobals();

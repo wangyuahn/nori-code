@@ -28,16 +28,16 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   oauthFlowSnapshotSchema,
   oauthFlowStartSchema,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 import {
   IOAuthService,
-} from '@moonshot-ai/agent-core';
+} from '@nori-code/agent-core';
 import type {
   OAuthFlowSnapshot,
   OAuthFlowStart,
   OAuthLoginCancelResponse,
   OAuthLogoutResponse,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 
 import { IRestGateway, startServer, type RunningServer } from '../src';
 import { fixedTokenAuth } from './helpers/serverHarness';

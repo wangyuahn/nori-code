@@ -8,7 +8,7 @@ import {
   OAuthError,
   OAuthUnauthorizedError,
   RetryableRefreshError,
-} from '@moonshot-ai/kimi-code-oauth';
+} from '@nori-code/oauth';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ErrorCodes, KimiError, KimiForCodingProvider } from '#/index';

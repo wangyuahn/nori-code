@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { encodeWorkDirKey } from '@moonshot-ai/agent-core/session/store';
+import { encodeWorkDirKey } from '@nori-code/agent-core/session/store';
 
 /**
  * Bucket directory name `wd_<slug>_<hash12>` for a workdir path.

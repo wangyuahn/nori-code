@@ -1,5 +1,5 @@
 /**
- * `kimi vis`
+ * `nori vis`
  *
  * Verifies the CLI layer for the session visualizer: home + auto-port
  * resolution, browser open vs `--no-open`, and the session deep-link path.
@@ -104,7 +104,7 @@ describe('handleVis', () => {
       waitForShutdown: vi.fn(async () => {}),
     });
     await handleVis(deps, { open: true, port: 4321 });
-    expect(errored.join('')).toContain('Failed to start kimi vis');
+    expect(errored.join('')).toContain('Failed to start nori vis');
     expect(errored.join('')).toContain('EADDRINUSE');
     expect(deps.exit).toHaveBeenCalledWith(1);
     // Nothing past the failed start should run.

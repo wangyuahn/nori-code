@@ -33,7 +33,7 @@ import { createDecorator } from '../../di';
 import type { CoreRPC, KimiCoreOptions } from '../../rpc';
 
 /** Host identity (product name + version). Mirrors the type previously
- *  imported from @moonshot-ai/kimi-code-oauth. */
+ *  imported from @nori-code/oauth. */
 export interface KimiHostIdentity {
   readonly userAgentProduct: string;
   readonly version: string;

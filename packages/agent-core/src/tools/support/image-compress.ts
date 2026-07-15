@@ -18,7 +18,7 @@
  *    WebP codec. Unknown formats are passed through.
  */
 
-import type { ContentPart } from '@moonshot-ai/kosong';
+import type { ContentPart } from '@nori-code/kosong';
 
 import { sniffImageDimensions } from './file-type';
 

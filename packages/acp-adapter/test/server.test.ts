@@ -14,7 +14,7 @@ import {
   type WriteTextFileRequest,
   type WriteTextFileResponse,
 } from '@agentclientprotocol/sdk';
-import type { KimiHarness } from '@moonshot-ai/kimi-code-sdk';
+import type { KimiHarness } from '@nori-code/sdk';
 
 import { AcpServer } from '../src/server';
 import { TERMINAL_AUTH_METHOD } from '../src';
@@ -106,6 +106,19 @@ describe('AcpServer + AgentSideConnection', () => {
       name: expect.any(String),
       args: ['--login'],
     });
+  });
+
+  it('can disable terminal auth advertisement for API-key-only distributions', async () => {
+    const harness = {} as KimiHarness;
+    const { agentStream, clientStream } = makeInMemoryStreamPair();
+    new AgentSideConnection(
+      (c) => new AcpServer(harness, c, { advertiseTerminalAuth: false }),
+      agentStream,
+    );
+    const client = new ClientSideConnection((_a) => new StubClient(), clientStream);
+
+    const response = await client.initialize({ protocolVersion: 1 });
+    expect(response.authMethods).toEqual([]);
   });
 
   it('honors version negotiation: client v99 still negotiates to v1', async () => {

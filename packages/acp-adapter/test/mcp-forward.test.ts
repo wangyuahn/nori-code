@@ -19,9 +19,9 @@ import {
   type WriteTextFileRequest,
   type WriteTextFileResponse,
 } from '@agentclientprotocol/sdk';
-import type { KimiHarness, Session } from '@moonshot-ai/kimi-code-sdk';
-import { log } from '@moonshot-ai/kimi-code-sdk';
-import type { McpServerConfig } from '@moonshot-ai/agent-core';
+import type { KimiHarness, Session } from '@nori-code/sdk';
+import { log } from '@nori-code/sdk';
+import type { McpServerConfig } from '@nori-code/agent-core';
 
 import { acpMcpServersToConfigs } from '../src/mcp';
 import { AcpServer } from '../src/server';

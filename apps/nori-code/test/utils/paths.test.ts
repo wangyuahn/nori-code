@@ -24,13 +24,13 @@ afterEach(() => {
 });
 
 describe('getDataDir', () => {
-  it('returns ~/.kimi-code when NORI_CODE_HOME is not set', () => {
-    expect(getDataDir()).toBe(join(homedir(), '.kimi-code'));
+  it('returns ~/.nori-code when NORI_CODE_HOME is not set', () => {
+    expect(getDataDir()).toBe(join(homedir(), '.nori-code'));
   });
 
   it('returns NORI_CODE_HOME when set', () => {
-    process.env['NORI_CODE_HOME'] = '/tmp/kimi-test-data';
-    expect(getDataDir()).toBe('/tmp/kimi-test-data');
+    process.env['NORI_CODE_HOME'] = '/tmp/nori-test-data';
+    expect(getDataDir()).toBe('/tmp/nori-test-data');
   });
 
   it('returns NORI_CODE_HOME even if it is a relative path', () => {
@@ -41,7 +41,7 @@ describe('getDataDir', () => {
 
 describe('getLogDir', () => {
   it('returns <dataDir>/logs', () => {
-    expect(getLogDir()).toBe(join(homedir(), '.kimi-code', 'logs'));
+    expect(getLogDir()).toBe(join(homedir(), '.nori-code', 'logs'));
   });
 
   it('respects NORI_CODE_HOME', () => {
@@ -52,7 +52,7 @@ describe('getLogDir', () => {
 
 describe('getBinDir', () => {
   it('returns <dataDir>/bin', () => {
-    expect(getBinDir()).toBe(join(homedir(), '.kimi-code', 'bin'));
+    expect(getBinDir()).toBe(join(homedir(), '.nori-code', 'bin'));
   });
 
   it('respects NORI_CODE_HOME', () => {
@@ -63,7 +63,7 @@ describe('getBinDir', () => {
 
 describe('getUpdateStateFile', () => {
   it('returns <dataDir>/updates/latest.json', () => {
-    expect(getUpdateStateFile()).toBe(join(homedir(), '.kimi-code', 'updates', 'latest.json'));
+    expect(getUpdateStateFile()).toBe(join(homedir(), '.nori-code', 'updates', 'latest.json'));
   });
 
   it('respects NORI_CODE_HOME', () => {
@@ -75,7 +75,7 @@ describe('getUpdateStateFile', () => {
 describe('getUpdateInstallStateFile', () => {
   it('returns <dataDir>/updates/install.json', () => {
     expect(getUpdateInstallStateFile()).toBe(
-      join(homedir(), '.kimi-code', 'updates', 'install.json'),
+      join(homedir(), '.nori-code', 'updates', 'install.json'),
     );
   });
 
@@ -90,7 +90,7 @@ describe('getInputHistoryFile', () => {
     const workDir = '/home/user/project';
     const hash = createHash('md5').update(workDir, 'utf-8').digest('hex');
     expect(getInputHistoryFile(workDir)).toBe(
-      join(homedir(), '.kimi-code', 'user-history', `${hash}.jsonl`),
+      join(homedir(), '.nori-code', 'user-history', `${hash}.jsonl`),
     );
   });
 

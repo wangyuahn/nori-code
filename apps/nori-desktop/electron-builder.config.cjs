@@ -1,80 +1,72 @@
 'use strict';
 
-// electron-builder configuration.
-//
-// Signing / notarization are environment-driven so the same config produces
-// either an unsigned local build or a fully signed + notarized distributable:
-//
-//   unsigned (default / local):
-//     CSC_IDENTITY_AUTO_DISCOVERY=false  -> no signing, no notarization
-//
-//   signed + notarized (CI, with a Developer ID cert in the keychain):
-//     NORI_DESKTOP_NOTARIZE=true
-//     APPLE_API_KEY=<path to .p8>  APPLE_API_KEY_ID=<id>  APPLE_API_ISSUER=<id>
-//
-// The entitlements (hardened runtime) are applied to the app AND every nested
-// Mach-O — including the bundled Nori SEA backend — via entitlementsInherit, so
-// the whole bundle passes notarization. Mirrors the TUI's native entitlements.
-
 const notarize = process.env.NORI_DESKTOP_NOTARIZE === 'true';
 
-// Internal-testing artifact name:
-//   ND-beta-alpha-crazy-internal-v50-<arch>-<MMDD>.<ext>
-// The date is MMDD in UTC+8, computed at build time. `v50` is a fixed label
-// (not a version number) — edit it here to bump the internal build label.
-function mmddUTC8() {
-  const utc8 = new Date(Date.now() + 8 * 60 * 60 * 1000);
-  const mm = String(utc8.getUTCMonth() + 1).padStart(2, '0');
-  const dd = String(utc8.getUTCDate()).padStart(2, '0');
-  return mm + dd;
-}
-const artifactName = 'ND-beta-alpha-crazy-internal-v50-${arch}-' + mmddUTC8() + '.${ext}';
-
 module.exports = {
-  appId: 'ai.nori.desktop',
-  productName: 'Nori Code Desktop',
-  copyright: 'Copyright © Nori Code',
+  // A stable, standalone Nori identity used by electron-builder.
+  // derives Windows application identity and installer metadata from this ID.
+  appId: 'com.nori.work',
+  productName: 'Nori Work',
+  executableName: 'NoriWork',
+  copyright: 'Copyright © Nori',
 
-  directories: {
-    output: 'dist-app',
-  },
-
-  // No native node modules in the Electron app itself; the backend is the
-  // prebuilt SEA staged by before-pack.cjs.
+  directories: { output: 'dist-app' },
   npmRebuild: false,
   asar: true,
-
   files: ['out/**', 'package.json'],
-
   beforePack: './scripts/before-pack.cjs',
-  extraResources: [{ from: 'resources-stage/bin', to: 'bin' }],
+  extraResources: [
+    { from: 'resources-stage/bin', to: 'bin' },
+    { from: 'resources-stage/nori-web', to: 'nori-web' },
+    { from: 'build/icon.png', to: 'icon.png' },
+  ],
 
   mac: {
+    icon: 'build/icon.icns',
     category: 'public.app-category.developer-tools',
     hardenedRuntime: true,
     gatekeeperAssess: false,
     entitlements: 'build/entitlements.mac.plist',
     entitlementsInherit: 'build/entitlements.mac.plist',
     target: ['dmg', 'zip'],
-    artifactName,
+    artifactName: 'Nori-Work-${version}-${arch}.${ext}',
     notarize,
+    protocols: [{ name: 'Nori Work', schemes: ['nori-work'] }],
   },
 
   win: {
+    icon: 'build/icon.ico',
     target: ['nsis'],
-    artifactName,
+    artifactName: 'Nori-Work-${version}-${arch}.${ext}',
+    protocols: [{ name: 'Nori Work', schemes: ['nori-work'] }],
   },
 
   nsis: {
+    // Stable, Nori-only GUID prevents collisions with unrelated applications.
+    guid: 'af4f85b3-4b85-5fac-8768-243f81adad55',
     oneClick: false,
     perMachine: false,
     allowToChangeInstallationDirectory: true,
+    shortcutName: 'Nori Work',
+    uninstallDisplayName: 'Nori Work',
+    createDesktopShortcut: 'always',
+    createStartMenuShortcut: true,
   },
 
   linux: {
+    icon: 'build/icon.png',
+    executableName: 'nori-work',
     category: 'Development',
     target: ['AppImage', 'deb'],
-    artifactName,
-    maintainer: 'Nori Code',
+    artifactName: 'Nori-Work-${version}-${arch}.${ext}',
+    maintainer: 'Nori',
+    protocols: [{ name: 'Nori Work', schemes: ['nori-work'] }],
+  },
+
+  publish: {
+    provider: 'github',
+    owner: 'wangyuahn',
+    repo: 'nori-code',
+    releaseType: 'draft',
   },
 };

@@ -30,8 +30,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { pino } from 'pino';
-import { ErrorCode, sessionSchema, sessionStatusResponseSchema, undoSessionResponseSchema } from '@moonshot-ai/protocol';
-import type { TelemetryClient, TelemetryProperties } from '@moonshot-ai/agent-core';
+import { ErrorCode, sessionSchema, sessionStatusResponseSchema, undoSessionResponseSchema } from '@nori-code/protocol';
+import type { TelemetryClient, TelemetryProperties } from '@nori-code/agent-core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 
@@ -132,7 +132,7 @@ async function openSessionListListener(r: RunningServer): Promise<{
   const wsUrl = r.address.replace('http://', 'ws://') + '/api/v1/ws';
   const received: Record<string, unknown>[] = [];
   const ws = await new Promise<WebSocket>((resolve, reject) => {
-    const sock = new WebSocket(wsUrl, ['kimi-code.bearer.test-token']);
+    const sock = new WebSocket(wsUrl, ['nori-code.bearer.test-token']);
     sock.on('message', (data) => {
       try {
         received.push(JSON.parse(wsDataToString(data)) as Record<string, unknown>);
@@ -230,10 +230,10 @@ describe('POST /api/v1/sessions — create', () => {
       method: 'POST',
       url: '/api/v1/sessions',
       headers: {
-        'x-kimi-client-id': 'web_test_client',
-        'x-kimi-client-name': 'kimi-code-web',
-        'x-kimi-client-version': '0.1.1',
-        'x-kimi-client-ui-mode': 'web',
+        'x-nori-client-id': 'web_test_client',
+        'x-nori-client-name': 'nori-web',
+        'x-nori-client-version': '0.1.1',
+        'x-nori-client-ui-mode': 'web',
       },
       payload: { metadata: { cwd }, title: 'client telemetry' },
     });
@@ -246,7 +246,7 @@ describe('POST /api/v1/sessions — create', () => {
       sessionId: env.data!.id,
       properties: {
         client_id: 'web_test_client',
-        client_name: 'kimi-code-web',
+        client_name: 'nori-web',
         client_version: '0.1.1',
         ui_mode: 'web',
         resumed: false,
@@ -646,7 +646,9 @@ describe('POST /api/v1/sessions/{session_id}:undo — undo history', () => {
           thinking_level: 'auto',
           permission: 'manual',
           plan_mode: false,
+          main_write_enabled: true,
           swarm_mode: false,
+          goal: null,
           context_tokens: 0,
           max_context_tokens: 0,
           context_usage: 0,
@@ -854,5 +856,41 @@ describe('POST /api/v1/sessions/{session_id}:archive — archive', () => {
     });
     const env = envelopeOf<unknown>(res.json());
     expect(env.code).toBe(40401);
+  });
+});
+
+describe('POST /api/v1/sessions/{session_id}:delete — permanent delete', () => {
+  it('removes the session from active and archived listings', async () => {
+    const r = await bootDaemon();
+    const cwd = join(tmpDir, 'workspace-delete');
+    const created = envelopeOf<{ id: string }>(
+      (await appOf(r).inject({
+        method: 'POST',
+        url: '/api/v1/sessions',
+        payload: { metadata: { cwd } },
+      })).json(),
+    ).data!;
+
+    const deleted = await appOf(r).inject({
+      method: 'POST',
+      url: `/api/v1/sessions/${created.id}:delete`,
+      payload: {},
+    });
+    expect(envelopeOf<{ deleted: boolean }>(deleted.json()).data).toEqual({ deleted: true });
+
+    const listed = envelopeOf<{ items: Array<{ id: string }> }>(
+      (await appOf(r).inject({ method: 'GET', url: '/api/v1/sessions?include_archive=true' })).json(),
+    );
+    expect(listed.data!.items.some(session => session.id === created.id)).toBe(false);
+  });
+
+  it('returns 40401 for an unknown session', async () => {
+    const r = await bootDaemon();
+    const response = await appOf(r).inject({
+      method: 'POST',
+      url: '/api/v1/sessions/sess_missing:delete',
+      payload: {},
+    });
+    expect(envelopeOf<unknown>(response.json()).code).toBe(40401);
   });
 });

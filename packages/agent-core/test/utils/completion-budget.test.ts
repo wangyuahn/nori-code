@@ -1,4 +1,4 @@
-import type { ChatProvider, ModelCapability } from '@moonshot-ai/kosong';
+import type { ChatProvider, ModelCapability } from '@nori-code/kosong';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {

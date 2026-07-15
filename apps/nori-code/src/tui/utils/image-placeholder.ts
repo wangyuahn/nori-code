@@ -15,7 +15,7 @@
  *     noise between two media parts.
  */
 
-import type { PromptPart } from '@moonshot-ai/kimi-code-sdk';
+import type { PromptPart } from '@nori-code/sdk';
 
 import type {
   ImageAttachment,

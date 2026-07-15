@@ -1,4 +1,4 @@
-import { ErrorCodes } from '@moonshot-ai/kimi-code-sdk';
+import { ErrorCodes } from '@nori-code/sdk';
 
 export const PRODUCT_NAME = 'Nori Code';
 export const CLI_COMMAND_NAME = 'nori';
@@ -72,17 +72,17 @@ export const FEEDBACK_VERSION_PREFIX = 'nori-code-';
 export const FEEDBACK_TELEMETRY_EVENT = 'feedback_submitted';
 
 // CDN source of truth: all version checks and native install scripts pull from here.
-export const NORI_CODE_CDN_BASE = '';
-export const NORI_CODE_CDN_LATEST_URL = '';
+export const NORI_CODE_CDN_BASE = 'https://cdn.nori.work/nori-code';
+export const NORI_CODE_CDN_LATEST_URL = `${NORI_CODE_CDN_BASE}/latest`;
 // Rollout manifest consumed by update checks; the plain-text `/latest` above
 // stays unchanged forever — already-shipped clients hard-fail on non-semver
 // bodies, and the CDN install scripts read it for fresh installs.
-export const NORI_CODE_CDN_LATEST_JSON_URL = '';
+export const NORI_CODE_CDN_LATEST_JSON_URL = `${NORI_CODE_CDN_BASE}/latest.json`;
 export const NORI_CODE_TIPS_BANNER_URL = '';
 export const NORI_CODE_PLUGIN_MARKETPLACE_URL = '';
 export const NORI_CODE_PLUGIN_MARKETPLACE_URL_ENV = 'NORI_CODE_PLUGIN_MARKETPLACE_URL';
-export const NORI_CODE_INSTALL_SH_URL = '';
-export const NORI_CODE_INSTALL_PS1_URL = '';
+export const NORI_CODE_INSTALL_SH_URL = `${NORI_CODE_CDN_BASE}/install.sh`;
+export const NORI_CODE_INSTALL_PS1_URL = `${NORI_CODE_CDN_BASE}/install.ps1`;
 
 // Native install commands, split by platform. Use these for prompt copy and spawn calls only; do not assemble the strings elsewhere.
 export const NATIVE_INSTALL_COMMAND_UNIX = `curl -fsSL ${NORI_CODE_INSTALL_SH_URL} | bash`;

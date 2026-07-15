@@ -1,4 +1,4 @@
-# @moonshot-ai/protocol
+# @nori-code/protocol
 
 ## 0.3.2
 

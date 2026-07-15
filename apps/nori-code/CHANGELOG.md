@@ -1,4 +1,4 @@
-# @moonshot-ai/kimi-code
+# @nori-code/kimi-code
 
 ## 0.22.0
 
@@ -787,7 +787,7 @@
 
 ### Minor Changes
 
-- [#368](https://github.com/MoonshotAI/kimi-code/pull/368) [`3eafa79`](https://github.com/MoonshotAI/kimi-code/commit/3eafa79f39c06b67d18bd2c1fd5321d2d889ed90) - Add `@moonshot-ai/acp-adapter` and the `kimi acp` subcommand: kimi-code now speaks [Agent Client Protocol 0.23](https://agentclientprotocol.com/) over stdio so IDEs (Zed, JetBrains AI Chat, custom clients) can drive sessions directly — coverage matrix, Zed configuration and breaking pre-release notes are in [kimi acp Subcommand Page](https://moonshotai.github.io/kimi-code/en/reference/kimi-acp.html).
+- [#368](https://github.com/MoonshotAI/kimi-code/pull/368) [`3eafa79`](https://github.com/MoonshotAI/kimi-code/commit/3eafa79f39c06b67d18bd2c1fd5321d2d889ed90) - Add `@nori-code/acp-adapter` and the `kimi acp` subcommand: kimi-code now speaks [Agent Client Protocol 0.23](https://agentclientprotocol.com/) over stdio so IDEs (Zed, JetBrains AI Chat, custom clients) can drive sessions directly — coverage matrix, Zed configuration and breaking pre-release notes are in [kimi acp Subcommand Page](https://moonshotai.github.io/kimi-code/en/reference/kimi-acp.html).
 
 - [#338](https://github.com/MoonshotAI/kimi-code/pull/338) [`ba7dd73`](https://github.com/MoonshotAI/kimi-code/commit/ba7dd736a3b295b2a29c229a944208c232d51458) - Add `/btw` for side-channel conversations without steering the active main turn.
 

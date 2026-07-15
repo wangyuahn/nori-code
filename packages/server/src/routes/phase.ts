@@ -7,7 +7,7 @@
 import { z } from 'zod';
 import { okEnvelope } from '../envelope';
 import { defineRoute } from '../middleware/defineRoute';
-import type { IInstantiationService } from '@moonshot-ai/agent-core';
+import type { IInstantiationService } from '@nori-code/agent-core';
 
 interface RouteHost {
   get(

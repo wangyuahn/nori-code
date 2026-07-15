@@ -1,4 +1,4 @@
-# @moonshot-ai/server
+# @nori-code/server
 
 Local REST + WebSocket server that exposes the Kimi Code SDK over a stable wire
 protocol. It hosts `agent-core` sessions and serves them under a single
@@ -23,9 +23,9 @@ pnpm dev:server
 pnpm dev:server:restart
 
 # Checks
-pnpm --filter @moonshot-ai/server typecheck   # tsc --noEmit
-pnpm --filter @moonshot-ai/server test        # vitest run
-pnpm --filter @moonshot-ai/server build       # tsdown
+pnpm --filter @nori-code/server typecheck   # tsc --noEmit
+pnpm --filter @nori-code/server test        # vitest run
+pnpm --filter @nori-code/server build       # tsdown
 ```
 
 The public entry point is `startServer(opts)` in `src/start.ts`, which returns a
@@ -45,11 +45,11 @@ apps/nori-code (CLI)            apps/kimi-web (browser)
         └──────────┬───────────────────┘
                    │  REST + WebSocket, /api/v1
         ┌──────────▼───────────┐
-        │  @moonshot-ai/server │
+        │  @nori-code/server │
         │  Fastify REST        │
         │  ws gateway          │
-        │  DI container        │  ← @moonshot-ai/agent-core
-        │  agent-core sessions │  ← @moonshot-ai/agent-core
+        │  DI container        │  ← @nori-code/agent-core
+        │  agent-core sessions │  ← @nori-code/agent-core
         └──────────────────────┘
 ```
 
@@ -60,7 +60,7 @@ apps/nori-code (CLI)            apps/kimi-web (browser)
   `server_hello` / `ack` / `event` / `resync_required` frames, replay and
   fan-out.
 - **DI** (`src/services/serviceCollection.ts`): seeds the container from
-  `@moonshot-ai/agent-core` (`getSingletonServiceDescriptors()`) and layers in
+  `@nori-code/agent-core` (`getSingletonServiceDescriptors()`) and layers in
   server-owned gateways plus `IApprovalService` / `IQuestionService`
   implementations.
 - **OS service managers** (`src/svc/`): launchd / systemd / schtasks backends
@@ -78,12 +78,12 @@ apps/nori-code (CLI)            apps/kimi-web (browser)
 
 ## Related packages
 
-- `@moonshot-ai/agent-core` — the agent engine the server hosts, including the
+- `@nori-code/agent-core` — the agent engine the server hosts, including the
   in-process DI service layer it wires together.
-- `@moonshot-ai/protocol` — wire types and the AsyncAPI document.
-- `@moonshot-ai/node-sdk` — typed in-process facade for user code
+- `@nori-code/protocol` — wire types and the AsyncAPI document.
+- `@nori-code/node-sdk` — typed in-process facade for user code
   (`KimiHarness`, `Session`); prefer it over hand-rolling REST/WS calls.
-- `@moonshot-ai/server-e2e` — wire-level e2e client and scenarios against a
+- `@nori-code/server-e2e` — wire-level e2e client and scenarios against a
   running server.
 
 ## Development

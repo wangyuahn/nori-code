@@ -32,7 +32,7 @@ describe('TUI config', () => {
 
     expect(result).toEqual(DEFAULT_TUI_CONFIG);
     const text = readFileSync(filePath, 'utf-8');
-    expect(text).toContain('Client preferences for kimi-code.');
+    expect(text).toContain('Client preferences for Nori Code.');
     expect(text).toContain('theme = "auto"');
     expect(text).toContain('command = ""');
     expect(text).toContain('[upgrade]');

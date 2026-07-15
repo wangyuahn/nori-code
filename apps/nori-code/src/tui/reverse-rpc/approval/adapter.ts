@@ -1,4 +1,4 @@
-import type { ApprovalRequest, ApprovalResponse, ToolInputDisplay } from '@moonshot-ai/kimi-code-sdk';
+import type { ApprovalRequest, ApprovalResponse, ToolInputDisplay } from '@nori-code/sdk';
 
 import type { ApprovalPanelResponse } from '#/tui/components/dialogs/approval-panel';
 import { goalStartOptions } from '#/tui/components/dialogs/start-permission-prompt';

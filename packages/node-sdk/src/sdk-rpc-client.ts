@@ -12,9 +12,9 @@ import {
   type RPCMethods,
   type SDKAPI,
   type TelemetryClient,
-} from '@moonshot-ai/agent-core';
-import type { Kaos } from '@moonshot-ai/kaos';
-import { assertKimiHostIdentity, createKimiDefaultHeaders } from '@moonshot-ai/kimi-code-oauth';
+} from '@nori-code/agent-core';
+import type { Kaos } from '@nori-code/kaos';
+import { assertKimiHostIdentity, createKimiDefaultHeaders } from '@nori-code/oauth';
 
 import { KimiAuthFacade } from '#/auth';
 import { KimiHarness } from '#/kimi-harness';

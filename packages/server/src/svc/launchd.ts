@@ -14,7 +14,7 @@ import {
 import { buildLaunchAgentPlist } from './launchd-plist';
 import {
   guiDomain as defaultGuiDomain,
-  KIMI_SERVER_LABEL,
+  NORI_SERVER_LABEL,
   launchAgentPlistPath as defaultLaunchAgentPlistPath,
   supervisorLogPath as defaultSupervisorLogPath,
 } from './paths';
@@ -105,7 +105,7 @@ export function createLaunchdManager(
     }
     const bootout = await deps.execLaunchctl([
       'bootout',
-      `${deps.guiDomain()}/${KIMI_SERVER_LABEL}`,
+      `${deps.guiDomain()}/${NORI_SERVER_LABEL}`,
     ]);
 
     void bootout;
@@ -128,7 +128,7 @@ export function createLaunchdManager(
         message: 'LaunchAgent is not installed. Run `nori server install` first.',
       };
     }
-    const target = `${deps.guiDomain()}/${KIMI_SERVER_LABEL}`;
+    const target = `${deps.guiDomain()}/${NORI_SERVER_LABEL}`;
 
     const result = await deps.execLaunchctl(['kickstart', '-k', target]);
     if (result.code !== 0) {
@@ -148,11 +148,11 @@ export function createLaunchdManager(
         };
       }
     }
-    return { ok: true, message: `Nori server started (${KIMI_SERVER_LABEL}).` };
+    return { ok: true, message: `Nori server started (${NORI_SERVER_LABEL}).` };
   }
 
   async function stop(): Promise<LifecycleResult> {
-    const target = `${deps.guiDomain()}/${KIMI_SERVER_LABEL}`;
+    const target = `${deps.guiDomain()}/${NORI_SERVER_LABEL}`;
     const result = await deps.execLaunchctl(['kill', 'SIGTERM', target]);
     if (result.code !== 0) {
 
@@ -164,11 +164,11 @@ export function createLaunchdManager(
         };
       }
     }
-    return { ok: true, message: `Nori server stopped (${KIMI_SERVER_LABEL}).` };
+    return { ok: true, message: `Nori server stopped (${NORI_SERVER_LABEL}).` };
   }
 
   async function restart(): Promise<LifecycleResult> {
-    const target = `${deps.guiDomain()}/${KIMI_SERVER_LABEL}`;
+    const target = `${deps.guiDomain()}/${NORI_SERVER_LABEL}`;
     const result = await deps.execLaunchctl(['kickstart', '-k', target]);
     if (result.code !== 0) {
       return {
@@ -176,7 +176,7 @@ export function createLaunchdManager(
         message: `launchctl kickstart -k failed: ${detail(result) ?? 'unknown error'}`,
       };
     }
-    return { ok: true, message: `Nori server restarted (${KIMI_SERVER_LABEL}).` };
+    return { ok: true, message: `Nori server restarted (${NORI_SERVER_LABEL}).` };
   }
 
   async function status(): Promise<ServiceStatus> {
@@ -188,7 +188,7 @@ export function createLaunchdManager(
       platform: 'darwin',
       installed,
       running: false,
-      label: KIMI_SERVER_LABEL,
+      label: NORI_SERVER_LABEL,
       ...(plan?.host !== undefined ? { host: plan.host } : {}),
       ...(plan?.port !== undefined ? { port: plan.port } : {}),
       logPath: deps.logPath(),
@@ -198,7 +198,7 @@ export function createLaunchdManager(
       return { ...base, notes: ['LaunchAgent is not installed.'] };
     }
 
-    const print = await deps.execLaunchctl(['print', `${deps.guiDomain()}/${KIMI_SERVER_LABEL}`]);
+    const print = await deps.execLaunchctl(['print', `${deps.guiDomain()}/${NORI_SERVER_LABEL}`]);
     if (print.code !== 0) {
       return {
         ...base,
@@ -256,7 +256,7 @@ export function parseLaunchctlPrint(output: string): {
 
 function writePlist(plistPath: string, plan: InstallPlan, logPath: string): void {
   const xml = buildLaunchAgentPlist({
-    label: KIMI_SERVER_LABEL,
+    label: NORI_SERVER_LABEL,
     comment: 'Nori Code local server (managed by `nori server install`).',
     programArguments: plan.programArguments,
     stdoutPath: logPath,
@@ -267,7 +267,7 @@ function writePlist(plistPath: string, plan: InstallPlan, logPath: string): void
 }
 
 async function bestEffortBootout(deps: LaunchdManagerDeps): Promise<void> {
-  await deps.execLaunchctl(['bootout', `${deps.guiDomain()}/${KIMI_SERVER_LABEL}`]).catch(() => {
+  await deps.execLaunchctl(['bootout', `${deps.guiDomain()}/${NORI_SERVER_LABEL}`]).catch(() => {
 
   });
 }

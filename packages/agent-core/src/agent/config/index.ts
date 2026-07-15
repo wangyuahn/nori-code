@@ -4,7 +4,7 @@ import {
   type ChatProvider,
   type ModelCapability,
   type ProviderConfig,
-} from '@moonshot-ai/kosong';
+} from '@nori-code/kosong';
 
 import {
   applyKimiEnvSamplingParams,

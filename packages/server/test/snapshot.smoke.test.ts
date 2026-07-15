@@ -8,7 +8,7 @@
  *   1. The reader returns a valid envelope under real wire transport.
  *   2. A second call is materially faster than the first (cache hit / no
  *      extra disk read on a session with a stable wire file).
- *   3. The `KIMI_SNAPSHOT_READER=legacy` rollback path also returns the
+ *   3. The `NORI_SNAPSHOT_READER=legacy` rollback path also returns the
  *      same protocol shape.
  *
  * Driven from the harness as `pnpm vitest run test/snapshot.smoke.test.ts`.

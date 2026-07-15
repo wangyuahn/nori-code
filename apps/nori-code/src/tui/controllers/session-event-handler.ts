@@ -1,4 +1,4 @@
-import type { Component, Focusable } from '@moonshot-ai/pi-tui';
+import type { Component, Focusable } from '@nori-code/pi-tui';
 import type {
   AgentStatusUpdatedEvent,
   AssistantDeltaEvent,
@@ -29,7 +29,7 @@ import type {
   TurnStepInterruptedEvent,
   TurnStepStartedEvent,
   WarningEvent,
-} from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/sdk';
 
 import { MoonLoader } from '../components/chrome/moon-loader';
 import { buildGoalMarker } from '../components/messages/goal-markers';
@@ -388,7 +388,7 @@ export class SessionEventHandler {
         ? 'Model hit max_tokens — tool call was truncated before it could run.'
         : 'Model hit max_tokens — no tool call was emitted.';
     const detail = this.isAnthropicSessionActive()
-      ? 'If this limit is wrong for your model, set `max_output_size` on the model alias in your kimi-code config.'
+      ? 'If this limit is wrong for your model, set `max_output_size` on the model alias in your Nori Code config.'
       : undefined;
     this.host.showNotice(title, detail);
   }

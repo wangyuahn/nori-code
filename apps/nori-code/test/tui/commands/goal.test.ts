@@ -1,4 +1,4 @@
-import { ErrorCodes, KimiError } from '@moonshot-ai/kimi-code-sdk';
+import { ErrorCodes, KimiError } from '@nori-code/sdk';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {

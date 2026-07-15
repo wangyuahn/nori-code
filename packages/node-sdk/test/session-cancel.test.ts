@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import type * as KosongModule from '@moonshot-ai/kosong';
+import type * as KosongModule from '@nori-code/kosong';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createKimiHarness, type KimiError, type Event } from '#/index';
@@ -9,7 +9,7 @@ import { createKimiHarness, type KimiError, type Event } from '#/index';
 import { makeTempDir, removeTempDirs, waitForSDKEvent } from './session-runtime-helpers';
 import { TEST_IDENTITY } from './test-identity';
 
-vi.mock('@moonshot-ai/kosong', async (importOriginal) => {
+vi.mock('@nori-code/kosong', async (importOriginal) => {
   const actual = await importOriginal<typeof KosongModule>();
   return {
     ...actual,

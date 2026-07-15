@@ -1,5 +1,5 @@
 /**
- * `kimi server kill` — terminate the running server.
+ * `nori server kill` — terminate the running server.
  *
  * Combines two independent mechanisms so the server dies even if one path
  * fails:
@@ -16,7 +16,7 @@
 
 import type { Command } from 'commander';
 
-import { getLiveLock, type LockContents } from '@moonshot-ai/server';
+import { getLiveLock, type LockContents } from '@nori-code/server';
 
 import { getDataDir } from '#/utils/paths';
 

@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { IRestGateway, startServer, type RunningServer } from '../src';
 import { fixedTokenAuth } from './helpers/serverHarness';
-import { parsePorcelain, parseNumstat } from '@moonshot-ai/agent-core';
+import { parsePorcelain, parseNumstat } from '@nori-code/agent-core';
 
 let tmpDir: string;
 let lockPath: string;

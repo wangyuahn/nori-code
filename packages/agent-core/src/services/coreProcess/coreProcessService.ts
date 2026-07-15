@@ -20,7 +20,7 @@ import {
 } from './coreProcess';
 
 /** Stub replacement for the removed `createKimiDefaultHeaders` from
- *  @moonshot-ai/kimi-code-oauth. Returns an empty header set so downstream
+ *  @nori-code/oauth. Returns an empty header set so downstream
  *  callers that don't pass explicit `kimiRequestHeaders` get `undefined`
  *  instead of a 40340 from the managed endpoint. */
 function createDefaultHeadersStub(

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { emptyUsage } from '@moonshot-ai/kosong';
+import { emptyUsage } from '@nori-code/kosong';
 
 import { ProviderManager } from '../../src/session/provider-manager';
 import type { KimiConfig } from '../../src/config';

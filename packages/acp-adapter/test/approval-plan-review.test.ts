@@ -16,7 +16,7 @@
  * exercises ONLY the plan_review branch.
  */
 import type { RequestPermissionResponse } from '@agentclientprotocol/sdk';
-import type { ApprovalRequest, ToolInputDisplay } from '@moonshot-ai/kimi-code-sdk';
+import type { ApprovalRequest, ToolInputDisplay } from '@nori-code/sdk';
 import { describe, expect, it } from 'vitest';
 
 import {

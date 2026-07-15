@@ -3,7 +3,7 @@
  */
 
 import { Disposable, InstantiationType, registerSingleton } from '../../di';
-import type { BackgroundTask } from '@moonshot-ai/protocol';
+import type { BackgroundTask } from '@nori-code/protocol';
 
 import { ICoreProcessService } from '../coreProcess/coreProcess';
 import { SessionNotFoundError } from '../session/session';

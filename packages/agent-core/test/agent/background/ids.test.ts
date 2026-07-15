@@ -5,7 +5,7 @@
 import { Readable } from 'node:stream';
 import type { Writable } from 'node:stream';
 
-import type { KaosProcess } from '@moonshot-ai/kaos';
+import type { KaosProcess } from '@nori-code/kaos';
 import { describe, expect, it, vi } from 'vitest';
 
 import { BackgroundTaskPersistence } from '../../../src/agent/background';

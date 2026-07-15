@@ -1,4 +1,4 @@
-import { Emitter, type TerminalBackend, type TerminalProcess, type TerminalSpawnOptions } from '@moonshot-ai/agent-core';
+import { Emitter, type TerminalBackend, type TerminalProcess, type TerminalSpawnOptions } from '@nori-code/agent-core';
 
 export class FakeTerminalProcess implements TerminalProcess {
   readonly writes: string[] = [];

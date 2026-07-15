@@ -8,14 +8,14 @@ import {
   DeviceCodeTimeoutError,
   OAuthError,
   type DeviceAuthorization,
-} from '@moonshot-ai/kimi-code-oauth';
+} from '@nori-code/oauth';
 import type {
   OAuthFlowSnapshot,
   OAuthFlowStart,
   OAuthFlowStatus,
   OAuthLoginCancelResponse,
   OAuthLogoutResponse,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 import { ulid } from 'ulid';
 
 import { createManagedAuthFacade, type ServicesAuthFacade } from '../auth/managedAuth';

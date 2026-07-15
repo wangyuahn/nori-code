@@ -4,7 +4,7 @@
  * by inspecting the loop's call graph.
  */
 
-import { inputTotal } from '@moonshot-ai/kosong';
+import { inputTotal } from '@nori-code/kosong';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { LoopHooks, ExecutableToolResult, ToolExecution } from '../../src/loop/index';

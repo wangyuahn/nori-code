@@ -10,7 +10,7 @@
  */
 import assert from 'node:assert/strict';
 
-import type { QuestionAnswer } from '@moonshot-ai/protocol';
+import type { QuestionAnswer } from '@nori-code/protocol';
 
 import { DaemonClient, type AnyFrame } from '../src/index';
 

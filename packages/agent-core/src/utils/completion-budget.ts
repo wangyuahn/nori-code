@@ -1,4 +1,4 @@
-import type { ChatProvider, ModelCapability } from '@moonshot-ai/kosong';
+import type { ChatProvider, ModelCapability } from '@nori-code/kosong';
 
 /** Completion-token budget for the next LLM request. */
 export interface CompletionBudgetConfig {

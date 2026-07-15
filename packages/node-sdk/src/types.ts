@@ -5,10 +5,10 @@ import type {
   TelemetryClient,
   TelemetryContextPatch,
   TelemetryProperties,
-} from '@moonshot-ai/agent-core';
-import type { Kaos } from '@moonshot-ai/kaos';
-import type { KimiHostIdentity, OAuthRefreshOutcome } from '@moonshot-ai/kimi-code-oauth';
-import type { ContentPart } from '@moonshot-ai/kosong';
+} from '@nori-code/agent-core';
+import type { Kaos } from '@nori-code/kaos';
+import type { KimiHostIdentity, OAuthRefreshOutcome } from '@nori-code/oauth';
+import type { ContentPart } from '@nori-code/kosong';
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { readonly [key: string]: JsonValue };
@@ -62,11 +62,11 @@ export type {
   SkillSummary,
   ThinkingConfig,
   ToolInfo,
-} from '@moonshot-ai/agent-core';
+} from '@nori-code/agent-core';
 
 export type { KimiHostIdentity, OAuthRefreshOutcome };
 export type { TelemetryClient, TelemetryContextPatch, TelemetryProperties };
-export type { ContentPart, Role, ThinkingEffort, ToolCall } from '@moonshot-ai/kosong';
+export type { ContentPart, Role, ThinkingEffort, ToolCall } from '@nori-code/kosong';
 
 export type PermissionMode = 'yolo' | 'manual' | 'auto';
 

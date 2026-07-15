@@ -1,4 +1,4 @@
-import type { QuestionHandler, QuestionRequest, QuestionResult } from '@moonshot-ai/kimi-code-sdk';
+import type { QuestionHandler, QuestionRequest, QuestionResult } from '@nori-code/sdk';
 
 import type {
   QuestionPanelData,

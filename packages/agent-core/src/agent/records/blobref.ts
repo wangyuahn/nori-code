@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, open, readFile } from 'node:fs/promises';
 import { join } from 'pathe';
-import type { ContentPart } from '@moonshot-ai/kosong';
+import type { ContentPart } from '@nori-code/kosong';
 import type { AgentRecord } from './types';
 
 const DEFAULT_THRESHOLD = 4096;

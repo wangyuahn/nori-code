@@ -3,8 +3,8 @@ import { realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { SyncDescriptor, ITerminalService, TerminalService } from '@moonshot-ai/agent-core';
-import type { Terminal } from '@moonshot-ai/protocol';
+import { SyncDescriptor, ITerminalService, TerminalService } from '@nori-code/agent-core';
+import type { Terminal } from '@nori-code/protocol';
 import { pino } from 'pino';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 

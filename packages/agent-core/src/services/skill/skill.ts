@@ -27,13 +27,13 @@
  *   - `SkillNotActivatableError` (→ 40912) when agent-core reports
  *     `skill.type_unsupported` (e.g. `reference`-type skills).
  *
- * **Anti-corruption**: imports `@moonshot-ai/agent-core` only for the
+ * **Anti-corruption**: imports `@nori-code/agent-core` only for the
  * `createDecorator` value and the `SkillSummary` type.
  */
 
 import { createDecorator } from '../../di';
 import type { SkillSummary as AgentCoreSkillSummary } from '../../rpc';
-import type { SkillDescriptor } from '@moonshot-ai/protocol';
+import type { SkillDescriptor } from '@nori-code/protocol';
 
 // ---------------------------------------------------------------------------
 // Adapter helpers

@@ -1,6 +1,6 @@
 import { Readable, type Writable } from 'node:stream';
 
-import type { Environment, KaosProcess } from '@moonshot-ai/kaos';
+import type { Environment, KaosProcess } from '@nori-code/kaos';
 import { describe, expect, it, vi } from 'vitest';
 
 import { BashTool } from '../../src/tools/builtin/shell/bash';

@@ -1,4 +1,4 @@
-# @moonshot-ai/server-e2e
+# @nori-code/server-e2e
 
 Wire-level test client for the kimi-code server (HTTP + WS). This package is
 **private** — it ships scenario scripts that double as smoke tests and a small
@@ -18,12 +18,12 @@ typed `DaemonClient` you can reuse in vitest e2e files.
   `packages/server/test/ws-*.e2e.test.ts` (in-process `startServer` boots are
   faster and assert on the server's internal services directly).
 - You want a typed in-process facade over the server for user-facing code —
-  use `@moonshot-ai/node-sdk` instead (`KimiHarness`, `Session`).
+  use `@nori-code/node-sdk` instead (`KimiHarness`, `Session`).
 
 ## Quick start
 
 ```ts
-import { DaemonClient } from '@moonshot-ai/server-e2e';
+import { DaemonClient } from '@nori-code/server-e2e';
 
 const client = new DaemonClient(); // http://127.0.0.1:58627 by default
 
@@ -47,10 +47,10 @@ await client.archiveSession(session.id);
 ## Scripts
 
 ```sh
-pnpm --filter @moonshot-ai/server-e2e typecheck
-pnpm --filter @moonshot-ai/server-e2e test            # vitest self-tests
-pnpm --filter @moonshot-ai/server-e2e test:scenarios  # run every scenarios/*.ts
-pnpm --filter @moonshot-ai/server-e2e docker:e2e      # run server + scenarios in docker
+pnpm --filter @nori-code/server-e2e typecheck
+pnpm --filter @nori-code/server-e2e test            # vitest self-tests
+pnpm --filter @nori-code/server-e2e test:scenarios  # run every scenarios/*.ts
+pnpm --filter @nori-code/server-e2e docker:e2e      # run server + scenarios in docker
 ```
 
 Both `test` and `test:scenarios` require a running server (set `KIMI_SERVER_URL`

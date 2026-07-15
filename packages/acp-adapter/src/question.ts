@@ -2,7 +2,7 @@ import type {
   PermissionOption,
   RequestPermissionResponse,
 } from '@agentclientprotocol/sdk';
-import type { QuestionAnswers, QuestionItem } from '@moonshot-ai/kimi-code-sdk';
+import type { QuestionAnswers, QuestionItem } from '@nori-code/sdk';
 
 /**
  * `optionId` namespace for the AskUserQuestion bridge.

@@ -18,8 +18,8 @@ import type { KimiConfig, KimiConfigPatch, McpServerConfig } from '#/config';
 import type { ExperimentalFeatureState } from '#/flags';
 import type { ResumeSessionResult } from '#/rpc/resumed';
 import type { SessionMeta } from '#/session';
-import type { ContentPart } from '@moonshot-ai/kosong';
-import type { SessionWarning } from '@moonshot-ai/protocol';
+import type { ContentPart } from '@nori-code/kosong';
+import type { SessionWarning } from '@nori-code/protocol';
 
 import type { PluginCommandDef, PluginInfo, PluginSummary, ReloadSummary } from '#/plugin';
 import type { UsageStatus } from './events';
@@ -67,6 +67,10 @@ export interface CloseSessionPayload {
 }
 
 export interface ArchiveSessionPayload {
+  readonly sessionId: string;
+}
+
+export interface DeleteSessionPayload {
   readonly sessionId: string;
 }
 
@@ -458,6 +462,7 @@ export interface CoreAPI extends SessionAPIWithId {
   createSession: (payload: CreateSessionPayload) => SessionSummary;
   closeSession: (payload: CloseSessionPayload) => void;
   archiveSession: (payload: ArchiveSessionPayload) => void;
+  deleteSession: (payload: DeleteSessionPayload) => void;
   resumeSession: (payload: ResumeSessionPayload) => ResumeSessionResult;
   reloadSession: (payload: ReloadSessionPayload) => ResumeSessionResult;
   forkSession: (payload: ForkSessionPayload) => ResumeSessionResult;

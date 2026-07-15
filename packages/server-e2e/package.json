@@ -1,17 +1,17 @@
 {
-  "name": "@moonshot-ai/server-e2e",
+  "name": "@nori-code/server-e2e",
   "version": "0.1.0",
   "private": true,
-  "description": "Wire-level E2E test client for the kimi-code server (HTTP + WS). Powers scenario scripts and self-tests against a real server process.",
+  "description": "Wire-level end-to-end test client for the Nori server.",
   "license": "MIT",
-  "author": "Moonshot AI",
+  "author": "Nori",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MoonshotAI/kimi-code.git",
+    "url": "git+https://github.com/wangyuahn/nori-code.git",
     "directory": "packages/server-e2e"
   },
   "bugs": {
-    "url": "https://github.com/MoonshotAI/kimi-code/issues"
+    "url": "https://github.com/wangyuahn/nori-code/issues"
   },
   "type": "module",
   "imports": {
@@ -35,7 +35,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@moonshot-ai/protocol": "workspace:^",
+    "@nori-code/protocol": "workspace:^",
     "ulid": "^3.0.1",
     "ws": "^8.18.0",
     "zod": "catalog:"

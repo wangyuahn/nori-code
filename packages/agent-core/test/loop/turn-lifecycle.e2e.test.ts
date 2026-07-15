@@ -8,7 +8,7 @@
  * referenced.
  */
 
-import { inputTotal } from '@moonshot-ai/kosong';
+import { inputTotal } from '@nori-code/kosong';
 import { describe, expect, it } from 'vitest';
 
 import { ErrorCodes, KimiError } from '../../src/errors';

@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import type { Session } from '@moonshot-ai/kimi-code-sdk';
+import type { Session } from '@nori-code/sdk';
 
 import { detectInstallSource } from '#/cli/update/source';
 import { detectShellEnvironment } from '#/utils/process/shell-env';
@@ -105,7 +105,7 @@ export async function handleExportMdCommand(host: SlashCommandHost, args: string
     const now = new Date();
     const shortId = session.id.slice(0, 8);
     const timestamp = now.toISOString().replaceAll(/[-:]/g, '').replace(/T/, '-').slice(0, 15);
-    const defaultName = `kimi-export-${shortId}-${timestamp}.md`;
+    const defaultName = `nori-export-${shortId}-${timestamp}.md`;
 
     const trimmedArgs = args.trim();
     const outputPath = trimmedArgs.length > 0

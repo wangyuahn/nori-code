@@ -1,4 +1,4 @@
-import type { PluginSummary } from '@moonshot-ai/kimi-code-sdk';
+import type { PluginSummary } from '@nori-code/sdk';
 
 export const OFFICIAL_BADGE = 'official';
 export const CURATED_BADGE = 'curated';
@@ -25,49 +25,14 @@ export function formatPluginSourceLabel(plugin: PluginSummary): string {
   return plugin.source;
 }
 
-/**
- * Returns one of three trust labels for a plugin. Only Kimi-hosted plugin zip
- * paths receive official or curated badges. Everything else is third-party.
- */
-export function pluginTrustLabel(plugin: PluginSummary): PluginTrustLabel {
-  if (plugin.source !== 'zip-url' || plugin.originalSource === undefined) {
-    return 'third-party';
-  }
-  try {
-    const url = new URL(plugin.originalSource);
-    if (url.protocol !== 'https:' || url.hostname !== 'code.kimi.com') {
-      return 'third-party';
-    }
-    if (url.pathname.startsWith('/kimi-code/plugins/official/')) {
-      return 'official';
-    }
-    if (url.pathname.startsWith('/kimi-code/plugins/curated/')) {
-      return 'curated';
-    }
-    return 'third-party';
-  } catch {
-    return 'third-party';
-  }
+/** Nori treats every external plugin source as third-party until a Nori registry is available. */
+export function pluginTrustLabel(_plugin: PluginSummary): PluginTrustLabel {
+  return 'third-party';
 }
 
-/**
- * Returns true only for install sources that are unambiguously Kimi-built
- * official plugins — an https URL under the official Kimi CDN plugin path.
- * Everything else (local paths, GitHub repos, curated or third-party URLs)
- * is treated as unofficial and should be confirmed before install.
- */
-export function isOfficialPluginSource(source: string): boolean {
-  const trimmed = source.trim();
-  if (!trimmed.startsWith('https://')) return false;
-  try {
-    const url = new URL(trimmed);
-    return (
-      url.hostname === 'code.kimi.com' &&
-      url.pathname.startsWith('/kimi-code/plugins/official/')
-    );
-  } catch {
-    return false;
-  }
+/** No legacy Kimi-hosted artifact is implicitly trusted by Nori. */
+export function isOfficialPluginSource(_source: string): boolean {
+  return false;
 }
 
 function hostFromUrl(raw: string): string | undefined {

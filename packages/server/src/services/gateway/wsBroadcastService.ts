@@ -2,8 +2,8 @@
 
 import { join } from 'node:path';
 
-import { Disposable, IEnvironmentService, IEventService, ILogService } from '@moonshot-ai/agent-core';
-import { isVolatileEventType, type Event, type SessionCursor } from '@moonshot-ai/protocol';
+import { Disposable, IEnvironmentService, IEventService, ILogService } from '@nori-code/agent-core';
+import { isVolatileEventType, type Event, type SessionCursor } from '@nori-code/protocol';
 import { IConnectionRegistry } from './connectionRegistry';
 import { InFlightTurnTracker } from './inFlightTurnTracker';
 import { ISessionClientsService } from './sessionClients';
@@ -16,6 +16,17 @@ import {
 } from './wsBroadcast';
 
 import { buildEventEnvelope, type EventEnvelope } from '#/ws/protocol';
+import {
+  findSwarmByAgent,
+  findSwarmByToolCall,
+  getSwarmStatus,
+  nextSwarmRound,
+  setSwarmStatus,
+  type SwarmStatusEntry,
+  type SwarmTaskStatusEntry,
+  type SwarmTokenUsage,
+  updateSwarmStatus,
+} from '../../routes/swarmStatus';
 
 interface BufferEntry {
   seq: number;
@@ -33,6 +44,88 @@ interface SessionState {
   queue: Promise<void>;
 }
 
+const MAIN_AGENT_ID = 'main';
+const MAX_SWARM_OUTPUT_CHARS = 128_000;
+
+interface PendingSwarmToolCall {
+  ownerAgentId: string;
+  toolCallId: string;
+  description: string;
+}
+
+function isSubagentTranscriptEvent(event: Event): boolean {
+  if (event.agentId === MAIN_AGENT_ID) return false;
+  const type = (event as { type: string }).type;
+  return type.startsWith('turn.')
+    || type.startsWith('assistant.')
+    || type.startsWith('thinking.')
+    || type.startsWith('tool.call.')
+    || type.startsWith('shell.')
+    || type === 'tool.progress'
+    || type === 'tool.result'
+    || type === 'prompt.completed'
+    || type === 'error';
+}
+
+function toSwarmUsage(usage: {
+  inputOther: number;
+  output: number;
+  inputCacheRead: number;
+  inputCacheCreation: number;
+}): SwarmTokenUsage {
+  const input = usage.inputOther + usage.inputCacheRead + usage.inputCacheCreation;
+  return {
+    input,
+    output: usage.output,
+    cache_read: usage.inputCacheRead,
+    cache_write: usage.inputCacheCreation,
+    total: input + usage.output,
+  };
+}
+
+function addSwarmUsage(
+  current: SwarmTokenUsage | undefined,
+  incoming: SwarmTokenUsage,
+): SwarmTokenUsage {
+  if (current === undefined) return incoming;
+  return {
+    input: current.input + incoming.input,
+    output: current.output + incoming.output,
+    cache_read: current.cache_read + incoming.cache_read,
+    cache_write: current.cache_write + incoming.cache_write,
+    total: current.total + incoming.total,
+  };
+}
+
+function aggregateSwarmUsage(
+  tasks: readonly SwarmTaskStatusEntry[] | undefined,
+): SwarmTokenUsage | undefined {
+  const usages = tasks?.flatMap(task => task.usage === undefined ? [] : [task.usage]) ?? [];
+  if (usages.length === 0) return undefined;
+  return usages.reduce<SwarmTokenUsage>((total, usage) => addSwarmUsage(total, usage), {
+    input: 0,
+    output: 0,
+    cache_read: 0,
+    cache_write: 0,
+    total: 0,
+  });
+}
+
+function upsertSwarmTask(
+  current: readonly SwarmTaskStatusEntry[] | undefined,
+  task: SwarmTaskStatusEntry,
+): SwarmTaskStatusEntry[] {
+  const tasks = [...(current ?? [])];
+  const index = tasks.findIndex(item => item.id === task.id);
+  if (index < 0) tasks.push(task);
+  else tasks[index] = { ...tasks[index], ...task };
+  return tasks;
+}
+
+function countCompletedSwarmTasks(tasks: readonly SwarmTaskStatusEntry[] | undefined): number {
+  return tasks?.filter(task => ['completed', 'failed', 'cancelled'].includes(task.status)).length ?? 0;
+}
+
 export class WSBroadcastService extends Disposable implements IWSBroadcastService {
   readonly _serviceBrand: undefined;
 
@@ -40,6 +133,7 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
   private readonly _maxBufferSize: number;
   private readonly _journalDir: string;
   private readonly _turnTracker = new InFlightTurnTracker();
+  private readonly _pendingSwarmTools = new Map<string, PendingSwarmToolCall[]>();
 
   constructor(
     @IEventService eventService: IEventService,
@@ -70,12 +164,162 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
       );
       return;
     }
+    this._updateSwarmStatus(sid, event);
+    // Subagent transcript streams have their own task-output surface. Sending
+    // every token and tool step through the main session socket can generate
+    // thousands of frames per second during a swarm, starving the main
+    // assistant stream and making snapshots wait behind an ever-growing
+    // journal queue. Shared events such as code.change and subagent lifecycle
+    // updates still pass through this channel.
+    if (isSubagentTranscriptEvent(event)) return;
     const state = this._getOrCreateSession(sid);
     state.queue = state.queue
       .then(() => this._dispatch(sid, state, event))
       .catch((err: unknown) => {
         this.logger.warn({ sid, eventType: evType, err: String(err) }, 'wsBroadcast dispatch failed');
       });
+  }
+
+  private _updateSwarmStatus(sid: string, event: Event): void {
+    if (
+      event.type === 'tool.call.started'
+      && (event.name === 'AgentSwarm' || event.name === 'nori_swarm_launch')
+    ) {
+      const pending = this._pendingSwarmTools.get(sid) ?? [];
+      pending.push({
+        ownerAgentId: event.agentId,
+        toolCallId: event.toolCallId,
+        description: event.description ?? event.name,
+      });
+      this._pendingSwarmTools.set(sid, pending);
+      return;
+    }
+
+    if (event.type === 'background.task.started' || event.type === 'background.task.terminated') {
+      const { info } = event;
+      if (info.kind !== 'agent' || !info.subagentType?.startsWith('swarm')) return;
+
+      const prior = getSwarmStatus(info.taskId);
+      const parsedCount = Number.parseInt(info.subagentType.split(':')[1] ?? '', 10);
+      const taskCount = Number.isFinite(parsedCount) && parsedCount > 0
+        ? parsedCount
+        : (prior?.task_count ?? 1);
+      const terminal = event.type === 'background.task.terminated';
+      const pending = terminal ? undefined : this._takePendingSwarmTool(sid, event.agentId);
+      const status = !terminal
+        ? 'running' as const
+        : info.status === 'completed'
+          ? 'done' as const
+          : 'failed' as const;
+      setSwarmStatus({
+        ...prior,
+        swarm_id: info.taskId,
+        status,
+        task_count: taskCount,
+        completed_count: terminal ? taskCount : (prior?.completed_count ?? 0),
+        session_id: sid,
+        task_id: info.taskId,
+        description: info.description,
+        owner_agent_id: prior?.owner_agent_id ?? event.agentId,
+        tool_call_id: prior?.tool_call_id ?? pending?.toolCallId,
+        round: prior?.round ?? nextSwarmRound(sid),
+        started_at: prior?.started_at ?? new Date(info.startedAt).toISOString(),
+        usage: aggregateSwarmUsage(prior?.tasks),
+      });
+      return;
+    }
+
+    if (event.type === 'subagent.spawned') {
+      const ownerAgentId = event.parentAgentId ?? event.agentId;
+      const swarm = findSwarmByToolCall(sid, ownerAgentId, event.parentToolCallId);
+      if (swarm === undefined) return;
+      const task: SwarmTaskStatusEntry = {
+        id: event.subagentId,
+        agent_id: event.subagentId,
+        parent_agent_id: ownerAgentId,
+        profile: event.subagentName,
+        label: event.description ?? `Agent ${String((event.swarmIndex ?? 0) + 1)}`,
+        status: 'pending',
+      };
+      updateSwarmStatus(swarm.swarm_id, current => {
+        const tasks = upsertSwarmTask(current.tasks, task);
+        return { ...current, tasks, completed_count: countCompletedSwarmTasks(tasks) };
+      });
+      return;
+    }
+
+    if (event.type === 'subagent.started') {
+      this._updateSwarmTask(sid, event.subagentId, task => ({ ...task, status: 'running' }));
+      return;
+    }
+
+    if (event.type === 'assistant.delta') {
+      this._updateSwarmTask(sid, event.agentId, task => {
+        const output = `${task.output ?? ''}${event.delta}`.slice(-MAX_SWARM_OUTPUT_CHARS);
+        return { ...task, output, output_bytes: output.length };
+      }, false);
+      return;
+    }
+
+    if (event.type === 'turn.step.completed') {
+      const usage = event.usage;
+      if (usage === undefined) return;
+      this._updateSwarmTask(sid, event.agentId, task => ({
+        ...task,
+        usage: addSwarmUsage(task.usage, toSwarmUsage(usage)),
+      }), false);
+      return;
+    }
+
+    if (event.type === 'subagent.completed') {
+      this._updateSwarmTask(sid, event.subagentId, task => ({
+        ...task,
+        status: 'completed',
+        output: event.resultSummary.slice(-MAX_SWARM_OUTPUT_CHARS),
+        output_bytes: event.resultSummary.length,
+        usage: event.usage === undefined ? task.usage : toSwarmUsage(event.usage),
+        context_tokens: event.contextTokens,
+      }));
+      return;
+    }
+
+    if (event.type === 'subagent.failed') {
+      this._updateSwarmTask(sid, event.subagentId, task => ({
+        ...task,
+        status: 'failed',
+        output: event.error,
+        output_bytes: event.error.length,
+      }));
+    }
+  }
+
+  private _takePendingSwarmTool(sid: string, ownerAgentId: string): PendingSwarmToolCall | undefined {
+    const pending = this._pendingSwarmTools.get(sid);
+    if (pending === undefined) return undefined;
+    const index = pending.findIndex(item => item.ownerAgentId === ownerAgentId);
+    if (index < 0) return undefined;
+    const [matched] = pending.splice(index, 1);
+    if (pending.length === 0) this._pendingSwarmTools.delete(sid);
+    return matched;
+  }
+
+  private _updateSwarmTask(
+    sid: string,
+    agentId: string,
+    update: (task: SwarmTaskStatusEntry) => SwarmTaskStatusEntry,
+    notify = true,
+  ): void {
+    const swarm = findSwarmByAgent(sid, agentId);
+    if (swarm === undefined) return;
+    updateSwarmStatus(swarm.swarm_id, current => {
+      const tasks = current.tasks?.map(task => task.agent_id === agentId ? update(task) : task);
+      return {
+        ...current,
+        tasks,
+        completed_count: countCompletedSwarmTasks(tasks),
+        usage: aggregateSwarmUsage(tasks),
+      };
+    }, notify);
   }
 
   private async _dispatch(sid: string, state: SessionState, event: Event): Promise<void> {

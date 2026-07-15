@@ -29,8 +29,6 @@
     "dist",
     "dist-web",
     "native",
-    "scripts/postinstall.mjs",
-    "scripts/postinstall",
     "README.md"
   ],
   "type": "module",
@@ -49,7 +47,7 @@
     "provenance": true
   },
   "scripts": {
-    "build": "pnpm -C ../kimi-web run build && tsdown && node scripts/copy-native-assets.mjs && node scripts/copy-web-assets.mjs",
+    "build": "pnpm -C ../nori-web run build && tsdown && node scripts/copy-native-assets.mjs && node scripts/copy-web-assets.mjs",
     "prebuild": "node scripts/build-vis-asset.mjs",
     "catalog:update": "node scripts/update-catalog.mjs --out dist/built-in-catalog.json",
     "smoke": "node scripts/smoke.mjs",
@@ -71,24 +69,21 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm -w run build:packages && vitest run",
     "e2e": "pnpm -w run build:packages && KIMI_E2E=1 vitest run test/e2e",
-    "e2e:real": "pnpm -w run build:packages && KIMI_E2E_REAL=1 vitest run test/e2e/real-llm-smoke.e2e.test.ts",
-    "postinstall": "node scripts/postinstall.mjs"
+    "e2e:real": "pnpm -w run build:packages && KIMI_E2E_REAL=1 vitest run test/e2e/real-llm-smoke.e2e.test.ts"
   },
   "optionalDependencies": {
     "@mariozechner/clipboard": "^0.3.9",
     "node-pty": "^1.1.0"
   },
   "devDependencies": {
-    "@moonshot-ai/acp-adapter": "workspace:^",
-    "@moonshot-ai/kimi-code-oauth": "workspace:^",
-    "@moonshot-ai/kimi-code-sdk": "workspace:^",
-    "@moonshot-ai/kimi-telemetry": "workspace:^",
-    "@moonshot-ai/kimi-web": "workspace:^",
-    "@moonshot-ai/migration-legacy": "workspace:^",
-    "@moonshot-ai/pi-tui": "workspace:^",
-    "@moonshot-ai/server": "workspace:^",
-    "@moonshot-ai/vis-server": "workspace:^",
-    "@moonshot-ai/vis-web": "workspace:*",
+    "@nori-code/acp-adapter": "workspace:^",
+    "@nori-code/oauth": "workspace:^",
+    "@nori-code/sdk": "workspace:^",
+    "@nori-code/telemetry": "workspace:^",
+    "@nori-code/pi-tui": "workspace:^",
+    "@nori-code/server": "workspace:^",
+    "@nori-code/vis-server": "workspace:^",
+    "@nori-code/vis-web": "workspace:*",
     "@types/semver": "^7.7.0",
     "@types/yazl": "^2.4.6",
     "chalk": "^5.4.1",

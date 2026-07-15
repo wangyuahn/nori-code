@@ -1,4 +1,4 @@
-import type { ToolCall } from '@moonshot-ai/kosong';
+import type { ToolCall } from '@nori-code/kosong';
 import { describe, expect, it } from 'vitest';
 
 import type { PermissionPolicyContext } from '../../../src/agent/permission';

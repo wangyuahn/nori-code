@@ -1,5 +1,5 @@
 import { createDecorator } from '../../di';
-import type { ConfigResponse, PatchConfigRequest } from '@moonshot-ai/protocol';
+import type { ConfigResponse, PatchConfigRequest } from '@nori-code/protocol';
 
 export interface IConfigService {
   readonly _serviceBrand: undefined;

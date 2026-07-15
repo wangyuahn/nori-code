@@ -4,8 +4,8 @@ import {
   createTerminalRequestSchema,
   getTerminalResponseSchema,
   listTerminalsResponseSchema,
-} from '@moonshot-ai/protocol';
-import { FsPathEscapesError, ITerminalService, SessionNotFoundError, TerminalNotFoundError, type IInstantiationService } from '@moonshot-ai/agent-core';
+} from '@nori-code/protocol';
+import { FsPathEscapesError, ITerminalService, SessionNotFoundError, TerminalNotFoundError, type IInstantiationService } from '@nori-code/agent-core';
 import { z } from 'zod';
 
 

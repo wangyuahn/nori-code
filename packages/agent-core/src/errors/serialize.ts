@@ -4,7 +4,7 @@ import {
   APIStatusError,
   APITimeoutError,
   ChatProviderError,
-} from '@moonshot-ai/kosong';
+} from '@nori-code/kosong';
 
 import { KimiError } from './classes';
 import { ErrorCodes, KIMI_ERROR_INFO, type KimiErrorCode } from './codes';

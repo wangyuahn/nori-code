@@ -44,9 +44,9 @@ import {
   type SetSessionModelResponse,
   type Stream,
 } from '@agentclientprotocol/sdk';
-import type { KimiHarness, Session, SessionSummary } from '@moonshot-ai/kimi-code-sdk';
-import { log } from '@moonshot-ai/kimi-code-sdk';
-import { LocalKaos, type Kaos } from '@moonshot-ai/kaos';
+import type { KimiHarness, Session, SessionSummary } from '@nori-code/sdk';
+import { log } from '@nori-code/sdk';
+import { LocalKaos, type Kaos } from '@nori-code/kaos';
 
 import { TERMINAL_AUTH_METHOD, buildTerminalAuthMethod } from './auth-methods';
 import { redirectConsoleToStderr } from './log-guard';
@@ -112,7 +112,7 @@ function toResolvedSlashCommands(
  */
 async function harnessIsAuthed(harness: KimiHarness): Promise<boolean> {
   const status = await harness.auth.status();
-  return status.providers.some((entry) => entry.hasToken === true);
+  return status.some((entry) => entry.hasToken === true);
 }
 
 /**
@@ -134,6 +134,7 @@ export class AcpServer implements Agent {
   private readonly agentInfo: Implementation | undefined;
   private readonly terminalAuthEnv: Readonly<Record<string, string>> | undefined;
   private readonly terminalAuthLegacyCommand: string | undefined;
+  private readonly advertiseTerminalAuth: boolean;
   private readonly resolveSlashCommands: (
     session: Session,
   ) => Promise<ResolvedSlashCommands>;
@@ -166,6 +167,8 @@ export class AcpServer implements Agent {
        * directly. Defaults to undefined (the `_meta` fallback is omitted).
        */
       terminalAuthLegacyCommand?: string;
+      /** Disable account-oriented terminal auth for API-key-only distributions. */
+      advertiseTerminalAuth?: boolean;
       /**
        * Slash commands to advertise in the one-shot
        * `available_commands_update` pushed immediately after each
@@ -189,6 +192,7 @@ export class AcpServer implements Agent {
     this.agentInfo = opts?.agentInfo;
     this.terminalAuthEnv = opts?.terminalAuthEnv;
     this.terminalAuthLegacyCommand = opts?.terminalAuthLegacyCommand;
+    this.advertiseTerminalAuth = opts?.advertiseTerminalAuth ?? true;
     const slash = opts?.slashCommands;
     this.resolveSlashCommands =
       typeof slash === 'function'
@@ -235,14 +239,16 @@ export class AcpServer implements Agent {
     return {
       protocolVersion: this.negotiated.protocolVersion,
       agentCapabilities,
-      authMethods: [
-        this.terminalAuthEnv !== undefined || this.terminalAuthLegacyCommand !== undefined
-          ? buildTerminalAuthMethod({
-              env: this.terminalAuthEnv,
-              legacyCommand: this.terminalAuthLegacyCommand,
-            })
-          : TERMINAL_AUTH_METHOD,
-      ],
+      authMethods: this.advertiseTerminalAuth
+        ? [
+            this.terminalAuthEnv !== undefined || this.terminalAuthLegacyCommand !== undefined
+              ? buildTerminalAuthMethod({
+                  env: this.terminalAuthEnv,
+                  legacyCommand: this.terminalAuthLegacyCommand,
+                })
+              : TERMINAL_AUTH_METHOD,
+          ]
+        : [],
       ...(this.agentInfo ? { agentInfo: this.agentInfo } : {}),
     };
   }
@@ -937,6 +943,8 @@ export async function runAcpServerWithStream(
     agentInfo?: Implementation;
     terminalAuthEnv?: Readonly<Record<string, string>>;
     terminalAuthLegacyCommand?: string;
+    /** Disable account-oriented terminal auth for API-key-only distributions. */
+    advertiseTerminalAuth?: boolean;
     slashCommands?: SlashCommandsResolver;
   },
 ): Promise<void> {
@@ -987,6 +995,8 @@ export async function runAcpServer(
      * ctor for compatibility rationale.
      */
     terminalAuthLegacyCommand?: string;
+    /** Disable account-oriented terminal auth for API-key-only distributions. */
+    advertiseTerminalAuth?: boolean;
     /**
      * Slash commands to advertise to ACP clients so their slash-command
      * palette is populated. See {@link AcpServer} ctor for details.
@@ -1047,6 +1057,7 @@ export async function runAcpServer(
       agentInfo: opts?.agentInfo,
       terminalAuthEnv: opts?.terminalAuthEnv,
       terminalAuthLegacyCommand: opts?.terminalAuthLegacyCommand,
+      advertiseTerminalAuth: opts?.advertiseTerminalAuth,
       slashCommands: opts?.slashCommands,
     });
   } finally {

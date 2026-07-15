@@ -7,7 +7,7 @@
  * file doesn't have to hand-roll them.
  */
 
-import type { ModelAlias } from '@moonshot-ai/kimi-code-sdk';
+import type { ModelAlias } from '@nori-code/sdk';
 
 /** Stub `auth.status()` payload for an authenticated harness. */
 export const AUTHED_STATUS = {

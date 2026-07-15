@@ -7,8 +7,8 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { InstantiationService, ServiceCollection, EventService, FsWatcherService, IApprovalService, IEventService, ILogService, IQuestionService, type ApprovalResponse, type QuestionResult, type FsWatcherServiceOptions, type IEnvironmentService, type ILogService as ILoggerT, type ISessionService } from '@moonshot-ai/agent-core';
-import type { Event } from '@moonshot-ai/protocol';
+import { InstantiationService, ServiceCollection, EventService, FsWatcherService, IApprovalService, IEventService, ILogService, IQuestionService, type ApprovalResponse, type QuestionResult, type FsWatcherServiceOptions, type IEnvironmentService, type ILogService as ILoggerT, type ISessionService } from '@nori-code/agent-core';
+import type { Event } from '@nori-code/protocol';
 
 import { ApprovalService } from '#/services/approval/approvalService';
 import { QuestionService } from '#/services/question/questionService';
@@ -17,6 +17,7 @@ import {
   type ISessionClientsService as ISessionClientsServiceT,
 } from '#/services/gateway';
 import { WSBroadcastService } from '#/services/gateway/wsBroadcastService';
+import { clearSwarmStatus, getSwarmStatus } from '#/routes/swarmStatus';
 import type { WsConnection } from '../src/ws/connection';
 
 class TestLogger implements ILoggerT {
@@ -427,6 +428,172 @@ describe('WSBroadcastService (WS transport pump)', () => {
     const snap = await broadcast.getSnapshotState('sid_v');
     expect(snap.seq).toBe(1);
     expect(snap.inFlightTurn?.assistant_text).toBe('hello');
+    broadcast.dispose();
+    bus.dispose();
+  });
+
+  it('keeps subagent transcript traffic out of the main session stream', async () => {
+    const clients = new FakeSessionClients();
+    const connection = fakeConn();
+    clients.subscribe(connection, 'sid_swarm');
+    const bus = new EventService();
+    const broadcast = new WSBroadcastService(
+      bus,
+      testLogger,
+      clients,
+      new FakeConnectionRegistry(),
+      makeEnv(),
+    );
+
+    bus.publish({
+      type: 'turn.started',
+      sessionId: 'sid_swarm',
+      agentId: 'agent-2',
+      turnId: 1,
+      origin: { kind: 'background_task' },
+    } as unknown as Event);
+    bus.publish({
+      type: 'assistant.delta',
+      sessionId: 'sid_swarm',
+      agentId: 'agent-2',
+      turnId: 1,
+      delta: 'high-volume subagent output',
+    } as unknown as Event);
+    bus.publish({
+      type: 'tool.result',
+      sessionId: 'sid_swarm',
+      agentId: 'agent-2',
+      turnId: 1,
+      toolCallId: 'tool-1',
+      name: 'Read',
+      output: 'done',
+      isError: false,
+    } as unknown as Event);
+    bus.publish({
+      type: 'code.change',
+      sessionId: 'sid_swarm',
+      agentId: 'agent-2',
+      path: 'src/app.ts',
+      operation: 'edit',
+      diff: '+changed',
+      occurredAt: new Date().toISOString(),
+    } as unknown as Event);
+    await broadcast._drainForTest('sid_swarm');
+
+    expect(connection.sent).toHaveLength(1);
+    expect(connection.sent[0]).toMatchObject({
+      type: 'code.change',
+      seq: 1,
+      payload: { agentId: 'agent-2', path: 'src/app.ts' },
+    });
+    expect((await broadcast.getCursor('sid_swarm')).seq).toBe(1);
+    broadcast.dispose();
+    bus.dispose();
+  });
+
+  it('tracks swarm rounds, live agent output, and token usage outside the main stream', async () => {
+    const bus = new EventService();
+    const broadcast = new WSBroadcastService(
+      bus,
+      testLogger,
+      new FakeSessionClients(),
+      new FakeConnectionRegistry(),
+      makeEnv(),
+    );
+    const sessionId = 'sid_swarm_status';
+    const swarmId = 'swarm-status-1';
+
+    bus.publish({
+      type: 'tool.call.started',
+      sessionId,
+      agentId: 'main',
+      turnId: 1,
+      toolCallId: 'call-swarm-1',
+      name: 'AgentSwarm',
+      args: { tasks: [{ prompt: 'inspect' }] },
+      description: 'Inspect the project',
+    } as unknown as Event);
+    bus.publish({
+      type: 'background.task.started',
+      sessionId,
+      agentId: 'main',
+      info: {
+        taskId: swarmId,
+        description: 'Inspect the project',
+        status: 'running',
+        detached: true,
+        startedAt: Date.now(),
+        endedAt: null,
+        kind: 'agent',
+        subagentType: 'swarm:1',
+      },
+    } as unknown as Event);
+    bus.publish({
+      type: 'subagent.spawned',
+      sessionId,
+      agentId: 'main',
+      subagentId: 'agent-status-1',
+      subagentName: 'nori-coder',
+      parentToolCallId: 'call-swarm-1',
+      parentAgentId: 'main',
+      description: 'Inspect streaming',
+      swarmIndex: 0,
+      runInBackground: true,
+    } as unknown as Event);
+    bus.publish({
+      type: 'subagent.started',
+      sessionId,
+      agentId: 'main',
+      subagentId: 'agent-status-1',
+    } as unknown as Event);
+    bus.publish({
+      type: 'assistant.delta',
+      sessionId,
+      agentId: 'agent-status-1',
+      turnId: 0,
+      delta: 'live preview',
+    } as unknown as Event);
+    bus.publish({
+      type: 'turn.step.completed',
+      sessionId,
+      agentId: 'agent-status-1',
+      turnId: 0,
+      step: 1,
+      stepId: 'step-1',
+      usage: { inputOther: 10, output: 5, inputCacheRead: 2, inputCacheCreation: 1 },
+      finishReason: 'end_turn',
+    } as unknown as Event);
+
+    expect(getSwarmStatus(swarmId)).toMatchObject({
+      session_id: sessionId,
+      owner_agent_id: 'main',
+      tool_call_id: 'call-swarm-1',
+      round: 1,
+      usage: { input: 13, output: 5, total: 18 },
+      tasks: [{
+        id: 'agent-status-1',
+        status: 'running',
+        output: 'live preview',
+        usage: { input: 13, output: 5, total: 18 },
+      }],
+    });
+
+    bus.publish({
+      type: 'subagent.completed',
+      sessionId,
+      agentId: 'main',
+      subagentId: 'agent-status-1',
+      resultSummary: 'final result',
+      usage: { inputOther: 20, output: 7, inputCacheRead: 3, inputCacheCreation: 0 },
+      contextTokens: 23,
+    } as unknown as Event);
+    expect(getSwarmStatus(swarmId)).toMatchObject({
+      completed_count: 1,
+      usage: { input: 23, output: 7, total: 30 },
+      tasks: [{ status: 'completed', output: 'final result', context_tokens: 23 }],
+    });
+
+    clearSwarmStatus(swarmId);
     broadcast.dispose();
     bus.dispose();
   });

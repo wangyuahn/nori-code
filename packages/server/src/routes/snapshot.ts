@@ -1,7 +1,7 @@
 /**
  * `GET /sessions/{session_id}/snapshot` — IM-style initial sync.
  *
- * **Reader strategy** (controlled by `KIMI_SNAPSHOT_READER`):
+ * **Reader strategy** (controlled by `NORI_SNAPSHOT_READER`):
  *
  *   - `auto` (default) — delegate to `ISnapshotService`, which reads
  *     `state.json` + `wire.jsonl` directly from disk and bypasses the heavy
@@ -11,7 +11,7 @@
  *     assembly with the 3-attempt watermark-stability retry. Pure operator
  *     escape hatch; no silent per-request fallback.
  *
- * **Timeout**: the new path races against a hard `KIMI_SNAPSHOT_TIMEOUT_MS`
+ * **Timeout**: the new path races against a hard `NORI_SNAPSHOT_TIMEOUT_MS`
  * ceiling (default 4000ms, well under traefik's 5s cut-off). Timeout returns
  * 50001 with a structured log line so the gateway never sees a 499.
  *
@@ -25,8 +25,8 @@ import {
   sessionSnapshotResponseSchema,
   type Message,
   type Session,
-} from '@moonshot-ai/protocol';
-import { IApprovalService, IMessageService, IPromptService, IQuestionService, ISessionService, ILogService, SessionNotFoundError, type IInstantiationService } from '@moonshot-ai/agent-core';
+} from '@nori-code/protocol';
+import { IApprovalService, IMessageService, IPromptService, IQuestionService, ISessionService, ILogService, SessionNotFoundError, type IInstantiationService } from '@nori-code/agent-core';
 import { z } from 'zod';
 
 

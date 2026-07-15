@@ -1,7 +1,7 @@
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
 import type { Socket } from 'node:net';
 
-import { Disposable, ILogService } from '@moonshot-ai/agent-core';
+import { Disposable, ILogService } from '@nori-code/agent-core';
 import { WebSocketServer, type WebSocket } from 'ws';
 
 import { isAllowedHost } from '#/middleware/hostnames';
@@ -51,7 +51,7 @@ export class WSGateway extends Disposable implements IWSGateway {
     this.wss = new WebSocketServer({
       noServer: true,
       // Browsers require the server to select one of the offered subprotocols;
-      // echo back the `kimi-code.bearer.<token>` subprotocol when present so
+      // echo back the `nori-code.bearer.<token>` subprotocol when present so
       // token-carrying browser clients complete the handshake.
       handleProtocols: (protocols: Set<string>) => {
         for (const p of protocols) {

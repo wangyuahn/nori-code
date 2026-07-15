@@ -6,7 +6,7 @@ import { ErrorCodes, KimiError, makeErrorPayload } from '#/errors';
 import { log } from '#/logging/logger';
 import type { Logger } from '#/logging/types';
 import type { AgentAPI, AgentEvent, KimiConfig, SDKAgentRPC, UsageStatus } from '#/rpc';
-import { generate } from '@moonshot-ai/kosong';
+import { generate } from '@nori-code/kosong';
 
 import type { EnabledPluginSessionStart, PluginCommandDef } from '#/plugin';
 import { expandCommandArguments } from '../plugin/commands';
@@ -56,7 +56,7 @@ import { KosongLLM } from './turn/kosong-llm';
 import { UsageRecorder } from './usage';
 import { LlmRequestLogger, splitGenerateOptions } from './llm-request-logger';
 import { resolveCompletionBudget } from '../utils/completion-budget';
-import type { Kaos } from '@moonshot-ai/kaos';
+import type { Kaos } from '@nori-code/kaos';
 import type { ToolServices } from '../tools/support/services';
 import type { NoriMemoryProvider, NoriSwarmProvider } from '../tools/builtin/nori/types';
 import { RuleEngine, type RuleConfig } from './turn/rule-engine';
@@ -361,24 +361,6 @@ export class Agent {
   get rpcMethods(): PromisableMethods<AgentAPI> {
     return {
       prompt: async (payload) => {
-        // NORI auto-loop: let the model summarize the task into a goal.
-        // Inject a short instruction to use CreateGoal with a summary.
-        if (this.goal.getGoal().goal === null) {
-          const userText = payload.input
-            .filter((p) => p.type === 'text')
-            .map((p) => p.text)
-            .join('\n')
-            .trim();
-          if (userText.length > 0 && !userText.startsWith('/')) {
-            // Prepend a system message asking the model to summarize and
-            // create a goal before starting the actual work.
-            const goalInstruction = {
-              type: 'text' as const,
-              text: `<system-reminder>\nBefore starting work, summarize this task as a one-sentence goal objective and call CreateGoal with it. Then proceed with your normal workflow.\n</system-reminder>`,
-            };
-            payload.input = [goalInstruction, ...payload.input];
-          }
-        }
         this.turn.prompt(payload.input);
       },
       runShellCommand: (payload) => this.tools.runShellCommand(payload.command, payload.commandId),

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { pino } from 'pino';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { IModelCatalogService, type IModelCatalogService as ModelCatalogServiceShape } from '@moonshot-ai/agent-core';
+import { IModelCatalogService, type IModelCatalogService as ModelCatalogServiceShape } from '@nori-code/agent-core';
 
 import { IRestGateway, startServer, type RunningServer, type ServerStartOptions } from '../src';
 import { fixedTokenAuth } from './helpers/serverHarness';

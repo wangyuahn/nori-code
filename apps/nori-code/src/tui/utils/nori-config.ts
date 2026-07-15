@@ -56,7 +56,7 @@ function parseRules(raw: string): ParsedRules {
   const rulesMatch = raw.match(/^rules:\s*\n([\s\S]*?)(?:^[a-z]|^$)/m);
   if (!rulesMatch) return result;
 
-  const block = rulesMatch[1];
+  const block = rulesMatch[1] ?? '';
 
   // Each rule entry: indent-2 key, then indent-4 key:value lines.
   const entryRegex = /^\s{2}(\w[\w-]*?):\s*\n((?:\s{4}.+\n?)+)/gm;
@@ -151,8 +151,9 @@ export function updateRulePrompt(
   promptTemplate: string,
 ): ParsedRules | null {
   const rules = loadNoriRules(cwd);
-  if (!(ruleName in rules)) return null;
-  rules[ruleName] = { ...rules[ruleName], promptTemplate };
+  const current = rules[ruleName];
+  if (current === undefined) return null;
+  rules[ruleName] = { ...current, promptTemplate };
   saveNoriRules(cwd, rules);
   return rules;
 }
@@ -181,7 +182,7 @@ export function loadNoteRuleFlags(cwd: string): NoteRuleFlags {
     const re = new RegExp(`^\\s{2}${yamlKey}:\\s*(true|false)\\s*$`, 'm');
     const m = raw.match(re);
     if (m) {
-      (flags as Record<string, boolean>)[prop] = m[1] === 'true';
+      flags[prop as keyof NoteRuleFlags] = m[1] === 'true';
     }
   }
 

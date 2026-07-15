@@ -35,9 +35,9 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { resolveKimiHome } from '@moonshot-ai/agent-core';
+import { resolveNoriHome } from './home';
 
-export const DEFAULT_LOCK_DIR = join(resolveKimiHome(), 'server');
+export const DEFAULT_LOCK_DIR = join(resolveNoriHome(), 'server');
 export const DEFAULT_LOCK_PATH = join(DEFAULT_LOCK_DIR, 'lock');
 
 /** JSON shape stored in the lock file. snake_case to match operator-facing logs. */
@@ -46,8 +46,8 @@ export interface LockContents {
   started_at: string;
   host?: string;
   port: number;
-  /** Host CLI version that started this server (e.g. kimi-code package version).
-      Lets `kimi server status` detect a build-mismatched server. Absent in locks
+  /** Host CLI version that started this server (e.g. Nori package version).
+      Lets `nori server status` detect a build-mismatched server. Absent in locks
       written by older builds. */
   host_version?: string;
   /** Absolute path of the CLI entry that spawned the server. Distinguishes two
@@ -85,7 +85,7 @@ export interface AcquireLockResult {
    * Rewrite the lock file's recorded `port` to the one actually bound. Used
    * when the requested port was busy (held by a third-party process) and the
    * server retried on `port + 1`: the lock must advertise the real port so
-   * `kimi server status` / `kill` / `ps` can find the daemon. Best-effort and
+   * `nori server status` / `kill` / `ps` can find the daemon. Best-effort and
    * ownership-guarded — a no-op when the file is missing, owned by another
    * pid, or already records `port`.
    */

@@ -10,10 +10,10 @@ export { buildScheduledTaskXml, parseSchtasksQuery } from './schtasks-xml';
 export { buildInstallPlan, readInstallPlan, writeInstallPlan } from './install-plan';
 export type { InstallPlan } from './install-plan';
 export {
-  KIMI_SERVER_LABEL,
-  KIMI_SERVER_PLIST_FILENAME,
-  KIMI_SERVER_SYSTEMD_UNIT,
-  KIMI_SERVER_TASK_NAME,
+  NORI_SERVER_LABEL,
+  NORI_SERVER_PLIST_FILENAME,
+  NORI_SERVER_SYSTEMD_UNIT,
+  NORI_SERVER_TASK_NAME,
 } from './paths';
 export {
   ServiceUnavailableError,

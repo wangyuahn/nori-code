@@ -1,11 +1,22 @@
-import { ipcMain } from 'electron';
+import { BrowserWindow, dialog, ipcMain } from 'electron';
 import { loadNoriConfig, type NoriDesktopConfig } from './nori-config';
-import { readLock, originFromLock } from './ensure-server';
+import { readLock, originFromLock, readServerToken } from './ensure-server';
 import { updateTray, type TrayState } from './tray';
 import { showNotification } from './notifications';
+import { readDir, readTextFile, type FsEntry } from './filesystem';
 
 export function registerIpcHandlers(): void {
   let cachedConfig: NoriDesktopConfig | null = null;
+
+  ipcMain.handle('nori:getServerToken', () => readServerToken());
+
+  ipcMain.handle('nori:selectProjectDirectory', async (event) => {
+    const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+    const result = owner
+      ? await dialog.showOpenDialog(owner, { properties: ['openDirectory', 'createDirectory'] })
+      : await dialog.showOpenDialog({ properties: ['openDirectory', 'createDirectory'] });
+    return result.canceled ? undefined : result.filePaths[0];
+  });
 
   ipcMain.handle('nori:getConfig', () => {
     if (!cachedConfig) {
@@ -80,4 +91,7 @@ export function registerIpcHandlers(): void {
       payload.tool ? `[${payload.tool}] ${payload.message}` : payload.message,
     );
   });
+
+  ipcMain.handle('nori:fs:readDir', (_event, dirPath: string) => readDir(dirPath));
+  ipcMain.handle('nori:fs:readFile', (_event, filePath: string) => readTextFile(filePath));
 }

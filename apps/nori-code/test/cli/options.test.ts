@@ -21,7 +21,7 @@ function parse(argv: string[]): CLIOptions {
     writeErr: () => {},
   });
 
-  program.parse(['node', 'kimi', ...argv]);
+  program.parse(['node', 'nori', ...argv]);
 
   if (captured === undefined) {
     throw new Error('Main action handler was not called');
@@ -33,7 +33,7 @@ describe('CLI options parsing', () => {
   describe('defaults', () => {
     it('returns defaults when no arguments are given', () => {
       const opts = parse([]);
-      expect(opts.yolo).toBe(false);
+      expect(opts.permission).toBeUndefined();
       expect(opts.plan).toBe(false);
       expect(opts.continue).toBe(false);
       expect(opts.session).toBeUndefined();
@@ -60,7 +60,7 @@ describe('CLI options parsing', () => {
         },
       });
 
-      expect(() => program.parse(['node', 'kimi', '--version'])).toThrow();
+      expect(() => program.parse(['node', 'nori', '--version'])).toThrow();
       expect(output).toContain('1.2.3');
     });
 
@@ -78,7 +78,7 @@ describe('CLI options parsing', () => {
         },
       });
 
-      expect(() => program.parse(['node', 'kimi', '-V'])).toThrow();
+      expect(() => program.parse(['node', 'nori', '-V'])).toThrow();
       expect(output).toContain('4.5.6');
     });
   });
@@ -91,7 +91,6 @@ describe('CLI options parsing', () => {
         () => {
           throw new Error('main action should not run');
         },
-        () => {},
         (entry, args) => {
           pluginRunnerCalls.push({ entry, args });
         },
@@ -118,19 +117,19 @@ describe('CLI options parsing', () => {
 
   describe('--yolo family', () => {
     it('--yolo sets yolo to true', () => {
-      expect(parse(['--yolo']).yolo).toBe(true);
+      expect(parse(['--yolo']).permission).toBe('yolo');
     });
 
     it('-y sets yolo to true', () => {
-      expect(parse(['-y']).yolo).toBe(true);
+      expect(parse(['-y']).permission).toBe('yolo');
     });
 
     it('--yes sets yolo to true (hidden alias)', () => {
-      expect(parse(['--yes']).yolo).toBe(true);
+      expect(parse(['--yes']).permission).toBe('yolo');
     });
 
     it('--auto-approve sets yolo to true (hidden alias)', () => {
-      expect(parse(['--auto-approve']).yolo).toBe(true);
+      expect(parse(['--auto-approve']).permission).toBe('yolo');
     });
   });
 
@@ -175,28 +174,28 @@ describe('CLI options parsing', () => {
   describe('--auto / --yolo / --plan with --session / --continue', () => {
     it('allows --auto with --continue', () => {
       const opts = parse(['--auto', '--continue']);
-      expect(opts.auto).toBe(true);
+      expect(opts.permission).toBe('auto');
       expect(opts.continue).toBe(true);
       expect(validateOptions(opts).uiMode).toBe('shell');
     });
 
     it('allows --auto with an explicit session id', () => {
       const opts = parse(['--auto', '--session', 'ses_123']);
-      expect(opts.auto).toBe(true);
+      expect(opts.permission).toBe('auto');
       expect(opts.session).toBe('ses_123');
       expect(validateOptions(opts).uiMode).toBe('shell');
     });
 
     it('allows --yolo with --continue', () => {
       const opts = parse(['--yolo', '--continue']);
-      expect(opts.yolo).toBe(true);
+      expect(opts.permission).toBe('yolo');
       expect(opts.continue).toBe(true);
       expect(validateOptions(opts).uiMode).toBe('shell');
     });
 
     it('allows --yolo with an explicit session id', () => {
       const opts = parse(['--yolo', '--session', 'ses_123']);
-      expect(opts.yolo).toBe(true);
+      expect(opts.permission).toBe('yolo');
       expect(opts.session).toBe('ses_123');
       expect(validateOptions(opts).uiMode).toBe('shell');
     });
@@ -274,7 +273,7 @@ describe('CLI options parsing', () => {
     it('rejects prompt mode with --yolo because prompt mode always uses auto permission', () => {
       const opts = parse(['-p', 'run this', '--yolo']);
       expect(() => validateOptions(opts)).toThrow(OptionConflictError);
-      expect(() => validateOptions(opts)).toThrow('Cannot combine --prompt with --yolo.');
+      expect(() => validateOptions(opts)).toThrow('Cannot combine --prompt with --permission.');
     });
 
     it('rejects prompt mode with --plan', () => {
@@ -331,7 +330,6 @@ describe('CLI options parsing', () => {
           throw new Error('main action should not run');
         },
         () => {},
-        () => {},
         () => {
           upgradeCalls += 1;
         },
@@ -342,7 +340,7 @@ describe('CLI options parsing', () => {
         writeErr: () => {},
       });
 
-      program.parse(['node', 'kimi', 'upgrade']);
+      program.parse(['node', 'nori', 'upgrade']);
 
       expect(upgradeCalls).toBe(1);
     });
@@ -355,7 +353,6 @@ describe('CLI options parsing', () => {
           throw new Error('main action should not run');
         },
         () => {},
-        () => {},
         () => {
           upgradeCalls += 1;
         },
@@ -366,7 +363,7 @@ describe('CLI options parsing', () => {
         writeErr: () => {},
       });
 
-      program.parse(['node', 'kimi', 'update']);
+      program.parse(['node', 'nori', 'update']);
 
       expect(upgradeCalls).toBe(1);
     });
@@ -386,10 +383,9 @@ describe('CLI options parsing', () => {
         'acp',
         'server',
         'web',
-        'login',
+        'desktop',
         'doctor',
         'vis',
-        'migrate',
         'upgrade',
       ]);
     });

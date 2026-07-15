@@ -21,7 +21,7 @@
  * can exit cleanly.
  */
 
-import { createDecorator } from '@moonshot-ai/agent-core';
+import { createDecorator } from '@nori-code/agent-core';
 
 import type { WsConnection } from '#/ws/connection';
 

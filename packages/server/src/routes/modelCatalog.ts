@@ -7,8 +7,8 @@ import {
   listProvidersResponseSchema,
   refreshProviderModelsResponseSchema,
   setDefaultModelResponseSchema,
-} from '@moonshot-ai/protocol';
-import { IModelCatalogService, ModelNotFoundError, ProviderNotFoundError, type IInstantiationService } from '@moonshot-ai/agent-core';
+} from '@nori-code/protocol';
+import { IModelCatalogService, ModelNotFoundError, ProviderNotFoundError, type IInstantiationService } from '@nori-code/agent-core';
 
 import { errEnvelope, okEnvelope } from '../envelope';
 import { defineRoute } from '../middleware/defineRoute';
@@ -49,6 +49,69 @@ const providerCollectionActionParamSchema = z.object({
   action: z.string().min(1),
 });
 
+const providerPresetSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  type: z.enum(['anthropic', 'openai', 'kimi', 'google-genai', 'openai_responses', 'vertexai']),
+  base_url: z.string().optional(),
+  env: z.array(z.string()),
+  model_count: z.number().int().nonnegative(),
+});
+
+const providerPresetsResponseSchema = z.object({
+  items: z.array(providerPresetSchema),
+  source: z.string(),
+  warning: z.string().optional(),
+});
+
+const PROVIDER_PRESET_SOURCE = 'https://models.dev/api.json';
+
+type ProviderWireType = 'anthropic' | 'openai' | 'kimi' | 'google-genai' | 'openai_responses' | 'vertexai';
+
+function inferPresetWire(entry: Record<string, unknown>): ProviderWireType | undefined {
+  const explicit = typeof entry['type'] === 'string' ? entry['type'] : '';
+  if (['anthropic', 'openai', 'kimi', 'google-genai', 'openai_responses', 'vertexai'].includes(explicit)) {
+    return explicit as ProviderWireType;
+  }
+  const hint = [entry['id'], entry['name'], entry['npm']].filter((value): value is string => typeof value === 'string').join(' ').toLowerCase();
+  if (hint.includes('anthropic') || hint.includes('claude')) return 'anthropic';
+  if (hint.includes('vertex')) return 'vertexai';
+  if (hint.includes('google') || hint.includes('gemini')) return 'google-genai';
+  if (hint.includes('openai')) return 'openai';
+  return undefined;
+}
+
+export function normalizeProviderPresets(payload: unknown) {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return [];
+  const presets = [] as Array<z.infer<typeof providerPresetSchema>>;
+  for (const [catalogId, value] of Object.entries(payload)) {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) continue;
+    const entry = value as Record<string, unknown>;
+    const type = inferPresetWire({ ...entry, id: typeof entry['id'] === 'string' ? entry['id'] : catalogId });
+    if (type === undefined) continue;
+    const rawApi = typeof entry['api'] === 'string' && entry['api'].length > 0 ? entry['api'] : undefined;
+    const baseUrl = type === 'anthropic' ? rawApi?.replace(/\/v1\/?$/, '') : rawApi;
+    const models = typeof entry['models'] === 'object' && entry['models'] !== null && !Array.isArray(entry['models'])
+      ? Object.values(entry['models']).filter((model) => {
+          if (typeof model !== 'object' || model === null || Array.isArray(model)) return false;
+          const record = model as Record<string, unknown>;
+          const id = typeof record['id'] === 'string' ? record['id'].toLowerCase() : '';
+          const output = (record['modalities'] as Record<string, unknown> | undefined)?.['output'];
+          return !id.includes('embed') && (!Array.isArray(output) || output.includes('text'));
+        })
+      : [];
+    presets.push({
+      id: typeof entry['id'] === 'string' && entry['id'].length > 0 ? entry['id'] : catalogId,
+      name: typeof entry['name'] === 'string' && entry['name'].length > 0 ? entry['name'] : catalogId,
+      type,
+      ...(baseUrl ? { base_url: baseUrl } : {}),
+      env: Array.isArray(entry['env']) ? entry['env'].filter((item): item is string => typeof item === 'string') : [],
+      model_count: models.length,
+    });
+  }
+  return presets.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export function registerModelCatalogRoutes(
   app: ModelCatalogRouteHost,
   ix: IInstantiationService,
@@ -72,6 +135,39 @@ export function registerModelCatalogRoutes(
     listModelsRoute.path,
     listModelsRoute.options,
     listModelsRoute.handler as Parameters<ModelCatalogRouteHost['get']>[2],
+  );
+
+  const providerPresetsRoute = defineRoute(
+    {
+      method: 'GET',
+      path: '/provider-presets',
+      success: { data: providerPresetsResponseSchema },
+      description: 'List online provider presets from models.dev',
+      tags: ['providers'],
+    },
+    async (req, reply) => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10_000);
+      try {
+        const response = await fetch(PROVIDER_PRESET_SOURCE, {
+          headers: { Accept: 'application/json', 'User-Agent': 'nori-work' },
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        const items = normalizeProviderPresets(await response.json());
+        reply.send(okEnvelope({ items, source: PROVIDER_PRESET_SOURCE }, req.id));
+      } catch (error) {
+        const warning = error instanceof Error ? error.message : String(error);
+        reply.send(okEnvelope({ items: [], source: PROVIDER_PRESET_SOURCE, warning }, req.id));
+      } finally {
+        clearTimeout(timeout);
+      }
+    },
+  );
+  app.get(
+    providerPresetsRoute.path,
+    providerPresetsRoute.options,
+    providerPresetsRoute.handler as Parameters<ModelCatalogRouteHost['get']>[2],
   );
 
   const setDefaultModelRoute = defineRoute(

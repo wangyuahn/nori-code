@@ -16,7 +16,7 @@ import type {
   FsStatManyRequest,
   FsStatManyResponse,
   FsStatRequest,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 import ignore, { type Ignore } from 'ignore';
 
 import { ISessionService, SessionNotFoundError } from '../session/session';
@@ -579,19 +579,25 @@ function buildEtag(st: import('node:fs').Stats): string {
   ].join('-');
 }
 
-function detectBinary(buf: Buffer): boolean {
+export function detectBinary(buf: Buffer): boolean {
   if (buf.length === 0) return false;
+  if (buf.includes(0)) return true;
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(buf, { stream: true });
+  } catch {
+    return true;
+  }
   let nonPrintable = 0;
-  for (let i = 0; i < buf.length; i++) {
-    const b = buf[i]!;
-    if (b === 0) return true;
-
-    if (b === 9 || b === 10 || b === 13) continue;
-    if (b >= 32 && b <= 126) continue;
-
+  let characters = 0;
+  for (const character of text) {
+    characters++;
+    const code = character.codePointAt(0)!;
+    if (code === 9 || code === 10 || code === 13) continue;
+    if (code >= 32 && code !== 127) continue;
     nonPrintable++;
   }
-  return nonPrintable / buf.length > FS_BINARY_NONPRINTABLE_FRACTION;
+  return characters > 0 && nonPrintable / characters > FS_BINARY_NONPRINTABLE_FRACTION;
 }
 
 async function readFileRange(

@@ -1,6 +1,6 @@
 # server Agent Guide
 
-Package-local rules for `packages/server` (`@moonshot-ai/server`).
+Package-local rules for `packages/server` (`@nori-code/server`).
 
 ## What it is
 
@@ -21,7 +21,7 @@ The Kimi Code server. It hosts `agent-core` sessions and exposes them over REST 
 - `middleware/` — `defineRoute.ts`, `schema.ts`, `validate.ts`. `openapi/transforms.ts`.
 - `svc/` — OS service managers (launchd / systemd / schtasks) backing `kimi server install/start`.
 
-## DI: how it consumes `@moonshot-ai/agent-core`
+## DI: how it consumes `@nori-code/agent-core`
 
 Service conventions (naming, file layout, registration) live in `packages/agent-core/src/services/AGENTS.md` — read that before adding or changing a service. This package only wires the container:
 
@@ -33,15 +33,15 @@ Service conventions (naming, file layout, registration) live in `packages/agent-
 
 - REST is **Fastify**. All v1 routes are registered under `/api/v1` in `routes/registerApiV1Routes.ts`. Declare routes with `middleware/defineRoute.ts`: one object carries the Zod validators and the OpenAPI response schema; the `200` schema is expanded into the envelope `oneOf`.
 - `start.ts` neuters Fastify's validator/serializer compilers — validation happens in `defineRoute` preHandlers, not in Fastify's own pipeline.
-- Doc/meta endpoints in `start.ts`: `/openapi.json` (`@fastify/swagger`, lazily imported), `/asyncapi.json` (`createAsyncApiDocument` from `@moonshot-ai/protocol`), `/healthz`. `webAssetsDir` enables `registerWebAssetRoutes`.
+- Doc/meta endpoints in `start.ts`: `/openapi.json` (`@fastify/swagger`, lazily imported), `/asyncapi.json` (`createAsyncApiDocument` from `@nori-code/protocol`), `/healthz`. `webAssetsDir` enables `registerWebAssetRoutes`.
 - WebSocket uses the `ws` package; frames/envelopes live in `ws/protocol.ts` (`server_hello`, `ack`, `event`, `resync_required`, per-session `seq`).
 
 ## Commands
 
-- `pnpm --filter @moonshot-ai/server build` — `tsdown`.
-- `pnpm --filter @moonshot-ai/server typecheck` — `tsc -p tsconfig.json --noEmit`.
-- `pnpm --filter @moonshot-ai/server test` — `vitest run`.
-- `pnpm --filter @moonshot-ai/server clean` — `rm -rf dist`.
+- `pnpm --filter @nori-code/server build` — `tsdown`.
+- `pnpm --filter @nori-code/server typecheck` — `tsc -p tsconfig.json --noEmit`.
+- `pnpm --filter @nori-code/server test` — `vitest run`.
+- `pnpm --filter @nori-code/server clean` — `rm -rf dist`.
 - Dev server: `pnpm dev:server` at the repo root.
 - E2E: in-process tests live in `test/*.e2e.test.ts` and boot `startServer` directly. Live e2e against a running server lives in `packages/server-e2e` (default `http://127.0.0.1:58627`, override with `KIMI_SERVER_URL`).
 

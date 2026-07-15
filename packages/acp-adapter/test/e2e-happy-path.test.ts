@@ -39,7 +39,7 @@ import {
   type WriteTextFileRequest,
   type WriteTextFileResponse,
 } from '@agentclientprotocol/sdk';
-import type { Event, KimiHarness, Session } from '@moonshot-ai/kimi-code-sdk';
+import type { Event, KimiHarness, Session } from '@nori-code/sdk';
 
 import { AcpServer } from '../src/server';
 import { AUTHED_STATUS, makeModelsMap } from './_helpers/harness-stubs';

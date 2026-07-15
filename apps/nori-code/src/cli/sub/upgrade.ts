@@ -1,5 +1,5 @@
-import { log, type Logger } from '@moonshot-ai/kimi-code-sdk';
-import { track as trackTelemetry, type TelemetryProperties } from '@moonshot-ai/kimi-telemetry';
+import { log, type Logger } from '@nori-code/sdk';
+import { track as trackTelemetry, type TelemetryProperties } from '@nori-code/telemetry';
 
 import { refreshUpdateCache } from '#/cli/update/refresh';
 import { selectUpdateTarget } from '#/cli/update/select';

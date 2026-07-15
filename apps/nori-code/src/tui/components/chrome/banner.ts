@@ -1,5 +1,5 @@
-import type { Component } from '@moonshot-ai/pi-tui';
-import { visibleWidth, wrapTextWithAnsi } from '@moonshot-ai/pi-tui';
+import type { Component } from '@nori-code/pi-tui';
+import { visibleWidth, wrapTextWithAnsi } from '@nori-code/pi-tui';
 
 import { currentTheme } from '#/tui/theme';
 import type { BannerState } from '#/tui/types';

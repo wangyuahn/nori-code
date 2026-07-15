@@ -15,7 +15,7 @@ import type {
   WriteTextFileResponse,
 } from '@agentclientprotocol/sdk';
 import { RequestError } from '@agentclientprotocol/sdk';
-import { KaosError, type Environment, type Kaos, type KaosProcess, type StatResult } from '@moonshot-ai/kaos';
+import { KaosError, type Environment, type Kaos, type KaosProcess, type StatResult } from '@nori-code/kaos';
 import { describe, expect, it } from 'vitest';
 
 import { AcpKaos } from '../src/kaos-acp';

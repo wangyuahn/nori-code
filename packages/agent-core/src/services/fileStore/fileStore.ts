@@ -3,7 +3,7 @@ import type { Readable } from 'node:stream';
 
 import { createDecorator } from '../../di';
 
-import type { FileMeta } from '@moonshot-ai/protocol';
+import type { FileMeta } from '@nori-code/protocol';
 
 export const DEFAULT_MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 

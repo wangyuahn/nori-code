@@ -3,7 +3,7 @@ import {
   collectCompactableUserMessages,
   isRealUserInput,
   selectRecentUserMessages,
-} from '@moonshot-ai/agent-core';
+} from '@nori-code/agent-core';
 import type {
   ContentPart,
   ContextMessage,

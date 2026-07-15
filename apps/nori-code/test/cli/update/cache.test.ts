@@ -43,7 +43,7 @@ describe('update cache', () => {
     writeFileSync(
       getUpdateStateFile(),
       JSON.stringify({
-        packageName: '@moonshot-ai/kimi-code',
+        packageName: '@nori-code/cli',
         checkedAt: '2026-04-23T08:00:00.000Z',
         distTags: { beta: '0.0.1-beta.1' },
       }),

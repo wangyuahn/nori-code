@@ -121,7 +121,7 @@ function openConn(url: string, opts?: ConnectOptions): Promise<Conn> {
   return new Promise((resolve, reject) => {
     // Offer the fixed bearer token so the M5.1 WS auth passes; the Host/Origin
     // cases that expect rejection use `expectRejected` (no token) instead.
-    const protocols = [...(opts?.protocols ?? []), 'kimi-code.bearer.test-token'];
+    const protocols = [...(opts?.protocols ?? []), 'nori-code.bearer.test-token'];
     const ws = new WebSocket(url, protocols, { headers: opts?.headers });
     const queue: WsFrame[] = [];
     const waiters: Array<(frame: WsFrame) => void> = [];
@@ -211,7 +211,7 @@ describe('HTTP Host check (start.ts)', () => {
     const body = JSON.parse(res.body) as Record<string, unknown>;
     expect(body['code']).toBe(40301);
     expect(body['msg']).toBe(
-      "Invalid Host header: evil.com; allow this host with KIMI_CODE_ALLOWED_HOSTS=evil.com or 'kimi server run --allowed-host evil.com'.",
+      "Invalid Host header: evil.com; allow this host with NORI_CODE_ALLOWED_HOSTS=evil.com or 'nori server run --allowed-host evil.com'.",
     );
   });
 

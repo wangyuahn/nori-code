@@ -1,5 +1,5 @@
-import type { BackgroundTaskInfo, Session } from '@moonshot-ai/kimi-code-sdk';
-import type { Component, ProcessTerminal, TUI } from '@moonshot-ai/pi-tui';
+import type { BackgroundTaskInfo, Session } from '@nori-code/sdk';
+import type { Component, ProcessTerminal, TUI } from '@nori-code/pi-tui';
 
 import { TaskOutputViewer } from '../components/dialogs/task-output-viewer';
 import { TasksBrowserApp, type TasksFilter } from '../components/dialogs/tasks-browser';

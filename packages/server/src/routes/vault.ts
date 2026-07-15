@@ -6,9 +6,10 @@
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { z } from 'zod';
+import { parse as parseYaml } from 'yaml';
 import { okEnvelope } from '../envelope';
 import { defineRoute } from '../middleware/defineRoute';
-import type { IInstantiationService } from '@moonshot-ai/agent-core';
+import type { IInstantiationService } from '@nori-code/agent-core';
 
 interface RouteHost {
   get(
@@ -28,6 +29,7 @@ const noteSchema = z.object({
   preview: z.string(),
   date: z.string(),
   path: z.string(),
+  links: z.array(z.string()).default([]),
 });
 
 const noteDetailSchema = noteSchema.extend({
@@ -57,7 +59,6 @@ function resolveVaultPath(): string {
   // Try project-relative first, then home
   const candidates = [
     join(process.cwd(), 'nori-vault'),
-    join(process.cwd(), 'upstream-kimi-code', 'nori-vault'),
     join(home, 'vault'),
   ];
   for (const c of candidates) {
@@ -100,10 +101,17 @@ function scanVault(vaultPath: string): NoteEntry[] {
         mtime = statSync(filePath).mtime.toISOString().slice(0, 10);
       } catch { mtime = ''; }
 
-      // Extract title from filename (remove date prefix if present)
+      const frontmatter = parseFrontmatter(content);
+      // Prefer the canonical memory title because wiki-links target it. Fall
+      // back to the filename for legacy notes without frontmatter.
       const rawTitle = basename(entry, '.md');
-      // Remove YYYY-MM-DD- prefix if present
-      const title = rawTitle.replace(/^\d{4}-\d{2}-\d{2}-/, '');
+      const filenameTitle = rawTitle.replace(/^\d{4}-\d{2}-\d{2}-/, '');
+      const title = typeof frontmatter['title'] === 'string' && frontmatter['title'].trim() !== ''
+        ? frontmatter['title'].trim()
+        : filenameTitle;
+      const links = Array.isArray(frontmatter['links'])
+        ? frontmatter['links'].filter((link): link is string => typeof link === 'string' && link.trim() !== '').map(link => link.trim())
+        : [];
 
       // Preview: first non-empty, non-heading line, skipping YAML frontmatter
       const lines = content.split('\n');
@@ -132,6 +140,7 @@ function scanVault(vaultPath: string): NoteEntry[] {
         preview,
         date: mtime,
         path: filePath,
+        links,
       });
     }
   }
@@ -139,6 +148,19 @@ function scanVault(vaultPath: string): NoteEntry[] {
   // Sort by date descending
   notes.sort((a, b) => b.date.localeCompare(a.date));
   return notes;
+}
+
+function parseFrontmatter(content: string): Record<string, unknown> {
+  const match = /^---\s*\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(content);
+  if (!match?.[1]) return {};
+  try {
+    const parsed = parseYaml(match[1]) as unknown;
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
 }
 
 function searchNotes(notes: NoteEntry[], query: string, types?: string[]): NoteEntry[] {
@@ -162,7 +184,6 @@ function findNote(notes: NoteEntry[], noteId: string): NoteEntry | null {
 
 export function registerVaultRoutes(app: RouteHost, ix: IInstantiationService): void {
   const vaultPath = resolveVaultPath();
-  const allNotes = scanVault(vaultPath);
 
   // GET /vault/search?q=keywords&types=analysis,decision
   const searchRoute = defineRoute(
@@ -178,7 +199,7 @@ export function registerVaultRoutes(app: RouteHost, ix: IInstantiationService): 
       const q = req.query['q'] ?? '';
       const typesStr = req.query['types'] ?? '';
       const types = typesStr ? typesStr.split(',').filter(Boolean) : undefined;
-      const results = searchNotes(allNotes, q, types);
+      const results = searchNotes(scanVault(vaultPath), q, types);
       reply.send(okEnvelope(results, req.id));
     },
   );
@@ -196,6 +217,7 @@ export function registerVaultRoutes(app: RouteHost, ix: IInstantiationService): 
     },
     async (req, reply) => {
       const typeFilter = req.query['type'] ?? '';
+      const allNotes = scanVault(vaultPath);
       const results = typeFilter
         ? allNotes.filter(n => n.type === typeFilter || n.folder === typeFilter)
         : allNotes;
@@ -216,7 +238,7 @@ export function registerVaultRoutes(app: RouteHost, ix: IInstantiationService): 
     },
     async (req, reply) => {
       const noteId = req.params['note_id'];
-      const note = findNote(allNotes, noteId);
+      const note = findNote(scanVault(vaultPath), noteId);
       if (!note) {
         reply.send(okEnvelope(null, req.id));
         return;

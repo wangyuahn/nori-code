@@ -2,7 +2,7 @@
  * Client-owned preferences.
  *
  * Agent/runtime settings live in core's `config.toml`; this file owns
- * kimi-code client preferences such as terminal UI and update behavior.
+ * Nori Code client preferences such as terminal UI and update behavior.
  */
 
 import { existsSync } from 'node:fs';
@@ -146,7 +146,7 @@ export function normalizeTuiConfig(config: TuiConfigFileShape): TuiConfig {
 
 export function renderTuiConfig(config: TuiConfig): string {
   return `# ~/.nori-code/tui.toml
-# Client preferences for kimi-code.
+# Client preferences for Nori Code.
 # Agent/runtime settings stay in ~/.nori-code/config.toml.
 
 theme = "${escapeTomlBasicString(config.theme)}" # "auto" | "dark" | "light" | custom theme name

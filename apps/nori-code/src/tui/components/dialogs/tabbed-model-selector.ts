@@ -13,14 +13,14 @@
  * AskUserQuestion dialog's tab strip) — see .agents/skills/write-tui/DESIGN.md.
  */
 
-import type { ModelAlias } from '@moonshot-ai/kimi-code-sdk';
+import type { ModelAlias } from '@nori-code/sdk';
 import {
   Container,
   Key,
   matchesKey,
   truncateToWidth,
   type Focusable,
-} from '@moonshot-ai/pi-tui';
+} from '@nori-code/pi-tui';
 
 import { currentTheme } from '#/tui/theme';
 import { renderTabStrip } from '#/tui/utils/tab-strip';

@@ -5,7 +5,7 @@ import {
   type PromptPart,
   type ToolInputDisplay,
   type ToolResultEvent,
-} from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/sdk';
 
 import { isHideOutputMarker } from './marker';
 

@@ -6,8 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  KIMI_CODE_PLUGIN_MARKETPLACE_URL,
-  KIMI_CODE_PLUGIN_MARKETPLACE_URL_ENV,
+  NORI_CODE_PLUGIN_MARKETPLACE_URL,
+  NORI_CODE_PLUGIN_MARKETPLACE_URL_ENV,
 } from '#/constant/app';
 import { computeUpdateStatus, loadPluginMarketplace } from '#/utils/plugin-marketplace';
 
@@ -179,26 +179,26 @@ describe('loadPluginMarketplace', () => {
 
     const marketplace = await loadPluginMarketplace({
       workDir: '/tmp/work',
-      source: KIMI_CODE_PLUGIN_MARKETPLACE_URL,
+      source: NORI_CODE_PLUGIN_MARKETPLACE_URL,
       fetchImpl,
     });
 
-    expect(fetchImpl).toHaveBeenCalledWith(KIMI_CODE_PLUGIN_MARKETPLACE_URL);
+    expect(fetchImpl).toHaveBeenCalledWith(NORI_CODE_PLUGIN_MARKETPLACE_URL);
     expect(marketplace.plugins[0]).toEqual(
       expect.objectContaining({
         id: 'kimi-datasource',
         displayName: 'Kimi Datasource',
         source: new URL(
           './official/kimi-datasource.zip',
-          KIMI_CODE_PLUGIN_MARKETPLACE_URL,
+          NORI_CODE_PLUGIN_MARKETPLACE_URL,
         ).toString(),
       }),
     );
   });
 
   it('falls back to the source checkout marketplace when the default CDN cannot be fetched', async () => {
-    const previous = process.env[KIMI_CODE_PLUGIN_MARKETPLACE_URL_ENV];
-    delete process.env[KIMI_CODE_PLUGIN_MARKETPLACE_URL_ENV];
+    const previous = process.env[NORI_CODE_PLUGIN_MARKETPLACE_URL_ENV];
+    delete process.env[NORI_CODE_PLUGIN_MARKETPLACE_URL_ENV];
     const fetchImpl = vi.fn(async () => {
       throw new Error('fetch failed');
     }) as unknown as typeof fetch;
@@ -206,7 +206,7 @@ describe('loadPluginMarketplace', () => {
     try {
       const marketplace = await loadPluginMarketplace({ workDir: '/tmp/work', fetchImpl });
 
-      expect(fetchImpl).toHaveBeenCalledWith(KIMI_CODE_PLUGIN_MARKETPLACE_URL);
+      expect(fetchImpl).toHaveBeenCalledWith(NORI_CODE_PLUGIN_MARKETPLACE_URL);
       expect(marketplace.source).toBe(join(REPO_ROOT, 'plugins/marketplace.json'));
       expect(marketplace.plugins).toContainEqual(
         expect.objectContaining({
@@ -216,9 +216,9 @@ describe('loadPluginMarketplace', () => {
       );
     } finally {
       if (previous === undefined) {
-        delete process.env[KIMI_CODE_PLUGIN_MARKETPLACE_URL_ENV];
+        delete process.env[NORI_CODE_PLUGIN_MARKETPLACE_URL_ENV];
       } else {
-        process.env[KIMI_CODE_PLUGIN_MARKETPLACE_URL_ENV] = previous;
+        process.env[NORI_CODE_PLUGIN_MARKETPLACE_URL_ENV] = previous;
       }
     }
   });
@@ -230,7 +230,7 @@ describe('loadPluginMarketplace', () => {
 
     await expect(loadPluginMarketplace({
       workDir: '/tmp/work',
-      source: KIMI_CODE_PLUGIN_MARKETPLACE_URL,
+      source: NORI_CODE_PLUGIN_MARKETPLACE_URL,
       fetchImpl,
     })).rejects.toThrow(/fetch failed/);
   });

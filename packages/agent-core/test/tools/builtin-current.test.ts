@@ -7,14 +7,13 @@
 
 import { Readable, type Writable } from 'node:stream';
 
-import type { Kaos, KaosProcess } from '@moonshot-ai/kaos';
+import type { Kaos, KaosProcess } from '@nori-code/kaos';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Agent } from '../../src/agent';
 import type { SwarmMode } from '../../src/agent/swarm';
 import { FLAG_DEFINITIONS, FlagResolver } from '../../src/flags';
 import {
-  DEFAULT_SUBAGENT_TIMEOUT_MS,
   type QueuedSubagentRunResult,
   type QueuedSubagentTask,
   type SessionSubagentHost,
@@ -101,6 +100,35 @@ function agentTool(host: SessionSubagentHost): AgentTool {
 
 function mockSwarmMode(): SwarmMode {
   return { enter: vi.fn() } as unknown as SwarmMode;
+}
+
+/** Preserve result-oriented assertions while exercising the detached runtime contract. */
+function settledSwarmTool(host: SessionSubagentHost, swarmMode: SwarmMode): AgentSwarmTool {
+  const background = createBackgroundManager().manager;
+  const tool = new AgentSwarmTool(host, swarmMode, background);
+  const resolveExecution = tool.resolveExecution.bind(tool);
+  return {
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.parameters,
+    resolveExecution(args) {
+      const execution = resolveExecution(args);
+      if (execution.isError === true) return execution;
+      return {
+        ...execution,
+        execute: async (ctx) => {
+          const launched = await execution.execute(ctx);
+          if (launched.isError === true || typeof launched.output !== 'string') return launched;
+          const taskId = launched.output.match(/task_id: (swarm-[0-9a-z]{8})/)?.[1];
+          if (taskId === undefined) return launched;
+          await background.wait(taskId);
+          const output = await background.readOutput(taskId);
+          const finalResultStart = output.lastIndexOf('<agent_swarm_result>');
+          return { output: finalResultStart < 0 ? output : output.slice(finalResultStart) };
+        },
+      };
+    },
+  } as AgentSwarmTool;
 }
 
 function processWithOutput(stdout: string, exitCode = 0): KaosProcess {
@@ -306,7 +334,7 @@ describe('current builtin collaboration tools', () => {
     expect(description).toContain('dismiss');
   });
 
-  it('Agent exposes parameters and returns a foreground subagent summary', async () => {
+  it('Agent exposes parameters and launches a detached subagent', async () => {
     const host = mockSubagentHost({
       spawn: vi.fn().mockResolvedValue({
         agentId: 'agent-child',
@@ -331,11 +359,51 @@ describe('current builtin collaboration tools', () => {
         parentToolCallId: 'call_agent',
         prompt: 'Investigate',
         description: 'Find cause',
-        runInBackground: false,
+        runInBackground: true,
         signal: expect.any(AbortSignal),
       }),
     );
-    expect(result.output).toContain('child result');
+    expect(result.output).toContain('status: running');
+    expect(result.output).not.toContain('child result');
+  });
+
+  it('AgentSwarm returns before child completion and arms no timeout', async () => {
+    let resolveBatch: (results: QueuedSubagentRunResult<string>[]) => void = () => {};
+    const runQueued = vi.fn(() => new Promise<QueuedSubagentRunResult<string>[]>((resolve) => {
+      resolveBatch = resolve;
+    }));
+    const host = mockSubagentHost({ runQueued });
+    const background = createBackgroundManager().manager;
+    const tool = new AgentSwarmTool(host, mockSwarmMode(), background);
+    const input = {
+      description: 'Review files',
+      prompt_template: 'Review {{item}}',
+      items: ['src/a.ts', 'src/b.ts'],
+    };
+
+    const launched = await executeTool(tool, context(input, 'call_swarm'));
+
+    expect(launched.output).toContain('status: running');
+    const taskId = String(launched.output).match(/task_id: (swarm-[0-9a-z]{8})/)?.[1];
+    expect(taskId).toBeDefined();
+    expect(background.getTask(taskId!)).toMatchObject({
+      detached: true,
+      status: 'running',
+      timeoutMs: undefined,
+      subagentType: 'swarm:2',
+    });
+    const queued = runQueued.mock.calls[0]![0];
+    expect(queued).toHaveLength(2);
+    expect(queued.every((task) => task.runInBackground && task.timeout === undefined)).toBe(true);
+
+    resolveBatch(queued.map((task, index) => ({
+      task,
+      agentId: `agent-${String(index + 1)}`,
+      status: 'completed' as const,
+      result: `result ${String(index + 1)}`,
+    })));
+    await expect(background.wait(taskId!)).resolves.toMatchObject({ status: 'completed' });
+    await expect(background.readOutput(taskId!)).resolves.toContain('result 2');
   });
 
   it('AgentSwarm applies one subagent_type across templated subagents', async () => {
@@ -349,7 +417,7 @@ describe('current builtin collaboration tools', () => {
             parentToolCallId: 'call_swarm',
             prompt: 'Review src/a.ts',
             description: 'Review files #1 (explore)',
-            runInBackground: false,
+        runInBackground: true,
           },
           agentId: 'agent-explore-1',
           status: 'completed',
@@ -363,7 +431,7 @@ describe('current builtin collaboration tools', () => {
             parentToolCallId: 'call_swarm',
             prompt: 'Review src/b.ts',
             description: 'Review files #2 (explore)',
-            runInBackground: false,
+        runInBackground: true,
           },
           agentId: 'agent-explore-2',
           status: 'completed',
@@ -372,7 +440,7 @@ describe('current builtin collaboration tools', () => {
       ]),
     });
     const swarmMode = mockSwarmMode();
-    const tool = new AgentSwarmTool(host, swarmMode);
+    const tool = settledSwarmTool(host, swarmMode);
     const input = {
       description: 'Review files',
       prompt_template: 'Review {{item}}',
@@ -418,9 +486,8 @@ describe('current builtin collaboration tools', () => {
           description: 'Review files #1 (explore)',
           swarmIndex: 1,
           swarmItem: 'src/a.ts',
-          runInBackground: false,
-          signal,
-          timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
+        runInBackground: true,
+          signal: expect.any(AbortSignal),
         },
         {
           kind: 'spawn',
@@ -431,9 +498,8 @@ describe('current builtin collaboration tools', () => {
           description: 'Review files #2 (explore)',
           swarmIndex: 2,
           swarmItem: 'src/b.ts',
-          runInBackground: false,
-          signal,
-          timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
+        runInBackground: true,
+          signal: expect.any(AbortSignal),
         },
       ],
     );
@@ -491,7 +557,7 @@ describe('current builtin collaboration tools', () => {
       runQueued: runQueued as unknown as SessionSubagentHost['runQueued'],
     });
     const swarmMode = mockSwarmMode();
-    const tool = new AgentSwarmTool(host, swarmMode);
+    const tool = settledSwarmTool(host, swarmMode);
     const input = {
       description: 'Ship feature',
       tasks: [
@@ -566,7 +632,7 @@ describe('current builtin collaboration tools', () => {
       runQueued: runQueued as unknown as SessionSubagentHost['runQueued'],
     });
     const swarmMode = mockSwarmMode();
-    const tool = new AgentSwarmTool(host, swarmMode);
+    const tool = settledSwarmTool(host, swarmMode);
 
     const result = await executeTool(
       tool,
@@ -597,7 +663,7 @@ describe('current builtin collaboration tools', () => {
   it('AgentSwarm rejects more than 128 subagents at execution time', async () => {
     const host = mockSubagentHost({ runQueued: vi.fn() });
     const swarmMode = mockSwarmMode();
-    const tool = new AgentSwarmTool(host, swarmMode);
+    const tool = settledSwarmTool(host, swarmMode);
 
     const result = await executeTool(
       tool,
@@ -634,7 +700,7 @@ describe('current builtin collaboration tools', () => {
   ])('AgentSwarm rejects $name at execution time', async ({ input, output }) => {
     const host = mockSubagentHost({ runQueued: vi.fn() });
     const swarmMode = mockSwarmMode();
-    const tool = new AgentSwarmTool(host, swarmMode);
+    const tool = settledSwarmTool(host, swarmMode);
 
     const result = await executeTool(tool, context(input));
 
@@ -665,7 +731,7 @@ describe('current builtin collaboration tools', () => {
       runQueued: runQueued as unknown as SessionSubagentHost['runQueued'],
     });
     const swarmMode = mockSwarmMode();
-    const tool = new AgentSwarmTool(host, swarmMode);
+    const tool = settledSwarmTool(host, swarmMode);
     const input = {
       description: 'Finish review',
       subagent_type: 'explore',
@@ -716,10 +782,9 @@ describe('current builtin collaboration tools', () => {
           description: 'Finish review #1 (resume)',
           swarmIndex: 1,
           swarmItem: 'src/old-a.ts',
-          runInBackground: false,
+        runInBackground: true,
           resumeAgentId: 'agent-old-1',
-          signal,
-          timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
+          signal: expect.any(AbortSignal),
         },
         {
           kind: 'resume',
@@ -736,10 +801,9 @@ describe('current builtin collaboration tools', () => {
           description: 'Finish review #2 (resume)',
           swarmIndex: 2,
           swarmItem: 'src/old-b.ts',
-          runInBackground: false,
+        runInBackground: true,
           resumeAgentId: 'agent-old-2',
-          signal,
-          timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
+          signal: expect.any(AbortSignal),
         },
         {
           kind: 'spawn',
@@ -755,9 +819,8 @@ describe('current builtin collaboration tools', () => {
           description: 'Finish review #3 (explore)',
           swarmIndex: 3,
           swarmItem: 'src/new.ts',
-          runInBackground: false,
-          signal,
-          timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
+        runInBackground: true,
+          signal: expect.any(AbortSignal),
         },
       ],
     );
@@ -792,7 +855,7 @@ describe('current builtin collaboration tools', () => {
       runQueued: runQueued as unknown as SessionSubagentHost['runQueued'],
     });
     const swarmMode = mockSwarmMode();
-    const tool = new AgentSwarmTool(host, swarmMode);
+    const tool = settledSwarmTool(host, swarmMode);
     const input = {
       description: 'Resume review',
       resume_agent_ids: {
@@ -821,10 +884,9 @@ describe('current builtin collaboration tools', () => {
         description: 'Resume review #1 (resume)',
         swarmIndex: 1,
         swarmItem: 'src/old-a.ts',
-        runInBackground: false,
+        runInBackground: true,
         resumeAgentId: 'agent-old-1',
-        signal,
-        timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
+        signal: expect.any(AbortSignal),
       },
     ]);
     expect(result.output).toBe([
@@ -847,7 +909,7 @@ describe('current builtin collaboration tools', () => {
             parentToolCallId: 'call_swarm',
             prompt: 'Review src/a.ts',
             description: 'Review files #1 (coder)',
-            runInBackground: false,
+        runInBackground: true,
           },
           agentId: 'agent-coder-1',
           status: 'completed',
@@ -861,7 +923,7 @@ describe('current builtin collaboration tools', () => {
             parentToolCallId: 'call_swarm',
             prompt: 'Review src/b.ts',
             description: 'Review files #2 (coder)',
-            runInBackground: false,
+        runInBackground: true,
           },
           agentId: 'agent-coder-2',
           status: 'failed',
@@ -870,7 +932,7 @@ describe('current builtin collaboration tools', () => {
       ]),
     });
     const swarmMode = mockSwarmMode();
-    const tool = new AgentSwarmTool(host, swarmMode);
+    const tool = settledSwarmTool(host, swarmMode);
 
     const result = await executeTool(
       tool,
@@ -907,7 +969,7 @@ describe('current builtin collaboration tools', () => {
             parentToolCallId: 'call_swarm',
             prompt: 'Review src/a.ts',
             description: 'Review files #1 (coder)',
-            runInBackground: false,
+        runInBackground: true,
           },
           status: 'failed',
           error: 'Agent did not start.',
@@ -920,7 +982,7 @@ describe('current builtin collaboration tools', () => {
             parentToolCallId: 'call_swarm',
             prompt: 'Review src/b.ts',
             description: 'Review files #2 (coder)',
-            runInBackground: false,
+        runInBackground: true,
           },
           status: 'failed',
           error: 'Agent also did not start.',
@@ -928,7 +990,7 @@ describe('current builtin collaboration tools', () => {
       ]),
     });
     const swarmMode = mockSwarmMode();
-    const tool = new AgentSwarmTool(host, swarmMode);
+    const tool = settledSwarmTool(host, swarmMode);
 
     const result = await executeTool(
       tool,
@@ -963,7 +1025,7 @@ describe('current builtin collaboration tools', () => {
             parentToolCallId: 'call_swarm',
             prompt: 'Review src/a.ts',
             description: 'Review files #1 (coder)',
-            runInBackground: false,
+        runInBackground: true,
           },
           agentId: 'agent-coder-1',
           status: 'completed',
@@ -977,7 +1039,7 @@ describe('current builtin collaboration tools', () => {
             parentToolCallId: 'call_swarm',
             prompt: 'Review src/b.ts',
             description: 'Review files #2 (coder)',
-            runInBackground: false,
+        runInBackground: true,
           },
           agentId: 'agent-coder-2',
           status: 'aborted',
@@ -992,7 +1054,7 @@ describe('current builtin collaboration tools', () => {
             parentToolCallId: 'call_swarm',
             prompt: 'Review src/c.ts',
             description: 'Review files #3 (coder)',
-            runInBackground: false,
+        runInBackground: true,
           },
           status: 'aborted',
           state: 'not_started',
@@ -1001,7 +1063,7 @@ describe('current builtin collaboration tools', () => {
       ]),
     });
     const swarmMode = mockSwarmMode();
-    const tool = new AgentSwarmTool(host, swarmMode);
+    const tool = settledSwarmTool(host, swarmMode);
 
     const result = await executeTool(
       tool,

@@ -3,7 +3,7 @@ import {
   type GenerationKwargs,
   KimiChatProvider,
   type ThinkingEffort,
-} from '@moonshot-ai/kosong';
+} from '@nori-code/kosong';
 
 import { parseFloatEnv } from '#/config/resolve';
 

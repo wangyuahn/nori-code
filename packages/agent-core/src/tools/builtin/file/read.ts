@@ -1,4 +1,4 @@
-import type { Kaos, StatResult } from '@moonshot-ai/kaos';
+import type { Kaos, StatResult } from '@nori-code/kaos';
 import { z } from 'zod';
 
 import type { BuiltinTool } from '../../../agent/tool';

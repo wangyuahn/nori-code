@@ -1,5 +1,5 @@
 /**
- * `kimi web` daemon orchestration — parent (spawner) side.
+ * `nori web` daemon orchestration — parent (spawner) side.
  *
  * Ensures a single background server daemon exists for this device, then
  * returns its origin so the caller can open the web UI. The flow:
@@ -7,7 +7,7 @@
  *   1. Read `~/.nori-code/server/lock`. If it names a *live* daemon, reuse it
  *      (wait for it to be healthy) — never spawn a second one.
  *   2. Otherwise pick a free port (preferred port when available, else an
- *      OS-assigned one) and spawn `kimi server run --daemon` as a detached
+ *      OS-assigned one) and spawn `nori server run --daemon` as a detached
  *      child whose stdio is redirected to the server log.
  *   3. Poll the lock until *some* live daemon (ours, or a concurrent racer's
  *      that won the lock) is healthy, then return its origin.
@@ -22,7 +22,7 @@ import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
-import { DEFAULT_LOCK_DIR, getLiveLock, type LockContents } from '@moonshot-ai/server';
+import { DEFAULT_LOCK_DIR, getLiveLock, type LockContents } from '@nori-code/server';
 
 import {
   DEFAULT_SERVER_HOST,

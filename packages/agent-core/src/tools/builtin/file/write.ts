@@ -6,7 +6,7 @@
  * Path access policy is resolved before any Kaos I/O.
  */
 
-import type { Kaos } from '@moonshot-ai/kaos';
+import type { Kaos } from '@nori-code/kaos';
 import { dirname } from 'pathe';
 import { z } from 'zod';
 
@@ -18,6 +18,7 @@ import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
 import type { WorkspaceConfig } from '../../support/workspace';
 import WRITE_DESCRIPTION from './write.md?raw';
+import { summarizeChangedLines, type CodeChangeReporter } from './change-summary';
 
 /** Mask isolating the file-type bits of a stat mode. */
 const S_IFMT = 0o170000;
@@ -59,6 +60,7 @@ export class WriteTool implements BuiltinTool<WriteInput> {
   constructor(
     private readonly kaos: Kaos,
     private readonly workspace: WorkspaceConfig,
+    private readonly reportChange?: CodeChangeReporter,
   ) {}
 
   resolveExecution(args: WriteInput): ToolExecution {
@@ -90,6 +92,7 @@ export class WriteTool implements BuiltinTool<WriteInput> {
 
     try {
       const mode = args.mode ?? 'overwrite';
+      const before = await this.kaos.readText(safePath).catch(() => '');
       if (mode === 'append') {
         await this.kaos.writeText(safePath, args.content, { mode: 'a' });
       } else {
@@ -99,6 +102,8 @@ export class WriteTool implements BuiltinTool<WriteInput> {
       // length would only equal the byte count for pure ASCII content, so it
       // is not used here.
       const bytesWritten = Buffer.byteLength(args.content, 'utf8');
+      const after = mode === 'append' ? before + args.content : args.content;
+      this.reportChange?.({ operation: 'write', path: args.path, diff: summarizeChangedLines(before, after), occurredAt: new Date().toISOString() });
       return {
         output: `${mode === 'append' ? 'Appended' : 'Wrote'} ${String(bytesWritten)} bytes to ${args.path}`,
       };

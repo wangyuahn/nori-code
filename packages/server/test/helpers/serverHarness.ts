@@ -18,7 +18,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { ServiceIdentifier } from '@moonshot-ai/agent-core';
+import type { ServiceIdentifier } from '@nori-code/agent-core';
 import { pino } from 'pino';
 import { WebSocket } from 'ws';
 
@@ -72,7 +72,7 @@ export function withAuth(init: RequestInit = {}, token: string = DEFAULT_TOKEN):
  * Hardcoded here as a literal for M0; `WS_BEARER_PROTOCOL_PREFIX` is introduced
  * in M3.1 and may replace this literal when the WS auth seam lands.
  */
-const WS_BEARER_PROTOCOL_PREFIX = 'kimi-code.bearer.';
+const WS_BEARER_PROTOCOL_PREFIX = 'nori-code.bearer.';
 
 export interface BootOptions {
   /** Bearer token attached by `authedFetch` / `authedWs`. Defaults to `'test-token'`. */
@@ -107,7 +107,7 @@ export interface ServerHarness {
   authedFetch(path: string, init?: RequestInit): Promise<Response>;
   /**
    * Open a `ws` WebSocket to `wsUrl`, offering subprotocol
-   * `kimi-code.bearer.<token>` and an `Authorization: Bearer <token>` header.
+   * `nori-code.bearer.<token>` and an `Authorization: Bearer <token>` header.
    * In M0 the server ignores both; the connection still opens.
    */
   authedWs(): WebSocket;

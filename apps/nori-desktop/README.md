@@ -1,13 +1,13 @@
-# Kimi Code Desktop
+# Nori Work
 
-An Electron desktop client for Kimi Code (product name **Kimi Code Desktop**;
-workspace package `@moonshot-ai/kimi-desktop`). It is a thin **shell + process manager**
-around the existing web UI (`apps/kimi-web`): it does not reimplement any UI or
-backend, it just opens a native window onto the local Kimi server.
+An Electron desktop client for Nori (product name **Nori Work**; workspace
+package `@nori-code/nori-work`). It is a thin **shell + process manager** around
+the existing web UI (`apps/nori-web`): it does not reimplement any UI or
+backend, it just opens a native window onto the local Nori server.
 
 ## How it works
 
-The web UI cannot run on its own — it needs the Kimi Code **server** (REST + WS
+The web UI cannot run on its own — it needs the Nori **server** (REST + WS
 under `/api/v1`). That server already ships as a self-contained single-file
 executable (SEA) built from `apps/nori-code`, with the web UI bundled inside it.
 
@@ -15,7 +15,7 @@ On launch the app:
 
 1. Runs the bundled SEA's `server run`, which reuses a live shared daemon if one
    is already running, or starts one — exactly the same `ensureDaemon` flow the
-   CLI (`kimi web`) uses. The daemon binds the well-known port (`58627`) and
+   CLI (`nori web`) uses. The daemon binds the well-known port (`58627`) and
    writes `~/.nori-code/server/lock`, so the CLI, the browser and the TUI all
    share the **same** server.
 2. Reads that lock file for the real port and loads the web UI from the daemon's
@@ -37,31 +37,32 @@ The dev build loads the SEA from `apps/nori-code/dist-native/bin/<target>/`, so
 build the backend once for your platform first:
 
 ```bash
-# one-time (rebuild when kimi-code / kimi-web change):
-pnpm --filter @moonshot-ai/kimi-web run build
+# one-time (rebuild when nori-code / nori-web change):
+pnpm -C apps/nori-web run build
 node apps/nori-code/scripts/copy-web-assets.mjs
-pnpm --filter @moonshot-ai/kimi-code run build:native:sea
+pnpm -C apps/nori-code build:native:sea
 
 # then run the desktop app (builds the main process, launches Electron):
-pnpm -C apps/kimi-desktop run dev      # or: pnpm dev:desktop  (from repo root)
+pnpm -C apps/nori-desktop run dev      # or: pnpm dev:desktop  (from repo root)
 ```
 
 Checks:
 
 ```bash
-pnpm -C apps/kimi-desktop run typecheck
+pnpm -C apps/nori-desktop run typecheck
 ```
 
 ## Package
 
 `dist` builds the main process and runs electron-builder for the **current**
 platform. `scripts/before-pack.cjs` stages the matching-platform SEA into the
-app's resources (`<resources>/bin/<target>/`).
+app's resources (`<resources>/bin/<target>/`) and also stages the built
+`apps/nori-web/dist` assets (`<resources>/nori-web/dist/`).
 
 ```bash
 # unsigned local build (for your own machine):
-CSC_IDENTITY_AUTO_DISCOVERY=false pnpm -C apps/kimi-desktop run dist
-# -> apps/kimi-desktop/dist-app/
+CSC_IDENTITY_AUTO_DISCOVERY=false pnpm -C apps/nori-desktop run dist
+# -> apps/nori-desktop/dist-app/
 ```
 
 > Do **not** rename a built `.app` bundle — renaming invalidates its code
@@ -82,10 +83,10 @@ hardened runtime + entitlements (`build/entitlements.mac.plist`) to the app and
 the nested SEA, and signing/notarization are environment-driven:
 
 ```bash
-KIMI_DESKTOP_NOTARIZE=true \
+NORI_DESKTOP_NOTARIZE=true \
 CSC_NAME="Developer ID Application: … (TEAMID)" \
 APPLE_API_KEY=/path/AuthKey_XXX.p8 APPLE_API_KEY_ID=XXXX APPLE_API_ISSUER=…uuid… \
-pnpm -C apps/kimi-desktop run dist
+pnpm -C apps/nori-desktop run dist
 ```
 
 In CI, run the **desktop-build** workflow with `sign-macos: true`; it reuses the
@@ -101,7 +102,7 @@ on any Mac without warnings.
 - **Auto-update**: not implemented (v2).
 - **Windows / Linux signing**: unsigned in v1 (Windows shows a SmartScreen
   prompt). Only macOS is signed + notarized.
-- **App icon**: builds ship the Kimi logo (sourced from the docs site art) on
+- **App icon**: builds ship the Nori logo (sourced from the docs site art) on
   macOS, Windows, and Linux.
 - **First launch may need network**: the SEA resolves its native sidecars
   (clipboard / koffi) the same way the installed CLI does.

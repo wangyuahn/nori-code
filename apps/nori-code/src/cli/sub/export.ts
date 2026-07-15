@@ -1,5 +1,5 @@
 /**
- * `kimi export` sub-command.
+ * `nori export` sub-command.
  *
  * CLI glue only: session lookup, previous-session confirmation, and output.
  * The actual ZIP/manifest export is owned by the SDK.
@@ -12,7 +12,7 @@ import {
   shutdownTelemetry,
   track,
   withTelemetryContext,
-} from '@moonshot-ai/kimi-telemetry';
+} from '@nori-code/telemetry';
 import {
   createKimiHarness,
   type ExportSessionInput,
@@ -21,7 +21,7 @@ import {
   type SessionSummary,
   type ShellEnvironment,
   type TelemetryClient,
-} from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/sdk';
 import type { Command } from 'commander';
 
 import { CLI_SHUTDOWN_TIMEOUT_MS, CLI_UI_MODE } from '#/constant/app';

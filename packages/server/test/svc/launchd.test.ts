@@ -20,7 +20,7 @@ import {
   parseLaunchctlPrint,
   type LaunchdManagerDeps,
 } from '../../src/svc/launchd';
-import { KIMI_SERVER_LABEL } from '../../src/svc/paths';
+import { NORI_SERVER_LABEL } from '../../src/svc/paths';
 import { readInstallPlan, writeInstallPlan } from '../../src/svc/install-plan';
 import type { ExecOptions, ExecResult } from '../../src/svc/exec';
 
@@ -46,7 +46,7 @@ function makeDeps(
   workDir: string,
 ): { deps: LaunchdManagerDeps; calls: StubCall[]; plistPath: string; logPath: string; planPath: string } {
   const { execLaunchctl, calls } = makeStubExec(responses);
-  const plistPath = join(workDir, 'Library', 'LaunchAgents', `${KIMI_SERVER_LABEL}.plist`);
+  const plistPath = join(workDir, 'Library', 'LaunchAgents', `${NORI_SERVER_LABEL}.plist`);
   const logPath = join(workDir, 'server', 'server.log');
   const planPath = join(workDir, 'server', 'install.json');
   // Re-point the install-plan path side-effects by overriding via env.
@@ -54,7 +54,7 @@ function makeDeps(
   // deps only need to point launchctl + filesystem locations.
   const deps: LaunchdManagerDeps = {
     execLaunchctl,
-    resolveProgram: () => '/usr/local/bin/kimi',
+    resolveProgram: () => '/usr/local/bin/nori',
     plistPath: () => plistPath,
     logPath: () => logPath,
     guiDomain: () => 'gui/501',
@@ -84,13 +84,13 @@ afterEach(() => {
 describe('buildLaunchAgentPlist', () => {
   it('renders a well-formed plist with label, ProgramArguments, and stdio paths', () => {
     const xml = buildLaunchAgentPlist({
-      label: KIMI_SERVER_LABEL,
-      programArguments: ['/usr/local/bin/kimi', 'server', 'run', '--port', '58627'],
+      label: NORI_SERVER_LABEL,
+      programArguments: ['/usr/local/bin/nori', 'server', 'run', '--port', '58627'],
       stdoutPath: '/tmp/x.log',
       stderrPath: '/tmp/x.log',
     });
-    expect(xml).toContain(`<key>Label</key>\n    <string>${KIMI_SERVER_LABEL}</string>`);
-    expect(xml).toContain('<string>/usr/local/bin/kimi</string>');
+    expect(xml).toContain(`<key>Label</key>\n    <string>${NORI_SERVER_LABEL}</string>`);
+    expect(xml).toContain('<string>/usr/local/bin/nori</string>');
     expect(xml).toContain('<string>server</string>');
     expect(xml).toContain('<string>run</string>');
     expect(xml).not.toContain('<string>--host</string>');
@@ -116,11 +116,11 @@ describe('buildLaunchAgentPlist', () => {
 describe('parseLaunchctlPrint', () => {
   it('extracts state + pid from a `launchctl print` block', () => {
     const sample = [
-      `${'gui/501/' + KIMI_SERVER_LABEL} = {`,
+      `${'gui/501/' + NORI_SERVER_LABEL} = {`,
       '\tstate = running',
       '\tpid = 4711',
       '\tlast exit code = 78: EX_CONFIG',
-      '\tprogram = /usr/local/bin/kimi',
+      '\tprogram = /usr/local/bin/nori',
       '}',
     ].join('\n');
     const parsed = parseLaunchctlPrint(sample);
@@ -138,21 +138,21 @@ describe('parseLaunchctlPrint', () => {
 
 describe('resolveSupervisorProgram', () => {
   it('normalizes a relative executable path to an absolute path', () => {
-    expect(resolveSupervisorProgram(['node', './kimi'], '/tmp/kimi-bin')).toBe(resolve('/tmp/kimi-bin', './kimi'));
+    expect(resolveSupervisorProgram(['node', './nori'], '/tmp/nori-bin')).toBe(resolve('/tmp/nori-bin', './nori'));
   });
 
   it('uses the absolute script path outside SEA mode', () => {
-    expect(resolveSupervisorProgram(['node', '/opt/kimi/dist/cli.mjs'], '/tmp', '/usr/bin/node', false)).toBe('/opt/kimi/dist/cli.mjs');
+    expect(resolveSupervisorProgram(['node', '/opt/nori/dist/cli.mjs'], '/tmp', '/usr/bin/node', false)).toBe('/opt/nori/dist/cli.mjs');
   });
 
   it('returns execPath in SEA mode even when argv[1] is a bare command name', () => {
     // Reproduces `kimi web` from the shell: argv[1] is the invoked command
-    // name, not a path — resolving it against cwd produced `<cwd>/kimi` (ENOENT).
-    expect(resolveSupervisorProgram(['/Users/x/.kimi-code/bin/kimi', 'kimi', 'web'], '/Users/x', '/Users/x/.kimi-code/bin/kimi', true)).toBe('/Users/x/.kimi-code/bin/kimi');
+    // name, not a path — resolving it against cwd produced `<cwd>/nori` (ENOENT).
+    expect(resolveSupervisorProgram(['/Users/x/.nori-code/bin/nori', 'nori', 'web'], '/Users/x', '/Users/x/.nori-code/bin/nori', true)).toBe('/Users/x/.nori-code/bin/nori');
   });
 
   it('returns execPath in SEA mode for a spawned `server` child', () => {
-    expect(resolveSupervisorProgram(['/Users/x/.kimi-code/bin/kimi', 'server', 'run'], '/Users/x', '/Users/x/.kimi-code/bin/kimi', true)).toBe('/Users/x/.kimi-code/bin/kimi');
+    expect(resolveSupervisorProgram(['/Users/x/.nori-code/bin/nori', 'server', 'run'], '/Users/x', '/Users/x/.nori-code/bin/nori', true)).toBe('/Users/x/.nori-code/bin/nori');
   });
 });
 
@@ -166,8 +166,8 @@ describe.skipIf(process.platform === 'win32')('launchd manager — install', () 
     expect(result.plistPath).toBe(plistPath);
     expect(existsSync(plistPath)).toBe(true);
     const xml = readFileSync(plistPath, 'utf8');
-    expect(xml).toContain(`<string>${KIMI_SERVER_LABEL}</string>`);
-    expect(xml).toContain('<string>/usr/local/bin/kimi</string>');
+    expect(xml).toContain(`<string>${NORI_SERVER_LABEL}</string>`);
+    expect(xml).toContain('<string>/usr/local/bin/nori</string>');
     expect(xml).toContain('<string>58627</string>');
 
     expect(calls.length).toBe(1);
@@ -233,7 +233,7 @@ describe.skipIf(process.platform === 'win32')('launchd manager — lifecycle', (
     const mgr = createLaunchdManager(deps);
     const result = await mgr.start();
     expect(result.ok).toBe(true);
-    expect(calls[0]?.args).toEqual(['kickstart', '-k', `gui/501/${KIMI_SERVER_LABEL}`]);
+    expect(calls[0]?.args).toEqual(['kickstart', '-k', `gui/501/${NORI_SERVER_LABEL}`]);
   });
 
   it('start refuses when not installed', async () => {
@@ -250,7 +250,7 @@ describe.skipIf(process.platform === 'win32')('launchd manager — lifecycle', (
     const mgr = createLaunchdManager(deps);
     const result = await mgr.stop();
     expect(result.ok).toBe(true);
-    expect(calls[0]?.args).toEqual(['kill', 'SIGTERM', `gui/501/${KIMI_SERVER_LABEL}`]);
+    expect(calls[0]?.args).toEqual(['kill', 'SIGTERM', `gui/501/${NORI_SERVER_LABEL}`]);
   });
 
   it('restart delegates to `launchctl kickstart -k`', async () => {
@@ -258,7 +258,7 @@ describe.skipIf(process.platform === 'win32')('launchd manager — lifecycle', (
     const mgr = createLaunchdManager(deps);
     const result = await mgr.restart();
     expect(result.ok).toBe(true);
-    expect(calls[0]?.args).toEqual(['kickstart', '-k', `gui/501/${KIMI_SERVER_LABEL}`]);
+    expect(calls[0]?.args).toEqual(['kickstart', '-k', `gui/501/${NORI_SERVER_LABEL}`]);
   });
 
   it('uninstall calls bootout, removes the plist, and clears the install plan', async () => {
@@ -269,8 +269,8 @@ describe.skipIf(process.platform === 'win32')('launchd manager — lifecycle', (
       host: '127.0.0.1',
       port: 58627,
       logLevel: 'info',
-      program: '/usr/local/bin/kimi',
-      programArguments: ['/usr/local/bin/kimi', 'server', 'run'],
+      program: '/usr/local/bin/nori',
+      programArguments: ['/usr/local/bin/nori', 'server', 'run'],
       logPath: '/tmp/x',
       installedAt: '2026-06-11T00:00:00.000Z',
     });
@@ -279,7 +279,7 @@ describe.skipIf(process.platform === 'win32')('launchd manager — lifecycle', (
     const mgr = createLaunchdManager(deps);
     const result = await mgr.uninstall();
     expect(result.ok).toBe(true);
-    expect(calls[0]?.args).toEqual(['bootout', `gui/501/${KIMI_SERVER_LABEL}`]);
+    expect(calls[0]?.args).toEqual(['bootout', `gui/501/${NORI_SERVER_LABEL}`]);
     expect(existsSync(plistPath)).toBe(false);
     expect(readInstallPlan()).toBeUndefined();
   });
@@ -292,12 +292,12 @@ describe.skipIf(process.platform === 'win32')('launchd manager — status', () =
     const status = await mgr.status();
     expect(status.installed).toBe(false);
     expect(status.running).toBe(false);
-    expect(status.label).toBe(KIMI_SERVER_LABEL);
+    expect(status.label).toBe(NORI_SERVER_LABEL);
     expect(status.platform).toBe('darwin');
   });
 
   it('reports running=true + pid from `launchctl print`', async () => {
-    const printOutput = `gui/501/${KIMI_SERVER_LABEL} = {\n\tstate = running\n\tpid = 9876\n}`;
+    const printOutput = `gui/501/${NORI_SERVER_LABEL} = {\n\tstate = running\n\tpid = 9876\n}`;
     const { deps, plistPath } = makeDeps(
       [{ stdout: printOutput, stderr: '', code: 0 }],
       workDir,
@@ -308,7 +308,7 @@ describe.skipIf(process.platform === 'win32')('launchd manager — status', () =
       host: '127.0.0.1',
       port: 58627,
       logLevel: 'info',
-      program: '/usr/local/bin/kimi',
+      program: '/usr/local/bin/nori',
       programArguments: [],
       logPath: '/tmp/x',
       installedAt: '2026-06-11T00:00:00.000Z',

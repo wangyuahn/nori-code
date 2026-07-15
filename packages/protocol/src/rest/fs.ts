@@ -298,6 +298,37 @@ export const fsDiffResponseSchema = z.object({
 });
 export type FsDiffResponse = z.infer<typeof fsDiffResponseSchema>;
 
+const gitRefNameSchema = z.string().min(1).max(200).regex(/^[A-Za-z0-9._/-]+$/).refine(
+  value => !value.startsWith('-'),
+  'must not start with a dash',
+);
+
+export const fsGitCommitRequestSchema = z.object({
+  message: z.string().trim().min(1).max(500),
+});
+export type FsGitCommitRequest = z.infer<typeof fsGitCommitRequestSchema>;
+
+export const fsGitCommitResponseSchema = z.object({
+  committed: z.literal(true),
+  commit: z.string().min(1),
+  summary: z.string(),
+});
+export type FsGitCommitResponse = z.infer<typeof fsGitCommitResponseSchema>;
+
+export const fsGitPushRequestSchema = z.object({
+  remote: gitRefNameSchema.optional(),
+  branch: gitRefNameSchema.optional(),
+});
+export type FsGitPushRequest = z.infer<typeof fsGitPushRequestSchema>;
+
+export const fsGitPushResponseSchema = z.object({
+  pushed: z.literal(true),
+  remote: z.string(),
+  branch: z.string(),
+  summary: z.string(),
+});
+export type FsGitPushResponse = z.infer<typeof fsGitPushResponseSchema>;
+
 export const fsDownloadParamsSchema = z.object({
   path: z.string().min(1),
   range: z.string().optional(),

@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 
 import { describe, expect, it } from 'vitest';
-import type { KimiHarness } from '@moonshot-ai/kimi-code-sdk';
+import type { KimiHarness } from '@nori-code/sdk';
 
 import { runAcpServer } from '../src/server';
 

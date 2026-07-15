@@ -1,10 +1,10 @@
 {
-  "name": "@moonshot-ai/acp-adapter",
+  "name": "@nori-code/acp-adapter",
   "version": "0.3.3",
   "private": true,
-  "description": "Agent Client Protocol adapter for kimi-code",
+  "description": "Agent Client Protocol adapter for Nori Code",
   "license": "MIT",
-  "author": "Moonshot AI",
+  "author": "Nori",
   "type": "module",
   "imports": {
     "#/*": [
@@ -41,9 +41,9 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.23.0",
-    "@moonshot-ai/agent-core": "workspace:^",
-    "@moonshot-ai/kaos": "workspace:^",
-    "@moonshot-ai/kimi-code-sdk": "workspace:^"
+    "@nori-code/agent-core": "workspace:^",
+    "@nori-code/kaos": "workspace:^",
+    "@nori-code/sdk": "workspace:^"
   },
   "devDependencies": {
     "jimp": "^1.6.1"

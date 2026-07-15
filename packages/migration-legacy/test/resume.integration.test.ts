@@ -17,9 +17,9 @@
  *   - `SessionStore` (constructor: `new SessionStore(homeDir)`)
  *   - `SessionStore.list({ workDir })`
  *   - `encodeWorkDirKey` / `normalizeWorkDir`
- *     all from `@moonshot-ai/agent-core/session/store`.
+ *     all from `@nori-code/agent-core/session/store`.
  *   - `Session` (constructor + `resume()` + `getReadyAgent()`), from
- *     `@moonshot-ai/agent-core`; `localKaos` from `@moonshot-ai/kaos`. After
+ *     `@nori-code/agent-core`; `localKaos` from `@nori-code/kaos`. After
  *     `resume()`, `session.getReadyAgent('main').context.messages` exposes the
  *     replayed message history.
  */
@@ -33,9 +33,9 @@ import {
   SessionStore,
   encodeWorkDirKey,
   normalizeWorkDir,
-} from '@moonshot-ai/agent-core/session/store/index';
-import { Session, type SDKSessionRPC } from '@moonshot-ai/agent-core';
-import { LocalKaos } from '@moonshot-ai/kaos';
+} from '@nori-code/agent-core/session/store/index';
+import { Session, type SDKSessionRPC } from '@nori-code/agent-core';
+import { LocalKaos } from '@nori-code/kaos';
 
 import { migrateOneSession, type MigrateOneResult } from '../src/sessions/migrate-one.js';
 import { computeWorkdirBucket } from '../src/sessions/workdir-bucket.js';

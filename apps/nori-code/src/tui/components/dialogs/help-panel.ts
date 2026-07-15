@@ -15,7 +15,7 @@ import {
   decodeKittyPrintable,
   type Focusable,
   truncateToWidth,
-} from '@moonshot-ai/pi-tui';
+} from '@nori-code/pi-tui';
 import { currentTheme } from '#/tui/theme';
 
 export interface KeyboardShortcut {
@@ -110,7 +110,7 @@ export class HelpPanelComponent extends Container implements Focusable {
       currentTheme.boldFg('primary', ' help ') + muted('· Esc / Enter / q to cancel · ↑↓ scroll'),
       '',
       // Greeting
-      `  ${dim('Sure, Kimi is ready to help! Just send a message to get started.')}`,
+      `  ${dim('Nori is ready. Send a message to get started.')}`,
       '',
       // Section: keyboard shortcuts
       `  ${currentTheme.bold('Keyboard shortcuts')}`,

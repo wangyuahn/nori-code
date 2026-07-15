@@ -150,7 +150,7 @@ interface Conn {
 
 function openConn(url: string): Promise<Conn> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url, ['kimi-code.bearer.test-token']);
+    const ws = new WebSocket(url, ['nori-code.bearer.test-token']);
     const queue: WsFrame[] = [];
     const waiters: Array<(frame: WsFrame) => void> = [];
     ws.on('message', (data) => {

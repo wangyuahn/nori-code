@@ -13,8 +13,23 @@ import {
   GoogleGenAIStreamedMessage,
   messagesToGoogleGenAIContents,
 } from '#/providers/google-genai';
+import { createProvider as createProviderFromConfig } from '#/providers/index';
 import type { Tool } from '#/tool';
 import { describe, it, expect, vi } from 'vitest';
+
+describe('createProvider vertexai dispatch', () => {
+  it('enables Vertex mode from the provider type discriminator', () => {
+    const provider = createProviderFromConfig({
+      type: 'vertexai',
+      model: 'gemini-2.5-pro',
+      project: 'demo-project',
+      location: 'us-central1',
+    });
+
+    expect(provider).toBeInstanceOf(GoogleGenAIChatProvider);
+    expect((provider as unknown as { _vertexai: boolean })._vertexai).toBe(true);
+  });
+});
 
 function makeGenerateContentResponse() {
   return {

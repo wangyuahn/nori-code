@@ -2,8 +2,8 @@ import {
   configResponseSchema,
   ErrorCode,
   patchConfigRequestSchema,
-} from '@moonshot-ai/protocol';
-import { IConfigService, type IInstantiationService } from '@moonshot-ai/agent-core';
+} from '@nori-code/protocol';
+import { IConfigService, type IInstantiationService } from '@nori-code/agent-core';
 
 import { errEnvelope, okEnvelope } from '../envelope';
 import { defineRoute } from '../middleware/defineRoute';
@@ -33,7 +33,7 @@ export function registerConfigRoutes(app: ConfigRouteHost, ix: IInstantiationSer
       method: 'GET',
       path: '/config',
       success: { data: configResponseSchema },
-      description: 'Get the global Kimi configuration (secrets redacted)',
+      description: 'Get the global Nori configuration (secrets redacted)',
       tags: ['config'],
     },
     async (req, reply) => {
@@ -52,7 +52,7 @@ export function registerConfigRoutes(app: ConfigRouteHost, ix: IInstantiationSer
       errors: {
         [ErrorCode.VALIDATION_FAILED]: {},
       },
-      description: 'Update the global Kimi configuration (merge semantics)',
+      description: 'Update the global Nori configuration (merge semantics)',
       tags: ['config'],
     },
     async (req, reply) => {

@@ -10,6 +10,7 @@ export class ReadonlyPermissionPolicy implements PermissionPolicy {
 
   evaluate(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
     if (!this.agent.permission.toolsReadonly) return;
+    if (this.agent.permission.mode !== 'manual') return;
     if (!READONLY_DENIED_TOOLS.has(context.toolCall.name)) return;
     // When coderWriteEnabled is true, allow Write/Edit even in read-only mode.
     // This is toggled by the user via /setting → Coder Write.

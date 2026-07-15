@@ -19,7 +19,7 @@ import type {
   KimiHarness,
   PermissionMode,
   Session,
-} from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/sdk';
 
 import { AcpServer } from '../src/server';
 import { AUTHED_STATUS, makeModelsMap } from './_helpers/harness-stubs';

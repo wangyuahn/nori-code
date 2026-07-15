@@ -1,4 +1,4 @@
-import { ErrorCodes, isKimiError } from '@moonshot-ai/kimi-code-sdk';
+import { ErrorCodes, isKimiError } from '@nori-code/sdk';
 
 import {
   GoalQueueEditDialogComponent,

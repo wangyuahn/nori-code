@@ -16,6 +16,7 @@
 
 import { z } from 'zod';
 
+import { goalSnapshotSchema } from '../events';
 import { messageSchema } from '../message';
 import { cursorQuerySchema, pageResponseSchema } from '../pagination';
 import {
@@ -105,16 +106,30 @@ export type CreateSessionChildRequest = z.infer<typeof createSessionChildRequest
 export const createSessionChildResponseSchema = sessionSchema;
 export type CreateSessionChildResponse = z.infer<typeof createSessionChildResponseSchema>;
 
+const realtimeTokenUsageSchema = z.object({
+  input_other: z.number().int().nonnegative(),
+  output: z.number().int().nonnegative(),
+  input_cache_read: z.number().int().nonnegative(),
+  input_cache_creation: z.number().int().nonnegative(),
+});
+
 export const sessionStatusResponseSchema = z.object({
   status: sessionStatusSchema,
   model: z.string().optional(),
   thinking_level: z.string(),
   permission: z.string(),
   plan_mode: z.boolean(),
+  main_write_enabled: z.boolean(),
   swarm_mode: z.boolean(),
+  goal: goalSnapshotSchema.nullable(),
   context_tokens: z.number().int().nonnegative(),
   max_context_tokens: z.number().int().nonnegative(),
   context_usage: z.number().min(0).max(1),
+  usage: z.object({
+    by_model: z.record(z.string(), realtimeTokenUsageSchema).optional(),
+    current_turn: realtimeTokenUsageSchema.optional(),
+    total: realtimeTokenUsageSchema.optional(),
+  }).optional(),
 });
 export type SessionStatusResponse = z.infer<typeof sessionStatusResponseSchema>;
 
@@ -160,6 +175,11 @@ export const archiveSessionResponseSchema = z.object({
   archived: z.literal(true),
 });
 export type ArchiveSessionResponse = z.infer<typeof archiveSessionResponseSchema>;
+
+export const removeSessionResponseSchema = z.object({
+  deleted: z.literal(true),
+});
+export type RemoveSessionResponse = z.infer<typeof removeSessionResponseSchema>;
 
 /** @deprecated kept as an alias for backward compatibility; prefer archiveSessionResponseSchema. */
 export const deleteSessionResponseSchema = archiveSessionResponseSchema;

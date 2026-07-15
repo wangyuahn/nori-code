@@ -15,8 +15,8 @@
  * services-package façade.
  */
 
-import { authSummarySchema } from '@moonshot-ai/protocol';
-import { IAuthSummaryService, type IInstantiationService } from '@moonshot-ai/agent-core';
+import { authSummarySchema } from '@nori-code/protocol';
+import { IAuthSummaryService, type IInstantiationService } from '@nori-code/agent-core';
 
 import { okEnvelope } from '../envelope';
 import { defineRoute } from '../middleware/defineRoute';

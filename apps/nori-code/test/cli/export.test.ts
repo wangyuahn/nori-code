@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { createKimiDeviceId as createKimiDeviceIdFn } from '@moonshot-ai/kimi-code-oauth';
+import type { createKimiDeviceId as createKimiDeviceIdFn } from '@nori-code/oauth';
 import { Command } from 'commander';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -20,7 +20,7 @@ import type {
   ExportSessionManifest,
   ExportSessionResult,
   SessionSummary,
-} from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/sdk';
 
 let tmp: string;
 
@@ -47,8 +47,8 @@ const mocks = vi.hoisted(() => ({
   harnessCreatesDeviceIdOnConstruction: false,
 }));
 
-vi.mock('@moonshot-ai/kimi-code-sdk', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@moonshot-ai/kimi-code-sdk')>();
+vi.mock('@nori-code/sdk', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@nori-code/sdk')>();
   return {
     ...actual,
     resolveKimiHome: mocks.resolveKimiHome,
@@ -73,9 +73,9 @@ vi.mock('@moonshot-ai/kimi-code-sdk', async (importOriginal) => {
   };
 });
 
-vi.mock('@moonshot-ai/kimi-code-oauth', async () => {
-  const actual = await vi.importActual<typeof import('@moonshot-ai/kimi-code-oauth')>(
-    '@moonshot-ai/kimi-code-oauth',
+vi.mock('@nori-code/oauth', async () => {
+  const actual = await vi.importActual<typeof import('@nori-code/oauth')>(
+    '@nori-code/oauth',
   );
   return {
     ...actual,
@@ -84,7 +84,7 @@ vi.mock('@moonshot-ai/kimi-code-oauth', async () => {
   };
 });
 
-vi.mock('@moonshot-ai/kimi-telemetry', () => ({
+vi.mock('@nori-code/telemetry', () => ({
   initializeTelemetry: mocks.initializeTelemetry,
   shutdownTelemetry: mocks.shutdownTelemetry,
   track: mocks.telemetryTrack,
@@ -408,7 +408,7 @@ describe('kimi export', () => {
       homeDir: '/tmp/kimi-export-home',
       deviceId: 'device-1',
       enabled: true,
-      appName: 'kimi-code-cli',
+      appName: 'nori-code-cli',
       version: expect.any(String),
       uiMode: 'shell',
       model: 'k2',
@@ -475,7 +475,7 @@ describe('kimi export', () => {
       const deviceId = `device-for-${homeDir}`;
       if (!createdHomes.has(homeDir)) {
         createdHomes.add(homeDir);
-        options?.onFirstLaunch?.(deviceId);
+        options?.onFirstLaunch?.();
       }
       return deviceId;
     });

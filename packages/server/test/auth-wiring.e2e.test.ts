@@ -197,7 +197,7 @@ describe('production auth wiring (M5.1)', () => {
     const r = await bootReal();
     const token = readToken();
 
-    const conn = await openConn(wsUrl(r.address), [`kimi-code.bearer.${token}`]);
+    const conn = await openConn(wsUrl(r.address), [`nori-code.bearer.${token}`]);
     const hello = await receiveType(conn, 'server_hello', 1000);
     expect(hello.type).toBe('server_hello');
     conn.ws.close();

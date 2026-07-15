@@ -11,16 +11,15 @@ import {
   installGlobalProxyDispatcher,
   log,
   resolveGlobalLogPath,
-  resolveKimiHome,
   type TelemetryClient,
-} from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/sdk';
 import {
   installCrashHandlers,
   setTelemetryContext,
   shutdownTelemetry,
   track,
   withTelemetryContext,
-} from '@moonshot-ai/kimi-telemetry';
+} from '@nori-code/telemetry';
 
 import { createProgram } from './cli/commands';
 import { finalizeHeadlessRun } from './cli/headless-exit';
@@ -37,13 +36,14 @@ import { createKimiCodeHostIdentity, getVersion } from './cli/version';
 import { CLI_SHUTDOWN_TIMEOUT_MS, CLI_UI_MODE, PROCESS_NAME } from './constant/app';
 import { cleanupStaleNativeCacheForCurrent } from './native/native-assets';
 import { installNativeModuleHook } from './native/module-hook';
+import { getDataDir } from './utils/paths';
 import { runNativeAssetSmokeIfRequested } from './native/smoke';
 
 /**
  * Outcome of a CLI command run, reported back to the process entrypoint.
  *
  * `handleMainCommand` is a reusable, unit-tested handler — it must not terminate
- * the process itself. It reports here whether a headless (`kimi -p`) run
+ * the process itself. It reports here whether a headless (`nori -p`) run
  * completed so the entrypoint (the only place that owns the process) can arm the
  * force-exit fallback.
  */
@@ -83,10 +83,6 @@ export async function handleMainCommand(
   return { headlessCompleted: false };
 }
 
-/** `kimi migrate`: launch the migration screen only, then exit. */
-async function handleMigrateCommand(version: string): Promise<void> {
-  await runShell(MIGRATE_CLI_OPTIONS, version, { migrateOnly: true });
-}
 
 export async function handleUpgradeCommand(version: string): Promise<void> {
   const telemetryBootstrap = createCliTelemetryBootstrap();
@@ -119,16 +115,6 @@ export async function handleUpgradeCommand(version: string): Promise<void> {
   process.exit(exitCode);
 }
 
-/** A neutral CLIOptions value — `kimi migrate` never opens a chat session. */
-const MIGRATE_CLI_OPTIONS: CLIOptions = {
-  session: undefined,
-  continue: false,
-  plan: false,
-  model: undefined,
-  outputFormat: undefined,
-  prompt: undefined,
-  skillsDirs: [],
-};
 
 export function main(): void {
   process.title = PROCESS_NAME;
@@ -159,7 +145,7 @@ export function main(): void {
           // Only the process entrypoint disposes of the process. Print mode
           // relies on the event loop draining to exit; flush any buffered output
           // and then arm an unref'd fallback so a stray ref'd handle left over
-          // from the run can't wedge a completed `kimi -p` until an external
+          // from the run can't wedge a completed `nori -p` until an external
           // timeout. A healthy run drains and exits before the fallback fires.
           if (outcome.headlessCompleted) {
             await finalizeHeadlessRun(
@@ -177,17 +163,9 @@ export function main(): void {
               operation,
             }),
           );
-          process.stderr.write(`See log: ${resolveGlobalLogPath(resolveKimiHome())}\n`);
+          process.stderr.write(`See log: ${resolveGlobalLogPath(getDataDir())}\n`);
           process.exit(1);
         });
-    },
-    () => {
-      void handleMigrateCommand(version).catch(async (error: unknown) => {
-        await logStartupFailure('run migration', error);
-        process.stderr.write(formatStartupError(error, { operation: 'run migration' }));
-        process.stderr.write(`See log: ${resolveGlobalLogPath(resolveKimiHome())}\n`);
-        process.exit(1);
-      });
     },
     (entry, args) => {
       void runPluginNodeEntry(entry, args).catch(async (error: unknown) => {
@@ -200,7 +178,7 @@ export function main(): void {
       void handleUpgradeCommand(version).catch(async (error: unknown) => {
         await logStartupFailure('upgrade', error);
         process.stderr.write(formatStartupError(error, { operation: 'upgrade' }));
-        process.stderr.write(`See log: ${resolveGlobalLogPath(resolveKimiHome())}\n`);
+        process.stderr.write(`See log: ${resolveGlobalLogPath(getDataDir())}\n`);
         process.exit(1);
       });
     },

@@ -1,7 +1,7 @@
 {
-  "name": "@moonshot-ai/migration-legacy",
+  "name": "@nori-code/migration-legacy",
   "version": "0.1.15",
-  "description": "Migrate kimi-cli (~/.kimi/) data into kimi-code (~/.nori-code/).",
+  "description": "One-time migration helpers for importing legacy Kimi CLI data into Nori Code.",
   "license": "MIT",
   "type": "module",
   "private": true,
@@ -27,11 +27,11 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@moonshot-ai/agent-core": "workspace:^",
+    "@nori-code/agent-core": "workspace:^",
     "smol-toml": "^1.6.1",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@moonshot-ai/kaos": "workspace:^"
+    "@nori-code/kaos": "workspace:^"
   }
 }

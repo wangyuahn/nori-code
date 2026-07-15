@@ -2,7 +2,7 @@ import {
   APIProviderRateLimitError,
   isProviderRateLimitError,
   type TokenUsage,
-} from '@moonshot-ai/kosong';
+} from '@nori-code/kosong';
 
 import type { Agent } from '../agent';
 import type { PromptOrigin } from '../agent/context';

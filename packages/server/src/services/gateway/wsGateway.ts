@@ -1,4 +1,4 @@
-import { createDecorator, type TelemetryClient } from '@moonshot-ai/agent-core';
+import { createDecorator, type TelemetryClient } from '@nori-code/agent-core';
 
 import type { HostCheckOptions } from '#/middleware/hostnames';
 import type { IAuthTokenService } from '#/services/auth/authTokenService';
@@ -43,7 +43,7 @@ export const IWSGateway = createDecorator<IWSGateway>('wsGateway');
  * Extract the bearer token from a `Sec-WebSocket-Protocol` request header.
  *
  * The header is a comma-separated list of offered subprotocols (e.g.
- * `"kimi-code.bearer.abc, other"`). Returns the token portion of the first
+ * `"nori-code.bearer.abc, other"`). Returns the token portion of the first
  * entry whose subprotocol starts with {@link WS_BEARER_PROTOCOL_PREFIX}, or
  * `undefined` when the header is missing/empty, no entry matches, or the
  * matching entry carries an empty token.
@@ -87,7 +87,7 @@ export interface WSGatewayOptions {
 
   /**
    * When set, the WS upgrade path requires a valid bearer token (via the
-   * `Authorization` header or the `kimi-code.bearer.<token>` subprotocol).
+   * `Authorization` header or the `nori-code.bearer.<token>` subprotocol).
    * When unset (e.g. tests / pre-M5.1 boots), upgrade auth is skipped.
    */
   authTokenService?: IAuthTokenService;

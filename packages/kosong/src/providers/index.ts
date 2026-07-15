@@ -35,7 +35,10 @@ export function createProvider(config: ProviderConfig): ChatProvider {
     case 'openai_responses':
       return new OpenAIResponsesChatProvider(config);
     case 'vertexai':
-      return new GoogleGenAIChatProvider(config);
+      // `type` is only the dispatch tag and is not part of GoogleGenAIOptions.
+      // Explicitly enable Vertex mode so hand-written configs and imported
+      // third-party registries cannot silently use the Gemini Developer API.
+      return new GoogleGenAIChatProvider({ ...config, vertexai: true });
     default: {
       const exhaustive: never = config;
       throw new Error(`Unknown provider type: ${String(exhaustive)}`);

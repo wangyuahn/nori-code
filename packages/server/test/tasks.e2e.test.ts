@@ -34,10 +34,10 @@ import {
   ITaskService,
   TaskAlreadyFinishedError,
   TaskNotFoundError,
-} from '@moonshot-ai/agent-core';
+} from '@nori-code/agent-core';
 import {
   listTasksResponseSchema,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 
 import { IRestGateway, startServer, type ServerStartOptions, type RunningServer } from '../src';
 import { fixedTokenAuth } from './helpers/serverHarness';

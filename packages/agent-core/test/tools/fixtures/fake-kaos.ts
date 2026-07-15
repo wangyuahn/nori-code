@@ -11,7 +11,7 @@
  * their own `WorkspaceConfig` with narrower bounds.
  */
 
-import type { Environment, Kaos } from '@moonshot-ai/kaos';
+import type { Environment, Kaos } from '@nori-code/kaos';
 import type { ExecutableToolResult } from '#/loop';
 
 import type { WorkspaceConfig } from '../../../src/tools/support/workspace';

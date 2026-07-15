@@ -1,21 +1,21 @@
 {
-  "name": "@moonshot-ai/kaos",
+  "name": "@nori-code/kaos",
   "version": "0.1.6",
   "private": true,
   "description": "Execution environment abstraction for AI agent applications",
   "license": "MIT",
-  "author": "Moonshot AI",
-  "homepage": "https://github.com/MoonshotAI/kimi-code/tree/main/packages/kaos#readme",
+  "author": "Nori",
+  "homepage": "https://github.com/wangyuahn/nori-code/tree/main/packages/kaos#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MoonshotAI/kimi-code.git",
+    "url": "git+https://github.com/wangyuahn/nori-code.git",
     "directory": "packages/kaos"
   },
   "bugs": {
-    "url": "https://github.com/MoonshotAI/kimi-code/issues"
+    "url": "https://github.com/wangyuahn/nori-code/issues"
   },
   "keywords": [
-    "kimi",
+    "nori",
     "agent",
     "execution",
     "sandbox",

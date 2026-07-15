@@ -30,8 +30,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import { Jimp } from 'jimp';
 
-import type { Event, PromptSubmission } from '@moonshot-ai/protocol';
-import { IEventService, IPromptService, PromptService } from '@moonshot-ai/agent-core';
+import type { Event, PromptSubmission } from '@nori-code/protocol';
+import { IEventService, IPromptService, PromptService } from '@nori-code/agent-core';
 
 import { IRestGateway, startServer, type ServerStartOptions, type RunningServer } from '../src';
 import { fixedTokenAuth } from './helpers/serverHarness';
@@ -218,7 +218,7 @@ async function openSubscriber(
   const wsUrl = r.address.replace('http://', 'ws://') + '/api/v1/ws';
   const received: Record<string, unknown>[] = [];
   const ws = await new Promise<WebSocket>((resolve, reject) => {
-    const sock = new WebSocket(wsUrl, ['kimi-code.bearer.test-token']);
+    const sock = new WebSocket(wsUrl, ['nori-code.bearer.test-token']);
     sock.on('message', (data) => {
       try {
         received.push(JSON.parse(wsDataToString(data)) as Record<string, unknown>);
@@ -420,6 +420,53 @@ describe('POST /api/v1/sessions/{sid}/prompts — submit validation (W7.2 / Chai
         },
       },
     ]);
+  });
+
+  it('uploads a text file and injects its content into the model prompt', async () => {
+    let submitted: PromptSubmission | undefined;
+    const r = await bootDaemon([[
+      IPromptService,
+      createPromptServiceOverride({
+        submit: async (_sid, body) => {
+          submitted = body;
+          return {
+            prompt_id: 'prompt_text_file',
+            user_message_id: 'msg_text_file',
+            status: 'running',
+            content: body.content,
+            created_at: '2026-07-14T00:00:00.000Z',
+          };
+        },
+      }),
+    ]]);
+    const sid = await createSession(r);
+    const bytes = Buffer.from('# Notes\n\nAttached markdown content.\n', 'utf8');
+    const upload = buildMultipart({
+      file: { fieldName: 'file', filename: 'notes.md', contentType: 'text/markdown', data: bytes },
+    });
+    const uploadRes = await appOf(r).inject({
+      method: 'POST',
+      url: '/api/v1/files',
+      payload: upload.body,
+      headers: { 'content-type': upload.contentType },
+    });
+    const uploadEnv = envelopeOf<{ id: string }>(uploadRes.json());
+    expect(uploadEnv.code).toBe(0);
+
+    const res = await appOf(r).inject({
+      method: 'POST',
+      url: `/api/v1/sessions/${sid}/prompts`,
+      payload: {
+        content: [
+          { type: 'text', text: 'summarize this file' },
+          { type: 'file', file_id: uploadEnv.data!.id, name: 'notes.md', media_type: 'text/markdown', size: bytes.length },
+        ],
+      },
+    });
+    expect(envelopeOf(res.json()).code).toBe(0);
+    expect(submitted?.content[0]).toEqual({ type: 'text', text: 'summarize this file' });
+    expect(submitted?.content[1]).toMatchObject({ type: 'text' });
+    expect(submitted?.content[1]?.type === 'text' ? submitted.content[1].text : '').toContain('Attached markdown content.');
   });
 
   it('compresses an oversized uploaded image when resolving the prompt, leaving the stored file intact', async () => {

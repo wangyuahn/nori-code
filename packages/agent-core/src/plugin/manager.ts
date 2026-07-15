@@ -250,7 +250,7 @@ export class PluginManager {
         out.push({
           ...hook,
           cwd: record.root,
-          env: { NORI_CODE_HOME: this.kimiHomeDir, KIMI_PLUGIN_ROOT: record.root },
+          env: { NORI_CODE_HOME: this.kimiHomeDir, NORI_PLUGIN_ROOT: record.root, KIMI_PLUGIN_ROOT: record.root },
         });
       }
     }
@@ -495,6 +495,7 @@ function withPluginMcpRuntime(
   const env = {
     ...config.env,
     NORI_CODE_HOME: kimiHomeDir,
+    NORI_PLUGIN_ROOT: pluginRoot,
     KIMI_PLUGIN_ROOT: pluginRoot,
   };
 

@@ -1,0 +1,606 @@
+﻿packages/server/src\home.ts:4:/** Nori-owned data root. Never falls back to Kimi's environment or home. */
+packages/server/src\index.ts:42:} from '@moonshot-ai/agent-core';
+packages/server/src\error-handler.ts:20:import { errEnvelope, ErrorCode } from '@moonshot-ai/protocol';
+packages/server/src\envelope.ts:2: * Re-export the envelope helpers from `@moonshot-ai/protocol`.
+packages/server/src\envelope.ts:4: * The wire-shape source of truth lives in `@moonshot-ai/protocol`. Re-exporting
+packages/server/src\envelope.ts:12:export { okEnvelope, errEnvelope, type Envelope } from '@moonshot-ai/protocol';
+packages/server/src\request-id.ts:4: * Delegates to `parseOrGenerateRequestId` from `@moonshot-ai/protocol`, which:
+packages/server/src\request-id.ts:11:import { parseOrGenerateRequestId } from '@moonshot-ai/protocol';
+packages/server/src\openapi\transforms.ts:23:} from '@moonshot-ai/protocol';
+packages/server/src\start.ts:1:import { InstantiationService, resolveConfigPath, setUnexpectedErrorHandler, IApprovalService, IAuthSummaryService, IEnvironmentService, IEventService, ICoreProcessService, IModelCatalogService, IMcpService, IMessageService, IOAuthService, IFileStore, IFsGitService, IFsSearchService, IFsService, IFsWatcher, ILogService, IPromptService, IQuestionService, ISessionService, ISkillService, ITaskService, ITerminalService, IToolService, IWorkspaceFsService, IWorkspaceRegistry, FsPathEscapesError, FsWatchLimitError, FsWatcherService, SessionNotFoundError, createConnectionLookup, resolveSafePath, type ServiceIdentifier, type CoreProcessServiceOptions } from '@moonshot-ai/agent-core';
+packages/server/src\start.ts:2:import { ErrorCode, createAsyncApiDocument } from '@moonshot-ai/protocol';
+packages/server/src\start.ts:102:   * and `KIMI_CODE_ALLOWED_HOSTS`. A leading dot matches a domain suffix.
+packages/server/src\middleware\validate.ts:21:import { ErrorCode } from '@moonshot-ai/protocol';
+apps/nori-desktop\electron-builder.config.cjs:6:  // Deliberately unrelated to every Moonshot/Kimi identifier. electron-builder
+apps/nori-desktop\electron-builder.config.cjs:46:    // upgrading, grouping, or uninstalling a Kimi-family application.
+apps/nori-code/scripts\update-catalog.mjs:3: * Fetches models.dev/api.json, strips fields not needed by kimi-code, and
+packages/server/src\ws\protocol.ts:2: * WS envelope helpers — thin builders around the `@moonshot-ai/protocol`
+packages/server/src\ws\protocol.ts:22:import type { Event } from '@moonshot-ai/protocol';
+packages/server/src\ws\connection.ts:24:} from '@moonshot-ai/protocol';
+packages/server/src\ws\connection.ts:30:} from '@moonshot-ai/agent-core';
+packages/server/src\services\approval\approvalService.ts:5:import { Disposable, DisposableMap, IApprovalService, IEventService, approvalToBrokerRequest, ILogService, type IDisposable, type ApprovalRequest, type ApprovalResponse } from '@moonshot-ai/agent-core';
+packages/server/src\services\approval\approvalService.ts:9:} from '@moonshot-ai/protocol';
+packages/server/src\middleware\schema.ts:10:import { envelopeSchema } from '@moonshot-ai/protocol';
+apps/nori-code/scripts\built-in-catalog.mjs:4:export const BUILT_IN_CATALOG_DEFINE = '__KIMI_CODE_BUILT_IN_CATALOG__';
+packages/server/src\services\auth\authTokenService.ts:14:import { createDecorator } from '@moonshot-ai/agent-core';
+apps/nori-code/scripts\build-vis-asset.mjs:29:  execSync('pnpm --filter @moonshot-ai/vis-web exec vite build', {
+packages/server/src\services\snapshot\snapshotService.ts:60:} from '@moonshot-ai/agent-core';
+packages/server/src\services\snapshot\snapshotService.ts:61:import { SessionStore } from '@moonshot-ai/agent-core/session/store';
+packages/server/src\services\snapshot\snapshotService.ts:67:} from '@moonshot-ai/protocol';
+packages/server/src\services\snapshot\snapshotConfig.ts:4: *   KIMI_SNAPSHOT_READER       'auto' (default) | 'legacy'
+packages/server/src\services\snapshot\snapshotConfig.ts:5: *   KIMI_SNAPSHOT_TIMEOUT_MS   integer ms hard ceiling on the route (default 4000)
+packages/server/src\services\snapshot\snapshotConfig.ts:6: *   KIMI_SNAPSHOT_CACHE_LIMIT  LRU entries (default 32)
+packages/server/src\services\snapshot\snapshotConfig.ts:28:  const rawMode = env['KIMI_SNAPSHOT_READER']?.trim().toLowerCase();
+packages/server/src\services\snapshot\snapshotConfig.ts:32:    timeoutMs: parseInteger(env['KIMI_SNAPSHOT_TIMEOUT_MS'], DEFAULT_TIMEOUT_MS, 100),
+packages/server/src\services\snapshot\snapshotConfig.ts:33:    cacheLimit: parseInteger(env['KIMI_SNAPSHOT_CACHE_LIMIT'], DEFAULT_CACHE_LIMIT, 1),
+packages/server/src\services\snapshot\snapshot.ts:9:import { createDecorator } from '@moonshot-ai/agent-core';
+packages/server/src\services\snapshot\snapshot.ts:10:import type { SessionSnapshotResponse } from '@moonshot-ai/protocol';
+apps/nori-code/src\utils\experimental-features.ts:4:} from '@moonshot-ai/kimi-code-sdk';
+packages/server/src\routes\connections.ts:12:import { connectionsListResponseSchema } from '@moonshot-ai/protocol';
+packages/server/src\routes\connections.ts:13:import type { IInstantiationService } from '@moonshot-ai/agent-core';
+packages/server/src\services\question\questionService.ts:5:import { Disposable, DisposableMap, IEventService, IQuestionService, questionDismissedResult, questionToBrokerRequest, ILogService, type IDisposable, type QuestionRequest, type QuestionResult } from '@moonshot-ai/agent-core';
+packages/server/src\services\question\questionService.ts:9:} from '@moonshot-ai/protocol';
+packages/server/src\services\serviceCollection.ts:5:} from '@moonshot-ai/agent-core';
+packages/server/src\services\serviceCollection.ts:6:import * as Services from '@moonshot-ai/agent-core';
+packages/server/src\services\guiStore\guiStoreService.ts:5:import { IEnvironmentService } from '@moonshot-ai/agent-core';
+packages/server/src\routes\meta.ts:18:import { metaResponseSchema } from '@moonshot-ai/protocol';
+packages/server/src\routes\meta.ts:23:import type { MetaResponse } from '@moonshot-ai/protocol';
+packages/server/src\services\guiStore\guiStore.ts:1:import { createDecorator } from '@moonshot-ai/agent-core';
+packages/server/src\services\pinoLoggerService.ts:1:import { Disposable, ILogService } from '@moonshot-ai/agent-core';
+packages/server/src\routes\messages.ts:24: * `@moonshot-ai/agent-core`. No SDK package imports.
+packages/server/src\routes\messages.ts:32:} from '@moonshot-ai/protocol';
+packages/server/src\routes\messages.ts:33:import { IMessageService, MessageNotFoundError, SessionNotFoundError, type IInstantiationService } from '@moonshot-ai/agent-core';
+packages/server/src\routes\config.ts:5:} from '@moonshot-ai/protocol';
+packages/server/src\routes\config.ts:6:import { IConfigService, type IInstantiationService } from '@moonshot-ai/agent-core';
+packages/server/src\routes\config.ts:36:      description: 'Get the global Kimi configuration (secrets redacted)',
+packages/server/src\routes\config.ts:55:      description: 'Update the global Kimi configuration (merge semantics)',
+packages/server/src\routes\auth.ts:18:import { authSummarySchema } from '@moonshot-ai/protocol';
+packages/server/src\routes\auth.ts:19:import { IAuthSummaryService, type IInstantiationService } from '@moonshot-ai/agent-core';
+apps/nori-code/src\main.ts:9:  createKimiHarness,
+apps/nori-code/src\main.ts:15:} from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\main.ts:22:} from '@moonshot-ai/kimi-telemetry';
+apps/nori-code/src\main.ts:35:import { createKimiCodeHostIdentity, getVersion } from './cli/version';
+apps/nori-code/src\main.ts:46: * the process itself. It reports here whether a headless (`kimi -p`) run
+apps/nori-code/src\main.ts:94:  const harness = createKimiHarness({
+apps/nori-code/src\main.ts:96:    identity: createKimiCodeHostIdentity(version),
+packages/server/src\services\modelCatalog\modelCatalogRefreshScheduler.ts:20:} from '@moonshot-ai/agent-core';
+packages/server/src\services\modelCatalog\modelCatalogRefreshScheduler.ts:59:    const config = await this.core.rpc.getKimiConfig({ reload: true });
+apps/nori-code/src\utils\clipboard\clipboard-native.ts:15:declare const __KIMI_CODE_NATIVE_BUNDLE__: boolean | undefined;
+apps/nori-code/src\utils\clipboard\clipboard-native.ts:28:  typeof __KIMI_CODE_NATIVE_BUNDLE__ === 'boolean' && __KIMI_CODE_NATIVE_BUNDLE__;
+packages/server/src\svc\program.ts:38:  // In a SEA binary `argv[1]` is the invoked command name (e.g. `kimi`) or the
+packages/server/src\svc\program.ts:41:  // (e.g. `<cwd>/kimi`) and crash the spawn with ENOENT.
+apps/nori-code/src\utils\clipboard\clipboard-image.ts:4: * kimi-core's LLM pipeline only accepts PNG/JPEG/GIF/WebP, and the
+apps/nori-code/src\utils\clipboard\clipboard-image.ts:314:  const tmpFile = join(tmpdir(), `kimi-wsl-clip-${randomUUID()}.png`);
+apps/nori-code/src\utils\clipboard\clipboard-image.ts:326:      '$path = $env:KIMI_WSL_CLIPBOARD_IMAGE_PATH',
+apps/nori-code/src\utils\clipboard\clipboard-image.ts:333:      env: { ...process.env, KIMI_WSL_CLIPBOARD_IMAGE_PATH: winPath },
+packages/server/src\routes\skills.ts:37:} from '@moonshot-ai/protocol';
+packages/server/src\routes\skills.ts:38:import { ISkillService, SessionNotFoundError, SkillNotActivatableError, SkillNotFoundError, type IInstantiationService } from '@moonshot-ai/agent-core';
+apps/nori-code/src\built-in-catalog.ts:3:declare const __KIMI_CODE_BUILT_IN_CATALOG__: string | undefined;
+apps/nori-code/src\built-in-catalog.ts:6:  typeof __KIMI_CODE_BUILT_IN_CATALOG__ === 'string'
+apps/nori-code/src\built-in-catalog.ts:7:    ? __KIMI_CODE_BUILT_IN_CATALOG__
+packages/server/src\routes\shutdown.ts:11:import type { IInstantiationService } from '@moonshot-ai/agent-core';
+packages/server/src\routes\sessions.ts:25:} from '@moonshot-ai/protocol';
+packages/server/src\routes\sessions.ts:26:import { IPromptService, ISessionService, SessionNotFoundError, SessionUndoUnavailableError, ErrorCodes, KimiError, IWorkspaceRegistry, WorkspaceNotFoundError, IEventService, type IInstantiationService, type SessionClientTelemetry } from '@moonshot-ai/agent-core';
+packages/server/src\routes\sessions.ts:646:  if (err instanceof KimiError && err.code === ErrorCodes.COMPACTION_UNABLE) {
+packages/server/src\routes\sessions.ts:654:  if (err instanceof KimiError) {
+packages/server/src\routes\sessions.ts:676:  if (err instanceof KimiError && err.code === ErrorCodes.SESSION_FORK_ACTIVE_TURN) {
+packages/server/src\routes\registerApiV1Routes.ts:1:import type { IInstantiationService } from '@moonshot-ai/agent-core';
+packages/server/src\routes\questions.ts:41:} from '@moonshot-ai/protocol';
+packages/server/src\routes\questions.ts:42:import { IQuestionService, questionToAgentCoreResponse, type IInstantiationService } from '@moonshot-ai/agent-core';
+packages/server/src\routes\prompts.ts:14:} from '@moonshot-ai/protocol';
+packages/server/src\routes\prompts.ts:15:import { IPromptService, AuthModelNotResolvedError, AuthProvisioningRequiredError, AuthTokenMissingError, AuthTokenUnauthorizedError, PromptAlreadyCompletedError, PromptNotFoundError, SessionBusyError, SessionNotFoundError, FileNotFoundError, IFileStore, compressImageForModel, compressBase64ForModel, type IInstantiationService, type GetResult } from '@moonshot-ai/agent-core';
+packages/server/src\routes\guiStore.ts:8:} from '@moonshot-ai/protocol';
+packages/server/src\routes\guiStore.ts:10:import type { IInstantiationService } from '@moonshot-ai/agent-core';
+packages/server/src\routes\approvals.ts:35:} from '@moonshot-ai/protocol';
+packages/server/src\routes\approvals.ts:36:import { IApprovalService, approvalToAgentCoreResponse, type IInstantiationService } from '@moonshot-ai/agent-core';
+packages/server/src\routes\fs.ts:33:} from '@moonshot-ai/protocol';
+packages/server/src\routes\fs.ts:34:import { SessionNotFoundError, FsAlreadyExistsError, FsIsBinaryError, FsIsDirectoryError, FsPathNotFoundError, FsTooLargeError, FsTooManyResultsError, IFsService, FsGrepTimeoutError, IFsSearchService, FsGitUnavailableError, IFsGitService, FsPathEscapesError, type IInstantiationService } from '@moonshot-ai/agent-core';
+packages/server/src\routes\fs.ts:239:    let resolved: import('@moonshot-ai/agent-core').FsDownloadResolved;
+packages/server/src\routes\phase.ts:10:import type { IInstantiationService } from '@moonshot-ai/agent-core';
+packages/server/src\routes\oauth.ts:28:} from '@moonshot-ai/protocol';
+packages/server/src\routes\oauth.ts:29:import { IOAuthService, type IInstantiationService } from '@moonshot-ai/agent-core';
+packages/server/src\routes\debug.ts:34:import { IPromptService, PromptService, type IInstantiationService } from '@moonshot-ai/agent-core';
+packages/server/src\routes\modelCatalog.ts:10:} from '@moonshot-ai/protocol';
+packages/server/src\routes\modelCatalog.ts:11:import { IModelCatalogService, ModelNotFoundError, ProviderNotFoundError, type IInstantiationService } from '@moonshot-ai/agent-core';
+packages/server/src\routes\terminals.ts:7:} from '@moonshot-ai/protocol';
+packages/server/src\routes\terminals.ts:8:import { FsPathEscapesError, ITerminalService, SessionNotFoundError, TerminalNotFoundError, type IInstantiationService } from '@moonshot-ai/agent-core';
+apps/nori-code/src\tui\config.ts:5: * kimi-code client preferences such as terminal UI and update behavior.
+apps/nori-code/src\tui\config.ts:149:# Client preferences for kimi-code.
+packages/server/src\routes\tasks.ts:32:} from '@moonshot-ai/protocol';
+packages/server/src\routes\tasks.ts:33:import { ITaskService, SessionNotFoundError, TaskAlreadyFinishedError, TaskNotFoundError, type IInstantiationService } from '@moonshot-ai/agent-core';
+packages/server/src\routes\files.ts:13:} from '@moonshot-ai/protocol';
+packages/server/src\routes\files.ts:16:import { DEFAULT_MAX_UPLOAD_BYTES, FileNotFoundError, FileTooLargeError, IFileStore, type IInstantiationService } from '@moonshot-ai/agent-core';
+apps/nori-code/src\cli\build-info.ts:1:declare const __KIMI_CODE_VERSION__: string | undefined;
+apps/nori-code/src\cli\build-info.ts:2:declare const __KIMI_CODE_CHANNEL__: string | undefined;
+apps/nori-code/src\cli\build-info.ts:3:declare const __KIMI_CODE_COMMIT__: string | undefined;
+apps/nori-code/src\cli\build-info.ts:4:declare const __KIMI_CODE_BUILD_TARGET__: string | undefined;
+apps/nori-code/src\cli\build-info.ts:6:export interface KimiBuildInfo {
+apps/nori-code/src\cli\build-info.ts:17:export const KIMI_BUILD_INFO: KimiBuildInfo = {
+apps/nori-code/src\cli\build-info.ts:19:    typeof __KIMI_CODE_VERSION__ === 'string'
+apps/nori-code/src\cli\build-info.ts:20:      ? optionalBuildString(__KIMI_CODE_VERSION__)
+apps/nori-code/src\cli\build-info.ts:23:    typeof __KIMI_CODE_CHANNEL__ === 'string'
+apps/nori-code/src\cli\build-info.ts:24:      ? optionalBuildString(__KIMI_CODE_CHANNEL__)
+apps/nori-code/src\cli\build-info.ts:27:    typeof __KIMI_CODE_COMMIT__ === 'string'
+apps/nori-code/src\cli\build-info.ts:28:      ? optionalBuildString(__KIMI_CODE_COMMIT__)
+apps/nori-code/src\cli\build-info.ts:31:    typeof __KIMI_CODE_BUILD_TARGET__ === 'string'
+apps/nori-code/src\cli\build-info.ts:32:      ? optionalBuildString(__KIMI_CODE_BUILD_TARGET__)
+packages/server/src\routes\workspaces.ts:12:} from '@moonshot-ai/protocol';
+packages/server/src\routes\workspaces.ts:14:import { IWorkspaceRegistry, WorkspaceNotFoundError, WorkspaceRootNotFoundError, type IInstantiationService } from '@moonshot-ai/agent-core';
+apps/nori-code/src\cli\goal-prompt.ts:1:import type { GoalSnapshot } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\cli\goal-prompt.ts:6: * Headless goal-mode support for the `kimi -p "/goal <objective>"` prompt path.
+packages/server/src\routes\vault.ts:11:import type { IInstantiationService } from '@moonshot-ai/agent-core';
+packages/server/src\routes\vault.ts:60:    join(process.cwd(), 'upstream-kimi-code', 'nori-vault'),
+packages/server/src\routes\swarmWs.ts:12:import type { IInstantiationService } from '@moonshot-ai/agent-core';
+apps/nori-code/src\cli\headless-exit.ts:11: * Schedule a best-effort force-exit for a completed headless (`kimi -p`) run.
+apps/nori-code/src\constant\app.ts:1:import { ErrorCodes } from '@moonshot-ai/kimi-code-sdk';
+packages/server/src\routes\workspaceFs.ts:8:} from '@moonshot-ai/protocol';
+packages/server/src\routes\workspaceFs.ts:10:import { IWorkspaceFsService, WorkspaceFsNotAbsoluteError, WorkspaceFsNotFoundError, WorkspaceFsPermissionError, type IInstantiationService } from '@moonshot-ai/agent-core';
+packages/server/src\routes\swarmStatus.ts:15:import type { IInstantiationService } from '@moonshot-ai/agent-core';
+apps/nori-code/src\tui\commands\add-dir.ts:1:import { NO_ACTIVE_SESSION_MESSAGE } from '../constant/kimi-tui';
+packages/server/src\services\gateway\sessionClients.ts:2:import { createDecorator } from '@moonshot-ai/agent-core';
+apps/nori-code/src\utils\process\shell-env.ts:1:import type { ShellEnvironment } from '@moonshot-ai/kimi-code-sdk';
+packages/server/src\routes\snapshot.ts:4: * **Reader strategy** (controlled by `KIMI_SNAPSHOT_READER`):
+packages/server/src\routes\snapshot.ts:14: * **Timeout**: the new path races against a hard `KIMI_SNAPSHOT_TIMEOUT_MS`
+packages/server/src\routes\snapshot.ts:28:} from '@moonshot-ai/protocol';
+packages/server/src\routes\snapshot.ts:29:import { IApprovalService, IMessageService, IPromptService, IQuestionService, ISessionService, ILogService, SessionNotFoundError, type IInstantiationService } from '@moonshot-ai/agent-core';
+packages/server/src\services\gateway\serverShutdown.ts:1:import { createDecorator } from '@moonshot-ai/agent-core';
+packages/server/src\services\gateway\connectionRegistryService.ts:5:import { Disposable } from '@moonshot-ai/agent-core';
+packages/server/src\routes\tools.ts:27:} from '@moonshot-ai/protocol';
+packages/server/src\routes\tools.ts:28:import { IMcpService, IToolService, McpServerNotFoundError, type IInstantiationService } from '@moonshot-ai/agent-core';
+packages/server/src\services\gateway\restGatewayService.ts:5:import { Disposable } from '@moonshot-ai/agent-core';
+apps/nori-code/src\cli\run-prompt.ts:7:} from '@moonshot-ai/kimi-telemetry';
+apps/nori-code/src\cli\run-prompt.ts:10:  createKimiHarness,
+apps/nori-code/src\cli\run-prompt.ts:15:  type KimiHarness,
+apps/nori-code/src\cli\run-prompt.ts:19:} from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\cli\run-prompt.ts:33:import { createKimiCodeHostIdentity } from './version';
+apps/nori-code/src\cli\run-prompt.ts:111:  const harness = createKimiHarness({
+apps/nori-code/src\cli\run-prompt.ts:113:    identity: createKimiCodeHostIdentity(version),
+apps/nori-code/src\cli\run-prompt.ts:126:  log.info('kimi-code starting', {
+apps/nori-code/src\cli\run-prompt.ts:150:    // the background if it overruns; the caller (`kimi -p`) force-exits shortly
+apps/nori-code/src\cli\run-prompt.ts:186:    // Headless goal mode: `kimi -p "/goal <objective>"`. The goal driver keeps
+apps/nori-code/src\cli\run-prompt.ts:259:  harness: KimiHarness,
+apps/nori-code/src\cli\run-prompt.ts:376:      'No model configured. Run `kimi` and use /login to sign in, then retry; or set default_model in config.toml.',
+apps/nori-code/src\utils\process\external-editor.ts:40:  const dir = await mkdtemp(join(tmpdir(), 'kimi-edit-'));
+packages/server/src\services\gateway\connectionRegistry.ts:24:import { createDecorator } from '@moonshot-ai/agent-core';
+packages/server/src\services\gateway\restGateway.ts:25:import { createDecorator } from '@moonshot-ai/agent-core';
+packages/server/src\services\gateway\sessionEventJournal.ts:5: * One JSONL file per session under `<kimiHome>/server/events/<sessionId>.jsonl`:
+packages/server/src\services\gateway\sessionEventJournal.ts:31:import type { ILogService } from '@moonshot-ai/agent-core';
+apps/nori-code/src\cli\run-shell.ts:4:  createKimiHarness,
+apps/nori-code/src\cli\run-shell.ts:6:  type KimiHarness,
+apps/nori-code/src\cli\run-shell.ts:8:} from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\cli\run-shell.ts:15:} from '@moonshot-ai/kimi-telemetry';
+apps/nori-code/src\cli\run-shell.ts:21:import { KimiTUI } from '#/tui/index';
+apps/nori-code/src\cli\run-shell.ts:29:import { createKimiCodeHostIdentity } from './version';
+apps/nori-code/src\cli\run-shell.ts:58:  const harness = createKimiHarness({
+apps/nori-code/src\cli\run-shell.ts:60:    identity: createKimiCodeHostIdentity(version),
+apps/nori-code/src\cli\run-shell.ts:88:  const tui = new KimiTUI(harness, {
+apps/nori-code/src\cli\run-shell.ts:109:    properties?: Parameters<KimiHarness['track']>[1],
+apps/nori-code/src\cli\run-shell.ts:117:  const trackLifecycle = (event: string, properties?: Parameters<KimiHarness['track']>[1]) => {
+packages/server/src\services\gateway\sessionClientsService.ts:3:import { Disposable, ILogService } from '@moonshot-ai/agent-core';
+packages/server/src\services\gateway\wsGateway.ts:1:import { createDecorator, type TelemetryClient } from '@moonshot-ai/agent-core';
+packages/server/src\services\gateway\wsGateway.ts:46: * `"kimi-code.bearer.abc, other"`). Returns the token portion of the first
+packages/server/src\services\gateway\wsGateway.ts:90:   * `Authorization` header or the `kimi-code.bearer.<token>` subprotocol).
+packages/server/src\services\gateway\wsBroadcastService.ts:5:import { Disposable, IEnvironmentService, IEventService, ILogService } from '@moonshot-ai/agent-core';
+packages/server/src\services\gateway\wsBroadcastService.ts:6:import { isVolatileEventType, type Event, type SessionCursor } from '@moonshot-ai/protocol';
+apps/nori-code/src\tui\components\panes\queue-pane.ts:1:import { Container, truncateToWidth, visibleWidth } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\cli\startup-error.ts:1:import { KIMI_ERROR_INFO, isKimiError } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\cli\startup-error.ts:21:  if (!isKimiError(error)) {
+apps/nori-code/src\cli\startup-error.ts:26:  const info = KIMI_ERROR_INFO[error.code];
+packages/server/src\services\gateway\wsGatewayService.ts:4:import { Disposable, ILogService } from '@moonshot-ai/agent-core';
+packages/server/src\services\gateway\wsGatewayService.ts:54:      // echo back the `kimi-code.bearer.<token>` subprotocol when present so
+apps/nori-code/src\tui\commands\btw.ts:1:import { LLM_NOT_SET_MESSAGE } from '../constant/kimi-tui';
+apps/nori-code/src\tui\commands\auth.ts:7:  type ManagedKimiCodeModelInfo,
+apps/nori-code/src\tui\commands\auth.ts:8:  type ManagedKimiConfigShape,
+apps/nori-code/src\tui\commands\auth.ts:10:} from '@moonshot-ai/kimi-code-oauth';
+apps/nori-code/src\tui\commands\auth.ts:13:import { DEFAULT_OAUTH_PROVIDER_NAME } from '../constant/kimi-tui';
+apps/nori-code/src\tui\commands\auth.ts:55:  let models: ManagedKimiCodeModelInfo[];
+apps/nori-code/src\tui\commands\auth.ts:92:  applyOpenPlatformConfig(config as ManagedKimiConfigShape, {
+packages/server/src\services\gateway\wsBroadcast.ts:35:import { createDecorator } from '@moonshot-ai/agent-core';
+packages/server/src\services\gateway\wsBroadcast.ts:36:import type { InFlightTurn, SessionCursor } from '@moonshot-ai/protocol';
+packages/server/src\services\gateway\inFlightTurnTracker.ts:19:import type { Event, InFlightToolCall, InFlightTurn } from '@moonshot-ai/protocol';
+apps/nori-code/src\tui\components\panes\btw-panel.ts:1:import type { Component, MarkdownTheme } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\panes\btw-panel.ts:7:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\commands\complete-args.ts:1:import type { AutocompleteItem } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\commands\complete-args.ts:5: * position. Generic across commands — any `KimiSlashCommand` can build a
+apps/nori-code/src\cli\telemetry.ts:1:import { createKimiDeviceId, KIMI_CODE_PROVIDER_NAME } from '@moonshot-ai/kimi-code-oauth';
+apps/nori-code/src\cli\telemetry.ts:3:  KimiAuthFacade,
+apps/nori-code/src\cli\telemetry.ts:6:  type KimiConfig,
+apps/nori-code/src\cli\telemetry.ts:7:  type KimiHarness,
+apps/nori-code/src\cli\telemetry.ts:9:} from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\cli\telemetry.ts:15:} from '@moonshot-ai/kimi-telemetry';
+apps/nori-code/src\cli\telemetry.ts:20:import { createKimiCodeHostIdentity } from './version';
+apps/nori-code/src\cli\telemetry.ts:29:  readonly harness: KimiHarness;
+apps/nori-code/src\cli\telemetry.ts:31:  readonly config: Pick<KimiConfig, 'defaultModel' | 'telemetry'>;
+apps/nori-code/src\cli\telemetry.ts:40:  const deviceId = createKimiDeviceId(homeDir, {
+apps/nori-code/src\cli\telemetry.ts:58:      (await options.harness.auth.getCachedAccessToken(KIMI_CODE_PROVIDER_NAME)) ?? null,
+apps/nori-code/src\cli\telemetry.ts:76: * the same real client into `KimiCore`, so agent-core events emitted inside the
+apps/nori-code/src\cli\telemetry.ts:81: * The returned client wraps the `@moonshot-ai/kimi-telemetry` module
+apps/nori-code/src\cli\telemetry.ts:91:  const auth = new KimiAuthFacade({
+apps/nori-code/src\cli\telemetry.ts:94:    identity: createKimiCodeHostIdentity(options.version),
+apps/nori-code/src\cli\telemetry.ts:105:    getAccessToken: async () => (await auth.getCachedAccessToken(KIMI_CODE_PROVIDER_NAME)) ?? null,
+apps/nori-code/src\cli\telemetry.ts:117:): Pick<KimiConfig, 'telemetry' | 'defaultModel'> {
+apps/nori-code/src\cli\telemetry.ts:120:    // A broken config fails the server on its own inside KimiCore; for
+apps/nori-code/src\tui\components\panes\activity-pane.ts:1:import { Container, Spacer } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\commands\experimental-flags.ts:1:import type { ExperimentalFeatureState, ExperimentalFlagMap } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\commands\config.ts:9:} from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\commands\config.ts:38:import { NO_ACTIVE_SESSION_MESSAGE } from '../constant/kimi-tui';
+apps/nori-code/src\tui\commands\config.ts:392:      'Run /login to sign in to Kimi, or /provider to add another provider from a model catalog.',
+apps/nori-code/src\tui\components\editor\wrapping-select-list.ts:9:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\commands\dispatch.ts:1:import type { Component, Focusable } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\commands\dispatch.ts:2:import type { DeviceAuthorization } from '@moonshot-ai/kimi-code-oauth';
+apps/nori-code/src\tui\commands\dispatch.ts:3:import type { KimiHarness, Session } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\commands\dispatch.ts:7:import { LLM_NOT_SET_MESSAGE } from '../constant/kimi-tui';
+apps/nori-code/src\tui\commands\dispatch.ts:99:  readonly harness: KimiHarness;
+apps/nori-code/src\cli\version.ts:10:import { createKimiDefaultHeaders, type KimiHostIdentity } from '@moonshot-ai/kimi-code-oauth';
+apps/nori-code/src\cli\version.ts:15:import { KIMI_BUILD_INFO } from './build-info';
+apps/nori-code/src\cli\version.ts:42:  if (KIMI_BUILD_INFO.version !== undefined) {
+apps/nori-code/src\cli\version.ts:43:    return KIMI_BUILD_INFO.version;
+apps/nori-code/src\cli\version.ts:51:export function createKimiCodeHostIdentity(version = getVersion()): KimiHostIdentity {
+apps/nori-code/src\cli\version.ts:62:export function createKimiCodeUserAgent(version = getVersion()): string {
+apps/nori-code/src\cli\version.ts:66:export function buildKimiDefaultHeaders(version: string): Record<string, string> {
+apps/nori-code/src\cli\version.ts:67:  return createKimiDefaultHeaders({
+apps/nori-code/src\cli\version.ts:69:    ...createKimiCodeHostIdentity(version),
+apps/nori-code/src\tui\components\editor\file-mention-provider.ts:11:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\editor\file-mention-provider.ts:28: * Kimi wrapper around pi-tui's combined autocomplete provider.
+apps/nori-code/src\tui\components\editor\file-mention-provider.ts:35: * readdir-backed path completer. This wrapper also keeps Kimi-specific
+apps/nori-code/src\tui\components\editor\custom-editor.ts:14:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\editor\custom-editor.ts:249:    // Kimi needs Esc to win over app-level cancel while the slash menu request is active.
+apps/nori-code/src\tui\components\chrome\footer.ts:9:import type { Component } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\chrome\footer.ts:10:import { truncateToWidth, visibleWidth } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\chrome\footer.ts:12:import { effectiveModelAlias } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\components\chrome\gutter-container.ts:12:import { Container } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\chrome\gutter-container.ts:13:import type { Component } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\commands\goal.ts:1:import { ErrorCodes, isKimiError } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\commands\goal.ts:14:import { LLM_NOT_SET_MESSAGE } from '../constant/kimi-tui';
+apps/nori-code/src\tui\commands\goal.ts:352:    if (isKimiError(error) && error.code === ErrorCodes.GOAL_ALREADY_EXISTS) {
+apps/nori-code/src\tui\commands\goal.ts:380:    if (isKimiError(error) && error.code === ErrorCodes.GOAL_NOT_FOUND) {
+apps/nori-code/src\tui\commands\goal.ts:400:    if (isKimiError(error) && error.code === ErrorCodes.GOAL_NOT_FOUND) {
+apps/nori-code/src\tui\commands\goal.ts:417:    if (isKimiError(error) && error.code === ErrorCodes.GOAL_NOT_FOUND) {
+apps/nori-code/src\tui\components\chrome\banner.ts:1:import type { Component } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\chrome\banner.ts:2:import { visibleWidth, wrapTextWithAnsi } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\chrome\moon-loader.ts:1:import { Text, visibleWidth } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\chrome\moon-loader.ts:2:import type { TUI } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\commands\plugin-commands.ts:1:import type { PluginCommandDef } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\commands\plugin-commands.ts:3:import type { KimiSlashCommand } from './types';
+apps/nori-code/src\tui\commands\plugin-commands.ts:6:  readonly commands: readonly KimiSlashCommand[];
+apps/nori-code/src\tui\commands\plugin-commands.ts:24:    } satisfies KimiSlashCommand;
+apps/nori-code/src\tui\components\chrome\device-code-box.ts:9:import type { Component } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\chrome\device-code-box.ts:10:import { truncateToWidth, visibleWidth } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\utils\image\image-mime.ts:5: * for dimensions. Only formats that the kimi-core multimodal pipeline
+apps/nori-code/src\tui\components\dialogs\choice-picker.ts:18:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\chrome\todo-panel.ts:12:import type { Component } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\chrome\todo-panel.ts:13:import { truncateToWidth } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\cli\sub\vis.ts:2: * `kimi vis` sub-command.
+apps/nori-code/src\cli\sub\vis.ts:4: * CLI glue only: resolves the kimi home, starts the in-process session
+apps/nori-code/src\cli\sub\vis.ts:8: * lives in `@moonshot-ai/vis-server`.
+apps/nori-code/src\cli\sub\vis.ts:54:  // Lazily load the embedded single-file SPA so normal `kimi` startup never
+apps/nori-code/src\cli\sub\vis.ts:79:    deps.stderr.write(`Failed to start kimi vis: ${msg}\n`);
+apps/nori-code/src\cli\sub\vis.ts:88:  deps.stdout.write(`kimi vis is running at ${server.url}\n`);
+apps/nori-code/src\cli\sub\vis.ts:134:        const { startVisServer } = await import('@moonshot-ai/vis-server/start');
+apps/nori-code/src\tui\components\dialogs\approval-preview.ts:5: * Mounted by `kimi-tui.ts` via the same nested-takeover pattern as
+apps/nori-code/src\tui\components\dialogs\approval-preview.ts:27:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\commands\info.ts:3:import type { McpServerInfo, SessionStatus, SessionUsage } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\cli\sub\upgrade.ts:1:import { log, type Logger } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\cli\sub\upgrade.ts:2:import { track as trackTelemetry, type TelemetryProperties } from '@moonshot-ai/kimi-telemetry';
+apps/nori-code/src\tui\components\dialogs\api-key-input-dialog.ts:9:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\commands\provider.ts:5:  type ManagedKimiConfigShape,
+apps/nori-code/src\tui\commands\provider.ts:6:} from '@moonshot-ai/kimi-code-oauth';
+apps/nori-code/src\tui\commands\provider.ts:17:} from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\commands\provider.ts:18:import { createKimiCodeUserAgent } from '#/cli/version';
+apps/nori-code/src\tui\commands\provider.ts:30:import { DEFAULT_OAUTH_PROVIDER_NAME } from '../constant/kimi-tui';
+apps/nori-code/src\tui\commands\provider.ts:164:    catalog = await fetchCatalog(DEFAULT_CATALOG_URL, { signal: controller.signal, userAgent: createKimiCodeUserAgent() });
+apps/nori-code/src\tui\commands\provider.ts:280:    entries = await fetchCustomRegistry(source, { userAgent: createKimiCodeUserAgent() });
+apps/nori-code/src\tui\commands\provider.ts:290:      config as unknown as ManagedKimiConfigShape,
+apps/nori-code/src\tui\components\dialogs\effort-selector.ts:7:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\dialogs\effort-selector.ts:9:import type { ThinkingEffort } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\components\dialogs\approval-panel.ts:17:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\dialogs\feedback-input-dialog.ts:22:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\commands\prompts.ts:8:} from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\commands\prompts.ts:9:import { capabilitiesForModel } from '@moonshot-ai/kimi-code-oauth';
+apps/nori-code/src\tui\commands\prompts.ts:11:  ManagedKimiCodeModelInfo,
+apps/nori-code/src\tui\commands\prompts.ts:13:} from '@moonshot-ai/kimi-code-oauth';
+apps/nori-code/src\tui\commands\prompts.ts:168:  models: ManagedKimiCodeModelInfo[],
+apps/nori-code/src\tui\commands\prompts.ts:170:): Promise<{ model: ManagedKimiCodeModelInfo; thinking: ThinkingEffort } | undefined> {
+apps/nori-code/src\tui\components\dialogs\help-panel.ts:18:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\dialogs\help-panel.ts:113:      `  ${dim('Sure, Kimi is ready to help! Just send a message to get started.')}`,
+apps/nori-code/src\tui\components\dialogs\custom-registry-import.ts:20:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\commands\plugins.ts:4:import type { PluginInfo, PluginSummary } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\commands\plugins.ts:280:  // Kimi-built official plugins are trusted implicitly; anything else requires
+apps/nori-code/src\tui\components\dialogs\goal-queue-manager.ts:9:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\dialogs\compaction.ts:16:import { Container, Text, Spacer } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\dialogs\compaction.ts:17:import type { TUI } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\commands\resolve.ts:10:  KimiSlashCommand,
+apps/nori-code/src\tui\commands\resolve.ts:63:    isExperimentalFlagEnabled((command as KimiSlashCommand).experimentalFlag)
+apps/nori-code/src\tui\components\dialogs\platform-selector.ts:1:import { OPEN_PLATFORMS } from '@moonshot-ai/kimi-code-oauth';
+apps/nori-code/src\tui\components\dialogs\model-selector.ts:1:import { effectiveModelAlias, type ModelAlias, type ThinkingEffort } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\components\dialogs\model-selector.ts:9:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\commands\reload.ts:1:import type { KimiConfig } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\commands\reload.ts:53:function applyRuntimeConfig(host: SlashCommandHost, config: KimiConfig): void {
+apps/nori-code/src\tui\components\dialogs\provider-manager.ts:27: * through callbacks. The host (`KimiTui`) is responsible for performing
+apps/nori-code/src\tui\components\dialogs\provider-manager.ts:32:import type { ProviderConfig } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\components\dialogs\provider-manager.ts:37:} from '@moonshot-ai/kimi-code-oauth';
+apps/nori-code/src\tui\components\dialogs\provider-manager.ts:45:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\dialogs\provider-manager.ts:97:// Mirrors `readCustomRegistrySource` in `kimi-tui.ts`. We can't import
+apps/nori-code/src\tui\components\dialogs\plugins-selector.ts:9:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\dialogs\plugins-selector.ts:10:import type { PluginInfo, PluginMcpServerInfo, PluginSummary } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\components\dialogs\plugins-selector.ts:211: * to proceed with a plugin that Kimi has not reviewed.
+apps/nori-code/src\tui\components\dialogs\plugins-selector.ts:220:        '⚠️ This is a third-party plugin that Kimi has not reviewed. It can bundle MCP servers, ' +
+apps/nori-code/src\tui\commands\registry.ts:5:import type { AutocompleteItem } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\commands\registry.ts:8:import type { KimiSlashCommand, SlashCommandAvailability } from './types';
+apps/nori-code/src\tui\commands\registry.ts:407:] as const satisfies readonly KimiSlashCommand[];
+apps/nori-code/src\tui\commands\registry.ts:413:  const commands = BUILTIN_SLASH_COMMANDS as readonly KimiSlashCommand<BuiltinSlashCommandName>[];
+apps/nori-code/src\tui\commands\registry.ts:420:  command: KimiSlashCommand,
+apps/nori-code/src\tui\commands\registry.ts:427:export function sortSlashCommands(commands: readonly KimiSlashCommand[]): KimiSlashCommand[] {
+apps/nori-code/src\tui\components\chrome\welcome.ts:6:import type { Component } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\chrome\welcome.ts:7:import { truncateToWidth, visibleWidth } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\chrome\welcome.ts:10:import { effectiveModelAlias } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\components\dialogs\question-dialog.ts:18:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\commands\swarm.ts:5:import { LLM_NOT_SET_MESSAGE, NO_ACTIVE_SESSION_MESSAGE } from '../constant/kimi-tui';
+apps/nori-code/src\tui\components\dialogs\setting-auto-wizard.ts:23:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\dialogs\setting-auto-wizard.ts:24:import type { PermissionMode } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\components\dialogs\experiments-selector.ts:8:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\dialogs\experiments-selector.ts:9:import type { ExperimentalFeatureState } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\components\dialogs\experiments-selector.ts:202:      return 'locked by KIMI_CODE_EXPERIMENTAL_FLAG';
+apps/nori-code/src\cli\sub\export.ts:2: * `kimi export` sub-command.
+apps/nori-code/src\cli\sub\export.ts:15:} from '@moonshot-ai/kimi-telemetry';
+apps/nori-code/src\cli\sub\export.ts:17:  createKimiHarness,
+apps/nori-code/src\cli\sub\export.ts:20:  type KimiHarness,
+apps/nori-code/src\cli\sub\export.ts:24:} from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\cli\sub\export.ts:30:import { createKimiCodeHostIdentity } from '#/cli/version';
+apps/nori-code/src\cli\sub\export.ts:132:  let harness: KimiHarness | undefined;
+apps/nori-code/src\cli\sub\export.ts:136:  const identity = createKimiCodeHostIdentity();
+apps/nori-code/src\cli\sub\export.ts:146:  const getHarness = (): KimiHarness => {
+apps/nori-code/src\cli\sub\export.ts:148:    harness ??= createKimiHarness({
+apps/nori-code/src\tui\commands\skills.ts:1:import type { Session, SkillSummary } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\commands\skills.ts:3:import type { KimiSlashCommand } from './types';
+apps/nori-code/src\tui\commands\skills.ts:8:  readonly commands: readonly KimiSlashCommand[];
+apps/nori-code/src\tui\components\dialogs\session-picker.ts:12:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\cli\sub\doctor.ts:6:  createKimiConfigRpc,
+apps/nori-code/src\cli\sub\doctor.ts:7:  type KimiConfigRpc,
+apps/nori-code/src\cli\sub\doctor.ts:8:  type KimiConfigValidationIssue,
+apps/nori-code/src\cli\sub\doctor.ts:9:} from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\cli\sub\doctor.ts:28:  readonly configRpc?: KimiConfigRpc;
+apps/nori-code/src\cli\sub\doctor.ts:117:  const getConfigRpc = (): KimiConfigRpc => {
+apps/nori-code/src\cli\sub\doctor.ts:118:    configRpc ??= createKimiConfigRpc();
+apps/nori-code/src\cli\sub\doctor.ts:241:    'Kimi doctor',
+apps/nori-code/src\cli\sub\doctor.ts:252:    `Kimi doctor found ${String(issueCount)} ${issueCount === 1 ? 'issue' : 'issues'}.`,
+apps/nori-code/src\cli\sub\doctor.ts:293:function findValidationIssues(error: unknown): readonly KimiConfigValidationIssue[] | undefined {
+apps/nori-code/src\cli\sub\doctor.ts:301:function isValidationIssueArray(value: unknown): value is readonly KimiConfigValidationIssue[] {
+apps/nori-code/src\cli\sub\doctor.ts:305:function isValidationIssue(value: unknown): value is KimiConfigValidationIssue {
+apps/nori-code/src\cli\sub\plugin-run-node.ts:6:  const pluginRoot = process.env['KIMI_PLUGIN_ROOT'];
+apps/nori-code/src\cli\sub\plugin-run-node.ts:8:    throw new Error('KIMI_PLUGIN_ROOT is required to run a plugin node entry.');
+apps/nori-code/src\cli\sub\plugin-run-node.ts:16:    throw new Error(`Plugin node entry must be inside KIMI_PLUGIN_ROOT: ${entry}`);
+apps/nori-code/src\tui\commands\web.ts:7:import { NO_ACTIVE_SESSION_MESSAGE } from '../constant/kimi-tui';
+apps/nori-code/src\tui\commands\session.ts:5:import type { Session } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\commands\session.ts:10:import { LLM_NOT_SET_MESSAGE, NO_ACTIVE_SESSION_MESSAGE } from '../constant/kimi-tui';
+apps/nori-code/src\tui\commands\session.ts:108:    const defaultName = `kimi-export-${shortId}-${timestamp}.md`;
+apps/nori-code/src\tui\components\dialogs\task-output-viewer.ts:7: * Mounted by `kimi-tui.ts` via nested container swap on top of the
+apps/nori-code/src\tui\components\dialogs\task-output-viewer.ts:20:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\dialogs\task-output-viewer.ts:21:import type { BackgroundTaskInfo, BackgroundTaskStatus } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\components\dialogs\start-permission-prompt.ts:8:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\cli\sub\acp.ts:9: *  - A {@link KimiHarness} is constructed with the Nori host identity
+apps/nori-code/src\cli\sub\acp.ts:25:} from '@moonshot-ai/acp-adapter';
+apps/nori-code/src\cli\sub\acp.ts:26:import { createKimiHarness, type Session, type SkillSummary } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\cli\sub\acp.ts:28:import { createKimiCodeHostIdentity, getVersion } from '#/cli/version';
+apps/nori-code/src\cli\sub\acp.ts:38:      const identity = createKimiCodeHostIdentity();
+apps/nori-code/src\cli\sub\acp.ts:39:      const harness = createKimiHarness({
+apps/nori-code/src\tui\components\dialogs\tasks-browser.ts:7: * Mounted by `kimi-tui.ts` via container swap rather than `showOverlay`
+apps/nori-code/src\tui\components\dialogs\tasks-browser.ts:24:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\dialogs\tasks-browser.ts:25:import type { BackgroundTaskInfo, BackgroundTaskStatus } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\components\dialogs\undo-selector.ts:8:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\cli\update\rollout.ts:5:import { readKimiDeviceId } from '@moonshot-ai/kimi-code-oauth';
+apps/nori-code/src\cli\update\rollout.ts:193:  return readKimiDeviceId(getDataDir()) ?? randomUUID();
+apps/nori-code/src\cli\update\rollout.ts:200: * truthy values as `KIMI_CODE_NO_AUTO_UPDATE`) — the update preflight runs
+apps/nori-code/src\cli\update\rollout.ts:202: * `KIMI_CODE_NO_AUTO_UPDATE` still wins: disabling updates beats opting in.
+apps/nori-code/src\tui\commands\undo.ts:1:import type { Component } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\commands\undo.ts:2:import type { ContextMessage } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\commands\undo.ts:3:import { isKimiError } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\commands\undo.ts:22:import { NO_ACTIVE_SESSION_MESSAGE } from '../constant/kimi-tui';
+apps/nori-code/src\tui\commands\undo.ts:375:  if (!isKimiError(error)) return undefined;
+apps/nori-code/src\tui\commands\types.ts:1:import type { AutocompleteItem, SlashCommand } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\commands\types.ts:2:import type { FlagId } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\commands\types.ts:6:export interface KimiSlashCommand<Name extends string = string> extends SlashCommand {
+apps/nori-code/src\tui\components\dialogs\tabbed-model-selector.ts:16:import type { ModelAlias } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\components\dialogs\tabbed-model-selector.ts:23:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\user-message.ts:5:import { Spacer, Text, truncateToWidth, visibleWidth, type Component } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\cli\sub\server\lifecycle.ts:5: * manager from `@moonshot-ai/server`, which is filled in by Phase 3+.
+apps/nori-code/src\cli\sub\server\lifecycle.ts:20:} from '@moonshot-ai/server';
+apps/nori-code/src\cli\sub\server\ps.ts:12:import { getLiveLock } from '@moonshot-ai/server';
+apps/nori-code/src\cli\sub\server\rotate-token.ts:9:import { getLiveLock, rotateServerToken } from '@moonshot-ai/server';
+apps/nori-code/src\tui\components\messages\plugin-command.ts:14:import { Container, Text, Spacer } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\cli\sub\server\daemon.ts:25:import { DEFAULT_LOCK_DIR, getLiveLock, type LockContents } from '@moonshot-ai/server';
+apps/nori-code/src\cli\sub\server\daemon.ts:180: * name (e.g. `kimi`) or the first user argument — never a script path — so we
+apps/nori-code/src\cli\sub\server\daemon.ts:190:  // `cwd` would produce a bogus path (e.g. `<cwd>/kimi`) and crash the spawn
+apps/nori-code/src\cli\sub\server\kill.ts:19:import { getLiveLock, type LockContents } from '@moonshot-ai/server';
+apps/nori-code/src\cli\sub\provider.ts:20:  type ManagedKimiConfigShape,
+apps/nori-code/src\cli\sub\provider.ts:21:} from '@moonshot-ai/kimi-code-oauth';
+apps/nori-code/src\cli\sub\provider.ts:27:  createKimiHarness,
+apps/nori-code/src\cli\sub\provider.ts:33:  type KimiConfig,
+apps/nori-code/src\cli\sub\provider.ts:34:  type KimiHarness,
+apps/nori-code/src\cli\sub\provider.ts:35:} from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\cli\sub\provider.ts:38:import { createKimiCodeHostIdentity, createKimiCodeUserAgent } from '#/cli/version';
+apps/nori-code/src\cli\sub\provider.ts:46:  readonly getHarness: () => KimiHarness;
+apps/nori-code/src\cli\sub\provider.ts:103:    entries = await fetchCustomRegistry(source, { userAgent: createKimiCodeUserAgent() });
+apps/nori-code/src\cli\sub\provider.ts:117:  // `core-impl.ts removeKimiProvider`), so calling it inside the apply loop
+apps/nori-code/src\cli\sub\provider.ts:340:  // `core-impl.ts removeKimiProvider`). Without this, re-importing an
+apps/nori-code/src\cli\sub\provider.ts:402:    return await fetchCatalog(url, { userAgent: createKimiCodeUserAgent() });
+apps/nori-code/src\cli\sub\provider.ts:504:  let harness: KimiHarness | undefined;
+apps/nori-code/src\cli\sub\provider.ts:505:  const identity = createKimiCodeHostIdentity();
+apps/nori-code/src\cli\sub\provider.ts:510:        harness ??= createKimiHarness({ homeDir: getDataDir(), identity });
+apps/nori-code/src\cli\sub\provider.ts:527:function asManaged(config: KimiConfig): ManagedKimiConfigShape {
+apps/nori-code/src\cli\sub\provider.ts:528:  return config as unknown as ManagedKimiConfigShape;
+apps/nori-code/src\cli\sub\provider.ts:531:function providerSourceLabel(provider: KimiConfig['providers'][string]): string {
+apps/nori-code/src\cli\sub\server\shared.ts:11:import type { ServerLogLevel } from '@moonshot-ai/server';
+apps/nori-code/src\cli\sub\server\run.ts:16:import { shutdownTelemetry, track } from '@moonshot-ai/kimi-telemetry';
+apps/nori-code/src\cli\sub\server\run.ts:17:import { startServer, type RunningServer } from '@moonshot-ai/server';
+apps/nori-code/src\cli\sub\server\run.ts:33:import { createKimiCodeHostIdentity, getHostPackageRoot, getVersion } from '../../version';
+apps/nori-code/src\cli\sub\server\run.ts:342:      identity: createKimiCodeHostIdentity(version),
+apps/nori-code/src\tui\components\messages\background-agent-status.ts:1:import { Text, truncateToWidth, type Component } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\cli\update\prompt.ts:17:export const CHANGELOG_URL = 'https://moonshotai.github.io/kimi-code/en/release-notes/changelog.html';
+apps/nori-code/src\tui\components\messages\usage-panel.ts:7:import type { Component } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\usage-panel.ts:8:import { truncateToWidth, visibleWidth } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\usage-panel.ts:9:import type { SessionUsage, TokenUsage } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\utils\transcript-component-metadata.ts:1:import type { Component } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\cli\update\cdn.ts:30:  /** Raw newest version — what `kimi upgrade` installs, never rollout-gated. */
+apps/nori-code/src\tui\components\messages\plan-box.ts:10:import { Markdown, truncateToWidth, visibleWidth, type Component, type MarkdownTheme } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\goal-markers.ts:10:import { truncateToWidth, type Component } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\goal-markers.ts:11:import type { GoalChange } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\components\messages\cron-message.ts:1:import type { Component } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\cron-message.ts:2:import { Spacer, Text, visibleWidth } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\agent-swarm-progress.ts:1:import { truncateToWidth, visibleWidth, type Component } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\assistant-message.ts:8:import { Container, Markdown, truncateToWidth, visibleWidth, type Component } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\media\image-thumbnail.ts:15:import { Container, Image, Text, type ImageTheme, getCapabilities } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\goal-panel.ts:22:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\goal-panel.ts:23:import type { GoalSnapshot, GoalStatus } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\cli\update\preflight.ts:3:import { log, type Logger } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\cli\update\preflight.ts:4:import type { TelemetryProperties } from '@moonshot-ai/kimi-telemetry';
+apps/nori-code/src\cli\update\preflight.ts:127:      return { cmd: 'brew', args: ['upgrade', 'kimi-code'] };
+apps/nori-code/src\cli\update\preflight.ts:404: * `KIMI_CODE_NO_AUTO_UPDATE` (or the legacy `KIMI_CLI_NO_AUTO_UPDATE` alias)
+apps/nori-code/src\cli\update\preflight.ts:412:  return truthy(env['NORI_CODE_NO_AUTO_UPDATE']) || truthy(env['KIMI_CLI_NO_AUTO_UPDATE']);
+apps/nori-code/src\tui\components\messages\shell-execution.ts:1:import type { Component } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\shell-execution.ts:2:import { Container, Text } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\shell-run.ts:1:import { Container, Text } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\mcp-status-panel.ts:1:import type { McpServerInfo } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\components\messages\agent-group.ts:13: * - Mounting: `KimiTUI` attaches the group to the transcript at the
+apps/nori-code/src\tui\components\messages\agent-group.ts:18:import type { TUI } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\agent-group.ts:19:import { Container, Spacer, Text } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\utils\thinking-config.ts:1:import type { ThinkingEffort } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\components\messages\status-message.ts:1:import { Container, Spacer, Text } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\skill-activation.ts:15:import { Container, Text, Spacer } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\swarm-markers.ts:1:import { truncateToWidth, type Component } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\plugins-status-panel.ts:1:import type { PluginInfo, PluginSummary } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\components\messages\plugins-status-panel.ts:72:      return `${muted('Trust:')}  ${success(OFFICIAL_BADGE)} ${muted('(Kimi-built and -maintained)')}`;
+apps/nori-code/src\tui\components\messages\plugins-status-panel.ts:75:      return `${muted('Trust:')}  ${primary(CURATED_BADGE)} ${muted('(Kimi-reviewed, upstream-maintained)')}`;
+apps/nori-code/src\tui\components\messages\step-summary.ts:1:import type { Component } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\thinking.ts:8:import { Text, truncateToWidth, type Component, type TUI } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\read-group.ts:23:import type { TUI } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\read-group.ts:24:import { Container, Spacer, Text } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\utils\image-placeholder.ts:18:import type { PromptPart } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\index.ts:1:export { KimiTUI } from './kimi-tui';
+apps/nori-code/src\tui\index.ts:2:export type { KimiTUIStartupInput } from './kimi-tui';
+apps/nori-code/src\tui\index.ts:3:export type { KimiTUIOptions } from './types';
+apps/nori-code/src\tui\types.ts:10:} from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\types.ts:218:// TUI startup / options types (extracted from kimi-tui.ts)
+apps/nori-code/src\tui\types.ts:232:export interface KimiTUIOptions {
+apps/nori-code/src\tui\components\messages\tool-call.ts:8:import { Container, Spacer, Text, truncateToWidth, visibleWidth } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\tool-call.ts:9:import type { Component, TUI } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\tool-call.ts:25:import type { TokenUsage } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\components\messages\tool-call.ts:530:   * `args.plan` is empty. `KimiTUI` calls `setPlanInfo` with
+apps/nori-code/src\tui\components\messages\tool-call.ts:542:  // when KimiTUI routes a `subagent.event` with this tool call
+apps/nori-code/src\tui\components\messages\tool-call.ts:779:   * this: plan-file mode leaves `args.plan` empty, so `KimiTUI` fetches
+apps/nori-code/src\tui\components\messages\tool-call.ts:831:  // ── Subagent API (called by KimiTUI event routing) ───────────────
+apps/nori-code/src\tui\components\messages\tool-renderers\types.ts:1:import type { Component } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\status-panel.ts:14:} from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\utils\image-attachment-store.ts:11: * Scope is per-`KimiTUI` instance. Reloads (`/new`, `/clear`,
+apps/nori-code/src\tui\utils\event-payload.ts:2:  isKimiError,
+apps/nori-code/src\tui\utils\event-payload.ts:3:  type KimiErrorPayload,
+apps/nori-code/src\tui\utils\event-payload.ts:4:} from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\utils\event-payload.ts:96:  if (isKimiError(error)) {
+apps/nori-code/src\tui\utils\event-payload.ts:107:  error: Pick<KimiErrorPayload, 'code' | 'message' | 'details'>,
+apps/nori-code/src\tui\goal-queue-store.ts:6:  KimiError,
+apps/nori-code/src\tui\goal-queue-store.ts:7:} from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\goal-queue-store.ts:155:    throw new KimiError(
+apps/nori-code/src\tui\goal-queue-store.ts:208:    throw new KimiError(ErrorCodes.GOAL_OBJECTIVE_EMPTY, 'Goal objective cannot be empty');
+apps/nori-code/src\tui\goal-queue-store.ts:211:    throw new KimiError(
+apps/nori-code/src\tui\goal-queue-store.ts:222:    throw new KimiError(ErrorCodes.GOAL_NOT_FOUND, 'No queued goal found');
+apps/nori-code/src\tui\utils\hook-result-format.ts:1:import type { HookResultEvent } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\components\messages\tool-renderers\truncated.ts:1:import { Text, truncateToWidth, type Component } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\tui-state.ts:5:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\tui-state.ts:20:  type KimiTUIOptions,
+apps/nori-code/src\tui\tui-state.ts:57:export function createTUIState(options: KimiTUIOptions): TUIState {
+apps/nori-code/src\tui\easter-eggs\dance.ts:13:import { truncateToWidth, visibleWidth } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\constant\tips.ts:25:    text: '/plugins: manage plugins — try the "Kimi Datasource" for reliable financial, economic, and academic data',
+apps/nori-code/src\tui\constant\tips.ts:29:  { text: 'ask Kimi to schedule tasks, e.g. "remind me at 5pm"', solo: true, priority: 3 },
+apps/nori-code/src\tui\constant\tips.ts:43:  { text: '/auto when you want Kimi to handle approvals and keep going unattended' },
+apps/nori-code/src\tui\constant\tips.ts:48:  { text: 'shift-tab to Plan mode to review the approach before Kimi edits files.', priority: 2 },
+apps/nori-code/src\tui\utils\terminal-notification.ts:1:import type { Terminal } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\theme\theme-schema.json:3:  "$id": "https://github.com/moonshot-ai/kimi-code/blob/main/apps/nori-code/src/tui/theme/theme-schema.json",
+apps/nori-code/src\tui\controllers\tasks-browser.ts:1:import type { BackgroundTaskInfo, Session } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\controllers\tasks-browser.ts:2:import type { Component, ProcessTerminal, TUI } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\reverse-rpc\types.ts:9:import type { QuestionAnswerMethod } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\kimi-tui.ts:8:} from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\kimi-tui.ts:9:import type { DeviceAuthorization } from '@moonshot-ai/kimi-code-oauth';
+apps/nori-code/src\tui\kimi-tui.ts:15:  KimiHarness,
+apps/nori-code/src\tui\kimi-tui.ts:19:} from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\kimi-tui.ts:40:  type KimiSlashCommand,
+apps/nori-code/src\tui\kimi-tui.ts:93:} from './constant/kimi-tui';
+apps/nori-code/src\tui\kimi-tui.ts:118:  type KimiTUIOptions,
+apps/nori-code/src\tui\kimi-tui.ts:155:  KimiTUIOptions,
+apps/nori-code/src\tui\kimi-tui.ts:161:export interface KimiTUIStartupInput {
+apps/nori-code/src\tui\kimi-tui.ts:187:function createInitialAppState(input: KimiTUIStartupInput): AppState {
+apps/nori-code/src\tui\kimi-tui.ts:232:export class KimiTUI {
+apps/nori-code/src\tui\kimi-tui.ts:233:  readonly harness: KimiHarness;
+apps/nori-code/src\tui\kimi-tui.ts:234:  readonly options: KimiTUIOptions;
+apps/nori-code/src\tui\kimi-tui.ts:240:  private skillCommands: readonly KimiSlashCommand[] = [];
+apps/nori-code/src\tui\kimi-tui.ts:242:  private pluginCommands: readonly KimiSlashCommand[] = [];
+apps/nori-code/src\tui\kimi-tui.ts:300:  track(event: string, properties?: Parameters<KimiHarness['track']>[1]): void {
+apps/nori-code/src\tui\kimi-tui.ts:304:  constructor(harness: KimiHarness, startupInput: KimiTUIStartupInput) {
+apps/nori-code/src\tui\kimi-tui.ts:306:    const tuiOptions: KimiTUIOptions = {
+apps/nori-code/src\tui\kimi-tui.ts:355:  private getSlashCommands(): readonly KimiSlashCommand[] {
+apps/nori-code/src\tui\utils\background-task-status.ts:12:import type { BackgroundTaskInfo, BackgroundTaskStatus } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\utils\goal-completion.ts:1:import type { GoalSnapshot } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\components\messages\tool-renderers\summary.ts:13:import type { Component } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\tool-renderers\summary.ts:14:import { Text } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\utils\export-markdown.ts:1:import type { ContentPart, ContextMessage, PromptOrigin, ToolCall } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\utils\export-markdown.ts:234:    '# Kimi Session Export',
+apps/nori-code/src\tui\controllers\subagent-event-handler.ts:4:} from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\controllers\subagent-event-handler.ts:5:import type { Component } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\controllers\subagent-event-handler.ts:12:import { MAIN_AGENT_ID } from '../constant/kimi-tui';
+apps/nori-code/src\tui\utils\foreground-task.ts:1:import type { BackgroundTaskInfo } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\components\messages\tool-renderers\goal.ts:1:import { Text } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\theme\pi-tui-theme.ts:11:import type { MarkdownTheme, EditorTheme } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\utils\tab-strip.ts:11:import { visibleWidth } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\controllers\editor-keyboard.ts:1:import type { Session } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\controllers\editor-keyboard.ts:2:import { compressImageForModel } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\controllers\editor-keyboard.ts:15:} from '../constant/kimi-tui';
+apps/nori-code/src\tui\controllers\session-replay.ts:10:} from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\controllers\streaming-ui.ts:1:import type { Session } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\controllers\streaming-ui.ts:400:  // Dispose helpers (moved from KimiTUI)
+apps/nori-code/src\tui\reverse-rpc\question\handler.ts:1:import type { QuestionHandler, QuestionRequest, QuestionResult } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\components\messages\tool-renderers\media.ts:16:import type { Component } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\components\messages\tool-renderers\media.ts:17:import { Text } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\reverse-rpc\approval\adapter.ts:1:import type { ApprovalRequest, ApprovalResponse, ToolInputDisplay } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\reverse-rpc\approval\controller.ts:1:import type { ApprovalResponse } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\utils\render-cache.ts:12: * `KIMI_TUI_NO_RENDER_CACHE=1` as an escape hatch (and to let benchmarks
+apps/nori-code/src\tui\utils\render-cache.ts:16:let enabled = process.env['KIMI_TUI_NO_RENDER_CACHE'] !== '1';
+apps/nori-code/src\tui\controllers\clipboard-image-hint.ts:1:import type { TUI } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\controllers\session-event-handler.ts:1:import type { Component, Focusable } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\controllers\session-event-handler.ts:32:} from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\controllers\session-event-handler.ts:44:} from '../constant/kimi-tui';
+apps/nori-code/src\tui\controllers\session-event-handler.ts:441:    // Encrypted / redacted reasoning (e.g. Kimi over the Anthropic-compatible
+apps/nori-code/src\tui\reverse-rpc\approval\handler.ts:1:import type { ApprovalHandler, ApprovalRequest, ApprovalResponse } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\utils\mcp-server-status.ts:1:import type { McpServerInfo, McpServerStatusEvent } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\utils\message-replay.ts:9:} from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\utils\refresh-providers.ts:7:} from '@moonshot-ai/kimi-code-oauth';
+apps/nori-code/src\tui\utils\refresh-providers.ts:8:import type { KimiConfig, KimiConfigPatch, OAuthRef } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\utils\refresh-providers.ts:13: * package's `ManagedKimiConfigShape`-typed host directly.
+apps/nori-code/src\tui\utils\refresh-providers.ts:16:  getConfig(): Promise<KimiConfig>;
+apps/nori-code/src\tui\utils\refresh-providers.ts:17:  removeProvider(providerId: string): Promise<KimiConfig>;
+apps/nori-code/src\tui\utils\refresh-providers.ts:18:  setConfig(patch: KimiConfigPatch): Promise<KimiConfig>;
+apps/nori-code/src\tui\utils\refresh-providers.ts:26: * the shared `refreshProviderModels` orchestrator in `@moonshot-ai/kimi-code-oauth`
+apps/nori-code/src\tui\utils\refresh-providers.ts:37:      setConfig: (patch) => host.setConfig(patch as unknown as KimiConfigPatch),
+apps/nori-code/src\tui\utils\mcp-oauth.ts:6:} from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\controllers\btw-panel.ts:1:import { Spacer } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\controllers\btw-panel.ts:4:  KimiHarness,
+apps/nori-code/src\tui\controllers\btw-panel.ts:7:} from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\controllers\btw-panel.ts:9:import { NO_ACTIVE_SESSION_MESSAGE } from '../constant/kimi-tui';
+apps/nori-code/src\tui\controllers\btw-panel.ts:21:  readonly harness: KimiHarness;
+apps/nori-code/src\tui\utils\startup.ts:1:import { OAUTH_LOGIN_REQUIRED_CODE } from '../constant/kimi-tui';
+apps/nori-code/src\tui\utils\session-picker-rows.ts:1:import type { SessionSummary } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\utils\searchable-list.ts:11:import { fuzzyFilter, Key, matchesKey } from '@moonshot-ai/pi-tui';
+apps/nori-code/src\tui\utils\plugin-source-label.ts:1:import type { PluginSummary } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\utils\plugin-source-label.ts:29: * Returns one of three trust labels for a plugin. Only Kimi-hosted plugin zip
+apps/nori-code/src\tui\utils\plugin-source-label.ts:38:    if (url.protocol !== 'https:' || url.hostname !== 'code.kimi.com') {
+apps/nori-code/src\tui\utils\plugin-source-label.ts:41:    if (url.pathname.startsWith('/kimi-code/plugins/official/')) {
+apps/nori-code/src\tui\utils\plugin-source-label.ts:44:    if (url.pathname.startsWith('/kimi-code/plugins/curated/')) {
+apps/nori-code/src\tui\utils\plugin-source-label.ts:54: * Returns true only for install sources that are unambiguously Kimi-built
+apps/nori-code/src\tui\utils\plugin-source-label.ts:55: * official plugins — an https URL under the official Kimi CDN plugin path.
+apps/nori-code/src\tui\utils\plugin-source-label.ts:65:      url.hostname === 'code.kimi.com' &&
+apps/nori-code/src\tui\utils\plugin-source-label.ts:66:      url.pathname.startsWith('/kimi-code/plugins/official/')
+apps/nori-code/src\tui\utils\mcp-tool-name.ts:1:// Decodes the `mcp__<server>__<tool>` qualified names produced by kimi-core's
+apps/nori-code/src\tui\controllers\auth-flow.ts:1:import type { CreateSessionOptions, KimiHarness, Session } from '@moonshot-ai/kimi-code-sdk';
+apps/nori-code/src\tui\controllers\auth-flow.ts:4:import { OAUTH_LOGIN_REQUIRED_STARTUP_NOTICE } from '../constant/kimi-tui';
+apps/nori-code/src\tui\controllers\auth-flow.ts:12:import type { AppState, KimiTUIOptions } from '../types';
+apps/nori-code/src\tui\controllers\auth-flow.ts:22:  readonly harness: KimiHarness;
+apps/nori-code/src\tui\controllers\auth-flow.ts:23:  readonly options: KimiTUIOptions;
+apps/nori-code/src\tui\utils\printable-key.ts:23:import { decodeKittyPrintable } from '@moonshot-ai/pi-tui';

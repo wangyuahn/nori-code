@@ -1,4 +1,4 @@
-import type { ModelCapability, ProviderConfig, ToolCall } from '@moonshot-ai/kosong';
+import type { ModelCapability, ProviderConfig, ToolCall } from '@nori-code/kosong';
 import { describe, expect, it } from 'vitest';
 
 import type { ResolvedAgentProfile } from '../../src/profile';

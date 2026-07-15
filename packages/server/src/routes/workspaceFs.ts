@@ -5,9 +5,9 @@ import {
   fsBrowseQuerySchema,
   fsBrowseResponseSchema,
   fsHomeResponseSchema,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 
-import { IWorkspaceFsService, WorkspaceFsNotAbsoluteError, WorkspaceFsNotFoundError, WorkspaceFsPermissionError, type IInstantiationService } from '@moonshot-ai/agent-core';
+import { IWorkspaceFsService, WorkspaceFsNotAbsoluteError, WorkspaceFsNotFoundError, WorkspaceFsPermissionError, type IInstantiationService } from '@nori-code/agent-core';
 
 import { errEnvelope, okEnvelope } from '../envelope';
 import { defineRoute } from '../middleware/defineRoute';

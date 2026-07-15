@@ -8,7 +8,7 @@
  * unchanged and the strict builder is never consulted.
  */
 
-import { APIStatusError, type Message } from '@moonshot-ai/kosong';
+import { APIStatusError, type Message } from '@nori-code/kosong';
 import { describe, expect, it } from 'vitest';
 
 import {

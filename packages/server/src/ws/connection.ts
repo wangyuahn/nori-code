@@ -21,13 +21,13 @@ import {
   type WatchFsAddMessage,
   type WatchFsRemoveMessage,
   getClientControlOperation,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 
 import type {
   ILogService,
   TerminalAttachOptions,
   TerminalAttachSink,
-} from '@moonshot-ai/agent-core';
+} from '@nori-code/agent-core';
 import type { ISessionClientsService } from '#/services/gateway';
 
 import {

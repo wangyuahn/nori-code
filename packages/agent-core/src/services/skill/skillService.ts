@@ -4,7 +4,7 @@
 
 import { Disposable, InstantiationType, registerSingleton } from '../../di';
 import { ErrorCodes, KimiError } from '../../errors';
-import type { SkillDescriptor } from '@moonshot-ai/protocol';
+import type { SkillDescriptor } from '@nori-code/protocol';
 
 import { ICoreProcessService } from '../coreProcess/coreProcess';
 import { SessionNotFoundError } from '../session/session';

@@ -5,6 +5,8 @@ import { createReadStream } from 'node:fs';
 import {
   ErrorCode,
   fsDiffRequestSchema,
+  fsGitCommitRequestSchema,
+  fsGitPushRequestSchema,
   fsGitStatusRequestSchema,
   fsGrepRequestSchema,
   fsListManyRequestSchema,
@@ -18,6 +20,8 @@ import {
   fsStatManyRequestSchema,
   fsStatRequestSchema,
   type FsDiffRequest,
+  type FsGitCommitRequest,
+  type FsGitPushRequest,
   type FsGitStatusRequest,
   type FsGrepRequest,
   type FsListManyRequest,
@@ -30,8 +34,8 @@ import {
   type FsSearchRequest,
   type FsStatManyRequest,
   type FsStatRequest,
-} from '@moonshot-ai/protocol';
-import { SessionNotFoundError, FsAlreadyExistsError, FsIsBinaryError, FsIsDirectoryError, FsPathNotFoundError, FsTooLargeError, FsTooManyResultsError, IFsService, FsGrepTimeoutError, IFsSearchService, FsGitUnavailableError, IFsGitService, FsPathEscapesError, type IInstantiationService } from '@moonshot-ai/agent-core';
+} from '@nori-code/protocol';
+import { SessionNotFoundError, FsAlreadyExistsError, FsIsBinaryError, FsIsDirectoryError, FsPathNotFoundError, FsTooLargeError, FsTooManyResultsError, IFsService, FsGrepTimeoutError, IFsSearchService, FsGitUnavailableError, IFsGitService, FsPathEscapesError, type IInstantiationService } from '@nori-code/agent-core';
 import { z } from 'zod';
 
 
@@ -92,6 +96,8 @@ const FS_ACTIONS = [
   'grep',
   'git_status',
   'diff',
+  'git_commit',
+  'git_push',
   'open',
   'open-in',
   'reveal',
@@ -187,6 +193,12 @@ export function registerFsRoutes(
           case 'diff':
             await handleDiff(ix, session_id, req, reply);
             return;
+          case 'git_commit':
+            await handleGitCommit(ix, session_id, req, reply);
+            return;
+          case 'git_push':
+            await handleGitPush(ix, session_id, req, reply);
+            return;
           case 'open':
             await handleOpen(ix, session_id, req, reply);
             return;
@@ -236,7 +248,7 @@ export function registerFsRoutes(
       );
     }
 
-    let resolved: import('@moonshot-ai/agent-core').FsDownloadResolved;
+    let resolved: import('@nori-code/agent-core').FsDownloadResolved;
     try {
       resolved = await ix.invokeFunction((a) =>
         a.get(IFsService).resolveDownload(session_id, relPath),
@@ -498,6 +510,38 @@ async function handleDiff(
   const data = await ix.invokeFunction((a) =>
     a.get(IFsGitService).diff(sessionId, body),
   );
+  reply.send(okEnvelope(data, req.id));
+}
+
+async function handleGitCommit(
+  ix: IInstantiationService,
+  sessionId: string,
+  req: { id: string; body: unknown },
+  reply: { send(payload: unknown): unknown },
+): Promise<void> {
+  const parsed = fsGitCommitRequestSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    reply.send(buildValidationEnvelope(parsed.error.issues, req.id));
+    return;
+  }
+  const body: FsGitCommitRequest = parsed.data;
+  const data = await ix.invokeFunction((a) => a.get(IFsGitService).commit(sessionId, body));
+  reply.send(okEnvelope(data, req.id));
+}
+
+async function handleGitPush(
+  ix: IInstantiationService,
+  sessionId: string,
+  req: { id: string; body: unknown },
+  reply: { send(payload: unknown): unknown },
+): Promise<void> {
+  const parsed = fsGitPushRequestSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    reply.send(buildValidationEnvelope(parsed.error.issues, req.id));
+    return;
+  }
+  const body: FsGitPushRequest = parsed.data;
+  const data = await ix.invokeFunction((a) => a.get(IFsGitService).push(sessionId, body));
   reply.send(okEnvelope(data, req.id));
 }
 

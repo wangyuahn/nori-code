@@ -6,8 +6,8 @@
  * active palette so theme switches take effect on the next render.
  */
 
-import type { Component } from '@moonshot-ai/pi-tui';
-import { truncateToWidth, visibleWidth } from '@moonshot-ai/pi-tui';
+import type { Component } from '@nori-code/pi-tui';
+import { truncateToWidth, visibleWidth } from '@nori-code/pi-tui';
 
 import { currentTheme } from '#/tui/theme';
 

@@ -23,8 +23,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { pino } from 'pino';
 import { WebSocket } from 'ws';
 
-import type { Event } from '@moonshot-ai/protocol';
-import { IEventService } from '@moonshot-ai/agent-core';
+import type { Event } from '@nori-code/protocol';
+import { IEventService } from '@nori-code/agent-core';
 
 import {
   ISessionClientsService,
@@ -95,7 +95,7 @@ interface Conn {
 
 function openConn(url: string): Promise<Conn> {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url, ['kimi-code.bearer.test-token']);
+    const ws = new WebSocket(url, ['nori-code.bearer.test-token']);
     const queue: WsFrame[] = [];
     const waiters: Array<(frame: WsFrame) => void> = [];
     ws.on('message', (data) => {

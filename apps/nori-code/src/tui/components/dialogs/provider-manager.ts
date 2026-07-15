@@ -29,12 +29,12 @@
  * `setOptions`.
  */
 
-import type { ProviderConfig } from '@moonshot-ai/kimi-code-sdk';
+import type { ProviderConfig } from '@nori-code/sdk';
 import {
   getOpenPlatformById,
   isOpenPlatformId,
   type CustomRegistrySource,
-} from '@moonshot-ai/kimi-code-oauth';
+} from '@nori-code/oauth';
 import {
   Container,
   Key,
@@ -42,7 +42,7 @@ import {
   truncateToWidth,
   visibleWidth,
   type Focusable,
-} from '@moonshot-ai/pi-tui';
+} from '@nori-code/pi-tui';
 
 import { DEFAULT_OAUTH_PROVIDER_NAME } from '#/constant/app';
 import { CURRENT_MARK, SELECT_POINTER } from '#/tui/constant/symbols';

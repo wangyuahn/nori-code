@@ -15,7 +15,7 @@ import {
   truncateToWidth,
   visibleWidth,
   wrapTextWithAnsi,
-} from '@moonshot-ai/pi-tui';
+} from '@nori-code/pi-tui';
 
 import { currentTheme } from '#/tui/theme';
 import type {

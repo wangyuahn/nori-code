@@ -1,6 +1,6 @@
 # Server deployment security
 
-Operational guide for exposing the `@moonshot-ai/server` HTTP/WebSocket API beyond
+Operational guide for exposing the `@nori-code/server` HTTP/WebSocket API beyond
 `127.0.0.1`. For reporting vulnerabilities, see the repo root `SECURITY.md`.
 
 ## Threat model
@@ -156,8 +156,8 @@ tiers.
 - **Default Host allowlist:** `localhost`, `*.localhost`, `127.0.0.1`, `::1`,
   `[::1]`, and the actual bind host/IP. Requests with any other `Host` get
   `403 Invalid Host header` (DNS-rebinding protection).
-- **`KIMI_CODE_ALLOWED_HOSTS`** — comma-separated extra hosts. A leading dot matches
-  a subdomain wildcard, e.g. `KIMI_CODE_ALLOWED_HOSTS=.example.com,kimi.local`.
+- **`NORI_CODE_ALLOWED_HOSTS`** — comma-separated extra hosts. A leading dot matches
+  a subdomain wildcard, e.g. `NORI_CODE_ALLOWED_HOSTS=.example.com,kimi.local`.
 - **`kimi server run --allowed-host <host...>`** — CLI equivalent for appending
   extra allowed hosts; repeatable or comma-separated.
 - **`KIMI_CODE_CORS_ORIGINS`** — comma-separated list of allowed cross-origin values
@@ -175,7 +175,7 @@ tiers.
   `GET /api/v1/healthz`, `OPTIONS *`, and the static Web UI assets (`/`, `/*`).
   Failure returns `401` with code `40101`.
 - **WebSocket:** send either an `Authorization: Bearer <token|password>` header or
-  the subprotocol `Sec-WebSocket-Protocol: kimi-code.bearer.<token>` (for browsers
+  the subprotocol `Sec-WebSocket-Protocol: nori-code.bearer.<token>` (for browsers
   that cannot set WS headers). The server echoes the matching subprotocol on accept;
   a failed check destroys the socket.
 

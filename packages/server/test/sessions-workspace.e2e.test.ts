@@ -16,8 +16,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { pino } from 'pino';
-import { encodeWorkDirKey } from '@moonshot-ai/agent-core/session/store';
-import type { Session, Workspace } from '@moonshot-ai/protocol';
+import { encodeWorkDirKey } from '@nori-code/agent-core/session/store';
+import type { Session, Workspace } from '@nori-code/protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { IRestGateway, startServer, type RunningServer } from '../src';

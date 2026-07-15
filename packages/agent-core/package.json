@@ -1,21 +1,21 @@
 {
-  "name": "@moonshot-ai/agent-core",
+  "name": "@nori-code/agent-core",
   "version": "0.15.0",
   "private": true,
-  "description": "The unified agent engine for Kimi",
+  "description": "The unified agent engine for Nori Code",
   "license": "MIT",
-  "author": "Moonshot AI",
-  "homepage": "https://github.com/MoonshotAI/kimi-code/tree/main/packages/agent-core#readme",
+  "author": "Nori",
+  "homepage": "https://github.com/wangyuahn/nori-code/tree/main/packages/agent-core#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MoonshotAI/kimi-code.git",
+    "url": "git+https://github.com/wangyuahn/nori-code.git",
     "directory": "packages/agent-core"
   },
   "bugs": {
-    "url": "https://github.com/MoonshotAI/kimi-code/issues"
+    "url": "https://github.com/wangyuahn/nori-code/issues"
   },
   "keywords": [
-    "kimi",
+    "nori",
     "agent",
     "ai",
     "llm",
@@ -60,10 +60,10 @@
   "dependencies": {
     "@antfu/utils": "^9.3.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@moonshot-ai/kaos": "workspace:^",
-    "@moonshot-ai/kimi-code-oauth": "workspace:^",
-    "@moonshot-ai/kosong": "workspace:^",
-    "@moonshot-ai/protocol": "workspace:^",
+    "@nori-code/kaos": "workspace:^",
+    "@nori-code/oauth": "workspace:^",
+    "@nori-code/kosong": "workspace:^",
+    "@nori-code/protocol": "workspace:^",
     "@mozilla/readability": "^0.6.0",
     "ajv": "^8.18.0",
     "ajv-formats": "^3.0.1",

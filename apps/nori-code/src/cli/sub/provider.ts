@@ -18,7 +18,7 @@ import {
   fetchCustomRegistry,
   type CustomRegistrySource,
   type ManagedKimiConfigShape,
-} from '@moonshot-ai/kimi-code-oauth';
+} from '@nori-code/oauth';
 import {
   applyCatalogProvider,
   catalogBaseUrl,
@@ -32,10 +32,11 @@ import {
   type CatalogProviderEntry,
   type KimiConfig,
   type KimiHarness,
-} from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/sdk';
 import type { Command } from 'commander';
 
-import { createKimiCodeHostIdentity } from '#/cli/version';
+import { createKimiCodeHostIdentity, createKimiCodeUserAgent } from '#/cli/version';
+import { getDataDir } from '#/utils/paths';
 
 interface WritableLike {
   write(chunk: string): boolean;
@@ -99,7 +100,7 @@ export async function handleProviderAdd(
 
   let entries: Awaited<ReturnType<typeof fetchCustomRegistry>>;
   try {
-    entries = await fetchCustomRegistry(source);
+    entries = await fetchCustomRegistry(source, { userAgent: createKimiCodeUserAgent() });
   } catch (error) {
     const suffix = error instanceof CustomRegistryApiError ? ` (HTTP ${String(error.status)})` : '';
     deps.stderr.write(`Failed to fetch registry${suffix}: ${errorMessage(error)}\n`);
@@ -398,7 +399,7 @@ export async function handleCatalogAdd(
 
 async function loadCatalogOrExit(deps: ProviderDeps, url: string): Promise<Catalog> {
   try {
-    return await fetchCatalog(url);
+    return await fetchCatalog(url, { userAgent: createKimiCodeUserAgent() });
   } catch (error) {
     const suffix = error instanceof CatalogFetchError ? ` (HTTP ${String(error.status)})` : '';
     deps.stderr.write(`Failed to fetch catalog from ${url}${suffix}: ${errorMessage(error)}\n`);
@@ -506,7 +507,7 @@ function resolveDeps(overrides: Partial<ProviderDeps> = {}): ProviderDeps {
     getHarness:
       overrides.getHarness ??
       (() => {
-        harness ??= createKimiHarness({ identity });
+        harness ??= createKimiHarness({ homeDir: getDataDir(), identity });
         return harness;
       }),
     stdout: overrides.stdout ?? process.stdout,

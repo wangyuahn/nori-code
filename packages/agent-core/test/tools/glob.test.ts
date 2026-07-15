@@ -3,8 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { Readable, type Writable } from 'node:stream';
 
-import { LocalKaos } from '@moonshot-ai/kaos';
-import type { Kaos, KaosProcess, StatResult } from '@moonshot-ai/kaos';
+import { LocalKaos } from '@nori-code/kaos';
+import type { Kaos, KaosProcess, StatResult } from '@nori-code/kaos';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {

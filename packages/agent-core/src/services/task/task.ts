@@ -21,7 +21,7 @@
  *   - `TaskAlreadyFinishedError` (→ 40904) when the task has reached a
  *     terminal status (completed/failed/cancelled/timed_out/killed/lost).
  *
- * **Anti-corruption**: imports `@moonshot-ai/agent-core` only for the
+ * **Anti-corruption**: imports `@nori-code/agent-core` only for the
  * `createDecorator` value and the `BackgroundTaskInfo` type.
  *
  * Reference table (task kind + status):
@@ -40,7 +40,7 @@
 
 import { createDecorator } from '../../di';
 import type { BackgroundTaskInfo } from '../../agent/background';
-import type { BackgroundTask, BackgroundTaskKind, BackgroundTaskStatus } from '@moonshot-ai/protocol';
+import type { BackgroundTask, BackgroundTaskKind, BackgroundTaskStatus } from '@nori-code/protocol';
 
 // ---------------------------------------------------------------------------
 // Adapter helpers (moved from adapter/task-adapter.ts)

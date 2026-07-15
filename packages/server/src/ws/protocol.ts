@@ -1,5 +1,5 @@
 /**
- * WS envelope helpers — thin builders around the `@moonshot-ai/protocol`
+ * WS envelope helpers — thin builders around the `@nori-code/protocol`
  * schemas so `WsConnection` and `EventService` don't both re-implement the wire
  * shape (WS.md §2).
  *
@@ -19,7 +19,7 @@
  * the outbound path.
  */
 
-import type { Event } from '@moonshot-ai/protocol';
+import type { Event } from '@nori-code/protocol';
 import { ulid } from 'ulid';
 
 /** WS.md §3.1: `server_hello.payload`. */

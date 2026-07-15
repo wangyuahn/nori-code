@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'pathe';
 
 import { testKaos } from '../fixtures/test-kaos';
-import type { ProviderConfig, ToolCall } from '@moonshot-ai/kosong';
-import type { Kaos, StatResult } from '@moonshot-ai/kaos';
+import type { ProviderConfig, ToolCall } from '@nori-code/kosong';
+import type { Kaos, StatResult } from '@nori-code/kaos';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Agent, AgentOptions } from '../../src/agent';

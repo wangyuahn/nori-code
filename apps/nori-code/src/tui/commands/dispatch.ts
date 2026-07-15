@@ -1,6 +1,6 @@
-import type { Component, Focusable } from '@moonshot-ai/pi-tui';
-import type { DeviceAuthorization } from '@moonshot-ai/kimi-code-oauth';
-import type { KimiHarness, Session } from '@moonshot-ai/kimi-code-sdk';
+import type { Component, Focusable } from '@nori-code/pi-tui';
+import type { DeviceAuthorization } from '@nori-code/oauth';
+import type { KimiHarness, Session } from '@nori-code/sdk';
 
 import type { ColorToken, ThemeName } from '#/tui/theme';
 
@@ -35,6 +35,7 @@ import {
   showSettingsSelector,
 } from './config';
 import { handleGoalCommand } from './goal';
+import { handleSwarmCommand } from './swarm';
 import { handleFeedbackCommand, showMcpServers, showStatusReport, showUsage } from './info';
 import { handleAddDirCommand } from './add-dir';
 import { parseSlashInput } from './parse';
@@ -77,6 +78,7 @@ export { handleFeedbackCommand, showMcpServers, showStatusReport, showUsage } fr
 export { handlePluginsCommand } from './plugins';
 export { handleReloadCommand, handleReloadTuiCommand } from './reload';
 export { handleGoalCommand } from './goal';
+export { handleSwarmCommand } from './swarm';
 export {
   handleExportDebugZipCommand,
   handleExportMdCommand,
@@ -331,6 +333,9 @@ async function handleBuiltInSlashCommand(
       return;
     case 'goal':
       await handleGoalCommand(host, args);
+      return;
+    case 'swarm':
+      await handleSwarmCommand(host, args);
       return;
     case 'init':
       await handleInitCommand(host);

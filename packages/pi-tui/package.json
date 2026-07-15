@@ -1,18 +1,18 @@
 {
-	"name": "@moonshot-ai/pi-tui",
+	"name": "@nori-code/pi-tui",
 	"version": "0.80.3",
 	"private": true,
 	"description": "Terminal User Interface library with differential rendering for efficient text-based applications",
 	"license": "MIT",
-	"author": "Moonshot AI",
-	"homepage": "https://github.com/MoonshotAI/kimi-code/tree/main/packages/pi-tui#readme",
+	"author": "Nori",
+	"homepage": "https://github.com/wangyuahn/nori-code/tree/main/packages/pi-tui#readme",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/MoonshotAI/kimi-code.git",
+		"url": "git+https://github.com/wangyuahn/nori-code.git",
 		"directory": "packages/pi-tui"
 	},
 	"bugs": {
-		"url": "https://github.com/MoonshotAI/kimi-code/issues"
+		"url": "https://github.com/wangyuahn/nori-code/issues"
 	},
 	"keywords": [
 		"tui",

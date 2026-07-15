@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { computeWorkdirBucket, oldMd5BucketName } from '../../src/sessions/workdir-bucket.js';
-import { encodeWorkDirKey } from '@moonshot-ai/agent-core/session/store';
+import { encodeWorkDirKey } from '@nori-code/agent-core/session/store';
 import { createHash } from 'node:crypto';
 
 /**

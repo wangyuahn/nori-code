@@ -24,7 +24,7 @@
  *     anchor (extension, subdirectory) when that would not be enough.
  */
 
-import type { Kaos } from '@moonshot-ai/kaos';
+import type { Kaos } from '@nori-code/kaos';
 import { normalize, resolve } from 'pathe';
 import { z } from 'zod';
 

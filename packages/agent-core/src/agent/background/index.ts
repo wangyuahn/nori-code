@@ -13,7 +13,7 @@
 import { randomBytes } from 'node:crypto';
 
 import { createControlledPromise, type ControlledPromise } from '@antfu/utils';
-import type { ContentPart } from '@moonshot-ai/kosong';
+import type { ContentPart } from '@nori-code/kosong';
 
 import type { Agent } from '../..';
 import { errorMessage } from '../../loop/errors';
@@ -48,6 +48,7 @@ export { ProcessBackgroundTask } from './process-task';
 export type { ProcessBackgroundTaskInfo } from './process-task';
 export { QuestionBackgroundTask } from './question-task';
 export type { QuestionBackgroundTaskInfo } from './question-task';
+export { SwarmBackgroundTask } from './swarm-task';
 export { BackgroundTaskPersistence } from './persist';
 export type {
   BackgroundTaskInfo,
@@ -699,7 +700,11 @@ export class BackgroundManager {
     const content = [
       {
         type: 'text',
-        text: renderNotificationXml(notification),
+        text: [
+          '<system-reminder>',
+          renderNotificationXml(notification),
+          '</system-reminder>',
+        ].join('\n'),
       },
     ] as const;
     return { content, origin, notification };
@@ -928,7 +933,7 @@ function buildBackgroundTaskNotificationBody(info: BackgroundTaskInfo): string {
     '',
     `To recover or continue this subagent, call Agent(resume="${agentId}", prompt="Pick up where you left off; redo the last tool call if its result was never observed.").`,
     `Use agent_id ("${agentId}"), NOT source_id / task_id ("${info.taskId}") — the two look alike but only agent_id is accepted by the resume parameter.`,
-    'Add run_in_background=true to keep it backgrounded, or omit it to take the result inline in the current turn.',
+    'Agent tasks always run in the background; completion is delivered automatically.',
     'The subagent retains its full prior context across the restart, but any in-flight tool call lost its result and may need to be redone.',
   ].join('\n');
 

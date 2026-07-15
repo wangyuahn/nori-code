@@ -1,4 +1,4 @@
-import type { Message, Tool as LLMTool } from '@moonshot-ai/kosong';
+import type { Message, Tool as LLMTool } from '@nori-code/kosong';
 import { expect } from 'vitest';
 
 import { AGENT_WIRE_PROTOCOL_VERSION } from '../../../src/agent/records';

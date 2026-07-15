@@ -9,7 +9,7 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { isRecoverableRequestStructureError, type TokenUsage } from '@moonshot-ai/kosong';
+import { isRecoverableRequestStructureError, type TokenUsage } from '@nori-code/kosong';
 import type { Logger } from '#/logging/types';
 
 import type { LoopEventDispatcher } from './events';

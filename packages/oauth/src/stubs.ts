@@ -5,6 +5,8 @@
  * scattered across agent-core, node-sdk, and the TUI.
  */
 
+import { randomUUID } from 'node:crypto';
+
 // ── Identity (was ./identity) ──
 
 export interface KimiHostIdentity {
@@ -18,7 +20,7 @@ export function createKimiDeviceId(
   options?: { onFirstLaunch?: () => void },
 ): string {
   options?.onFirstLaunch?.();
-  return requireCrypto().randomUUID();
+  return randomUUID();
 }
 
 export function readKimiDeviceId(_homeDir?: string): string | undefined {
@@ -215,10 +217,3 @@ export async function refreshProviderModels(
 }
 
 // ── helpers ──
-
-function requireCrypto(): {
-  randomUUID(): string;
-} {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  return require('node:crypto') as { randomUUID(): string };
-}

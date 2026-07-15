@@ -1,4 +1,4 @@
-import { Text, truncateToWidth, type Component } from '@moonshot-ai/pi-tui';
+import { Text, truncateToWidth, type Component } from '@nori-code/pi-tui';
 
 import { currentTheme } from '#/tui/theme';
 import { sanitizeShellOutput } from '#/tui/utils/shell-output';

@@ -1,331 +1,167 @@
-import React, { useState, useEffect } from 'react';
-import { api } from '../api/client';
+import React, { useCallback, useEffect, useState } from 'react';
+import { api, type ProviderCatalogItem, type ProviderPreset } from '../api/client';
+import { useI18n, type Locale } from '../i18n';
+import {
+  DEFAULT_ACCENT,
+  applyThemeColor,
+  applyThemeMode,
+  isHexColor,
+  loadThemeColor,
+  loadThemeMode,
+  type ThemeMode,
+} from '../theme';
+import { Icon } from './Icon';
+import { loadRewindLimit, MAX_REWIND_LIMIT, saveRewindLimit } from '../rewindPreferences';
 
-const THEME_KEY = 'nori-theme-color';
-const THEME_MODE_KEY = 'nori-theme';
+type ProviderType = ProviderPreset['type'];
 
-function loadThemeColor(): string {
-  try {
-    return localStorage.getItem(THEME_KEY) ?? '#00BCD4';
-  } catch {
-    return '#00BCD4';
-  }
-}
-
-function applyThemeColor(color: string) {
-  try {
-    localStorage.setItem(THEME_KEY, color);
-    document.documentElement.style.setProperty('--nori-cyan', color);
-    document.documentElement.style.setProperty('--nori-border-active', color);
-    document.documentElement.style.setProperty('--nori-cyan-dim', `${color}26`);
-  } catch {
-    // localStorage unavailable — ignore
-  }
-}
-
-function loadThemeMode(): 'dark' | 'light' {
-  try {
-    const v = localStorage.getItem(THEME_MODE_KEY);
-    if (v === 'dark' || v === 'light') return v;
-  } catch {
-    // ignore
-  }
-  return 'dark';
-}
-
-function applyThemeMode(mode: 'dark' | 'light') {
-  try {
-    localStorage.setItem(THEME_MODE_KEY, mode);
-    document.documentElement.setAttribute('data-theme', mode);
-  } catch {
-    // ignore
-  }
-}
+const API_FORMATS: Array<{ value: ProviderType; label: string }> = [
+  { value: 'openai', label: 'OpenAI Chat Completions' },
+  { value: 'openai_responses', label: 'OpenAI Responses' },
+  { value: 'anthropic', label: 'Anthropic Messages' },
+  { value: 'google-genai', label: 'Google Gemini' },
+  { value: 'vertexai', label: 'Vertex AI' },
+];
 
 export function SettingsPanel() {
+  const { locale, setLocale, tr } = useI18n();
   const [permissionMode, setPermissionMode] = useState('auto');
-  const [defaultModel, setDefaultModel] = useState('');
-  const [themeColor, setThemeColor] = useState(loadThemeColor);
-  const [theme, setTheme] = useState<'dark' | 'light'>(loadThemeMode);
   const [planMode, setPlanMode] = useState(false);
   const [autoUpdate, setAutoUpdate] = useState(false);
+  const [themeColor, setThemeColor] = useState(loadThemeColor);
+  const [theme, setTheme] = useState<ThemeMode>(loadThemeMode);
+  const [providers, setProviders] = useState<ProviderCatalogItem[]>([]);
+  const [presets, setPresets] = useState<ProviderPreset[]>([]);
+  const [presetId, setPresetId] = useState('custom');
+  const [providerId, setProviderId] = useState('custom');
+  const [providerType, setProviderType] = useState<ProviderType>('openai');
+  const [baseUrl, setBaseUrl] = useState('https://api.openai.com/v1');
+  const [apiKey, setApiKey] = useState('');
+  const [apiKeyTouched, setApiKeyTouched] = useState(false);
+  const [rewindLimit, setRewindLimit] = useState(loadRewindLimit);
+  const [presetWarning, setPresetWarning] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState('');
+  const [saveError, setSaveError] = useState(false);
 
-  // Load config on mount
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const config = await api.getConfig();
-        if (cancelled) return;
-        if (typeof config.default_permission_mode === 'string') {
-          setPermissionMode(config.default_permission_mode);
-        }
-        if (typeof config.default_model === 'string') {
-          setDefaultModel(config.default_model);
-        }
-        if (typeof config.default_plan_mode === 'boolean') {
-          setPlanMode(config.default_plan_mode);
-        }
-        if (
-          typeof config.experimental === 'object' &&
-          config.experimental !== null &&
-          typeof (config.experimental as Record<string, unknown>).auto_update === 'boolean'
-        ) {
-          setAutoUpdate((config.experimental as Record<string, unknown>).auto_update as boolean);
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : 'Failed to load settings');
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    void load();
-    return () => { cancelled = true; };
-  }, []);
-
-  // Apply theme on mount
-  useEffect(() => {
-    applyThemeColor(themeColor);
-    applyThemeMode(theme);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const toggleTheme = (t: 'dark' | 'light') => {
-    setTheme(t);
-    applyThemeMode(t);
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    setSaveStatus('idle');
-    setSaveMessage('');
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
     try {
-      await api.updateConfig({
+      const [config, providerResult, presetResult] = await Promise.all([
+        api.getConfig(), api.providers.list(), api.providerPresets.list(),
+      ]);
+      if (typeof config.default_permission_mode === 'string') setPermissionMode(config.default_permission_mode);
+      if (typeof config.default_plan_mode === 'boolean') setPlanMode(config.default_plan_mode);
+      const experimental = config.experimental as Record<string, unknown> | undefined;
+      if (typeof experimental?.auto_update === 'boolean') setAutoUpdate(experimental.auto_update);
+      setProviders(providerResult.items);
+      setPresets(presetResult.items);
+      setPresetWarning(presetResult.warning ?? '');
+      const first = providerResult.items[0];
+      if (first) {
+        setProviderId(first.id);
+        if (API_FORMATS.some(item => item.value === first.type)) setProviderType(first.type as ProviderType);
+        setBaseUrl(first.base_url ?? '');
+      }
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : tr('Failed to load settings', '加载设置失败'));
+    } finally { setLoading(false); }
+  }, [tr]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const selectPreset = (id: string) => {
+    setPresetId(id);
+    const preset = presets.find(item => item.id === id);
+    if (!preset) return;
+    setProviderId(preset.id);
+    setProviderType(preset.type);
+    setBaseUrl(preset.base_url ?? '');
+  };
+
+  const selectConfiguredProvider = (id: string) => {
+    const provider = providers.find(item => item.id === id);
+    if (!provider) return;
+    setProviderId(provider.id);
+    if (API_FORMATS.some(item => item.value === provider.type)) setProviderType(provider.type as ProviderType);
+    setBaseUrl(provider.base_url ?? '');
+    setApiKey('');
+    setApiKeyTouched(false);
+  };
+
+  const save = async () => {
+    setSaving(true); setSaveMessage(''); setSaveError(false);
+    try {
+      const id = providerId.trim();
+      const providerPatch: Record<string, unknown> = { type: providerType };
+      if (baseUrl.trim()) providerPatch.base_url = baseUrl.trim();
+      if (apiKeyTouched && apiKey.trim()) providerPatch.api_key = apiKey.trim();
+      const patch: Record<string, unknown> = {
         default_permission_mode: permissionMode,
-        default_model: defaultModel || undefined,
         default_plan_mode: planMode,
-        experimental: {
-          auto_update: autoUpdate,
-        },
-      });
-      setSaveStatus('success');
-      setSaveMessage('Settings saved');
-    } catch (e) {
-      setSaveStatus('error');
-      setSaveMessage(e instanceof Error ? e.message : 'Failed to save');
-    } finally {
-      setSaving(false);
-      // Clear status after 3s
-      setTimeout(() => setSaveStatus('idle'), 3000);
-    }
+        experimental: { auto_update: autoUpdate },
+      };
+      if (id) patch.providers = { [id]: providerPatch };
+      await api.updateConfig(patch);
+      let refreshMessage = '';
+      if (id) {
+        const result = await api.providers.refresh(id);
+        refreshMessage = result.failed.length
+          ? tr('Provider saved, but model discovery failed: ', 'Provider 已保存，但获取模型失败：') + result.failed[0]?.reason
+          : tr('Provider saved and models refreshed', 'Provider 已保存并刷新模型列表');
+      }
+      setApiKey('');
+      setApiKeyTouched(false);
+      setSaveMessage(refreshMessage || tr('Settings saved', '设置已保存'));
+      window.dispatchEvent(new CustomEvent('nori:model-catalog-changed'));
+      const currentProviders = await api.providers.list();
+      setProviders(currentProviders.items);
+    } catch (error) {
+      setSaveError(true);
+      setSaveMessage(error instanceof Error ? error.message : tr('Failed to save', '保存失败'));
+    } finally { setSaving(false); }
   };
 
-  const handleThemeChange = (value: string) => {
-    setThemeColor(value);
-    applyThemeColor(value);
-  };
+  const changeTheme = (mode: ThemeMode) => { setTheme(mode); applyThemeMode(mode); };
+  const changeAccent = (color: string) => { setThemeColor(color); applyThemeColor(color); };
+  const selectedProvider = providers.find(item => item.id === providerId);
+  const displayedApiKey = apiKeyTouched ? apiKey : selectedProvider?.has_api_key ? '••••••••' : '';
 
-  if (loading) {
-    return (
-      <div style={{ maxWidth: 640 }}>
-        <div className="empty-state">
-          <div className="spinner" />
-          <div className="empty-state-desc">Loading settings...</div>
-        </div>
-      </div>
-    );
-  }
+  return <div className="settings-panel">
+    {loadError && <div className="settings-notice"><Icon name="alert" size={17} /><div><strong>{tr('Server settings are unavailable', '服务器设置不可用')}</strong><p>{loadError}</p></div><button className="btn btn-secondary btn-compact" onClick={() => void load()}>{tr('Retry', '重试')}</button></div>}
 
-  if (error) {
-    return (
-      <div style={{ maxWidth: 640 }}>
-        <div className="empty-state">
-          <div className="empty-state-icon">!</div>
-          <div className="empty-state-title">Failed to load settings</div>
-          <div className="empty-state-desc">{error}</div>
-        </div>
+    <section className="settings-card">
+      <div className="settings-card-heading"><span>Provider</span><h2>{tr('API connection', 'API 连接')}</h2><p>{tr('Configure any compatible API and fetch its models automatically.', '配置任意兼容 API，并自动获取模型列表。')}</p></div>
+      <div className="settings-card-body provider-settings-grid">
+        <SettingRow label={tr('Configured provider', '已配置 Provider')} desc={tr('Edit an existing connection or create a new one.', '编辑已有连接或新建连接。')}><select className="input settings-control" value={providers.some(p => p.id === providerId) ? providerId : ''} onChange={e => selectConfiguredProvider(e.target.value)}><option value="">{tr('New provider', '新建 Provider')}</option>{providers.map(p => <option key={p.id} value={p.id}>{p.id} · {p.status}</option>)}</select></SettingRow>
+        <SettingRow label={tr('Online preset', '在线预设')} desc={tr('Loaded from models.dev, the same catalog used by Nori CLI.', '来自 models.dev，与 Nori CLI 使用同一目录。')}><select className="input settings-control" value={presetId} onChange={e => selectPreset(e.target.value)}><option value="custom">{tr('Custom / manual', '自定义 / 手动')}</option>{presets.map(p => <option key={p.id} value={p.id}>{p.name} ({p.model_count})</option>)}</select></SettingRow>
+        {presetWarning && <div className="provider-warning">{tr('Online presets unavailable; manual configuration still works.', '在线预设暂不可用，仍可手动配置。')} {presetWarning}</div>}
+        <SettingRow label="Provider ID" desc={tr('A stable local identifier, such as openrouter.', '稳定的本地标识，例如 openrouter。')}><input className="input settings-control" value={providerId} onChange={e => setProviderId(e.target.value)} /></SettingRow>
+        <SettingRow label={tr('API format', 'API 格式')} desc={tr('Choose the request and response protocol.', '选择请求与响应协议。')}><select className="input settings-control" value={providerType} onChange={e => setProviderType(e.target.value as ProviderType)}>{API_FORMATS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></SettingRow>
+        <SettingRow label="API Base URL" desc={tr('The model endpoint is derived from this URL.', '模型列表端点会由此地址推导。')}><input className="input settings-control settings-url-input" value={baseUrl} onChange={e => setBaseUrl(e.target.value)} placeholder="https://api.example.com/v1" /></SettingRow>
+        <SettingRow label="API Key" desc={selectedProvider?.has_api_key ? tr('A key is stored. Enter a new value only to replace it.', '密钥已保存；只有输入新值时才会替换。') : tr('Stored only in the local Nori configuration.', '仅保存在本机 Nori 配置中。')}><input type="password" className="input settings-control" value={displayedApiKey} onFocus={() => { if (!apiKeyTouched && selectedProvider?.has_api_key) { setApiKey(''); setApiKeyTouched(true); } }} onChange={e => { setApiKeyTouched(true); setApiKey(e.target.value); }} placeholder="sk-..." /></SettingRow>
       </div>
-    );
-  }
+    </section>
 
-  return (
-    <div style={{ maxWidth: 640, display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Permission */}
-      <div className="card">
-        <div className="card-header">Permission</div>
-        <SettingRow
-          label="Default Permission Mode"
-          desc="Auto: agent asks for approval on writes. Manual: explicit approval required. YOLO: agent auto-approves all actions."
-        >
-          <select
-            className="input"
-            value={permissionMode}
-            onChange={e => setPermissionMode(e.target.value)}
-            style={{ width: 140, cursor: 'pointer' }}
-          >
-            <option value="auto">Auto</option>
-            <option value="manual">Manual</option>
-            <option value="yolo">YOLO</option>
-          </select>
-        </SettingRow>
-      </div>
+    <section className="settings-card"><div className="settings-card-heading"><span>{tr('Behavior', '行为')}</span><h2>{tr('Agent defaults', '智能体默认设置')}</h2></div><div className="settings-card-body">
+      <SettingRow label={tr('Permission mode', '权限模式')} desc={tr('Choose how tool actions are approved.', '选择工具操作的审批方式。')}><select className="input settings-control" value={permissionMode} onChange={e => setPermissionMode(e.target.value)}><option value="auto">{tr('Automatic', '自动')}</option><option value="manual">{tr('Manual', '手动')}</option><option value="yolo">YOLO</option></select></SettingRow>
+      <SettingRow label={tr('Plan mode', '规划模式')} desc={tr('Ask for a plan before code changes.', '修改代码前先生成计划。')}><Toggle checked={planMode} onChange={setPlanMode} /></SettingRow>
+      <SettingRow label={tr('Rewind history', '回溯轮数')} desc={tr(`Keep between 1 and ${MAX_REWIND_LIMIT} prompt checkpoints.`, `保留 1-${MAX_REWIND_LIMIT} 轮对话与代码快照。`)}><input type="number" min={1} max={MAX_REWIND_LIMIT} className="input settings-control settings-number-input" value={rewindLimit} onChange={event => { const value = saveRewindLimit(Number(event.target.value)); setRewindLimit(value); }} /></SettingRow>
+      <SettingRow label={tr('Auto update', '自动更新')} desc={tr('Automatically apply available updates.', '自动应用可用更新。')}><Toggle checked={autoUpdate} onChange={setAutoUpdate} /></SettingRow>
+    </div></section>
 
-      {/* Model */}
-      <div className="card">
-        <div className="card-header">Model</div>
-        <SettingRow
-          label="Default Model"
-          desc="Model used for orchestration. Leave blank for auto-detect."
-        >
-          <input
-            className="input"
-            value={defaultModel}
-            onChange={e => setDefaultModel(e.target.value)}
-            placeholder="e.g. claude-sonnet-4"
-            style={{ width: 220 }}
-          />
-        </SettingRow>
-      </div>
+    <section className="settings-card"><div className="settings-card-heading"><span>{tr('Appearance', '外观')}</span><h2>{tr('Workspace theme', '工作区主题')}</h2></div><div className="settings-card-body">
+      <SettingRow label={tr('Color mode', '颜色模式')} desc={tr('Applied to the entire application.', '应用到整个应用。')}><div className="theme-segment"><button onClick={() => changeTheme('dark')} className={theme === 'dark' ? 'active' : ''}><Icon name="moon" size={15}/>{tr('Dark', '深色')}</button><button onClick={() => changeTheme('light')} className={theme === 'light' ? 'active' : ''}><Icon name="sun" size={15}/>{tr('Light', '浅色')}</button></div></SettingRow>
+      <SettingRow label={tr('Accent color', '强调色')} desc={tr('Used for focus and primary actions.', '用于焦点与主要操作。')}><div className="accent-control"><input type="color" value={isHexColor(themeColor) ? themeColor : DEFAULT_ACCENT} onChange={e => changeAccent(e.target.value)}/><input className="input accent-value" value={themeColor} onChange={e => changeAccent(e.target.value)}/></div></SettingRow>
+      <SettingRow label={tr('Interface language', '界面语言')} desc={tr('Applied immediately.', '立即生效。')}><select className="input settings-control" value={locale} onChange={e => setLocale(e.target.value as Locale)}><option value="zh-CN">简体中文</option><option value="en">English</option></select></SettingRow>
+    </div></section>
 
-      {/* General */}
-      <div className="card">
-        <div className="card-header">General</div>
-        <SettingRow
-          label="Plan Mode"
-          desc="Require a plan before making code changes."
-        >
-          <label className="toggle">
-            <input
-              type="checkbox"
-              checked={planMode}
-              onChange={e => setPlanMode(e.target.checked)}
-            />
-            <span className="toggle-slider" />
-          </label>
-        </SettingRow>
-        <SettingRow
-          label="Auto Update"
-          desc="Automatically check for and apply updates."
-        >
-          <label className="toggle">
-            <input
-              type="checkbox"
-              checked={autoUpdate}
-              onChange={e => setAutoUpdate(e.target.checked)}
-            />
-            <span className="toggle-slider" />
-          </label>
-        </SettingRow>
-      </div>
-
-      {/* Theme */}
-      <div className="card">
-        <div className="card-header">Theme</div>
-        <SettingRow
-          label="Color Mode"
-          desc="Dark or light appearance (stored locally, applies immediately)."
-        >
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              onClick={() => toggleTheme('dark')}
-              className={theme === 'dark' ? 'btn btn-primary' : 'btn btn-secondary'}
-            >
-              Dark
-            </button>
-            <button
-              onClick={() => toggleTheme('light')}
-              className={theme === 'light' ? 'btn btn-primary' : 'btn btn-secondary'}
-            >
-              Light
-            </button>
-          </div>
-        </SettingRow>
-        <SettingRow
-          label="Accent Color"
-          desc="UI accent color (stored locally, applies immediately)."
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <input
-              type="color"
-              value={themeColor}
-              onChange={e => handleThemeChange(e.target.value)}
-              style={{
-                width: 28,
-                height: 28,
-                border: 'none',
-                borderRadius: 4,
-                cursor: 'pointer',
-                background: 'none',
-              }}
-            />
-            <input
-              className="input"
-              value={themeColor}
-              onChange={e => handleThemeChange(e.target.value)}
-              style={{ width: 100, fontFamily: 'var(--nori-font)' }}
-            />
-          </div>
-        </SettingRow>
-      </div>
-
-      {/* Save button + status */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-          {saving ? (
-            <>
-              <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} />
-              Saving...
-            </>
-          ) : (
-            'Save Settings'
-          )}
-        </button>
-        {saveStatus === 'success' && (
-          <span style={{ color: 'var(--nori-success)', fontSize: 13 }}>
-            ✓ {saveMessage}
-          </span>
-        )}
-        {saveStatus === 'error' && (
-          <span style={{ color: 'var(--nori-danger)', fontSize: 13 }}>
-            ✗ {saveMessage}
-          </span>
-        )}
-      </div>
-    </div>
-  );
+    <div className="settings-actions"><button className="btn btn-primary" onClick={() => void save()} disabled={saving || loading}>{saving ? tr('Saving…', '正在保存…') : tr('Save and refresh models', '保存并刷新模型')}</button>{saveMessage && <span className={'settings-save-status ' + (saveError ? 'error' : 'success')}><Icon name={saveError ? 'alert' : 'check'} size={15}/>{saveMessage}</span>}</div>
+  </div>;
 }
 
-function SettingRow({
-  label,
-  desc,
-  children,
-}: {
-  label: string;
-  desc: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: '12px 0',
-        borderBottom: '1px solid var(--nori-border)',
-      }}
-    >
-      <div style={{ flex: 1, marginRight: 16 }}>
-        <div style={{ fontWeight: 600, fontSize: 13 }}>{label}</div>
-        <div style={{ fontSize: 11, color: 'var(--nori-text-muted)', marginTop: 2 }}>{desc}</div>
-      </div>
-      {children}
-    </div>
-  );
-}
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (value: boolean) => void }) { return <label className="toggle"><input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)}/><span className="toggle-slider"/></label>; }
+function SettingRow({ label, desc, children }: { label: string; desc: string; children: React.ReactNode }) { return <div className="setting-row"><div className="setting-copy"><strong>{label}</strong><span>{desc}</span></div><div className="setting-action">{children}</div></div>; }

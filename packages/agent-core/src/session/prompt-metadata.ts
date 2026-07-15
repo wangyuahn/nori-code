@@ -1,5 +1,5 @@
 import type { ActivatePluginCommandPayload, ActivateSkillPayload, PromptPayload } from '#/rpc';
-import type { ContentPart } from '@moonshot-ai/kosong';
+import type { ContentPart } from '@nori-code/kosong';
 
 const MAX_TITLE_LENGTH = 200;
 const MAX_LAST_PROMPT_LENGTH = 4000;

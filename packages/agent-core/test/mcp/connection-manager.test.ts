@@ -6,7 +6,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { testKaos } from '../fixtures/test-kaos';
-import type { ProviderConfig } from '@moonshot-ai/kosong';
+import type { ProviderConfig } from '@nori-code/kosong';
 import { describe, expect, it } from 'vitest';
 
 import { randomUUID } from 'node:crypto';

@@ -31,7 +31,7 @@ import {
   type ApprovalRequest,
   type ApprovalResponse,
   type Event,
-} from '@moonshot-ai/agent-core';
+} from '@nori-code/agent-core';
 
 import { IRestGateway, startServer, type RunningServer } from '../src';
 import { fixedTokenAuth } from './helpers/serverHarness';
@@ -137,7 +137,7 @@ async function openSubscriber(
   const wsUrl = r.address.replace('http://', 'ws://') + '/api/v1/ws';
   const received: Record<string, unknown>[] = [];
   const ws = await new Promise<WebSocket>((resolve, reject) => {
-    const sock = new WebSocket(wsUrl, ['kimi-code.bearer.test-token']);
+    const sock = new WebSocket(wsUrl, ['nori-code.bearer.test-token']);
     sock.on('message', (data) => {
       try {
         received.push(JSON.parse(rawDataToString(data)) as Record<string, unknown>);

@@ -1,4 +1,4 @@
-import type { ModelCapability, ProviderConfig } from '@moonshot-ai/kosong';
+import type { ModelCapability, ProviderConfig } from '@nori-code/kosong';
 
 export interface AgentConfigData {
   cwd: string;

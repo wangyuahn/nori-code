@@ -1,4 +1,4 @@
-import { Container, Text } from '@moonshot-ai/pi-tui';
+import { Container, Text } from '@nori-code/pi-tui';
 
 import { currentTheme } from '#/tui/theme';
 

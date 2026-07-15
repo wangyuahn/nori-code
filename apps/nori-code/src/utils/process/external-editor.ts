@@ -37,7 +37,7 @@ export async function editInExternalEditor(
   initialText: string,
   command: string,
 ): Promise<string | undefined> {
-  const dir = await mkdtemp(join(tmpdir(), 'kimi-edit-'));
+  const dir = await mkdtemp(join(tmpdir(), 'nori-edit-'));
   const file = join(dir, 'prompt.md');
   await writeFile(file, initialText, 'utf-8');
   try {

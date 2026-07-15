@@ -1,20 +1,20 @@
 /**
- * `kimi server run` — starts the local server.
+ * `nori server run` — starts the local server.
  *
  * By default this ensures a single background daemon is running (spawning a
- * detached `kimi server run --daemon` child when needed) and returns once it is
+ * detached `nori server run --daemon` child when needed) and returns once it is
  * healthy. Pass `--foreground` to run the server in-process and keep this
  * terminal attached until SIGINT/SIGTERM. OS-managed background operation
- * (launchd / systemd / schtasks) lives in `kimi server install` + `kimi server start`.
+ * (launchd / systemd / schtasks) lives in `nori server install` + `nori server start`.
  *
- * `kimi web` is an alias of this command with `--open` defaulted to `true`,
+ * `nori web` is an alias of this command with `--open` defaulted to `true`,
  * registered in `./web-alias.ts`.
  */
 
 import { join } from 'node:path';
 
-import { shutdownTelemetry, track } from '@moonshot-ai/kimi-telemetry';
-import { startServer, type RunningServer } from '@moonshot-ai/server';
+import { shutdownTelemetry, track } from '@nori-code/telemetry';
+import { startServer, type RunningServer } from '@nori-code/server';
 import chalk from 'chalk';
 import { Option, type Command } from 'commander';
 
@@ -240,8 +240,8 @@ function formatReadyLine(origin: string, token: string | undefined): string {
 }
 
 /**
- * `kimi server run` (non-daemon) — ensures a background daemon is running
- * (spawning a detached `kimi server run --daemon` child if needed), then
+ * `nori server run` (non-daemon) — ensures a background daemon is running
+ * (spawning a detached `nori server run --daemon` child if needed), then
  * returns its origin so the caller can print the ready banner and exit. The
  * server keeps running in the background after this returns.
  */
@@ -262,7 +262,7 @@ export async function startServerBackground(
 }
 
 /**
- * `kimi server run --daemon` — runs the local server as a background daemon.
+ * `nori server run --daemon` — runs the local server as a background daemon.
  *
  * Spawned as a detached child by {@link startServerBackground}. The process is
  * expected to be detached (no controlling terminal) and self-terminates after
@@ -275,7 +275,7 @@ export async function startServerDaemon(options: ParsedServerOptions): Promise<n
 }
 
 /**
- * `kimi server run --foreground` — runs the local server in-process, attached
+ * `nori server run --foreground` — runs the local server in-process, attached
  * to the current terminal. Resolves only via `process.exit` (SIGINT/SIGTERM).
  */
 export async function startServerForeground(
@@ -338,6 +338,7 @@ async function runServerInProcess(
     allowedHosts: options.allowedHosts,
     webAssetsDir: serverWebAssetsDir(),
     coreProcessOptions: {
+      homeDir: getDataDir(),
       identity: createKimiCodeHostIdentity(version),
       telemetry,
     },

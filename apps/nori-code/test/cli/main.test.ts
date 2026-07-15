@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ErrorCodes, KimiError } from '@moonshot-ai/kimi-code-sdk';
+import { ErrorCodes, KimiError } from '@nori-code/sdk';
 
 import { validateOptions } from '#/cli/options';
 import type { CLIOptions } from '#/cli/options';
@@ -51,7 +51,7 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock('@moonshot-ai/kimi-telemetry', () => ({
+vi.mock('@nori-code/telemetry', () => ({
   installCrashHandlers: mocks.installCrashHandlers,
   track: mocks.track,
   setTelemetryContext: mocks.setTelemetryContext,
@@ -59,9 +59,9 @@ vi.mock('@moonshot-ai/kimi-telemetry', () => ({
   shutdownTelemetry: mocks.shutdownTelemetry,
 }));
 
-vi.mock('@moonshot-ai/kimi-code-sdk', async () => {
-  const actual = await vi.importActual<typeof import('@moonshot-ai/kimi-code-sdk')>(
-    '@moonshot-ai/kimi-code-sdk',
+vi.mock('@nori-code/sdk', async () => {
+  const actual = await vi.importActual<typeof import('@nori-code/sdk')>(
+    '@nori-code/sdk',
   );
   class MockKimiHarness {
     readonly homeDir = mocks.harness.homeDir;
@@ -142,8 +142,7 @@ function defaultOpts(): CLIOptions {
   return {
     session: undefined,
     continue: false,
-    yolo: false,
-    auto: false,
+    permission: undefined,
     plan: false,
     model: undefined,
     outputFormat: undefined,

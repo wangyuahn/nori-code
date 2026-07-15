@@ -438,6 +438,14 @@ export interface WarningEvent {
   readonly code?: string;
 }
 
+export interface CodeChangeEvent {
+  readonly type: 'code.change';
+  readonly operation: 'edit' | 'write';
+  readonly path: string;
+  readonly diff: string;
+  readonly occurredAt: string;
+}
+
 export interface TurnStartedEvent {
   readonly type: 'turn.started';
   readonly turnId: number;
@@ -691,6 +699,7 @@ export interface McpServerStatusPayload {
 export type AgentEvent =
   | ErrorEvent
   | WarningEvent
+  | CodeChangeEvent
   | AgentStatusUpdatedEvent
   | SessionMetaUpdatedEvent
   | SessionCreatedEvent
@@ -1143,6 +1152,14 @@ export const warningEventSchema = z.object({
   code: z.string().optional(),
 }) satisfies z.ZodType<WarningEvent>;
 
+export const codeChangeEventSchema = z.object({
+  type: z.literal('code.change'),
+  operation: z.enum(['edit', 'write']),
+  path: z.string().min(1),
+  diff: z.string(),
+  occurredAt: z.string().min(1),
+}) satisfies z.ZodType<CodeChangeEvent>;
+
 export const turnStartedEventSchema = z.object({
   type: z.literal('turn.started'),
   turnId: z.number(),
@@ -1380,6 +1397,7 @@ export const mcpServerStatusEventSchema = z.object({
 export const agentEventSchema = z.discriminatedUnion('type', [
   errorEventSchema,
   warningEventSchema,
+  codeChangeEventSchema,
   agentStatusUpdatedEventSchema,
   sessionMetaUpdatedEventSchema,
   sessionCreatedEventSchema,

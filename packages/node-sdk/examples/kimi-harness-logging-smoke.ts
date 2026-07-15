@@ -2,7 +2,7 @@ import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-import { createKimiHarness, log } from '@moonshot-ai/kimi-code-sdk';
+import { createKimiHarness, log } from '@nori-code/sdk';
 
 const SESSION_LOG = 'logs/nori-code.log';
 const GLOBAL_LOG = 'logs/global/nori-code.log';

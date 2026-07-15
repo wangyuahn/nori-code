@@ -12,7 +12,7 @@ import {
   writeInstallPlan,
   type InstallPlan,
 } from './install-plan';
-import { KIMI_SERVER_TASK_NAME, supervisorLogPath as defaultSupervisorLogPath } from './paths';
+import { NORI_SERVER_TASK_NAME, supervisorLogPath as defaultSupervisorLogPath } from './paths';
 import { resolveSupervisorProgram } from './program';
 import { buildScheduledTaskXml, parseSchtasksQuery } from './schtasks-xml';
 import type {
@@ -59,8 +59,8 @@ export function createSchtasksManager(
     if (alreadyInstalled && args.force !== true) {
       return {
         status: 'already-installed',
-        message: `Scheduled task "${KIMI_SERVER_TASK_NAME}" already exists. Rerun with --force to replace it.`,
-        taskName: KIMI_SERVER_TASK_NAME,
+        message: `Scheduled task "${NORI_SERVER_TASK_NAME}" already exists. Rerun with --force to replace it.`,
+        taskName: NORI_SERVER_TASK_NAME,
       };
     }
 
@@ -73,7 +73,7 @@ export function createSchtasksManager(
     const xmlPath = deps.writeTaskXml(xml);
 
     try {
-      const createArgs = ['/Create', '/TN', KIMI_SERVER_TASK_NAME, '/XML', xmlPath];
+      const createArgs = ['/Create', '/TN', NORI_SERVER_TASK_NAME, '/XML', xmlPath];
       if (alreadyInstalled) {
         createArgs.push('/F');
       }
@@ -95,20 +95,20 @@ export function createSchtasksManager(
     writeInstallPlan(plan);
 
 
-    const run = await deps.execSchtasks(['/Run', '/TN', KIMI_SERVER_TASK_NAME]);
+    const run = await deps.execSchtasks(['/Run', '/TN', NORI_SERVER_TASK_NAME]);
     if (run.code !== 0) {
 
       return {
         status: alreadyInstalled ? 'replaced' : 'installed',
         message: `Task ${alreadyInstalled ? 'replaced' : 'installed'} but /Run failed: ${detail(run) ?? 'unknown error'}.`,
-        taskName: KIMI_SERVER_TASK_NAME,
+        taskName: NORI_SERVER_TASK_NAME,
       };
     }
 
     return {
       status: alreadyInstalled ? 'replaced' : 'installed',
-      message: `Nori server scheduled task ${alreadyInstalled ? 'replaced' : 'installed'} (${KIMI_SERVER_TASK_NAME}, port ${plan.port}).`,
-      taskName: KIMI_SERVER_TASK_NAME,
+      message: `Nori server scheduled task ${alreadyInstalled ? 'replaced' : 'installed'} (${NORI_SERVER_TASK_NAME}, port ${plan.port}).`,
+      taskName: NORI_SERVER_TASK_NAME,
     };
   }
 
@@ -118,8 +118,8 @@ export function createSchtasksManager(
       return { ok: true, message: 'Scheduled task was not installed; nothing to remove.' };
     }
 
-    await deps.execSchtasks(['/End', '/TN', KIMI_SERVER_TASK_NAME]).catch(() => undefined);
-    const del = await deps.execSchtasks(['/Delete', '/TN', KIMI_SERVER_TASK_NAME, '/F']);
+    await deps.execSchtasks(['/End', '/TN', NORI_SERVER_TASK_NAME]).catch(() => undefined);
+    const del = await deps.execSchtasks(['/Delete', '/TN', NORI_SERVER_TASK_NAME, '/F']);
     if (del.code !== 0) {
       return {
         ok: false,
@@ -127,7 +127,7 @@ export function createSchtasksManager(
       };
     }
     deleteInstallPlan();
-    return { ok: true, message: `Scheduled task removed (${KIMI_SERVER_TASK_NAME}).` };
+    return { ok: true, message: `Scheduled task removed (${NORI_SERVER_TASK_NAME}).` };
   }
 
   async function start(): Promise<LifecycleResult> {
@@ -137,43 +137,43 @@ export function createSchtasksManager(
         message: 'Scheduled task is not installed. Run `nori server install` first.',
       };
     }
-    const result = await deps.execSchtasks(['/Run', '/TN', KIMI_SERVER_TASK_NAME]);
+    const result = await deps.execSchtasks(['/Run', '/TN', NORI_SERVER_TASK_NAME]);
     if (result.code !== 0) {
       return {
         ok: false,
         message: `schtasks /Run failed: ${detail(result) ?? 'unknown error'}`,
       };
     }
-    return { ok: true, message: `Nori server started (${KIMI_SERVER_TASK_NAME}).` };
+    return { ok: true, message: `Nori server started (${NORI_SERVER_TASK_NAME}).` };
   }
 
   async function stop(): Promise<LifecycleResult> {
-    const result = await deps.execSchtasks(['/End', '/TN', KIMI_SERVER_TASK_NAME]);
+    const result = await deps.execSchtasks(['/End', '/TN', NORI_SERVER_TASK_NAME]);
     if (result.code !== 0) {
       return {
         ok: false,
         message: `schtasks /End failed: ${detail(result) ?? 'unknown error'}`,
       };
     }
-    return { ok: true, message: `Nori server stopped (${KIMI_SERVER_TASK_NAME}).` };
+    return { ok: true, message: `Nori server stopped (${NORI_SERVER_TASK_NAME}).` };
   }
 
   async function restart(): Promise<LifecycleResult> {
-    const end = await deps.execSchtasks(['/End', '/TN', KIMI_SERVER_TASK_NAME]);
+    const end = await deps.execSchtasks(['/End', '/TN', NORI_SERVER_TASK_NAME]);
     if (end.code !== 0) {
       return {
         ok: false,
         message: `schtasks /End failed during restart: ${detail(end) ?? 'unknown error'}`,
       };
     }
-    const run = await deps.execSchtasks(['/Run', '/TN', KIMI_SERVER_TASK_NAME]);
+    const run = await deps.execSchtasks(['/Run', '/TN', NORI_SERVER_TASK_NAME]);
     if (run.code !== 0) {
       return {
         ok: false,
         message: `schtasks /Run failed during restart: ${detail(run) ?? 'unknown error'}`,
       };
     }
-    return { ok: true, message: `Nori server restarted (${KIMI_SERVER_TASK_NAME}).` };
+    return { ok: true, message: `Nori server restarted (${NORI_SERVER_TASK_NAME}).` };
   }
 
   async function status(): Promise<ServiceStatus> {
@@ -184,7 +184,7 @@ export function createSchtasksManager(
       platform: 'win32',
       installed,
       running: false,
-      taskName: KIMI_SERVER_TASK_NAME,
+      taskName: NORI_SERVER_TASK_NAME,
       ...(plan?.host !== undefined ? { host: plan.host } : {}),
       ...(plan?.port !== undefined ? { port: plan.port } : {}),
       logPath: deps.logPath(),
@@ -197,7 +197,7 @@ export function createSchtasksManager(
     const query = await deps.execSchtasks([
       '/Query',
       '/TN',
-      KIMI_SERVER_TASK_NAME,
+      NORI_SERVER_TASK_NAME,
       '/FO',
       'CSV',
       '/V',
@@ -236,7 +236,7 @@ function defaultWriteTaskXml(xml: string): string {
 
 
 async function defaultTaskExists(): Promise<boolean> {
-  const res = await execFileUtf8('schtasks', ['/Query', '/TN', KIMI_SERVER_TASK_NAME], {
+  const res = await execFileUtf8('schtasks', ['/Query', '/TN', NORI_SERVER_TASK_NAME], {
     windowsHide: true,
   });
   return res.code === 0;

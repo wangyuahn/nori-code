@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { Kaos } from '@moonshot-ai/kaos';
+import type { Kaos } from '@nori-code/kaos';
 import { createKimiHarness, KimiHarness } from '#/index';
 import type { KimiError } from '#/index';
 import type { ResumeSessionInput, ResumedSessionSummary } from '#/types';

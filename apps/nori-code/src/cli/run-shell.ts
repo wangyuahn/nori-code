@@ -1,23 +1,20 @@
 import { execSync, spawnSync } from 'node:child_process';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 
 import {
   createKimiHarness,
   log,
   type KimiHarness,
   type TelemetryClient,
-} from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/sdk';
 import {
   setCrashPhase,
   setTelemetryContext,
   shutdownTelemetry,
   track,
   withTelemetryContext,
-} from '@moonshot-ai/kimi-telemetry';
+} from '@nori-code/telemetry';
 
 import { CLI_SHUTDOWN_TIMEOUT_MS, CLI_UI_MODE } from '#/constant/app';
-import { detectPendingMigration } from '#/migration/index';
 import type { TuiConfig } from '#/tui/config';
 import { loadTuiConfig, TuiConfigParseError } from '#/tui/config';
 import { CHROME_GUTTER } from '#/tui/constant/rendering';
@@ -34,7 +31,6 @@ import { createKimiCodeHostIdentity } from './version';
 export async function runShell(
   opts: CLIOptions,
   version: string,
-  runOptions: { readonly migrateOnly?: boolean } = {},
 ): Promise<void> {
   const startedAt = Date.now();
   const configStartedAt = startedAt;
@@ -75,7 +71,7 @@ export async function runShell(
     },
     sessionStartedProperties: { permission: opts.permission, plan: opts.plan, afk: false },
   });
-  log.info('kimi-code starting', {
+  log.info('nori-code starting', {
     version,
     uiMode: CLI_UI_MODE,
     nodeVersion: process.version,
@@ -84,16 +80,6 @@ export async function runShell(
   });
 
   await harness.ensureConfigFile();
-  const migrationPlan = await detectPendingMigration({
-    sourceHome: join(homedir(), '.kimi'),
-    targetHome: harness.homeDir,
-    ignoreMarker: runOptions.migrateOnly,
-  });
-  if (runOptions.migrateOnly === true && migrationPlan === null) {
-    process.stdout.write('  Nothing to migrate from ~/.kimi/.\n');
-    await harness.close();
-    return;
-  }
   const config = await harness.getConfig();
   for (const warning of (await harness.getConfigDiagnostics()).warnings) {
     configWarning = combineStartupNotice(configWarning, warning);
@@ -106,8 +92,6 @@ export async function runShell(
     version,
     workDir,
     startupNotice: configWarning,
-    migrationPlan,
-    migrateOnly: runOptions.migrateOnly,
   });
 
   initializeCliTelemetry({
@@ -154,7 +138,7 @@ export async function runShell(
     spawnSync('stty', args, { stdio: ['inherit', 'ignore', 'ignore'] });
   };
 
-  // If we crash without going through KimiTUI.stop(), the terminal is left in
+  // If we crash without going through Nori TUI stop(), the terminal is left in
   // raw mode with a hidden cursor and XON/XOFF flow control disabled. Restore
   // both before exiting so the user's shell is usable afterwards.
   const emergencyExit = (exitCode: number): void => {

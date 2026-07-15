@@ -1,4 +1,4 @@
-# @moonshot-ai/kimi-telemetry
+# @nori-code/telemetry
 
 Shared telemetry infrastructure for Kimi Code.
 

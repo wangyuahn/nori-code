@@ -2,7 +2,7 @@
 
 import { createDecorator, Disposable } from '../../di';
 
-import type { FsBrowseResponse, FsHomeResponse } from '@moonshot-ai/protocol';
+import type { FsBrowseResponse, FsHomeResponse } from '@nori-code/protocol';
 
 export class WorkspaceFsNotAbsoluteError extends Error {
   readonly path: string;

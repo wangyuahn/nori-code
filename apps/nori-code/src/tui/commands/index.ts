@@ -25,7 +25,8 @@ export { handleFeedbackCommand, showMcpServers, showStatusReport, showUsage } fr
 export { handlePluginsCommand } from './plugins';
 export { handleReloadCommand, handleReloadTuiCommand } from './reload';
 export { handleGoalCommand, parseGoalCommand } from './goal';
-export { goalArgumentCompletions } from './registry';
+export { handleSwarmCommand } from './swarm';
+export { goalArgumentCompletions, swarmArgumentCompletions } from './registry';
 export { handleForkCommand, handleInitCommand, handleTitleCommand } from './session';
 export { handleUndoCommand } from './undo';
 export { handleWebCommand } from './web';

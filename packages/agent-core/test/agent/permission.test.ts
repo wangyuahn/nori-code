@@ -1,5 +1,5 @@
-import type { Kaos } from '@moonshot-ai/kaos';
-import type { ToolCall } from '@moonshot-ai/kosong';
+import type { Kaos } from '@nori-code/kaos';
+import type { ToolCall } from '@nori-code/kosong';
 import * as posixPath from 'node:path/posix';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -773,6 +773,7 @@ describe('Permission policy chain', () => {
       'tools-readonly-deny',
       'user-configured-deny',
       'auto-mode-approve',
+      'yolo-mode-approve',
       'session-approval-history',
       'user-configured-ask',
       'user-configured-allow',
@@ -781,7 +782,6 @@ describe('Permission policy chain', () => {
       'plan-mode-tool-approve',
       'sensitive-file-access-ask',
       'git-control-path-access-ask',
-      'yolo-mode-approve',
       'swarm-mode-agent-swarm-approve',
       'default-tool-approve',
       'git-cwd-write-approve',
@@ -1919,7 +1919,7 @@ describe('ExitPlanMode permission policy', () => {
     expect(requestApproval).not.toHaveBeenCalled();
   });
 
-  it('requests plan-review approval in yolo mode and returns formatted output', async () => {
+  it('does not request plan-review approval in yolo mode', async () => {
     const { manager, record, requestApproval, exit } = makePlanPermissionManager({
       mode: 'yolo',
       plan: '# Plan\n\n- Step',
@@ -1940,37 +1940,10 @@ describe('ExitPlanMode permission policy', () => {
       }),
     );
 
-    expect(requestApproval).toHaveBeenCalledWith(
-      {
-        turnId: 0,
-        toolCallId: 'call_exit',
-        toolName: 'ExitPlanMode',
-        action: 'Presenting plan and exiting plan mode',
-        display: {
-          kind: 'plan_review',
-          plan: '# Plan\n\n- Step',
-          path: '/tmp/plan.md',
-          options: planOptions,
-        },
-      },
-      { signal: expect.any(AbortSignal) },
-    );
-    expect(record).toHaveBeenCalledWith({
-      type: 'permission.record_approval_result',
-      turnId: 0,
-      toolCallId: 'call_exit',
-      toolName: 'ExitPlanMode',
-      action: 'Presenting plan and exiting plan mode',
-      sessionApprovalRule: undefined,
-      result: { decision: 'approved', selectedLabel: 'Approach B' },
-    });
-    expect(exit).toHaveBeenCalled();
-    expect(result).toMatchObject({
-      syntheticResult: {
-        isError: false,
-        output: expect.stringContaining('Selected approach: Approach B'),
-      },
-    });
+    expect(requestApproval).not.toHaveBeenCalled();
+    expect(record).not.toHaveBeenCalled();
+    expect(exit).not.toHaveBeenCalled();
+    expect(result).toBeUndefined();
   });
 
   it('reuses session approval for ExitPlanMode without re-prompting plan review', async () => {

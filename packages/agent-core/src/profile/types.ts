@@ -1,4 +1,4 @@
-import type { Environment } from '@moonshot-ai/kaos';
+import type { Environment } from '@nori-code/kaos';
 import { z } from 'zod';
 
 import type { SkillRegistry } from '../agent/skill/types';

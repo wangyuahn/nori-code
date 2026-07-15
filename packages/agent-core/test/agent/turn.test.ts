@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'pathe';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import type { Kaos } from '@moonshot-ai/kaos';
+import type { Kaos } from '@nori-code/kaos';
 import {
   APIConnectionError,
   APIEmptyResponseError,
@@ -12,7 +12,7 @@ import {
   type ChatProvider,
   type ModelCapability,
   type ToolCall,
-} from '@moonshot-ai/kosong';
+} from '@nori-code/kosong';
 import { describe, expect, it, vi } from 'vitest';
 
 import { HookEngine } from '../../src/session/hooks';

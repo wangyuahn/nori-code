@@ -17,7 +17,7 @@ import {
   ICoreProcessService,
   ILogService,
   IModelCatalogService,
-} from '@moonshot-ai/agent-core';
+} from '@nori-code/agent-core';
 
 const DEFAULT_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 

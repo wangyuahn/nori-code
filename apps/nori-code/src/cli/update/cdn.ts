@@ -27,7 +27,7 @@ export const UpdateManifestSchema = z.object({
 });
 
 export interface FetchLatestResult {
-  /** Raw newest version — what `kimi upgrade` installs, never rollout-gated. */
+  /** Raw newest version — what `nori upgrade` installs, never rollout-gated. */
   readonly latest: string;
   /** Null when the JSON manifest was unavailable and we fell back to plain text. */
   readonly manifest: UpdateManifest | null;

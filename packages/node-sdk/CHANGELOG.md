@@ -1,4 +1,4 @@
-# @moonshot-ai/kimi-code-sdk
+# @nori-code/sdk
 
 ## 0.12.0
 

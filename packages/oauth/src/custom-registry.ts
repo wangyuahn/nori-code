@@ -47,6 +47,8 @@ const CUSTOM_REGISTRY_MODEL_FIELDS: ReadonlySet<string> = new Set([
   'maxContextSize',
   'capabilities',
   'displayName',
+  'supportEfforts',
+  'defaultEffort',
 ]);
 
 function cloneOverrides(
@@ -99,16 +101,24 @@ export interface CustomRegistrySource {
   readonly apiKey: string;
 }
 
+export interface FetchCustomRegistryOptions {
+  readonly signal?: AbortSignal;
+  readonly fetchImpl?: typeof fetch;
+  readonly userAgent?: string;
+}
+
 /**
  * The kosong `ProviderConfig` union (`packages/kosong/src/providers/index.ts`)
- * mirrors these literal values. `kimi` is included because the api.json schema
- * permits it even though kokub itself only emits the other three.
+ * mirrors these literal values. Aliases commonly emitted by third-party
+ * registries are normalized to one of these canonical wire types below.
  */
 export type CustomRegistryProviderType =
   | 'anthropic'
   | 'openai'
   | 'openai_responses'
-  | 'kimi';
+  | 'kimi'
+  | 'google-genai'
+  | 'vertexai';
 
 export interface CustomRegistryModelEntry {
   readonly id: string;
@@ -120,6 +130,8 @@ export interface CustomRegistryModelEntry {
     input?: readonly string[];
     output?: readonly string[];
   };
+  readonly support_efforts?: readonly string[];
+  readonly default_effort?: string;
 }
 
 export interface CustomRegistryProviderEntry {
@@ -128,6 +140,8 @@ export interface CustomRegistryProviderEntry {
   readonly api: string;
   readonly type: CustomRegistryProviderType;
   readonly env?: readonly string[];
+  readonly project?: string;
+  readonly location?: string;
   readonly models: Record<string, CustomRegistryModelEntry>;
 }
 
@@ -144,6 +158,8 @@ const ALLOWED_PROVIDER_TYPES: ReadonlySet<CustomRegistryProviderType> = new Set(
   'openai',
   'openai_responses',
   'kimi',
+  'google-genai',
+  'vertexai',
 ]);
 
 export class CustomRegistryApiError extends Error {
@@ -156,8 +172,42 @@ export class CustomRegistryApiError extends Error {
   }
 }
 
-function isAllowedProviderType(value: unknown): value is CustomRegistryProviderType {
-  return typeof value === 'string' && ALLOWED_PROVIDER_TYPES.has(value as CustomRegistryProviderType);
+const PROVIDER_TYPE_ALIASES: Readonly<Record<string, CustomRegistryProviderType>> = {
+  'chat-completions': 'openai',
+  'chat_completions': 'openai',
+  'openai-compatible': 'openai',
+  'openai_compatible': 'openai',
+  'openai-legacy': 'openai',
+  'openai_legacy': 'openai',
+  'responses': 'openai_responses',
+  'openai-responses': 'openai_responses',
+  'anthropic-messages': 'anthropic',
+  'anthropic_messages': 'anthropic',
+  'google': 'google-genai',
+  'google_genai': 'google-genai',
+  'vertex-ai': 'vertexai',
+};
+
+function normalizeProviderType(value: unknown): CustomRegistryProviderType | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase();
+  const aliased = PROVIDER_TYPE_ALIASES[normalized] ?? normalized;
+  return ALLOWED_PROVIDER_TYPES.has(aliased as CustomRegistryProviderType)
+    ? (aliased as CustomRegistryProviderType)
+    : undefined;
+}
+
+function normalizeApiBaseUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const candidate = value.trim().replace(/\/+$/, '');
+  if (candidate.length === 0) return undefined;
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined;
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return undefined;
+  }
 }
 
 function toStringArrayOrUndefined(value: unknown): readonly string[] | undefined {
@@ -171,10 +221,12 @@ function toStringArrayOrUndefined(value: unknown): readonly string[] | undefined
   return out;
 }
 
-function toModelEntry(value: unknown): CustomRegistryModelEntry | undefined {
+function toModelEntry(value: unknown, fallbackId: string): CustomRegistryModelEntry | undefined {
   if (!isRecord(value)) return undefined;
-  const id = value['id'];
-  if (typeof id !== 'string' || id.length === 0) return undefined;
+  const rawId = value['id'];
+  const id =
+    typeof rawId === 'string' && rawId.trim().length > 0 ? rawId.trim() : fallbackId.trim();
+  if (id.length === 0) return undefined;
 
   const entry: {
     id: string;
@@ -183,10 +235,12 @@ function toModelEntry(value: unknown): CustomRegistryModelEntry | undefined {
     tool_call?: boolean;
     reasoning?: boolean;
     modalities?: { input?: readonly string[]; output?: readonly string[] };
+    support_efforts?: readonly string[];
+    default_effort?: string;
   } = { id };
 
   const name = value['name'];
-  if (typeof name === 'string' && name.length > 0) entry.name = name;
+  if (typeof name === 'string' && name.trim().length > 0) entry.name = name.trim();
 
   const limit = value['limit'];
   if (isRecord(limit)) {
@@ -207,6 +261,13 @@ function toModelEntry(value: unknown): CustomRegistryModelEntry | undefined {
   if (typeof value['tool_call'] === 'boolean') entry.tool_call = value['tool_call'];
   if (typeof value['reasoning'] === 'boolean') entry.reasoning = value['reasoning'];
 
+  const supportEfforts = toStringArrayOrUndefined(value['support_efforts']);
+  if (supportEfforts !== undefined) entry.support_efforts = supportEfforts;
+  const defaultEffort = value['default_effort'];
+  if (typeof defaultEffort === 'string' && defaultEffort.length > 0) {
+    entry.default_effort = defaultEffort;
+  }
+
   const modalities = value['modalities'];
   if (isRecord(modalities)) {
     const input = toStringArrayOrUndefined(modalities['input']);
@@ -222,28 +283,39 @@ function toModelEntry(value: unknown): CustomRegistryModelEntry | undefined {
   return entry;
 }
 
-function toProviderEntry(value: unknown): CustomRegistryProviderEntry | undefined {
+function toProviderEntry(value: unknown, registryKey: string): CustomRegistryProviderEntry | undefined {
   if (!isRecord(value)) return undefined;
-  const id = value['id'];
-  const name = value['name'];
-  const api = value['api'];
-  const type = value['type'];
+  const rawId = value['id'];
+  const id = typeof rawId === 'string' && rawId.trim().length > 0 ? rawId.trim() : registryKey.trim();
+  const rawName = value['name'];
+  const name = typeof rawName === 'string' && rawName.trim().length > 0 ? rawName.trim() : id;
+  const api = normalizeApiBaseUrl(value['api'] ?? value['base_url'] ?? value['baseUrl']);
+  const type = normalizeProviderType(value['type'] ?? value['protocol']);
   const models = value['models'];
 
-  if (typeof id !== 'string' || id.length === 0) return undefined;
-  if (typeof name !== 'string' || name.length === 0) return undefined;
-  if (typeof api !== 'string' || api.length === 0) return undefined;
-  if (!isAllowedProviderType(type)) return undefined;
-  if (!isRecord(models)) return undefined;
+  if (id.length === 0 || api === undefined || type === undefined || !isRecord(models)) {
+    return undefined;
+  }
 
   const parsedModels: Record<string, CustomRegistryModelEntry> = {};
   for (const [key, raw] of Object.entries(models)) {
-    const modelEntry = toModelEntry(raw);
+    const modelEntry = toModelEntry(raw, key);
     if (modelEntry === undefined) continue;
     parsedModels[key] = modelEntry;
   }
+  if (Object.keys(parsedModels).length === 0) return undefined;
 
   const env = toStringArrayOrUndefined(value['env']);
+  const rawProject = value['project'];
+  const project =
+    typeof rawProject === 'string' && rawProject.trim().length > 0
+      ? rawProject.trim()
+      : undefined;
+  const rawLocation = value['location'];
+  const location =
+    typeof rawLocation === 'string' && rawLocation.trim().length > 0
+      ? rawLocation.trim()
+      : undefined;
 
   return {
     id,
@@ -251,6 +323,8 @@ function toProviderEntry(value: unknown): CustomRegistryProviderEntry | undefine
     api,
     type,
     ...(env !== undefined ? { env } : {}),
+    ...(project !== undefined ? { project } : {}),
+    ...(location !== undefined ? { location } : {}),
     models: parsedModels,
   };
 }
@@ -259,15 +333,21 @@ function toProviderEntry(value: unknown): CustomRegistryProviderEntry | undefine
  * Fetches and validates an api.json document. The returned record is keyed by
  * the top-level provider key in the document (which may differ from
  * `entry.id`); callers should iterate `Object.values` to apply each entry.
+ *
+ * `userAgent` identifies the host product (e.g. `kimi-code-cli/1.2.3`); when
+ * omitted the request falls back to the runtime default (`User-Agent: node`).
  */
 export async function fetchCustomRegistry(
   source: CustomRegistrySource,
-  fetchImpl: typeof fetch = fetch,
-  signal?: AbortSignal,
+  options: FetchCustomRegistryOptions = {},
 ): Promise<Record<string, CustomRegistryProviderEntry>> {
+  const { signal, fetchImpl = fetch, userAgent } = options;
   const headers: Record<string, string> = {
     Accept: 'application/json',
   };
+  if (userAgent !== undefined) {
+    headers['User-Agent'] = userAgent;
+  }
   if (source.apiKey.length > 0) {
     headers['Authorization'] = `Bearer ${source.apiKey}`;
   }
@@ -293,7 +373,7 @@ export async function fetchCustomRegistry(
 
   const out: Record<string, CustomRegistryProviderEntry> = {};
   for (const [key, raw] of Object.entries(payload)) {
-    const entry = toProviderEntry(raw);
+    const entry = toProviderEntry(raw, key);
     if (entry === undefined) {
       // Skip invalid/unknown provider entries instead of aborting the whole
       // fetch, mirroring `toModelEntry`'s skip-on-invalid behavior. This keeps
@@ -305,6 +385,12 @@ export async function fetchCustomRegistry(
       continue;
     }
     out[key] = entry;
+  }
+
+  if (Object.keys(out).length === 0) {
+    throw new Error(
+      `Custom registry at ${source.url} did not contain any supported providers with a valid API URL and at least one model.`,
+    );
   }
 
   return out;
@@ -319,7 +405,11 @@ export async function fetchCustomRegistry(
 export function capabilitiesFromCustomEntry(model: CustomRegistryModelEntry): string[] {
   const caps = new Set<string>();
   if (model.tool_call === true) caps.add('tool_use');
-  if (model.reasoning === true) caps.add('thinking');
+  // Declaring concrete effort levels implies thinking support even when the
+  // legacy `reasoning` boolean is absent.
+  if (model.reasoning === true || (model.support_efforts?.length ?? 0) > 0) {
+    caps.add('thinking');
+  }
   if (model.modalities?.input?.includes('image') === true) caps.add('image_in');
   if (model.modalities?.input?.includes('video') === true) caps.add('video_in');
   if (model.modalities?.output?.includes('image') === true) caps.add('image_out');
@@ -331,19 +421,19 @@ function hasRichCapabilityHints(model: CustomRegistryModelEntry): boolean {
   return (
     typeof model.tool_call === 'boolean' ||
     typeof model.reasoning === 'boolean' ||
-    model.modalities !== undefined
+    model.modalities !== undefined ||
+    model.support_efforts !== undefined
   );
 }
 
 function resolveMaxContextSize(model: CustomRegistryModelEntry): number {
   const context = model.limit?.context;
-  const output = model.limit?.output;
   if (typeof context === 'number' && Number.isInteger(context) && context > 0) {
     return context;
   }
-  if (typeof output === 'number' && Number.isInteger(output) && output > 0) {
-    return output;
-  }
+  // Output-token limits are not context-window limits. Treating a common
+  // 4K/8K output limit as the total context makes compaction happen far too
+  // early for otherwise large-context third-party models.
   return CUSTOM_REGISTRY_DEFAULT_MAX_CONTEXT;
 }
 
@@ -369,10 +459,17 @@ export function applyCustomRegistryProvider(
 ): void {
   const providerKey = entry.id;
 
+  const usesVertexProjectAuth =
+    entry.type === 'vertexai' && (entry.project !== undefined || entry.location !== undefined);
   config.providers[providerKey] = {
     type: entry.type,
     baseUrl: entry.api,
-    apiKey: source.apiKey,
+    // Vertex project/location authentication is mutually exclusive with API
+    // keys in @google/genai. The registry key remains in `source` for refresh.
+    ...(!usesVertexProjectAuth ? { apiKey: source.apiKey } : {}),
+    ...(entry.type === 'vertexai' ? { vertexai: true } : {}),
+    ...(entry.project !== undefined ? { project: entry.project } : {}),
+    ...(entry.location !== undefined ? { location: entry.location } : {}),
     source,
   };
 
@@ -404,6 +501,8 @@ export function applyCustomRegistryProvider(
       maxContextSize,
       capabilities,
       displayName,
+      ...(model.support_efforts !== undefined ? { supportEfforts: model.support_efforts } : {}),
+      ...(model.default_effort !== undefined ? { defaultEffort: model.default_effort } : {}),
     };
     existingModels[aliasKey] = mergeRefreshedModelAlias(
       existing,

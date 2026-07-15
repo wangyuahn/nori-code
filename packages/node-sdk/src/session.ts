@@ -4,7 +4,7 @@ import {
   type AgentContextData,
   type KimiErrorCode,
   type SwarmModeTrigger,
-} from '@moonshot-ai/agent-core';
+} from '@nori-code/agent-core';
 
 import { type ApprovalHandler, type Event, type QuestionHandler } from '#/events';
 import type { SDKRpcClientBase } from '#/rpc';

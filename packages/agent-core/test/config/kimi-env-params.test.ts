@@ -1,4 +1,4 @@
-import { type ChatProvider, KimiChatProvider } from '@moonshot-ai/kosong';
+import { type ChatProvider, KimiChatProvider } from '@nori-code/kosong';
 import { describe, expect, it } from 'vitest';
 
 import {

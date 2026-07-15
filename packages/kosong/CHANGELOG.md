@@ -1,4 +1,4 @@
-# @moonshot-ai/kosong
+# @nori-code/kosong
 
 ## 0.5.1
 

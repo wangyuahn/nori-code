@@ -1,4 +1,4 @@
-# @moonshot-ai/pi-tui
+# @nori-code/pi-tui
 
 ## 0.80.3
 

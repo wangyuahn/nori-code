@@ -1,6 +1,6 @@
 import { Disposable, InstantiationType, registerSingleton } from '../../di';
 import type { KimiConfig, ProviderConfig } from '../../config';
-import type { ConfigResponse, PatchConfigRequest } from '@moonshot-ai/protocol';
+import type { ConfigResponse, PatchConfigRequest } from '@nori-code/protocol';
 
 import { ICoreProcessService } from '../coreProcess/coreProcess';
 import { IEventService } from '../event/event';

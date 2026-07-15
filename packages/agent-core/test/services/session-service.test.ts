@@ -15,7 +15,7 @@ import {
   type UpdateSessionMetadataPayload,
 } from '../../src';
 import { TestInstantiationService } from '../../src/di/test';
-import { emptySessionUsage, type Event, type Session } from '@moonshot-ai/protocol';
+import { emptySessionUsage, type Event, type Session } from '@nori-code/protocol';
 
 import {
   IApprovalService,
@@ -39,6 +39,7 @@ interface FakeBridgeState {
   createPayloads: CreateSessionPayload[];
   metas: Map<string, SessionMeta>;
   archivedIds: string[];
+  deletedIds: string[];
   closedIds: string[];
   renamedTitles: Map<string, string>;
   metadataPatches: Map<string, UpdateSessionMetadataPayload['metadata']>;
@@ -131,6 +132,10 @@ function makeFakeBridge(state: FakeBridgeState): ICoreProcessService {
     archiveSession: vi.fn().mockImplementation(async ({ sessionId }: { sessionId: string }) => {
       state.archivedIds.push(sessionId);
     }),
+    deleteSession: vi.fn().mockImplementation(async ({ sessionId }: { sessionId: string }) => {
+      state.deletedIds.push(sessionId);
+      state.sessions = state.sessions.filter(session => session.id !== sessionId);
+    }),
     renameSession: vi
       .fn()
       .mockImplementation(async (payload: WithSessionId<RenameSessionPayload>) => {
@@ -197,6 +202,13 @@ function makeFakeBridge(state: FakeBridgeState): ICoreProcessService {
     }),
     getPermission: vi.fn().mockResolvedValue({ mode: 'manual' }),
     getPlan: vi.fn().mockResolvedValue(null),
+    getUsage: vi.fn().mockResolvedValue({}),
+    getNoriRuntimeSettings: vi.fn().mockResolvedValue({
+      coderWriteEnabled: true,
+      toolsReadonly: false,
+      maxSwarmDepth: 2,
+    }),
+    getGoal: vi.fn().mockResolvedValue({ goal: null }),
   };
   return {
     rpc: rpc as CoreRPC,
@@ -212,6 +224,7 @@ function freshState(): FakeBridgeState {
     createPayloads: [],
     metas: new Map(),
     archivedIds: [],
+    deletedIds: [],
     closedIds: [],
     renamedTitles: new Map(),
     metadataPatches: new Map(),
@@ -271,10 +284,20 @@ function makePromptServiceStub(): {
 } {
   const calls: Array<{ sid: string; patch: Record<string, unknown>; source: string; promptId: string | undefined }> = [];
   const activePromptIds = new Map<string, string | undefined>();
+  const agentStates = new Map<string, import('../../src/services/prompt/prompt').AgentStateSnapshot>();
   const applyAgentState = vi
     .fn()
     .mockImplementation(async (sid: string, patch: Record<string, unknown>, source: string, promptId?: string) => {
       calls.push({ sid, patch, source, promptId });
+      const current = agentStates.get(sid) ?? {};
+      agentStates.set(sid, {
+        ...current,
+        ...(typeof patch['model'] === 'string' ? { model: patch['model'] } : {}),
+        ...(typeof patch['thinking'] === 'string' ? { thinking: patch['thinking'] } : {}),
+        ...(typeof patch['permission_mode'] === 'string' ? { permissionMode: patch['permission_mode'] } : {}),
+        ...(typeof patch['plan_mode'] === 'boolean' ? { planMode: patch['plan_mode'] } : {}),
+        ...(typeof patch['swarm_mode'] === 'boolean' ? { swarmMode: patch['swarm_mode'] } : {}),
+      });
     });
   const emitter = new Emitter<never>();
   const promptService: IPromptService = {
@@ -289,7 +312,7 @@ function makePromptServiceStub(): {
     applyAgentState,
     onDidComplete: emitter.event as unknown as IPromptService['onDidComplete'],
     onDidAbort: emitter.event as unknown as IPromptService['onDidAbort'],
-    getAgentStateSnapshot: vi.fn().mockReturnValue(undefined) as unknown as IPromptService['getAgentStateSnapshot'],
+    getAgentStateSnapshot: vi.fn().mockImplementation((sid: string) => agentStates.get(sid)) as unknown as IPromptService['getAgentStateSnapshot'],
   };
   return { promptService, calls, activePromptIds };
 }
@@ -703,10 +726,11 @@ describe('SessionService.update', () => {
   });
 
   it('forwards agent_config.model through IPromptService.applyAgentState (source="meta")', async () => {
-    await svc.update(created.id, { agent_config: { model: 'kimi-code/k9' } });
+    const updated = await svc.update(created.id, { agent_config: { model: 'kimi-code/k9' } });
     expect(promptStub.calls).toEqual([
       { sid: created.id, patch: { model: 'kimi-code/k9' }, source: 'meta', promptId: undefined },
     ]);
+    expect(updated.agent_config.model).toBe('kimi-code/k9');
   });
 
   it('ignores agent_config.model when empty string (legacy quirk preserved)', async () => {
@@ -888,6 +912,20 @@ describe('SessionService.archive', () => {
 
   it('throws SessionNotFoundError on a missing id', async () => {
     await expect(svc.archive('does-not-exist')).rejects.toBeInstanceOf(SessionNotFoundError);
+  });
+});
+
+describe('SessionService.delete', () => {
+  it('calls bridge.rpc.deleteSession and permanently removes the session', async () => {
+    const created = await svc.create({ metadata: { cwd: '/tmp/delete' } });
+    const result = await svc.delete(created.id);
+    expect(result).toEqual({ deleted: true });
+    expect(state.deletedIds).toEqual([created.id]);
+    await expect(svc.get(created.id)).rejects.toBeInstanceOf(SessionNotFoundError);
+  });
+
+  it('throws SessionNotFoundError on a missing id', async () => {
+    await expect(svc.delete('does-not-exist')).rejects.toBeInstanceOf(SessionNotFoundError);
   });
 });
 

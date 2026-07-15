@@ -1,4 +1,4 @@
-# @moonshot-ai/agent-core
+# @nori-code/agent-core
 
 ## 0.15.0
 
@@ -13,8 +13,8 @@
 - [#1269](https://github.com/MoonshotAI/kimi-code/pull/1269) [`bf35f63`](https://github.com/MoonshotAI/kimi-code/commit/bf35f63c5d9b53625f3bf04f50b9a0bb49ced2c9) - Honor `base_url` for the `google-genai` and `vertexai` providers. A configured base URL was previously ignored and requests always went to `generativelanguage.googleapis.com`; it is now forwarded to the Google GenAI SDK (with `GOOGLE_GEMINI_BASE_URL` / `GOOGLE_VERTEX_BASE_URL` env fallbacks), so Gemini-compatible proxies and gateways can be used. Give the host root only — the SDK appends the API version segment itself.
 
 - Updated dependencies [[`b905dd4`](https://github.com/MoonshotAI/kimi-code/commit/b905dd49108c567d0fecd38a096808c121672795), [`bf35f63`](https://github.com/MoonshotAI/kimi-code/commit/bf35f63c5d9b53625f3bf04f50b9a0bb49ced2c9), [`074bb9b`](https://github.com/MoonshotAI/kimi-code/commit/074bb9ba1359dd3ea2a55eff81986f2bb4772793)]:
-  - @moonshot-ai/protocol@0.3.2
-  - @moonshot-ai/kosong@0.5.1
+  - @nori-code/protocol@0.3.2
+  - @nori-code/kosong@0.5.1
 
 ## 0.14.3
 
@@ -23,7 +23,7 @@
 - [#1221](https://github.com/MoonshotAI/kimi-code/pull/1221) [`a3f9cec`](https://github.com/MoonshotAI/kimi-code/commit/a3f9cec8a975f11e37e992e42f954789ed394207) - Fix duplicate workspaces showing in the web sidebar when the same folder is registered more than once.
 
 - Updated dependencies [[`ceb27f5`](https://github.com/MoonshotAI/kimi-code/commit/ceb27f5e449e177493f320d90e292487a8fc3410)]:
-  - @moonshot-ai/protocol@0.3.1
+  - @nori-code/protocol@0.3.1
 
 ## 0.14.2
 
@@ -40,7 +40,7 @@
 - [#1131](https://github.com/MoonshotAI/kimi-code/pull/1131) [`76c643b`](https://github.com/MoonshotAI/kimi-code/commit/76c643bcb6da447c8c47728b4f58512a7a11cfa6) - Cap completion tokens to the remaining context window for chat-completions providers, avoiding context-overflow and invalid max_tokens errors.
 
 - Updated dependencies [[`76c643b`](https://github.com/MoonshotAI/kimi-code/commit/76c643bcb6da447c8c47728b4f58512a7a11cfa6)]:
-  - @moonshot-ai/kosong@0.5.0
+  - @nori-code/kosong@0.5.0
 
 ## 0.14.0
 
@@ -69,8 +69,8 @@
 - [#823](https://github.com/MoonshotAI/kimi-code/pull/823) [`90fc04b`](https://github.com/MoonshotAI/kimi-code/commit/90fc04b7072ec20055022c50583d35286ca715a6) - Remove redundant LLM request logging context plumbing.
 
 - Updated dependencies [[`d0d5821`](https://github.com/MoonshotAI/kimi-code/commit/d0d58219007cd9d7355f1ea8900e9777b66abda2), [`b45672c`](https://github.com/MoonshotAI/kimi-code/commit/b45672cdaac9959024c3ae36bf35b16a423aa1dc)]:
-  - @moonshot-ai/kosong@0.4.6
-  - @moonshot-ai/kaos@0.1.6
+  - @nori-code/kosong@0.4.6
+  - @nori-code/kaos@0.1.6
 
 ## 0.13.0
 
@@ -103,8 +103,8 @@
 - [#787](https://github.com/MoonshotAI/kimi-code/pull/787) [`1eb363f`](https://github.com/MoonshotAI/kimi-code/commit/1eb363f655aa44abc1e5c3af89016f00764ecc95) - Extend the same-language rule to the model's reasoning, so thinking follows the user's language while keeping code and technical terms in their original form.
 
 - Updated dependencies [[`73be7ba`](https://github.com/MoonshotAI/kimi-code/commit/73be7ba17d41df7999d4c1fba410994e7024eb7b), [`18f299f`](https://github.com/MoonshotAI/kimi-code/commit/18f299fd0b266545a1f7cebae9f58b83b9d9776e), [`ecd7a0a`](https://github.com/MoonshotAI/kimi-code/commit/ecd7a0afb646d14a14c780a4088fd8a59da134ad)]:
-  - @moonshot-ai/kosong@0.4.5
-  - @moonshot-ai/protocol@0.3.0
+  - @nori-code/kosong@0.4.5
+  - @nori-code/protocol@0.3.0
 
 ## 0.12.3
 
@@ -135,8 +135,8 @@
 - [#641](https://github.com/MoonshotAI/kimi-code/pull/641) [`30459af`](https://github.com/MoonshotAI/kimi-code/commit/30459af6abc8308e7f13822d9dbef3a5be80dd4a) - Stop background tasks by default when sessions close.
 
 - Updated dependencies [[`d8cdebf`](https://github.com/MoonshotAI/kimi-code/commit/d8cdebf3c03efa3a3dfa4f1deb3186a8f8f7f5ef), [`0381329`](https://github.com/MoonshotAI/kimi-code/commit/0381329570d3dca9fd861761c843968cc1c5e927), [`ff80327`](https://github.com/MoonshotAI/kimi-code/commit/ff803273440f3a2ff53d2c529c6fc892fde1d93f), [`a2c5e1b`](https://github.com/MoonshotAI/kimi-code/commit/a2c5e1be25484f7c52f729e333196c485f83b84c)]:
-  - @moonshot-ai/kosong@0.4.4
-  - @moonshot-ai/kaos@0.1.5
+  - @nori-code/kosong@0.4.4
+  - @nori-code/kaos@0.1.5
 
 ## 0.12.1
 
@@ -155,8 +155,8 @@
 - [#606](https://github.com/MoonshotAI/kimi-code/pull/606) [`a1b419a`](https://github.com/MoonshotAI/kimi-code/commit/a1b419ab5901d16ab9527eef62bcd468e76b27a3) - YOLO mode no longer asks before writing or editing files outside the working directory.
 
 - Updated dependencies [[`b747c6a`](https://github.com/MoonshotAI/kimi-code/commit/b747c6a9501e208250d09cf9a2810c885c6ce91b), [`4603d8a`](https://github.com/MoonshotAI/kimi-code/commit/4603d8ad6e92a303f396f3d79d4e4d212d1c4b14)]:
-  - @moonshot-ai/kosong@0.4.2
-  - @moonshot-ai/protocol@0.2.0
+  - @nori-code/kosong@0.4.2
+  - @nori-code/protocol@0.2.0
 
 ## 0.12.0
 
@@ -171,7 +171,7 @@
 - [#584](https://github.com/MoonshotAI/kimi-code/pull/584) [`11bb62c`](https://github.com/MoonshotAI/kimi-code/commit/11bb62c12f38d380a0ca1bb89ee2df67f93300e1) - Allow obsolete experimental config entries to remain without blocking startup.
 
 - Updated dependencies [[`aa3471f`](https://github.com/MoonshotAI/kimi-code/commit/aa3471f5d3d2960834ba3239c0b8459144bc79fa)]:
-  - @moonshot-ai/kosong@0.4.1
+  - @nori-code/kosong@0.4.1
 
 ## 0.11.0
 
@@ -198,8 +198,8 @@
 - [#506](https://github.com/MoonshotAI/kimi-code/pull/506) [`f09ec7b`](https://github.com/MoonshotAI/kimi-code/commit/f09ec7bbb59af42805a93df2993301dbd317ff2d) - Remove the per-turn auto-compaction limit so long conversations can keep compacting instead of failing early.
 
 - Updated dependencies [[`3b62b12`](https://github.com/MoonshotAI/kimi-code/commit/3b62b123e68cc4543bfa8fa376c7e8a24fee0afb), [`72c4b0a`](https://github.com/MoonshotAI/kimi-code/commit/72c4b0adaa6ae0466875cd8e4066c42456195f21)]:
-  - @moonshot-ai/kaos@0.1.4
-  - @moonshot-ai/kosong@0.4.0
+  - @nori-code/kaos@0.1.4
+  - @nori-code/kosong@0.4.0
 
 ## 0.10.0
 
@@ -222,7 +222,7 @@
 - [#464](https://github.com/MoonshotAI/kimi-code/pull/464) [`4f9977d`](https://github.com/MoonshotAI/kimi-code/commit/4f9977d4dcd2df14e6a310396c37af170b2eac50) - Preserve thinking effort when compacting long conversations.
 
 - Updated dependencies [[`3a98713`](https://github.com/MoonshotAI/kimi-code/commit/3a987130500fe5b403b696850165735c7d0ee076), [`93eb70a`](https://github.com/MoonshotAI/kimi-code/commit/93eb70a727c9724e19a31b0d2fbebb78b7390c78)]:
-  - @moonshot-ai/kosong@0.3.4
+  - @nori-code/kosong@0.3.4
 
 ## 0.9.0
 
@@ -245,7 +245,7 @@
 - [#430](https://github.com/MoonshotAI/kimi-code/pull/430) [`be0da5f`](https://github.com/MoonshotAI/kimi-code/commit/be0da5ff39641e117d60045a43a7d5d2e0b85b75) - Fail early when Git Bash is missing on Windows before starting CLI sessions.
 
 - Updated dependencies [[`4598262`](https://github.com/MoonshotAI/kimi-code/commit/459826292f855592288bcfddaa1c72529a6d8c64)]:
-  - @moonshot-ai/kosong@0.3.3
+  - @nori-code/kosong@0.3.3
 
 ## 0.8.0
 
@@ -264,7 +264,7 @@
 - [#365](https://github.com/MoonshotAI/kimi-code/pull/365) [`6a22523`](https://github.com/MoonshotAI/kimi-code/commit/6a2252343a0d624b326b2d369ec908bc8d60092d) - Use configured model output limits for completion token caps.
 
 - Updated dependencies [[`6a22523`](https://github.com/MoonshotAI/kimi-code/commit/6a2252343a0d624b326b2d369ec908bc8d60092d)]:
-  - @moonshot-ai/kosong@0.3.2
+  - @nori-code/kosong@0.3.2
 
 ## 0.7.0
 
@@ -303,7 +303,7 @@
 - [#333](https://github.com/MoonshotAI/kimi-code/pull/333) [`1178c5c`](https://github.com/MoonshotAI/kimi-code/commit/1178c5cd148d9d5851574afaafb986be1dfe9b63) - Remind the model to refresh TodoList during long-running tasks and strengthen TodoList progress-tracking guidance.
 
 - Updated dependencies [[`8809f3e`](https://github.com/MoonshotAI/kimi-code/commit/8809f3eb114172ac64cefe43bbf9b9257c5245c0)]:
-  - @moonshot-ai/kosong@0.3.1
+  - @nori-code/kosong@0.3.1
 
 ## 0.6.0
 
@@ -320,8 +320,8 @@
 - [#267](https://github.com/MoonshotAI/kimi-code/pull/267) [`e2e1728`](https://github.com/MoonshotAI/kimi-code/commit/e2e17289fca9bcb23f05cd77f7bcb9cba5db0325) - Report truncated compaction summaries clearly and apply valid completion token budgets across supported providers.
 
 - Updated dependencies [[`a24bfb1`](https://github.com/MoonshotAI/kimi-code/commit/a24bfb1df38e58120827a1d8ed881724af2e7b23), [`a580cd3`](https://github.com/MoonshotAI/kimi-code/commit/a580cd3a98664e18642e0e856aeaa9b71ba93516), [`e2e1728`](https://github.com/MoonshotAI/kimi-code/commit/e2e17289fca9bcb23f05cd77f7bcb9cba5db0325)]:
-  - @moonshot-ai/kosong@0.3.0
-  - @moonshot-ai/kaos@0.1.3
+  - @nori-code/kosong@0.3.0
+  - @nori-code/kaos@0.1.3
 
 ## 0.5.0
 
@@ -366,7 +366,7 @@
 - [#200](https://github.com/MoonshotAI/kimi-code/pull/200) [`5159af3`](https://github.com/MoonshotAI/kimi-code/commit/5159af341c7d388a158e41afb470a2281333f329) - Keep blocked prompt hook conversations available to subsequent model turns.
 
 - Updated dependencies [[`2388f20`](https://github.com/MoonshotAI/kimi-code/commit/2388f20bb3d039e89caefca159801059b90dc64a), [`13e0fff`](https://github.com/MoonshotAI/kimi-code/commit/13e0fff462e2ddbec5fb4c9de8ed8e6068db09f1), [`e280f33`](https://github.com/MoonshotAI/kimi-code/commit/e280f33daf7fbf1271c872dcb224737ec9518f73), [`3da4dae`](https://github.com/MoonshotAI/kimi-code/commit/3da4daeadee39573c7eeede30fa9465b411be3e2)]:
-  - @moonshot-ai/kosong@0.2.3
+  - @nori-code/kosong@0.2.3
 
 ## 0.4.0
 
@@ -407,8 +407,8 @@
 - [#84](https://github.com/MoonshotAI/kimi-code/pull/84) [`e5717b7`](https://github.com/MoonshotAI/kimi-code/commit/e5717b7261599f4b4379aa34eb0b5fdf2dd93898) - Unify path normalization by replacing ad-hoc `toForwardSlashes` helpers with `pathe`. Remove unnecessary `node:path/win32` branching in path-access policies and tools, and inline unused `joinPath` wrappers. Platform-specific path separators are now handled consistently through a single module.
 
 - Updated dependencies [[`4e458d6`](https://github.com/MoonshotAI/kimi-code/commit/4e458d63643a56a2fb1ba9f908c774e56eef1c75), [`e5717b7`](https://github.com/MoonshotAI/kimi-code/commit/e5717b7261599f4b4379aa34eb0b5fdf2dd93898)]:
-  - @moonshot-ai/kosong@0.2.2
-  - @moonshot-ai/kaos@0.1.2
+  - @nori-code/kosong@0.2.2
+  - @nori-code/kaos@0.1.2
 
 ## 0.2.1
 
@@ -427,7 +427,7 @@
 - [#85](https://github.com/MoonshotAI/kimi-code/pull/85) [`2bb50a3`](https://github.com/MoonshotAI/kimi-code/commit/2bb50a38d8379e2fac57547b1a563722f713c8fd) - Avoid overly small local completion caps that can truncate reasoning before summaries are produced.
 
 - Updated dependencies [[`d95b013`](https://github.com/MoonshotAI/kimi-code/commit/d95b01342a7921f0863ceb37abad7984d0245509), [`61f7d0e`](https://github.com/MoonshotAI/kimi-code/commit/61f7d0e7a2b9933bdbe7eef9177e67e7386154a2)]:
-  - @moonshot-ai/kosong@0.2.1
+  - @nori-code/kosong@0.2.1
 
 ## 0.2.0
 
@@ -450,4 +450,4 @@
 - [#17](https://github.com/MoonshotAI/kimi-code/pull/17) [`bfbd522`](https://github.com/MoonshotAI/kimi-code/commit/bfbd522a7160e597d673550f09fd4af089bfde34) - Let Kimi requests use the remaining context window for completion tokens by default while keeping explicit environment limits as hard caps.
 
 - Updated dependencies [[`a200a29`](https://github.com/MoonshotAI/kimi-code/commit/a200a297ac8986ec4baa8d2cdc881ef71bc3abfc), [`c4dd1c7`](https://github.com/MoonshotAI/kimi-code/commit/c4dd1c7ff298290ee17d4a6676f93284621f32e8), [`df7a9ca`](https://github.com/MoonshotAI/kimi-code/commit/df7a9cab606e0f152bc45b1d1645d76210b1e0c4)]:
-  - @moonshot-ai/kosong@0.2.0
+  - @nori-code/kosong@0.2.0

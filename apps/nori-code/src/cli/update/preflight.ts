@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 
-import { log, type Logger } from '@moonshot-ai/kimi-code-sdk';
-import type { TelemetryProperties } from '@moonshot-ai/kimi-telemetry';
+import { log, type Logger } from '@nori-code/sdk';
+import type { TelemetryProperties } from '@nori-code/telemetry';
 
 import {
   NATIVE_INSTALL_COMMAND_UNIX,
@@ -124,7 +124,7 @@ export function spawnForSource(
     case 'bun-global':
       return { cmd: bunCommand(platform), args: ['add', '-g', `${NPM_PACKAGE_NAME}@${version}`] };
     case 'homebrew':
-      return { cmd: 'brew', args: ['upgrade', 'kimi-code'] };
+      return { cmd: 'brew', args: ['upgrade', 'nori-code'] };
     case 'native':
       // `curl … | bash` reports only the trailing bash's exit status, so a
       // failed download (curl can't connect → empty stdin → bash exits 0)
@@ -403,7 +403,7 @@ async function showPendingBackgroundInstallNotice(
 /**
  * `KIMI_CODE_NO_AUTO_UPDATE` (or the legacy `KIMI_CLI_NO_AUTO_UPDATE` alias)
  * fully disables the update preflight — no check, no background install, no
- * prompt. Migrated from kimi-cli, where the variable gated all auto-update
+ * prompt. This variable gates all auto-update
  * behavior. Accepts the usual truthy values (`1`/`true`/`yes`/`on`).
  */
 function isAutoUpdateDisabledByEnv(env: NodeJS.ProcessEnv = process.env): boolean {

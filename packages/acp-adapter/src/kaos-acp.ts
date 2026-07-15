@@ -26,7 +26,7 @@ import {
   type Kaos,
   type KaosProcess,
   type StatResult,
-} from '@moonshot-ai/kaos';
+} from '@nori-code/kaos';
 
 /**
  * `Kaos` that routes `read*` / `write*` through the ACP reverse-RPC

@@ -1,9 +1,9 @@
-import type { GoalSnapshot } from '@moonshot-ai/kimi-code-sdk';
+import type { GoalSnapshot } from '@nori-code/sdk';
 
 import { parseGoalCommand } from '#/tui/commands/index';
 
 /**
- * Headless goal-mode support for the `kimi -p "/goal <objective>"` prompt path.
+ * Headless goal-mode support for the `nori -p "/goal <objective>"` prompt path.
  *
  * The goal driver keeps the prompt's turn-run alive across continuation turns
  * until the goal reaches a terminal state, so the existing prompt-turn waiter

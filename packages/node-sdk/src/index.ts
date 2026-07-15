@@ -32,6 +32,7 @@ export type {
   Catalog,
   CatalogModel,
   CatalogProviderEntry,
+  FetchCatalogOptions,
 } from '#/catalog';
 
 export {
@@ -45,7 +46,7 @@ export {
   fromKimiErrorPayload,
   isKimiError,
   toKimiErrorPayload,
-} from '@moonshot-ai/agent-core';
+} from '@nori-code/agent-core';
 
 // Diagnostic logging — public surface only.
 // RootLogger / getRootLogger / LoggingConfig stay inside agent-core.
@@ -55,17 +56,17 @@ export {
   redact,
   resolveGlobalLogPath,
   resolveKimiHome,
-} from '@moonshot-ai/agent-core';
-export type { LogContext, LogLevel, LogPayload, Logger } from '@moonshot-ai/agent-core';
+} from '@nori-code/agent-core';
+export type { LogContext, LogLevel, LogPayload, Logger } from '@nori-code/agent-core';
 
 // Host-side config helpers — safe config reader + config path resolution, used
 // by hosts (e.g. the CLI's server telemetry bootstrap) that need to inspect
 // config without spinning up a full KimiCore.
-export { effectiveModelAlias, loadRuntimeConfigSafe, resolveConfigPath } from '@moonshot-ai/agent-core';
+export { effectiveModelAlias, loadRuntimeConfigSafe, resolveConfigPath } from '@nori-code/agent-core';
 
 // Process-wide HTTP proxy bootstrap — installed once at CLI startup so all
 // outbound fetch honors HTTP_PROXY / HTTPS_PROXY / NO_PROXY.
-export { installGlobalProxyDispatcher } from '@moonshot-ai/agent-core';
+export { installGlobalProxyDispatcher } from '@nori-code/agent-core';
 
 // Image compression — ingestion sites (e.g. the CLI's clipboard paste, the ACP
 // adapter) shrink oversized images while constructing the content part, before
@@ -75,12 +76,12 @@ export {
   compressBase64ForModel,
   IMAGE_BYTE_BUDGET,
   MAX_IMAGE_EDGE_PX,
-} from '@moonshot-ai/agent-core';
+} from '@nori-code/agent-core';
 export type {
   CompressImageOptions,
   CompressImageResult,
   CompressBase64Result,
-} from '@moonshot-ai/agent-core';
+} from '@nori-code/agent-core';
 
 // Experimental feature flags — types only. Resolved values come from
 // `KimiHarness.getExperimentalFeatures()` over RPC, not from a re-exported runtime value.
@@ -92,7 +93,7 @@ export type {
   FlagDefinitionInput,
   FlagId,
   FlagSurface,
-} from '@moonshot-ai/agent-core';
+} from '@nori-code/agent-core';
 
 export type {
   KimiAuthCompleteFeedbackUploadInput,

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Nori N logo">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#202020"/>
+      <stop offset="1" stop-color="#0f0f0f"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#d8ddd9"/>
+    </linearGradient>
+  </defs>
+  <rect x="48" y="48" width="928" height="928" rx="232" fill="url(#bg)"/>
+  <rect x="49.5" y="49.5" width="925" height="925" rx="230.5" fill="none" stroke="#3a3a3a" stroke-width="3"/>
+  <path d="M274 742V282c0-38 31-69 69-69h22c24 0 47 13 60 33l230 350V282c0-38 31-69 69-69s69 31 69 69v460c0 38-31 69-69 69h-18c-25 0-48-13-61-34L412 424v318c0 38-31 69-69 69s-69-31-69-69Z" fill="url(#mark)"/>
+  <circle cx="793" cy="213" r="34" fill="#9be8b0"/>
+</svg>

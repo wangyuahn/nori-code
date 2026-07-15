@@ -1,4 +1,4 @@
-import { Markdown, visibleWidth } from '@moonshot-ai/pi-tui';
+import { Markdown, visibleWidth } from '@nori-code/pi-tui';
 import * as cliHighlight from 'cli-highlight';
 import { describe, expect, it, vi } from 'vitest';
 

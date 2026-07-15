@@ -34,8 +34,8 @@ import {
   activateSkillRequestSchema,
   activateSkillResultSchema,
   listSkillsResponseSchema,
-} from '@moonshot-ai/protocol';
-import { ISkillService, SessionNotFoundError, SkillNotActivatableError, SkillNotFoundError, type IInstantiationService } from '@moonshot-ai/agent-core';
+} from '@nori-code/protocol';
+import { ISkillService, SessionNotFoundError, SkillNotActivatableError, SkillNotFoundError, type IInstantiationService } from '@nori-code/agent-core';
 import { z } from 'zod';
 
 

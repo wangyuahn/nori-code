@@ -1,17 +1,17 @@
 {
-  "name": "@moonshot-ai/protocol",
+  "name": "@nori-code/protocol",
   "version": "0.3.2",
   "private": true,
-  "description": "Shared REST + WS protocol schemas (envelope, error codes, pagination, ws-control) for the kimi-code daemon.",
+  "description": "Shared REST and WebSocket protocol schemas for Nori Code.",
   "license": "MIT",
-  "author": "Moonshot AI",
+  "author": "Nori",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MoonshotAI/kimi-code.git",
+    "url": "git+https://github.com/wangyuahn/nori-code.git",
     "directory": "packages/protocol"
   },
   "bugs": {
-    "url": "https://github.com/MoonshotAI/kimi-code/issues"
+    "url": "https://github.com/wangyuahn/nori-code/issues"
   },
   "type": "module",
   "imports": {

@@ -12,7 +12,7 @@ import {
   isContextOverflowStatusError,
   type ContentPart,
   type TokenUsage,
-} from '@moonshot-ai/kosong';
+} from '@nori-code/kosong';
 import { basename } from 'pathe';
 
 import type { Agent } from '..';

@@ -38,7 +38,7 @@ import type {
   Event,
   SessionSummary,
 } from '../../src';
-import type { PromptSubmission, Session } from '@moonshot-ai/protocol';
+import type { PromptSubmission, Session } from '@nori-code/protocol';
 
 import {
   type IAuthSummaryService,

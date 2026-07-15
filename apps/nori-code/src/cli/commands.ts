@@ -1,25 +1,21 @@
 import { CLI_COMMAND_NAME } from '#/constant/app';
-import { registerMigrateCommand } from '#/migration/index';
 import { Command, Option } from 'commander';
 
 import type { CLIOptions, CLIPermissionMode } from './options';
 import { registerAcpCommand } from './sub/acp';
 import { registerDoctorCommand } from './sub/doctor';
 import { registerExportCommand } from './sub/export';
-import { registerLoginCommand } from './sub/login';
 import { registerProviderCommand } from './sub/provider';
 import { registerServerCommand } from './sub/server';
 import { registerVisCommand } from './sub/vis';
 
 export type MainCommandHandler = (opts: CLIOptions) => void;
-export type MigrateCommandHandler = () => void;
 export type PluginNodeRunnerHandler = (entry: string, args: readonly string[]) => void;
 export type UpgradeCommandHandler = () => void | Promise<void>;
 
 export function createProgram(
   version: string,
   onMain: MainCommandHandler,
-  onMigrate: MigrateCommandHandler,
   onPluginNodeRunner: PluginNodeRunnerHandler = () => {},
   onUpgrade: UpgradeCommandHandler = () => {},
 ): Command {
@@ -52,8 +48,10 @@ export function createProgram(
         'Set permission mode. Supported modes: auto (auto-approve with notifications), yolo (skip all approvals).',
       ).choices(['auto', 'yolo'] as const),
     )
-    .addOption(new Option('--yolo').hideHelp().default(false))
+    .addOption(new Option('-y, --yolo').hideHelp().default(false))
     .addOption(new Option('--auto').hideHelp().default(false))
+    .addOption(new Option('--yes').hideHelp().default(false))
+    .addOption(new Option('--auto-approve').hideHelp().default(false))
     .addOption(
       new Option(
         '-m, --model <model>',
@@ -94,10 +92,8 @@ export function createProgram(
   registerProviderCommand(program);
   registerAcpCommand(program);
   registerServerCommand(program);
-  registerLoginCommand(program);
   registerDoctorCommand(program);
   registerVisCommand(program);
-  registerMigrateCommand(program, onMigrate);
   program
     .command('upgrade')
     .alias('update')
@@ -130,7 +126,7 @@ export function createProgram(
     let permission: CLIPermissionMode | undefined;
     if (raw['permission'] !== undefined) {
       permission = raw['permission'] as CLIPermissionMode;
-    } else if (raw['yolo'] === true) {
+    } else if (raw['yolo'] === true || raw['yes'] === true || raw['autoApprove'] === true) {
       permission = 'yolo';
     } else if (raw['auto'] === true) {
       permission = 'auto';

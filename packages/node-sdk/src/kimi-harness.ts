@@ -1,10 +1,10 @@
-import type { Kaos } from '@moonshot-ai/kaos';
+import type { Kaos } from '@nori-code/kaos';
 import {
   ErrorCodes,
   KimiError,
   withTelemetryContext,
   type ExperimentalFeatureState,
-} from '@moonshot-ai/agent-core';
+} from '@nori-code/agent-core';
 
 import { Session } from '#/session';
 import type { KimiAuthFacade } from '#/auth';

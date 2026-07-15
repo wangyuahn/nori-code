@@ -26,7 +26,7 @@ try {
   // runners (.github/workflows/_native-build.yml), which run this generator.
   // A single command string (not an args array) avoids the args+shell
   // deprecation; the command is static (no injection surface).
-  execSync('pnpm --filter @moonshot-ai/vis-web exec vite build', {
+  execSync('pnpm --filter @nori-code/vis-web exec vite build', {
     stdio: 'inherit',
     cwd: repoRoot,
     env: { ...process.env, VIS_SINGLEFILE: '1' },

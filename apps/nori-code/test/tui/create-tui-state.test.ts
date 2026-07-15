@@ -43,8 +43,7 @@ describe('createTUIState', () => {
       initialAppState: fakeInitialAppState(),
       startup: {
         continueLast: false,
-        yolo: false,
-        auto: false,
+        permission: undefined,
         plan: false,
       },
     };

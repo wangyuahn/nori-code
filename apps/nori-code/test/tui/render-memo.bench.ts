@@ -11,12 +11,12 @@
  * transcript grows.
  *
  * Run:
- *   pnpm --filter @moonshot-ai/kimi-code exec vitest bench test/tui/render-memo.bench.ts
+ *   pnpm --filter @nori-code/cli exec vitest bench test/tui/render-memo.bench.ts
  */
 
 import { bench, describe } from 'vitest';
 
-import type { Component } from '@moonshot-ai/pi-tui';
+import type { Component } from '@nori-code/pi-tui';
 
 import { GutterContainer } from '#/tui/components/chrome/gutter-container';
 import { AssistantMessageComponent } from '#/tui/components/messages/assistant-message';

@@ -1,15 +1,15 @@
 /**
- * `kimi server ps` — list clients currently connected to the running server.
+ * `nori server ps` — list clients currently connected to the running server.
  *
  * Talks to the running server over HTTP (`GET /api/v1/connections`) using the
  * single-instance lock (`~/.nori-code/server/lock`) to discover its origin —
- * the same way `kimi web` locates the daemon.
+ * the same way `nori web` locates the daemon.
  */
 
 import chalk from 'chalk';
 import type { Command } from 'commander';
 
-import { getLiveLock } from '@moonshot-ai/server';
+import { getLiveLock } from '@nori-code/server';
 
 import { getDataDir } from '#/utils/paths';
 

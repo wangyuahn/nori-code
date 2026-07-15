@@ -6,8 +6,8 @@ import {
   truncateToWidth,
   visibleWidth,
   type Focusable,
-} from '@moonshot-ai/pi-tui';
-import type { PluginInfo, PluginMcpServerInfo, PluginSummary } from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/pi-tui';
+import type { PluginInfo, PluginMcpServerInfo, PluginSummary } from '@nori-code/sdk';
 import chalk from 'chalk';
 
 import { SELECT_POINTER } from '#/tui/constant/symbols';
@@ -208,7 +208,7 @@ export interface PluginInstallTrustConfirmOptions {
 /**
  * Confirmation shown before installing a third-party (unofficial) plugin.
  * Defaults to "Exit" so the user must explicitly switch to "Trust and install"
- * to proceed with a plugin that Kimi has not reviewed.
+ * to proceed with a plugin that Nori has not reviewed.
  */
 export class PluginInstallTrustConfirmComponent extends ChoicePickerComponent {
   constructor(opts: PluginInstallTrustConfirmOptions) {
@@ -217,7 +217,7 @@ export class PluginInstallTrustConfirmComponent extends ChoicePickerComponent {
       hint: '↑↓ navigate · Enter/Space select · ←/Esc cancel',
       formatHint: mutedHintLine,
       notice:
-        '⚠️ This is a third-party plugin that Kimi has not reviewed. It can bundle MCP servers, ' +
+        '⚠️ This is a third-party plugin that Nori has not reviewed. It can bundle MCP servers, ' +
         'skills, or files that run code and access your workspace. Install it only if you ' +
         'trust the source.',
       noticeTone: 'warning',

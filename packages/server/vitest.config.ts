@@ -17,8 +17,14 @@ export default defineConfig({
   resolve: {
     alias: [
       // Order matters — list MORE specific entries first so prefix matching
-      // doesn't route them through the bare `@moonshot-ai/agent-core` alias
+      // doesn't route them through the bare `@nori-code/agent-core` alias
       // (which points at agent-core/src/index.ts, breaking subpath imports).
+      {
+        find: /^@nori-code\/agent-core\/session\/store$/,
+        replacement: fileURLToPath(
+          new URL('../agent-core/src/session/store/index.ts', import.meta.url),
+        ),
+      },
       {
         find: /^@moonshot-ai\/agent-core\/session\/store$/,
         replacement: fileURLToPath(
@@ -32,25 +38,25 @@ export default defineConfig({
         ),
       },
       {
-        find: '@moonshot-ai/kimi-code-sdk',
+        find: '@nori-code/sdk',
         replacement: fileURLToPath(
           new URL('../node-sdk/src/index.ts', import.meta.url),
         ),
       },
       {
-        find: '@moonshot-ai/agent-core',
+        find: '@nori-code/agent-core',
         replacement: fileURLToPath(
           new URL('../agent-core/src/index.ts', import.meta.url),
         ),
       },
       {
-        find: '@moonshot-ai/protocol',
+        find: '@nori-code/protocol',
         replacement: fileURLToPath(
           new URL('../protocol/src/index.ts', import.meta.url),
         ),
       },
       {
-        find: '@moonshot-ai/kimi-code-oauth',
+        find: '@nori-code/oauth',
         replacement: fileURLToPath(
           new URL('../oauth/src/index.ts', import.meta.url),
         ),

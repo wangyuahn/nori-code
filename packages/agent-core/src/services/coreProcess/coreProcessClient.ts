@@ -1,6 +1,6 @@
 /**
  * `BridgeClientAPI` — the SDK side of the in-process RPC pair owned by
- * `CoreProcessService`. Satisfies `SDKAPI` (`@moonshot-ai/agent-core`
+ * `CoreProcessService`. Satisfies `SDKAPI` (`@nori-code/agent-core`
  * rpc/sdk-api.ts:78, via `SDKAgentAPI` at :67-72) so `KimiCore` can call
  * into it through `createRPC<CoreAPI, SDKAPI>()`. Methods route to
  * DI-resolved peer services:

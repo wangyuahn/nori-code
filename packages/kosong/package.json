@@ -1,18 +1,18 @@
 {
-  "name": "@moonshot-ai/kosong",
+  "name": "@nori-code/kosong",
   "version": "0.5.1",
   "private": true,
   "description": "The LLM abstraction layer for modern AI agent applications",
   "license": "MIT",
-  "author": "Moonshot AI",
-  "homepage": "https://github.com/MoonshotAI/kimi-code/tree/main/packages/kosong#readme",
+  "author": "Nori",
+  "homepage": "https://github.com/wangyuahn/nori-code/tree/main/packages/kosong#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MoonshotAI/kimi-code.git",
+    "url": "git+https://github.com/wangyuahn/nori-code.git",
     "directory": "packages/kosong"
   },
   "bugs": {
-    "url": "https://github.com/MoonshotAI/kimi-code/issues"
+    "url": "https://github.com/wangyuahn/nori-code/issues"
   },
   "keywords": [
     "llm",

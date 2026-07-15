@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import {
   ErrorCodes,
   KimiError,
-} from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/sdk';
 
 const GOAL_QUEUE_FILE = 'upcoming-goals.json';
 const GOAL_QUEUE_VERSION = 1;

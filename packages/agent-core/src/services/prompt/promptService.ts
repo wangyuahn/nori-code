@@ -12,7 +12,7 @@ import type {
   PromptSteerResult,
   PromptSubmitResult,
   PromptThinking,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 import type { PermissionMode } from '../../agent/permission';
 import { ulid } from 'ulid';
 

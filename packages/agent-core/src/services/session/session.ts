@@ -18,10 +18,10 @@ import {
   type SessionUpdate,
   type UndoSessionRequest,
   type UndoSessionResponse,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 
 export interface SessionListQuery extends CursorQuery {
-  status?: import('@moonshot-ai/protocol').SessionStatus;
+  status?: import('@nori-code/protocol').SessionStatus;
   workDir?: string;
   includeArchive?: boolean;
   /** When true, hide sessions the user has never interacted with (no prompt yet). */
@@ -65,6 +65,8 @@ export interface ISessionService {
   undo(id: string, input: UndoSessionRequest): Promise<UndoSessionResponse>;
 
   archive(id: string): Promise<{ archived: true }>;
+
+  delete?(id: string): Promise<{ deleted: true }>;
 
   readonly onDidCreate: Event<{ session: Session }>;
 

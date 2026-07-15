@@ -1,11 +1,11 @@
 ---
 name: custom-theme
-description: Create or edit a kimi-code custom color theme — a JSON file under the resolved NORI_CODE_HOME data directory that recolors the TUI. Use when the user wants their own theme, asks for a specific palette or mood, or wants to tweak an existing custom theme's colors.
+description: Create or edit a Nori Code custom color theme — a JSON file under the resolved NORI_CODE_HOME data directory that recolors the TUI. Use when the user wants their own theme, asks for a specific palette or mood, or wants to tweak an existing custom theme's colors.
 ---
 
-# Create a kimi-code custom theme (custom-theme)
+# Create a Nori Code custom theme (custom-theme)
 
-Help the user design, write, and apply a custom color theme for the kimi-code TUI. A theme is a single JSON file; the TUI ships with `dark`, `light`, and `auto`, and any file the user adds becomes selectable alongside them.
+Help the user design, write, and apply a custom color theme for the Nori Code TUI. A theme is a single JSON file; the TUI ships with `dark`, `light`, and `auto`, and any file the user adds becomes selectable alongside them.
 
 ## Rules of engagement
 
@@ -16,7 +16,7 @@ Help the user design, write, and apply a custom color theme for the kimi-code TU
 
 ## Where a theme lives
 
-The kimi-code runtime resolves the data directory as `NORI_CODE_HOME` first, falling back to `~/.nori-code`. Theme files live inside the `themes/` subdirectory of that data directory.
+The Nori Code runtime resolves the data directory as `NORI_CODE_HOME` first, falling back to `~/.nori-code`. Theme files live inside the `themes/` subdirectory of that data directory.
 
 Before doing anything, resolve the actual data root with Bash so you don't write to the wrong place. Check whether `NORI_CODE_HOME` is set and fall back to `~/.nori-code` when it is empty:
 
@@ -52,7 +52,7 @@ Use the first line when it is non-empty; otherwise use the second line. In the r
 Before choosing colors, use **FetchURL** to fetch the official custom-theme docs as the authoritative list of tokens and what each controls:
 
 ```
-https://moonshotai.github.io/kimi-code/en/customization/themes.html
+https://github.com/wangyuahn/nori-code/blob/main/docs/en/customization/themes.md
 ```
 
 Only set tokens from this set — unknown keys are silently ignored at load. If FetchURL is unavailable or the fetch fails, fall back to the embedded reference below (it mirrors the same tokens) and tell the user you're working from the built-in list rather than the live docs.

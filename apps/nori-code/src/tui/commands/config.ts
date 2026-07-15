@@ -6,7 +6,7 @@ import {
   type PermissionMode,
   type Session,
   type ThinkingEffort,
-} from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/sdk';
 
 import { EditorSelectorComponent } from '../components/dialogs/editor-selector';
 import { EffortSelectorComponent } from '../components/dialogs/effort-selector';
@@ -389,7 +389,7 @@ export function showModelPicker(host: SlashCommandHost, selectedValue: string = 
   if (entries.length === 0) {
     host.showNotice(
       'No models configured',
-      'Run /login to sign in to Kimi, or /provider to add another provider from a model catalog.',
+      'Use /provider to add a provider from a model catalog or custom registry.',
     );
     return;
   }

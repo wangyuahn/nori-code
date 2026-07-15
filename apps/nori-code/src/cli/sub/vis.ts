@@ -1,11 +1,11 @@
 /**
- * `kimi vis` sub-command.
+ * `nori vis` sub-command.
  *
- * CLI glue only: resolves the kimi home, starts the in-process session
+ * CLI glue only: resolves the Nori home, starts the in-process session
  * visualizer server (auto-picking a free port by default), prints the URL,
  * optionally opens the browser (with an optional session deep-link), then
  * waits for Ctrl-C and shuts the server down. The visualizer server itself
- * lives in `@moonshot-ai/vis-server`.
+ * lives in `@nori-code/vis-server`.
  */
 
 import type { Command } from 'commander';
@@ -51,7 +51,7 @@ export interface VisOptions {
 export async function handleVis(deps: VisDeps, opts: VisOptions): Promise<void> {
   const homeDir = deps.getHomeDir();
 
-  // Lazily load the embedded single-file SPA so normal `kimi` startup never
+  // Lazily load the embedded single-file SPA so normal `nori` startup never
   // pays for it. The module is generated at build time (prebuild). When running
   // from source without a build — e.g. tests — the generated value module is
   // absent and the dynamic import throws; in that case the server falls back to
@@ -76,7 +76,7 @@ export async function handleVis(deps: VisDeps, opts: VisOptions): Promise<void> 
     });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    deps.stderr.write(`Failed to start kimi vis: ${msg}\n`);
+    deps.stderr.write(`Failed to start nori vis: ${msg}\n`);
     return deps.exit(1);
   }
 
@@ -85,7 +85,7 @@ export async function handleVis(deps: VisDeps, opts: VisOptions): Promise<void> 
       ? server.url
       : `${server.url}sessions/${encodeURIComponent(opts.sessionId)}`;
 
-  deps.stdout.write(`kimi vis is running at ${server.url}\n`);
+  deps.stdout.write(`nori vis is running at ${server.url}\n`);
   deps.stdout.write('Press Ctrl-C to stop.\n');
 
   if (opts.open) {
@@ -131,7 +131,7 @@ function createDefaultVisDeps(overrides: Partial<VisDeps> = {}): VisDeps {
       overrides.startVisServer ??
       (async (opts) => {
         // Dynamic import keeps the vis server (and Hono) out of the hot path.
-        const { startVisServer } = await import('@moonshot-ai/vis-server/start');
+        const { startVisServer } = await import('@nori-code/vis-server/start');
         return startVisServer(opts);
       }),
     // `openUrl` is a synchronous fire-and-forget; adapt it to the async dep.

@@ -1,7 +1,7 @@
 import {
   isKimiError,
   type KimiErrorPayload,
-} from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/sdk';
 
 import {
   STREAMING_ARGS_FIELD_RE,

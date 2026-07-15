@@ -1,5 +1,5 @@
 import type { UsageStatus } from '#/rpc';
-import { addUsage, type TokenUsage } from '@moonshot-ai/kosong';
+import { addUsage, type TokenUsage } from '@nori-code/kosong';
 
 import type { Agent } from '..';
 

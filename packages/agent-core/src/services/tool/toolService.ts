@@ -17,7 +17,7 @@ export class ToolService extends Disposable implements IToolService {
     super();
   }
 
-  async list(sessionId?: string): Promise<readonly import('@moonshot-ai/protocol').ToolDescriptor[]> {
+  async list(sessionId?: string): Promise<readonly import('@nori-code/protocol').ToolDescriptor[]> {
     const resolvedSid = sessionId ?? (await this._anyKnownSessionId());
     if (resolvedSid === undefined) return [];
     let raw: readonly unknown[];

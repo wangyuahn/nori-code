@@ -36,6 +36,9 @@ describe('status panel report lines', () => {
         contextTokens: 3000,
         maxContextTokens: 12000,
         contextUsage: 0.25,
+        coderWriteEnabled: false,
+        toolsReadonly: false,
+        maxSwarmDepth: 3,
       },
       managedUsage: {
         summary: null,
@@ -51,7 +54,7 @@ describe('status panel report lines', () => {
     }).map(strip);
 
     const output = lines.join('\n');
-    expect(output).toContain('>_ Kimi Code (v1.2.3)');
+    expect(output).toContain('>_ Nori Code (v1.2.3)');
     expect(output).toContain('Model        Kimi K2 (thinking high)');
     expect(output).toContain('Directory    /tmp/project');
     expect(output).toContain('Permissions  auto');

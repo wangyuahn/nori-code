@@ -1,9 +1,10 @@
 import { execSync } from 'node:child_process';
 
-import type { createKimiDeviceId as createKimiDeviceIdFn } from '@moonshot-ai/kimi-code-oauth';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { createKimiDeviceId as createKimiDeviceIdFn } from '@nori-code/oauth';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runShell } from '#/cli/run-shell';
+import type { CLIOptions } from '#/cli/options';
 
 import { captureProcessWrite, ExitCalled, mockProcessExit } from '../helpers/process';
 
@@ -20,7 +21,7 @@ const mocks = vi.hoisted(() => {
     readonly fallback: TuiConfigFallback;
 
     constructor(fallback: TuiConfigFallback) {
-      super('Invalid TUI config in ~/.kimi-code/tui.toml; using defaults.');
+      super('Invalid TUI config in ~/.nori-code/tui.toml; using defaults.');
       this.fallback = fallback;
     }
   }
@@ -40,7 +41,6 @@ const mocks = vi.hoisted(() => {
     harnessGetConfigDiagnostics: vi.fn(async () => ({ warnings: [] as readonly string[] })),
     harnessGetCachedAccessToken: vi.fn(),
     harnessClose: vi.fn(),
-    detectPendingMigration: vi.fn<() => Promise<unknown>>(async () => null),
     harnessTrack: vi.fn(),
     kimiTuiConstructor: vi.fn(),
     tuiStart: vi.fn(),
@@ -57,21 +57,21 @@ const mocks = vi.hoisted(() => {
     withTelemetryContext: vi.fn(() => ({
       track: lifecycleTrack,
     })),
-    resolveKimiHome: vi.fn((homeDir?: string) => homeDir ?? '/tmp/kimi-code-test-home'),
+    resolveKimiHome: vi.fn((homeDir?: string) => homeDir ?? '/tmp/nori-code-test-home'),
     harnessCreatesDeviceIdOnConstruction: false,
     execSync: vi.fn(),
     TuiConfigParseError,
   };
 });
 
-vi.mock('@moonshot-ai/kimi-code-sdk', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@moonshot-ai/kimi-code-sdk')>();
+vi.mock('@nori-code/sdk', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@nori-code/sdk')>();
   return {
     ...actual,
     resolveKimiHome: mocks.resolveKimiHome,
     createKimiHarness: (...args: unknown[]) => {
       const options = args[0] as { readonly homeDir?: string } | undefined;
-      const homeDir = options?.homeDir ?? '/tmp/kimi-code-test-home';
+      const homeDir = options?.homeDir ?? '/tmp/nori-code-test-home';
       if (mocks.harnessCreatesDeviceIdOnConstruction) {
         mocks.createKimiDeviceId(homeDir);
       }
@@ -91,9 +91,9 @@ vi.mock('@moonshot-ai/kimi-code-sdk', async (importOriginal) => {
   };
 });
 
-vi.mock('@moonshot-ai/kimi-code-oauth', async () => {
-  const actual = await vi.importActual<typeof import('@moonshot-ai/kimi-code-oauth')>(
-    '@moonshot-ai/kimi-code-oauth',
+vi.mock('@nori-code/oauth', async () => {
+  const actual = await vi.importActual<typeof import('@nori-code/oauth')>(
+    '@nori-code/oauth',
   );
   return {
     ...actual,
@@ -102,7 +102,7 @@ vi.mock('@moonshot-ai/kimi-code-oauth', async () => {
   };
 });
 
-vi.mock('@moonshot-ai/kimi-telemetry', () => ({
+vi.mock('@nori-code/telemetry', () => ({
   initializeTelemetry: mocks.initializeTelemetry,
   setCrashPhase: mocks.setCrashPhase,
   shutdownTelemetry: mocks.shutdownTelemetry,
@@ -135,16 +135,14 @@ vi.mock('../../src/tui/theme/detect', () => ({
   detectTerminalTheme: mocks.detectTerminalTheme,
 }));
 
-vi.mock('../../src/migration/index', () => ({
-  detectPendingMigration: mocks.detectPendingMigration,
-}));
-
 vi.mock('node:child_process', () => ({
   execSync: mocks.execSync,
 }));
 
 describe('runShell', () => {
+  beforeEach(() => { process.env['NORI_CODE_HOME'] = '/tmp/nori-code-test-home'; });
   afterEach(() => {
+    delete process.env['NORI_CODE_HOME'];
     vi.clearAllMocks();
     mocks.harnessGetConfig.mockResolvedValue({
       providers: {},
@@ -156,7 +154,7 @@ describe('runShell', () => {
     mocks.tuiHasSessionContent.mockReturnValue(false);
     mocks.createKimiDeviceId.mockImplementation(() => 'device-1');
     mocks.resolveKimiHome.mockImplementation(
-      (homeDir?: string) => homeDir ?? '/tmp/kimi-code-test-home',
+      (homeDir?: string) => homeDir ?? '/tmp/nori-code-test-home',
     );
     mocks.harnessCreatesDeviceIdOnConstruction = false;
   });
@@ -171,11 +169,10 @@ describe('runShell', () => {
     mocks.tuiGetStartupMcpMs.mockResolvedValue(47);
     mocks.tuiGetCurrentSessionId.mockReturnValue('ses-startup');
 
-    const cliOptions = {
+    const cliOptions: CLIOptions = {
       session: undefined,
       continue: false,
-      yolo: true,
-      auto: false,
+      permission: 'yolo',
       plan: true,
       model: undefined,
       outputFormat: undefined,
@@ -189,10 +186,10 @@ describe('runShell', () => {
     expect(mocks.kimiHarnessConstructor).toHaveBeenCalledWith(
       expect.objectContaining({
         identity: expect.objectContaining({
-          userAgentProduct: 'kimi-code-cli',
+          userAgentProduct: 'nori-code-cli',
           version: '1.2.3-test',
         }),
-        sessionStartedProperties: { yolo: true, auto: false, plan: true, afk: false },
+        sessionStartedProperties: { permission: 'yolo', plan: true, afk: false },
       }),
     );
     expect(mocks.harnessEnsureConfigFile).toHaveBeenCalledOnce();
@@ -202,14 +199,14 @@ describe('runShell', () => {
     expect(execSync).toHaveBeenCalledWith('stty -ixon', { stdio: ['inherit', 'ignore', 'ignore'] });
     expect(mocks.kimiTuiConstructor).toHaveBeenCalledTimes(1);
     expect(mocks.createKimiDeviceId).toHaveBeenCalledWith(
-      '/tmp/kimi-code-test-home',
+      '/tmp/nori-code-test-home',
       expect.any(Object),
     );
     expect(mocks.initializeTelemetry).toHaveBeenCalledWith({
-      homeDir: '/tmp/kimi-code-test-home',
+      homeDir: '/tmp/nori-code-test-home',
       deviceId: 'device-1',
       enabled: true,
-      appName: 'kimi-code-cli',
+      appName: 'nori-code-cli',
       version: '1.2.3-test',
       uiMode: 'shell',
       model: 'k2',
@@ -249,7 +246,7 @@ describe('runShell', () => {
     mocks.tuiStart.mockResolvedValue(undefined);
     mocks.createKimiDeviceId.mockImplementationOnce((homeDir, options) => {
       const deviceId = `device-for-${homeDir}`;
-      options?.onFirstLaunch?.(deviceId);
+      options?.onFirstLaunch?.();
       return deviceId;
     });
 
@@ -257,8 +254,7 @@ describe('runShell', () => {
       {
         session: undefined,
         continue: false,
-        yolo: false,
-        auto: false,
+        permission: undefined,
         plan: false,
         model: undefined,
         outputFormat: undefined,
@@ -269,7 +265,7 @@ describe('runShell', () => {
     );
 
     expect(mocks.createKimiDeviceId).toHaveBeenCalledWith(
-      '/tmp/kimi-code-test-home',
+      '/tmp/nori-code-test-home',
       expect.objectContaining({ onFirstLaunch: expect.any(Function) }),
     );
     expect(mocks.harnessTrack).toHaveBeenCalledWith('first_launch');
@@ -288,7 +284,7 @@ describe('runShell', () => {
       const deviceId = `device-for-${homeDir}`;
       if (!createdHomes.has(homeDir)) {
         createdHomes.add(homeDir);
-        options?.onFirstLaunch?.(deviceId);
+        options?.onFirstLaunch?.();
       }
       return deviceId;
     });
@@ -297,8 +293,7 @@ describe('runShell', () => {
       {
         session: undefined,
         continue: false,
-        yolo: false,
-        auto: false,
+        permission: undefined,
         plan: false,
         model: undefined,
         outputFormat: undefined,
@@ -310,14 +305,14 @@ describe('runShell', () => {
 
     expect(mocks.createKimiDeviceId).toHaveBeenNthCalledWith(
       1,
-      '/tmp/kimi-code-test-home',
+      '/tmp/nori-code-test-home',
       expect.objectContaining({ onFirstLaunch: expect.any(Function) }),
     );
     expect(mocks.createKimiDeviceId.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.kimiHarnessConstructor.mock.invocationCallOrder[0]!,
     );
     expect(mocks.kimiHarnessConstructor).toHaveBeenCalledWith(
-      expect.objectContaining({ homeDir: '/tmp/kimi-code-test-home' }),
+      expect.objectContaining({ homeDir: '/tmp/nori-code-test-home' }),
     );
     expect(mocks.harnessTrack).toHaveBeenCalledWith('first_launch');
   });
@@ -340,8 +335,7 @@ describe('runShell', () => {
       {
         session: undefined,
         continue: false,
-        yolo: false,
-        auto: false,
+        permission: undefined,
         plan: false,
         model: undefined,
         outputFormat: undefined,
@@ -373,8 +367,7 @@ describe('runShell', () => {
       {
         session: undefined,
         continue: false,
-        yolo: false,
-        auto: false,
+        permission: undefined,
         plan: false,
         model: undefined,
         outputFormat: undefined,
@@ -424,8 +417,7 @@ describe('runShell', () => {
       {
         session: '',
         continue: false,
-        yolo: false,
-        auto: false,
+        permission: undefined,
         plan: false,
         model: undefined,
         outputFormat: undefined,
@@ -438,7 +430,7 @@ describe('runShell', () => {
     expect(mocks.detectTerminalTheme).toHaveBeenCalledOnce();
     const [, , startupInput] = mocks.kimiTuiConstructor.mock.calls[0]!;
     expect(startupInput).toMatchObject({
-      startupNotice: 'Invalid TUI config in ~/.kimi-code/tui.toml; using defaults.',
+      startupNotice: 'Invalid TUI config in ~/.nori-code/tui.toml; using defaults.',
       tuiConfig: {
         theme: 'auto',
         editorCommand: 'vim',
@@ -462,8 +454,7 @@ describe('runShell', () => {
       {
         session: '',
         continue: false,
-        yolo: false,
-        auto: false,
+        permission: undefined,
         plan: false,
         model: undefined,
         outputFormat: undefined,
@@ -492,8 +483,7 @@ describe('runShell', () => {
         {
           session: undefined,
           continue: false,
-          yolo: false,
-          auto: false,
+          permission: undefined,
           plan: false,
           model: undefined,
           outputFormat: undefined,
@@ -529,8 +519,7 @@ describe('runShell', () => {
         {
           session: undefined,
           continue: false,
-          yolo: false,
-          auto: false,
+          permission: undefined,
           plan: false,
           model: undefined,
           outputFormat: undefined,
@@ -556,7 +545,7 @@ describe('runShell', () => {
       expect(mocks.harnessTrack).not.toHaveBeenCalledWith('exit', expect.anything());
       expect(mocks.shutdownTelemetry).toHaveBeenCalledOnce();
       expect(stdout.text()).toBe(' Bye!\n');
-      expect(stderr.text()).toContain(' To resume this session: kimi -r ses-1');
+      expect(stderr.text()).toContain(' To resume this session: nori -r ses-1');
     } finally {
       exitSpy.mockRestore();
       stdout.restore();
@@ -583,8 +572,7 @@ describe('runShell', () => {
         {
           session: undefined,
           continue: false,
-          yolo: false,
-          auto: false,
+          permission: undefined,
           plan: false,
           model: undefined,
           outputFormat: undefined,
@@ -601,7 +589,7 @@ describe('runShell', () => {
         ExitCalled,
       );
 
-      expect(stderr.text()).toContain(' To resume this session: kimi -r ses-1');
+      expect(stderr.text()).toContain(' To resume this session: nori -r ses-1');
       expect(stderr.text()).toContain('open ');
       expect(stderr.text()).toContain(openedUrl);
     } finally {
@@ -611,36 +599,4 @@ describe('runShell', () => {
     }
   });
 
-  it('surfaces an invalid target config as an error for kimi migrate, not silently', async () => {
-    mocks.loadTuiConfig.mockResolvedValue({
-      theme: 'dark',
-      editorCommand: null,
-      notifications: { enabled: true, condition: 'unfocused' },
-    });
-    mocks.detectPendingMigration.mockResolvedValue({ totalSessions: 1 });
-    mocks.harnessGetConfig.mockRejectedValue(
-      new Error('Invalid configuration in ~/.kimi-code/config.toml'),
-    );
-
-    // A broken config.toml must fail loudly — `kimi migrate` must not swallow
-    // it and proceed, or the user never learns their config is broken.
-    await expect(
-      runShell(
-        {
-          session: undefined,
-          continue: false,
-          yolo: false,
-          auto: false,
-          plan: false,
-          model: undefined,
-          outputFormat: undefined,
-          prompt: undefined,
-          skillsDirs: [],
-        },
-        '1.2.3-test',
-        { migrateOnly: true },
-      ),
-    ).rejects.toThrow('Invalid configuration');
-    expect(mocks.tuiStart).not.toHaveBeenCalled();
-  });
 });

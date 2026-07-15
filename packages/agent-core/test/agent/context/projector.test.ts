@@ -1,4 +1,4 @@
-import type { ContentPart, Message, ToolCall } from '@moonshot-ai/kosong';
+import type { ContentPart, Message, ToolCall } from '@nori-code/kosong';
 import { describe, expect, it } from 'vitest';
 
 import { project, type ProjectionAnomaly } from '../../../src/agent/context/projector';

@@ -6,7 +6,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 
 import { Disposable, InstantiationType, registerSingleton } from '../../di';
 
-import type { FsBrowseEntry, FsBrowseResponse, FsHomeResponse } from '@moonshot-ai/protocol';
+import type { FsBrowseEntry, FsBrowseResponse, FsHomeResponse } from '@nori-code/protocol';
 
 import { IWorkspaceRegistry } from './workspaceRegistry';
 import {

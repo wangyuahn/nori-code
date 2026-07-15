@@ -3,7 +3,7 @@ import {
   fetchCustomRegistry,
   type CustomRegistrySource,
   type ManagedKimiConfigShape,
-} from '@moonshot-ai/kimi-code-oauth';
+} from '@nori-code/oauth';
 import {
   applyCatalogProvider,
   catalogBaseUrl,
@@ -14,7 +14,8 @@ import {
   inferWireType,
   type Catalog,
   type ThinkingEffort,
-} from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/sdk';
+import { createKimiCodeUserAgent } from '#/cli/version';
 
 import { ChoicePickerComponent } from '../components/dialogs/choice-picker';
 import {
@@ -160,7 +161,7 @@ async function handleCatalogProviderAdd(host: SlashCommandHost): Promise<void> {
   const spinner = host.showLoginProgressSpinner(`Fetching catalog from ${DEFAULT_CATALOG_URL}`);
   let catalog: Catalog | undefined;
   try {
-    catalog = await fetchCatalog(DEFAULT_CATALOG_URL, controller.signal);
+    catalog = await fetchCatalog(DEFAULT_CATALOG_URL, { signal: controller.signal, userAgent: createKimiCodeUserAgent() });
     spinner.stop({ ok: true, label: 'Catalog loaded.' });
   } catch (error) {
     if (controller.signal.aborted) {
@@ -276,7 +277,7 @@ async function handleCustomRegistryAddViaDialog(host: SlashCommandHost): Promise
 
   let entries: Awaited<ReturnType<typeof fetchCustomRegistry>>;
   try {
-    entries = await fetchCustomRegistry(source);
+    entries = await fetchCustomRegistry(source, { userAgent: createKimiCodeUserAgent() });
   } catch (error) {
     host.showError(`Failed to import registry: ${formatErrorMessage(error)}`);
     return false;

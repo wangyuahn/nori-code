@@ -5,8 +5,11 @@
 // Each electron-builder run targets one (platform, arch). We stage the matching
 // prebuilt Nori SEA backend into `resources-stage/bin/<target>/` so that the
 // `extraResources` rule copies exactly that one binary into the packaged app's
-// resources. sea-path.ts resolves `<resources>/bin/<target>/kimi[.exe]` at
+// resources. sea-path.ts resolves `<resources>/bin/<target>/nori[.exe]` at
 // runtime, where <target> is `${process.platform}-${process.arch}`.
+//
+// We also stage the built nori-web assets into `resources-stage/nori-web/dist`
+// so the packaged app contains `<resources>/nori-web/dist/index.html`.
 
 const { existsSync, rmSync, mkdirSync, cpSync } = require('node:fs');
 const { join, resolve } = require('node:path');
@@ -21,9 +24,12 @@ exports.default = async function beforePack(context) {
     throw new Error(`Unsupported arch for packaging: ${String(context.arch)}`);
   }
   const target = `${platform}-${archName}`;
-  const exe = platform === 'win32' ? 'kimi.exe' : 'kimi';
+  const exe = platform === 'win32' ? 'nori.exe' : 'nori';
 
   const desktopRoot = resolve(__dirname, '..');
+  const stageRoot = resolve(desktopRoot, 'resources-stage');
+
+  // Stage SEA binary.
   const seaDir = resolve(desktopRoot, '..', 'nori-code', 'dist-native', 'bin', target);
   const seaExe = join(seaDir, exe);
   if (!existsSync(seaExe)) {
@@ -34,9 +40,23 @@ exports.default = async function beforePack(context) {
     );
   }
 
-  const stageDir = resolve(desktopRoot, 'resources-stage', 'bin', target);
-  rmSync(resolve(desktopRoot, 'resources-stage'), { recursive: true, force: true });
-  mkdirSync(stageDir, { recursive: true });
-  cpSync(seaDir, stageDir, { recursive: true });
-  console.log(`[before-pack] staged Nori server (${target}) -> ${stageDir}`);
+  const binStageDir = resolve(stageRoot, 'bin', target);
+  rmSync(binStageDir, { recursive: true, force: true });
+  mkdirSync(binStageDir, { recursive: true });
+  cpSync(seaDir, binStageDir, { recursive: true });
+  console.log(`[before-pack] staged Nori server (${target}) -> ${binStageDir}`);
+
+  // Stage nori-web dist assets.
+  const webSourceDir = resolve(desktopRoot, '..', 'nori-web', 'dist');
+  const webStageDir = resolve(stageRoot, 'nori-web', 'dist');
+  if (!existsSync(webSourceDir)) {
+    throw new Error(
+      `Built nori-web assets not found at ${webSourceDir}. ` +
+        `Build them first: \`pnpm -C apps/nori-web build\`.`,
+    );
+  }
+  rmSync(webStageDir, { recursive: true, force: true });
+  mkdirSync(webStageDir, { recursive: true });
+  cpSync(webSourceDir, webStageDir, { recursive: true });
+  console.log(`[before-pack] staged nori-web assets -> ${webStageDir}`);
 };

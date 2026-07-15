@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-import { IEnvironmentService } from '@moonshot-ai/agent-core';
+import { IEnvironmentService } from '@nori-code/agent-core';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 
 import { IGuiStoreService } from './guiStore';

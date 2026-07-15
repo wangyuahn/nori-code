@@ -63,7 +63,7 @@ vi.mock('../../../src/tui/config', () => ({
     readonly fallback: TuiConfig;
 
     constructor(fallback: TuiConfig) {
-      super('Invalid client preferences in ~/.kimi-code/tui.toml; using defaults.');
+      super('Invalid client preferences in ~/.nori-code/tui.toml; using defaults.');
       this.fallback = fallback;
     }
   },
@@ -239,8 +239,8 @@ describe('runUpdatePreflight', () => {
 
   afterEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); });
 
-  it('skips all update work when KIMI_CODE_NO_AUTO_UPDATE is set', async () => {
-    vi.stubEnv('KIMI_CODE_NO_AUTO_UPDATE', '1');
+  it('skips all update work when NORI_CODE_NO_AUTO_UPDATE is set', async () => {
+    vi.stubEnv('NORI_CODE_NO_AUTO_UPDATE', '1');
     mocks.readUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
     mocks.refreshUpdateCache.mockResolvedValue(cacheWith('0.5.0'));
     const { options } = captureOutput();
@@ -281,7 +281,7 @@ describe('runUpdatePreflight', () => {
     expect(detectInstallSource).toHaveBeenCalledTimes(1);
     expect(mocks.spawn).toHaveBeenCalledWith(
       expect.stringMatching(/^npm(\.cmd)?$/),
-      ['install', '-g', '@moonshot-ai/kimi-code@0.5.0'],
+      ['install', '-g', '@nori-code/cli@0.5.0'],
       { detached: true, stdio: 'ignore' },
     );
   });
@@ -340,16 +340,16 @@ describe('runUpdatePreflight', () => {
     await expect(runUpdatePreflight('0.4.0', options)).resolves.toBe('exit');
     expect(mocks.promptForInstallChoice).toHaveBeenCalledWith(
       expect.objectContaining({
-        installCommand: 'npm install -g @moonshot-ai/kimi-code@0.5.0',
+        installCommand: 'npm install -g @nori-code/cli@0.5.0',
         installSource: 'npm-global',
       }),
     );
     expect(mocks.spawn).toHaveBeenCalledWith(
       expect.stringMatching(/^npm(\.cmd)?$/),
-      ['install', '-g', '@moonshot-ai/kimi-code@0.5.0'],
+      ['install', '-g', '@nori-code/cli@0.5.0'],
       { stdio: 'inherit' },
     );
-    expect(stdout.join('')).toContain('Updated @moonshot-ai/kimi-code to 0.5.0');
+    expect(stdout.join('')).toContain('Updated @nori-code/cli to 0.5.0');
   });
 
   it('refreshes a stale cached target before showing the foreground install prompt', async () => {
@@ -367,15 +367,15 @@ describe('runUpdatePreflight', () => {
     expect(mocks.promptForInstallChoice).toHaveBeenCalledWith(
       expect.objectContaining({
         target: { version: '0.7.0' },
-        installCommand: 'npm install -g @moonshot-ai/kimi-code@0.7.0',
+        installCommand: 'npm install -g @nori-code/cli@0.7.0',
       }),
     );
     expect(mocks.spawn).toHaveBeenCalledWith(
       expect.stringMatching(/^npm(\.cmd)?$/),
-      ['install', '-g', '@moonshot-ai/kimi-code@0.7.0'],
+      ['install', '-g', '@nori-code/cli@0.7.0'],
       { stdio: 'inherit' },
     );
-    expect(stdout.join('')).toContain('Updated @moonshot-ai/kimi-code to 0.7.0');
+    expect(stdout.join('')).toContain('Updated @nori-code/cli to 0.7.0');
   });
 
   it('falls back to the cached foreground prompt target when the refresh hangs', async () => {
@@ -395,7 +395,7 @@ describe('runUpdatePreflight', () => {
       expect(mocks.promptForInstallChoice).toHaveBeenCalledWith(
         expect.objectContaining({
           target: { version: '0.6.0' },
-          installCommand: 'npm install -g @moonshot-ai/kimi-code@0.6.0',
+          installCommand: 'npm install -g @nori-code/cli@0.6.0',
         }),
       );
     } finally {
@@ -414,7 +414,7 @@ describe('runUpdatePreflight', () => {
     await runUpdatePreflight('0.4.0', options);
     expect(mocks.spawn).toHaveBeenCalledWith(
       expect.stringMatching(/^pnpm(\.cmd)?$/),
-      ['add', '-g', '@moonshot-ai/kimi-code@0.5.0'],
+      ['add', '-g', '@nori-code/cli@0.5.0'],
       { stdio: 'inherit' },
     );
   });
@@ -430,7 +430,7 @@ describe('runUpdatePreflight', () => {
     await runUpdatePreflight('0.4.0', options);
     expect(mocks.spawn).toHaveBeenCalledWith(
       expect.stringMatching(/^yarn(\.cmd)?$/),
-      ['global', 'add', '@moonshot-ai/kimi-code@0.5.0'],
+      ['global', 'add', '@nori-code/cli@0.5.0'],
       { stdio: 'inherit' },
     );
   });
@@ -446,7 +446,7 @@ describe('runUpdatePreflight', () => {
     await runUpdatePreflight('0.4.0', options);
     expect(mocks.spawn).toHaveBeenCalledWith(
       expect.stringMatching(/^bun(\.exe)?$/),
-      ['add', '-g', '@moonshot-ai/kimi-code@0.5.0'],
+      ['add', '-g', '@nori-code/cli@0.5.0'],
       { stdio: 'inherit' },
     );
   });
@@ -482,7 +482,7 @@ describe('runUpdatePreflight', () => {
       // pipefail must come before the pipeline so a failed `curl` is not masked
       // by the trailing `bash` exiting 0 (see "surfaces a failed curl" below).
       expect(script).toContain('set -o pipefail');
-      expect(script).toContain('curl -fsSL https://code.kimi.com/kimi-code/install.sh');
+      expect(script).toContain('curl -fsSL https://cdn.nori.work/nori-code/install.sh');
       expect(script).toContain('| bash');
     } finally {
       Object.defineProperty(process, 'platform', { value: originalPlatform });
@@ -498,7 +498,7 @@ describe('runUpdatePreflight', () => {
     try {
       const { stdout, options } = captureOutput();
       await expect(runUpdatePreflight('0.4.0', options)).resolves.toBe('continue');
-      expect(stdout.join('')).toContain('irm https://code.kimi.com/kimi-code/install.ps1 | iex');
+      expect(stdout.join('')).toContain('irm https://cdn.nori.work/nori-code/install.ps1 | iex');
       expect(promptForInstallChoice).not.toHaveBeenCalled();
       expect(mocks.spawn).not.toHaveBeenCalled();
     } finally {
@@ -512,7 +512,7 @@ describe('runUpdatePreflight', () => {
     mocks.detectInstallSource.mockResolvedValue('unsupported');
     const { stdout, options } = captureOutput();
     await expect(runUpdatePreflight('0.4.0', options)).resolves.toBe('continue');
-    expect(stdout.join('')).toContain('npm install -g @moonshot-ai/kimi-code@0.5.0');
+    expect(stdout.join('')).toContain('npm install -g @nori-code/cli@0.5.0');
     expect(mocks.spawn).not.toHaveBeenCalled();
   });
 
@@ -538,7 +538,7 @@ describe('runUpdatePreflight', () => {
     await expect(runUpdatePreflight('0.4.0', options)).resolves.toBe('continue');
     expect(stderr.join('')).toContain('warning: failed to install');
     // A failed install must never print the "Updated …" success line.
-    expect(stdout.join('')).not.toContain('Updated @moonshot-ai/kimi-code');
+    expect(stdout.join('')).not.toContain('Updated @nori-code/cli');
   });
 
   it('starts an automatic update in the background by default', async () => {
@@ -553,7 +553,7 @@ describe('runUpdatePreflight', () => {
     expect(promptForInstallChoice).not.toHaveBeenCalled();
     expect(mocks.spawn).toHaveBeenCalledWith(
       expect.stringMatching(/^npm(\.cmd)?$/),
-      ['install', '-g', '@moonshot-ai/kimi-code@0.5.0'],
+      ['install', '-g', '@nori-code/cli@0.5.0'],
       { detached: true, stdio: 'ignore' },
     );
     expect(writeUpdateInstallState).toHaveBeenCalledWith(expect.objectContaining({
@@ -625,7 +625,7 @@ describe('runUpdatePreflight', () => {
     expect(promptForInstallChoice).not.toHaveBeenCalled();
     expect(mocks.spawn).toHaveBeenCalledWith(
       expect.stringMatching(/^npm(\.cmd)?$/),
-      ['install', '-g', '@moonshot-ai/kimi-code@0.5.0'],
+      ['install', '-g', '@nori-code/cli@0.5.0'],
       { detached: true, stdio: 'ignore' },
     );
   });
@@ -772,9 +772,9 @@ describe('runUpdatePreflight', () => {
     await expect(runUpdatePreflight('0.5.0', { ...options, track, logger })).resolves.toBe('continue');
 
     const rendered = stdout.join('');
-    expect(rendered).toContain('Kimi Code updated to v0.5.0');
+    expect(rendered).toContain('Nori Code updated to v0.5.0');
     expect(rendered).toContain(
-      'https://moonshotai.github.io/kimi-code/en/release-notes/changelog.html',
+      'https://github.com/wangyuahn/nori-code/releases',
     );
     expect(track).toHaveBeenCalledWith('update_success_notice_shown', expect.objectContaining({
       version: '0.5.0',
@@ -807,7 +807,7 @@ describe('runUpdatePreflight', () => {
 
     await expect(runUpdatePreflight('0.5.0', options)).resolves.toBe('continue');
 
-    expect(stdout.join('')).toContain('Kimi Code updated to v0.5.0');
+    expect(stdout.join('')).toContain('Nori Code updated to v0.5.0');
     expect(writeUpdateInstallState).toHaveBeenCalledWith(expect.objectContaining({
       active: null,
       lastFailure: null,
@@ -883,7 +883,7 @@ describe('runUpdatePreflight', () => {
 
       expect(mocks.spawn).toHaveBeenCalledWith(
         expect.stringMatching(/^npm(\.cmd)?$/),
-        ['install', '-g', '@moonshot-ai/kimi-code@0.5.0'],
+        ['install', '-g', '@nori-code/cli@0.5.0'],
         { detached: true, stdio: 'ignore' },
       );
       expect(track).toHaveBeenCalledWith('update_background_install_started', expect.objectContaining({
@@ -994,8 +994,8 @@ describe('runUpdatePreflight', () => {
       expect(mocks.spawn).not.toHaveBeenCalled();
     });
 
-    it('KIMI_CODE_EXPERIMENTAL_FLAG bypasses the rollout: held devices still update', async () => {
-      vi.stubEnv('KIMI_CODE_EXPERIMENTAL_FLAG', '1');
+    it('NORI_CODE_EXPERIMENTAL_FLAG bypasses the rollout: held devices still update', async () => {
+      vi.stubEnv('NORI_CODE_EXPERIMENTAL_FLAG', '1');
       const held = cacheWithManifest(heldForEveryone('0.5.0'));
       mocks.readUpdateCache.mockResolvedValue(held);
       mocks.refreshUpdateCache.mockResolvedValue(held);
@@ -1009,7 +1009,7 @@ describe('runUpdatePreflight', () => {
 
       expect(mocks.spawn).toHaveBeenCalledWith(
         expect.stringMatching(/^npm(\.cmd)?$/),
-        ['install', '-g', '@moonshot-ai/kimi-code@0.5.0'],
+        ['install', '-g', '@nori-code/cli@0.5.0'],
         { detached: true, stdio: 'ignore' },
       );
       expect(track).toHaveBeenCalledWith('update_background_install_started', expect.objectContaining({
@@ -1023,9 +1023,9 @@ describe('runUpdatePreflight', () => {
       }));
     });
 
-    it('KIMI_CODE_NO_AUTO_UPDATE still wins over the experimental flag', async () => {
-      vi.stubEnv('KIMI_CODE_EXPERIMENTAL_FLAG', '1');
-      vi.stubEnv('KIMI_CODE_NO_AUTO_UPDATE', '1');
+    it('NORI_CODE_NO_AUTO_UPDATE still wins over the experimental flag', async () => {
+      vi.stubEnv('NORI_CODE_EXPERIMENTAL_FLAG', '1');
+      vi.stubEnv('NORI_CODE_NO_AUTO_UPDATE', '1');
       mocks.readUpdateCache.mockResolvedValue(cacheWithManifest(releasedForEveryone('0.5.0')));
       const { options } = captureOutput();
 

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContentBlock } from '@agentclientprotocol/sdk';
 import { Jimp } from 'jimp';
 
-import { log, type ToolInputDisplay } from '@moonshot-ai/kimi-code-sdk';
+import { log, type ToolInputDisplay } from '@nori-code/sdk';
 
 import {
   acpBlocksToPromptParts,

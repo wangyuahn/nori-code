@@ -1,4 +1,4 @@
-import { createDecorator } from '@moonshot-ai/agent-core';
+import { createDecorator } from '@nori-code/agent-core';
 
 /**
  * `IGuiStoreService` — a server-backed key/value store mirroring the browser

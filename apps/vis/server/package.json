@@ -1,5 +1,5 @@
 {
-  "name": "@moonshot-ai/vis-server",
+  "name": "@nori-code/vis-server",
   "version": "0.1.1",
   "private": true,
   "license": "MIT",
@@ -32,8 +32,8 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
-    "@moonshot-ai/agent-core": "workspace:^",
-    "@moonshot-ai/kosong": "workspace:^",
+    "@nori-code/agent-core": "workspace:^",
+    "@nori-code/kosong": "workspace:^",
     "hono": "^4.7.7",
     "yauzl": "^3.3.0"
   },

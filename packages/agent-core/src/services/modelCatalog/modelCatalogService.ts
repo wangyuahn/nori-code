@@ -6,13 +6,13 @@ import type {
   RefreshOAuthProviderModelsResponse,
   RefreshProviderModelsResponse,
   SetDefaultModelResponse,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 import {
   refreshProviderModels,
   type ManagedKimiOAuthRef,
   type RefreshProviderHost,
   type RefreshResult,
-} from '@moonshot-ai/kimi-code-oauth';
+} from '@nori-code/oauth';
 
 import { createManagedAuthFacade, type ServicesAuthFacade } from '../auth/managedAuth';
 import { ICoreProcessService } from '../coreProcess/coreProcess';

@@ -21,8 +21,8 @@ import {
   truncateToWidth,
   visibleWidth,
   type Focusable,
-} from '@moonshot-ai/pi-tui';
-import type { BackgroundTaskInfo, BackgroundTaskStatus } from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/pi-tui';
+import type { BackgroundTaskInfo, BackgroundTaskStatus } from '@nori-code/sdk';
 
 import { SELECT_POINTER } from '@/tui/constant/symbols';
 import { currentTheme } from '#/tui/theme';

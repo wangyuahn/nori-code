@@ -10,7 +10,7 @@ import type {
   FsChangeAction,
   FsChangeEntry,
   FsChangeKind,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 
 import { ILogService } from '../logger/logger';
 import {

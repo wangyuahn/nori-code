@@ -2,7 +2,7 @@
  * `SessionEventJournal` — per-session durable event log (the IM-style
  * server-side message log that makes multi-device cursors meaningful).
  *
- * One JSONL file per session under `<kimiHome>/server/events/<sessionId>.jsonl`:
+ * One JSONL file per session under `<noriHome>/server/events/<sessionId>.jsonl`:
  *
  *   line 1   {"kind":"journal_header","version":1,"epoch":"ep_<ulid>","created_at":...}
  *   line 2+  {"kind":"event","seq":N,"envelope":{...wire envelope...}}
@@ -28,7 +28,7 @@ import { appendFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { ulid } from 'ulid';
 
-import type { ILogService } from '@moonshot-ai/agent-core';
+import type { ILogService } from '@nori-code/agent-core';
 
 import type { EventEnvelope } from '#/ws/protocol';
 

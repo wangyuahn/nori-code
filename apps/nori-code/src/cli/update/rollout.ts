@@ -2,10 +2,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { appendFile, mkdir, stat, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-import { readKimiDeviceId } from '@moonshot-ai/kimi-code-oauth';
-import { resolveKimiHome } from '@moonshot-ai/kimi-code-sdk';
+import { readKimiDeviceId } from '@nori-code/oauth';
 
-import { getUpdateRolloutLogFile } from '#/utils/paths';
+import { getDataDir, getUpdateRolloutLogFile } from '#/utils/paths';
 
 import { selectUpdateTarget } from './select';
 import type { RolloutBatch, UpdateManifest, UpdateTarget } from './types';
@@ -72,7 +71,7 @@ export type PassiveUpdateReason =
   | 'held'
   /** Gated and the batch delay has elapsed: update is visible. */
   | 'eligible'
-  /** KIMI_CODE_EXPERIMENTAL_FLAG is on: rollout skipped, newest always visible. */
+  /** NORI_CODE_EXPERIMENTAL_FLAG is on: rollout skipped, newest always visible. */
   | 'experimental';
 
 export interface PassiveUpdateDecision {
@@ -89,7 +88,7 @@ export interface PassiveUpdateDecision {
  * no update at all. A null manifest (plain-text fallback or legacy cache)
  * keeps the pre-rollout behavior: the latest version is visible immediately.
  *
- * `kimi upgrade` must NOT go through this gate — it selects directly from the
+ * `nori upgrade` must NOT go through this gate — it selects directly from the
  * raw latest version.
  */
 export function decidePassiveUpdateTarget(
@@ -191,7 +190,7 @@ export async function appendRolloutDecisionLog(
  * creates the telemetry device_id before telemetry can emit first_launch.
  */
 export function resolveUpdateDeviceId(): string {
-  return readKimiDeviceId(resolveKimiHome()) ?? randomUUID();
+  return readKimiDeviceId(getDataDir()) ?? randomUUID();
 }
 
 /**

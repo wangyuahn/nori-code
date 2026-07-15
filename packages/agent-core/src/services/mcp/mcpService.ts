@@ -3,7 +3,7 @@
  */
 
 import { Disposable, InstantiationType, registerSingleton } from '../../di';
-import type { McpServer } from '@moonshot-ai/protocol';
+import type { McpServer } from '@nori-code/protocol';
 
 import { ICoreProcessService } from '../coreProcess/coreProcess';
 import {

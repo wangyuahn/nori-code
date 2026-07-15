@@ -1,6 +1,6 @@
 /**
  * Tests for the CLI telemetry bootstrap helpers, focusing on the
- * `kimi web` / `kimi server run` host wiring added in `cli/telemetry.ts`.
+ * `nori web` / `nori server run` host wiring added in `cli/telemetry.ts`.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,8 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   initializeTelemetry: vi.fn(),
   createKimiDeviceId: vi.fn(() => 'device-123'),
-  resolveKimiHome: vi.fn(() => '/home/.kimi-code'),
-  resolveConfigPath: vi.fn(() => '/home/.kimi-code/config.toml'),
+    resolveConfigPath: vi.fn(() => '/home/.nori-code/config.toml'),
   loadRuntimeConfigSafe: vi.fn(
     (): {
       config: { defaultModel?: string; telemetry?: boolean };
@@ -19,33 +18,24 @@ const mocks = vi.hoisted(() => ({
       fileError: undefined,
     }),
   ),
-  getCachedAccessToken: vi.fn(async () => 'tok'),
 }));
 
-vi.mock('@moonshot-ai/kimi-telemetry', () => ({
+vi.mock('@nori-code/telemetry', () => ({
   initializeTelemetry: mocks.initializeTelemetry,
   setTelemetryContext: vi.fn(),
   track: vi.fn(),
   withTelemetryContext: vi.fn(),
 }));
 
-vi.mock('@moonshot-ai/kimi-code-oauth', () => ({
+vi.mock('@nori-code/oauth', () => ({
   createKimiDeviceId: mocks.createKimiDeviceId,
-  KIMI_CODE_PROVIDER_NAME: 'managed:kimi-code',
 }));
 
-vi.mock('@moonshot-ai/kimi-code-sdk', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@moonshot-ai/kimi-code-sdk')>();
-  return {
-    ...actual,
-    resolveKimiHome: mocks.resolveKimiHome,
-    resolveConfigPath: mocks.resolveConfigPath,
-    loadRuntimeConfigSafe: mocks.loadRuntimeConfigSafe,
-    KimiAuthFacade: vi.fn(function () {
-      return { getCachedAccessToken: mocks.getCachedAccessToken };
-    }),
-  };
-});
+vi.mock('@nori-code/sdk', () => ({
+  ErrorCodes: { AUTH_LOGIN_REQUIRED: 40100 },
+  resolveConfigPath: mocks.resolveConfigPath,
+  loadRuntimeConfigSafe: mocks.loadRuntimeConfigSafe,
+}));
 
 describe('initializeServerTelemetry', () => {
   beforeEach(() => {
@@ -57,19 +47,19 @@ describe('initializeServerTelemetry', () => {
     });
   });
 
-  it('configures the sink with ui_mode="web" and the CLI product identity', async () => {
+  it('configures a disabled sink with ui_mode="web" and the Nori CLI identity', async () => {
     const { initializeServerTelemetry } = await import('#/cli/telemetry');
     const client = initializeServerTelemetry({ version: '1.2.3' });
 
     expect(mocks.initializeTelemetry).toHaveBeenCalledWith(
       expect.objectContaining({
-        appName: 'kimi-code-cli',
+        appName: 'nori-code-cli',
         version: '1.2.3',
         uiMode: 'web',
         model: 'kimi-k2',
-        enabled: true,
+        enabled: false,
         deviceId: 'device-123',
-        homeDir: '/home/.kimi-code',
+        homeDir: expect.stringMatching(/[\\/]\.nori-code$/),
       }),
     );
     // The returned client wraps the module functions so core + the host share
@@ -81,9 +71,11 @@ describe('initializeServerTelemetry', () => {
         setContext: expect.any(Function),
       }),
     );
+    const telemetryOptions = mocks.initializeTelemetry.mock.calls[0]?.[0];
+    expect(await telemetryOptions?.getAccessToken()).toBeNull();
   });
 
-  it('disables telemetry when config.toml sets telemetry = false', async () => {
+  it('keeps telemetry disabled when config.toml sets telemetry = false', async () => {
     mocks.loadRuntimeConfigSafe.mockReturnValue({
       config: { defaultModel: 'kimi-k2', telemetry: false },
       fileError: undefined,
@@ -96,7 +88,7 @@ describe('initializeServerTelemetry', () => {
     );
   });
 
-  it('degrades to enabled with no model when config is unreadable', async () => {
+  it('keeps telemetry disabled with no model when config is unreadable', async () => {
     mocks.loadRuntimeConfigSafe.mockReturnValue({
       config: {},
       fileError: new Error('bad toml'),
@@ -105,7 +97,7 @@ describe('initializeServerTelemetry', () => {
     initializeServerTelemetry({ version: '1.2.3' });
 
     expect(mocks.initializeTelemetry).toHaveBeenCalledWith(
-      expect.objectContaining({ enabled: true, model: undefined }),
+      expect.objectContaining({ enabled: false, model: undefined }),
     );
   });
 });

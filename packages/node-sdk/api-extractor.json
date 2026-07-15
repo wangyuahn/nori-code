@@ -2,10 +2,10 @@
   "$schema": "https://developer.microsoft.com/json-schemas/api-extractor/v7/api-extractor.schema.json",
   "mainEntryPointFilePath": "<projectFolder>/.tmp-api-extractor/dts/node-sdk/src/index.d.ts",
   "bundledPackages": [
-    "@moonshot-ai/agent-core",
-    "@moonshot-ai/kaos",
-    "@moonshot-ai/kimi-code-oauth",
-    "@moonshot-ai/kosong"
+    "@nori-code/agent-core",
+    "@nori-code/kaos",
+    "@nori-code/oauth",
+    "@nori-code/kosong"
   ],
   "compiler": {
     "tsconfigFilePath": "<projectFolder>/tsconfig.api-extractor.json",

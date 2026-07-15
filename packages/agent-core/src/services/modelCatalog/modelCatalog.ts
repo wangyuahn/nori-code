@@ -6,7 +6,7 @@ import type {
   RefreshOAuthProviderModelsResponse,
   RefreshProviderModelsResponse,
   SetDefaultModelResponse,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 
 export type RefreshProviderModelsScope = 'all' | 'oauth';
 

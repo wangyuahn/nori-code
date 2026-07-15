@@ -91,77 +91,43 @@ function makePanel(opts: {
 }
 
 describe('plugins selector dialogs', () => {
-  it('trusts only built-in Kimi CDN plugin paths', () => {
-    expect(pluginTrustLabel({
-      id: 'kimi-datasource',
-      displayName: 'Kimi Datasource',
-      enabled: true,
-      state: 'ok',
-      skillCount: 0,
-      mcpServerCount: 0,
-      enabledMcpServerCount: 0,
-      hookCount: 0,
-      commandCount: 0,
-      hasErrors: false,
-      source: 'zip-url',
-      originalSource: 'https://code.kimi.com/kimi-code/plugins/official/kimi-datasource.zip',
-    })).toBe('official');
-    expect(pluginTrustLabel({
-      id: 'superpowers',
-      displayName: 'Superpowers',
-      enabled: true,
-      state: 'ok',
-      skillCount: 0,
-      mcpServerCount: 0,
-      enabledMcpServerCount: 0,
-      hookCount: 0,
-      commandCount: 0,
-      hasErrors: false,
-      source: 'zip-url',
-      originalSource: 'https://code.kimi.com/kimi-code/plugins/curated/superpowers.zip',
-    })).toBe('curated');
-    expect(pluginTrustLabel({
-      id: 'demo',
-      displayName: 'Demo',
-      enabled: true,
-      state: 'ok',
-      skillCount: 0,
-      mcpServerCount: 0,
-      enabledMcpServerCount: 0,
-      hookCount: 0,
-      commandCount: 0,
-      hasErrors: false,
-      source: 'zip-url',
-      originalSource: 'https://code.kimi.com/demo.zip',
-    })).toBe('third-party');
-    expect(pluginTrustLabel({
-      id: 'local',
-      displayName: 'Local',
-      enabled: true,
-      state: 'ok',
-      skillCount: 0,
-      mcpServerCount: 0,
-      enabledMcpServerCount: 0,
-      hookCount: 0,
-      commandCount: 0,
-      hasErrors: false,
-      source: 'local-path',
-      originalSource: 'https://code.kimi.com/kimi-code/plugins/official/local',
-    })).toBe('third-party');
+  it('treats every external plugin source as third-party', () => {
+    const sources = [
+      'https://code.kimi.com/kimi-code/plugins/official/legacy.zip',
+      'https://code.kimi.com/kimi-code/plugins/curated/legacy.zip',
+      'https://plugins.example.test/demo.zip',
+    ];
+    for (const [index, originalSource] of sources.entries()) {
+      expect(pluginTrustLabel({
+        id: `external-${index}`,
+        displayName: 'External plugin',
+        enabled: true,
+        state: 'ok',
+        skillCount: 0,
+        mcpServerCount: 0,
+        enabledMcpServerCount: 0,
+        hookCount: 0,
+        commandCount: 0,
+        hasErrors: false,
+        source: 'zip-url',
+        originalSource,
+      })).toBe('third-party');
+    }
   });
 
-  it('treats only the official Kimi CDN path as a trusted install source', () => {
-    expect(isOfficialPluginSource('https://code.kimi.com/kimi-code/plugins/official/kimi-datasource.zip')).toBe(true);
-    // Curated and other Kimi CDN paths are not "official" for the install gate.
-    expect(isOfficialPluginSource('https://code.kimi.com/kimi-code/plugins/curated/superpowers.zip')).toBe(false);
-    expect(isOfficialPluginSource('https://code.kimi.com/kimi-code/plugins/foo.zip')).toBe(false);
-    // Non-Kimi hosts, non-https schemes, local paths, and GitHub sources are unofficial.
-    expect(isOfficialPluginSource('https://example.test/kimi-code/plugins/official/x.zip')).toBe(false);
-    expect(isOfficialPluginSource('http://code.kimi.com/kimi-code/plugins/official/x.zip')).toBe(false);
-    expect(isOfficialPluginSource('./plugins/kimi-datasource')).toBe(false);
-    expect(isOfficialPluginSource('/abs/path/to/plugin')).toBe(false);
-    expect(isOfficialPluginSource('github.com/owner/repo')).toBe(false);
-    expect(isOfficialPluginSource('not a url')).toBe(false);
+  it('does not bypass install confirmation for any external source', () => {
+    const sources = [
+      'https://code.kimi.com/kimi-code/plugins/official/legacy.zip',
+      'https://plugins.example.test/plugin.zip',
+      'http://plugins.example.test/plugin.zip',
+      './plugins/local',
+      '/abs/path/to/plugin',
+      'github.com/owner/repo',
+      'not a url',
+    ];
+    for (const source of sources) {
+      expect(isOfficialPluginSource(source)).toBe(false);
+    }
   });
 
   it('opens on the Installed tab with the four panel tabs', () => {
@@ -523,7 +489,7 @@ describe('plugins selector dialogs', () => {
     expect(out).toContain('    Install this third-party plugin anyway.');
     // The warning explains why confirmation is required and uses the
     // design-system warning color rather than muted/default text.
-    expect(out.some((line) => line.includes('Kimi has not reviewed'))).toBe(true);
+    expect(out.some((line) => line.includes('Nori has not reviewed'))).toBe(true);
     expect(out.some((line) => line.includes('trust the source'))).toBe(true);
     expect(raw).toContain(warningMark());
 

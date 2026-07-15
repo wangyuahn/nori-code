@@ -4,7 +4,7 @@
 
 import { Disposable, InstantiationType, registerSingleton } from '../../di';
 import type { KimiConfig } from '../../config';
-import type { AuthSummary } from '@moonshot-ai/protocol';
+import type { AuthSummary } from '@nori-code/protocol';
 import { createManagedAuthFacade, type ServicesAuthFacade } from '../auth/managedAuth';
 import { IEnvironmentService } from '../environment/environment';
 import { ICoreProcessService } from '../coreProcess/coreProcess';
@@ -15,7 +15,7 @@ import {
   AuthModelNotResolvedError,
 } from './authSummary';
 
-/** Wire name of the OAuth-managed provider (`@moonshot-ai/kimi-code-oauth`'s `KIMI_CODE_PROVIDER_NAME`). */
+/** Wire name of the OAuth-managed provider (`@nori-code/oauth`'s `KIMI_CODE_PROVIDER_NAME`). */
 const MANAGED_PROVIDER_NAME = 'managed:nori-code';
 
 export class AuthSummaryService

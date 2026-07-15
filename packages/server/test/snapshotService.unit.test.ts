@@ -31,11 +31,11 @@ import type {
   ILogService,
   IPromptService,
   IQuestionService,
-} from '@moonshot-ai/agent-core';
+} from '@nori-code/agent-core';
 import {
   EventService,
-} from '@moonshot-ai/agent-core';
-import { SessionStore } from '@moonshot-ai/agent-core/session/store';
+} from '@nori-code/agent-core';
+import { SessionStore } from '@nori-code/agent-core/session/store';
 
 import { IWSBroadcastService } from '#/services/gateway';
 import type {

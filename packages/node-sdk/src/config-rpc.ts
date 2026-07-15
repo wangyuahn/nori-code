@@ -5,7 +5,7 @@ import {
   parseConfigString,
   resolveConfigPath,
   type RPCMethods,
-} from '@moonshot-ai/agent-core';
+} from '@nori-code/agent-core';
 import { z } from 'zod';
 
 export type KimiConfigValidationPathSegment = string | number;

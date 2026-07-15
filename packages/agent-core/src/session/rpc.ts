@@ -1,5 +1,5 @@
 import { ErrorCodes, KimiError } from '#/errors';
-import type { SessionWarning } from '@moonshot-ai/protocol';
+import type { SessionWarning } from '@nori-code/protocol';
 import type {
   ActivateSkillPayload,
   ActivatePluginCommandPayload,
@@ -304,6 +304,7 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
   }
 
   private needUpdateEasyTitle(metadata: SessionMeta): boolean {
+    if ((metadata as SessionMeta & { nori_smart_title?: unknown }).nori_smart_title === true) return false;
     if (hasCustomTitle(metadata)) return false;
     if (!isUntitled(metadata.title)) return false;
     return true;

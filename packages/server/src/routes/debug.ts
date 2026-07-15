@@ -31,7 +31,7 @@
  * pattern `packages/server/test/prompt.e2e.test.ts` already uses.
  */
 
-import { IPromptService, PromptService, type IInstantiationService } from '@moonshot-ai/agent-core';
+import { IPromptService, PromptService, type IInstantiationService } from '@nori-code/agent-core';
 import { z } from 'zod';
 
 

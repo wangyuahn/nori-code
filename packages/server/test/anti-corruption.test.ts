@@ -11,16 +11,16 @@ const here = dirname(fileURLToPath(import.meta.url));
 const daemonSrc = resolve(here, '..', 'src');
 
 describe('packages/server/src anti-corruption', () => {
-  it('has zero @moonshot-ai/kimi-code-sdk / KimiHarness / createRPC / SDKRpcClient references', () => {
+  it('has zero @nori-code/sdk / KimiHarness / createRPC / SDKRpcClient references', () => {
 
     const out = execSync(
-      `grep -rE "@moonshot-ai/kimi-code-sdk|KimiHarness\\b|createRPC\\b|SDKRpcClient\\b" "${daemonSrc}" || true`,
+      `grep -rE "@nori-code/sdk|KimiHarness\\b|createRPC\\b|SDKRpcClient\\b" "${daemonSrc}" || true`,
       { encoding: 'utf8' },
     ).trim();
     expect(out).toBe('');
   });
 
-  it('imports shared filesystem, file store, logger, and workspace services from @moonshot-ai/agent-core', () => {
+  it('imports shared filesystem, file store, logger, and workspace services from @nori-code/agent-core', () => {
     const out = execSync(
       `grep -rE '["'"'"']#/services/(fileStore|fs|logger|workspace)(/|["'"'"'])' "${daemonSrc}" || true`,
       { encoding: 'utf8' },

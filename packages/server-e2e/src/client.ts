@@ -56,7 +56,7 @@ import type {
   Workspace,
   WorkspaceCreate,
   WorkspaceUpdate,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 import { ulid } from 'ulid';
 import { WebSocket as WsWebSocket } from 'ws';
 

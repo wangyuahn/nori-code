@@ -326,15 +326,26 @@ describe('sessionStatusResponseSchema', () => {
       thinking_level: 'on',
       permission: 'ask',
       plan_mode: true,
+      main_write_enabled: true,
       swarm_mode: false,
+      goal: null,
       context_tokens: 1024,
       max_context_tokens: 128000,
       context_usage: 0.008,
+      usage: {
+        total: {
+          input_other: 800,
+          output: 200,
+          input_cache_read: 100,
+          input_cache_creation: 50,
+        },
+      },
     });
     expect(parsed.status).toBe('running');
     expect(parsed.model).toBe('moonshot-v1-128k');
     expect(parsed.plan_mode).toBe(true);
     expect(parsed.context_usage).toBe(0.008);
+    expect(parsed.usage?.total?.output).toBe(200);
   });
 
   it('accepts minimal shape without model', () => {
@@ -343,7 +354,9 @@ describe('sessionStatusResponseSchema', () => {
       thinking_level: 'off',
       permission: 'auto',
       plan_mode: false,
+      main_write_enabled: false,
       swarm_mode: false,
+      goal: null,
       context_tokens: 0,
       max_context_tokens: 0,
       context_usage: 0,
@@ -358,7 +371,9 @@ describe('sessionStatusResponseSchema', () => {
         thinking_level: 'off',
         permission: 'auto',
         plan_mode: false,
+        main_write_enabled: false,
         swarm_mode: false,
+        goal: null,
         context_tokens: 0,
         max_context_tokens: 0,
         context_usage: 0,
@@ -373,7 +388,9 @@ describe('sessionStatusResponseSchema', () => {
         thinking_level: 'off',
         permission: 'auto',
         plan_mode: false,
+        main_write_enabled: false,
         swarm_mode: false,
+        goal: null,
         context_tokens: 0,
         max_context_tokens: 0,
         context_usage: 0,
@@ -388,7 +405,9 @@ describe('sessionStatusResponseSchema', () => {
         thinking_level: 'off',
         permission: 'auto',
         plan_mode: false,
+        main_write_enabled: false,
         swarm_mode: false,
+        goal: null,
         context_tokens: -1,
         max_context_tokens: 0,
         context_usage: 0,
@@ -403,7 +422,9 @@ describe('sessionStatusResponseSchema', () => {
         thinking_level: 'off',
         permission: 'auto',
         plan_mode: false,
+        main_write_enabled: false,
         swarm_mode: false,
+        goal: null,
         context_tokens: 10,
         max_context_tokens: 5,
         context_usage: 2,
@@ -477,7 +498,9 @@ describe('undoSessionResponseSchema', () => {
         thinking_level: 'auto',
         permission: 'manual',
         plan_mode: false,
+        main_write_enabled: true,
         swarm_mode: false,
+        goal: null,
         context_tokens: 10,
         max_context_tokens: 100,
         context_usage: 0.1,

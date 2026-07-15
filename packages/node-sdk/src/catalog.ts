@@ -1,4 +1,4 @@
-import type { KimiConfig, ModelAlias } from '@moonshot-ai/agent-core';
+import type { KimiConfig, ModelAlias } from '@nori-code/agent-core';
 import {
   catalogBaseUrl,
   catalogProviderModels,
@@ -8,7 +8,7 @@ import {
   type CatalogProviderEntry,
   type ModelCapability,
   type ProviderType,
-} from '@moonshot-ai/kosong';
+} from '@nori-code/kosong';
 
 export { catalogBaseUrl, catalogProviderModels, inferWireType };
 export type { Catalog, CatalogModel, CatalogProviderEntry };
@@ -23,13 +23,25 @@ export class CatalogFetchError extends Error {
   }
 }
 
-/** Fetches a models.dev-style catalog. Public endpoint, no credentials needed. */
+export interface FetchCatalogOptions {
+  readonly signal?: AbortSignal;
+  readonly fetchImpl?: typeof fetch;
+  readonly userAgent?: string;
+}
+
+/**
+ * Fetches a models.dev-style catalog. Public endpoint, no credentials needed.
+ * `userAgent` identifies the host product (e.g. `nori-code-cli/1.2.3`); when
+ * omitted the request falls back to the runtime default (`User-Agent: node`).
+ */
 export async function fetchCatalog(
   url: string,
-  signal?: AbortSignal,
-  fetchImpl: typeof fetch = fetch,
+  options: FetchCatalogOptions = {},
 ): Promise<Catalog> {
-  const res = await fetchImpl(url, { headers: { Accept: 'application/json' }, signal });
+  const { signal, fetchImpl = fetch, userAgent } = options;
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (userAgent !== undefined) headers['User-Agent'] = userAgent;
+  const res = await fetchImpl(url, { headers, signal });
   if (!res.ok) {
     throw new CatalogFetchError(`Failed to fetch catalog (HTTP ${res.status}).`, res.status);
   }

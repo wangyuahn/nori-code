@@ -9,8 +9,9 @@
 
 import type { RawData, WebSocket } from 'ws';
 import { WebSocketServer } from 'ws';
-import type { IInstantiationService } from '@moonshot-ai/agent-core';
+import type { IInstantiationService } from '@nori-code/agent-core';
 import type { FastifyInstance } from 'fastify';
+import { listSwarmStatuses } from './swarmStatus';
 
 export interface SwarmStatusPayload {
   type: 'swarm_status';
@@ -18,6 +19,19 @@ export interface SwarmStatusPayload {
   status: 'pending' | 'running' | 'done' | 'failed';
   task_count: number;
   completed_count: number;
+  session_id?: string;
+  task_id?: string;
+  description?: string;
+  owner_agent_id?: string;
+  round?: number;
+  started_at?: string;
+  usage?: {
+    input: number;
+    output: number;
+    cache_read: number;
+    cache_write: number;
+    total: number;
+  };
   timestamp: string;
 }
 
@@ -61,6 +75,23 @@ export function registerSwarmWsRoute(app: FastifyInstance, _ix: IInstantiationSe
           client_count: connectedClients.size,
         }),
       );
+      for (const entry of listSwarmStatuses()) {
+        ws.send(JSON.stringify({
+          type: 'swarm_status',
+          swarm_id: entry.swarm_id,
+          status: entry.status,
+          task_count: entry.task_count,
+          completed_count: entry.completed_count,
+          session_id: entry.session_id,
+          task_id: entry.task_id,
+          description: entry.description,
+          owner_agent_id: entry.owner_agent_id,
+          round: entry.round,
+          started_at: entry.started_at,
+          usage: entry.usage,
+          timestamp: new Date().toISOString(),
+        } satisfies SwarmStatusPayload));
+      }
 
       ws.on('message', (raw: RawData) => {
         try {

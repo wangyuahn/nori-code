@@ -31,7 +31,7 @@ import {
   DeviceCodeTimeoutError,
   OAuthError,
   type DeviceAuthorization,
-} from '@moonshot-ai/kimi-code-oauth';
+} from '@nori-code/oauth';
 
 import type { ServicesAuthFacade } from '../../src/services/auth/managedAuth';
 import { IEnvironmentService } from '../../src/services/environment/environment';

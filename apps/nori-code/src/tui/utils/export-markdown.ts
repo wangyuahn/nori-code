@@ -1,4 +1,4 @@
-import type { ContentPart, ContextMessage, PromptOrigin, ToolCall } from '@moonshot-ai/kimi-code-sdk';
+import type { ContentPart, ContextMessage, PromptOrigin, ToolCall } from '@nori-code/sdk';
 
 const HINT_KEYS = ['path', 'file_path', 'command', 'query', 'url', 'name', 'pattern'] as const;
 
@@ -231,7 +231,7 @@ export function buildExportMarkdown(input: BuildExportMarkdownInput): string {
     `token_count: ${String(tokenCount)}`,
     '---',
     '',
-    '# Kimi Session Export',
+    '# Nori Session Export',
     '',
   ];
 

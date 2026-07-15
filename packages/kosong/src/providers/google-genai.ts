@@ -702,7 +702,11 @@ export class GoogleGenAIChatProvider implements ChatProvider {
     this._stream = options.stream ?? true;
     this._generationKwargs = {};
 
-    const apiKey = options.apiKey ?? process.env['GOOGLE_API_KEY'];
+    // Vertex project/location auth uses ADC and is mutually exclusive with an
+    // API key. Do not accidentally inject GOOGLE_API_KEY into Vertex configs.
+    const apiKey = options.vertexai
+      ? options.apiKey
+      : (options.apiKey ?? process.env['GOOGLE_API_KEY']);
     this._apiKey = apiKey === undefined || apiKey.length === 0 ? undefined : apiKey;
     this._baseUrl =
       options.baseUrl === undefined || options.baseUrl.length === 0 ? undefined : options.baseUrl;

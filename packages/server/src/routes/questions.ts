@@ -38,8 +38,8 @@ import {
   listPendingQuestionsResponseSchema,
   questionResolveRequestSchema,
   questionResolveResultSchema,
-} from '@moonshot-ai/protocol';
-import { IQuestionService, questionToAgentCoreResponse, type IInstantiationService } from '@moonshot-ai/agent-core';
+} from '@nori-code/protocol';
+import { IQuestionService, questionToAgentCoreResponse, type IInstantiationService } from '@nori-code/agent-core';
 import { z } from 'zod';
 
 

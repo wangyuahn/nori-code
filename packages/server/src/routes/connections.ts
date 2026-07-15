@@ -9,8 +9,8 @@
  * Read-only and effectively infallible: it only snapshots the registry map.
  */
 
-import { connectionsListResponseSchema } from '@moonshot-ai/protocol';
-import type { IInstantiationService } from '@moonshot-ai/agent-core';
+import { connectionsListResponseSchema } from '@nori-code/protocol';
+import type { IInstantiationService } from '@nori-code/agent-core';
 
 import { okEnvelope } from '../envelope';
 import { defineRoute } from '../middleware/defineRoute';

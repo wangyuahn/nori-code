@@ -1,4 +1,4 @@
-# @moonshot-ai/kimi-code-sdk
+# @nori-code/sdk
 
 The TypeScript SDK for Kimi Code
 

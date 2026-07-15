@@ -19,7 +19,7 @@ import {
   noopTelemetryClient,
   type TelemetryClient,
   type TelemetryProperties,
-} from '@moonshot-ai/agent-core';
+} from '@nori-code/agent-core';
 
 import { IRestGateway, startServer, type RunningServer } from '../src';
 import { fixedTokenAuth } from './helpers/serverHarness';
@@ -493,13 +493,13 @@ describe('FsSearchService direct: rg fallback + grep timeout (W11.1)', () => {
     class StubTimeout extends FsSearchService {
       protected override async grepWithNode(
         _cwd: string,
-        _req: import('@moonshot-ai/protocol').FsGrepRequest,
+        _req: import('@nori-code/protocol').FsGrepRequest,
         _signal: AbortSignal,
         startedAt: number,
-      ): Promise<import('@moonshot-ai/protocol').FsGrepResponse> {
+      ): Promise<import('@nori-code/protocol').FsGrepResponse> {
 
         throw new (
-          await import('@moonshot-ai/agent-core')
+          await import('@nori-code/agent-core')
         ).FsGrepTimeoutError(Date.now() - startedAt);
       }
       public override probeRg(): Promise<string | null> {

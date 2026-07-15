@@ -1,4 +1,4 @@
-import { createToolMessage, type ContentPart, type Message } from '@moonshot-ai/kosong';
+import { createToolMessage, type ContentPart, type Message } from '@nori-code/kosong';
 
 import type { Agent } from '..';
 import { ErrorCodes, KimiError } from '../../errors';

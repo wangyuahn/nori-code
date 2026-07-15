@@ -8,7 +8,7 @@ import { Readable } from 'node:stream';
 import type { Writable } from 'node:stream';
 import { join } from 'pathe';
 
-import type { KaosProcess } from '@moonshot-ai/kaos';
+import type { KaosProcess } from '@nori-code/kaos';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -282,6 +282,7 @@ describe('BackgroundManager — notification delivery', () => {
       notificationId: `task:${taskId}:completed`,
     });
     const text = (content as Array<{ text: string }>)[0]!.text;
+    expect(text).toMatch(/^<system-reminder>\n<notification[\s\S]*<\/notification>\n<\/system-reminder>$/);
     expect(text).toContain('Background agent completed');
     expect(text).toContain('final subagent summary');
     expect(text).toContain('<output-preview');

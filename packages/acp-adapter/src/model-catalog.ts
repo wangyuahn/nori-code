@@ -3,7 +3,7 @@
  * config snapshot into a flat list of selectable models for the ACP
  * `configOptions` picker (`packages/acp-adapter/src/config-options.ts`).
  *
- * Used to live inside `@moonshot-ai/kimi-code-sdk` as
+ * Used to live inside `@nori-code/sdk` as
  * `KimiHarness.listAvailableModels()`; moved here so the SDK keeps a
  * minimal surface and ACP-specific heuristics (thinking-capability
  * derivation, the toggleable-models allow-list) stay scoped to the
@@ -22,8 +22,8 @@
  *      allow-list (mirrors `kimi-cli/src/kimi_cli/llm.py:derive_model_capabilities`).
  */
 
-import { effectiveModelAlias } from '@moonshot-ai/agent-core';
-import type { KimiHarness, ModelAlias } from '@moonshot-ai/kimi-code-sdk';
+import { effectiveModelAlias } from '@nori-code/agent-core';
+import type { KimiHarness, ModelAlias } from '@nori-code/sdk';
 
 /**
  * One catalog row per configured model alias, suitable for an ACP

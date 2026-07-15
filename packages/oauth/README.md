@@ -1,4 +1,4 @@
-# @moonshot-ai/kimi-code-oauth
+# @nori-code/oauth
 
 OAuth toolkit for Kimi Code managed authentication.
 

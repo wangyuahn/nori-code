@@ -14,7 +14,7 @@
  */
 
 import Fastify from 'fastify';
-import { ulidRegex } from '@moonshot-ai/protocol';
+import { ulidRegex } from '@nori-code/protocol';
 import { pino } from 'pino';
 import { describe, expect, it } from 'vitest';
 

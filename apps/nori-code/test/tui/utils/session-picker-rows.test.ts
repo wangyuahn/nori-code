@@ -1,4 +1,4 @@
-import type { SessionSummary } from '@moonshot-ai/kimi-code-sdk';
+import type { SessionSummary } from '@nori-code/sdk';
 import { describe, expect, it } from 'vitest';
 
 import { sessionRowsForPicker } from '#/tui/utils/session-picker-rows';

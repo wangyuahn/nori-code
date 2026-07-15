@@ -1,23 +1,21 @@
-import { createKimiDeviceId, KIMI_CODE_PROVIDER_NAME } from '@moonshot-ai/kimi-code-oauth';
+import { createKimiDeviceId } from '@nori-code/oauth';
 import {
-  KimiAuthFacade,
   loadRuntimeConfigSafe,
   resolveConfigPath,
-  resolveKimiHome,
   type KimiConfig,
   type KimiHarness,
   type TelemetryClient,
-} from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/sdk';
 import {
   initializeTelemetry,
   setTelemetryContext,
   track,
   withTelemetryContext,
-} from '@moonshot-ai/kimi-telemetry';
+} from '@nori-code/telemetry';
 
 import { CLI_USER_AGENT_PRODUCT, WEB_UI_MODE } from '#/constant/app';
+import { getDataDir } from '#/utils/paths';
 
-import { createKimiCodeHostIdentity } from './version';
 
 export interface CliTelemetryBootstrap {
   readonly homeDir: string;
@@ -36,7 +34,7 @@ export interface InitializeCliTelemetryOptions {
 
 export function createCliTelemetryBootstrap(): CliTelemetryBootstrap {
   let firstLaunch = false;
-  const homeDir = resolveKimiHome();
+  const homeDir = getDataDir();
   const deviceId = createKimiDeviceId(homeDir, {
     onFirstLaunch: () => {
       firstLaunch = true;
@@ -49,13 +47,12 @@ export function initializeCliTelemetry(options: InitializeCliTelemetryOptions): 
   initializeTelemetry({
     homeDir: options.harness.homeDir,
     deviceId: options.bootstrap.deviceId,
-    enabled: options.config.telemetry !== false,
+    enabled: false,
     appName: CLI_USER_AGENT_PRODUCT,
     version: options.version,
     uiMode: options.uiMode,
     model: options.model ?? options.config.defaultModel,
-    getAccessToken: async () =>
-      (await options.harness.auth.getCachedAccessToken(KIMI_CODE_PROVIDER_NAME)) ?? null,
+    getAccessToken: async () => null,
   });
   if (options.bootstrap.firstLaunch) {
     options.harness.track('first_launch');
@@ -67,10 +64,10 @@ export interface InitializeServerTelemetryOptions {
 }
 
 /**
- * Bootstrap telemetry for the `kimi web` / `kimi server run` host.
+ * Bootstrap telemetry for the `nori web` / `nori server run` host.
  *
- * Mirrors {@link initializeCliTelemetry}: mints the device id, reads config to
- * honor the `telemetry` toggle and pick up the default model, attaches the
+ * Mirrors {@link initializeCliTelemetry}: mints the device id, reads config for
+ * the default model, and attaches a permanently disabled local telemetry client.
  * sink with `ui_mode = "web"`, and returns a {@link TelemetryClient} the
  * caller hands to `startServer` via `coreProcessOptions.telemetry`. That wires
  * the same real client into `KimiCore`, so agent-core events emitted inside the
@@ -78,7 +75,7 @@ export interface InitializeServerTelemetryOptions {
  * events, …) actually leave the process carrying the enriched context
  * (`app_name` / `version` / `ui_mode` / `model` / platform fields).
  *
- * The returned client wraps the `@moonshot-ai/kimi-telemetry` module
+ * The returned client wraps the `@nori-code/telemetry` module
  * functions, so the module-level `track` / `withTelemetryContext` (used to
  * fire the startup event) share the same underlying client + sink.
  */
@@ -88,21 +85,17 @@ export function initializeServerTelemetry(
   const bootstrap = createCliTelemetryBootstrap();
   const configPath = resolveConfigPath({ homeDir: bootstrap.homeDir });
   const config = readServerTelemetryConfig(configPath);
-  const auth = new KimiAuthFacade({
-    homeDir: bootstrap.homeDir,
-    configPath,
-    identity: createKimiCodeHostIdentity(options.version),
-  });
+
 
   initializeTelemetry({
     homeDir: bootstrap.homeDir,
     deviceId: bootstrap.deviceId,
-    enabled: config.telemetry !== false,
+    enabled: false,
     appName: CLI_USER_AGENT_PRODUCT,
     version: options.version,
     uiMode: WEB_UI_MODE,
     model: config.defaultModel,
-    getAccessToken: async () => (await auth.getCachedAccessToken(KIMI_CODE_PROVIDER_NAME)) ?? null,
+    getAccessToken: async () => null,
   });
 
   return {
@@ -118,7 +111,7 @@ function readServerTelemetryConfig(
   try {
     const { config, fileError } = loadRuntimeConfigSafe(configPath);
     // A broken config fails the server on its own inside KimiCore; for
-    // telemetry just degrade to "enabled, no model" so we never block startup.
+    // telemetry just degrades to no model so it never blocks server startup.
     if (fileError !== undefined) return {};
     return config;
   } catch {

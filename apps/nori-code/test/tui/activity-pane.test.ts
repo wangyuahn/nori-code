@@ -19,8 +19,7 @@ function makeStartupInput(): KimiTUIStartupInput {
     cliOptions: {
       session: undefined,
       continue: false,
-      yolo: false,
-      auto: false,
+      permission: undefined,
       plan: false,
       model: undefined,
       outputFormat: undefined,

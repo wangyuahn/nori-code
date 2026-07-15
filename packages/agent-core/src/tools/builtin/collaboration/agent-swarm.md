@@ -1,5 +1,7 @@
 Launch one or many subagents as the unified swarm orchestration entrypoint.
 
+Every swarm runs as a detached background task with no execution deadline. The call returns immediately with a task id. Completion is inserted into the parent context automatically: active work is not interrupted, and an idle parent is woken to process the result. Use task output only when a live preview is explicitly needed; polling is not required for completion.
+
 Use AgentSwarm for all delegated subagent work, including single implementation tasks, parallel review, and multi-step coding loops. The older Agent tool is only a legacy fallback.
 
 Each spawned subagent receives its resolved profile prompt and tool APIs. Nori subagents also run a phase-0 memory retrieval step before the task prompt: they output `<retrieval_query>` keywords, the host injects `<retrieved_context>`, and the subagent may call `nori_memory_search`, `nori_ask_parent`, `AgentSwarm`, or other available tools again whenever it needs more context or follow-up work.

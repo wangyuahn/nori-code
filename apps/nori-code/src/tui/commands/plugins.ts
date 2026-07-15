@@ -1,7 +1,7 @@
 import { homedir as osHomedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 
-import type { PluginInfo, PluginSummary } from '@moonshot-ai/kimi-code-sdk';
+import type { PluginInfo, PluginSummary } from '@nori-code/sdk';
 
 import {
   PluginInstallTrustConfirmComponent,
@@ -277,7 +277,7 @@ async function confirmInstallTrust(
   label: string,
   official: boolean,
 ): Promise<boolean> {
-  // Kimi-built official plugins are trusted implicitly; anything else requires
+  // Nori-published official plugins are trusted implicitly; anything else requires
   // the user to explicitly opt in via the trust prompt.
   if (official) return true;
   return new Promise((resolveConfirmed) => {

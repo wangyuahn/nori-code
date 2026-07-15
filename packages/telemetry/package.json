@@ -1,21 +1,21 @@
 {
-  "name": "@moonshot-ai/kimi-telemetry",
+  "name": "@nori-code/telemetry",
   "version": "0.1.1",
   "private": true,
-  "description": "Shared telemetry infrastructure for Kimi Code",
+  "description": "Shared telemetry infrastructure for Nori Code",
   "license": "MIT",
-  "author": "Moonshot AI",
-  "homepage": "https://github.com/MoonshotAI/kimi-code/tree/main/packages/telemetry#readme",
+  "author": "Nori",
+  "homepage": "https://github.com/wangyuahn/nori-code/tree/main/packages/telemetry#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MoonshotAI/kimi-code.git",
+    "url": "git+https://github.com/wangyuahn/nori-code.git",
     "directory": "packages/telemetry"
   },
   "bugs": {
-    "url": "https://github.com/MoonshotAI/kimi-code/issues"
+    "url": "https://github.com/wangyuahn/nori-code/issues"
   },
   "keywords": [
-    "kimi",
+    "nori",
     "telemetry",
     "analytics",
     "events",

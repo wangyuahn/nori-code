@@ -9,10 +9,10 @@ export default defineConfig({
   deps: {
     neverBundle: [
       '@agentclientprotocol/sdk',
-      '@moonshot-ai/agent-core',
-      '@moonshot-ai/kimi-code-sdk',
-      '@moonshot-ai/kosong',
-      '@moonshot-ai/kaos',
+      '@nori-code/agent-core',
+      '@nori-code/sdk',
+      '@nori-code/kosong',
+      '@nori-code/kaos',
     ],
   },
 });

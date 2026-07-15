@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'pathe';
 
 export interface SessionIndexEntry {
@@ -18,6 +18,20 @@ export async function appendSessionIndexEntry(
   const indexPath = sessionIndexPath(homeDir);
   await mkdir(dirname(indexPath), { recursive: true, mode: 0o700 });
   await appendFile(indexPath, `${JSON.stringify(entry)}\n`, 'utf-8');
+}
+
+export async function removeSessionIndexEntry(
+  homeDir: string,
+  sessionsDir: string,
+  sessionId: string,
+): Promise<void> {
+  const index = await readSessionIndex(homeDir, sessionsDir);
+  index.delete(sessionId);
+  const indexPath = sessionIndexPath(homeDir);
+  const temporaryPath = `${indexPath}.${process.pid}.${Date.now()}.tmp`;
+  const content = [...index.values()].map((entry) => JSON.stringify(entry)).join('\n');
+  await writeFile(temporaryPath, content === '' ? '' : `${content}\n`, { encoding: 'utf-8', mode: 0o600 });
+  await rename(temporaryPath, indexPath);
 }
 
 export async function readSessionIndex(

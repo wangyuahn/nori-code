@@ -1,12 +1,12 @@
 /**
- * `kimi server rotate-token` — generate a new persistent server token.
+ * `nori server rotate-token` — generate a new persistent server token.
  *
  * Rewrites `<NORI_CODE_HOME>/server.token` (0600, atomic). The previous token
  * stops working immediately: a running server re-reads the file on its next
  * auth check, so rotation takes effect without a restart.
  */
 
-import { getLiveLock, rotateServerToken } from '@moonshot-ai/server';
+import { getLiveLock, rotateServerToken } from '@nori-code/server';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 

@@ -10,7 +10,7 @@
  */
 
 import chalk from 'chalk';
-import { truncateToWidth, visibleWidth } from '@moonshot-ai/pi-tui';
+import { truncateToWidth, visibleWidth } from '@nori-code/pi-tui';
 
 import { PRODUCT_NAME } from '#/constant/app';
 import type { SlashCommandHost } from '../commands/dispatch';

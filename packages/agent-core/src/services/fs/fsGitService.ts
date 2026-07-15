@@ -7,10 +7,14 @@ import { Disposable, InstantiationType, registerSingleton } from '../../di';
 import type {
   FsDiffRequest,
   FsDiffResponse,
+  FsGitCommitRequest,
+  FsGitCommitResponse,
   FsGitStatusRequest,
   FsGitStatusResponse,
+  FsGitPushRequest,
+  FsGitPushResponse,
   FsPullRequest,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 import { ISessionService } from '../session/session';
 
 import { FsPathNotFoundError } from './fs';
@@ -209,6 +213,68 @@ export class FsGitService extends Disposable implements IFsGitService {
       diff: truncated ? full.slice(0, DIFF_MAX_BYTES) : full,
       truncated,
     };
+  }
+
+  async commit(sessionId: string, req: FsGitCommitRequest): Promise<FsGitCommitResponse> {
+    const session = await this.sessions.get(sessionId);
+    const cwd = await fs.realpath(session.metadata.cwd);
+    await this.assertRepository(cwd);
+
+    const add = await runCommand('git', ['add', '-A', '--', '.'], cwd);
+    if (add.exitCode !== 0) {
+      throw new FsGitUnavailableError(cwd, add.stderr.trim() || 'git add failed');
+    }
+    const commit = await runCommand('git', ['commit', '-m', req.message], cwd);
+    if (commit.exitCode !== 0) {
+      throw new FsGitUnavailableError(cwd, commit.stderr.trim() || commit.stdout.trim() || 'git commit failed');
+    }
+    const revision = await runCommand('git', ['rev-parse', '--short', 'HEAD'], cwd);
+    if (revision.exitCode !== 0) {
+      throw new FsGitUnavailableError(cwd, revision.stderr.trim() || 'unable to read commit id');
+    }
+    return {
+      committed: true,
+      commit: revision.stdout.trim(),
+      summary: commit.stdout.trim() || commit.stderr.trim(),
+    };
+  }
+
+  async push(sessionId: string, req: FsGitPushRequest): Promise<FsGitPushResponse> {
+    const session = await this.sessions.get(sessionId);
+    const cwd = await fs.realpath(session.metadata.cwd);
+    await this.assertRepository(cwd);
+
+    const branchResult = await runCommand('git', ['branch', '--show-current'], cwd);
+    const branch = req.branch ?? branchResult.stdout.trim();
+    if (!branch) throw new FsGitUnavailableError(cwd, 'cannot push from a detached HEAD');
+
+    let remote = req.remote ?? '';
+    const upstream = await runCommand('git', ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], cwd);
+    let args: string[];
+    if (req.remote || req.branch || upstream.exitCode !== 0) {
+      remote ||= 'origin';
+      args = ['push', '--set-upstream', remote, branch];
+    } else {
+      remote = upstream.stdout.trim().split('/')[0] || 'origin';
+      args = ['push'];
+    }
+    const pushed = await runCommand('git', args, cwd);
+    if (pushed.exitCode !== 0) {
+      throw new FsGitUnavailableError(cwd, pushed.stderr.trim() || pushed.stdout.trim() || 'git push failed');
+    }
+    return {
+      pushed: true,
+      remote,
+      branch,
+      summary: pushed.stderr.trim() || pushed.stdout.trim(),
+    };
+  }
+
+  private async assertRepository(cwd: string): Promise<void> {
+    const result = await runCommand('git', ['rev-parse', '--is-inside-work-tree'], cwd);
+    if (result.exitCode !== 0 || result.stdout.trim() !== 'true') {
+      throw new FsGitUnavailableError(cwd, result.stderr.trim() || 'not a Git repository');
+    }
   }
 }
 

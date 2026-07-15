@@ -32,8 +32,8 @@ import {
   ErrorCode,
   listPendingApprovalsQuerySchema,
   listPendingApprovalsResponseSchema,
-} from '@moonshot-ai/protocol';
-import { IApprovalService, approvalToAgentCoreResponse, type IInstantiationService } from '@moonshot-ai/agent-core';
+} from '@nori-code/protocol';
+import { IApprovalService, approvalToAgentCoreResponse, type IInstantiationService } from '@nori-code/agent-core';
 import { z } from 'zod';
 
 

@@ -57,14 +57,14 @@ import {
   type SessionMeta,
   type SessionSummary,
   type WireTranscript,
-} from '@moonshot-ai/agent-core';
-import { SessionStore } from '@moonshot-ai/agent-core/session/store';
+} from '@nori-code/agent-core';
+import { SessionStore } from '@nori-code/agent-core/session/store';
 import type {
   InFlightTurn,
   Message,
   SessionSnapshotResponse,
   SessionStatus,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 
 import { IWSBroadcastService } from '#/services/gateway';
 import type { ApprovalService } from '#/services/approval/approvalService';

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Fetches models.dev/api.json, strips fields not needed by kimi-code, and
+ * Fetches models.dev/api.json, strips fields not needed by Nori Code, and
  * writes the result as raw JSON for release builds to inline.
  *
  * This script intentionally does not write into src/. The source tree keeps a

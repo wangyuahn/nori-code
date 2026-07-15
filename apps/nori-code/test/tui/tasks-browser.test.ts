@@ -1,5 +1,5 @@
-import type { Terminal } from '@moonshot-ai/pi-tui';
-import type { BackgroundTaskInfo, BackgroundTaskStatus } from '@moonshot-ai/kimi-code-sdk';
+import type { Terminal } from '@nori-code/pi-tui';
+import type { BackgroundTaskInfo, BackgroundTaskStatus } from '@nori-code/sdk';
 import { describe, expect, it, vi } from 'vitest';
 
 import {

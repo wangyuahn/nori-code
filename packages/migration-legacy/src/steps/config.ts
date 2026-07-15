@@ -6,8 +6,8 @@ import {
   ModelAliasSchema,
   ProviderConfigSchema,
   transformTomlData,
-} from '@moonshot-ai/agent-core';
-import { FLAG_DEFINITIONS } from '@moonshot-ai/agent-core/flags/registry';
+} from '@nori-code/agent-core';
+import { FLAG_DEFINITIONS } from '@nori-code/agent-core/flags/registry';
 import { atomicWrite } from '../atomic-write.js';
 import { DEFAULT_CONFIG_FILE_TEXT, isTuiStubOrMissing } from '../stub-detect.js';
 import {

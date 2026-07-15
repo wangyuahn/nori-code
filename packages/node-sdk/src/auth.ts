@@ -1,5 +1,5 @@
-import { type OAuthRef, type KimiConfig } from '@moonshot-ai/agent-core';
-import type { BearerTokenProvider } from '@moonshot-ai/kimi-code-oauth';
+import { type OAuthRef, type KimiConfig } from '@nori-code/agent-core';
+import type { BearerTokenProvider } from '@nori-code/oauth';
 
 export interface KimiAuthSubmitFeedbackInput {
   readonly content: string;

@@ -18,7 +18,7 @@
  * reach the generic error hook, which only emits 50001 for unknown exceptions.
  */
 
-import { ErrorCode } from '@moonshot-ai/protocol';
+import { ErrorCode } from '@nori-code/protocol';
 import type { z } from 'zod';
 
 /**

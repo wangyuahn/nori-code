@@ -21,7 +21,7 @@
  *
  * **Anti-corruption**: route file lives in `packages/server/src/` and goes
  * through `accessor.get(IMessageService)` whose impl lives in
- * `@moonshot-ai/agent-core`. No SDK package imports.
+ * `@nori-code/agent-core`. No SDK package imports.
  */
 
 import {
@@ -29,8 +29,8 @@ import {
   getMessageResponseSchema,
   listMessagesResponseSchema,
   messageRoleSchema,
-} from '@moonshot-ai/protocol';
-import { IMessageService, MessageNotFoundError, SessionNotFoundError, type IInstantiationService } from '@moonshot-ai/agent-core';
+} from '@nori-code/protocol';
+import { IMessageService, MessageNotFoundError, SessionNotFoundError, type IInstantiationService } from '@nori-code/agent-core';
 import { z } from 'zod';
 
 

@@ -5,7 +5,7 @@
 
 import * as pathe from 'pathe';
 
-import type { Kaos } from '@moonshot-ai/kaos';
+import type { Kaos } from '@nori-code/kaos';
 
 const S_IFMT = 0o170000;
 const S_IFDIR = 0o040000;

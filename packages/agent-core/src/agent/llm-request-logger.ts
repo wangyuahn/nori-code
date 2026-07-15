@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import type { Logger } from '#/logging/types';
-import type { ChatProvider, GenerateOptions, Message, Tool } from '@moonshot-ai/kosong';
+import type { ChatProvider, GenerateOptions, Message, Tool } from '@nori-code/kosong';
 
 import type { LLMRequestLogFields } from '../loop';
 

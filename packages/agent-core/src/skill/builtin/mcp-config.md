@@ -40,7 +40,7 @@ tools exist and the user didn't name one, ask which.
 Config lives in three files; on key collision, later entries in this
 precedence order override earlier ones.
 
-The kimi-code runtime resolves the user-global directory as `NORI_CODE_HOME`
+The Nori Code runtime resolves the user-global directory as `NORI_CODE_HOME`
 first, falling back to `~/.nori-code`. Before touching the user-global file,
 resolve the actual directory with Bash so you don't read or write the wrong
 one. Check whether `NORI_CODE_HOME` is set and fall back to `~/.nori-code`
@@ -113,7 +113,7 @@ For changes, the flow is:
 3. **Write and tell them how to reload MCP servers.** Preserve unrelated
    entries and the `mcpServers` wrapper. MCP servers load at session
    start, so tell the user to start a new session (for example `/new`) or
-   restart `kimi-code` for the change to take effect.
+   restart `nori` for the change to take effect.
 
 ## Secrets
 

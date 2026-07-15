@@ -5,7 +5,7 @@ import {
   type TextPart,
   type ThinkPart,
   type TokenUsage,
-} from '@moonshot-ai/kosong';
+} from '@nori-code/kosong';
 
 import type {
   LLM,

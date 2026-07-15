@@ -7,7 +7,7 @@ import type {
   ResumedAgentState,
   Session,
   ToolCall,
-} from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/sdk';
 
 import { ToolCallComponent } from '../components/messages/tool-call';
 import { currentTheme } from '../theme';

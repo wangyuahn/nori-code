@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import {
   InstantiationService,
   type IEnvironmentService,
-} from '@moonshot-ai/agent-core';
+} from '@nori-code/agent-core';
 import { pino } from 'pino';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 

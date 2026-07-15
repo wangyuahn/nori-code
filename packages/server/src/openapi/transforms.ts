@@ -20,7 +20,7 @@ import {
   questionResolveResultSchema,
   undoSessionRequestSchema,
   undoSessionResponseSchema,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 import { z } from 'zod';
 
 import {

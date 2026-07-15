@@ -3,8 +3,8 @@ import { homedir } from 'node:os';
 import * as path from 'node:path';
 import { load as loadYaml } from 'js-yaml';
 import { join } from 'pathe';
-import type { Kaos } from '@moonshot-ai/kaos';
-import type { SessionWarning } from '@moonshot-ai/protocol';
+import type { Kaos } from '@nori-code/kaos';
+import type { SessionWarning } from '@nori-code/protocol';
 
 import { ErrorCodes, KimiError } from '#/errors';
 import { getRootLogger, log } from '#/logging/logger';
@@ -986,7 +986,12 @@ export class Session {
       const optionsProviders = this.options.noriProviders;
       effective = optionsProviders ?? autoProviders;
       const noriWorkflow = resolveNoriWorkflowConfig(noriConfig);
-      const noriRules = normalizeNoriRuleDefinitions(noriConfig?.['rules']?.['definitions']);
+      const rulesConfig = noriConfig?.['rules'];
+      const definitions =
+        typeof rulesConfig === 'object' && rulesConfig !== null
+          ? (rulesConfig as Record<string, unknown>)['definitions']
+          : undefined;
+      const noriRules = normalizeNoriRuleDefinitions(definitions);
       config = { noriRules, noriWorkflow };
       if (effective !== null) {
         config = {

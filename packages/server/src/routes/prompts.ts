@@ -11,13 +11,14 @@ import {
   promptSteerRequestSchema,
   promptSteerResultSchema,
   type PromptSubmission,
-} from '@moonshot-ai/protocol';
-import { IPromptService, AuthModelNotResolvedError, AuthProvisioningRequiredError, AuthTokenMissingError, AuthTokenUnauthorizedError, PromptAlreadyCompletedError, PromptNotFoundError, SessionBusyError, SessionNotFoundError, FileNotFoundError, IFileStore, compressImageForModel, compressBase64ForModel, type IInstantiationService, type GetResult } from '@moonshot-ai/agent-core';
+} from '@nori-code/protocol';
+import { IPromptService, ISessionService, AuthModelNotResolvedError, AuthProvisioningRequiredError, AuthTokenMissingError, AuthTokenUnauthorizedError, PromptAlreadyCompletedError, PromptNotFoundError, SessionBusyError, SessionNotFoundError, FileNotFoundError, IFileStore, compressImageForModel, compressBase64ForModel, type IInstantiationService, type GetResult } from '@nori-code/agent-core';
 import { z } from 'zod';
 
 
 import { errEnvelope, okEnvelope } from '../envelope';
 import { defineRoute } from '../middleware/defineRoute';
+import { captureWorkspaceCheckpoint, discardLatestWorkspaceCheckpoint } from '../services/rewind/workspaceRewind';
 import { parseActionSuffix } from './action-suffix';
 
 interface PromptRouteHost {
@@ -123,12 +124,29 @@ export function registerPromptsRoutes(
       try {
         const { session_id } = req.params;
         const body = req.body;
-        const result = await ix.invokeFunction(async (a) =>
-          a.get(IPromptService).submit(
-            session_id,
-            await resolvePromptMediaFiles(body, a.get(IFileStore)),
-          ),
-        );
+        const services = ix.invokeFunction((a) => ({
+          prompts: a.get(IPromptService),
+          sessions: a.get(ISessionService),
+          files: a.get(IFileStore),
+        }));
+        const result = await (async () => {
+          const session = await services.sessions.get(session_id);
+          let checkpointCaptured = false;
+          try {
+            checkpointCaptured = await captureWorkspaceCheckpoint(session_id, session.metadata.cwd);
+          } catch {
+            // Conversation-only rewind still works outside Git workspaces.
+          }
+          try {
+            return await services.prompts.submit(
+              session_id,
+              await resolvePromptMediaFiles(body, services.files),
+            );
+          } catch (error) {
+            if (checkpointCaptured) await discardLatestWorkspaceCheckpoint(session_id).catch(() => undefined);
+            throw error;
+          }
+        })();
         reply.send(okEnvelope(result, req.id));
       } catch (error) {
         sendMappedError(reply, req.id, error);
@@ -254,6 +272,19 @@ async function resolvePromptMediaFiles(
   let changed = false;
   const content: PromptSubmission['content'] = [];
   for (const part of body.content) {
+    if (part.type === 'file') {
+      const file = await store.get(part.file_id);
+      const data = await readFile(file.blobPath);
+      const text = decodeUploadedText(data, file.meta.name, file.meta.media_type);
+      content.push({
+        type: 'text',
+        text: text === null
+          ? `<uploaded-file name="${escapeAttachmentAttribute(file.meta.name)}" media-type="${escapeAttachmentAttribute(file.meta.media_type)}" size="${file.meta.size}">Binary content is not directly readable. Ask the user for a text-based version if its contents are required.</uploaded-file>`
+          : `<uploaded-file name="${escapeAttachmentAttribute(file.meta.name)}" media-type="${escapeAttachmentAttribute(file.meta.media_type)}" size="${file.meta.size}">\n${text}\n</uploaded-file>`,
+      });
+      changed = true;
+      continue;
+    }
     // Inline base64 image: compress the payload in place. This is the same
     // input-stage step as the file path below, for REST clients that submit an
     // image as `{ source: { kind: 'base64' } }` instead of uploading a file.
@@ -297,6 +328,30 @@ async function resolvePromptMediaFiles(
     changed = true;
   }
   return changed ? { ...body, content } : body;
+}
+
+const MAX_FILE_CONTEXT_BYTES = 1_000_000;
+const TEXT_FILE_EXTENSIONS = new Set([
+  'c', 'cc', 'cpp', 'cs', 'css', 'csv', 'go', 'h', 'hpp', 'html', 'ini', 'java', 'js', 'json', 'jsx',
+  'log', 'md', 'mjs', 'php', 'properties', 'py', 'rb', 'rs', 'sh', 'sql', 'svg', 'toml', 'ts', 'tsx',
+  'txt', 'vue', 'xml', 'yaml', 'yml',
+]);
+
+function decodeUploadedText(data: Uint8Array, name: string, mediaType: string): string | null {
+  const extension = name.includes('.') ? name.split('.').pop()?.toLowerCase() ?? '' : '';
+  const normalizedType = mediaType.toLowerCase().split(';', 1)[0] ?? '';
+  const textLike = normalizedType.startsWith('text/')
+    || ['application/json', 'application/javascript', 'application/sql', 'application/xml', 'application/x-yaml'].includes(normalizedType)
+    || TEXT_FILE_EXTENSIONS.has(extension);
+  if (!textLike || data.subarray(0, Math.min(data.length, 4096)).includes(0)) return null;
+  const truncated = data.length > MAX_FILE_CONTEXT_BYTES;
+  const decoded = new TextDecoder().decode(data.subarray(0, MAX_FILE_CONTEXT_BYTES));
+  const sanitized = decoded.replaceAll('</uploaded-file>', '&lt;/uploaded-file&gt;');
+  return truncated ? `${sanitized}\n\n[File truncated after ${MAX_FILE_CONTEXT_BYTES} bytes]` : sanitized;
+}
+
+function escapeAttachmentAttribute(value: string): string {
+  return value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
 function assertMediaFile(file: GetResult, expected: 'image' | 'video'): void {

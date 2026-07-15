@@ -2,8 +2,8 @@
  * ReadMediaFileTool tests for the current output/capability contract.
  */
 
-import type { Kaos } from '@moonshot-ai/kaos';
-import type { ContentPart, ModelCapability } from '@moonshot-ai/kosong';
+import type { Kaos } from '@nori-code/kaos';
+import type { ContentPart, ModelCapability } from '@nori-code/kosong';
 import { Jimp } from 'jimp';
 import { describe, expect, it, vi } from 'vitest';
 

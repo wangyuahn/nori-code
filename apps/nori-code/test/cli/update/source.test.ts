@@ -8,78 +8,78 @@ import {
 
 describe('classifyByPathHeuristic', () => {
   it('returns null for an npm-style global path (handled by classifyInstallSource)', () => {
-    expect(classifyByPathHeuristic('/usr/local/lib/node_modules/@moonshot-ai/kimi-code')).toBeNull();
+    expect(classifyByPathHeuristic('/usr/local/lib/node_modules/@nori-code/cli')).toBeNull();
   });
 
   it('detects pnpm global on macOS', () => {
     expect(
-      classifyByPathHeuristic('/Users/me/Library/pnpm/global/5/node_modules/@moonshot-ai/kimi-code'),
+      classifyByPathHeuristic('/Users/me/Library/pnpm/global/5/node_modules/@nori-code/cli'),
     ).toBe('pnpm-global');
   });
 
   it('detects pnpm global on Linux', () => {
     expect(
-      classifyByPathHeuristic('/home/me/.local/share/pnpm/global/5/node_modules/@moonshot-ai/kimi-code'),
+      classifyByPathHeuristic('/home/me/.local/share/pnpm/global/5/node_modules/@nori-code/cli'),
     ).toBe('pnpm-global');
   });
 
   it('detects pnpm global on Windows (normalized backslashes)', () => {
     expect(
-      classifyByPathHeuristic('C:\\Users\\me\\AppData\\Local\\pnpm\\global\\5\\node_modules\\@moonshot-ai/kimi-code'),
+      classifyByPathHeuristic('C:\\Users\\me\\AppData\\Local\\pnpm\\global\\5\\node_modules\\@nori-code/cli'),
     ).toBe('pnpm-global');
   });
 
   it('detects yarn classic global', () => {
     expect(
-      classifyByPathHeuristic('/Users/me/.config/yarn/global/node_modules/@moonshot-ai/kimi-code'),
+      classifyByPathHeuristic('/Users/me/.config/yarn/global/node_modules/@nori-code/cli'),
     ).toBe('yarn-global');
   });
 
   it('detects yarn berry global (~/.yarn/global)', () => {
     expect(
-      classifyByPathHeuristic('/Users/me/.yarn/global/node_modules/@moonshot-ai/kimi-code'),
+      classifyByPathHeuristic('/Users/me/.yarn/global/node_modules/@nori-code/cli'),
     ).toBe('yarn-global');
   });
 
   it('detects bun global', () => {
     expect(
-      classifyByPathHeuristic('/Users/me/.bun/install/global/node_modules/@moonshot-ai/kimi-code'),
+      classifyByPathHeuristic('/Users/me/.bun/install/global/node_modules/@nori-code/cli'),
     ).toBe('bun-global');
   });
 
   it('detects homebrew on macOS (Cellar path)', () => {
     expect(
-      classifyByPathHeuristic('/opt/homebrew/Cellar/kimi-code/0.5.0/libexec/lib/node_modules/@moonshot-ai/kimi-code'),
+      classifyByPathHeuristic('/opt/homebrew/Cellar/nori-code/0.5.0/libexec/lib/node_modules/@nori-code/cli'),
     ).toBe('homebrew');
   });
 
   it('detects homebrew on Linux (Linuxbrew)', () => {
     expect(
-      classifyByPathHeuristic('/home/linuxbrew/.linuxbrew/Cellar/kimi-code/0.5.0/libexec/lib/node_modules/@moonshot-ai/kimi-code'),
+      classifyByPathHeuristic('/home/linuxbrew/.linuxbrew/Cellar/nori-code/0.5.0/libexec/lib/node_modules/@nori-code/cli'),
     ).toBe('homebrew');
   });
 
   it('does not treat npm-global under Homebrew prefix as homebrew', () => {
     expect(
-      classifyByPathHeuristic('/opt/homebrew/lib/node_modules/@moonshot-ai/kimi-code'),
+      classifyByPathHeuristic('/opt/homebrew/lib/node_modules/@nori-code/cli'),
     ).toBeNull();
   });
 
   it('returns null for an unknown layout', () => {
-    expect(classifyByPathHeuristic('/Users/me/dev/@moonshot-ai/kimi-code')).toBeNull();
+    expect(classifyByPathHeuristic('/Users/me/dev/@nori-code/cli')).toBeNull();
   });
 });
 
 describe('classifyInstallSource (npm prefix matching)', () => {
   it('matches a macOS/Linux npm global package path', () => {
     expect(
-      classifyInstallSource('/usr/local/lib/node_modules/@moonshot-ai/kimi-code', '/usr/local', 'darwin'),
+      classifyInstallSource('/usr/local/lib/node_modules/@nori-code/cli', '/usr/local', 'darwin'),
     ).toBe('npm-global');
   });
 
   it('returns unsupported when the package path does not match the prefix', () => {
     expect(
-      classifyInstallSource('/Users/me/dev/@moonshot-ai/kimi-code', '/usr/local', 'darwin'),
+      classifyInstallSource('/Users/me/dev/@nori-code/cli', '/usr/local', 'darwin'),
     ).toBe('unsupported');
   });
 });
@@ -89,7 +89,7 @@ describe('detectInstallSource', () => {
     await expect(
       detectInstallSource({
         getPackageRoot: () =>
-          '/Users/me/Library/pnpm/global/5/node_modules/@moonshot-ai/kimi-code',
+          '/Users/me/Library/pnpm/global/5/node_modules/@nori-code/cli',
         getGlobalPrefix: async () => '/usr/local',
         detectNative: () => false,
         platform: 'darwin',
@@ -100,7 +100,7 @@ describe('detectInstallSource', () => {
   it('returns yarn-global when packageRoot matches yarn heuristic', async () => {
     await expect(
       detectInstallSource({
-        getPackageRoot: () => '/Users/me/.config/yarn/global/node_modules/@moonshot-ai/kimi-code',
+        getPackageRoot: () => '/Users/me/.config/yarn/global/node_modules/@nori-code/cli',
         getGlobalPrefix: async () => '/usr/local',
         detectNative: () => false,
         platform: 'darwin',
@@ -111,7 +111,7 @@ describe('detectInstallSource', () => {
   it('returns bun-global when packageRoot matches bun heuristic', async () => {
     await expect(
       detectInstallSource({
-        getPackageRoot: () => '/Users/me/.bun/install/global/node_modules/@moonshot-ai/kimi-code',
+        getPackageRoot: () => '/Users/me/.bun/install/global/node_modules/@nori-code/cli',
         getGlobalPrefix: async () => '/usr/local',
         detectNative: () => false,
         platform: 'darwin',
@@ -122,7 +122,7 @@ describe('detectInstallSource', () => {
   it('returns npm-global when packageRoot matches npm prefix', async () => {
     await expect(
       detectInstallSource({
-        getPackageRoot: () => '/usr/local/lib/node_modules/@moonshot-ai/kimi-code',
+        getPackageRoot: () => '/usr/local/lib/node_modules/@nori-code/cli',
         getGlobalPrefix: async () => '/usr/local',
         detectNative: () => false,
         platform: 'darwin',
@@ -134,7 +134,7 @@ describe('detectInstallSource', () => {
     await expect(
       detectInstallSource({
         getPackageRoot: () =>
-          '/opt/homebrew/Cellar/kimi-code/0.5.0/libexec/lib/node_modules/@moonshot-ai/kimi-code',
+          '/opt/homebrew/Cellar/nori-code/0.5.0/libexec/lib/node_modules/@nori-code/cli',
         getGlobalPrefix: async () => '/usr/local',
         detectNative: () => false,
         platform: 'darwin',
@@ -145,7 +145,7 @@ describe('detectInstallSource', () => {
   it('returns native when SEA isSea() is true (highest priority)', async () => {
     await expect(
       detectInstallSource({
-        getPackageRoot: () => '/usr/local/lib/node_modules/@moonshot-ai/kimi-code',
+        getPackageRoot: () => '/usr/local/lib/node_modules/@nori-code/cli',
         getGlobalPrefix: async () => '/usr/local',
         detectNative: () => true,
         platform: 'darwin',
@@ -156,7 +156,7 @@ describe('detectInstallSource', () => {
   it('returns unsupported when nothing matches', async () => {
     await expect(
       detectInstallSource({
-        getPackageRoot: () => '/Users/me/dev/@moonshot-ai/kimi-code',
+        getPackageRoot: () => '/Users/me/dev/@nori-code/cli',
         getGlobalPrefix: async () => '/usr/local',
         detectNative: () => false,
         platform: 'darwin',
@@ -167,7 +167,7 @@ describe('detectInstallSource', () => {
   it('returns unsupported when npm prefix lookup throws', async () => {
     await expect(
       detectInstallSource({
-        getPackageRoot: () => '/Users/me/dev/@moonshot-ai/kimi-code',
+        getPackageRoot: () => '/Users/me/dev/@nori-code/cli',
         getGlobalPrefix: async () => {
           throw new Error('prefix failed');
         },

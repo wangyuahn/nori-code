@@ -5,12 +5,12 @@ import {
   type CatalogModel,
   type ModelAlias,
   type ThinkingEffort,
-} from '@moonshot-ai/kimi-code-sdk';
-import { capabilitiesForModel } from '@moonshot-ai/kimi-code-oauth';
+} from '@nori-code/sdk';
+import { capabilitiesForModel } from '@nori-code/oauth';
 import type {
   ManagedKimiCodeModelInfo,
   OpenPlatformDefinition,
-} from '@moonshot-ai/kimi-code-oauth';
+} from '@nori-code/oauth';
 
 import { ApiKeyInputDialogComponent, type ApiKeyInputResult } from '../components/dialogs/api-key-input-dialog';
 import { ChoicePickerComponent, type ChoiceOption } from '../components/dialogs/choice-picker';

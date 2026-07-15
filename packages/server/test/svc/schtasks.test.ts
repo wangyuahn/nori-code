@@ -15,7 +15,7 @@ import {
   type SchtasksManagerDeps,
 } from '../../src/svc/schtasks';
 import { buildScheduledTaskXml, parseSchtasksQuery } from '../../src/svc/schtasks-xml';
-import { KIMI_SERVER_TASK_NAME } from '../../src/svc/paths';
+import { NORI_SERVER_TASK_NAME } from '../../src/svc/paths';
 import { readInstallPlan, writeInstallPlan } from '../../src/svc/install-plan';
 import type { ExecOptions, ExecResult } from '../../src/svc/exec';
 
@@ -48,7 +48,7 @@ function makeDeps(
   const writtenXmls: string[] = [];
   const deps: SchtasksManagerDeps = {
     execSchtasks,
-    resolveProgram: () => 'C\\:Program Files\\Kimi\\kimi.exe',
+    resolveProgram: () => 'C\\:Program Files\\Kimi\\nori.exe',
     logPath: () => join(workDir, 'server', 'server.log'),
     writeTaskXml: (xml) => {
       const path = join(workDir, `task-${writtenXmls.length}.xml`);
@@ -83,12 +83,12 @@ describe('buildScheduledTaskXml', () => {
   it('renders a well-formed task XML with command and arguments', () => {
     const xml = buildScheduledTaskXml({
       description: 'test desc',
-      command: 'C:\\bin\\kimi.exe',
+      command: 'C:\\bin\\nori.exe',
       arguments: 'server run --port 58627',
     });
     expect(xml).toContain('<?xml version="1.0" encoding="UTF-16"?>');
     expect(xml).toContain('<Description>test desc</Description>');
-    expect(xml).toContain('<Command>C:\\bin\\kimi.exe</Command>');
+    expect(xml).toContain('<Command>C:\\bin\\nori.exe</Command>');
     expect(xml).toContain('<Arguments>server run --port 58627</Arguments>');
     expect(xml).toContain('<LogonTrigger>');
     expect(xml).toContain('<RunLevel>LeastPrivilege</RunLevel>');
@@ -97,7 +97,7 @@ describe('buildScheduledTaskXml', () => {
   it('escapes XML-special characters in the description', () => {
     const xml = buildScheduledTaskXml({
       description: 'has & < > characters',
-      command: 'C:\\kimi.exe',
+      command: 'C:\\nori.exe',
     });
     expect(xml).toContain('<Description>has &amp; &lt; &gt; characters</Description>');
   });
@@ -105,7 +105,7 @@ describe('buildScheduledTaskXml', () => {
   it('omits <Arguments> when no args provided', () => {
     const xml = buildScheduledTaskXml({
       description: 'desc',
-      command: 'C:\\kimi.exe',
+      command: 'C:\\nori.exe',
     });
     expect(xml).not.toContain('<Arguments>');
   });
@@ -113,7 +113,7 @@ describe('buildScheduledTaskXml', () => {
   it('injects UserId when taskUser is set', () => {
     const xml = buildScheduledTaskXml({
       description: 'desc',
-      command: 'C:\\kimi.exe',
+      command: 'C:\\nori.exe',
       taskUser: 'DOMAIN\\alice',
     });
     expect(xml).toContain('<UserId>DOMAIN\\alice</UserId>');
@@ -126,19 +126,19 @@ describe('parseSchtasksQuery', () => {
   it('parses CSV header + first row into a record', () => {
     const csv = [
       '"HostName","TaskName","Status","Last Result","Run As User"',
-      '"WORKSTATION","\\KimiServer","Running","0","alice"',
+      '"WORKSTATION","\\NoriServer","Running","0","alice"',
     ].join('\r\n');
     const row = parseSchtasksQuery(csv);
     expect(row).toBeDefined();
     expect(row?.['Status']).toBe('Running');
-    expect(row?.['TaskName']).toBe('\\KimiServer');
+    expect(row?.['TaskName']).toBe('\\NoriServer');
     expect(row?.['Run As User']).toBe('alice');
   });
 
   it('handles escaped quotes inside CSV cells', () => {
     const csv = [
       '"TaskName","Description"',
-      '"\\KimiServer","with ""quotes"" inside"',
+      '"\\NoriServer","with ""quotes"" inside"',
     ].join('\n');
     const row = parseSchtasksQuery(csv);
     expect(row?.['Description']).toBe('with "quotes" inside');
@@ -164,9 +164,9 @@ describe('schtasks manager — install', () => {
     const result = await mgr.install({ host: '127.0.0.1', port: 58627, logLevel: 'info' });
 
     expect(result.status).toBe('installed');
-    expect(result.taskName).toBe(KIMI_SERVER_TASK_NAME);
+    expect(result.taskName).toBe(NORI_SERVER_TASK_NAME);
     expect(writtenXmls.length).toBe(1);
-    expect(writtenXmls[0]).toContain(`<Description>Kimi Code local server`);
+    expect(writtenXmls[0]).toContain(`<Description>Nori Code local server`);
     expect(writtenXmls[0]).toContain('--host 127.0.0.1');
     expect(writtenXmls[0]).toContain('--port 58627');
 
@@ -174,10 +174,10 @@ describe('schtasks manager — install', () => {
     expect(calls[0]?.args.slice(0, 4)).toEqual([
       '/Create',
       '/TN',
-      KIMI_SERVER_TASK_NAME,
+      NORI_SERVER_TASK_NAME,
       '/XML',
     ]);
-    expect(calls[1]?.args).toEqual(['/Run', '/TN', KIMI_SERVER_TASK_NAME]);
+    expect(calls[1]?.args).toEqual(['/Run', '/TN', NORI_SERVER_TASK_NAME]);
   });
 
   it('refuses to overwrite without --force', async () => {
@@ -225,7 +225,7 @@ describe('schtasks manager — lifecycle', () => {
     const mgr = createSchtasksManager(deps);
     const result = await mgr.start();
     expect(result.ok).toBe(true);
-    expect(calls[0]?.args).toEqual(['/Run', '/TN', KIMI_SERVER_TASK_NAME]);
+    expect(calls[0]?.args).toEqual(['/Run', '/TN', NORI_SERVER_TASK_NAME]);
   });
 
   it('start refuses when not installed', async () => {
@@ -241,7 +241,7 @@ describe('schtasks manager — lifecycle', () => {
     const mgr = createSchtasksManager(deps);
     const result = await mgr.stop();
     expect(result.ok).toBe(true);
-    expect(calls[0]?.args).toEqual(['/End', '/TN', KIMI_SERVER_TASK_NAME]);
+    expect(calls[0]?.args).toEqual(['/End', '/TN', NORI_SERVER_TASK_NAME]);
   });
 
   it('restart fires /End then /Run', async () => {
@@ -256,8 +256,8 @@ describe('schtasks manager — lifecycle', () => {
     const mgr = createSchtasksManager(deps);
     const result = await mgr.restart();
     expect(result.ok).toBe(true);
-    expect(calls[0]?.args).toEqual(['/End', '/TN', KIMI_SERVER_TASK_NAME]);
-    expect(calls[1]?.args).toEqual(['/Run', '/TN', KIMI_SERVER_TASK_NAME]);
+    expect(calls[0]?.args).toEqual(['/End', '/TN', NORI_SERVER_TASK_NAME]);
+    expect(calls[1]?.args).toEqual(['/Run', '/TN', NORI_SERVER_TASK_NAME]);
   });
 
   it('uninstall calls /End + /Delete and clears plan', async () => {
@@ -273,8 +273,8 @@ describe('schtasks manager — lifecycle', () => {
       host: '127.0.0.1',
       port: 58627,
       logLevel: 'info',
-      program: 'C:\\kimi.exe',
-      programArguments: ['C:\\kimi.exe', 'server', 'run'],
+      program: 'C:\\nori.exe',
+      programArguments: ['C:\\nori.exe', 'server', 'run'],
       logPath: 'C:\\tmp\\x',
       installedAt: '2026-06-11T00:00:00.000Z',
     });
@@ -283,8 +283,8 @@ describe('schtasks manager — lifecycle', () => {
     const mgr = createSchtasksManager(deps);
     const result = await mgr.uninstall();
     expect(result.ok).toBe(true);
-    expect(calls[0]?.args).toEqual(['/End', '/TN', KIMI_SERVER_TASK_NAME]);
-    expect(calls[1]?.args).toEqual(['/Delete', '/TN', KIMI_SERVER_TASK_NAME, '/F']);
+    expect(calls[0]?.args).toEqual(['/End', '/TN', NORI_SERVER_TASK_NAME]);
+    expect(calls[1]?.args).toEqual(['/Delete', '/TN', NORI_SERVER_TASK_NAME, '/F']);
     expect(readInstallPlan()).toBeUndefined();
   });
 });
@@ -297,20 +297,20 @@ describe('schtasks manager — status', () => {
     expect(status.installed).toBe(false);
     expect(status.running).toBe(false);
     expect(status.platform).toBe('win32');
-    expect(status.taskName).toBe(KIMI_SERVER_TASK_NAME);
+    expect(status.taskName).toBe(NORI_SERVER_TASK_NAME);
   });
 
   it('reports running=true when /Query returns Status=Running', async () => {
     const csv = [
       '"HostName","TaskName","Status","Last Result"',
-      '"WORKSTATION","\\KimiServer","Running","0"',
+      '"WORKSTATION","\\NoriServer","Running","0"',
     ].join('\r\n');
     const { deps } = makeDeps([{ stdout: csv, stderr: '', code: 0 }], workDir, true);
     writeInstallPlan({
       host: '127.0.0.1',
       port: 58627,
       logLevel: 'info',
-      program: 'C:\\kimi.exe',
+      program: 'C:\\nori.exe',
       programArguments: [],
       logPath: 'C:\\tmp\\x',
       installedAt: '2026-06-11T00:00:00.000Z',

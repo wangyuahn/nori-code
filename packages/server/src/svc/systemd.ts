@@ -12,7 +12,7 @@ import {
   type InstallPlan,
 } from './install-plan';
 import {
-  KIMI_SERVER_SYSTEMD_UNIT,
+  NORI_SERVER_SYSTEMD_UNIT,
   supervisorLogPath as defaultSupervisorLogPath,
   systemdUnitPath as defaultSystemdUnitPath,
 } from './paths';
@@ -80,7 +80,7 @@ export function createSystemdManager(
       );
     }
 
-    const enable = await deps.execSystemctl(['enable', '--now', KIMI_SERVER_SYSTEMD_UNIT]);
+    const enable = await deps.execSystemctl(['enable', '--now', NORI_SERVER_SYSTEMD_UNIT]);
     if (enable.code !== 0) {
       throw new Error(
         `systemctl --user enable --now failed (code ${enable.code}): ${detail(enable) ?? 'unknown error'}`,
@@ -100,7 +100,7 @@ export function createSystemdManager(
       deleteInstallPlan();
       return { ok: true, message: 'systemd unit was not installed; nothing to remove.' };
     }
-    await deps.execSystemctl(['disable', '--now', KIMI_SERVER_SYSTEMD_UNIT]).catch(() => undefined);
+    await deps.execSystemctl(['disable', '--now', NORI_SERVER_SYSTEMD_UNIT]).catch(() => undefined);
     try {
       rmSync(unitPath, { force: true });
     } catch (error) {
@@ -120,36 +120,36 @@ export function createSystemdManager(
         message: 'systemd unit is not installed. Run `nori server install` first.',
       };
     }
-    const result = await deps.execSystemctl(['start', KIMI_SERVER_SYSTEMD_UNIT]);
+    const result = await deps.execSystemctl(['start', NORI_SERVER_SYSTEMD_UNIT]);
     if (result.code !== 0) {
       return {
         ok: false,
         message: `systemctl --user start failed: ${detail(result) ?? 'unknown error'}`,
       };
     }
-    return { ok: true, message: `Nori server started (${KIMI_SERVER_SYSTEMD_UNIT}).` };
+    return { ok: true, message: `Nori server started (${NORI_SERVER_SYSTEMD_UNIT}).` };
   }
 
   async function stop(): Promise<LifecycleResult> {
-    const result = await deps.execSystemctl(['stop', KIMI_SERVER_SYSTEMD_UNIT]);
+    const result = await deps.execSystemctl(['stop', NORI_SERVER_SYSTEMD_UNIT]);
     if (result.code !== 0) {
       return {
         ok: false,
         message: `systemctl --user stop failed: ${detail(result) ?? 'unknown error'}`,
       };
     }
-    return { ok: true, message: `Nori server stopped (${KIMI_SERVER_SYSTEMD_UNIT}).` };
+    return { ok: true, message: `Nori server stopped (${NORI_SERVER_SYSTEMD_UNIT}).` };
   }
 
   async function restart(): Promise<LifecycleResult> {
-    const result = await deps.execSystemctl(['restart', KIMI_SERVER_SYSTEMD_UNIT]);
+    const result = await deps.execSystemctl(['restart', NORI_SERVER_SYSTEMD_UNIT]);
     if (result.code !== 0) {
       return {
         ok: false,
         message: `systemctl --user restart failed: ${detail(result) ?? 'unknown error'}`,
       };
     }
-    return { ok: true, message: `Nori server restarted (${KIMI_SERVER_SYSTEMD_UNIT}).` };
+    return { ok: true, message: `Nori server restarted (${NORI_SERVER_SYSTEMD_UNIT}).` };
   }
 
   async function status(): Promise<ServiceStatus> {
@@ -161,7 +161,7 @@ export function createSystemdManager(
       platform: 'linux',
       installed,
       running: false,
-      unitName: KIMI_SERVER_SYSTEMD_UNIT,
+      unitName: NORI_SERVER_SYSTEMD_UNIT,
       ...(plan?.host !== undefined ? { host: plan.host } : {}),
       ...(plan?.port !== undefined ? { port: plan.port } : {}),
       logPath: deps.logPath(),
@@ -173,7 +173,7 @@ export function createSystemdManager(
 
     const show = await deps.execSystemctl([
       'show',
-      KIMI_SERVER_SYSTEMD_UNIT,
+      NORI_SERVER_SYSTEMD_UNIT,
       '--property=ActiveState,SubState,MainPID,ExecStart',
     ]);
     if (show.code !== 0) {

@@ -8,7 +8,7 @@
  * everywhere: ↑/↓, PgUp/PgDn, and search editing.
  */
 
-import { fuzzyFilter, Key, matchesKey } from '@moonshot-ai/pi-tui';
+import { fuzzyFilter, Key, matchesKey } from '@nori-code/pi-tui';
 
 import { pageView, type PageView } from './paging';
 import { isPrintableChar, printableChar } from './printable-key';

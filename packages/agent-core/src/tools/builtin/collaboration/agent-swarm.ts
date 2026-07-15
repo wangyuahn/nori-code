@@ -1,12 +1,10 @@
 import { z } from 'zod';
+import { grandTotal, inputTotal, type TokenUsage } from '@nori-code/kosong';
 
+import { SwarmBackgroundTask, type BackgroundManager } from '../../../agent/background';
 import type { SwarmMode } from '../../../agent/swarm';
 import type { BuiltinTool } from '../../../agent/tool';
-import {
-  DEFAULT_SUBAGENT_TIMEOUT_MS,
-  type QueuedSubagentTask,
-  type SessionSubagentHost,
-} from '../../../session/subagent-host';
+import type { QueuedSubagentTask, SessionSubagentHost } from '../../../session/subagent-host';
 import { ToolAccesses } from '../../../loop/tool-access';
 import type { ExecutableToolContext, ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import { toInputJsonSchema } from '../../support/input-schema';
@@ -127,6 +125,7 @@ interface SwarmRunResult {
   readonly state?: 'started' | 'not_started';
   readonly result?: string;
   readonly error?: string;
+  readonly usage?: TokenUsage;
 }
 
 export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
@@ -137,6 +136,7 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
   constructor(
     private readonly subagentHost: SessionSubagentHost,
     private readonly swarmMode: SwarmMode,
+    private readonly backgroundManager?: BackgroundManager,
   ) {}
 
   resolveExecution(args: AgentSwarmToolInput): ToolExecution {
@@ -162,10 +162,43 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
     context: ExecutableToolContext,
   ): Promise<ExecutableToolResult> {
     try {
+      context.signal.throwIfAborted();
+      const profileName = normalizeOptionalString(args.subagent_type) ?? DEFAULT_SUBAGENT_TYPE;
+      const specs = createAgentSwarmSpecs(args, (agentId) => this.subagentHost.getSwarmItem(agentId));
+      if (this.backgroundManager === undefined) {
+        throw new Error('AgentSwarm background manager is unavailable.');
+      }
       this.swarmMode.enter('tool');
-      const result = await this.runSwarm(args, context.signal, context.toolCallId);
+      const taskId = this.backgroundManager.registerTask(
+        new SwarmBackgroundTask(`Agent swarm: ${args.description}`, async (signal, appendOutput) => {
+          appendOutput([
+            '<agent_swarm_progress status="running">',
+            `Launching ${String(specs.length)} background subagent(s): ${args.description}`,
+            '</agent_swarm_progress>',
+            '',
+          ].join('\n'));
+          return this.runSwarm(
+            args,
+            profileName,
+            specs,
+            signal,
+            context.toolCallId,
+            appendOutput,
+          );
+        }, specs.length),
+        { detached: true },
+      );
       return {
-        output: result,
+        output: [
+          `task_id: ${taskId}`,
+          'status: running',
+          `subagent_count: ${String(specs.length)}`,
+          'automatic_notification: true',
+          '',
+          `description: ${args.description}`,
+          '',
+          'next_step: The swarm runs in the background without a deadline. Continue other work or stop and wait; completion will be injected automatically.',
+        ].join('\n'),
       };
     } catch (error) {
       return {
@@ -177,14 +210,23 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
 
   private async runSwarm(
     args: AgentSwarmToolInput,
+    profileName: string,
+    specs: readonly AgentSwarmSpec[],
     signal: AbortSignal,
     toolCallId: string,
+    appendOutput: (chunk: string) => void,
   ): Promise<string> {
-    const profileName = normalizeOptionalString(args.subagent_type) ?? DEFAULT_SUBAGENT_TYPE;
-    const specs = createAgentSwarmSpecs(args, (agentId) => this.subagentHost.getSwarmItem(agentId));
     const results = hasDependencyEdges(specs)
-      ? await this.runDagSwarm(args, profileName, specs, signal, toolCallId)
-      : await this.runSpecBatch(args, profileName, specs, signal, toolCallId, new Map());
+      ? await this.runDagSwarm(args, profileName, specs, signal, toolCallId, appendOutput)
+      : await this.runSpecBatch(
+          args,
+          profileName,
+          specs,
+          signal,
+          toolCallId,
+          new Map(),
+          appendOutput,
+        );
     return renderSwarmResults(results);
   }
 
@@ -194,6 +236,7 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
     specs: readonly AgentSwarmSpec[],
     signal: AbortSignal,
     toolCallId: string,
+    appendOutput: (chunk: string) => void,
   ): Promise<SwarmRunResult[]> {
     const remaining = [...specs];
     const results: SwarmRunResult[] = [];
@@ -245,6 +288,7 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
         signal,
         toolCallId,
         finishedById,
+        appendOutput,
       );
       results.push(...layerResults);
       for (const result of layerResults) {
@@ -264,6 +308,7 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
     signal: AbortSignal,
     toolCallId: string,
     dependencyResults: ReadonlyMap<string, SwarmRunResult>,
+    appendOutput: (chunk: string) => void,
   ): Promise<SwarmRunResult[]> {
     if (specs.length === 0) return [];
     const tasks = specs.map((spec): QueuedSubagentTask<AgentSwarmSpec> => {
@@ -285,10 +330,9 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
           spec.kind === 'spawn' ? spec.description : undefined,
         ),
         swarmIndex: spec.index,
-        runInBackground: false,
+        runInBackground: true,
         swarmItem: spec.item ?? (spec.kind === 'spawn' ? spec.id : undefined),
         signal,
-        timeout: DEFAULT_SUBAGENT_TIMEOUT_MS,
       };
       if (spec.kind === 'resume') {
         return {
@@ -303,7 +347,9 @@ export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
       };
     });
     const results = await this.subagentHost.runQueued(tasks);
-    return results.map(({ task, ...result }) => ({ spec: task.data, ...result }));
+    const mapped = results.map(({ task, ...result }) => ({ spec: task.data, ...result }));
+    appendOutput(`${renderSwarmResults(mapped)}\n`);
+    return mapped;
   }
 }
 
@@ -465,6 +511,10 @@ function renderSwarmResults(results: readonly SwarmRunResult[]): string {
     '<agent_swarm_result>',
     `<summary>${renderSwarmSummary(completed, failed, aborted)}</summary>`,
   ];
+  const usage = sumSwarmUsage(results);
+  if (usage !== undefined) {
+    lines.push(`<usage input="${String(inputTotal(usage))}" output="${String(usage.output)}" cache_read="${String(usage.inputCacheRead)}" cache_write="${String(usage.inputCacheCreation)}" total="${String(grandTotal(usage))}" />`);
+  }
 
   if (shouldRenderResumeHint) {
     lines.push(
@@ -488,6 +538,20 @@ function renderSwarmResults(results: readonly SwarmRunResult[]): string {
 
   lines.push('</agent_swarm_result>');
   return lines.join('\n');
+}
+
+function sumSwarmUsage(results: readonly SwarmRunResult[]): TokenUsage | undefined {
+  let total: TokenUsage | undefined;
+  for (const result of results) {
+    if (result.usage === undefined) continue;
+    total = total === undefined ? { ...result.usage } : {
+      inputOther: total.inputOther + result.usage.inputOther,
+      output: total.output + result.usage.output,
+      inputCacheRead: total.inputCacheRead + result.usage.inputCacheRead,
+      inputCacheCreation: total.inputCacheCreation + result.usage.inputCacheCreation,
+    };
+  }
+  return total;
 }
 
 function normalizeOptionalString(value: string | undefined): string | undefined {

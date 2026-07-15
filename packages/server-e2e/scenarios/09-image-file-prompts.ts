@@ -9,7 +9,7 @@
  */
 import assert from 'node:assert/strict';
 
-import { ErrorCode } from '@moonshot-ai/protocol';
+import { ErrorCode } from '@nori-code/protocol';
 
 import { DaemonClient, EnvelopeError } from '../src/index';
 

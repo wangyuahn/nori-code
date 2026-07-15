@@ -19,7 +19,7 @@ import {
   buildSystemdUnit,
   parseSystemctlShow,
 } from '../../src/svc/systemd-unit';
-import { KIMI_SERVER_SYSTEMD_UNIT } from '../../src/svc/paths';
+import { NORI_SERVER_SYSTEMD_UNIT } from '../../src/svc/paths';
 import { readInstallPlan, writeInstallPlan } from '../../src/svc/install-plan';
 import { ServiceUnavailableError } from '../../src/svc/types';
 import type { ExecOptions, ExecResult } from '../../src/svc/exec';
@@ -49,11 +49,11 @@ function makeDeps(
   workDir: string,
 ): { deps: SystemdManagerDeps; calls: StubCall[]; unitPath: string; logPath: string } {
   const { execSystemctl, calls } = makeStubExec(responses);
-  const unitPath = join(workDir, 'systemd', 'user', KIMI_SERVER_SYSTEMD_UNIT);
+  const unitPath = join(workDir, 'systemd', 'user', NORI_SERVER_SYSTEMD_UNIT);
   const logPath = join(workDir, 'server', 'server.log');
   const deps: SystemdManagerDeps = {
     execSystemctl,
-    resolveProgram: () => '/usr/local/bin/kimi',
+    resolveProgram: () => '/usr/local/bin/nori',
     unitPath: () => unitPath,
     logPath: () => logPath,
   };
@@ -81,33 +81,33 @@ afterEach(() => {
 describe('buildSystemdUnit', () => {
   it('renders the standard [Unit]/[Service]/[Install] triple', () => {
     const unit = buildSystemdUnit({
-      programArguments: ['/usr/local/bin/kimi', 'server', 'run', '--port', '58627'],
+      programArguments: ['/usr/local/bin/nori', 'server', 'run', '--port', '58627'],
     });
     expect(unit).toContain('[Unit]');
     expect(unit).toContain('[Service]');
     expect(unit).toContain('[Install]');
-    expect(unit).toContain('Description=Kimi Code local server');
-    expect(unit).toContain('ExecStart=/usr/local/bin/kimi server run --port 58627');
+    expect(unit).toContain('Description=Nori Code local server');
+    expect(unit).toContain('ExecStart=/usr/local/bin/nori server run --port 58627');
     expect(unit).toContain('Restart=always');
     expect(unit).toContain('WantedBy=default.target');
   });
 
   it('quotes argv elements with whitespace', () => {
     const unit = buildSystemdUnit({
-      programArguments: ['/path with space/kimi', 'server', 'run'],
+      programArguments: ['/path with space/nori', 'server', 'run'],
     });
-    expect(unit).toContain('ExecStart="/path with space/kimi" server run');
+    expect(unit).toContain('ExecStart="/path with space/nori" server run');
   });
 
   it('rejects argv elements with CR/LF', () => {
     expect(() =>
-      buildSystemdUnit({ programArguments: ['/usr/bin/kimi', 'server\nrun'] }),
+      buildSystemdUnit({ programArguments: ['/usr/bin/nori', 'server\nrun'] }),
     ).toThrow(/cannot contain CR or LF/);
   });
 
   it('renders Environment= lines', () => {
     const unit = buildSystemdUnit({
-      programArguments: ['/usr/bin/kimi'],
+      programArguments: ['/usr/bin/nori'],
       environment: { FOO: 'bar', BAZ: 'qux' },
     });
     expect(unit).toContain('Environment=FOO=bar');
@@ -149,13 +149,13 @@ describe.skipIf(process.platform === 'win32')('systemd manager — install', () 
     expect(result.unitPath).toBe(unitPath);
     expect(existsSync(unitPath)).toBe(true);
     const text = readFileSync(unitPath, 'utf8');
-    expect(text).toContain('ExecStart=/usr/local/bin/kimi server run --port 58627 --log-level info --host 127.0.0.1');
+    expect(text).toContain('ExecStart=/usr/local/bin/nori server run --port 58627 --log-level info --host 127.0.0.1');
     expect(text).toContain('--host 127.0.0.1');
 
     expect(calls.length).toBe(3);
     expect(calls[0]?.args).toEqual(['show-environment']);
     expect(calls[1]?.args).toEqual(['daemon-reload']);
-    expect(calls[2]?.args).toEqual(['enable', '--now', KIMI_SERVER_SYSTEMD_UNIT]);
+    expect(calls[2]?.args).toEqual(['enable', '--now', NORI_SERVER_SYSTEMD_UNIT]);
   });
 
   it('refuses to overwrite an existing install without --force', async () => {
@@ -185,7 +185,7 @@ describe.skipIf(process.platform === 'win32')('systemd manager — install', () 
     const result = await mgr.install({ host: '0.0.0.0', port: 9999, logLevel: 'debug', force: true });
     expect(result.status).toBe('replaced');
     const text = readFileSync(unitPath, 'utf8');
-    expect(text).toContain('ExecStart=/usr/local/bin/kimi server run --port 9999 --log-level debug');
+    expect(text).toContain('ExecStart=/usr/local/bin/nori server run --port 9999 --log-level debug');
     expect(text).not.toContain('0.0.0.0');
   });
 
@@ -249,7 +249,7 @@ describe.skipIf(process.platform === 'win32')('systemd manager — lifecycle', (
     const mgr = createSystemdManager(deps);
     const result = await mgr.start();
     expect(result.ok).toBe(true);
-    expect(calls[0]?.args).toEqual(['start', KIMI_SERVER_SYSTEMD_UNIT]);
+    expect(calls[0]?.args).toEqual(['start', NORI_SERVER_SYSTEMD_UNIT]);
   });
 
   it('start refuses when not installed', async () => {
@@ -266,7 +266,7 @@ describe.skipIf(process.platform === 'win32')('systemd manager — lifecycle', (
     const mgr = createSystemdManager(deps);
     const result = await mgr.stop();
     expect(result.ok).toBe(true);
-    expect(calls[0]?.args).toEqual(['stop', KIMI_SERVER_SYSTEMD_UNIT]);
+    expect(calls[0]?.args).toEqual(['stop', NORI_SERVER_SYSTEMD_UNIT]);
   });
 
   it('restart delegates to `systemctl --user restart`', async () => {
@@ -274,7 +274,7 @@ describe.skipIf(process.platform === 'win32')('systemd manager — lifecycle', (
     const mgr = createSystemdManager(deps);
     const result = await mgr.restart();
     expect(result.ok).toBe(true);
-    expect(calls[0]?.args).toEqual(['restart', KIMI_SERVER_SYSTEMD_UNIT]);
+    expect(calls[0]?.args).toEqual(['restart', NORI_SERVER_SYSTEMD_UNIT]);
   });
 
   it('uninstall calls disable + removes unit + clears plan', async () => {
@@ -291,8 +291,8 @@ describe.skipIf(process.platform === 'win32')('systemd manager — lifecycle', (
       host: '127.0.0.1',
       port: 58627,
       logLevel: 'info',
-      program: '/usr/local/bin/kimi',
-      programArguments: ['/usr/local/bin/kimi', 'server', 'run'],
+      program: '/usr/local/bin/nori',
+      programArguments: ['/usr/local/bin/nori', 'server', 'run'],
       logPath: '/tmp/x',
       installedAt: '2026-06-11T00:00:00.000Z',
     });
@@ -301,7 +301,7 @@ describe.skipIf(process.platform === 'win32')('systemd manager — lifecycle', (
     const mgr = createSystemdManager(deps);
     const result = await mgr.uninstall();
     expect(result.ok).toBe(true);
-    expect(calls[0]?.args).toEqual(['disable', '--now', KIMI_SERVER_SYSTEMD_UNIT]);
+    expect(calls[0]?.args).toEqual(['disable', '--now', NORI_SERVER_SYSTEMD_UNIT]);
     expect(calls[1]?.args).toEqual(['daemon-reload']);
     expect(existsSync(unitPath)).toBe(false);
     expect(readInstallPlan()).toBeUndefined();
@@ -316,7 +316,7 @@ describe.skipIf(process.platform === 'win32')('systemd manager — status', () =
     expect(status.installed).toBe(false);
     expect(status.running).toBe(false);
     expect(status.platform).toBe('linux');
-    expect(status.unitName).toBe(KIMI_SERVER_SYSTEMD_UNIT);
+    expect(status.unitName).toBe(NORI_SERVER_SYSTEMD_UNIT);
   });
 
   it('reports running=true + pid from `systemctl --user show`', async () => {
@@ -328,7 +328,7 @@ describe.skipIf(process.platform === 'win32')('systemd manager — status', () =
       host: '127.0.0.1',
       port: 58627,
       logLevel: 'info',
-      program: '/usr/local/bin/kimi',
+      program: '/usr/local/bin/nori',
       programArguments: [],
       logPath: '/tmp/x',
       installedAt: '2026-06-11T00:00:00.000Z',

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = resolve(appRoot, '../..');
-const source = resolve(repoRoot, 'apps/kimi-web/dist');
+const source = resolve(repoRoot, 'apps/nori-web/dist');
 const target = resolve(appRoot, 'dist-web');
 
 async function assertBuiltWeb() {
@@ -15,7 +15,7 @@ async function assertBuiltWeb() {
     }
   } catch {
     throw new Error(
-      `Kimi web build output was not found at ${source}. Run \`pnpm --filter @moonshot-ai/kimi-web run build\` first.`,
+      `Nori web build output was not found at ${source}. Run \`pnpm --filter @nori-code/nori-web run build\` first.`,
     );
   }
 }
@@ -24,4 +24,4 @@ await assertBuiltWeb();
 await rm(target, { recursive: true, force: true });
 await cp(source, target, { recursive: true });
 
-console.log(`Copied Kimi web assets to ${target}`);
+console.log(`Copied Nori web assets to ${target}`);

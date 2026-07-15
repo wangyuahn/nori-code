@@ -3,7 +3,7 @@
  * `HttpClient.getSession`. Kept separate from `client.ts` so scenarios can
  * import them directly without dragging the whole `DaemonClient` class.
  */
-import type { Session, SessionStatus } from '@moonshot-ai/protocol';
+import type { Session, SessionStatus } from '@nori-code/protocol';
 
 import type { HttpClient } from './http.js';
 import type { AnyFrame, WsClient } from './ws.js';

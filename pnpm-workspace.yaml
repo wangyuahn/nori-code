@@ -1,9 +1,11 @@
 packages:
   - packages/*
+  - '!packages/kimi-migration-legacy'
   - apps/*
+  - '!apps/kimi-desktop'
+  - '!apps/kimi-web'
   - apps/vis/server
   - apps/vis/web
-  - docs
 
 catalog:
   zod: 4.3.6
@@ -13,7 +15,7 @@ overrides:
   "ssh2@1.17.0>nan": "-"
 
 # Allow Electron's postinstall to extract its prebuilt binary (needed by
-# apps/kimi-desktop). Other native deps stay unbuilt and rely on their own
+# apps/nori-desktop). Other native deps stay unbuilt and rely on their own
 # prebuilds, matching the prior default.
 onlyBuiltDependencies:
   - electron

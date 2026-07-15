@@ -6,7 +6,7 @@ import {
   createKimiConfigRpc,
   type KimiConfigRpc,
   type KimiConfigValidationIssue,
-} from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/sdk';
 import type { Command } from 'commander';
 import { z } from 'zod';
 
@@ -238,7 +238,7 @@ function resolveInputPath(input: string, cwd: string): string {
 
 function formatSuccess(results: readonly CheckResult[]): string {
   return [
-    'Kimi doctor',
+    'Nori doctor',
     '',
     ...formatResults(results),
     '',
@@ -249,7 +249,7 @@ function formatSuccess(results: readonly CheckResult[]): string {
 
 function formatFailure(results: readonly CheckResult[], issueCount: number): string {
   return [
-    `Kimi doctor found ${String(issueCount)} ${issueCount === 1 ? 'issue' : 'issues'}.`,
+    `Nori doctor found ${String(issueCount)} ${issueCount === 1 ? 'issue' : 'issues'}.`,
     '',
     ...formatResults(results),
     '',

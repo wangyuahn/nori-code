@@ -1,4 +1,4 @@
-# @moonshot-ai/kaos
+# @nori-code/kaos
 
 ## 0.1.6
 

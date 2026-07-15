@@ -1,5 +1,5 @@
 import { uniq } from '@antfu/utils';
-import type { ChatProvider, Tool } from '@moonshot-ai/kosong';
+import type { ChatProvider, Tool } from '@nori-code/kosong';
 import picomatch from 'picomatch';
 
 import type { Agent } from '..';
@@ -74,7 +74,11 @@ export class ToolManager {
     }
     if (this.agent.swarmManager) {
       const swarmLaunch = new b.NoriSwarmLaunchTool(
-        this.agent.swarmManager, this.agent.noriSwarmMaxDepth, this.agent.noriSwarmDepth) as any;
+        this.agent.swarmManager,
+        this.agent.noriSwarmMaxDepth,
+        this.agent.noriSwarmDepth,
+        this.agent.background,
+      ) as any;
       const swarmStatus = new b.NoriSwarmStatusTool(this.agent.swarmManager) as any;
       const swarmResult = new b.NoriSwarmResultTool(this.agent.swarmManager) as any;
       this.builtinTools.set(swarmLaunch.name, swarmLaunch);
@@ -503,11 +507,14 @@ export class ToolManager {
       this.enabledTools.has('TaskOutput') &&
       this.enabledTools.has('TaskStop');
     const goalToolsEnabled = this.agent.type === 'main';
+    const reportCodeChange: b.CodeChangeReporter = (change) => {
+      this.agent.emitEvent({ type: 'code.change', ...change });
+    };
     this.builtinTools = new Map(
       [
         new b.ReadTool(kaos, workspace),
-        new b.WriteTool(kaos, workspace),
-        new b.EditTool(kaos, workspace),
+        new b.WriteTool(kaos, workspace, reportCodeChange),
+        new b.EditTool(kaos, workspace, reportCodeChange),
         new b.GrepTool(kaos, workspace, this.agent.telemetry),
         new b.GlobTool(kaos, workspace, this.agent.telemetry),
         new b.BashTool(kaos, cwd, background, {
@@ -545,7 +552,7 @@ export class ToolManager {
             },
           ),
         this.agent.subagentHost &&
-          new b.AgentSwarmTool(this.agent.subagentHost, this.agent.swarmMode),
+          new b.AgentSwarmTool(this.agent.subagentHost, this.agent.swarmMode, background),
         this.agent.subagentHost &&
           new b.NoriAskParentTool(this.agent),
         new b.WebSearchTool(toolServices?.webSearcher),
@@ -564,6 +571,7 @@ export class ToolManager {
             this.agent.swarmManager,
             this.agent.noriSwarmMaxDepth,
             this.agent.noriSwarmDepth,
+            background,
           ),
         this.agent.swarmManager &&
           new b.NoriSwarmStatusTool(this.agent.swarmManager),

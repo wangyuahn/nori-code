@@ -16,8 +16,8 @@ import {
   type ToolCallRequest,
   type ToolCallResponse,
   type SwarmModeTrigger,
-} from '@moonshot-ai/agent-core';
-import type { Kaos } from '@moonshot-ai/kaos';
+} from '@nori-code/agent-core';
+import type { Kaos } from '@nori-code/kaos';
 
 import type { ApprovalHandler, QuestionHandler } from '#/events';
 import type {

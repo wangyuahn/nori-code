@@ -1,4 +1,4 @@
-# @moonshot-ai/kimi-code-oauth
+# @nori-code/oauth
 
 ## 0.2.2
 

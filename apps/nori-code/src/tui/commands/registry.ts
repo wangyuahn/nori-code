@@ -2,7 +2,7 @@ import { readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'pathe';
 
-import type { AutocompleteItem } from '@moonshot-ai/pi-tui';
+import type { AutocompleteItem } from '@nori-code/pi-tui';
 
 import { completeLeadingArg, type ArgCompletionSpec } from './complete-args';
 import type { KimiSlashCommand, SlashCommandAvailability } from './types';
@@ -25,7 +25,17 @@ const ADD_DIR_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
   { value: 'list', description: 'Show configured additional workspace directories' },
 ];
 
+const SWARM_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
+  { value: 'on', description: 'Turn swarm mode on' },
+  { value: 'off', description: 'Turn swarm mode off' },
+];
+
 /** Argument autocompletion for the `/goal` command (subcommands). */
+/** Argument autocompletion for the `/swarm` command. */
+export function swarmArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
+  return completeLeadingArg(SWARM_ARG_COMPLETIONS, argumentPrefix);
+}
+
 export function goalArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
   const nextMatch = argumentPrefix.match(/^next\s+(\S*)$/i);
   if (nextMatch !== null) {
@@ -262,6 +272,15 @@ export const BUILTIN_SLASH_COMMANDS = [
     description: 'Compact the conversation context',
     priority: 80,
     argumentHint: '<instruction>',
+  },
+  {
+    name: 'swarm',
+    aliases: [],
+    description: 'Enable swarm mode or start a coordinated swarm task',
+    priority: 80,
+    argumentHint: '[on|off] | <task>',
+    completeArgs: swarmArgumentCompletions,
+    availability: 'idle-only',
   },
   {
     name: 'goal',

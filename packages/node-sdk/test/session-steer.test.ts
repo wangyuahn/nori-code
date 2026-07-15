@@ -1,4 +1,4 @@
-import type * as KosongModule from '@moonshot-ai/kosong';
+import type * as KosongModule from '@nori-code/kosong';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createKimiHarness, type KimiError } from '#/index';
@@ -10,7 +10,7 @@ const fakeProviderState = vi.hoisted(() => ({
   responseText: 'steer response',
 }));
 
-vi.mock('@moonshot-ai/kosong', async (importOriginal) => {
+vi.mock('@nori-code/kosong', async (importOriginal) => {
   const actual = await importOriginal<typeof KosongModule>();
   return {
     ...actual,

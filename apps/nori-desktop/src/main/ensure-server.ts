@@ -29,9 +29,19 @@ function lockPath(): string {
   return join(noriHome(), 'server', 'lock');
 }
 
-/** Background daemon log written by the SEA — surfaced in the error screen / menu. */
 export function serverLogPath(): string {
   return join(noriHome(), 'server', 'server.log');
+}
+
+/** Read the daemon's bearer token from `<NORI_CODE_HOME>/server.token` (the server's
+ *  `persistentToken.ts` writes the token at the home-dir root, not under `server/`). */
+export function readServerToken(): string | undefined {
+  try {
+    const token = readFileSync(join(noriHome(), 'server.token'), 'utf-8').trim();
+    return token.length > 0 ? token : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function readLock(): LockContents | null {

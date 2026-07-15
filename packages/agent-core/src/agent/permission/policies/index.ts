@@ -41,6 +41,9 @@ export function createPermissionDecisionPolicies(agent: Agent): PermissionPolicy
     new UserConfiguredDenyPermissionPolicy(agent),
     // auto mode → approve (any auto-mode block must be a deny rule above this).
     new ModeApprovePermissionPolicy(agent, 'auto', 'auto-mode-approve'),
+    // yolo mode → approve before any policy that can ask. Explicit hard deny
+    // rules above still apply, but yolo never opens an approval prompt.
+    new ModeApprovePermissionPolicy(agent, 'yolo', 'yolo-mode-approve'),
     // Approve-for-session memorized rule matches → approve. Runs before user-configured ask rules so an in-session grant beats a still-matching ask rule on later calls.
     new SessionApprovalHistoryPermissionPolicy(agent),
     // User-configured ask rule matches → ask.
@@ -59,8 +62,6 @@ export function createPermissionDecisionPolicies(agent: Agent): PermissionPolicy
     new SensitiveFileAccessAskPermissionPolicy(),
     // Access touches .git or a git control-dir path → ask.
     new GitControlPathAccessAskPermissionPolicy(agent),
-    // yolo mode → approve.
-    new ModeApprovePermissionPolicy(agent, 'yolo', 'yolo-mode-approve'),
     // Swarm mode keeps AgentSwarm available without making it a globally default-approved tool.
     new SwarmModeAgentSwarmApprovePermissionPolicy(agent),
     // Tool is in the default-approve list (read-only / UI helpers) → approve.

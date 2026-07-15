@@ -45,6 +45,7 @@ export type {
   CustomRegistryProviderEntry,
   CustomRegistryProviderType,
   CustomRegistrySource,
+  FetchCustomRegistryOptions,
   ManagedKimiConfigShape,
   ManagedKimiModelAlias,
   ManagedKimiModelAliasOverrides,
@@ -92,11 +93,11 @@ export type {
   OpenPlatformDefinition,
 } from './stubs';
 
-export { refreshProviderModels } from './stubs';
+export { refreshProviderModels } from './refresh-provider-models';
 export type {
   ProviderChange,
   RefreshProviderHost,
   RefreshProviderOptions,
   RefreshProviderScope,
   RefreshResult,
-} from './stubs';
+} from './refresh-provider-models';

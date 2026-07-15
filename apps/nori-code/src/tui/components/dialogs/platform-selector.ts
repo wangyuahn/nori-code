@@ -1,4 +1,4 @@
-import { OPEN_PLATFORMS } from '@moonshot-ai/kimi-code-oauth';
+import { OPEN_PLATFORMS } from '@nori-code/oauth';
 
 import { ChoicePickerComponent, type ChoiceOption } from './choice-picker';
 

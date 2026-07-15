@@ -13,7 +13,7 @@ import {
   type StreamedMessage,
   type StreamedMessagePart,
   type ToolCall,
-} from '@moonshot-ai/kosong';
+} from '@nori-code/kosong';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { KimiConfig } from '../../../src/config';

@@ -39,7 +39,7 @@ describe('stripPort', () => {
 describe('formatHostErrorMessage', () => {
   it('includes the rejected host and allow guidance', () => {
     expect(formatHostErrorMessage('APP.Example.com:443')).toBe(
-      "Invalid Host header: app.example.com; allow this host with KIMI_CODE_ALLOWED_HOSTS=app.example.com or 'kimi server run --allowed-host app.example.com'.",
+      "Invalid Host header: app.example.com; allow this host with NORI_CODE_ALLOWED_HOSTS=app.example.com or 'nori server run --allowed-host app.example.com'.",
     );
   });
 });
@@ -106,7 +106,7 @@ describe('isAllowedHost (disable)', () => {
 
 describe('parseAllowedHosts', () => {
   it('splits, trims, and drops empties', () => {
-    expect(parseAllowedHosts({ KIMI_CODE_ALLOWED_HOSTS: ' a, .b.com, ' })).toEqual(['a', '.b.com']);
+    expect(parseAllowedHosts({ NORI_CODE_ALLOWED_HOSTS: ' a, .b.com, ' })).toEqual(['a', '.b.com']);
   });
 
   it('returns [] when unset', () => {
@@ -116,7 +116,7 @@ describe('parseAllowedHosts', () => {
 
 describe('isHostCheckDisabled', () => {
   it('is true when set to "1"', () => {
-    expect(isHostCheckDisabled({ KIMI_CODE_DISABLE_HOST_CHECK: '1' })).toBe(true);
+    expect(isHostCheckDisabled({ NORI_CODE_DISABLE_HOST_CHECK: '1' })).toBe(true);
   });
 
   it('is false when unset', () => {
@@ -148,7 +148,7 @@ describe('createHostCheck (onRequest hook)', () => {
     const body = res.json() as Record<string, unknown>;
     expect(body['code']).toBe(40301);
     expect(body['msg']).toBe(
-      "Invalid Host header: evil.com; allow this host with KIMI_CODE_ALLOWED_HOSTS=evil.com or 'kimi server run --allowed-host evil.com'.",
+      "Invalid Host header: evil.com; allow this host with NORI_CODE_ALLOWED_HOSTS=evil.com or 'nori server run --allowed-host evil.com'.",
     );
     expect(body['data']).toBeNull();
     expect(typeof body['request_id']).toBe('string');

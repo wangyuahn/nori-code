@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { registerExportCommand } from '#/cli/sub/export';
 import { createKimiCodeHostIdentity } from '#/cli/version';
-import { createKimiHarness, log } from '@moonshot-ai/kimi-code-sdk';
+import { createKimiHarness, log } from '@nori-code/sdk';
 import { __resetRootLoggerForTest } from '../../../../packages/agent-core/src/logging/logger';
 
 const SESSION_LOG = 'logs/nori-code.log';
@@ -23,8 +23,8 @@ let oldLogLevel: string | undefined;
 
 beforeEach(async () => {
   await __resetRootLoggerForTest();
-  homeDir = await mkdtemp(join(tmpdir(), 'kimi-cli-log-home-'));
-  workDir = await mkdtemp(join(tmpdir(), 'kimi-cli-log-work-'));
+  homeDir = await mkdtemp(join(tmpdir(), 'nori-cli-log-home-'));
+  workDir = await mkdtemp(join(tmpdir(), 'nori-cli-log-work-'));
   oldHome = process.env['NORI_CODE_HOME'];
   oldLogLevel = process.env['NORI_LOG_LEVEL'];
   process.env['NORI_CODE_HOME'] = homeDir;

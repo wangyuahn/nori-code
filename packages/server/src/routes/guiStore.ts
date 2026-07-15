@@ -5,9 +5,9 @@ import {
   guiStoreLengthResponseSchema,
   guiStoreRemoveItemBodySchema,
   guiStoreSetItemBodySchema,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 import { z } from 'zod';
-import type { IInstantiationService } from '@moonshot-ai/agent-core';
+import type { IInstantiationService } from '@nori-code/agent-core';
 
 import { IGuiStoreService } from '#/services/guiStore/guiStore';
 

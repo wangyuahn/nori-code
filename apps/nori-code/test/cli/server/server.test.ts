@@ -102,7 +102,7 @@ describe('`kimi server` lifecycle exits with ESERVICE_UNSUPPORTED on unsupported
     // The remaining platforms fall through to the stub that throws
     // `ServiceUnsupportedError` — pin that contract so a future addition
     // (freebsd, etc.) needs a deliberate decision instead of silently working.
-    const { resolveServiceManager, ServiceUnsupportedError } = await import('@moonshot-ai/server');
+    const { resolveServiceManager, ServiceUnsupportedError } = await import('@nori-code/server');
     const mgr = resolveServiceManager('freebsd');
     await expect(
       mgr.install({ host: '127.0.0.1', port: 58627, logLevel: 'info' }),
@@ -113,7 +113,7 @@ describe('`kimi server` lifecycle exits with ESERVICE_UNSUPPORTED on unsupported
 
 describe('`kimi server` lifecycle handles unavailable service managers', () => {
   it('prints a friendly JSON error and exits 2', async () => {
-    const { ServiceUnavailableError } = await import('@moonshot-ai/server');
+    const { ServiceUnavailableError } = await import('@nori-code/server');
     const program = new Command('kimi').exitOverride();
     const server = program.command('server');
     let stdout = '';
@@ -944,12 +944,12 @@ describe('resolveDaemonProgram', () => {
     // name (`kimi`), not a path. Resolving it against cwd produced `<cwd>/kimi`
     // and crashed the spawn with ENOENT.
     const { resolveDaemonProgram } = await import('#/cli/sub/server/daemon');
-    expect(resolveDaemonProgram(['/Users/x/.kimi-code/bin/kimi', 'kimi', 'web'], '/Users/x', '/Users/x/.kimi-code/bin/kimi', true)).toBe('/Users/x/.kimi-code/bin/kimi');
+    expect(resolveDaemonProgram(['/Users/x/.nori-code/bin/nori', 'nori', 'web'], '/Users/x', '/Users/x/.nori-code/bin/nori', true)).toBe('/Users/x/.nori-code/bin/nori');
   });
 
   it('returns execPath in SEA mode for a spawned `server` child', async () => {
     const { resolveDaemonProgram } = await import('#/cli/sub/server/daemon');
-    expect(resolveDaemonProgram(['/Users/x/.kimi-code/bin/kimi', 'server', 'run'], '/Users/x', '/Users/x/.kimi-code/bin/kimi', true)).toBe('/Users/x/.kimi-code/bin/kimi');
+    expect(resolveDaemonProgram(['/Users/x/.nori-code/bin/nori', 'server', 'run'], '/Users/x', '/Users/x/.nori-code/bin/nori', true)).toBe('/Users/x/.nori-code/bin/nori');
   });
 });
 

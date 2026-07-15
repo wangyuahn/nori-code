@@ -10,7 +10,7 @@ import type {
   Role,
   Session,
   ToolCall,
-} from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/sdk';
 import { describe, expect, it, vi } from 'vitest';
 
 import { KimiTUI, type KimiTUIStartupInput, type TUIState } from '#/tui/kimi-tui';
@@ -42,8 +42,7 @@ function makeStartupInput(): KimiTUIStartupInput {
     cliOptions: {
       session: undefined,
       continue: false,
-      yolo: false,
-      auto: false,
+      permission: undefined,
       plan: false,
       model: undefined,
       outputFormat: undefined,

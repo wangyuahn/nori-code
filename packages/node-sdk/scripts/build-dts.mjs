@@ -14,10 +14,10 @@ const apiExtractorBinPath = packageBinPath('@microsoft/api-extractor', 'bin/api-
 
 const packageDirs = new Set(['agent-core', 'kaos', 'kosong', 'node-sdk', 'oauth']);
 const workspacePackages = new Map([
-  ['@moonshot-ai/agent-core', 'agent-core'],
-  ['@moonshot-ai/kaos', 'kaos'],
-  ['@moonshot-ai/kimi-code-oauth', 'oauth'],
-  ['@moonshot-ai/kosong', 'kosong'],
+  ['@nori-code/agent-core', 'agent-core'],
+  ['@nori-code/kaos', 'kaos'],
+  ['@nori-code/oauth', 'oauth'],
+  ['@nori-code/kosong', 'kosong'],
 ]);
 
 try {

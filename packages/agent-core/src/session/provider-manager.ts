@@ -1,6 +1,6 @@
 import type { Logger } from '#/logging/types';
-import type { ProviderConfig as KosongProviderConfig, ModelCapability, ProviderRequestAuth } from '@moonshot-ai/kosong';
-import { APIStatusError, getModelCapability, UNKNOWN_CAPABILITY } from '@moonshot-ai/kosong';
+import type { ProviderConfig as KosongProviderConfig, ModelCapability, ProviderRequestAuth } from '@nori-code/kosong';
+import { APIStatusError, getModelCapability, UNKNOWN_CAPABILITY } from '@nori-code/kosong';
 import {
   effectiveModelAlias,
   type KimiConfig,

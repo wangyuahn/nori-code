@@ -7,7 +7,7 @@ import {
   type ManagedKimiCodeModelInfo,
   type ManagedKimiConfigShape,
   type OpenPlatformDefinition,
-} from '@moonshot-ai/kimi-code-oauth';
+} from '@nori-code/oauth';
 
 import type { ChoiceOption } from '../components/dialogs/choice-picker';
 import { DEFAULT_OAUTH_PROVIDER_NAME } from '../constant/kimi-tui';

@@ -16,7 +16,7 @@ import type {
   ToolProgressEvent,
   ToolResultEvent,
   TurnEndReason,
-} from '@moonshot-ai/kimi-code-sdk';
+} from '@nori-code/sdk';
 
 import { displayBlockToAcpContent, toolResultToAcpContent } from './convert';
 import type { AcpStopReason } from './types';

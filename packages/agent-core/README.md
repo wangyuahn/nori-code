@@ -1,4 +1,4 @@
-# @moonshot-ai/agent-core
+# @nori-code/agent-core
 
 The unified agent engine for Kimi Code.
 

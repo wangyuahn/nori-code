@@ -12,7 +12,7 @@
 // Compaction is a hot path, so these intentionally drive the real
 // Agent/ContextMemory/FullCompaction machinery through the test harness rather
 // than mocking it.
-import type { ContentPart, Message } from '@moonshot-ai/kosong';
+import type { ContentPart, Message } from '@nori-code/kosong';
 import { describe, expect, it } from 'vitest';
 
 import type { AgentOptions } from '../../../src/agent';

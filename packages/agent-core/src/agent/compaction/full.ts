@@ -14,7 +14,7 @@ import {
   APIContextOverflowError,
   APIStatusError,
   createUserMessage,
-} from '@moonshot-ai/kosong';
+} from '@nori-code/kosong';
 
 import type { Agent } from '..';
 import { isAbortError } from '../../loop/errors';

@@ -1,6 +1,6 @@
 import { Readable, type Writable } from 'node:stream';
 
-import type { KaosProcess, StatResult } from '@moonshot-ai/kaos';
+import type { KaosProcess, StatResult } from '@nori-code/kaos';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { type GrepInput, GrepInputSchema, GrepTool } from '../../src/tools/builtin/file/grep';

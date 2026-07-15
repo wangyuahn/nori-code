@@ -6,7 +6,7 @@ import type {
   Terminal,
   TerminalExitMessage,
   TerminalOutputMessage,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 
 export type TerminalFrame = TerminalOutputMessage | TerminalExitMessage;
 

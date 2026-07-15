@@ -19,9 +19,11 @@ import {
   type SessionStatusResponse,
   type SessionUpdate,
   type SessionWarning,
+  type TokenUsage,
   type UndoSessionRequest,
   type UndoSessionResponse,
-} from '@moonshot-ai/protocol';
+  type UsageStatus,
+} from '@nori-code/protocol';
 
 import { IApprovalService } from '../approval/approval';
 import { ICoreProcessService } from '../coreProcess/coreProcess';
@@ -51,6 +53,28 @@ function asJsonObject(value: Record<string, unknown>): JsonObject {
 function normalizeOptionalString(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed === '' ? undefined : trimmed;
+}
+
+function mapTokenUsage(usage: TokenUsage) {
+  return {
+    input_other: usage.inputOther,
+    output: usage.output,
+    input_cache_read: usage.inputCacheRead,
+    input_cache_creation: usage.inputCacheCreation,
+  };
+}
+
+function mapRealtimeUsage(usage: UsageStatus | undefined): SessionStatusResponse['usage'] {
+  if (usage === undefined) return undefined;
+  const byModel = usage.byModel === undefined
+    ? undefined
+    : Object.fromEntries(Object.entries(usage.byModel).map(([model, value]) => [model, mapTokenUsage(value)]));
+  if (byModel === undefined && usage.currentTurn === undefined && usage.total === undefined) return undefined;
+  return {
+    ...(byModel === undefined ? {} : { by_model: byModel }),
+    ...(usage.currentTurn === undefined ? {} : { current_turn: mapTokenUsage(usage.currentTurn) }),
+    ...(usage.total === undefined ? {} : { total: mapTokenUsage(usage.total) }),
+  };
 }
 
 function canUndoHistory(history: readonly ContextMessage[], count: number): boolean {
@@ -155,6 +179,26 @@ export class SessionService extends Disposable implements ISessionService {
    * emitted only when the live state actually moves.
    */
   private _patchSessionStatus(session: Session): Session {
+    const agentState = this._promptService?.getAgentStateSnapshot(session.id);
+    if (agentState !== undefined) {
+      session.agent_config = {
+        ...session.agent_config,
+        ...(agentState.model !== undefined ? { model: agentState.model } : {}),
+        ...(agentState.thinking !== undefined ? { thinking: agentState.thinking } : {}),
+        ...(agentState.permissionMode !== undefined
+          ? { permission_mode: agentState.permissionMode as Session['agent_config']['permission_mode'] }
+          : {}),
+        ...(agentState.planMode !== undefined ? { plan_mode: agentState.planMode } : {}),
+        ...(agentState.swarmMode !== undefined ? { swarm_mode: agentState.swarmMode } : {}),
+      };
+    }
+    const runtime = session.metadata['noriRuntime'];
+    if (runtime !== null && typeof runtime === 'object') {
+      const toolsReadonly = (runtime as Record<string, unknown>)['toolsReadonly'];
+      if (typeof toolsReadonly === 'boolean') {
+        session.agent_config.main_write_enabled = !toolsReadonly;
+      }
+    }
     const status = this._computeStatus(session.id);
     session.status = status;
     this._statusBySession.set(session.id, status);
@@ -343,6 +387,13 @@ export class SessionService extends Disposable implements ISessionService {
       ) {
         await this.promptService.applyAgentState(id, patch, 'meta');
       }
+      if (ac.main_write_enabled !== undefined) {
+        await this.core.rpc.setNoriRuntimeSettings({
+          sessionId: id,
+          agentId: 'main',
+          toolsReadonly: !ac.main_write_enabled,
+        });
+      }
     }
 
     const allAfter = await this.core.rpc.listSessions({});
@@ -440,18 +491,23 @@ export class SessionService extends Disposable implements ISessionService {
     });
   }
 
-  async getStatus(id: string): Promise<SessionStatusResponse> {
+  async getStatus(id: string, ensureResumed = true): Promise<SessionStatusResponse> {
     const all = await this.core.rpc.listSessions({});
     const summary = all.find((s) => s.id === id);
     if (summary === undefined) {
       throw new SessionNotFoundError(id);
     }
 
-    const [config, context, permission, plan] = await Promise.all([
+    if (ensureResumed) await this.core.rpc.resumeSession({ sessionId: id });
+
+    const [config, context, permission, plan, usage, runtime, goalResult] = await Promise.all([
       this.core.rpc.getConfig({ sessionId: id, agentId: 'main' }),
       this.core.rpc.getContext({ sessionId: id, agentId: 'main' }),
       this.core.rpc.getPermission({ sessionId: id, agentId: 'main' }),
       this.core.rpc.getPlan({ sessionId: id, agentId: 'main' }),
+      this.core.rpc.getUsage?.({ sessionId: id, agentId: 'main' }),
+      this.core.rpc.getNoriRuntimeSettings({ sessionId: id, agentId: 'main' }),
+      this.core.rpc.getGoal({ sessionId: id, agentId: 'main' }),
     ]);
 
     const maxContextTokens = config.modelCapabilities?.max_context_tokens ?? 0;
@@ -460,16 +516,20 @@ export class SessionService extends Disposable implements ISessionService {
 
     const agentState = this.promptService.getAgentStateSnapshot(id);
 
+    const realtimeUsage = mapRealtimeUsage(usage);
     return {
       status: this._computeStatus(id),
       model: config.modelAlias ?? config.provider?.model,
       thinking_level: config.thinkingEffort,
       permission: permission.mode,
       plan_mode: plan !== null,
+      main_write_enabled: !runtime.toolsReadonly,
       swarm_mode: agentState?.swarmMode ?? false,
+      goal: goalResult.goal,
       context_tokens: contextTokens,
       max_context_tokens: maxContextTokens,
       context_usage: contextUsage,
+      ...(realtimeUsage === undefined ? {} : { usage: realtimeUsage }),
     };
   }
 
@@ -535,7 +595,7 @@ export class SessionService extends Disposable implements ISessionService {
     const after = await this.core.rpc.getContext({ sessionId: id, agentId: 'main' });
     return {
       messages: pageContextMessages(id, summary.createdAt, after, input.page_size),
-      status: await this.getStatus(id),
+      status: await this.getStatus(id, false),
     };
   }
 
@@ -551,6 +611,20 @@ export class SessionService extends Disposable implements ISessionService {
     this._activeTurns.delete(id);
     this._abortedTurns.delete(id);
     return { archived: true };
+  }
+
+  async delete(id: string): Promise<{ deleted: true }> {
+    const all = await this.core.rpc.listSessions({ includeArchive: true });
+    const summary = all.find((session) => session.id === id);
+    if (summary === undefined) {
+      throw new SessionNotFoundError(id);
+    }
+    await this.core.rpc.deleteSession({ sessionId: id });
+    this._onDidClose.fire({ sessionId: id });
+    this._statusBySession.delete(id);
+    this._activeTurns.delete(id);
+    this._abortedTurns.delete(id);
+    return { deleted: true };
   }
 
   private async requireSummary(id: string): Promise<SessionSummary> {

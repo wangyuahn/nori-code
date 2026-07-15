@@ -18,7 +18,7 @@
  *   - `MCP_SERVER_NOT_FOUND` (40408) is raised by the impl via
  *     `McpServerNotFoundError`. The route maps it to envelope code 40408.
  *
- * **Anti-corruption**: imports `@moonshot-ai/agent-core` only for the
+ * **Anti-corruption**: imports `@nori-code/agent-core` only for the
  * `createDecorator` value and the `McpServerInfo` type.
  *
  * **MCP status mapping** (`McpServerInfo.status` → `McpServer.status`):
@@ -38,7 +38,7 @@ import type {
   McpServer,
   McpServerStatus,
   McpServerTransport,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 
 // ---------------------------------------------------------------------------
 // Adapter helpers (MCP side of former adapter/tool-adapter.ts)

@@ -1,4 +1,4 @@
-import type { ContentPart, TokenUsage } from '@moonshot-ai/kosong';
+import type { ContentPart, TokenUsage } from '@nori-code/kosong';
 
 import type { LoopRecordedEvent } from '../../loop';
 import type { GoalActor, GoalBudgetLimits, GoalStatus } from '../goal';

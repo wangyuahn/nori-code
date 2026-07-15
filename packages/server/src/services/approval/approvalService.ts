@@ -2,11 +2,11 @@
 
 import { ulid } from 'ulid';
 
-import { Disposable, DisposableMap, IApprovalService, IEventService, approvalToBrokerRequest, ILogService, type IDisposable, type ApprovalRequest, type ApprovalResponse } from '@moonshot-ai/agent-core';
+import { Disposable, DisposableMap, IApprovalService, IEventService, approvalToBrokerRequest, ILogService, type IDisposable, type ApprovalRequest, type ApprovalResponse } from '@nori-code/agent-core';
 import type {
   ApprovalRequest as ProtocolApprovalRequest,
   Event,
-} from '@moonshot-ai/protocol';
+} from '@nori-code/protocol';
 
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars

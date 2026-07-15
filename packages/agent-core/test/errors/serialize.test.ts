@@ -1,4 +1,4 @@
-import { APIStatusError } from '@moonshot-ai/kosong';
+import { APIStatusError } from '@nori-code/kosong';
 import { describe, expect, it } from 'vitest';
 
 import { toKimiErrorPayload } from '#/errors/serialize';

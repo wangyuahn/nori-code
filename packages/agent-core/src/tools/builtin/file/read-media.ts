@@ -15,13 +15,13 @@
  * Read/Write/Edit.
  */
 
-import type { Kaos } from '@moonshot-ai/kaos';
+import type { Kaos } from '@nori-code/kaos';
 import type {
   ContentPart,
   ModelCapability,
   VideoURLPart,
   VideoUploadInput as ProviderVideoUploadInput,
-} from '@moonshot-ai/kosong';
+} from '@nori-code/kosong';
 import { z } from 'zod';
 
 import type { BuiltinTool } from '../../../agent/tool';

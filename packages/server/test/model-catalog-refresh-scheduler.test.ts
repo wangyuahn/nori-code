@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ICoreProcessService, ILogService, IModelCatalogService } from '@moonshot-ai/agent-core';
+import type { ICoreProcessService, ILogService, IModelCatalogService } from '@nori-code/agent-core';
 
 import { ModelCatalogRefreshScheduler } from '../src/services/modelCatalog/modelCatalogRefreshScheduler';
 

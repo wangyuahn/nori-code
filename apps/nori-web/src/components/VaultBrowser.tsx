@@ -1,171 +1,123 @@
-import { useState, useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { api, type Note } from '../api/client';
 import { useVaultNotes } from '../hooks/useApi';
-import type { Note } from '../api/client';
+import { useI18n } from '../i18n';
+import { Icon } from './Icon';
+import { VaultGraph } from './VaultGraph';
+import { MarkdownView } from './MarkdownView';
 
 const TYPE_COLORS: Record<string, { bg: string; color: string }> = {
   analysis: { bg: 'color-mix(in srgb, var(--nori-cyan) 15%, transparent)', color: 'var(--nori-cyan)' },
   decision: { bg: 'color-mix(in srgb, var(--nori-purple) 15%, transparent)', color: 'var(--nori-purple)' },
-  task:     { bg: 'color-mix(in srgb, var(--nori-warning) 15%, transparent)', color: 'var(--nori-warning)' },
-  review:   { bg: 'color-mix(in srgb, var(--nori-success) 15%, transparent)', color: 'var(--nori-success)' },
+  task: { bg: 'color-mix(in srgb, var(--nori-warning) 15%, transparent)', color: 'var(--nori-warning)' },
+  review: { bg: 'color-mix(in srgb, var(--nori-success) 15%, transparent)', color: 'var(--nori-success)' },
 };
 
 const FOLDERS = ['all', 'analysis', 'decision', 'review', 'task'] as const;
 
-export function VaultBrowser() {
+export function VaultBrowser({ mode = 'list' }: { mode?: 'list' | 'graph' }) {
+  const { tr } = useI18n();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFolder, setSelectedFolder] = useState<string>('all');
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const { notes, loading, error, refresh } = useVaultNotes();
 
-  const { notes, loading, error, refresh } = useVaultNotes(
-    selectedFolder !== 'all' ? selectedFolder : undefined,
-  );
+  useEffect(() => {
+    setSelectedNote(null);
+    setDetailError(null);
+  }, [selectedFolder]);
 
-  const handleRefresh = useCallback(() => {
-    void refresh();
-  }, [refresh]);
+  const openNote = useCallback(async (note: Note) => {
+    setSelectedNote(note);
+    setDetailLoading(true);
+    setDetailError(null);
+    try {
+      const detail = await api.vault.get(note.title);
+      if (!detail) throw new Error(tr('The note no longer exists.', '这篇笔记已不存在。'));
+      setSelectedNote(detail);
+    } catch (caught) {
+      setDetailError(caught instanceof Error ? caught.message : tr('Failed to load note.', '加载笔记失败。'));
+    } finally {
+      setDetailLoading(false);
+    }
+  }, [tr]);
 
   const filteredNotes = notes.filter(note => {
-    const matchFolder = selectedFolder === 'all' || note.folder === selectedFolder;
-    const matchSearch = !searchQuery ||
-      note.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      note.preview.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchFolder && matchSearch;
+    const query = searchQuery.toLowerCase();
+    return (selectedFolder === 'all' || note.folder === selectedFolder) &&
+      (!query || note.title.toLowerCase().includes(query) || note.preview.toLowerCase().includes(query));
   });
 
   if (selectedNote) {
-    const typeColors = TYPE_COLORS[selectedNote.type] || TYPE_COLORS.analysis;
+    const typeColors = TYPE_COLORS[selectedNote.type] ?? TYPE_COLORS.analysis;
     return (
-      <div className="card" style={{ height: '100%' }}>
-        <div style={{ marginBottom: '16px' }}>
-          <button className="btn" onClick={() => setSelectedNote(null)}>← Back</button>
+      <div className="card vault-note-detail">
+        <div className="vault-note-toolbar">
+          <button className="btn" onClick={() => setSelectedNote(null)}><Icon name="chevron-left" size={14} /> {tr('Back', '返回')}</button>
         </div>
-        <div style={{ marginBottom: '8px' }}>
-          <span style={{
-            fontSize: '11px',
-            padding: '2px 8px',
-            borderRadius: '4px',
-            background: typeColors.bg,
-            color: typeColors.color,
-            fontWeight: 600,
-            textTransform: 'uppercase',
-          }}>
-            {selectedNote.type}
-          </span>
-        </div>
-        <h2 style={{ fontSize: '18px', marginBottom: '4px' }}>{selectedNote.title}</h2>
-        <div style={{ color: 'var(--nori-text-muted)', fontSize: '12px', marginBottom: '16px' }}>{selectedNote.date}</div>
-        <div style={{
-          background: 'var(--nori-bg)',
-          border: '1px solid var(--nori-border)',
-          borderRadius: '8px',
-          padding: '16px',
-          whiteSpace: 'pre-wrap',
-          fontFamily: 'monospace',
-          fontSize: '13px',
-          lineHeight: '1.7',
-        }}>
-          {selectedNote.content || selectedNote.preview}
-        </div>
+        <span className="vault-note-type" style={{ background: typeColors.bg, color: typeColors.color }}>{selectedNote.type}</span>
+        <h2>{selectedNote.title}</h2>
+        <div className="vault-note-date">{selectedNote.date}</div>
+        {detailLoading ? (
+          <div className="vault-note-state"><span className="spinner spinner-small" /> {tr('Loading full note', '正在加载完整笔记')}</div>
+        ) : detailError ? (
+          <div className="vault-note-state error">{detailError}</div>
+        ) : (
+          <MarkdownView className="vault-note-content" content={noteBodyWithoutDuplicateTitle(selectedNote)} />
+        )}
       </div>
     );
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: '100%' }}>
-      {/* Search */}
-      <input
-        className="input"
-        placeholder="Search notes..."
-        value={searchQuery}
-        onChange={e => setSearchQuery(e.target.value)}
-      />
-
-      {/* Folder tabs */}
-      <div style={{ display: 'flex', gap: '4px' }}>
-        {FOLDERS.map(f => (
-          <button
-            key={f}
-            className={`btn ${selectedFolder === f ? 'btn-primary' : ''}`}
-            style={{ fontSize: '12px', padding: '4px 12px' }}
-            onClick={() => setSelectedFolder(f)}
-          >
-            {f}
+    <div className="vault-browser">
+      <input className="input" placeholder={tr('Search notes...', '搜索笔记...')} value={searchQuery} onChange={event => setSearchQuery(event.target.value)} />
+      <div className="vault-folder-tabs">
+        {FOLDERS.map(folder => (
+          <button key={folder} className={`btn ${selectedFolder === folder ? 'btn-primary' : ''}`} onClick={() => setSelectedFolder(folder)}>
+            {tr(folder, folder === 'all' ? '全部' : folder === 'analysis' ? '分析' : folder === 'decision' ? '决策' : folder === 'review' ? '评审' : '任务')}
           </button>
         ))}
-        <button
-          className="btn"
-          style={{ fontSize: '12px', padding: '4px 12px', marginLeft: 'auto' }}
-          onClick={handleRefresh}
-          disabled={loading}
-        >
-          {loading ? '⏳' : '↻'}
-        </button>
+        <button className="btn btn-icon" onClick={() => void refresh()} disabled={loading} title={tr('Refresh', '刷新')}><Icon name="refresh" size={14} /></button>
       </div>
-
-      {/* Error */}
-      {error && (
-        <div style={{
-          padding: '12px',
-          borderRadius: '6px',
-          background: 'color-mix(in srgb, var(--nori-danger) 15%, transparent)',
-          border: '1px solid var(--nori-danger)',
-          color: 'var(--nori-danger)',
-          fontSize: '13px',
-        }}>
-          {error}
-        </div>
-      )}
-
-      {/* Loading */}
-      {loading && (
-        <div style={{ textAlign: 'center', color: 'var(--nori-text-muted)', padding: '32px', fontSize: '13px' }}>
-          Loading notes...
-        </div>
-      )}
-
-      {/* Notes list */}
-      {!loading && !error && (
-        <div style={{ flex: 1, overflow: 'auto' }}>
-          {filteredNotes.map((note, i) => {
-            const typeColors = TYPE_COLORS[note.type] || TYPE_COLORS.analysis;
+      {error && <div className="vault-note-state error">{error}</div>}
+      {loading ? (
+        <div className="vault-note-state"><span className="spinner spinner-small" /> {tr('Loading notes', '正在加载笔记')}</div>
+      ) : !error && mode === 'graph' ? (
+        <VaultGraph notes={filteredNotes} onOpenNote={note => void openNote(note)} />
+      ) : !error && (
+        <div className="vault-note-list">
+          {filteredNotes.map((note, index) => {
+            const typeColors = TYPE_COLORS[note.type] ?? TYPE_COLORS.analysis;
             return (
-              <div
-                key={note.path || `${note.type}-${note.title}-${i}`}
-                className="card"
-                style={{
-                  marginBottom: '8px',
-                  cursor: 'pointer',
-                  transition: 'border-color 0.15s',
-                }}
-                onClick={() => setSelectedNote(note)}
-                onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--nori-cyan)')}
-                onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--nori-border)')}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                  <span style={{ fontWeight: 600, fontSize: '14px' }}>{note.title}</span>
-                  <span style={{
-                    fontSize: '10px',
-                    padding: '1px 6px',
-                    borderRadius: '3px',
-                    background: typeColors.bg,
-                    color: typeColors.color,
-                    textTransform: 'uppercase',
-                  }}>
-                    {note.type}
-                  </span>
-                </div>
-                <div style={{ color: 'var(--nori-text-muted)', fontSize: '12px' }}>{note.preview}</div>
-                <div style={{ color: 'var(--nori-text-muted)', fontSize: '11px', marginTop: '6px', opacity: 0.6 }}>{note.date}</div>
-              </div>
+              <button key={note.path || `${note.type}-${note.title}-${index}`} className="card vault-note-card" onClick={() => void openNote(note)}>
+                <span className="vault-note-card-heading"><strong>{note.title}</strong><span className="vault-note-type" style={{ background: typeColors.bg, color: typeColors.color }}>{note.type}</span></span>
+                <span className="vault-note-preview">{note.preview}</span>
+                <time>{note.date}</time>
+              </button>
             );
           })}
-          {filteredNotes.length === 0 && (
-            <div style={{ textAlign: 'center', color: 'var(--nori-text-muted)', padding: '32px' }}>
-              No notes found.
-            </div>
-          )}
+          {filteredNotes.length === 0 && <div className="vault-note-state">{tr('No notes found.', '未找到笔记。')}</div>}
         </div>
       )}
     </div>
   );
+}
+
+function noteBodyWithoutDuplicateTitle(note: Note): string {
+  const content = note.content ?? note.preview;
+  const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
+  const heading = /^(?:\s*\r?\n)*#\s+(.+?)\s*\r?\n/.exec(body);
+  if (!heading) return content;
+  const normalize = (value: string) => value
+    .replace(/\.(?:md|markdown)$/i, '')
+    .replace(/^\d{4}-\d{2}-\d{2}-/, '')
+    .replace(/[*_`~]/g, '')
+    .trim()
+    .toLowerCase();
+  return normalize(heading[1] ?? '') === normalize(note.title)
+    ? body.slice(heading[0].length)
+    : content;
 }

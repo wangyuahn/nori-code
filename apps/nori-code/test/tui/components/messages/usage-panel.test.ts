@@ -1,4 +1,4 @@
-import { visibleWidth } from '@moonshot-ai/pi-tui';
+import { visibleWidth } from '@nori-code/pi-tui';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { buildUsageReportLines, UsagePanelComponent } from '#/tui/components/messages/usage-panel';
