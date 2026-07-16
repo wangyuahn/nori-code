@@ -150,6 +150,61 @@ function parseSwarmUsage(output: string | undefined): SwarmTokenUsage | undefine
 
 const swarmState = new Map<string, SwarmStatusEntry>();
 
+const TERMINAL_SWARM_TASK_STATUSES = new Set(['completed', 'done', 'failed', 'cancelled', 'stopped']);
+
+export function isSwarmTaskTerminal(status: string): boolean {
+  return TERMINAL_SWARM_TASK_STATUSES.has(status);
+}
+
+export function countSettledSwarmTasks(
+  tasks: readonly SwarmTaskStatusEntry[] | undefined,
+): number {
+  return tasks?.filter(task => isSwarmTaskTerminal(task.status)).length ?? 0;
+}
+
+export function synchronizeSwarmTasks(
+  tasks: readonly SwarmTaskStatusEntry[] | undefined,
+  status: SwarmStatusEntry['status'],
+): SwarmTaskStatusEntry[] | undefined {
+  if (tasks === undefined) return undefined;
+  return tasks.map(task => {
+    if (isSwarmTaskTerminal(task.status)) return task;
+    if (status === 'paused') {
+      return task.status === 'running' ? { ...task, status: 'paused' } : task;
+    }
+    if (status === 'running') {
+      return task.status === 'paused' ? { ...task, status: 'pending' } : task;
+    }
+    if (status === 'done') return { ...task, status: 'completed' };
+    if (status === 'stopped') return { ...task, status: 'cancelled' };
+    if (status === 'failed') return { ...task, status: 'failed' };
+    return task;
+  });
+}
+
+export function reconcileSwarmStatus(
+  entry: SwarmStatusEntry,
+  status: SwarmStatusEntry['status'],
+): SwarmStatusEntry {
+  const tasks = synchronizeSwarmTasks(entry.tasks, status);
+  const completedCount = tasks === undefined
+    ? status === 'done' ? entry.task_count : entry.completed_count
+    : countSettledSwarmTasks(tasks);
+  return {
+    ...entry,
+    status,
+    tasks,
+    completed_count: completedCount,
+    usage: aggregateTaskUsage(tasks) ?? entry.usage,
+  };
+}
+
+function publicSwarmTasks(
+  tasks: readonly SwarmTaskStatusEntry[] | undefined,
+): Array<Omit<SwarmTaskStatusEntry, 'live_output'>> | undefined {
+  return tasks?.map(({ live_output: _liveOutput, ...task }) => task);
+}
+
 /** Write or update the status of a swarm. */
 export function setSwarmStatus(entry: SwarmStatusEntry): void {
   swarmState.set(entry.swarm_id, entry);
@@ -166,6 +221,7 @@ export function setSwarmStatus(entry: SwarmStatusEntry): void {
     round: entry.round,
     started_at: entry.started_at,
     usage: entry.usage,
+    tasks: publicSwarmTasks(entry.tasks),
   });
 }
 
@@ -254,9 +310,10 @@ export function registerSwarmStatusRoute(app: RouteHost, ix: IInstantiationServi
     async (req, reply) => {
       const swarmId = req.params['swarm_id'] as string;
       const entry = swarmState.get(swarmId);
-      let tasks = entry?.tasks;
-      let usage = entry?.usage ?? aggregateTaskUsage(tasks);
-      let status = entry?.status ?? ('pending' as const);
+      let snapshot = entry;
+      let tasks = snapshot?.tasks;
+      let usage = snapshot?.usage ?? aggregateTaskUsage(tasks);
+      let status = snapshot?.status ?? ('pending' as const);
       if (entry?.session_id !== undefined && entry.task_id !== undefined) {
         try {
           const task = await ix.invokeFunction((a) =>
@@ -276,7 +333,11 @@ export function registerSwarmStatusRoute(app: RouteHost, ix: IInstantiationServi
                   ? 'done'
                   : status === 'paused'
                     ? 'running'
-                    : status;
+                  : status;
+          snapshot = reconcileSwarmStatus(entry, status);
+          swarmState.set(swarmId, snapshot);
+          tasks = snapshot.tasks;
+          usage = snapshot.usage ?? usage;
           if (tasks === undefined || tasks.length === 0) {
             tasks = [{
               id: task.id,
@@ -294,8 +355,8 @@ export function registerSwarmStatusRoute(app: RouteHost, ix: IInstantiationServi
       reply.send(okEnvelope({
         swarm_id: swarmId,
         status,
-        task_count: entry?.task_count ?? 0,
-        completed_count: entry?.completed_count ?? 0,
+        task_count: snapshot?.task_count ?? 0,
+        completed_count: snapshot?.completed_count ?? 0,
         session_id: entry?.session_id,
         task_id: entry?.task_id,
         description: entry?.description,
@@ -329,18 +390,22 @@ export function registerSwarmStatusRoute(app: RouteHost, ix: IInstantiationServi
       }
       const ownerAgentId = entry.owner_agent_id ?? 'main';
       const service = ix.invokeFunction((a) => a.get(ITaskService));
+      let taskPaused = entry.status === 'paused';
       if (action === 'stop') {
         await service.cancel(entry.session_id, entry.task_id, ownerAgentId);
       } else if (action === 'pause') {
-        await service.pause(entry.session_id, entry.task_id, prompt, ownerAgentId);
+        const task = await service.pause(entry.session_id, entry.task_id, prompt, ownerAgentId);
+        taskPaused = task.paused === true;
       } else if (action === 'guide') {
         if (prompt === undefined) throw new Error('prompt is required when adding swarm guidance.');
-        await service.guide(entry.session_id, entry.task_id, prompt, ownerAgentId);
+        const task = await service.guide(entry.session_id, entry.task_id, prompt, ownerAgentId);
+        taskPaused = task.paused === true;
       } else {
-        await service.resume(entry.session_id, entry.task_id, prompt, ownerAgentId);
+        const task = await service.resume(entry.session_id, entry.task_id, prompt, ownerAgentId);
+        taskPaused = task.paused === true;
       }
-      const status = action === 'stop' ? 'stopped' : action === 'resume' ? 'running' : 'paused';
-      updateSwarmStatus(swarmId, current => ({ ...current, status }));
+      const status = action === 'stop' ? 'stopped' : taskPaused ? 'paused' : 'running';
+      updateSwarmStatus(swarmId, current => reconcileSwarmStatus(current, status));
       reply.send(okEnvelope({ swarm_id: swarmId, status }, req.id));
     },
   );

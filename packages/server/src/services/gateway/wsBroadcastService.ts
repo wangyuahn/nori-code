@@ -17,10 +17,12 @@ import {
 
 import { buildEventEnvelope, type EventEnvelope } from '#/ws/protocol';
 import {
+  countSettledSwarmTasks,
   findSwarmByAgent,
   findSwarmByToolCall,
   getSwarmStatus,
   nextSwarmRound,
+  reconcileSwarmStatus,
   setSwarmStatus,
   type SwarmStatusEntry,
   type SwarmTaskStatusEntry,
@@ -122,10 +124,6 @@ function upsertSwarmTask(
   return tasks;
 }
 
-function countCompletedSwarmTasks(tasks: readonly SwarmTaskStatusEntry[] | undefined): number {
-  return tasks?.filter(task => ['completed', 'failed', 'cancelled'].includes(task.status)).length ?? 0;
-}
-
 function estimateOutputTokens(text: string): number {
   let asciiChars = 0;
   let nonAsciiChars = 0;
@@ -205,7 +203,11 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
       return;
     }
 
-    if (event.type === 'background.task.started' || event.type === 'background.task.terminated') {
+    if (
+      event.type === 'background.task.started'
+      || event.type === 'background.task.updated'
+      || event.type === 'background.task.terminated'
+    ) {
       const { info } = event;
       if (info.kind !== 'agent' || !info.subagentType?.startsWith('swarm')) return;
 
@@ -215,23 +217,27 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
         ? parsedCount
         : Math.max(prior?.task_count ?? 0, prior?.tasks?.length ?? 0, 1);
       const terminal = event.type === 'background.task.terminated';
-      const pending = terminal ? undefined : this._takePendingSwarmTool(sid, event.agentId);
+      const pending = event.type === 'background.task.started'
+        ? this._takePendingSwarmTool(sid, event.agentId)
+        : undefined;
       const parentSwarm = prior?.parent_swarm_id === undefined && event.agentId !== MAIN_AGENT_ID
         ? findSwarmByAgent(sid, event.agentId)
         : undefined;
-      const status = !terminal
-        ? 'running' as const
+      const status = event.type === 'background.task.updated'
+        ? info.paused === true ? 'paused' as const : 'running' as const
+        : !terminal
+          ? 'running' as const
         : info.status === 'completed'
           ? 'done' as const
           : info.status === 'killed'
             ? 'stopped' as const
             : 'failed' as const;
-      setSwarmStatus({
+      const next: SwarmStatusEntry = {
         ...prior,
         swarm_id: info.taskId,
         status,
         task_count: taskCount,
-        completed_count: terminal ? taskCount : (prior?.completed_count ?? 0),
+        completed_count: prior?.completed_count ?? 0,
         session_id: sid,
         task_id: info.taskId,
         description: info.description,
@@ -241,7 +247,10 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
         round: prior?.round ?? parentSwarm?.round ?? nextSwarmRound(sid),
         started_at: prior?.started_at ?? new Date(info.startedAt).toISOString(),
         usage: aggregateSwarmUsage(prior?.tasks),
-      });
+      };
+      setSwarmStatus(event.type === 'background.task.started'
+        ? next
+        : reconcileSwarmStatus(next, status));
       return;
     }
 
@@ -263,7 +272,7 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
           ...current,
           tasks,
           task_count: Math.max(current.task_count, tasks.length),
-          completed_count: countCompletedSwarmTasks(tasks),
+          completed_count: countSettledSwarmTasks(tasks),
         };
       });
       return;
@@ -351,16 +360,20 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
     updateSwarmStatus(swarm.swarm_id, current => {
       const tasks = current.tasks?.map(task => task.agent_id === agentId ? update(task) : task);
       const taskCount = Math.max(current.task_count, tasks?.length ?? 0);
-      const completedCount = countCompletedSwarmTasks(tasks);
+      const completedCount = countSettledSwarmTasks(tasks);
       const allTasksSettled = taskCount > 0
         && tasks !== undefined
         && tasks.length >= taskCount
         && completedCount >= taskCount;
-      const failed = tasks?.some(task => task.status === 'failed' || task.status === 'cancelled') ?? false;
+      const failed = tasks?.some(task => task.status === 'failed') ?? false;
+      const stopped = !failed && (tasks?.some(task => task.status === 'cancelled') ?? false);
+      const hasRunningTask = tasks?.some(task => task.status === 'running') ?? false;
       return {
         ...current,
         tasks,
-        status: allTasksSettled ? (failed ? 'failed' : 'done') : current.status,
+        status: allTasksSettled
+          ? failed ? 'failed' : stopped ? 'stopped' : 'done'
+          : hasRunningTask && current.status === 'paused' ? 'running' : current.status,
         task_count: taskCount,
         completed_count: completedCount,
         usage: aggregateSwarmUsage(tasks),

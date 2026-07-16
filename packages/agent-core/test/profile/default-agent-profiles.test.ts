@@ -50,6 +50,16 @@ describe('default agent profiles', () => {
     }
   });
 
+  it('exposes real swarm controls to every main-agent profile', () => {
+    for (const name of ['agent', 'nori-agent']) {
+      const profile = DEFAULT_AGENT_PROFILES[name];
+      expect(profile?.tools).toContain('AgentSwarmControl');
+      expect(profile?.systemPrompt(promptContext)).toContain('AgentSwarmControl');
+    }
+    expect(DEFAULT_AGENT_PROFILES['nori-agent']?.systemPrompt(promptContext)).toContain('preserves unfinished agent contexts');
+    expect(DEFAULT_AGENT_PROFILES['nori-agent']?.systemPrompt(promptContext)).toContain('failure notifications arrive automatically');
+  });
+
   it('fails loudly when an embedded system prompt source is missing', () => {
     expect(() =>
       loadAgentProfilesFromSources(['profile/default/agent.yaml'], {

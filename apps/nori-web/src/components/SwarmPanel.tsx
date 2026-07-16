@@ -37,6 +37,7 @@ export function SwarmPanel({
           {connected ? tr('Live', '已连接') : tr('Offline', '离线')}
         </div>
       </header>
+      <CustomAgentsPanel />
 
       {runs.length === 0 ? (
         <div className="empty-state">
@@ -65,6 +66,112 @@ export function SwarmPanel({
       )}
     </div>
   );
+}
+
+interface CustomAgentDraft {
+  name: string;
+  description: string;
+  role: string;
+  base_profile: 'orchestrator' | 'coder' | 'explore' | 'plan';
+  permissions: Record<'read' | 'write' | 'shell' | 'web' | 'delegate', boolean>;
+}
+
+const DEFAULT_CUSTOM_AGENT_PERMISSIONS: CustomAgentDraft['permissions'] = { read: true, write: true, shell: true, web: false, delegate: false };
+
+function CustomAgentsPanel() {
+  const { tr } = useI18n();
+  const [agents, setAgents] = useState<CustomAgentDraft[]>([]);
+  const [draft, setDraft] = useState<CustomAgentDraft>({ name: '', description: '', role: '', base_profile: 'coder', permissions: { ...DEFAULT_CUSTOM_AGENT_PERMISSIONS } });
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    void api.getConfig().then(config => {
+      if (cancelled) return;
+      const configured = typeof config.custom_agents === 'object' && config.custom_agents !== null ? config.custom_agents as Record<string, Record<string, unknown>> : {};
+      setAgents(Object.entries(configured).flatMap(([name, value]) => value.enabled === false ? [] : [{
+        name,
+        description: typeof value.description === 'string' ? value.description : '',
+        role: typeof value.role === 'string' ? value.role : '',
+        base_profile: isBaseProfile(value.baseProfile ?? value.base_profile) ? (value.baseProfile ?? value.base_profile) as CustomAgentDraft['base_profile'] : 'coder',
+        permissions: parseAgentPermissions(value.permissions),
+      }]));
+    }).catch(error => setNotice(error instanceof Error ? error.message : String(error)));
+    return () => { cancelled = true; };
+  }, []);
+
+  const saveAgents = async (next: CustomAgentDraft[], disabledName?: string) => {
+    setSaving(true); setNotice('');
+    try {
+      const custom_agents = Object.fromEntries(next.map(agent => [agent.name, {
+        description: agent.description,
+        role: agent.role,
+        base_profile: agent.base_profile,
+        enabled: true,
+        permissions: agent.permissions,
+      }]));
+      if (disabledName) custom_agents[disabledName] = { description: 'Disabled custom agent', role: 'Disabled', base_profile: 'coder', enabled: false, permissions: DEFAULT_CUSTOM_AGENT_PERMISSIONS };
+      await api.updateConfig({ custom_agents });
+      setAgents(next);
+      setNotice(tr('Custom agents saved. New sessions use the updated roles.', '自定义 Agent 已保存，新会话将使用更新后的角色。'));
+    } catch (error) { setNotice(error instanceof Error ? error.message : String(error)); }
+    finally { setSaving(false); }
+  };
+
+  const add = () => {
+    const normalized = { ...draft, name: draft.name.trim(), description: draft.description.trim(), role: draft.role.trim() };
+    if (!/^[a-z][a-z0-9_-]{1,31}$/.test(normalized.name) || !normalized.description || !normalized.role) {
+      setNotice(tr('Use a 2-32 character lowercase ID and complete the description and role.', '请使用 2-32 位小写 ID，并填写描述与角色。'));
+      return;
+    }
+    const next = [...agents.filter(agent => agent.name !== normalized.name), normalized];
+    void saveAgents(next);
+    setDraft({ name: '', description: '', role: '', base_profile: 'coder', permissions: { ...DEFAULT_CUSTOM_AGENT_PERMISSIONS } });
+  };
+
+  return <section className="custom-agents-panel"><header><div><strong>{tr('Custom agents', '自定义 Agent')}</strong><span>{tr('Roles available to Agent and AgentSwarm through subagent_type.', '主模型可通过 subagent_type 在 Agent 与 AgentSwarm 中指定这些角色。')}</span></div></header>
+    <div className="custom-agent-list">{agents.map(agent => <article key={agent.name}><div><strong>{agent.name}</strong><small>{agent.base_profile} · {agent.description}</small></div><span className="custom-agent-permission-preview" title={permissionSummary(agent.permissions, tr)}>{tr('Permissions', '权限')}</span><button type="button" onClick={() => void saveAgents(agents.filter(item => item.name !== agent.name), agent.name)} disabled={saving} title={tr('Remove agent', '删除 Agent')}><Icon name="trash" size={13}/></button></article>)}</div>
+    <div className="custom-agent-form"><input value={draft.name} onChange={event => setDraft(value => ({ ...value, name: event.target.value }))} placeholder="reviewer" aria-label={tr('Agent ID', 'Agent ID')}/><select value={draft.base_profile} title={baseProfileSummary(draft.base_profile, tr)} onChange={event => { const base_profile = event.target.value as CustomAgentDraft['base_profile']; setDraft(value => ({ ...value, base_profile, permissions: defaultPermissionsForBase(base_profile) })); }}><option value="coder">coder</option><option value="explore">explore</option><option value="plan">plan</option><option value="orchestrator">orchestrator</option></select><input value={draft.description} onChange={event => setDraft(value => ({ ...value, description: event.target.value }))} placeholder={tr('When should the main model use it?', '主模型什么时候使用它？')}/><textarea value={draft.role} onChange={event => setDraft(value => ({ ...value, role: event.target.value }))} placeholder={tr('Role, constraints, and expected output', '角色、约束和预期输出')}/><div className="custom-agent-permissions">{(Object.keys(draft.permissions) as Array<keyof CustomAgentDraft['permissions']>).map(key => <label key={key} title={permissionLabel(key, tr).description}><input type="checkbox" checked={draft.permissions[key]} onChange={event => setDraft(value => ({ ...value, permissions: { ...value.permissions, [key]: event.target.checked } }))}/><span>{permissionLabel(key, tr).label}</span></label>)}</div><button type="button" onClick={add} disabled={saving}>{saving ? tr('Saving...', '保存中...') : tr('Add agent', '添加 Agent')}</button></div>
+    {notice && <p className="custom-agent-notice">{notice}</p>}
+  </section>;
+}
+
+function isBaseProfile(value: unknown): value is CustomAgentDraft['base_profile'] {
+  return value === 'orchestrator' || value === 'coder' || value === 'explore' || value === 'plan';
+}
+
+function parseAgentPermissions(value: unknown): CustomAgentDraft['permissions'] {
+  const record = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  return Object.fromEntries(Object.entries(DEFAULT_CUSTOM_AGENT_PERMISSIONS).map(([key, fallback]) => [key, typeof record[key] === 'boolean' ? record[key] : fallback])) as CustomAgentDraft['permissions'];
+}
+
+function permissionLabel(key: keyof CustomAgentDraft['permissions'], tr: (en: string, zh: string) => string) {
+  return {
+    read: { label: tr('Read', '读取'), description: tr('Read, search, media, and memory lookup.', '读取、搜索、媒体与记忆检索。') },
+    write: { label: tr('Write', '写入'), description: tr('Edit files and write project memory or plans.', '编辑文件并写入项目记忆或计划。') },
+    shell: { label: tr('Terminal', '终端'), description: tr('Run shell commands and inspect background tasks.', '运行终端命令并查看后台任务。') },
+    web: { label: tr('Web', '联网'), description: tr('Search the web and fetch URLs.', '联网搜索并读取 URL。') },
+    delegate: { label: tr('Delegate', '委派'), description: tr('Launch Agent or AgentSwarm children.', '继续调用 Agent 或 AgentSwarm。') },
+  }[key];
+}
+
+function permissionSummary(permissions: CustomAgentDraft['permissions'], tr: (en: string, zh: string) => string): string {
+  return (Object.keys(permissions) as Array<keyof typeof permissions>).filter(key => permissions[key]).map(key => permissionLabel(key, tr).label).join(' · ') || tr('No tool permissions', '无工具权限');
+}
+
+function baseProfileSummary(profile: CustomAgentDraft['base_profile'], tr: (en: string, zh: string) => string): string {
+  if (profile === 'orchestrator') return tr('Read-only planner that can delegate work to other agents.', '只读规划与任务拆分，可继续委派给其他 Agent。');
+  if (profile === 'coder') return tr('Direct implementation worker with code and terminal tools.', '直接实现任务，默认具备代码与终端工具。');
+  if (profile === 'explore') return tr('Read-only codebase explorer.', '只读代码库探索角色。');
+  return tr('Read-only planning role without terminal access.', '只读规划角色，不使用终端。');
+}
+
+function defaultPermissionsForBase(profile: CustomAgentDraft['base_profile']): CustomAgentDraft['permissions'] {
+  if (profile === 'orchestrator') return { read: true, write: false, shell: false, web: true, delegate: true };
+  if (profile === 'explore') return { read: true, write: false, shell: false, web: true, delegate: false };
+  if (profile === 'plan') return { read: true, write: false, shell: false, web: false, delegate: false };
+  return { ...DEFAULT_CUSTOM_AGENT_PERMISSIONS };
 }
 
 export interface SwarmSessionGroup {
@@ -150,8 +257,8 @@ function SwarmSession({ group, current }: { group: SwarmSessionGroup; current: b
   const rounds = groupSwarmRuns(group.runs);
   const treeRuns = collectSwarmTreeRuns([...rounds.values()].flat(), group.runs);
   const progress = treeRuns.map(swarmRunProgress);
-  const running = progress.some(item => item.running);
-  const paused = !running && progress.some(item => item.status === 'paused');
+  const status = aggregateSwarmStatus(progress.map(item => item.status));
+  const running = status === 'running' || status === 'pending';
   const [open, setOpen] = useState(current || running);
   const swarmTaskIds = swarmTaskIdsForRuns(group.runs);
 
@@ -165,9 +272,9 @@ function SwarmSession({ group, current }: { group: SwarmSessionGroup; current: b
     onToggle={event => setOpen(event.currentTarget.open)}
   >
     <summary>
-      <span className={`status-dot ${running ? 'running' : paused ? 'paused' : 'done'}`}/>
+      <span className={`status-dot ${status}`}/>
       <span><strong>{group.title}</strong><small>{group.sessionId ?? tr('Unknown conversation', '未知会话')}</small></span>
-      <span className={`badge badge-${running ? 'info' : paused ? 'warning' : 'success'}`}>{running ? tr('Running', '运行中') : paused ? tr('Paused', '已暂停') : tr('Done', '已完成')}</span>
+      <span className={`badge badge-${swarmStatusBadge(status)}`}>{swarmStatusLabel(status, tr)}</span>
     </summary>
     <div className="swarm-session-body">
       <div className="swarm-round-list">
@@ -246,20 +353,32 @@ export function swarmRunProgress(run: SwarmStatus): {
   const completed = explicitlyFinished
     ? total
     : Math.min(total, Math.max(run.completed_count, completedFromTasks));
-  const failed = run.status === 'failed'
-    || tasks.some(task => task.status === 'failed' || task.status === 'cancelled');
+  const failed = run.status === 'failed' || tasks.some(task => task.status === 'failed');
+  const stopped = run.status === 'stopped'
+    || (!failed && tasks.some(task => task.status === 'cancelled' || task.status === 'stopped'));
   const status = explicitlyFinished || tasksFinished
-    ? (run.status === 'stopped' ? 'stopped' : failed ? 'failed' : 'done')
+    ? (stopped ? 'stopped' : failed ? 'failed' : 'done')
     : run.status;
   return { total, completed, running: status === 'running' || status === 'pending', status };
+}
+
+export function aggregateSwarmStatus(
+  statuses: readonly SwarmStatus['status'][],
+): SwarmStatus['status'] {
+  if (statuses.some(status => status === 'running')) return 'running';
+  if (statuses.some(status => status === 'pending')) return 'pending';
+  if (statuses.some(status => status === 'paused')) return 'paused';
+  if (statuses.some(status => status === 'failed')) return 'failed';
+  if (statuses.some(status => status === 'stopped')) return 'stopped';
+  return 'done';
 }
 
 function SwarmRound({ round, runs, allRuns }: { round: number; runs: SwarmStatus[]; allRuns: SwarmStatus[] }) {
   const { tr } = useI18n();
   const treeRuns = collectSwarmTreeRuns(runs, allRuns);
   const progressByRun = treeRuns.map(swarmRunProgress);
-  const running = progressByRun.some(progress => progress.running);
-  const paused = !running && progressByRun.some(progress => progress.status === 'paused');
+  const status = aggregateSwarmStatus(progressByRun.map(progress => progress.status));
+  const running = status === 'running' || status === 'pending';
   const [open, setOpen] = useState(running);
   const agentCount = progressByRun.reduce((total, progress) => total + progress.total, 0);
   const completedCount = progressByRun.reduce((total, progress) => total + progress.completed, 0);
@@ -270,11 +389,11 @@ function SwarmRound({ round, runs, allRuns }: { round: number; runs: SwarmStatus
     if (running) setOpen(true);
   }, [running]);
 
-  return <details className={`swarm-round${running ? ' running' : ''}`} open={open} onToggle={event => setOpen(event.currentTarget.open)}>
+  return <details className={`swarm-round swarm-round-${status}${running ? ' running' : ''}`} open={open} onToggle={event => setOpen(event.currentTarget.open)}>
     <summary>
-      <span className={`status-dot ${running ? 'running' : paused ? 'paused' : 'done'}`}/>
-      <span className="swarm-round-copy"><strong>{tr(`Round ${round}`, `第 ${round} 轮`)}</strong><small>{completedCount}/{agentCount} {tr('agents complete', '个智能体已完成')}</small></span>
-      <span className="swarm-round-meta">{tokens > 0 && <small>{hasLiveTokens ? '~' : ''}{tokens.toLocaleString()} tokens</small>}<span className={`badge badge-${running ? 'info' : paused ? 'warning' : 'success'}`}>{running ? tr('Running', '运行中') : paused ? tr('Paused', '已暂停') : tr('Done', '已完成')}</span></span>
+      <span className={`status-dot ${status}`}/>
+      <span className="swarm-round-copy"><strong>{tr(`Round ${round}`, `第 ${round} 轮`)}</strong><small>{completedCount}/{agentCount} {tr('agents finished', '个智能体已结束')}</small></span>
+      <span className="swarm-round-meta">{tokens > 0 && <small>{hasLiveTokens ? '~' : ''}{tokens.toLocaleString()} tokens</small>}<span className={`badge badge-${swarmStatusBadge(status)}`}>{swarmStatusLabel(status, tr)}</span></span>
     </summary>
     <div className="swarm-round-body">{runs.map(run => <SwarmRun key={run.swarm_id} run={run} allRuns={allRuns}/>)}</div>
   </details>;
@@ -461,6 +580,26 @@ function taskStatusBadge(status: string): string {
   return 'muted';
 }
 
+function swarmStatusBadge(status: SwarmStatus['status']): string {
+  if (status === 'done') return 'success';
+  if (status === 'running') return 'info';
+  if (status === 'paused') return 'warning';
+  if (status === 'failed') return 'danger';
+  return 'muted';
+}
+
+function swarmStatusLabel(
+  status: SwarmStatus['status'],
+  tr: (english: string, chinese: string) => string,
+): string {
+  if (status === 'done') return tr('Done', '已完成');
+  if (status === 'running') return tr('Running', '运行中');
+  if (status === 'paused') return tr('Paused', '已暂停');
+  if (status === 'failed') return tr('Failed', '失败');
+  if (status === 'stopped') return tr('Stopped', '已终止');
+  return tr('Pending', '等待中');
+}
+
 function taskStatusLabel(
   status: string,
   tr: (english: string, chinese: string) => string,
@@ -469,13 +608,13 @@ function taskStatusLabel(
   if (status === 'running') return tr('Running', '运行中');
   if (status === 'paused') return tr('Paused', '已暂停');
   if (status === 'failed') return tr('Failed', '失败');
-  if (status === 'cancelled') return tr('Cancelled', '已取消');
+  if (status === 'cancelled' || status === 'stopped') return tr('Stopped', '已终止');
   if (status === 'pending' || status === 'queued') return tr('Pending', '等待中');
   return status;
 }
 
 function isTaskFinished(status: string): boolean {
-  return status === 'done' || status === 'completed' || status === 'failed' || status === 'cancelled';
+  return status === 'done' || status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'stopped';
 }
 
 function formatBytes(bytes: number): string {

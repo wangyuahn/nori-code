@@ -1,12 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type FsDiffResponse, type FsGitStatusResponse, type FsReadResponse } from '../api/client';
 import type { ChatMessage, CodeChange } from '../hooks/useChatMessages';
 import type { GitStatusRefreshOptions } from '../hooks/useFilesystem';
 import { useI18n } from '../i18n';
 import { FilePreview } from './FilePreview';
 import { Icon } from './Icon';
+import { LspPanel } from './LspPanel';
 
-type InspectorTab = 'preview' | 'changes' | 'git';
+const TerminalPanel = lazy(() => import('./TerminalPanel').then(module => ({ default: module.TerminalPanel })));
+
+export type InspectorTab = 'preview' | 'changes' | 'git' | 'lsp' | 'terminal';
+const DEFAULT_INSPECTOR_TABS: InspectorTab[] = ['changes', 'preview', 'git', 'lsp', 'terminal'];
 
 interface WorkspaceInspectorProps {
   sessionId: string | null;
@@ -22,16 +26,22 @@ interface WorkspaceInspectorProps {
   refreshGitStatus: (options?: GitStatusRefreshOptions) => Promise<FsGitStatusResponse | null>;
   refreshMessages?: () => Promise<void>;
   isStreaming: boolean;
+  onSelectFilePath?: (path: string) => void;
+  initialTab?: InspectorTab;
+  standalone?: boolean;
 }
 
-export function WorkspaceInspector({ sessionId, projectPath, path, file, loading, messages, codeChanges, gitStatus, gitError, gitLoading, refreshGitStatus, refreshMessages }: WorkspaceInspectorProps) {
+export function WorkspaceInspector({ sessionId, projectPath, path, file, loading, messages, codeChanges, gitStatus, gitError, gitLoading, refreshGitStatus, refreshMessages, onSelectFilePath, initialTab = 'changes', standalone = false }: WorkspaceInspectorProps) {
   const { tr } = useI18n();
-  const [tab, setTab] = useState<InspectorTab>('changes');
+  const [tab, setTab] = useState<InspectorTab>(initialTab);
+  const [tabOrder, setTabOrder] = useState<InspectorTab[]>(loadInspectorTabOrder);
   const [textChangeCount, setTextChangeCount] = useState<number>();
+  const [diagnosticCount, setDiagnosticCount] = useState<number>();
+  const [revealLine, setRevealLine] = useState<number>();
 
   useEffect(() => {
-    if (path) setTab('preview');
-  }, [path]);
+    if (path && !standalone) setTab('preview');
+  }, [path, standalone]);
 
   useEffect(() => {
     setTextChangeCount(undefined);
@@ -51,21 +61,62 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
   }, [mutationRefreshKey, refreshGitStatus, sessionId]);
 
   return <section className="workspace-inspector">
-    <div className="inspector-tabs" role="tablist" aria-label={tr('Inspector', '检查器')}>
-      <InspectorTabButton active={tab === 'changes'} icon="diff" label={tr('Changes', '更改')} count={textChangeCount} onClick={() => setTab('changes')} />
-      <InspectorTabButton active={tab === 'preview'} icon="files" label={tr('Preview', '预览')} onClick={() => setTab('preview')} />
-      <InspectorTabButton active={tab === 'git'} icon="git-branch" label="Git" onClick={() => { setTab('git'); void refreshGitStatus(); }} />
+    {!standalone && <div className="inspector-tabs" role="tablist" aria-label={tr('Inspector', '检查器')}>
+      {tabOrder.map(item => <InspectorTabButton key={item} tab={item} active={tab === item} count={item === 'changes' ? textChangeCount : item === 'lsp' ? diagnosticCount : undefined} onClick={() => { setTab(item); if (item === 'git') void refreshGitStatus(); }} onMove={target => setTabOrder(previous => moveInspectorTab(previous, item, target))} />)}
+      <button type="button" className="inspector-popout" onClick={() => openInspectorWindow(tab, sessionId, path)} title={tr('Open in separate window', '在独立窗口中打开')} aria-label={tr('Open in separate window', '在独立窗口中打开')}><Icon name="external" size={13}/></button>
     </div>
+    }
     <div className="inspector-content">
-      {tab === 'preview' && <FilePreview path={path} file={file} loading={loading} />}
+      {tab === 'preview' && <FilePreview path={path} file={file} loading={loading} revealLine={revealLine} />}
       {tab === 'changes' && <ChangesPanel sessionId={sessionId} projectPath={projectPath} status={gitStatus} messages={messages} codeChanges={codeChanges} onRefreshGitStatus={refreshGitStatus} onRefreshMessages={refreshMessages} onCountChange={setTextChangeCount} />}
       {tab === 'git' && <GitPanel sessionId={sessionId} projectPath={projectPath} status={gitStatus} error={gitError} loading={gitLoading} onRefresh={refreshGitStatus} />}
+      {tab === 'lsp' && <LspPanel sessionId={sessionId} path={path} onDiagnosticCountChange={setDiagnosticCount} onReveal={(targetPath, line) => { if (targetPath !== path) onSelectFilePath?.(targetPath); setRevealLine(line + 1); setTab('preview'); }} />}
+      {tab === 'terminal' && <Suspense fallback={<div className="inspector-empty"><span className="spinner"/></div>}><TerminalPanel sessionId={sessionId} /></Suspense>}
     </div>
   </section>;
 }
 
-function InspectorTabButton({ active, icon, label, count, onClick }: { active: boolean; icon: 'files' | 'diff' | 'git-branch'; label: string; count?: number; onClick: () => void }) {
-  return <button type="button" role="tab" aria-selected={active} className={active ? 'active' : ''} onClick={onClick}><Icon name={icon} size={14}/><span>{label}</span>{count ? <small>{count}</small> : null}</button>;
+function InspectorTabButton({ tab, active, count, onClick, onMove }: { tab: InspectorTab; active: boolean; count?: number; onClick: () => void; onMove: (target: InspectorTab) => void }) {
+  const { tr } = useI18n();
+  const meta = inspectorTabMeta(tab, tr);
+  return <button type="button" role="tab" draggable aria-selected={active} className={active ? 'active' : ''} onClick={onClick} onDragStart={event => event.dataTransfer.setData('text/nori-inspector-tab', tab)} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const source = event.dataTransfer.getData('text/nori-inspector-tab') as InspectorTab; if (DEFAULT_INSPECTOR_TABS.includes(source)) onMove(source); }}><Icon name={meta.icon} size={14}/><span>{meta.label}</span>{count ? <small>{count}</small> : null}</button>;
+}
+
+function inspectorTabMeta(tab: InspectorTab, tr: (en: string, zh: string) => string) {
+  const values = {
+    changes: { icon: 'diff' as const, label: tr('Changes', '更改') },
+    preview: { icon: 'files' as const, label: tr('Preview', '预览') },
+    git: { icon: 'git-branch' as const, label: 'Git' },
+    lsp: { icon: 'target' as const, label: 'LSP' },
+    terminal: { icon: 'terminal' as const, label: tr('Terminal', '终端') },
+  };
+  return values[tab];
+}
+
+function loadInspectorTabOrder(): InspectorTab[] {
+  try {
+    const value = JSON.parse(localStorage.getItem('nori-inspector-tab-order') ?? '[]') as unknown;
+    if (!Array.isArray(value)) return DEFAULT_INSPECTOR_TABS;
+    const valid = value.filter((item): item is InspectorTab => typeof item === 'string' && DEFAULT_INSPECTOR_TABS.includes(item as InspectorTab));
+    return [...new Set([...valid, ...DEFAULT_INSPECTOR_TABS])];
+  } catch { return DEFAULT_INSPECTOR_TABS; }
+}
+
+function moveInspectorTab(order: InspectorTab[], target: InspectorTab, source: InspectorTab): InspectorTab[] {
+  const next = order.filter(item => item !== source);
+  next.splice(Math.max(0, next.indexOf(target)), 0, source);
+  localStorage.setItem('nori-inspector-tab-order', JSON.stringify(next));
+  return next;
+}
+
+function openInspectorWindow(tab: InspectorTab, sessionId: string | null, path: string): void {
+  const input = { tab, sessionId: sessionId ?? undefined, path: path || undefined };
+  if (window.noriDesktop?.openInspectorWindow) { void window.noriDesktop.openInspectorWindow(input); return; }
+  const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  params.set('inspector', tab);
+  if (sessionId) params.set('session', sessionId);
+  if (path) params.set('path', path);
+  window.open(`${window.location.pathname}${window.location.search}#${params}`, `nori-inspector-${tab}`, 'popup,width=720,height=760');
 }
 
 function latestToolMutationKey(messages: ChatMessage[]): string | undefined {

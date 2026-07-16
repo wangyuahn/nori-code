@@ -22,6 +22,7 @@ import { registerSkillsRoutes } from './skills';
 import { registerSnapshotRoutes } from './snapshot';
 import { registerTasksRoutes } from './tasks';
 import { registerTerminalsRoutes } from './terminals';
+import { registerLspRoutes } from './lsp';
 import { registerToolsRoutes } from './tools';
 import { registerWorkspaceFsRoutes } from './workspaceFs';
 import { registerWorkspacesRoutes } from './workspaces';
@@ -117,6 +118,7 @@ export async function registerApiV1Routes(
         ix,
       );
     }
+    registerLspRoutes(apiV1 as unknown as Parameters<typeof registerLspRoutes>[0], ix);
     registerFsRoutes(apiV1 as unknown as Parameters<typeof registerFsRoutes>[0], ix);
     registerGuiStoreRoutes(apiV1 as unknown as Parameters<typeof registerGuiStoreRoutes>[0], ix);
     registerFilesRoutes(apiV1 as unknown as Parameters<typeof registerFilesRoutes>[0], ix);

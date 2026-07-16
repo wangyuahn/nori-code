@@ -12,6 +12,7 @@ import { DenyAllPermissionPolicy } from '../agent/permission/policies/deny-all';
 import { InMemoryAgentRecordPersistence } from '../agent/records';
 import { isAbortError } from '../loop/errors';
 import {
+  configuredSubagentProfiles,
   DEFAULT_AGENT_PROFILES,
   prepareSystemPromptContext,
   type ResolvedAgentProfile,
@@ -457,9 +458,11 @@ export class SessionSubagentHost {
   }
 
   private resolveProfile(parent: Agent, profileName: string): ResolvedAgentProfile {
-    const profile =
-      DEFAULT_AGENT_PROFILES[parent.config.profileName ?? 'agent']?.subagents?.[profileName] ??
-      DEFAULT_AGENT_PROFILES['agent']?.subagents?.[profileName];
+    const builtins = DEFAULT_AGENT_PROFILES[parent.config.profileName ?? 'agent']?.subagents ?? DEFAULT_AGENT_PROFILES['agent']?.subagents;
+    // Keep old persisted/tool-call inputs working without advertising the
+    // confusing legacy name in current Agent and AgentSwarm descriptions.
+    const resolvedName = profileName === 'nori-coder' ? 'orchestrator' : profileName;
+    const profile = configuredSubagentProfiles(builtins, parent.kimiConfig?.customAgents)?.[resolvedName];
     if (profile === undefined) {
       throw new Error(`Subagent profile "${profileName}" was not found`);
     }

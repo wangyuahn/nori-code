@@ -11,7 +11,24 @@ import type { RawData, WebSocket } from 'ws';
 import { WebSocketServer } from 'ws';
 import type { IInstantiationService } from '@nori-code/agent-core';
 import type { FastifyInstance } from 'fastify';
-import { listSwarmStatuses } from './swarmStatus';
+
+interface SwarmStatusTaskPayload {
+  id: string;
+  label: string;
+  status: string;
+  agent_id?: string;
+  parent_agent_id?: string;
+  profile?: string;
+  output?: string;
+  output_bytes?: number;
+  usage?: SwarmStatusPayload['usage'];
+  live_output_tokens?: number;
+  context_tokens?: number;
+}
+
+interface SwarmStatusSnapshot extends Omit<SwarmStatusPayload, 'type' | 'timestamp' | 'tasks'> {
+  tasks?: Array<SwarmStatusTaskPayload & { live_output?: string }>;
+}
 
 export interface SwarmStatusPayload {
   type: 'swarm_status';
@@ -33,6 +50,7 @@ export interface SwarmStatusPayload {
     cache_write: number;
     total: number;
   };
+  tasks?: SwarmStatusTaskPayload[];
   timestamp: string;
 }
 
@@ -55,7 +73,11 @@ export function broadcastSwarmStatus(payload: Omit<SwarmStatusPayload, 'type' | 
   }
 }
 
-export function registerSwarmWsRoute(app: FastifyInstance, _ix: IInstantiationService): void {
+export function registerSwarmWsRoute(
+  app: FastifyInstance,
+  _ix: IInstantiationService,
+  listStatuses: () => readonly SwarmStatusSnapshot[],
+): void {
   const wss = new WebSocketServer({ noServer: true });
 
   const server = app.server;
@@ -76,7 +98,7 @@ export function registerSwarmWsRoute(app: FastifyInstance, _ix: IInstantiationSe
           client_count: connectedClients.size,
         }),
       );
-      for (const entry of listSwarmStatuses()) {
+      for (const entry of listStatuses()) {
         ws.send(JSON.stringify({
           type: 'swarm_status',
           swarm_id: entry.swarm_id,
@@ -91,6 +113,7 @@ export function registerSwarmWsRoute(app: FastifyInstance, _ix: IInstantiationSe
           round: entry.round,
           started_at: entry.started_at,
           usage: entry.usage,
+          tasks: entry.tasks?.map(({ live_output: _liveOutput, ...task }) => task),
           timestamp: new Date().toISOString(),
         } satisfies SwarmStatusPayload));
       }

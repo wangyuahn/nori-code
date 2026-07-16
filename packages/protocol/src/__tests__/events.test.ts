@@ -142,6 +142,28 @@ describe('events / display re-exports', () => {
     expect((parsed as { info: { detached?: boolean } }).info.detached).toBe(false);
   });
 
+  it('preserves paused state on background task updates', () => {
+    const parsed = eventSchema.parse({
+      type: 'background.task.updated',
+      agentId: 'main',
+      sessionId: 'sess_1',
+      info: {
+        kind: 'agent',
+        taskId: 'swarm-deadbeef',
+        description: 'Review changes',
+        status: 'running',
+        detached: true,
+        paused: true,
+        startedAt: 1,
+        endedAt: null,
+        subagentType: 'swarm:2',
+      },
+    });
+
+    expect(parsed.type).toBe('background.task.updated');
+    expect((parsed as { info: { paused?: boolean } }).info.paused).toBe(true);
+  });
+
   it('validates event.session.created events', () => {
     const parsed = eventSchema.parse({
       type: 'event.session.created',

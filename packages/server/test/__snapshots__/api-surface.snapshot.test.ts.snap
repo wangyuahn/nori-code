@@ -91,6 +91,14 @@ exports[`API surface snapshot > matches the documented v1 route table and meta e
     ],
     [
       "GET",
+      "/api/v1/phase/status",
+    ],
+    [
+      "GET",
+      "/api/v1/provider-presets",
+    ],
+    [
+      "GET",
       "/api/v1/providers",
     ],
     [
@@ -171,7 +179,23 @@ exports[`API surface snapshot > matches the documented v1 route table and meta e
     ],
     [
       "GET",
+      "/api/v1/swarm/status/{swarm_id}",
+    ],
+    [
+      "GET",
       "/api/v1/tools",
+    ],
+    [
+      "GET",
+      "/api/v1/vault/notes",
+    ],
+    [
+      "GET",
+      "/api/v1/vault/notes/{note_id}",
+    ],
+    [
+      "GET",
+      "/api/v1/vault/search",
     ],
     [
       "GET",
@@ -263,6 +287,14 @@ exports[`API surface snapshot > matches the documented v1 route table and meta e
     ],
     [
       "POST",
+      "/api/v1/sessions/{session_id}/lsp:request",
+    ],
+    [
+      "POST",
+      "/api/v1/sessions/{session_id}/lsp:status",
+    ],
+    [
+      "POST",
       "/api/v1/sessions/{session_id}/profile",
     ],
     [
@@ -300,6 +332,10 @@ exports[`API surface snapshot > matches the documented v1 route table and meta e
     [
       "POST",
       "/api/v1/shutdown",
+    ],
+    [
+      "POST",
+      "/api/v1/swarm/{swarm_id}/{action}",
     ],
     [
       "POST",

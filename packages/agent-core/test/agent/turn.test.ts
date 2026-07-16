@@ -1877,6 +1877,27 @@ describe('Agent turn flow', () => {
     await ctx.expectResumeMatches();
   });
 
+  it('does not launch buffered user guidance after the active response is stopped', async () => {
+    const ctx = testAgent({ kaos: createCommandKaos('should-not-run') });
+    ctx.configure({ tools: ['Bash'] });
+    ctx.mockNextResponse({ type: 'text', text: 'Waiting for approval.' }, bashCall());
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run the command' }] });
+    await ctx.untilApprovalRequest();
+
+    await ctx.rpc.steer({ input: [{ type: 'text', text: 'Change direction now' }] });
+    await ctx.rpc.cancel({ turnId: 0 });
+    await ctx.untilTurnEnd();
+    await Promise.resolve();
+
+    expect(ctx.agent.turn.hasActiveTurn).toBe(false);
+    expect(ctx.allEvents.filter(entry => entry.event === 'turn.started')).toHaveLength(1);
+    expect(ctx.agent.context.history).not.toContainEqual(expect.objectContaining({
+      role: 'user',
+      content: [{ type: 'text', text: 'Change direction now' }],
+    }));
+    await ctx.expectResumeMatches();
+  });
+
   it('rejects a non-steer prompt while a turn is active', async () => {
     const ctx = testAgent({ kaos: createCommandKaos('should-not-run') });
     ctx.configure({ tools: ['Bash'] });
@@ -1908,6 +1929,7 @@ describe('Agent turn flow', () => {
       [emit] error         { "code": "turn.agent_busy", "message": "Cannot launch a new turn while another turn (ID 0) is active", "details": { "turnId": 0 }, "retryable": true }
     `);
     await ctx.rpc.cancel({ turnId: 0 });
+    expect(ctx.agent.turn.hasActiveTurn).toBe(true);
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
       [wire] turn.cancel                 { "turnId": 0, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "tool.call", "uuid": "call_bash", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf should-not-run", "timeout": 60 }, "description": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }, "time": "<time>" }

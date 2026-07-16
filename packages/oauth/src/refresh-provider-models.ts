@@ -43,6 +43,7 @@ interface DiscoveredModel {
   readonly displayName?: string;
   readonly maxContextSize?: number;
   readonly capabilities?: string[];
+  readonly thinkingSupport?: boolean;
   readonly supportEfforts?: string[];
   readonly defaultEffort?: string;
 }
@@ -115,6 +116,7 @@ function normalizeEfforts(value: unknown): string[] | undefined {
 function capabilitiesFor(
   record: ProviderRecord,
   id: string,
+  efforts: readonly string[] | undefined,
   endpointCapabilities: readonly string[] = [],
 ): string[] {
   const capabilities = new Set<string>(['tool_use', ...endpointCapabilities]);
@@ -125,7 +127,7 @@ function capabilitiesFor(
     }
   }
   const reasoning = record['reasoning'] ?? record['supports_reasoning'] ?? record['supportsThinking'];
-  if (reasoning === true || /(^|[-_.])(o[134]|reason|thinking)/i.test(id)) capabilities.add('thinking');
+  if (reasoning === true || (efforts?.length ?? 0) > 0 || (reasoning !== false && /(^|[-_.])(o[134]|reason|thinking)/i.test(id))) capabilities.add('thinking');
   if (record['supports_image_in'] === true || record['supportsImageInput'] === true) capabilities.add('image_in');
   if (record['supports_audio_in'] === true || record['supportsAudioInput'] === true) capabilities.add('audio_in');
   if (record['supports_video_in'] === true || record['supportsVideoInput'] === true) capabilities.add('video_in');
@@ -137,6 +139,17 @@ function capabilitiesFor(
     if (inputs.includes('video')) capabilities.add('video_in');
   }
   return [...capabilities];
+}
+
+function thinkingSupportFor(
+  record: ProviderRecord,
+  id: string,
+  efforts: readonly string[] | undefined,
+): boolean | undefined {
+  const reasoning = record['reasoning'] ?? record['supports_reasoning'] ?? record['supportsThinking'];
+  if (typeof reasoning === 'boolean') return reasoning || (efforts?.length ?? 0) > 0;
+  if ((efforts?.length ?? 0) > 0 || /(^|[-_.])(o[134]|reason|thinking)/i.test(id)) return true;
+  return undefined;
 }
 
 function normalizeModels(
@@ -167,12 +180,73 @@ function normalizeModels(
       id,
       displayName: stringField(record, 'display_name') ?? stringField(record, 'displayName') ?? stringField(record, 'name'),
       maxContextSize: positiveInteger(record['context_window'], record['context_length'], record['max_context_size'], record['inputTokenLimit']),
-      capabilities: capabilitiesFor(record, id, endpointCapabilities),
+      capabilities: capabilitiesFor(record, id, efforts, endpointCapabilities),
+      thinkingSupport: thinkingSupportFor(record, id, efforts),
       supportEfforts: efforts,
       defaultEffort: stringField(record, 'default_effort'),
     });
   }
   return [...models.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
+
+async function enrichModelsFromCatalog(
+  discovered: DiscoveredModel[],
+  provider: ProviderRecord,
+  signal: AbortSignal,
+  userAgent?: string,
+): Promise<DiscoveredModel[]> {
+  const source = recordField(provider, 'source');
+  if (source?.['kind'] !== 'modelsDev') return discovered;
+  const url = stringField(source, 'url');
+  const catalogId = stringField(source, 'catalogId') ?? stringField(source, 'catalog_id');
+  if (url === undefined || catalogId === undefined) return discovered;
+
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (userAgent !== undefined) headers['User-Agent'] = userAgent;
+  const response = await fetch(url, { headers, signal });
+  if (!response.ok) return discovered;
+  const payload: unknown = await response.json();
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return discovered;
+  const providers = payload as Record<string, unknown>;
+  const rawProvider = providers[catalogId] ?? Object.values(providers).find(value => {
+    return typeof value === 'object'
+      && value !== null
+      && !Array.isArray(value)
+      && (value as ProviderRecord)['id'] === catalogId;
+  });
+  if (typeof rawProvider !== 'object' || rawProvider === null || Array.isArray(rawProvider)) {
+    return discovered;
+  }
+  const rawModels = (rawProvider as ProviderRecord)['models'];
+  if (typeof rawModels !== 'object' || rawModels === null || Array.isArray(rawModels)) {
+    return discovered;
+  }
+
+  const byId = new Map<string, ProviderRecord>();
+  for (const [key, value] of Object.entries(rawModels)) {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) continue;
+    const record = value as ProviderRecord;
+    const id = stringField(record, 'id') ?? key;
+    byId.set(id, record);
+    byId.set(key, record);
+  }
+
+  return discovered.map(model => {
+    const record = byId.get(model.id);
+    if (record === undefined) return model;
+    const efforts = normalizeEfforts(record['support_efforts'] ?? record['supported_efforts']);
+    const limit = recordField(record, 'limit');
+    const catalogCapabilities = capabilitiesFor(record, model.id, efforts);
+    return {
+      ...model,
+      displayName: stringField(record, 'name') ?? model.displayName,
+      maxContextSize: positiveInteger(limit?.['context']) ?? model.maxContextSize,
+      capabilities: [...new Set([...(model.capabilities ?? []), ...catalogCapabilities])],
+      thinkingSupport: thinkingSupportFor(record, model.id, efforts) ?? model.thinkingSupport,
+      supportEfforts: efforts ?? model.supportEfforts,
+      defaultEffort: stringField(record, 'default_effort') ?? model.defaultEffort,
+    };
+  });
 }
 
 async function discoverModels(
@@ -231,7 +305,9 @@ async function discoverModels(
         const endpointCapabilities = isOfficialKimiCodingEndpoint(configuredBase)
           ? OFFICIAL_KIMI_CODING_INPUT_CAPABILITIES
           : [];
-        return normalizeModels(await readModelPayload(response, url), endpointCapabilities);
+        const discovered = normalizeModels(await readModelPayload(response, url), endpointCapabilities);
+        return await enrichModelsFromCatalog(discovered, provider, controller.signal, host.userAgent)
+          .catch(() => discovered);
       } catch (error) {
         failures.push(error instanceof Error ? error : new Error(String(error)));
       }
@@ -261,6 +337,7 @@ function sameModels(current: Array<[string, ManagedKimiModelAlias]>, discovered:
     if (model.maxContextSize !== undefined && existing.maxContextSize !== model.maxContextSize) return false;
     if (model.displayName !== undefined && existing.displayName !== model.displayName) return false;
     if (model.defaultEffort !== undefined && existing.defaultEffort !== model.defaultEffort) return false;
+    if (model.thinkingSupport !== undefined && existing.thinkingSupport !== model.thinkingSupport) return false;
     if (!sameStringSet(existing.capabilities ?? ['tool_use'], model.capabilities ?? existing.capabilities ?? ['tool_use'])) return false;
     if (!sameStringSet(existing.supportEfforts ?? [], model.supportEfforts ?? existing.supportEfforts ?? [])) return false;
   }
@@ -315,6 +392,7 @@ export async function refreshProviderModels(
           model: model.id,
           maxContextSize: model.maxContextSize ?? existing?.maxContextSize ?? DEFAULT_CONTEXT_SIZE,
           capabilities: model.capabilities ?? existing?.capabilities ?? ['tool_use'],
+          thinkingSupport: model.thinkingSupport ?? existing?.thinkingSupport,
           displayName: model.displayName ?? existing?.displayName,
           supportEfforts: model.supportEfforts ?? existing?.supportEfforts,
           defaultEffort: model.defaultEffort ?? existing?.defaultEffort,

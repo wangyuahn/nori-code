@@ -12,6 +12,7 @@ import {
 } from '../theme';
 import { Icon } from './Icon';
 import { loadRewindLimit, MAX_REWIND_LIMIT, saveRewindLimit } from '../rewindPreferences';
+import { loadSoundPreferences, playNotificationSound, saveSoundPreferences } from '../notificationSounds';
 
 type ProviderType = ProviderPreset['type'];
 type MemoryProviderType = Extract<ProviderType, 'openai' | 'openai_responses'>;
@@ -38,6 +39,7 @@ export function SettingsPanel() {
   const [theme, setTheme] = useState<ThemeMode>(loadThemeMode);
   const [providers, setProviders] = useState<ProviderCatalogItem[]>([]);
   const [presets, setPresets] = useState<ProviderPreset[]>([]);
+  const [presetSource, setPresetSource] = useState('https://models.dev/api.json');
   const [presetId, setPresetId] = useState('custom');
   const [providerId, setProviderId] = useState('custom');
   const [providerType, setProviderType] = useState<ProviderType>('openai');
@@ -52,6 +54,9 @@ export function SettingsPanel() {
   const [memoryApiKey, setMemoryApiKey] = useState('');
   const [memoryApiKeyTouched, setMemoryApiKeyTouched] = useState(false);
   const [rewindLimit, setRewindLimit] = useState(loadRewindLimit);
+  const [soundPreferences, setSoundPreferences] = useState(loadSoundPreferences);
+  const [maxStepsPerTurn, setMaxStepsPerTurn] = useState(0);
+  const [goalMaxTurns, setGoalMaxTurns] = useState(0);
   const [presetWarning, setPresetWarning] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -68,6 +73,9 @@ export function SettingsPanel() {
       ]);
       if (typeof config.default_permission_mode === 'string') setPermissionMode(config.default_permission_mode);
       if (typeof config.default_plan_mode === 'boolean') setPlanMode(config.default_plan_mode);
+      const loopControl = typeof config.loop_control === 'object' && config.loop_control !== null ? config.loop_control as Record<string, unknown> : {};
+      setMaxStepsPerTurn(nonNegativeInteger(loopControl.maxStepsPerTurn ?? loopControl.max_steps_per_turn));
+      setGoalMaxTurns(nonNegativeInteger(loopControl.goalMaxTurns ?? loopControl.goal_max_turns));
       const experimental = config.experimental as Record<string, unknown> | undefined;
       if (typeof experimental?.auto_update === 'boolean') setAutoUpdate(experimental.auto_update);
       const memory = typeof config.memory === 'object' && config.memory !== null
@@ -86,12 +94,16 @@ export function SettingsPanel() {
       setMemoryApiKeyTouched(false);
       setProviders(providerResult.items);
       setPresets(presetResult.items);
+      setPresetSource(presetResult.source);
       setPresetWarning(presetResult.warning ?? '');
       const first = providerResult.items[0];
       if (first) {
         setProviderId(first.id);
         if (API_FORMATS.some(item => item.value === first.type)) setProviderType(first.type as ProviderType);
         setBaseUrl(first.base_url ?? '');
+        const matchingPreset = presetResult.items.find(item =>
+          item.id === first.id && (item.base_url ?? '') === (first.base_url ?? ''));
+        setPresetId(matchingPreset?.id ?? 'custom');
       }
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : tr('Failed to load settings', '加载设置失败'));
@@ -124,6 +136,9 @@ export function SettingsPanel() {
     setProviderId(provider.id);
     if (API_FORMATS.some(item => item.value === provider.type)) setProviderType(provider.type as ProviderType);
     setBaseUrl(provider.base_url ?? '');
+    const matchingPreset = presets.find(item =>
+      item.id === provider.id && (item.base_url ?? '') === (provider.base_url ?? ''));
+    setPresetId(matchingPreset?.id ?? 'custom');
     setApiKey('');
     setApiKeyTouched(false);
   };
@@ -153,6 +168,10 @@ export function SettingsPanel() {
       const providerPatch: Record<string, unknown> = { type: providerType };
       if (baseUrl.trim()) providerPatch.base_url = baseUrl.trim();
       if (apiKeyTouched && apiKey.trim()) providerPatch.api_key = apiKey.trim();
+      const selectedPreset = presets.find(item => item.id === presetId);
+      providerPatch.source = selectedPreset === undefined
+        ? { kind: 'manual' }
+        : { kind: 'modelsDev', url: presetSource, catalog_id: selectedPreset.id };
       const memoryPatch: Record<string, unknown> = {
         vector_enabled: memoryVectorEnabled,
         provider_type: memoryProviderType,
@@ -165,6 +184,7 @@ export function SettingsPanel() {
         default_plan_mode: planMode,
         experimental: { auto_update: autoUpdate },
         memory: memoryPatch,
+        loop_control: { max_steps_per_turn: maxStepsPerTurn, goal_max_turns: goalMaxTurns },
       };
       if (id) patch.providers = { [id]: providerPatch };
       await api.updateConfig(patch);
@@ -192,18 +212,29 @@ export function SettingsPanel() {
 
   const changeTheme = (mode: ThemeMode) => { setTheme(mode); applyThemeMode(mode); };
   const changeAccent = (color: string) => { setThemeColor(color); applyThemeColor(color); };
+  const changeSoundPreferences = (patch: Partial<typeof soundPreferences>) => {
+    setSoundPreferences(previous => saveSoundPreferences({ ...previous, ...patch }));
+  };
   const selectedProvider = providers.find(item => item.id === providerId);
   const displayedApiKey = apiKeyTouched ? apiKey : selectedProvider?.has_api_key ? '••••••••' : '';
   const displayedMemoryApiKey = memoryApiKeyTouched ? memoryApiKey : memoryHasApiKey ? '••••••••' : '';
 
   return <div className="settings-panel">
+    <section className="settings-card"><div className="settings-card-heading"><span>{tr('Notifications', '通知')}</span><h2>{tr('Sound feedback', '声音反馈')}</h2><p>{tr('Short local cues for completion, attention, and failures.', '在完成、需要处理和失败时播放简短的本地提示音。')}</p></div><div className="settings-card-body">
+      <SettingRow label={tr('Notification sounds', '通知音效')} desc={tr('Play sounds for main responses, agents, approvals, and errors.', '为主回复、智能体、授权和错误播放提示音。')}><Toggle checked={soundPreferences.enabled} onChange={enabled => changeSoundPreferences({ enabled })} ariaLabel={tr('Enable notification sounds', '启用通知音效')} /></SettingRow>
+      <SettingRow label={tr('Sound volume', '音效音量')} desc={tr('Only affects Nori notification sounds.', '仅影响 Nori 的通知音效。')}><div className="sound-volume-control"><input aria-label={tr('Sound volume', '音效音量')} type="range" min="0" max="100" value={Math.round(soundPreferences.volume * 100)} disabled={!soundPreferences.enabled} onChange={event => changeSoundPreferences({ volume: Number(event.target.value) / 100 })}/><span>{Math.round(soundPreferences.volume * 100)}%</span><button type="button" className="sound-preview" disabled={!soundPreferences.enabled} onClick={() => playNotificationSound('complete', true)} title={tr('Preview sound', '试听音效')} aria-label={tr('Preview sound', '试听音效')}><Icon name="play" size={12}/></button></div></SettingRow>
+    </div></section>
+    <section className="settings-card"><div className="settings-card-heading"><span>Loop / Goal</span><h2>{tr('Execution limits', '执行轮次限制')}</h2><p>{tr('Control runaway tool loops and long-running goals. Enter 0 for unlimited.', '控制工具循环和长期 Goal 的轮次；填写 0 表示无限。')}</p></div><div className="settings-card-body">
+      <SettingRow label={tr('Steps per turn', '单轮最大步骤')} desc={tr('Maximum model/tool steps in one turn. 0 disables the limit.', '每轮模型与工具的最大步骤数；0 表示不限制。')}><input aria-label={tr('Steps per turn', '单轮最大步骤')} type="number" min="0" step="1" className="input settings-control" value={maxStepsPerTurn} onChange={event => setMaxStepsPerTurn(nonNegativeInteger(event.target.value))}/></SettingRow>
+      <SettingRow label={tr('Goal turns', 'Goal 最大轮次')} desc={tr('Default continuation-turn budget for new goals. 0 means unlimited.', '新 Goal 默认允许的连续轮次；0 表示无限。')}><input aria-label={tr('Goal turns', 'Goal 最大轮次')} type="number" min="0" step="1" className="input settings-control" value={goalMaxTurns} onChange={event => setGoalMaxTurns(nonNegativeInteger(event.target.value))}/></SettingRow>
+    </div></section>
     {loadError && <div className="settings-notice"><Icon name="alert" size={17} /><div><strong>{tr('Server settings are unavailable', '服务器设置不可用')}</strong><p>{loadError}</p></div><button className="btn btn-secondary btn-compact" onClick={() => void load()}>{tr('Retry', '重试')}</button></div>}
 
     <section className="settings-card">
       <div className="settings-card-heading"><span>Provider</span><h2>{tr('API connection', 'API 连接')}</h2><p>{tr('Configure any compatible API and fetch its models automatically.', '配置任意兼容 API，并自动获取模型列表。')}</p></div>
       <div className="settings-card-body provider-settings-grid">
         <SettingRow label={tr('Configured provider', '已配置 Provider')} desc={tr('Edit an existing connection or create a new one.', '编辑已有连接或新建连接。')}><select aria-label={tr('Configured provider', '已配置 Provider')} className="input settings-control" value={providers.some(p => p.id === providerId) ? providerId : ''} onChange={e => { selectConfiguredProvider(e.target.value); }}><option value="">{tr('New provider', '新建 Provider')}</option>{providers.map(p => <option key={p.id} value={p.id}>{p.id} · {p.status}</option>)}</select></SettingRow>
-        <SettingRow label={tr('Online preset', '在线预设')} desc={tr('Loaded from models.dev, the same catalog used by Nori CLI.', '来自 models.dev，与 Nori CLI 使用同一目录。')}><select className="input settings-control" value={presetId} onChange={e => { selectPreset(e.target.value); }}><option value="custom">{tr('Custom / manual', '自定义 / 手动')}</option>{presets.map(p => <option key={p.id} value={p.id}>{p.name} ({p.model_count})</option>)}</select></SettingRow>
+        <SettingRow label={tr('Online preset', '在线预设')} desc={tr('Loaded from models.dev, the same catalog used by Nori CLI.', '来自 models.dev，与 Nori CLI 使用同一目录。')}><select aria-label={tr('Online preset', '在线预设')} className="input settings-control" value={presetId} onChange={e => { selectPreset(e.target.value); }}><option value="custom">{tr('Custom / manual', '自定义 / 手动')}</option>{presets.map(p => <option key={p.id} value={p.id}>{p.name} ({p.model_count})</option>)}</select></SettingRow>
         {presetWarning && <div className="provider-warning">{tr('Online presets unavailable; manual configuration still works.', '在线预设暂不可用，仍可手动配置。')} {presetWarning}</div>}
         <SettingRow label="Provider ID" desc={tr('A stable local identifier, such as openrouter.', '稳定的本地标识，例如 openrouter。')}><input aria-label="Provider ID" className="input settings-control" value={providerId} onChange={e => { setProviderId(e.target.value); }} /></SettingRow>
         <SettingRow label={tr('API format', 'API 格式')} desc={tr('Choose the request and response protocol.', '选择请求与响应协议。')}><select className="input settings-control" value={providerType} onChange={e => { setProviderType(e.target.value as ProviderType); }}>{API_FORMATS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></SettingRow>
@@ -251,4 +282,9 @@ function isHttpUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function nonNegativeInteger(value: unknown): number {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(numeric) ? Math.max(0, Math.round(numeric)) : 0;
 }

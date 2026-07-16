@@ -31,7 +31,7 @@ interface CodeViewProps {
   onMainWriteChange: (enabled: boolean) => void | Promise<void>;
   onGoalControl?: (action: 'pause' | 'resume' | 'cancel') => void | Promise<void>;
   onSendMessage: ChatViewProps['onSendMessage'];
-  onAbort: () => void;
+  onAbort: () => boolean | void | Promise<boolean | void>;
   pendingApprovals?: ApprovalRequest[];
   onResolveApproval?: (approvalId: string, decision: 'approved' | 'rejected' | 'cancelled', options?: { remember?: boolean; feedback?: string; selectedLabel?: string }) => void | Promise<void>;
   pendingQuestions?: QuestionRequest[];
@@ -46,6 +46,7 @@ interface CodeViewProps {
   rewindLimit?: number;
   onRewind?: (count: number) => string | undefined | Promise<string | undefined>;
   onRefreshMessages?: () => Promise<void>;
+  onSelectFilePath?: (path: string) => void;
 }
 
 export function CodeView({
@@ -88,6 +89,7 @@ export function CodeView({
   rewindLimit,
   onRewind,
   onRefreshMessages,
+  onSelectFilePath,
 }: CodeViewProps) {
   const [fileContent, setFileContent] = useState<FsReadResponse | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
@@ -115,7 +117,7 @@ export function CodeView({
   }, [readFile, selectedFile]);
 
   return (
-    <SplitPane direction="horizontal" defaultSize={60} minSize={30} maxSize={80}>
+    <SplitPane direction="horizontal" defaultSize={60} minSize={30} maxSize={80} storageKey="nori-code-inspector-split">
       <ChatView
         session={session}
         allSessions={allSessions}
@@ -168,6 +170,7 @@ export function CodeView({
         refreshGitStatus={refreshGitStatus}
         refreshMessages={onRefreshMessages}
         isStreaming={isStreaming}
+        onSelectFilePath={onSelectFilePath}
       />
     </SplitPane>
   );

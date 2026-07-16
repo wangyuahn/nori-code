@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_AGENT_PROFILES,
+  configuredSubagentProfiles,
   loadAgentProfilesFromDir,
   loadAgentProfilesFromSources,
   resolveAgentProfiles,
@@ -155,7 +156,23 @@ tools:
 });
 
 describe('default agent profiles', () => {
+  it('adds configured roles while preserving the selected base profile tools', () => {
+    const profiles = configuredSubagentProfiles(DEFAULT_AGENT_PROFILES['agent']?.subagents, {
+      reviewer: { description: 'Review risky changes', role: 'Find correctness bugs.', baseProfile: 'explore', enabled: true, permissions: { read: true, write: true, shell: false, web: true, delegate: false } },
+      disabled: { description: 'Disabled', role: 'Do nothing.', baseProfile: 'coder', enabled: false },
+    });
+    expect(profiles?.['reviewer']?.tools).toContain('Write');
+    expect(profiles?.['reviewer']?.tools).not.toContain('Bash');
+    expect(profiles?.['reviewer']?.systemPrompt(promptContext)).toContain('<custom_agent_role>\nFind correctness bugs.');
+    expect(profiles?.['disabled']).toBeUndefined();
+  });
+
   it('links bundled subagents and keeps role-specific tool sets observable', () => {
+    expect(DEFAULT_AGENT_PROFILES['agent']?.subagents?.['orchestrator']).toBe(
+      DEFAULT_AGENT_PROFILES['orchestrator'],
+    );
+    expect(DEFAULT_AGENT_PROFILES['agent']?.subagents?.['nori-coder']).toBeUndefined();
+    expect(DEFAULT_AGENT_PROFILES['orchestrator']?.tools).not.toContain('Write');
     expect(DEFAULT_AGENT_PROFILES['agent']?.subagents?.['coder']).toBe(
       DEFAULT_AGENT_PROFILES['coder'],
     );

@@ -26,4 +26,5 @@ contextBridge.exposeInMainWorld('noriDesktop', {
   },
   fsReadDir: (dirPath: string) => ipcRenderer.invoke('nori:fs:readDir', dirPath),
   fsReadFile: (filePath: string) => ipcRenderer.invoke('nori:fs:readFile', filePath),
+  openInspectorWindow: (input: { tab: string; sessionId?: string; path?: string }) => ipcRenderer.invoke('nori:openInspectorWindow', input),
 });

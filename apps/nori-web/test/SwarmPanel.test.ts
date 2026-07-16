@@ -1,16 +1,51 @@
-import { describe, expect, it } from 'vitest';
-import type { SwarmStatus } from '../src/api/client';
+import { act, createElement } from 'react';
+import { createRoot } from 'react-dom/client';
+import { describe, expect, it, vi } from 'vitest';
+import { api, type SwarmStatus } from '../src/api/client';
 import {
   collectSwarmTreeRuns,
+  aggregateSwarmStatus,
   groupSwarmRuns,
   groupSwarmRunsByProject,
   runningSwarmAgents,
   swarmRunProgress,
   swarmRunTokens,
   swarmTaskIdsForRuns,
+  SwarmPanel,
 } from '../src/components/SwarmPanel';
+import { I18nProvider } from '../src/i18n';
+
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 describe('SwarmPanel projections', () => {
+  it('renders a compact custom-agent editor with explicit permission controls', async () => {
+    vi.spyOn(api, 'getConfig').mockResolvedValue({ custom_agents: {} });
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(SwarmPanel, {
+          swarm: { swarmStatuses: new Map(), connected: true, error: null },
+          sessions: [],
+        })));
+        await Promise.resolve();
+      });
+      const form = container.querySelector('.custom-agent-form');
+      expect(form?.querySelector<HTMLSelectElement>('select')?.title).toContain('implementation worker');
+      expect([...form?.querySelectorAll('.custom-agent-permissions label') ?? []].map(item => item.textContent)).toEqual([
+        'Read', 'Write', 'Terminal', 'Web', 'Delegate',
+      ]);
+      expect(form?.querySelector('button')?.textContent).toBe('Add agent');
+      expect([...form?.querySelectorAll('option') ?? []].map(item => item.textContent)).toContain('orchestrator');
+      expect(container.textContent).not.toContain('nori-coder');
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      vi.restoreAllMocks();
+    }
+  });
+
   it('groups runs by their session round', () => {
     const rounds = groupSwarmRuns([
       run('swarm-2', 2),
@@ -67,6 +102,19 @@ describe('SwarmPanel projections', () => {
     }]);
     expect([...activity.ids].sort()).toEqual(['running-1', 'running-2']);
     expect(activity.untracked).toBe(0);
+
+    const stopped = runningSwarmAgents([{
+      ...run('swarm-stopped', 1),
+      status: 'stopped',
+      completed_count: 2,
+      task_count: 2,
+      tasks: [
+        { id: 'stopped-1', label: 'One', status: 'cancelled' },
+        { id: 'stopped-2', label: 'Two', status: 'cancelled' },
+      ],
+    }]);
+    expect(stopped.ids.size).toBe(0);
+    expect(stopped.untracked).toBe(0);
   });
 
   it('derives completed progress from task snapshots when aggregate fields are stale', () => {
@@ -79,6 +127,23 @@ describe('SwarmPanel projections', () => {
         { id: 'agent-2', label: 'Two', status: 'completed' },
       ],
     })).toEqual({ total: 2, completed: 2, running: false, status: 'done' });
+  });
+
+  it('keeps stopped and failed runs distinct from completed runs', () => {
+    expect(swarmRunProgress({
+      ...run('swarm-stopped', 1),
+      status: 'stopped',
+      tasks: [{ id: 'agent-1', label: 'One', status: 'cancelled' }],
+    }).status).toBe('stopped');
+    expect(swarmRunProgress({
+      ...run('swarm-failed', 1),
+      status: 'failed',
+      tasks: [{ id: 'agent-1', label: 'One', status: 'failed' }],
+    }).status).toBe('failed');
+    expect(aggregateSwarmStatus(['done', 'stopped'])).toBe('stopped');
+    expect(aggregateSwarmStatus(['done', 'failed'])).toBe('failed');
+    expect(aggregateSwarmStatus(['paused', 'done'])).toBe('paused');
+    expect(aggregateSwarmStatus(['running', 'failed'])).toBe('running');
   });
 
   it('groups swarm runs by project and conversation', () => {

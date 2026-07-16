@@ -25,6 +25,7 @@ tools:
   - Skill
   - WebSearch
   - AgentSwarm
+  - AgentSwarmControl
   - Agent
   - FetchURL
   - AskUserQuestion
@@ -45,10 +46,10 @@ tools:
   - nori_ask_parent
 
 subagents:
-  nori-coder:
-    description: Read-only coding orchestrator. Plans and delegates implementation via AgentSwarm. Does NOT write code directly.
+  orchestrator:
+    description: Read-only task orchestrator. Plans and delegates implementation to worker agents.
   coder:
-    description: General software engineering worker. Prefer AgentSwarm/nori-coder orchestration for delegated work.
+    description: General software engineering worker. Prefer AgentSwarm/orchestrator for delegated work.
   explore:
     description: Fast codebase exploration with prompt-enforced read-only behavior.
   plan:

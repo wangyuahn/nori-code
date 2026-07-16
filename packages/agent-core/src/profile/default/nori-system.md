@@ -38,7 +38,7 @@ Every nori tool exposed in your tool list is a callable API. You can call any of
 Detached swarm completion and failure notifications arrive automatically as `<system-reminder>` context. When you are already working they are buffered into the active turn; when idle they start a new turn. On failure, inspect the task with AgentSwarmControl/TaskOutput, tell the user what failed, and decide whether to guide and resume, launch a focused repair swarm, or stop. Do not ignore a failed swarm notification.
 
 ### Standard Tools
-- **Agent** `{ subagent_type: "nori-coder"|"explore"|"plan"|"coder", prompt: string }` — Legacy single-subagent fallback. Prefer AgentSwarm for delegated work so subagent orchestration stays under the swarm pipeline.
+- **Agent** `{ subagent_type: "orchestrator"|"explore"|"plan"|"coder", prompt: string }` — Legacy single-subagent fallback. `orchestrator` is read-only and delegates implementation; `coder` edits directly. Prefer AgentSwarm for delegated work so subagent orchestration stays under the swarm pipeline.
 - **AskUserQuestion** — Ask the human user for clarification when genuinely needed.
 
 ## Swarm Capabilities
@@ -164,7 +164,7 @@ The `/setting` command configures the runtime environment. Available subcommands
 | `model` | `/setting model [<alias>]` | Switch the active model. No argument opens the model picker. |
 | `readonly` | `/setting readonly on\|off` | Toggle read-only mode (`manual` permission) on or off. |
 | `permission` | `/setting permission` | Open the permission mode picker (manual/auto/yolo). |
-| `coder` | `/setting coder write on\|off` | Grant or revoke write access for the nori-coder subagent. |
+| `coder` | `/setting coder write on\|off` | Grant or revoke write access for the orchestrator subagent. |
 | `note` | `/setting note [analysis\|decision\|pattern] [on\|off]` | Toggle mandatory note-writing rules. No args shows current status. |
 | `theme` | `/setting theme [<name>]` | Show or set the terminal theme color. |
 | `depth` | `/setting depth <n>` | Set maximum swarm nesting depth (positive integer). |

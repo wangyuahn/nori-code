@@ -623,6 +623,81 @@ describe('WSBroadcastService (WS transport pump)', () => {
     bus.dispose();
   });
 
+  it('synchronizes child states when a swarm is paused, resumed, and stopped', () => {
+    const bus = new EventService();
+    const broadcast = new WSBroadcastService(
+      bus,
+      testLogger,
+      new FakeSessionClients(),
+      new FakeConnectionRegistry(),
+      makeEnv(),
+    );
+    const sessionId = 'sid_swarm_control_status';
+    const swarmId = 'swarm-control-1';
+
+    bus.publish({
+      type: 'tool.call.started', sessionId, agentId: 'main', turnId: 1,
+      toolCallId: 'call-control-1', name: 'AgentSwarm', args: {}, description: 'Controlled review',
+    } as unknown as Event);
+    bus.publish({
+      type: 'background.task.started', sessionId, agentId: 'main',
+      info: {
+        taskId: swarmId, description: 'Controlled review', status: 'running', detached: true,
+        startedAt: Date.now(), endedAt: null, kind: 'agent', subagentType: 'swarm:2', paused: false,
+      },
+    } as unknown as Event);
+    for (const [index, agentId] of ['agent-control-1', 'agent-control-2'].entries()) {
+      bus.publish({
+        type: 'subagent.spawned', sessionId, agentId: 'main', subagentId: agentId,
+        subagentName: 'nori-coder', parentToolCallId: 'call-control-1', parentAgentId: 'main',
+        description: `Task ${String(index + 1)}`, swarmIndex: index, runInBackground: true,
+      } as unknown as Event);
+      bus.publish({ type: 'subagent.started', sessionId, agentId: 'main', subagentId: agentId } as unknown as Event);
+    }
+
+    bus.publish({
+      type: 'background.task.updated', sessionId, agentId: 'main',
+      info: {
+        taskId: swarmId, description: 'Controlled review', status: 'running', detached: true,
+        startedAt: Date.now(), endedAt: null, kind: 'agent', subagentType: 'swarm:2', paused: true,
+      },
+    } as unknown as Event);
+    expect(getSwarmStatus(swarmId)).toMatchObject({
+      status: 'paused',
+      tasks: [{ status: 'paused' }, { status: 'paused' }],
+    });
+
+    bus.publish({
+      type: 'background.task.updated', sessionId, agentId: 'main',
+      info: {
+        taskId: swarmId, description: 'Controlled review', status: 'running', detached: true,
+        startedAt: Date.now(), endedAt: null, kind: 'agent', subagentType: 'swarm:2', paused: false,
+      },
+    } as unknown as Event);
+    expect(getSwarmStatus(swarmId)).toMatchObject({
+      status: 'running',
+      tasks: [{ status: 'pending' }, { status: 'pending' }],
+    });
+
+    bus.publish({ type: 'subagent.started', sessionId, agentId: 'main', subagentId: 'agent-control-1' } as unknown as Event);
+    bus.publish({
+      type: 'background.task.terminated', sessionId, agentId: 'main',
+      info: {
+        taskId: swarmId, description: 'Controlled review', status: 'killed', detached: true,
+        startedAt: Date.now(), endedAt: Date.now(), kind: 'agent', subagentType: 'swarm:2', paused: false,
+      },
+    } as unknown as Event);
+    expect(getSwarmStatus(swarmId)).toMatchObject({
+      status: 'stopped',
+      completed_count: 2,
+      tasks: [{ status: 'cancelled' }, { status: 'cancelled' }],
+    });
+
+    clearSwarmStatus(swarmId);
+    broadcast.dispose();
+    bus.dispose();
+  });
+
   it('keeps swarms launched by child agents in their parent round', () => {
     const bus = new EventService();
     const broadcast = new WSBroadcastService(

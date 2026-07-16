@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ApprovalRequest, ModelCatalogItem, QuestionRequest, Session } from '../src/api/client';
 import { ChatView, modelSupportsImageInput, type ChatViewProps } from '../src/components/ChatView';
 import { I18nProvider } from '../src/i18n';
+import { modelThinkingOptions } from '../src/utils/model-thinking';
+import { projectFileMention, referenceProjectFile } from '../src/projectFileReference';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -184,6 +186,76 @@ describe('chat image attachments', () => {
   });
 });
 
+describe('project file references', () => {
+  it('formats relative paths safely for the main agent', () => {
+    expect(projectFileMention('src/app.ts')).toBe('@src/app.ts');
+    expect(projectFileMention('docs/product brief.md')).toBe('@"docs/product brief.md"');
+    expect(projectFileMention('src\\windows.ts')).toBe('@src/windows.ts');
+  });
+
+  it('inserts a referenced file into the current draft without sending it', async () => {
+    const { container, props } = await renderChat();
+    const input = container.querySelector<HTMLTextAreaElement>('.chat-input')!;
+    await enterText(input, 'Review');
+
+    await act(async () => {
+      referenceProjectFile('docs/product brief.md');
+      await new Promise(resolve => requestAnimationFrame(resolve));
+    });
+
+    expect(input.value).toBe('Review @"docs/product brief.md" ');
+    expect(document.activeElement).toBe(input);
+    expect(props.onSendMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe('model thinking options', () => {
+  it('offers Fast and Think when a third-party model omits reasoning metadata', () => {
+    expect(modelThinkingOptions(model('gateway-model', ['tool_use']))).toEqual({
+      choices: [
+        { value: 'off', kind: 'fast' },
+        { value: 'medium', kind: 'think' },
+      ],
+      defaultValue: 'off',
+    });
+  });
+
+  it('uses provider-declared effort levels without inventing more levels', () => {
+    expect(modelThinkingOptions({
+      ...model('reasoning-model', ['tool_use', 'thinking']),
+      support_efforts: ['minimal', 'high'],
+      default_effort: 'high',
+    })).toEqual({
+      choices: [
+        { value: 'off', kind: 'fast' },
+        { value: 'minimal', kind: 'effort' },
+        { value: 'high', kind: 'effort' },
+      ],
+      defaultValue: 'high',
+    });
+  });
+
+  it('uses a boolean Think switch when support is known but levels are absent', () => {
+    expect(modelThinkingOptions({
+      ...model('toggle-model', ['tool_use', 'thinking']),
+      supports_thinking: true,
+    })).toEqual({
+      choices: [
+        { value: 'off', kind: 'fast' },
+        { value: 'medium', kind: 'think' },
+      ],
+      defaultValue: 'medium',
+    });
+  });
+
+  it('hides the control when catalog metadata explicitly marks thinking unsupported', () => {
+    expect(modelThinkingOptions({
+      ...model('text-only-model', ['tool_use']),
+      supports_thinking: false,
+    })).toEqual({ choices: [], defaultValue: 'off' });
+  });
+});
+
 describe('interactive user questions', () => {
   it('submits a selected option so the waiting model can continue', async () => {
     const onResolveQuestion = vi.fn(async () => undefined);
@@ -238,6 +310,44 @@ describe('chat rewind', () => {
 
     expect(onRewind).toHaveBeenCalledWith(1);
     expect(container.querySelector<HTMLTextAreaElement>('.chat-input')!.value).toBe('prompt restored from history');
+  });
+});
+
+describe('live response controls', () => {
+  it('serializes immediate guidance and keeps the draft until steering succeeds', async () => {
+    let resolveSteer!: (accepted: boolean) => void;
+    const onSendMessage = vi.fn(() => new Promise<boolean>(resolve => { resolveSteer = resolve; }));
+    const { container } = await renderChat({ isStreaming: true, onSendMessage });
+    const input = container.querySelector<HTMLTextAreaElement>('.chat-input')!;
+    await enterText(input, 'Focus on the parser race');
+
+    await act(async () => container.querySelector<HTMLButtonElement>('.chat-steer-btn')!.click());
+
+    expect(onSendMessage).toHaveBeenCalledWith('Focus on the parser race', [], 'steer');
+    expect(container.querySelector<HTMLButtonElement>('.chat-steer-btn')!.disabled).toBe(true);
+    expect(input.value).toBe('Focus on the parser race');
+
+    await act(async () => { resolveSteer(true); await Promise.resolve(); });
+    expect(input.value).toBe('');
+    await enterText(input, 'One more constraint');
+    expect(container.querySelector<HTMLButtonElement>('.chat-steer-btn')!.disabled).toBe(false);
+  });
+
+  it('prevents duplicate stop requests and reports a failed stop', async () => {
+    let resolveStop!: (stopped: boolean) => void;
+    const onAbort = vi.fn(() => new Promise<boolean>(resolve => { resolveStop = resolve; }));
+    const { container } = await renderChat({ isStreaming: true, onAbort });
+    const button = container.querySelector<HTMLButtonElement>('.chat-abort-btn')!;
+
+    await act(async () => button.click());
+    button.click();
+    expect(onAbort).toHaveBeenCalledTimes(1);
+    expect(button.disabled).toBe(true);
+    expect(button.textContent).toContain('Stopping');
+
+    await act(async () => { resolveStop(false); await Promise.resolve(); });
+    expect(button.disabled).toBe(false);
+    expect(button.textContent).toContain('Stop response');
   });
 });
 

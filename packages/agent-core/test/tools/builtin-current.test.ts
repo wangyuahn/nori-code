@@ -11,13 +11,15 @@ import type { Kaos, KaosProcess } from '@nori-code/kaos';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Agent } from '../../src/agent';
+import { SwarmBackgroundTask } from '../../src/agent/background';
 import type { SwarmMode } from '../../src/agent/swarm';
 import { FLAG_DEFINITIONS, FlagResolver } from '../../src/flags';
 import {
   type QueuedSubagentRunResult,
   type QueuedSubagentTask,
-  type SessionSubagentHost,
+  SessionSubagentHost,
 } from '../../src/session/subagent-host';
+import type { Session } from '../../src/session';
 import { SessionSkillRegistry } from '../../src/skill';
 import { TaskListInputSchema } from '../../src/tools/background/task-list';
 import { TaskOutputInputSchema } from '../../src/tools/background/task-output';
@@ -342,6 +344,66 @@ describe('current builtin collaboration tools', () => {
     expect(stop).toHaveBeenCalledWith('swarm-nested', 'Stopped by the main agent.');
   });
 
+  it('AgentSwarmControl pauses, guides, and resumes a real session swarm', async () => {
+    const main = createBackgroundManager();
+    const owner = createBackgroundManager();
+    let paused = false;
+    const control = {
+      get paused() { return paused; },
+      pause: vi.fn(() => { paused = true; }),
+      addGuidance: vi.fn(),
+      resume: vi.fn(() => { paused = false; }),
+    };
+    const taskId = owner.manager.registerTask(new SwarmBackgroundTask(
+      'Nested implementation',
+      taskSignal => new Promise<string>((_resolve, reject) => {
+        taskSignal.addEventListener('abort', () => reject(taskSignal.reason), { once: true });
+      }),
+      2,
+      control,
+    ));
+    const session = {
+      metadata: {
+        agents: {
+          main: { homedir: '/main', type: 'main', parentAgentId: null },
+          'agent-owner': { homedir: '/owner', type: 'sub', parentAgentId: 'main' },
+        },
+      },
+      ensureAgentResumed: vi.fn(async (agentId: string) => ({
+        background: agentId === 'agent-owner' ? owner.manager : main.manager,
+      })),
+    } as unknown as Session;
+    const host = new SessionSubagentHost(session, 'main');
+    (main.agent as typeof main.agent & { subagentHost: SessionSubagentHost }).subagentHost = host;
+    const tool = new AgentSwarmControlTool(main.manager);
+
+    const pausedResult = await executeTool(tool, context({
+      action: 'pause' as const,
+      task_id: taskId,
+      prompt: 'Hold before changing files',
+    }));
+    const guidedResult = await executeTool(tool, context({
+      action: 'guide' as const,
+      task_id: taskId,
+      prompt: 'Also verify the parser',
+    }));
+    const resumedResult = await executeTool(tool, context({
+      action: 'resume' as const,
+      task_id: taskId,
+      prompt: 'Continue with the new constraint',
+    }));
+
+    expect(pausedResult.output).toContain('status=paused');
+    expect(guidedResult.output).toContain('status=paused');
+    expect(resumedResult.output).toContain('status=running');
+    expect(control.pause).toHaveBeenCalledWith('Hold before changing files');
+    expect(control.addGuidance).toHaveBeenCalledWith('Also verify the parser');
+    expect(control.resume).toHaveBeenCalledWith('Continue with the new constraint');
+    expect(owner.agent.emittedEvents.filter(event => event.type === 'background.task.updated')).toHaveLength(3);
+
+    await owner.manager.stop(taskId, 'test cleanup');
+  });
+
   it('AskUserQuestion exposes parameters and asks through rpc in yolo mode', async () => {
     const tool = new AskUserQuestionTool({
       experimentalFlags: new FlagResolver({}, FLAG_DEFINITIONS),
@@ -388,7 +450,7 @@ describe('current builtin collaboration tools', () => {
     const host = mockSubagentHost({
       spawn: vi.fn().mockResolvedValue({
         agentId: 'agent-child',
-        profileName: 'nori-coder',
+        profileName: 'orchestrator',
         resumed: false,
         completion: Promise.resolve({ result: 'child result' }),
       }),
@@ -405,7 +467,7 @@ describe('current builtin collaboration tools', () => {
     const result = await executeTool(tool, context(input, 'call_agent'));
     expect(host.spawn).toHaveBeenCalledWith(
       expect.objectContaining({
-        profileName: 'nori-coder',
+        profileName: 'orchestrator',
         parentToolCallId: 'call_agent',
         prompt: 'Investigate',
         description: 'Find cause',

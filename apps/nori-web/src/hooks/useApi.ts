@@ -147,6 +147,7 @@ export function useSwarmWebSocket(): SwarmConnectionState {
                   round: typeof msg.round === 'number' ? msg.round : current?.round,
                   started_at: typeof msg.started_at === 'string' ? msg.started_at : current?.started_at,
                   usage: msg.usage ?? current?.usage,
+                  tasks: Array.isArray(msg.tasks) ? msg.tasks : current?.tasks,
                 });
                 return next;
               });

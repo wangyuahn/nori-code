@@ -33,7 +33,9 @@ export type IconName =
   | 'diff'
   | 'upload'
   | 'target'
-  | 'paperclip';
+  | 'paperclip'
+  | 'terminal'
+  | 'external';
 
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'name'> {
   name: IconName;
@@ -75,6 +77,8 @@ export function Icon({ name, size = 18, ...props }: IconProps) {
     upload: <><path d="M12 16V4M7 9l5-5 5 5"/><path d="M5 20h14"/></>,
     target: <><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></>,
     paperclip: <path d="m20.5 11.5-8.7 8.7a6 6 0 0 1-8.5-8.5l9.4-9.4a4 4 0 0 1 5.7 5.7l-9.5 9.5a2 2 0 0 1-2.8-2.8l8.8-8.8"/>,
+    terminal: <><path d="m5 7 4 4-4 4"/><path d="M11 16h8"/><rect x="2.5" y="3.5" width="19" height="17" rx="2"/></>,
+    external: <><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6"/></>,
   };
 
   return (

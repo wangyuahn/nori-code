@@ -4,16 +4,18 @@ import type { FsReadResponse } from '../api/client';
 import { useI18n } from '../i18n';
 import { Icon } from './Icon';
 import { MarkdownView } from './MarkdownView';
+import { referenceProjectFile } from '../projectFileReference';
 
 interface FilePreviewProps {
   path: string;
   file: FsReadResponse | null;
   loading?: boolean;
+  revealLine?: number;
 }
 
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico']);
 
-export function FilePreview({ path, file, loading }: FilePreviewProps) {
+export function FilePreview({ path, file, loading, revealLine }: FilePreviewProps) {
   const { tr } = useI18n();
   const [highlighted, setHighlighted] = useState('');
   const fileName = path.replace(/\\/g, '/').split('/').at(-1) ?? path;
@@ -38,11 +40,23 @@ export function FilePreview({ path, file, loading }: FilePreviewProps) {
     return () => { cancelled = true; };
   }, [extension, file, isImage, isMarkdown]);
 
+  useEffect(() => {
+    if (!revealLine || !highlighted) return;
+    const timer = requestAnimationFrame(() => {
+      const lines = document.querySelectorAll<HTMLElement>('.file-preview .code-preview .line');
+      for (const line of lines) line.classList.remove('lsp-reveal-line');
+      const target = lines.item(revealLine - 1);
+      target?.classList.add('lsp-reveal-line');
+      target?.scrollIntoView({ block: 'center' });
+    });
+    return () => cancelAnimationFrame(timer);
+  }, [highlighted, revealLine]);
+
   if (loading) return <div className="file-preview-state"><span className="spinner" />{tr('Loading file', '正在加载文件')}</div>;
   if (!file) return <div className="file-preview-state"><Icon name="files" size={25} /><span>{tr('Select a file to preview', '选择文件以预览')}</span></div>;
 
   return <section className="file-preview">
-    <header className="file-preview-header"><strong title={path}>{fileName}</strong><span>{file.language_id || extension || 'text'} · {formatBytes(file.size)}{file.truncated ? ` · ${tr('truncated', '已截断')}` : ''}</span></header>
+    <header className="file-preview-header"><div><strong title={path}>{fileName}</strong><span>{file.language_id || extension || 'text'} · {formatBytes(file.size)}{file.truncated ? ` · ${tr('truncated', '已截断')}` : ''}</span></div><button type="button" className="file-preview-reference" onClick={() => referenceProjectFile(path)} title={tr('Reference in chat', '引用到对话')} aria-label={tr('Reference in chat', '引用到对话')}><Icon name="paperclip" size={13}/></button></header>
     {isImage ? <div className="file-preview-image"><img src={imageSource} alt={fileName} /></div>
       : file.is_binary ? <div className="file-preview-state">{tr('Binary files cannot be previewed.', '无法预览二进制文件。')}</div>
       : isMarkdown ? <div className="markdown-preview-scroll"><MarkdownView content={file.content} /></div>

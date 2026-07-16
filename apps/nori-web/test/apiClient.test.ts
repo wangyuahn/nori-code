@@ -36,6 +36,26 @@ describe('prompt execution options', () => {
       content: [{ type: 'text', text: 'ship the release' }],
     });
   });
+
+  it('forwards a cancellation signal to the prompt request', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      await new Promise<void>((_resolve, reject) => {
+        const rejectAbort = () => reject(new DOMException('Aborted', 'AbortError'));
+        if (init?.signal?.aborted) rejectAbort();
+        else init?.signal?.addEventListener('abort', rejectAbort, { once: true });
+      });
+      throw new Error('prompt request unexpectedly completed');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createClient('http://localhost:3000');
+    const controller = new AbortController();
+
+    const sending = client.sendPrompt('session-1', 'keep working', [], {}, controller.signal);
+    controller.abort();
+
+    await expect(sending).rejects.toMatchObject({ name: 'AbortError' });
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).signal?.aborted).toBe(true);
+  });
 });
 
 describe('getServerToken', () => {

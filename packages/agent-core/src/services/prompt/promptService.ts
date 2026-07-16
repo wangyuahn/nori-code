@@ -345,7 +345,10 @@ export class PromptService
     const key = promptKey(sid, state.agentId);
 
     const existing = this._active.get(key);
-    if (existing !== undefined && !existing.completed && !existing.aborted) {
+    // An aborted prompt remains the active execution owner until agent-core
+    // emits turn.ended. Queue behind it so a fast follow-up cannot overlap the
+    // cancelling worker and become a permanently "running" phantom prompt.
+    if (existing !== undefined && !existing.completed) {
       this._enqueue(sid, state);
       const item = toPromptItem(state, 'queued');
       this._publishSubmitted(sid, state, item);

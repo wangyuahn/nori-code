@@ -7,6 +7,7 @@ export type { ThinkingEffort };
 
 function supportsThinking(model: ModelAlias | undefined): boolean {
   if (model === undefined) return false;
+  if (model.thinkingSupport !== undefined) return model.thinkingSupport;
   const caps = model.capabilities ?? [];
   return (
     caps.includes('thinking') ||

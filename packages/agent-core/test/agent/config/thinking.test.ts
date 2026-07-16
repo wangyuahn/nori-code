@@ -35,6 +35,17 @@ describe('defaultThinkingEffortFor', () => {
     expect(defaultThinkingEffortFor(undefined)).toBe('off');
     expect(defaultThinkingEffortFor(nonThinkingModel)).toBe('off');
     expect(defaultThinkingEffortFor(model())).toBe('off');
+    expect(defaultThinkingEffortFor(model({
+      capabilities: ['thinking'],
+      thinkingSupport: false,
+    }))).toBe('off');
+  });
+
+  it('honors explicit thinking support even when capability metadata is incomplete', () => {
+    expect(defaultThinkingEffortFor(model({
+      capabilities: ['tool_use'],
+      thinkingSupport: true,
+    }))).toBe('on');
   });
 
   it('returns the declared defaultEffort for effort-capable models', () => {

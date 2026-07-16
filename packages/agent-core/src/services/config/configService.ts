@@ -74,6 +74,7 @@ function toConfigResponse(config: KimiConfig): ConfigResponse {
     merge_all_available_skills: config.mergeAllAvailableSkills,
     extra_skill_dirs: config.extraSkillDirs,
     loop_control: config.loopControl,
+    custom_agents: config.customAgents,
     background: config.background,
     experimental: config.experimental,
     telemetry: config.telemetry,

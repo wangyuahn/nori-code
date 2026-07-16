@@ -48,11 +48,11 @@ tools:
   - nori_ask_parent
 
 subagents:
-  nori-coder:
-    description: Read-only coding orchestrator. Plans and delegates implementation via AgentSwarm. Does NOT write code directly.
+  orchestrator:
+    description: Read-only task orchestrator. Plans and delegates implementation to worker agents.
   explore:
     description: Fast codebase exploration with prompt-enforced read-only behavior.
   plan:
     description: Read-only implementation planning and architecture design.
   coder:
-    description: General software engineering worker. Legacy direct agent type — prefer AgentSwarm/nori-coder.
+    description: General software engineering worker. Legacy direct agent type — prefer AgentSwarm/orchestrator.

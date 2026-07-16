@@ -3,6 +3,8 @@ import { api, type ApprovalRequest, type GoalSnapshot, type ModelCatalogItem, ty
 import type { ChatMessage, QueuedPrompt, TodoItem, ToolCall, WorkBlock } from '../hooks/useChatMessages';
 import { useI18n } from '../i18n';
 import { chatSlashCommandSuggestions, resolveChatSlashCommand, type ChatSlashCommand, type ChatSlashCommandName } from '../utils/chat-slash-commands';
+import { modelThinkingOptions } from '../utils/model-thinking';
+import { PROJECT_FILE_REFERENCE_EVENT, projectFileMention } from '../projectFileReference';
 import { Icon } from './Icon';
 import { ApprovalPanel } from './ApprovalPanel';
 import { MarkdownView } from './MarkdownView';
@@ -27,7 +29,7 @@ export interface ChatViewProps {
   modelsLoading: boolean;
   modelError: string | null;
   onSendMessage: (text: string, attachments?: PromptAttachment[], behavior?: 'queue' | 'steer') => boolean | void | Promise<boolean | void>;
-  onAbort: () => void;
+  onAbort: () => boolean | void | Promise<boolean | void>;
   onRefreshModels: () => void;
   onModelChange: (model: string) => void | Promise<void>;
   onThinkingChange: (effort: string) => void | Promise<void>;
@@ -93,6 +95,8 @@ export function ChatView(props: ChatViewProps) {
   const [modelNotice, setModelNotice] = useState(false);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
+  const [steering, setSteering] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
   const [commandMenuDismissed, setCommandMenuDismissed] = useState(false);
@@ -106,8 +110,8 @@ export function ChatView(props: ChatViewProps) {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const selectedModelId = session?.agent_config?.model ?? draftAgentConfig?.model ?? '';
   const selectedModel = models.find(model => model.model === selectedModelId);
-  const efforts = selectedModel?.support_efforts ?? (selectedModel?.capabilities?.includes('thinking') ? ['low', 'medium', 'high'] : []);
-  const selectedThinking = session?.agent_config?.thinking ?? draftAgentConfig?.thinking ?? selectedModel?.default_effort ?? 'off';
+  const thinkingOptions = modelThinkingOptions(selectedModel);
+  const selectedThinking = session?.agent_config?.thinking ?? draftAgentConfig?.thinking ?? thinkingOptions.defaultValue;
   const selectedPermission = session?.agent_config?.permission_mode ?? draftAgentConfig?.permission_mode ?? 'manual';
   const selectedTaskMode = (sessionStatus?.plan_mode ?? session?.agent_config?.plan_mode ?? draftAgentConfig?.plan_mode) ? 'plan' : 'code';
   const selectedMainWrite = sessionStatus?.main_write_enabled ?? session?.agent_config?.main_write_enabled ?? draftAgentConfig?.main_write_enabled ?? false;
@@ -134,6 +138,17 @@ export function ChatView(props: ChatViewProps) {
     element.style.height = Math.min(element.scrollHeight, 180) + 'px';
   }, [input]);
   useEffect(() => { setModelNotice(false); }, [selectedModelId, session?.id]);
+  useEffect(() => {
+    const reference = (event: Event) => {
+      const path = (event as CustomEvent<{ path?: string }>).detail?.path;
+      if (!path) return;
+      const mention = projectFileMention(path);
+      setInput(previous => `${previous.trimEnd()}${previous.trim() ? ' ' : ''}${mention} `);
+      requestAnimationFrame(() => inputRef.current?.focus());
+    };
+    window.addEventListener(PROJECT_FILE_REFERENCE_EVENT, reference);
+    return () => window.removeEventListener(PROJECT_FILE_REFERENCE_EVENT, reference);
+  }, []);
   useEffect(() => {
     setAttachments([]);
     setAttachmentsLoading(false);
@@ -188,17 +203,33 @@ export function ChatView(props: ChatViewProps) {
     }
     followOutputRef.current = true;
     setFollowOutput(true);
-    if (attachmentsLoading) return;
-    const accepted = await onSendMessage(text, attachments.map(item => item.attachment), behavior);
-    if (accepted !== false) {
-      setInput('');
-      setAttachments([]);
-      setAttachmentError(null);
-      for (const item of attachments) {
-        if (item.attachment.kind === 'file') void api.files.delete(item.attachment.file_id).catch(() => undefined);
+    if (attachmentsLoading || (behavior === 'steer' && steering)) return;
+    if (behavior === 'steer') setSteering(true);
+    try {
+      const accepted = await onSendMessage(text, attachments.map(item => item.attachment), behavior);
+      if (accepted !== false) {
+        setInput('');
+        setAttachments([]);
+        setAttachmentError(null);
+        for (const item of attachments) {
+          if (item.attachment.kind === 'file') void api.files.delete(item.attachment.file_id).catch(() => undefined);
+        }
       }
+    } finally {
+      if (behavior === 'steer') setSteering(false);
     }
-  }, [attachments, attachmentsLoading, imageCapable, input, onSendMessage, selectedModelId, tr]);
+  }, [attachments, attachmentsLoading, imageCapable, input, onSendMessage, selectedModelId, steering, tr]);
+
+  useEffect(() => {
+    if (!isStreaming) setStopping(false);
+  }, [isStreaming]);
+
+  const handleAbort = async () => {
+    if (stopping) return;
+    setStopping(true);
+    const stopped = await onAbort();
+    if (stopped === false) setStopping(false);
+  };
 
   const selectSlashCommand = (command: ChatSlashCommand) => {
     setInput(`/${command.name}${command.argumentHint ? ' ' : ''}`);
@@ -345,7 +376,7 @@ export function ChatView(props: ChatViewProps) {
     <div className="chat-messages" ref={messagesScrollRef} onScroll={handleMessagesScroll}>
       {messagesLoading ? <div className="chat-history-loading" role="status"><span className="spinner"/><strong>{tr('Loading conversation…', '正在加载会话…')}</strong></div> : messages.length === 0 ? <div className="chat-welcome"><div className="welcome-mark"><Icon name="sparkles" size={27}/></div><span className="eyebrow">{tr('Your thoughtful coding partner', '你的智能编程伙伴')}</span><h2>{session ? tr('What should we make better?', '我们要改进什么？') : tr('What would you like to work on?', '你想从哪里开始？')}</h2><p>{session ? tr('Ask Nori to inspect code, plan a feature, fix a bug, or validate an API integration.', '让 Nori 检查代码、规划功能、修复缺陷或验证 API 集成。') : tr('Choose a project folder to start a new task, or open an existing conversation from the sidebar. You can also type below now.', '选择一个项目文件夹开始新任务，或从左侧打开已有对话。你也可以直接在下方输入。')}</p><UsageOverview sessions={allSessions} models={models}/><div className="starter-grid">{STARTERS.map(item => <button key={item.title} className="starter-card" onClick={() => void handleSend(tr(item.prompt, item.promptZh))}><Icon name="sparkles" size={16}/><span><strong>{tr(item.title, item.titleZh)}</strong><small>{tr(item.prompt, item.promptZh)}</small></span></button>)}</div></div> : messages.map(message => <MessageBubble key={message.id} message={message} rewindCount={rewindCounts.get(message.id)} onRewind={handleRewind}/>) }
 
-      {isStreaming && <div className={`chat-message chat-message-assistant chat-message-streaming${streamingContinuesAssistant ? ' continuation' : ''}`}>{!streamingContinuesAssistant && <div className="message-avatar"><span>N</span></div>}<div className="message-body">{!streamingContinuesAssistant && <div className="chat-message-role">Nori <span>{pendingApprovals.length > 0 ? tr('waiting for permission', '等待授权') : tr('working', '工作中')}</span></div>}{(workBlocks.length > 0 || thinking) && <WorkProcess blocks={workBlocks.length > 0 ? workBlocks : [{ id: 'live-thinking', type: 'thinking', text: thinking }]} live/>}<div className="chat-message-content">{streaming ? <MarkdownView content={streaming} /> : (!thinking && workBlocks.length === 0 && <span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span>)}<span className="streaming-cursor"/></div>{streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(streaming))} tokens</div>}<button className="chat-abort-btn" onClick={onAbort}><Icon name="stop" size={13}/> {tr('Stop response', '停止回复')}</button></div></div>}
+      {isStreaming && <div className={`chat-message chat-message-assistant chat-message-streaming${streamingContinuesAssistant ? ' continuation' : ''}`}>{!streamingContinuesAssistant && <div className="message-avatar"><span>N</span></div>}<div className="message-body">{!streamingContinuesAssistant && <div className="chat-message-role">Nori <span>{pendingApprovals.length > 0 ? tr('waiting for permission', '等待授权') : tr('working', '工作中')}</span></div>}{(workBlocks.length > 0 || thinking) && <WorkProcess blocks={workBlocks.length > 0 ? workBlocks : [{ id: 'live-thinking', type: 'thinking', text: thinking }]} live/>}<div className="chat-message-content">{streaming ? <MarkdownView content={streaming} /> : (!thinking && workBlocks.length === 0 && <span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span>)}<span className="streaming-cursor"/></div>{streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(streaming))} tokens</div>}<button className="chat-abort-btn" onClick={() => void handleAbort()} disabled={stopping}><Icon name="stop" size={13}/> {stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button></div></div>}
       <div ref={messagesEndRef}/>
     </div>
 
@@ -365,11 +396,11 @@ export function ChatView(props: ChatViewProps) {
       <div className="composer-mode-row"><div className="composer-task-mode" role="group" aria-label={tr('Task mode', '任务模式')}><button type="button" className={selectedTaskMode === 'plan' ? 'active' : ''} onClick={() => void onTaskModeChange('plan')} disabled={isStreaming}>{tr('Plan', '规划')}</button><button type="button" className={selectedTaskMode === 'code' ? 'active' : ''} onClick={() => void onTaskModeChange('code')} disabled={isStreaming}>{tr('Code', '执行')}</button></div>{selectedTaskMode === 'code' && <label className="main-write-toggle" title={tr('Allow the main model to use Edit and Write directly.', '允许主模型直接使用 Edit 和 Write。')}><input type="checkbox" checked={selectedMainWrite} disabled={isStreaming} onChange={event => void onMainWriteChange(event.target.checked)}/><span>{tr('Main edits', '主模型编辑')}</span></label>}</div>
       <div className="composer-footer"><div className="composer-model-controls">
         <select className={'composer-select model-select' + (!selectedModelId ? ' invalid' : '')} value={selectedModelId} disabled={isStreaming || modelsLoading} onChange={e => handleModelChange(e.target.value)} aria-label={tr('Model', '模型')}><option value="">{modelsLoading ? tr('Loading models…', '正在加载模型…') : tr('Select model', '选择模型')}</option>{models.map(model => <option key={model.model} value={model.model}>{model.display_name || model.model}</option>)}</select>
-        {efforts.length > 0 && <select className="composer-select thinking-select" value={selectedThinking} disabled={isStreaming} onChange={e => void onThinkingChange(e.target.value)} aria-label={tr('Thinking effort', '思考等级')}><option value="off">{tr('Thinking off', '关闭思考')}</option>{efforts.map(effort => <option key={effort} value={effort}>{tr('Thinking', '思考')} · {effort}</option>)}</select>}
+        {thinkingOptions.choices.length > 0 && <select className="composer-select thinking-select" value={selectedThinking} disabled={isStreaming} onChange={e => void onThinkingChange(e.target.value)} aria-label={tr('Thinking effort', '思考等级')}>{thinkingOptions.choices.map(choice => <option key={choice.value} value={choice.value}>{choice.kind === 'fast' ? tr('Fast', '快速') : choice.kind === 'think' ? 'Think' : `${tr('Thinking', '思考')} · ${choice.value}`}</option>)}</select>}
         <select className={`composer-select permission-select permission-${selectedPermission}`} value={selectedPermission} disabled={isStreaming} onChange={event => void onPermissionChange(event.target.value as 'auto' | 'yolo' | 'manual')} aria-label={tr('Permission mode', '权限模式')} title={tr('Auto approves normal tools; YOLO asks nothing; Manual asks before commands and changes.', '自动模式放行常规工具；YOLO 不询问；手动模式在命令和更改前询问。')}><option value="auto">AUTO</option><option value="yolo">YOLO</option><option value="manual">MANUAL</option></select>
         <SkillPicker sessionId={session?.id ?? null} disabled={isStreaming}/>
         <button className="composer-refresh" onClick={onRefreshModels} disabled={modelsLoading} title={tr('Refresh model list', '刷新模型列表')} aria-label={tr('Refresh model list', '刷新模型列表')}><Icon name="refresh" size={14}/></button>
-      </div><div className="composer-submit-actions"><input ref={imageInputRef} className="composer-image-input" type="file" multiple onChange={event => { if (event.target.files) void addFiles(event.target.files); event.target.value = ''; }}/><button type="button" className="composer-image-button" onClick={() => imageInputRef.current?.click()} disabled={attachmentsLoading || attachments.length >= 6 || commandRunning} title={tr('Attach files', '添加文件')} aria-label={tr('Attach files', '添加文件')}><Icon name="paperclip" size={15}/></button>{isStreaming && <button className="chat-steer-btn" onClick={() => void handleSend(undefined, 'steer')} disabled={attachmentsLoading || (!input.trim() && attachments.length === 0)} title={tr('Steer the active task now', '立即调整当前任务')} aria-label={tr('Steer the active task now', '立即调整当前任务')}><Icon name="sparkles" size={15}/></button>}<button className="chat-send-btn" onClick={() => input.trim().startsWith('/') ? void runSlashCommand() : void handleSend()} disabled={commandRunning || attachmentsLoading || (!input.trim() && attachments.length === 0)} title={isStreaming ? tr('Queue message', '排队发送') : tr('Send message', '发送消息')} aria-label={isStreaming ? tr('Queue message', '排队发送') : tr('Send message', '发送消息')}><Icon name="send" size={16}/></button></div></div>
+      </div><div className="composer-submit-actions"><input ref={imageInputRef} className="composer-image-input" type="file" multiple onChange={event => { if (event.target.files) void addFiles(event.target.files); event.target.value = ''; }}/><button type="button" className="composer-image-button" onClick={() => imageInputRef.current?.click()} disabled={attachmentsLoading || attachments.length >= 6 || commandRunning} title={tr('Attach files', '添加文件')} aria-label={tr('Attach files', '添加文件')}><Icon name="paperclip" size={15}/></button>{isStreaming && <button className="chat-steer-btn" onClick={() => void handleSend(undefined, 'steer')} disabled={steering || attachmentsLoading || (!input.trim() && attachments.length === 0)} title={tr('Steer the active task now', '立即调整当前任务')} aria-label={tr('Steer the active task now', '立即调整当前任务')}><Icon name="sparkles" size={15}/></button>}<button className="chat-send-btn" onClick={() => input.trim().startsWith('/') ? void runSlashCommand() : void handleSend()} disabled={commandRunning || steering || attachmentsLoading || (!input.trim() && attachments.length === 0)} title={isStreaming ? tr('Queue message', '排队发送') : tr('Send message', '发送消息')} aria-label={isStreaming ? tr('Queue message', '排队发送') : tr('Send message', '发送消息')}><Icon name="send" size={16}/></button></div></div>
       {(modelNotice || modelError || attachmentError) && <div className="composer-error" role="status">{modelNotice ? tr('Select a model before sending.', '请先选择模型') : attachmentError ?? modelError}</div>}
       {commandNotice && <div className="composer-command-notice" role="status">{commandNotice}</div>}
     </div></div>

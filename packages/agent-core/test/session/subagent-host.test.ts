@@ -152,6 +152,7 @@ describe('SessionSubagentHost', () => {
     await expect(running).rejects.toThrow('Aborted');
     await child.untilTurnEnd();
 
+    expect(parent.agent.usage.data().total).toEqual(child.agent.usage.data().total);
     expect(parent.allEvents).not.toContainEqual(
       expect.objectContaining({
         type: '[rpc]',
@@ -377,6 +378,7 @@ describe('SessionSubagentHost', () => {
       'Glob',
       'Grep',
       'Read',
+      'ReadMediaFile',
       'WebSearch',
       'nori_plan_write',
     ]);
@@ -478,6 +480,7 @@ describe('SessionSubagentHost', () => {
       'Glob',
       'Grep',
       'Read',
+      'ReadMediaFile',
       'WebSearch',
       'Write',
       'nori_plan_write',
@@ -488,6 +491,30 @@ describe('SessionSubagentHost', () => {
         content: [{ type: 'text', text: 'Implement the fix' }],
       },
     ]);
+  });
+
+  it('accepts the legacy nori-coder input without advertising it as a profile', async () => {
+    const parent = testAgent();
+    parent.configure();
+    parent.newEvents();
+    const child = testAgent();
+    const result = 'Prepared a complete delegation plan with explicit implementation tasks, dependencies, validation steps, and ownership boundaries. The parent can now launch the worker agents without relying on the legacy profile name.';
+    child.mockNextResponse({ type: 'text', text: result });
+    const host = new SessionSubagentHost(fakeSession(parent.agent, child.agent), 'main');
+
+    const handle = await host.spawn({
+      profileName: 'nori-coder',
+      parentToolCallId: 'call_legacy_agent',
+      prompt: 'Plan and delegate this change',
+      description: 'Legacy profile compatibility',
+      runInBackground: false,
+      signal,
+    });
+
+    await expect(handle.completion).resolves.toMatchObject({ result });
+    expect(handle.profileName).toBe('orchestrator');
+    expect(child.agent.config.profileName).toBe('orchestrator');
+    expect(child.llmCalls[0]?.tools.map(tool => tool.name)).not.toContain('Write');
   });
 
   it('rejects unknown subagent types before creating a child agent', async () => {

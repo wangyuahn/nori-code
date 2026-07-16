@@ -22,7 +22,7 @@ function makeStore() {
   return fakeAgent().goal;
 }
 
-function fakeAgent(opts: { type?: 'main' | 'sub'; goal?: GoalMode } = {}): Agent {
+function fakeAgent(opts: { type?: 'main' | 'sub'; goal?: GoalMode; goalMaxTurns?: number } = {}): Agent {
   const agent = {
     type: opts.type ?? 'main',
     records: { logRecord: () => {} },
@@ -30,6 +30,7 @@ function fakeAgent(opts: { type?: 'main' | 'sub'; goal?: GoalMode } = {}): Agent
     telemetry: { track: () => {} },
     context: { appendSystemReminder: () => {} },
     permission: { mode: 'manual' },
+    kimiConfig: opts.goalMaxTurns === undefined ? undefined : { providers: {}, loopControl: { goalMaxTurns: opts.goalMaxTurns } },
   } as unknown as Agent;
   (agent as { goal: GoalMode }).goal = opts.goal ?? new GoalMode(agent);
   return agent;
@@ -40,6 +41,16 @@ function ctx<Input>(args: Input) {
 }
 
 describe('CreateGoalTool', () => {
+  it('uses the configured default turn budget and treats zero as unlimited', async () => {
+    const limitedAgent = fakeAgent({ goalMaxTurns: 12 });
+    await limitedAgent.goal.createGoal({ objective: 'limited' });
+    expect(limitedAgent.goal.getGoal().goal?.budget.turnBudget).toBe(12);
+
+    const unlimitedAgent = fakeAgent({ goalMaxTurns: 0 });
+    await unlimitedAgent.goal.createGoal({ objective: 'unlimited' });
+    expect(unlimitedAgent.goal.getGoal().goal?.budget.turnBudget).toBeNull();
+  });
+
   it('creates a goal through the goal store', async () => {
     const store = makeStore();
     const tool = new CreateGoalTool(fakeAgent({ goal: store }));

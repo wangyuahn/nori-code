@@ -5,6 +5,7 @@ interface SplitPaneProps {
   defaultSize?: number;  // percentage 0-100, default 50
   minSize?: number;      // percentage, default 20
   maxSize?: number;      // percentage, default 80
+  storageKey?: string;
   children: [React.ReactNode, React.ReactNode];
 }
 
@@ -13,11 +14,13 @@ export function SplitPane({
   defaultSize = 50,
   minSize = 20,
   maxSize = 80,
+  storageKey,
   children,
 }: SplitPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const splitRef = useRef(defaultSize); // ref to avoid re-renders during drag
-  const [splitPos, setSplitPos] = useState(defaultSize); // updated on mouseup
+  const initialSize = loadSplitSize(storageKey, defaultSize, minSize, maxSize);
+  const splitRef = useRef(initialSize); // ref to avoid re-renders during drag
+  const [splitPos, setSplitPos] = useState(initialSize); // updated on mouseup
   const draggingRef = useRef(false);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -58,8 +61,9 @@ export function SplitPane({
     if (draggingRef.current) {
       draggingRef.current = false;
       setSplitPos(splitRef.current); // sync React state on release
+      if (storageKey) localStorage.setItem(storageKey, String(splitRef.current));
     }
-  }, []);
+  }, [storageKey]);
 
   useEffect(() => {
     document.addEventListener('mousemove', handleMouseMove);
@@ -90,4 +94,10 @@ export function SplitPane({
       </div>
     </div>
   );
+}
+
+function loadSplitSize(key: string | undefined, fallback: number, min: number, max: number): number {
+  if (!key) return fallback;
+  const stored = Number(localStorage.getItem(key));
+  return Number.isFinite(stored) ? Math.max(min, Math.min(max, stored)) : fallback;
 }

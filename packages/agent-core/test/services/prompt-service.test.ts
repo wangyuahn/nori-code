@@ -953,6 +953,31 @@ describe('PromptService.abortBySession', () => {
       agentId: 'main',
     });
   });
+
+  it('queues a fast follow-up until the aborted turn actually ends', async () => {
+    const { bridge, record } = makeBridge();
+    const { bus, triggerSubscribers } = makeBus();
+    const impl = newSvc(bridge, bus);
+    const first = await impl.submit(SID, mkBodyMinimal({ content: [{ type: 'text', text: 'first' }] }));
+    triggerSubscribers({
+      type: 'turn.started', turnId: 7, origin: { kind: 'user' }, sessionId: SID, agentId: 'main',
+    } as unknown as Event);
+
+    await impl.abort(SID, first.prompt_id);
+    const followUp = await impl.submit(SID, mkBodyMinimal({ content: [{ type: 'text', text: 'follow up' }] }));
+
+    expect(followUp.status).toBe('queued');
+    expect(record.promptCalls).toHaveLength(1);
+    triggerSubscribers({
+      type: 'turn.ended', turnId: 7, reason: 'cancelled', sessionId: SID, agentId: 'main',
+    } as unknown as Event);
+    await vi.waitFor(() => expect(record.promptCalls).toHaveLength(2));
+    expect(record.promptCalls[1]).toMatchObject({
+      sessionId: SID,
+      agentId: 'main',
+      input: [{ type: 'text', text: 'follow up' }],
+    });
+  });
 });
 
 describe('PromptService queue steer', () => {

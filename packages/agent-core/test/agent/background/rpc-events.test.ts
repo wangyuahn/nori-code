@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   BackgroundTaskPersistence,
+  SwarmBackgroundTask,
   type BackgroundTaskInfo,
 } from '../../../src/agent/background';
 import {
@@ -224,6 +225,50 @@ describe('BackgroundManager — event emission', () => {
         }),
       },
     ]);
+  });
+
+  it('emits live updates after pause, guidance, and resume', async () => {
+    const { agent, manager } = createBackgroundManager();
+    let paused = false;
+    const control = {
+      get paused() { return paused; },
+      pause: vi.fn(() => { paused = true; }),
+      addGuidance: vi.fn(),
+      resume: vi.fn(() => { paused = false; }),
+    };
+    const taskId = manager.registerTask(new SwarmBackgroundTask(
+      'review changes',
+      signal => new Promise<string>((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      }),
+      2,
+      control,
+    ));
+    agent.emittedEvents.length = 0;
+
+    await manager.pause(taskId, 'hold before editing');
+    await manager.addGuidance(taskId, 'inspect the parser too');
+    await manager.resume(taskId, 'continue now');
+
+    expect(control.pause).toHaveBeenCalledWith('hold before editing');
+    expect(control.addGuidance).toHaveBeenCalledWith('inspect the parser too');
+    expect(control.resume).toHaveBeenCalledWith('continue now');
+    expect(agent.emittedEvents).toEqual([
+      {
+        type: 'background.task.updated',
+        info: expect.objectContaining({ taskId, paused: true }),
+      },
+      {
+        type: 'background.task.updated',
+        info: expect.objectContaining({ taskId, paused: true }),
+      },
+      {
+        type: 'background.task.updated',
+        info: expect.objectContaining({ taskId, paused: false }),
+      },
+    ]);
+
+    await manager.stop(taskId, 'test cleanup');
   });
 
   it('emits background.task.terminated when a restored task is marked lost', async () => {

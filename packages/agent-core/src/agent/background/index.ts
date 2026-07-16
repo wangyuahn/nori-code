@@ -235,6 +235,10 @@ export class BackgroundManager {
     });
   }
 
+  private emitTaskUpdated(info: BackgroundTaskInfo): void {
+    this.agent.emitEvent({ type: 'background.task.updated', info });
+  }
+
   private emitTaskTerminated(info: BackgroundTaskInfo): void {
     this.agent.emitEvent({ type: 'background.task.terminated', info });
     this.agent.telemetry.track('background_task_completed', {
@@ -483,7 +487,9 @@ export class BackgroundManager {
     if (entry.task.pause === undefined) throw new Error(`Background task "${taskId}" cannot be paused.`);
     await entry.task.pause(guidance);
     await this.persistLive(entry);
-    return this.toInfo(entry);
+    const info = this.toInfo(entry);
+    this.emitTaskUpdated(info);
+    return info;
   }
 
   async addGuidance(taskId: string, guidance: string): Promise<BackgroundTaskInfo | undefined> {
@@ -495,7 +501,9 @@ export class BackgroundManager {
     }
     await entry.task.addGuidance(guidance);
     await this.persistLive(entry);
-    return this.toInfo(entry);
+    const info = this.toInfo(entry);
+    this.emitTaskUpdated(info);
+    return info;
   }
 
   async resume(taskId: string, guidance?: string): Promise<BackgroundTaskInfo | undefined> {
@@ -505,7 +513,9 @@ export class BackgroundManager {
     if (entry.task.resume === undefined) throw new Error(`Background task "${taskId}" cannot be resumed.`);
     await entry.task.resume(guidance);
     await this.persistLive(entry);
-    return this.toInfo(entry);
+    const info = this.toInfo(entry);
+    this.emitTaskUpdated(info);
+    return info;
   }
 
   /**

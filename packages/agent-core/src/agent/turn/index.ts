@@ -275,6 +275,11 @@ export class TurnFlow {
     if (turnId !== undefined && turnId !== this.currentId) {
       return; // Ignore cancel for non-active turn
     }
+    // Guidance buffered for the current response must not become a surprise
+    // follow-up turn after the user presses Stop. Keep background/system
+    // notifications: they have independent lifecycle semantics and may still
+    // need to wake the main agent after this cancellation settles.
+    this.steerBuffer = this.steerBuffer.filter(({ origin }) => origin.kind !== 'user');
     // A direct cancel (RPC / replay) is the user pressing stop. When the cancel
     // is propagated from an aborting signal (e.g. a subagent's deadline via
     // waitForCurrentTurn), carry that original reason instead so a timeout is
@@ -320,14 +325,16 @@ export class TurnFlow {
   }
 
   private abortTurn(reason: unknown) {
-    if (this.activeTurn !== 'resuming') {
+    if (this.activeTurn === 'resuming') {
+      this.activeTurn = null;
+    } else {
       // The reason (a user cancellation by default, or the originating signal's
       // reason when propagated) travels as signal.reason so tools settling on
       // this signal can report a deliberate user interruption distinctly from a
-      // timeout/system abort. linkAbortSignal forwards it to linked subagents.
+      // timeout/system abort. Keep the turn registered until its worker settles:
+      // otherwise a new prompt can start concurrently with the cancelling worker.
       this.activeTurn?.controller.abort(reason);
     }
-    this.activeTurn = null;
   }
 
   private flushSteerBuffer(): boolean {

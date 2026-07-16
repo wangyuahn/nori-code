@@ -144,6 +144,41 @@ describe('SettingsPanel Provider settings', () => {
     expect(providerControl<HTMLInputElement>(container, 'Provider ID').value).toBe('');
     expect(providerControl<HTMLInputElement>(container, 'API Base URL').value).toBe('');
   });
+
+  it('stores the models.dev source when an online preset is selected', async () => {
+    vi.mocked(api.providerPresets.list).mockResolvedValue({
+      source: 'https://models.dev/api.json',
+      items: [{
+        id: 'openai',
+        name: 'OpenAI',
+        type: 'openai',
+        base_url: 'https://api.openai.com/v1',
+        env: ['OPENAI_API_KEY'],
+        model_count: 4,
+      }],
+    });
+    const updateConfig = vi.mocked(api.updateConfig);
+    const { container } = await renderSettings({});
+
+    await selectValue(providerControl<HTMLSelectElement>(container, 'Online preset'), 'openai');
+    await act(async () => {
+      saveButton(container).click();
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => { expect(updateConfig).toHaveBeenCalled(); });
+    expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({
+      providers: {
+        openai: expect.objectContaining({
+          source: {
+            kind: 'modelsDev',
+            url: 'https://models.dev/api.json',
+            catalog_id: 'openai',
+          },
+        }),
+      },
+    }));
+  });
 });
 
 async function renderSettings(config: ConfigResponse) {

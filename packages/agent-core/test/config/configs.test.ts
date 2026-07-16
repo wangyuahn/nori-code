@@ -367,6 +367,27 @@ removed_flag = true
     expect(reloaded.raw?.['theme']).toBe('dark');
   });
 
+  it('round-trips loop limits and custom agent roles', async () => {
+    const dir = makeTempDir();
+    const configPath = join(dir, 'custom-agents.toml');
+    await writeConfigFile(configPath, {
+      providers: {},
+      loopControl: { maxStepsPerTurn: 0, goalMaxTurns: 18 },
+      customAgents: {
+        reviewer: { description: 'Review risky changes', role: 'Find correctness bugs.', baseProfile: 'explore', enabled: true },
+      },
+    });
+
+    const text = await readFile(configPath, 'utf8');
+    expect(text).toContain('max_steps_per_turn = 0');
+    expect(text).toContain('goal_max_turns = 18');
+    expect(text).toContain('[custom_agents.reviewer]');
+    expect(parseConfigString(text, configPath).customAgents?.['reviewer']).toMatchObject({
+      role: 'Find correctness bugs.',
+      baseProfile: 'explore',
+    });
+  });
+
   it('creates a parseable default config scaffold without changing runtime defaults', async () => {
     const dir = makeTempDir();
     const configPath = join(dir, 'config.toml');

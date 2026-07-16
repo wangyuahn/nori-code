@@ -313,6 +313,8 @@ export function transformTomlData(data: Record<string, unknown>): Record<string,
       result[targetKey] = transformPlainObject(value);
     } else if (targetKey === 'loopControl' && isPlainObject(value)) {
       result[targetKey] = transformLoopControlData(value);
+    } else if (targetKey === 'customAgents' && isPlainObject(value)) {
+      result[targetKey] = transformRecord(value, transformPlainObject);
     } else if (targetKey === 'background' && isPlainObject(value)) {
       result[targetKey] = transformPlainObject(value);
     } else if (targetKey === 'experimental' && isPlainObject(value)) {
@@ -492,6 +494,7 @@ export function configToTomlData(config: KimiConfig): Record<string, unknown> {
   setSection(out, 'services', config.services, servicesToToml);
   setSection(out, 'memory', config.memory, memoryToToml);
   setSection(out, 'loop_control', config.loopControl, loopControlToToml);
+  setRecordSection(out, 'custom_agents', config.customAgents, customAgentToToml);
   setSection(out, 'background', config.background, backgroundToToml);
   setSection(out, 'experimental', config.experimental, experimentalToToml);
   setSection(out, 'permission', config.permission, permissionToToml);
@@ -668,6 +671,12 @@ function loopControlToToml(
   for (const [key, value] of Object.entries(loopControl)) {
     setDefined(out, camelToSnake(key), value);
   }
+  return out;
+}
+
+function customAgentToToml(value: NonNullable<KimiConfig['customAgents']>[string], raw: unknown): Record<string, unknown> {
+  const out = cloneRecord(raw);
+  for (const [key, field] of Object.entries(value)) setDefined(out, camelToSnake(key), field);
   return out;
 }
 

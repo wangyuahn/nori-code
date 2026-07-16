@@ -54,6 +54,7 @@ const ModelAliasBaseSchema = z.object({
   maxContextSize: z.number().int().min(1),
   maxOutputSize: z.number().int().min(1).optional(),
   capabilities: z.array(z.string()).optional(),
+  thinkingSupport: z.boolean().optional(),
   displayName: z.string().optional(),
   reasoningKey: z.string().optional(),
   protocol: z.literal('anthropic').optional(),
@@ -124,6 +125,7 @@ export type PermissionConfig = z.infer<typeof PermissionConfigSchema>;
 
 export const LoopControlSchema = z.object({
   maxStepsPerTurn: z.number().int().min(0).optional(),
+  goalMaxTurns: z.number().int().min(0).optional(),
   maxRetriesPerStep: z.number().int().min(0).optional(),
   maxRalphIterations: z.number().int().min(-1).optional(),
   reservedContextSize: z.number().int().min(0).optional(),
@@ -131,6 +133,21 @@ export const LoopControlSchema = z.object({
 });
 
 export type LoopControl = z.infer<typeof LoopControlSchema>;
+
+export const CustomAgentConfigSchema = z.object({
+  description: z.string().min(1),
+  role: z.string().min(1),
+  baseProfile: z.enum(['orchestrator', 'nori-coder', 'coder', 'explore', 'plan']).default('coder'),
+  enabled: z.boolean().default(true),
+  permissions: z.object({
+    read: z.boolean().optional(),
+    write: z.boolean().optional(),
+    shell: z.boolean().optional(),
+    web: z.boolean().optional(),
+    delegate: z.boolean().optional(),
+  }).optional(),
+});
+export type CustomAgentConfig = z.infer<typeof CustomAgentConfigSchema>;
 
 export const BackgroundConfigSchema = z.object({
   maxRunningTasks: z.number().int().min(1).optional(),
@@ -263,6 +280,7 @@ export const KimiConfigSchema = z.object({
   mergeAllAvailableSkills: z.boolean().optional(),
   extraSkillDirs: z.array(z.string()).optional(),
   loopControl: LoopControlSchema.optional(),
+  customAgents: z.record(z.string().min(1), CustomAgentConfigSchema).optional(),
   background: BackgroundConfigSchema.optional(),
   modelCatalog: ModelCatalogConfigSchema.optional(),
   experimental: ExperimentalConfigSchema.optional(),
@@ -277,6 +295,7 @@ const ModelAliasPatchSchema = ModelAliasSchema.partial();
 const ThinkingConfigPatchSchema = ThinkingConfigSchema.partial();
 const PermissionConfigPatchSchema = PermissionConfigSchema.partial();
 const LoopControlPatchSchema = LoopControlSchema.partial();
+const CustomAgentConfigPatchSchema = CustomAgentConfigSchema.partial();
 const BackgroundConfigPatchSchema = BackgroundConfigSchema.partial();
 const ModelCatalogConfigPatchSchema = ModelCatalogConfigSchema.partial();
 const ExperimentalConfigPatchSchema = ExperimentalConfigSchema;
@@ -305,6 +324,7 @@ export const KimiConfigPatchSchema = z
     mergeAllAvailableSkills: z.boolean().optional(),
     extraSkillDirs: z.array(z.string()).optional(),
     loopControl: LoopControlPatchSchema.optional(),
+    customAgents: z.record(z.string().min(1), CustomAgentConfigPatchSchema).optional(),
     background: BackgroundConfigPatchSchema.optional(),
     modelCatalog: ModelCatalogConfigPatchSchema.optional(),
     experimental: ExperimentalConfigPatchSchema.optional(),

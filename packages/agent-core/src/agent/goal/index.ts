@@ -379,7 +379,7 @@ export class GoalMode {
       tokensUsed: 0,
       wallClockMs: 0,
       wallClockResumedAt: Date.now(),
-      budgetLimits: {},
+      budgetLimits: configuredGoalBudget(this.agent.kimiConfig?.loopControl?.goalMaxTurns),
     };
 
     this.persistState(state);
@@ -389,6 +389,9 @@ export class GoalMode {
       objective: state.objective,
       completionCriterion: state.completionCriterion,
     });
+    if (state.budgetLimits.turnBudget !== undefined) {
+      this.appendGoalUpdate({ budgetLimits: state.budgetLimits });
+    }
     this.trackGoalCreated(actor, input.replace === true);
     return this.toSnapshot(state);
   }
@@ -706,6 +709,10 @@ export class GoalMode {
       terminalReason: state.terminalReason,
     };
   }
+}
+
+function configuredGoalBudget(maxTurns: number | undefined): GoalBudgetLimits {
+  return maxTurns !== undefined && maxTurns > 0 ? { turnBudget: maxTurns } : {};
 }
 
 /**

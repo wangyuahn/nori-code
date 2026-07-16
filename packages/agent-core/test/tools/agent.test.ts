@@ -91,8 +91,8 @@ describe('AgentTool', () => {
     ).properties;
 
     const subagentTypeDescription = properties['subagent_type']?.description ?? '';
-    // #7: the description states the default is nori-coder
-    expect(subagentTypeDescription).toContain('nori-coder');
+    // #7: the description states the default is the read-only orchestrator.
+    expect(subagentTypeDescription).toContain('orchestrator');
     // #6: terminology aligned with the "Available agent types" prose heading —
     // no longer "agent registry"
     expect(subagentTypeDescription).not.toContain('registry');
@@ -176,14 +176,14 @@ describe('AgentTool', () => {
         prompt: 'Investigate',
         description: 'Find cause',
       }).subagent_type,
-    ).toBe('nori-coder');
+    ).toBe('orchestrator');
     expect(
       AgentToolInputSchema.parse({
         prompt: 'Investigate',
         description: 'Find cause',
         subagent_type: '',
       }).subagent_type,
-    ).toBe('nori-coder');
+    ).toBe('orchestrator');
     expect(
       AgentToolInputSchema.parse({
         prompt: 'Continue',
@@ -274,7 +274,7 @@ describe('AgentTool', () => {
     expect(host.spawn).toHaveBeenCalledWith(
       expect.objectContaining({
         parentToolCallId: 'call_agent',
-        profileName: 'nori-coder',
+        profileName: 'orchestrator',
       }),
     );
   });
@@ -726,7 +726,7 @@ describe('AgentTool', () => {
           toolCallId: 'call_agent',
           runInBackground: true,
           operation: 'spawn',
-          subagentType: 'nori-coder',
+          subagentType: 'orchestrator',
           error,
         }),
       },

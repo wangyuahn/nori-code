@@ -76,6 +76,8 @@ export function toProtocolModel(
     display_name: effective.displayName ?? effective.model,
     max_context_size: effective.maxContextSize,
     capabilities: capabilities.size > 0 ? [...capabilities] : undefined,
+    supports_thinking: effective.thinkingSupport
+      ?? (capabilities.has('thinking') || capabilities.has('always_thinking') ? true : undefined),
     support_efforts: effective.supportEfforts,
     default_effort: effective.defaultEffort,
   };

@@ -44,7 +44,7 @@ export const AgentToolInputSchema = z.preprocess(
     const hasSubagentType =
       typeof normalized['subagent_type'] === 'string' && normalized['subagent_type'].length > 0;
     if (!hasSubagentType && !hasResumeId) {
-      normalized['subagent_type'] = 'nori-coder';
+      normalized['subagent_type'] = 'orchestrator';
     } else if (!hasSubagentType) {
       delete normalized['subagent_type'];
     }
@@ -57,7 +57,7 @@ export const AgentToolInputSchema = z.preprocess(
       .string()
       .optional()
       .describe(
-        'One of the available agent types (see "Available agent types" in this tool description). Defaults to "nori-coder" when omitted.',
+        'One of the available agent types (see "Available agent types" in this tool description). Defaults to "orchestrator" when omitted.',
       ),
     resume: z
       .string()
@@ -137,7 +137,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
         isError: true,
       };
     }
-    let profileName = args.subagent_type?.length ? args.subagent_type : 'nori-coder';
+    let profileName = args.subagent_type?.length ? args.subagent_type : 'orchestrator';
     if (resumeAgentId !== undefined && resumeAgentId.length > 0) {
       profileName = (await this.subagentHost.getProfileName?.(resumeAgentId)) ?? 'subagent';
     }
@@ -195,7 +195,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
           operation === 'resume'
             ? await this.subagentHost.resume(resumeAgentId!, runOptions)
             : await this.subagentHost.spawn({
-                profileName: requestedProfileName ?? 'nori-coder',
+                profileName: requestedProfileName ?? 'orchestrator',
                 ...runOptions,
               });
       } catch (error) {
@@ -204,7 +204,7 @@ export class AgentTool implements BuiltinTool<AgentToolInput> {
           runInBackground,
           operation,
           agentId: resumeAgentId,
-          subagentType: operation === 'spawn' ? requestedProfileName ?? 'nori-coder' : undefined,
+          subagentType: operation === 'spawn' ? requestedProfileName ?? 'orchestrator' : undefined,
           error,
         });
         throw error;

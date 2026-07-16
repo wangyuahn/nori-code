@@ -107,6 +107,60 @@ describe('refreshProviderModels', () => {
     expect(harness.config().defaultModel).toBe('custom/gpt-new');
   });
 
+  it('enriches preset models with models.dev reasoning metadata', async () => {
+    const fetchMock = vi.fn(async (input: string) => input === 'https://models.dev/api.json'
+      ? jsonResponse({
+          openrouter: {
+            id: 'openrouter',
+            models: {
+              reasoning: {
+                id: 'vendor/reasoning-model',
+                name: 'Reasoning Model',
+                reasoning: true,
+                limit: { context: 200000 },
+                support_efforts: ['low', 'high'],
+                default_effort: 'high',
+              },
+            },
+          },
+        })
+      : jsonResponse({ data: [{ id: 'vendor/reasoning-model' }] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const harness = makeHost({
+      providers: {
+        openrouter: {
+          type: 'openai',
+          baseUrl: 'https://openrouter.ai/api/v1',
+          apiKey: 'secret',
+          source: {
+            kind: 'modelsDev',
+            url: 'https://models.dev/api.json',
+            catalogId: 'openrouter',
+          },
+        },
+      },
+      models: {},
+    });
+
+    const result = await refreshProviderModels(harness.host, { providerId: 'openrouter' });
+
+    expect(result.failed).toEqual([]);
+    expect(fetchMock.mock.calls.map(([input]) => input)).toEqual([
+      'https://openrouter.ai/api/v1/models',
+      'https://models.dev/api.json',
+    ]);
+    expect(harness.config().models?.['openrouter/vendor/reasoning-model']).toEqual(
+      expect.objectContaining({
+        displayName: 'Reasoning Model',
+        maxContextSize: 200000,
+        thinkingSupport: true,
+        capabilities: expect.arrayContaining(['thinking']),
+        supportEfforts: ['low', 'high'],
+        defaultEffort: 'high',
+      }),
+    );
+  });
+
   it('falls back to /v1/models when a custom provider root returns HTML', async () => {
     const fetchMock = vi.fn(async (input: string) => input.endsWith('/v1/models')
       ? jsonResponse({ data: [{ id: 'custom-chat' }] })

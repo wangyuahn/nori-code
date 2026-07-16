@@ -210,3 +210,18 @@ export type {
   TerminalSpawnOptions,
 } from './terminal/terminal';
 export { NodePtyTerminalBackend, TerminalService } from './terminal/terminalService';
+
+export {
+  ILspService,
+  LspPositionRequiredError,
+  LspUnavailableError,
+  LspUnsupportedLanguageError,
+} from './lsp/lsp';
+export type {
+  LanguageServerBackend,
+  LanguageServerDocument,
+  LanguageServerLaunch,
+  LanguageServerTransport,
+  LspServiceOptions,
+} from './lsp/lsp';
+export { LspService, NodeLanguageServerBackend } from './lsp/lspService';

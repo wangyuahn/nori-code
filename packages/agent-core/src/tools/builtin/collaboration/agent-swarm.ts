@@ -13,8 +13,9 @@ import { ToolAccesses } from '../../../loop/tool-access';
 import type { ExecutableToolContext, ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import { toInputJsonSchema } from '../../support/input-schema';
 import AGENT_SWARM_DESCRIPTION from './agent-swarm.md?raw';
+import type { ResolvedAgentProfile } from '../../../profile';
 
-const DEFAULT_SUBAGENT_TYPE = 'nori-coder';
+const DEFAULT_SUBAGENT_TYPE = 'orchestrator';
 const PROMPT_TEMPLATE_PLACEHOLDER = '{{item}}';
 const MAX_AGENT_SWARM_SUBAGENTS = 128;
 
@@ -66,7 +67,7 @@ export const AgentSwarmToolInputSchema = z
       .min(1)
       .optional()
       .describe(
-        'Subagent type used for every spawned subagent. Defaults to nori-coder when omitted.',
+        'Subagent type used for every spawned subagent. Defaults to orchestrator when omitted.',
       ),
     prompt_template: z
       .string()
@@ -134,14 +135,18 @@ interface SwarmRunResult {
 
 export class AgentSwarmTool implements BuiltinTool<AgentSwarmToolInput> {
   readonly name = 'AgentSwarm' as const;
-  readonly description = AGENT_SWARM_DESCRIPTION;
+  readonly description: string;
   readonly parameters: Record<string, unknown> = toInputJsonSchema(AgentSwarmToolInputSchema);
 
   constructor(
     private readonly subagentHost: SessionSubagentHost,
     private readonly swarmMode: SwarmMode,
     private readonly backgroundManager?: BackgroundManager,
-  ) {}
+    subagents?: ResolvedAgentProfile['subagents'],
+  ) {
+    const available = Object.entries(subagents ?? {}).map(([name, profile]) => `- ${name}: ${profile.description ?? profile.whenToUse ?? 'Custom agent'}`).join('\n');
+    this.description = available ? `${AGENT_SWARM_DESCRIPTION}\n\nAvailable subagent types:\n${available}` : AGENT_SWARM_DESCRIPTION;
+  }
 
   resolveExecution(args: AgentSwarmToolInput): ToolExecution {
     const agentCount =

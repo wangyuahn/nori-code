@@ -282,6 +282,7 @@ export interface AgentBackgroundTaskInfo extends BackgroundTaskInfoBase {
   readonly kind: 'agent';
   readonly agentId?: string;
   readonly subagentType?: string;
+  readonly paused?: boolean;
 }
 
 export interface QuestionBackgroundTaskInfo extends BackgroundTaskInfoBase {
@@ -655,6 +656,11 @@ export interface BackgroundTaskStartedEvent {
   readonly info: BackgroundTaskInfo;
 }
 
+export interface BackgroundTaskUpdatedEvent {
+  readonly type: 'background.task.updated';
+  readonly info: BackgroundTaskInfo;
+}
+
 export interface BackgroundTaskTerminatedEvent {
   readonly type: 'background.task.terminated';
   readonly info: BackgroundTaskInfo;
@@ -739,6 +745,7 @@ export type AgentEvent =
   | CompactionCancelledEvent
   | CompactionCompletedEvent
   | BackgroundTaskStartedEvent
+  | BackgroundTaskUpdatedEvent
   | BackgroundTaskTerminatedEvent
   | CronFiredEvent
   | PromptSubmittedEvent;
@@ -1017,6 +1024,7 @@ export const agentBackgroundTaskInfoSchema = backgroundTaskInfoBaseSchema.extend
   kind: z.literal('agent'),
   agentId: z.string().optional(),
   subagentType: z.string().optional(),
+  paused: z.boolean().optional(),
 }) satisfies z.ZodType<AgentBackgroundTaskInfo>;
 
 export const questionBackgroundTaskInfoSchema = backgroundTaskInfoBaseSchema.extend({
@@ -1349,6 +1357,11 @@ export const backgroundTaskStartedEventSchema = z.object({
   info: backgroundTaskInfoSchema,
 }) satisfies z.ZodType<BackgroundTaskStartedEvent>;
 
+export const backgroundTaskUpdatedEventSchema = z.object({
+  type: z.literal('background.task.updated'),
+  info: backgroundTaskInfoSchema,
+}) satisfies z.ZodType<BackgroundTaskUpdatedEvent>;
+
 export const backgroundTaskTerminatedEventSchema = z.object({
   type: z.literal('background.task.terminated'),
   info: backgroundTaskInfoSchema,
@@ -1436,6 +1449,7 @@ export const agentEventSchema = z.discriminatedUnion('type', [
   compactionCancelledEventSchema,
   compactionCompletedEventSchema,
   backgroundTaskStartedEventSchema,
+  backgroundTaskUpdatedEventSchema,
   backgroundTaskTerminatedEventSchema,
   cronFiredEventSchema,
   promptSubmittedEventSchema,

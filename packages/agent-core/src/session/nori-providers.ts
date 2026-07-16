@@ -656,7 +656,7 @@ class SimpleSwarmProvider implements NoriSwarmProvider {
     // Template not in checks: create a single coder task
     return [{
       id: templateName,
-      agent_type: (params['agent_type'] as string | undefined) ?? 'nori-coder',
+      agent_type: (params['agent_type'] as string | undefined) ?? 'orchestrator',
       depends_on: [],
       on_failure: 'report',
     }];
@@ -667,7 +667,7 @@ class SimpleSwarmProvider implements NoriSwarmProvider {
     return [
       {
         id: 'code_implementation',
-        agent_type: 'nori-coder',
+        agent_type: 'orchestrator',
         depends_on: [],
         on_failure: 'block',
       },
@@ -700,7 +700,8 @@ class SimpleSwarmProvider implements NoriSwarmProvider {
     switch (agentType) {
       case 'coder': return 'coder';
       case 'explore': return 'explore';
-      case 'nori-coder': return 'coder';  // swarm coding tasks use coder profile
+      case 'orchestrator':
+      case 'nori-coder': return 'coder';  // legacy nori-coder remains compatible
       case 'plan': return 'plan';
       case 'test': case 'test_check': return 'coder';
       case 'review': case 'style_check': case 'security': return 'explore';
@@ -712,7 +713,7 @@ class SimpleSwarmProvider implements NoriSwarmProvider {
     const context = (params['context'] as string | undefined) ?? '';
     const taskDesc = (params['description'] as string | undefined) ?? check.id;
     const filesChanged = (params['changed_files'] as string[] | undefined) ?? [];
-    const isCoder = check.agent_type === 'coder' || check.agent_type === 'nori-coder';
+    const isCoder = check.agent_type === 'coder' || check.agent_type === 'orchestrator' || check.agent_type === 'nori-coder';
     let prompt = '';
 
     if (isCoder) {

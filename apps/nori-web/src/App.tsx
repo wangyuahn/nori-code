@@ -1,19 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChatView } from './components/ChatView';
 import { Dashboard } from './components/Dashboard';
-import { SwarmPanel, runningSwarmAgents, swarmRunTokens } from './components/SwarmPanel';
+import { SwarmPanel, runningSwarmAgents, swarmRunProgress, swarmRunTokens } from './components/SwarmPanel';
 import { VaultBrowser } from './components/VaultBrowser';
 import { SettingsPanel } from './components/SettingsPanel';
 import { CodeView } from './components/CodeView';
 import { Icon, type IconName } from './components/Icon';
 import { useSessions, usePhaseStatus, useSwarmWebSocket, useServerStatus } from './hooks/useApi';
 import { useChatMessages } from './hooks/useChatMessages';
-import { api, type FsEntry, type Message, type ModelCatalogItem, type PromptAttachment, type Session, type SessionAgentConfig } from './api/client';
+import { api, type FsEntry, type Message, type ModelCatalogItem, type PromptAttachment, type Session, type SessionAgentConfig, type SwarmStatus } from './api/client';
 import { FileTree } from './components/FileTree';
 import { ProjectFolderPicker } from './components/ProjectFolderPicker';
 import { useI18n } from './i18n';
+import { modelThinkingOptions } from './utils/model-thinking';
 import { loadRewindLimit } from './rewindPreferences';
 import type { ChatSlashCommandName } from './utils/chat-slash-commands';
+import { installSoundUnlock, playNotificationSound } from './notificationSounds';
 
 type View = 'chat' | 'dashboard' | 'swarm' | 'vault' | 'settings';
 type SidebarTab = 'sessions' | 'vault' | 'files';
@@ -45,6 +47,7 @@ export function App() {
   const { tr } = useI18n();
   const [activeView, setActiveView] = useState<View>('chat');
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(() => Math.max(220, Math.min(480, Number(localStorage.getItem('nori-sidebar-width')) || 256)));
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('sessions');
   const [mode, setMode] = useState<WorkspaceMode>(loadWorkspaceMode);
   const [models, setModels] = useState<ModelCatalogItem[]>([]);
@@ -65,6 +68,25 @@ export function App() {
   });
   const [rewindLimit, setRewindLimit] = useState(loadRewindLimit);
   const swarm = useSwarmWebSocket();
+  const swarmSoundStateRef = useRef<Map<string, SwarmStatus['status']> | null>(null);
+
+  useEffect(() => installSoundUnlock(), []);
+
+  useEffect(() => {
+    const roots = Array.from(swarm.swarmStatuses.values()).filter(run => !run.parent_swarm_id);
+    if (swarmSoundStateRef.current === null) {
+      if (roots.length > 0) swarmSoundStateRef.current = new Map(roots.map(run => [run.swarm_id, run.status]));
+      return;
+    }
+    const previous = swarmSoundStateRef.current;
+    for (const run of roots) {
+      const before = previous.get(run.swarm_id);
+      const wasActive = before === 'pending' || before === 'running' || before === 'paused';
+      if (wasActive && run.status === 'done') playNotificationSound('agent-complete');
+      if (wasActive && run.status === 'failed') playNotificationSound('error');
+      previous.set(run.swarm_id, run.status);
+    }
+  }, [swarm.swarmStatuses]);
 
   const {
     sessions,
@@ -79,12 +101,16 @@ export function App() {
     renameSession,
     forkSession,
     updateSessionProfile,
+    refresh: refreshSessions,
   } = useSessions();
   const activeSession: Session | null = sessions.find(session => session.id === sessionId) ?? null;
-  const activeSwarmRuns = Array.from(swarm.swarmStatuses.values()).filter(status =>
-    status.session_id === sessionId
-    && (status.status === 'running' || status.status === 'pending' || status.status === 'paused'),
+  const sessionSwarmRuns = Array.from(swarm.swarmStatuses.values()).filter(status =>
+    status.session_id === sessionId,
   );
+  const activeSwarmRuns = sessionSwarmRuns.filter(status => {
+    const progress = swarmRunProgress(status);
+    return progress.running || progress.status === 'paused';
+  });
   const activeAgentTokens = activeSwarmRuns.reduce((total, run) => total + swarmRunTokens(run), 0);
   useEffect(() => { setSelectedProjectFile(null); }, [sessionId]);
   useEffect(() => {
@@ -104,7 +130,13 @@ export function App() {
   };
   const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort } = useChatMessages(sessionId, activeSession?.title);
   const runningSwarm = runningSwarmAgents(activeSwarmRuns);
-  const activeAgentIds = new Set([...activeSubagentIds, ...runningSwarm.ids]);
+  const knownSwarmAgentIds = new Set(sessionSwarmRuns.flatMap(run =>
+    run.tasks?.flatMap(task => [task.id, ...(task.agent_id ? [task.agent_id] : [])]) ?? [],
+  ));
+  const activeAgentIds = new Set([
+    ...activeSubagentIds.filter(id => !knownSwarmAgentIds.has(id)),
+    ...runningSwarm.ids,
+  ]);
   const activeAgentCount = activeAgentIds.size + runningSwarm.untracked;
   const hasSwarmActivity = activeSwarmRuns.length > 0;
 
@@ -146,7 +178,7 @@ export function App() {
 
   const changeModel = async (modelId: string) => {
     const model = models.find(item => item.model === modelId);
-    const effort = model?.default_effort ?? (model?.capabilities?.includes('thinking') ? 'medium' : 'off');
+    const effort = modelThinkingOptions(model).defaultValue;
     if (!activeSession) {
       setDraftAgentConfig(previous => ({ ...previous, model: modelId, thinking: effort }));
       return;
@@ -382,6 +414,7 @@ export function App() {
               rewindLimit={rewindLimit}
               onRewind={rewindToPrompt}
               onRefreshMessages={refreshMessages}
+              onSelectFilePath={path => setSelectedProjectFile({ path, name: path.replaceAll('\\', '/').split('/').at(-1) ?? path, kind: 'file', modified_at: '' })}
             />
           );
         }
@@ -430,7 +463,7 @@ export function App() {
 
   return (
     <div className={`app-container codex-layout${sidebarExpanded ? ' sidebar-is-expanded' : ''}`}>
-      <aside className={`sidebar${sidebarExpanded ? ' expanded' : ''}`} aria-label={tr('Nori workspace', 'Nori 工作区')}>
+      <aside className={`sidebar${sidebarExpanded ? ' expanded' : ''}`} style={sidebarExpanded ? { width: sidebarWidth, minWidth: sidebarWidth } : undefined} aria-label={tr('Nori workspace', 'Nori 工作区')}>
         <div className="sidebar-brand">
           <span className="app-logo" aria-hidden="true"><span>N</span></span>
           <span className="sidebar-brand-copy"><strong>Nori Work</strong><small>{tr('Independent workspace', '独立工作区')}</small></span>
@@ -461,7 +494,7 @@ export function App() {
 
         <div className="sidebar-content">
           {sidebarTab === 'sessions' && (
-            <SessionsList sessions={sessions} sessionId={sessionId} sessionsLoading={sessionsLoading} sessionsError={sessionsError} sessionsCreating={sessionsCreating} onCreateSession={() => void startNewConversation()} onSwitchSession={id => { switchSession(id); setActiveView('chat'); }} onArchiveSession={archiveSession} onDeleteSession={deleteSession} onRenameSession={renameSession} onForkSession={async (id, title) => { await forkSession(id, title); setActiveView('chat'); }} />
+            <SessionsList sessions={sessions} sessionId={sessionId} sessionsLoading={sessionsLoading} sessionsError={sessionsError} sessionsCreating={sessionsCreating} onRefresh={refreshSessions} onCreateSession={() => void startNewConversation()} onSwitchSession={id => { switchSession(id); setActiveView('chat'); }} onArchiveSession={archiveSession} onDeleteSession={deleteSession} onRenameSession={renameSession} onForkSession={async (id, title) => { await forkSession(id, title); setActiveView('chat'); }} />
           )}
           {sidebarTab === 'vault' && <VaultSidebar mode={vaultMode} onModeChange={setVaultMode} />}
           {sidebarTab === 'files' && <FilesSidebar session={activeSession} selectedFile={selectedProjectFile} onSelectFile={setSelectedProjectFile} />}
@@ -475,6 +508,19 @@ export function App() {
             <Icon name="panel-left" size={17} /><span>{tr('Collapse sidebar', '收起侧栏')}</span><kbd>Ctrl B</kbd>
           </button>
         </div>
+        {sidebarExpanded && <div className="sidebar-resizer" onPointerDown={event => {
+          event.currentTarget.setPointerCapture(event.pointerId);
+          const startX = event.clientX;
+          const startWidth = sidebarWidth;
+          const move = (moveEvent: PointerEvent) => setSidebarWidth(Math.max(220, Math.min(480, startWidth + moveEvent.clientX - startX)));
+          const up = () => {
+            window.removeEventListener('pointermove', move);
+            window.removeEventListener('pointerup', up);
+            setSidebarWidth(current => { localStorage.setItem('nori-sidebar-width', String(current)); return current; });
+          };
+          window.addEventListener('pointermove', move);
+          window.addEventListener('pointerup', up, { once: true });
+        }} />}
       </aside>
 
       <div className="main-area">
@@ -572,6 +618,7 @@ function SessionsList({
   sessionsLoading,
   sessionsError,
   sessionsCreating,
+  onRefresh,
   onCreateSession,
   onSwitchSession,
   onArchiveSession,
@@ -584,6 +631,7 @@ function SessionsList({
   sessionsLoading: boolean;
   sessionsError: string | null;
   sessionsCreating: boolean;
+  onRefresh: () => Promise<void>;
   onCreateSession: () => void;
   onSwitchSession: (id: string) => void;
   onArchiveSession: (id: string) => Promise<void>;
@@ -743,9 +791,9 @@ function SessionsList({
     <div className="sidebar-panel">
       <div className="sidebar-header">
         <span>{tr('Projects', '项目')}</span>
-        <button className="btn-icon" title={tr('New session', '新建会话')} onClick={onCreateSession} disabled={sessionsCreating}>
+        <span className="sidebar-header-actions"><button className="btn-icon" title={tr('Refresh sessions', '刷新会话')} aria-label={tr('Refresh sessions', '刷新会话')} onClick={() => void onRefresh()} disabled={sessionsLoading}><Icon name="refresh" size={14}/></button><button className="btn-icon" title={tr('New session', '新建会话')} onClick={onCreateSession} disabled={sessionsCreating}>
           {sessionsCreating ? <span className="spinner spinner-small" /> : <Icon name="plus" size={15} />}
-        </button>
+        </button></span>
       </div>
       <div className="sidebar-list">
         {sessionsLoading ? (

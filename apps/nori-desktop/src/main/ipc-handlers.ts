@@ -1,5 +1,6 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron';
 import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { readServerToken } from './ensure-server';
 import { readDir, readTextFile } from './filesystem';
 
@@ -34,4 +35,31 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('nori:fs:readDir', (_event, dirPath: string) => readDir(dirPath));
   ipcMain.handle('nori:fs:readFile', (_event, filePath: string) => readTextFile(filePath));
+  ipcMain.handle('nori:openInspectorWindow', (event, input: { tab?: string; sessionId?: string; path?: string }) => {
+    const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+    const url = new URL(event.sender.getURL());
+    const params = new URLSearchParams(url.hash.replace(/^#/, ''));
+    params.set('inspector', input.tab ?? 'changes');
+    if (input.sessionId) params.set('session', input.sessionId);
+    if (input.path) params.set('path', input.path);
+    url.hash = params.toString();
+    const panel = new BrowserWindow({
+      width: 760,
+      height: 780,
+      minWidth: 440,
+      minHeight: 320,
+      parent: owner,
+      title: `Nori Work - ${input.tab ?? 'Inspector'}`,
+      autoHideMenuBar: true,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        webSecurity: true,
+        sandbox: true,
+        preload: join(__dirname, 'preload.cjs'),
+      },
+    });
+    panel.setMenu(null);
+    void panel.loadURL(url.href);
+  });
 }

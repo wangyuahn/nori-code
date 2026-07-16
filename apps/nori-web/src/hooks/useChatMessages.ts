@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, getWebSocketProtocols, type ApprovalRequest, type GoalSnapshot, type Message, type MessageContent, type PromptAttachment, type PromptExecutionOptions, type QuestionAnswer, type QuestionRequest, type SessionRealtimeStatus, type TokenUsage } from '../api/client';
+import { playNotificationSound } from '../notificationSounds';
 
 export interface ToolCall {
   id?: string;
@@ -134,7 +135,7 @@ export interface UseChatMessagesResult {
   cancelQueuedPrompt: (promptId: string) => Promise<void>;
   rewindToPrompt: (count: number) => Promise<string | undefined>;
   refreshMessages: () => Promise<void>;
-  abort: () => void;
+  abort: () => Promise<boolean>;
 }
 
 interface WsPayload {
@@ -531,6 +532,8 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const subscriptionGateRef = useRef(new RealtimeSubscriptionGate());
   const sendAbortRef = useRef<AbortController | null>(null);
+  const sendSettledRef = useRef<Promise<void> | null>(null);
+  const sendInFlightRef = useRef(false);
   const promptIdRef = useRef<string | null>(null);
   const sendStartedAtRef = useRef(0);
   const lastStreamActivityAtRef = useRef(0);
@@ -548,6 +551,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
   const compactingRef = useRef(false);
   const activeToolCallsRef = useRef(new Map<string, ToolCall>());
   const liveWorkBlocksRef = useRef<WorkBlock[]>([]);
+  const attentionRequestIdsRef = useRef(new Set<string>());
 
   sessionRef.current = sessionId;
   sessionTitleRef.current = sessionTitle;
@@ -640,6 +644,10 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     compactingRef.current = false;
     setSessionStatus(null);
     setPendingQuestions([]);
+    attentionRequestIdsRef.current = new Set([
+      ...pendingApprovals.map(request => `approval:${request.approval_id}`),
+      ...pendingQuestions.map(request => `question:${request.question_id}`),
+    ]);
     setQueuedPrompts([]);
     setTodos([]);
     setActiveSubagentIds([]);
@@ -655,6 +663,16 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
         if (sessionRef.current === sessionId) setMessagesLoading(false);
       });
   }, [clearDraft, refreshHistory, sessionId]);
+
+  useEffect(() => {
+    const ids = [
+      ...pendingApprovals.map(request => `approval:${request.approval_id}`),
+      ...pendingQuestions.map(request => `question:${request.question_id}`),
+    ];
+    const hasNew = ids.some(id => !attentionRequestIdsRef.current.has(id));
+    for (const id of ids) attentionRequestIdsRef.current.add(id);
+    if (hasNew) playNotificationSound('attention');
+  }, [pendingApprovals, pendingQuestions]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -950,6 +968,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
               finishTurn(payload.turnId);
               break;
             case 'prompt.completed':
+              playNotificationSound(payload.reason === 'failed' ? 'error' : 'complete');
               if (streamingRef.current || thinkingRef.current) finishTurn(activeTurnIdRef.current ?? undefined);
               else setIsStreaming(false);
               scheduleHistoryRefresh();
@@ -988,6 +1007,8 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
               if (payload.subagentId) {
                 setActiveSubagentIds(previous => previous.filter(id => id !== payload.subagentId));
               }
+              if (type === 'subagent.completed') playNotificationSound('agent-complete');
+              if (type === 'subagent.failed') playNotificationSound('error');
               break;
             case 'code.change':
               if (payload.path && payload.operation && payload.diff !== undefined) {
@@ -1010,6 +1031,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
                 : { ...previous, goal: payload.snapshot ?? null });
               break;
             case 'error':
+              playNotificationSound('error');
               console.error('Stream error:', payload);
               if (payload.message) {
                 setMessages(previous => [...previous, {
@@ -1092,11 +1114,15 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
   const sendMessage = useCallback(async (text: string, attachments: PromptAttachment[] = [], behavior: 'queue' | 'steer' = 'queue', options: PromptExecutionOptions = {}) => {
     const trimmed = text.trim();
     if (!sessionId || (!trimmed && attachments.length === 0)) return false;
+    if (sendInFlightRef.current) return false;
 
     const activeBeforeSubmit = isStreaming || activeTurnIdRef.current !== null;
-    sendAbortRef.current?.abort();
     const controller = new AbortController();
     sendAbortRef.current = controller;
+    sendInFlightRef.current = true;
+    let settleSend!: () => void;
+    const sendSettled = new Promise<void>(resolve => { settleSend = resolve; });
+    sendSettledRef.current = sendSettled;
     if (!activeBeforeSubmit) {
       sendStartedAtRef.current = Date.now();
       lastStreamActivityAtRef.current = Date.now();
@@ -1133,16 +1159,34 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
         shouldGenerateTitle ? firstPromptWithTitleInstruction(promptText) : promptText,
         attachments,
         options,
+        controller.signal,
       );
       if (response.status === 'queued') {
         setQueuedPrompts(previous => previous.some(item => item.id === response.prompt_id) ? previous : [...previous, { id: response.prompt_id, text: visibleText, createdAt: response.created_at }]);
         if (behavior === 'steer') {
-          await api.sessions.prompts.steer(sessionId, [response.prompt_id]);
+          try {
+            await api.sessions.prompts.steer(sessionId, [response.prompt_id]);
+          } catch (error) {
+            // A failed immediate steer must not silently remain queued and run
+            // later as an unrelated turn.
+            await api.sessions.prompts.abort(sessionId, response.prompt_id).catch(() => undefined);
+            setQueuedPrompts(previous => previous.filter(item => item.id !== response.prompt_id));
+            throw error;
+          }
           setQueuedPrompts(previous => previous.filter(item => item.id !== response.prompt_id));
           setMessages(previous => [...previous, { id: response.user_message_id, role: 'user', text: visibleText, images: visibleImages.length > 0 ? visibleImages : undefined, createdAt: response.created_at }]);
         }
       } else {
         promptIdRef.current = response.prompt_id;
+        if (activeBeforeSubmit) {
+          setMessages(previous => mergeHistory(previous, [{
+            id: response.user_message_id,
+            role: 'user',
+            text: visibleText,
+            images: visibleImages.length > 0 ? visibleImages : undefined,
+            createdAt: response.created_at,
+          }]));
+        }
       }
       return true;
     } catch (error) {
@@ -1159,6 +1203,11 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
       }]);
       if (!activeBeforeSubmit) setIsStreaming(false);
       return false;
+    } finally {
+      settleSend();
+      if (sendAbortRef.current === controller) sendAbortRef.current = null;
+      if (sendSettledRef.current === sendSettled) sendSettledRef.current = null;
+      sendInFlightRef.current = false;
     }
   }, [clearDraft, isStreaming, sessionId, waitForSubscription]);
 
@@ -1168,23 +1217,29 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     setQueuedPrompts(previous => previous.filter(item => item.id !== promptId));
   }, [sessionId]);
 
-  const abort = useCallback(() => {
+  const abort = useCallback(async (): Promise<boolean> => {
+    if (!sessionId) return false;
     sendAbortRef.current?.abort();
-    if (sessionId) {
-      void api.abortSession(sessionId).catch(error => console.error('Abort failed:', error));
+    await sendSettledRef.current?.catch(() => undefined);
+    try {
+      await api.abortSession(sessionId);
+      const stillRunning = await hydrateInFlight(sessionId).catch(() => true);
+      if (!stillRunning) {
+        promptIdRef.current = null;
+        setIsStreaming(false);
+        clearDraft();
+      }
+      return true;
+    } catch (error) {
+      setMessages(previous => [...previous, {
+        id: `abort-error-${Date.now()}`,
+        role: 'system',
+        text: `Error: ${error instanceof Error ? error.message : 'Failed to stop response'}`,
+        createdAt: new Date().toISOString(),
+      }]);
+      return false;
     }
-    const promptId = promptIdRef.current;
-    if (promptId && wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: 'abort',
-        id: controlId('abort'),
-        payload: { session_id: sessionId, prompt_id: promptId },
-      }));
-    }
-    promptIdRef.current = null;
-    setIsStreaming(false);
-    clearDraft();
-  }, [clearDraft, sessionId]);
+  }, [clearDraft, hydrateInFlight, sessionId]);
 
   const rewindToPrompt = useCallback(async (count: number) => {
     if (!sessionId || isStreaming) return undefined;

@@ -7,6 +7,7 @@ export interface ManagedKimiModelAliasOverrides {
   maxContextSize?: number | undefined;
   maxOutputSize?: number | undefined;
   capabilities?: string[] | undefined;
+  thinkingSupport?: boolean | undefined;
   displayName?: string | undefined;
   reasoningKey?: string | undefined;
   adaptiveThinking?: boolean | undefined;
@@ -20,6 +21,7 @@ export interface ManagedKimiModelAlias {
   model: string;
   maxContextSize: number;
   capabilities?: string[] | undefined;
+  thinkingSupport?: boolean | undefined;
   supportEfforts?: readonly string[] | undefined;
   defaultEffort?: string | undefined;
   displayName?: string | undefined;
@@ -46,6 +48,7 @@ const CUSTOM_REGISTRY_MODEL_FIELDS: ReadonlySet<string> = new Set([
   'model',
   'maxContextSize',
   'capabilities',
+  'thinkingSupport',
   'displayName',
   'supportEfforts',
   'defaultEffort',
@@ -500,6 +503,11 @@ export function applyCustomRegistryProvider(
       model: model.id,
       maxContextSize,
       capabilities,
+      ...(typeof model.reasoning === 'boolean'
+        ? { thinkingSupport: model.reasoning || (model.support_efforts?.length ?? 0) > 0 }
+        : (model.support_efforts?.length ?? 0) > 0
+          ? { thinkingSupport: true }
+          : {}),
       displayName,
       ...(model.support_efforts !== undefined ? { supportEfforts: model.support_efforts } : {}),
       ...(model.default_effort !== undefined ? { defaultEffort: model.default_effort } : {}),

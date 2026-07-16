@@ -27,6 +27,7 @@ import {
 import { resolveRequestId } from './request-id';
 import { registerApiV1Routes } from './routes/registerApiV1Routes';
 import { registerSwarmWsRoute } from './routes/swarmWs';
+import { listSwarmStatuses } from './routes/swarmStatus';
 import {
   IConnectionRegistry,
   IRestGateway,
@@ -341,7 +342,7 @@ export async function startServer(opts: ServerStartOptions): Promise<RunningServ
   // server object. The main WS gateway also uses prependListener, so swarm's
   // prependListener must fire before the gateway's — registration order matters.
   try {
-    registerSwarmWsRoute(app as never, ix);
+    registerSwarmWsRoute(app as never, ix, listSwarmStatuses);
   } catch (err) {
     pinoLogger.warn({ err }, 'failed to register swarm WS route');
   }

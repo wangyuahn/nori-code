@@ -242,6 +242,44 @@ export interface FsGitPushResponse {
   summary: string;
 }
 
+export interface TerminalSession {
+  id: string;
+  session_id: string;
+  cwd: string;
+  shell: string;
+  cols: number;
+  rows: number;
+  status: 'running' | 'exited';
+  created_at: string;
+  exited_at?: string;
+  exit_code?: number | null;
+}
+
+export interface CreateTerminalOptions {
+  cwd?: string;
+  shell?: string;
+  cols?: number;
+  rows?: number;
+}
+
+export type LspOperation = 'diagnostics' | 'hover' | 'definition' | 'references' | 'document_symbols' | 'workspace_symbols' | 'rename' | 'format';
+
+export interface LspStatus {
+  available: boolean;
+  running: boolean;
+  server_id: string;
+  language_id: string;
+  capabilities: LspOperation[];
+  reason?: string;
+}
+
+export interface LspResult {
+  server_id: string;
+  language_id: string;
+  operation: LspOperation;
+  result: unknown;
+}
+
 export interface ModelCatalogItem {
   provider: string;
   model: string;
@@ -249,6 +287,7 @@ export interface ModelCatalogItem {
   max_context_size: number;
   max_output_size?: number;
   capabilities?: string[];
+  supports_thinking?: boolean;
   /** Raw managed-Kimi catalog compatibility before capabilities are flattened. */
   supports_image_in?: boolean;
   /** Runtime/session catalog compatibility used by older server builds. */
@@ -698,12 +737,19 @@ export function createClient(
           page_size: params?.page_size,
         }),
 
-      sendPrompt: (sessionId: string, text: string, attachments: PromptAttachment[] = [], options: PromptExecutionOptions = {}) =>
+      sendPrompt: (
+        sessionId: string,
+        text: string,
+        attachments: PromptAttachment[] = [],
+        options: PromptExecutionOptions = {},
+        signal?: AbortSignal,
+      ) =>
         request<PromptResponse>(
           `/sessions/${encodeURIComponent(sessionId)}/prompts`,
           undefined,
           {
             method: 'POST',
+            signal,
             body: {
               goal_objective: options.goalObjective,
               swarm_mode: options.swarmMode,
@@ -813,6 +859,38 @@ export function createClient(
           `/sessions/${encodeURIComponent(id)}/fs:git_push`,
           undefined,
           { method: 'POST', body: options },
+        ),
+      },
+
+      terminals: {
+        list: (id: string) => request<{ items: TerminalSession[] }>(
+          `/sessions/${encodeURIComponent(id)}/terminals`,
+        ),
+        create: (id: string, options: CreateTerminalOptions = {}) => request<TerminalSession>(
+          `/sessions/${encodeURIComponent(id)}/terminals`,
+          undefined,
+          { method: 'POST', body: options },
+        ),
+        get: (id: string, terminalId: string) => request<TerminalSession>(
+          `/sessions/${encodeURIComponent(id)}/terminals/${encodeURIComponent(terminalId)}`,
+        ),
+        close: (id: string, terminalId: string) => request<{ closed: true }>(
+          `/sessions/${encodeURIComponent(id)}/terminals/${encodeURIComponent(terminalId)}:close`,
+          undefined,
+          { method: 'POST', body: {} },
+        ),
+      },
+
+      lsp: {
+        status: (id: string, path: string, signal?: AbortSignal) => request<LspStatus>(
+          `/sessions/${encodeURIComponent(id)}/lsp:status`,
+          undefined,
+          { method: 'POST', body: { path }, signal },
+        ),
+        request: (id: string, input: { operation: LspOperation; path: string; position?: { line: number; character: number }; query?: string; new_name?: string }, signal?: AbortSignal) => request<LspResult>(
+          `/sessions/${encodeURIComponent(id)}/lsp:request`,
+          undefined,
+          { method: 'POST', body: input, signal },
         ),
       },
 
@@ -967,12 +1045,19 @@ export function createClient(
         page_size: params?.page_size,
       }),
 
-    sendPrompt: (sessionId: string, text: string, attachments: PromptAttachment[] = [], options: PromptExecutionOptions = {}) =>
+    sendPrompt: (
+      sessionId: string,
+      text: string,
+      attachments: PromptAttachment[] = [],
+      options: PromptExecutionOptions = {},
+      signal?: AbortSignal,
+    ) =>
       request<PromptResponse>(
         `/sessions/${encodeURIComponent(sessionId)}/prompts`,
         undefined,
         {
           method: 'POST',
+          signal,
           body: {
             goal_objective: options.goalObjective,
             swarm_mode: options.swarmMode,

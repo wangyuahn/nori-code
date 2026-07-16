@@ -10,7 +10,7 @@ import type { McpConnectionManager, McpServerEntry } from '../../mcp';
 import { mcpResultToExecutableOutput } from '../../mcp/output';
 import { isMcpToolName, qualifyMcpToolName } from '../../mcp/tool-naming';
 import type { MCPClient } from '../../mcp/types';
-import { DEFAULT_AGENT_PROFILES } from '../../profile';
+import { configuredSubagentProfiles, DEFAULT_AGENT_PROFILES } from '../../profile';
 import { extendWorkspaceWithSkillRoots } from '../../skill';
 import * as b from '../../tools/builtin';
 import type { ToolStore, ToolStoreData, ToolStoreKey } from '../../tools/store';
@@ -510,6 +510,7 @@ export class ToolManager {
     const reportCodeChange: b.CodeChangeReporter = (change) => {
       this.agent.emitEvent({ type: 'code.change', ...change });
     };
+    const subagentProfiles = configuredSubagentProfiles(DEFAULT_AGENT_PROFILES['agent']?.subagents, this.agent.kimiConfig?.customAgents);
     this.builtinTools = new Map(
       [
         new b.ReadTool(kaos, workspace),
@@ -542,7 +543,7 @@ export class ToolManager {
           new b.AgentTool(
             this.agent.subagentHost,
             background,
-            DEFAULT_AGENT_PROFILES['agent']?.subagents,
+            subagentProfiles,
             {
               allowBackground,
               log: this.agent.log,
@@ -551,7 +552,7 @@ export class ToolManager {
             },
           ),
         this.agent.subagentHost &&
-          new b.AgentSwarmTool(this.agent.subagentHost, this.agent.swarmMode, background),
+          new b.AgentSwarmTool(this.agent.subagentHost, this.agent.swarmMode, background, subagentProfiles),
         this.agent.subagentHost && new b.AgentSwarmControlTool(background),
         this.agent.subagentHost &&
           new b.NoriAskParentTool(this.agent),
