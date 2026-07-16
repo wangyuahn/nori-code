@@ -1,7 +1,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ApprovalRequest, ModelCatalogItem, Session } from '../src/api/client';
+import type { ApprovalRequest, ModelCatalogItem, QuestionRequest, Session } from '../src/api/client';
 import { ChatView, modelSupportsImageInput, type ChatViewProps } from '../src/components/ChatView';
 import { I18nProvider } from '../src/i18n';
 
@@ -184,6 +184,48 @@ describe('chat image attachments', () => {
   });
 });
 
+describe('interactive user questions', () => {
+  it('submits a selected option so the waiting model can continue', async () => {
+    const onResolveQuestion = vi.fn(async () => undefined);
+    const { container } = await renderChat({
+      pendingQuestions: [questionRequest()],
+      onResolveQuestion,
+      onDismissQuestion: vi.fn(async () => undefined),
+    });
+
+    const recommended = Array.from(container.querySelectorAll<HTMLButtonElement>('.question-options button'))
+      .find(button => button.textContent?.includes('Use worktree'));
+    await act(async () => recommended?.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('.question-submit')?.click());
+
+    expect(onResolveQuestion).toHaveBeenCalledWith('question-1', {
+      q_0: { kind: 'single', option_id: 'opt_0_0' },
+    });
+  });
+
+  it('submits a free-form answer through the generated Other option', async () => {
+    const onResolveQuestion = vi.fn(async () => undefined);
+    const { container } = await renderChat({
+      pendingQuestions: [questionRequest()],
+      onResolveQuestion,
+      onDismissQuestion: vi.fn(async () => undefined),
+    });
+
+    await act(async () => container.querySelector<HTMLButtonElement>('.question-other > button')?.click());
+    const input = container.querySelector<HTMLInputElement>('.question-other input')!;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(input, 'Use a temporary branch');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => container.querySelector<HTMLButtonElement>('.question-submit')?.click());
+
+    expect(onResolveQuestion).toHaveBeenCalledWith('question-1', {
+      q_0: { kind: 'other', text: 'Use a temporary branch' },
+    });
+  });
+});
+
 describe('chat rewind', () => {
   it('fills the restored prompt into the composer after rewind succeeds', async () => {
     const onRewind = vi.fn(async () => 'prompt restored from history');
@@ -323,5 +365,26 @@ function session(modelId: string): Session {
     created_at: '2026-07-15T00:00:00.000Z',
     updated_at: '2026-07-15T00:00:00.000Z',
     agent_config: { model: modelId },
+  };
+}
+
+function questionRequest(): QuestionRequest {
+  return {
+    question_id: 'question-1',
+    session_id: 'session-1',
+    tool_call_id: 'tool-question-1',
+    created_at: '2026-07-15T00:00:00.000Z',
+    questions: [{
+      id: 'q_0',
+      header: 'Workflow',
+      question: 'How should this task be isolated?',
+      options: [
+        { id: 'opt_0_0', label: 'Use worktree', description: 'Keep changes isolated.' },
+        { id: 'opt_0_1', label: 'Use local checkout', description: 'Modify the active workspace.' },
+      ],
+      allow_other: true,
+      other_label: 'Other',
+      other_description: 'Describe another approach',
+    }],
   };
 }

@@ -1,40 +1,88 @@
-# Nori Code
+# Nori Code / Nori Work
 
-> A multi-agent coding workspace for planning, implementation, review, and persistent project knowledge.
+> **Multi-agent coding workspace — decompose, distribute, verify, remember.**
+
+Nori orchestrates multiple AI agents to plan, implement, review, and persist knowledge across sessions. Not another chat-over-code tool — a **multi-agent engineering workspace**.
 
 [中文说明](README.zh-CN.md)
 
 ![Nori Work](docs/images/nori-work.png)
 
-Nori is available through two connected experiences:
+---
 
-- **Nori Code**: the terminal CLI/TUI for focused coding workflows.
-- **Nori Work**: the Electron desktop workspace for conversations, files, Git, knowledge, usage, and Agent Swarm activity.
+## Products
 
-Nori is based on [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code) under the MIT license. It retains required upstream compatibility while adding Nori's workflow, memory, desktop, and multi-agent capabilities.
+| | Nori Code | Nori Work |
+|---|---|---|
+| **What** | Terminal CLI/TUI for focused coding sessions | Electron desktop workbench |
+| **Who for** | Terminal-first power users | Full workspace with browser, terminal, Git, filesystem |
+| **Interface** | Ink-based TUI with split panes | Multi-panel desktop with embedded browser/terminal |
+| **Start** | `nori` | Standalone installer (see releases) |
 
-## Highlights
+---
 
-- **Plan and Code modes**: Plan mode is read-only. Code mode can optionally allow the main Agent to use Edit and Write, which avoids launching a Swarm for every small change.
-- **Background Agent work**: Agent Swarm and sub-agents continue in the background while the main Agent can keep working. Completion is delivered back into the parent context.
-- **Agent activity tree**: Nori Work groups top-level Swarm rounds and nests Agents launched by other Agents beneath their caller. Live output, Markdown results, status, and token totals are available per Agent.
-- **Streaming conversations**: assistant reasoning, tool calls, and Markdown answers update in place. Tool calls stay at their actual position in the turn instead of being collected at the bottom.
-- **Provider flexibility**: configure API format, base URL, and key for built-in or compatible third-party providers. Models and supported reasoning levels are requested from the provider and selected beside the composer.
-- **Multimodal input**: attach files and, when the selected model supports vision, images.
-- **Project-oriented sessions**: conversations are grouped by project folder, can be collapsed, archived, restored, or deleted.
-- **Workspace inspector**: browse project files and Git status, preview source with syntax highlighting, render Markdown, inspect recent Agent edits, and use Git diff/commit/publish controls.
-- **Project knowledge**: Markdown notes support `[[wiki-links]]`, search, removal, and an interactive bidirectional-link graph.
-- **Usage visibility**: Nori Work shows per-output usage, Agent totals, session totals, context utilization, and an initial-page usage overview.
-- **Permission modes**: Manual asks for every operation, Auto approves ordinary operations according to policy, and Yolo approves all operations.
+## Why Nori
+
+Most AI coding tools are **single-agent chat shells**: one model, one context, one turn at a time. Nori is built differently:
+
+- **Parallel, not serial.** Complex tasks decompose into DAG-shaped agent workflows — plan → implement → verify → review — running in parallel with dependency scheduling.
+- **Memory, not amnesia.** Architecture decisions, code reviews, and patterns persist in a bidirectional-link vault. What you learned last month is available next session.
+- **Policy, not guesswork.** `nori.yaml` enforces deterministic rules: search memory before coding, run tests before exit, review before merge. AI flexibility backed by project discipline.
+- **Desktop, not a web tab.** Nori Work embeds a native terminal (node-pty), browser view (WebContentsView), filesystem sandbox, system tray, notifications, and auto-update — a proper local workspace.
+
+---
+
+## Key Features
+
+### 🧠 Multi-Agent DAG Orchestration
+AgentSwarm splits a task into parallel sub-agents with explicit dependency chaining. A multi-file refactor dispatches `{ plan, implement-1, implement-2, verify, review }` concurrently — no manual turn-by-turn handholding.
+
+### 📚 Persistent Project Memory
+Every decision, review, and pattern lands in an Obsidian-compatible vault with `[[wiki-links]]`. The planner searches it automatically before each implementation phase. Cross-session knowledge means Nori gets smarter about *your project* over time.
+
+### ⚙️ Policy-as-Code (`nori.yaml`)
+Codify project rules that the agent loop enforces automatically:
+```yaml
+rules:
+  - name: search_before_code
+    condition: { on_phase: implement, stage: enter }
+    prompt: "Search vault for prior decisions and patterns."
+    enforced: true
+```
+Orchestrator, coder, and reviewer can each use a different model/provider.
+
+### 🖥️ Nori Work Desktop
+Built from scratch (Electron + node-pty + WebContentsView):
+- Embedded terminal with full PTY support
+- Embedded browser for documentation / preview
+- Filesystem sandbox (whitelist + blocklist)
+- System tray with phase/swarm state
+- Native OS notifications
+- Secure preload bridge (no raw Node in renderer)
+
+### 🔌 Provider Flexibility
+Bring any OpenAI-compatible provider — local (Ollama, LM Studio) or cloud. Each agent role (orchestrator / coder / reviewer) can run its own model.
+
+---
+
+## Roadmap
+
+| Priority | Feature | Status |
+|----------|---------|--------|
+| P0 | **Built-in LSP** — symbol definition, references, types, diagnostics via language server | 📝 Planned |
+| P0 | **Custom Agent Profiles** — user-defined agents with custom prompts, tools, and model selection | 📝 Planned |
+| P1 | **Agent Browser Tool** — headless browser for page rendering, screenshot, JS evaluation | 📝 Planned |
+
+See [plans/roadmap-todo.md](plans/roadmap-todo.md) for details.
+
+---
 
 ## Quick Start
-
-Requirements: Node.js `>=24.15.0`.
 
 ```sh
 npm install -g nori-code
 
-# Interactive terminal UI
+# Interactive TUI
 nori
 
 # One-shot prompt
@@ -44,9 +92,9 @@ nori -p "your task"
 nori web
 ```
 
-In the TUI, use `/provider` to configure a provider and `/model` to select a model. Nori Work exposes the same provider settings in its Settings page and model selection in the chat composer.
+Nori Work is available as a **standalone desktop installer** — see the [latest release](https://github.com/wangyuahn/nori-code/releases).
 
-### Build from source
+### From source
 
 ```sh
 git clone https://github.com/wangyuahn/nori-code.git
@@ -54,80 +102,28 @@ cd nori-code
 corepack enable
 pnpm install
 
-pnpm dev:cli
-pnpm dev:web
-pnpm dev:desktop
+pnpm dev:cli       # Terminal TUI
+pnpm dev:web       # Web UI
+pnpm dev:desktop   # Desktop workbench
 ```
 
-Build the Windows desktop installer:
+---
 
-```sh
-pnpm --filter @nori-code/nori-web build
-pnpm -C apps/nori-code build:native:sea
-pnpm -C apps/nori-code test:native:smoke
-pnpm --filter @nori-code/nori-work dist
-```
+## Packages
 
-The generated installers are written to `apps/nori-desktop/dist-app/`.
+| Package | Role |
+|---------|------|
+| `apps/nori-code` | CLI/TUI entry point |
+| `apps/nori-web` | Web UI (loaded by desktop) |
+| `apps/nori-desktop` | Electron desktop workbench |
+| `packages/agent-core` | Agent, session, swarm, tool, workflow engine |
+| `packages/server` | REST/WebSocket server |
+| `packages/kosong` | Model/provider abstraction |
+| `packages/kaos` | File, process, environment abstractions |
+| `packages/node-sdk` | Public TypeScript SDK |
+| `packages/oauth` | Authentication and provider registry |
 
-## Workflow
-
-Nori can combine model-driven work with deterministic project policy:
-
-```text
-request -> plan -> implement -> verify -> review -> summarize
-             |          |
-             |          +-> background Agent Swarm / sub-agents
-             +-> project memory and rules
-```
-
-The optional `nori.yaml` in a project root controls phases, rules, review thresholds, and Swarm execution. Missing configuration uses runtime defaults.
-
-```yaml
-phases:
-  - name: plan
-    mode: hybrid
-  - name: implement
-    mode: llm-autonomous
-  - name: review
-    mode: rule-enforced
-    rule_enforced:
-      steps:
-        - type: exec
-          id: test
-          command: "pnpm test"
-
-workflow:
-  review:
-    suggestion_threshold: 4
-    required_threshold: 7
-
-swarm:
-  max_concurrency: 4
-  max_swarm_depth: 3
-```
-
-Configuration is resolved by the current runtime implementation in `packages/agent-core`. Invalid or security-sensitive configuration should fail closed rather than silently widen permissions.
-
-## Tools
-
-### Memory
-
-| Tool | Purpose |
-| --- | --- |
-| `nori_memory_search` | Search Markdown notes using text, metadata, and link relationships |
-| `nori_memory_write` | Create or update a project note with optional `[[wiki-links]]` |
-| `nori_memory_remove` | Move a matching note into the vault's `.trash` directory |
-| `nori_plan_write` | Write a plan document in the project workspace |
-
-### Agent Swarm
-
-| Tool | Purpose |
-| --- | --- |
-| `nori_swarm_launch` | Launch a dependency-aware group of background Agents |
-| `nori_swarm_status` | Read live status for a running Swarm |
-| `nori_swarm_result` | Retrieve completed Swarm results |
-| `nori_ask_parent` | Let a child Agent request guidance from its parent |
+---
 
 ## Development
 
@@ -136,11 +132,13 @@ pnpm typecheck
 pnpm lint
 pnpm test
 pnpm build
-pnpm check:brand
+pnpm check:brand    # Verify no stray Kimi branding
 ```
 
-Run focused checks while developing, then expand verification according to the affected packages.
+Run focused checks per affected package first; expand to root-level checks before commit.
+
+---
 
 ## License
 
-MIT. Based on [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code), also licensed under MIT.
+MIT. Based on [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code) (MIT), from which Nori forked and grew its own architecture: multi-agent DAG orchestration, persistent memory, desktop environment, policy engine, and independent branding. Required upstream compatibility is maintained where shared protocol surfaces apply.
