@@ -328,7 +328,6 @@ export function App() {
     if (tab === 'vault') setActiveView('vault');
     if (tab === 'files') {
       setMode('code');
-      setActiveView('chat');
     }
   };
 
@@ -477,7 +476,7 @@ export function App() {
 
         <nav className="sidebar-primary-nav" aria-label={tr('Primary navigation', '主导航')}>
           {NAV_ITEMS.filter(item => item.key !== 'settings').map(item => (
-            <button key={item.key} className={`sidebar-nav-item${activeView === item.key ? ' active' : ''}${item.key === 'swarm' && activeAgentCount > 0 && activeView === 'swarm' ? ' swarm-active' : ''}${item.key === 'swarm' && activeAgentCount > 0 && activeView !== 'swarm' ? ' activity-pending' : ''}`} onClick={() => setActiveView(item.key)} aria-current={activeView === item.key ? 'page' : undefined} title={viewLabels[item.key]}>
+            <button key={item.key} className={`sidebar-nav-item${activeView === item.key ? ' active' : ''}${item.key === 'swarm' && activeAgentCount > 0 && activeView === 'swarm' ? ' swarm-active' : ''}${item.key === 'swarm' && activeAgentCount > 0 && activeView !== 'swarm' ? ' activity-pending' : ''}`} onClick={() => { setActiveView(item.key); if (item.key === 'chat') setSidebarTab('sessions'); }} aria-current={activeView === item.key ? 'page' : undefined} title={viewLabels[item.key]}>
               <Icon name={item.icon} size={17} /><span>{viewLabels[item.key]}</span>{item.key === 'swarm' && activeAgentCount > 0 && <i className="sidebar-activity-count">{activeAgentCount}</i>}
             </button>
           ))}

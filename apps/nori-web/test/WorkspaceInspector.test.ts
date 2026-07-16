@@ -61,6 +61,7 @@ describe('workspace change presentation', () => {
     }];
 
     expect(collectToolCodeChanges(messages, 'C:/Users/sudden/Desktop/games')).toEqual([{
+      operationId: 'edit-1',
       agentId: 'main',
       operation: 'edit',
       path: 'stardrift.html',
@@ -94,6 +95,7 @@ describe('workspace change presentation', () => {
 
   it('deduplicates one tool mutation reported by realtime, live turn, and history', () => {
     const realtime = {
+      operationId: 'edit-1',
       agentId: 'main',
       operation: 'edit' as const,
       path: 'probe.txt',
@@ -106,6 +108,7 @@ describe('workspace change presentation', () => {
     expect(mergeCodeChanges([realtime], [liveTurn, history])).toHaveLength(1);
     expect(mergeCodeChanges([realtime], [{
       ...liveTurn,
+      operationId: 'edit-2',
       diff: '-after\n+done',
     }])).toHaveLength(2);
   });
@@ -409,7 +412,10 @@ describe('workspace change presentation', () => {
       const inspectorTabs = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
       const changesTab = inspectorTabs
         .find(button => button.textContent?.includes('更改') || button.textContent?.includes('Changes'));
+      const browserTab = inspectorTabs
+        .find(button => button.textContent?.includes('浏览器') || button.textContent?.includes('Browser'));
       expect(changesTab).toBeDefined();
+      expect(browserTab).toBeDefined();
       expect(inspectorTabs[0]).toBe(changesTab);
       expect(changesTab!.getAttribute('aria-selected')).toBe('true');
       await act(async () => {

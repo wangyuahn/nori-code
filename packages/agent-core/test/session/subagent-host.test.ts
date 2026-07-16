@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Agent, AgentOptions } from '../../src/agent';
 import type { BackgroundTaskInfo } from '../../src/agent/background';
+import type { BackgroundTask } from '../../src/agent/background/task';
 import { AGENT_WIRE_PROTOCOL_VERSION } from '../../src/agent/records';
 import type { ResolvedAgentProfile } from '../../src/profile';
 import type { SDKSessionRPC } from '../../src/rpc';
@@ -388,6 +389,60 @@ describe('SessionSubagentHost', () => {
         content: [{ type: 'text', text: 'Find the cause' }],
       },
     ]);
+  });
+
+  it('keeps a child running until its nested background agent wakes and finishes it', async () => {
+    const parent = testAgent();
+    parent.configure();
+    const child = testAgent({ type: 'sub' });
+    const firstSummary = 'The nested agent is still running, so I am retaining this node and waiting for its automatic completion notification before I report final results. '.repeat(2);
+    const finalSummary = 'The nested agent completed and its notification was consumed. I verified the returned result and can now provide the parent with the final consolidated handoff. '.repeat(2);
+    child.mockNextResponse({ type: 'text', text: firstSummary });
+    child.mockNextResponse({ type: 'text', text: finalSummary });
+
+    let releaseNested!: () => void;
+    const nestedGate = new Promise<void>(resolve => { releaseNested = resolve; });
+    const nestedTask: BackgroundTask = {
+      idPrefix: 'agent',
+      kind: 'agent',
+      description: 'Nested agent work',
+      async start(sink) {
+        await nestedGate;
+        sink.appendOutput('Nested agent finished successfully.');
+        await sink.settle({ status: 'completed' });
+      },
+      toInfo: base => ({
+        ...base,
+        kind: 'agent',
+        agentId: 'agent-nested',
+        subagentType: 'orchestrator',
+      }),
+    };
+    child.agent.background.registerTask(nestedTask, { detached: true });
+
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+    const handle = await host.spawn({
+      profileName: 'coder',
+      parentToolCallId: 'call_agent',
+      prompt: 'Coordinate nested work',
+      description: 'Coordinate nested work',
+      runInBackground: false,
+      signal,
+    });
+
+    await child.untilTurnEnd();
+    let completed = false;
+    void handle.completion.then(() => { completed = true; });
+    await Promise.resolve();
+    expect(completed).toBe(false);
+
+    releaseNested();
+    await expect(handle.completion).resolves.toMatchObject({ result: finalSummary.trim() });
+    expect(child.llmCalls).toHaveLength(2);
+    expect(userTextMessages(child.llmCalls[1]?.history ?? [])).toEqual(expect.arrayContaining([
+      expect.stringContaining('task.completed'),
+    ]));
   });
 
   it('inherits active parent user tools when spawning a subagent', async () => {

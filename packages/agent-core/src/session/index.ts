@@ -60,7 +60,7 @@ import {
 } from '../skill';
 import { noopTelemetryClient, type TelemetryClient } from '../telemetry';
 import { SessionSubagentHost } from './subagent-host';
-import type { ToolServices } from '../tools/support/services';
+import type { BrowserProvider, ToolServices } from '../tools/support/services';
 import { FlagResolver, type ExperimentalFlagResolver } from '../flags';
 import { abortError } from '../utils/abort';
 import { loadNoriYamlConfig, createNoriProvidersFromConfig } from "./nori-providers";
@@ -74,6 +74,7 @@ export interface SessionOptions {
   readonly kimiHomeDir?: string;
   readonly rpc: SDKSessionRPC;
   readonly toolServices?: ToolServices;
+  readonly browserProvider?: BrowserProvider;
   readonly initializeMainAgent?: boolean | undefined;
   readonly providerManager?: ProviderManager | undefined;
   readonly background?: BackgroundConfig | undefined;
@@ -549,7 +550,7 @@ export class Session {
     const context = await prepareSystemPromptContext(
       this.systemContextKaos(agent.kaos.getcwd()),
       this.options.kimiHomeDir,
-      { additionalDirs: this.additionalDirs },
+      { additionalDirs: this.additionalDirs, customAgents: this.options.config?.customAgents },
     );
     agent.useProfile(profile, context, this.options.kimiHomeDir);
     const { agentsMdWarning } = context;
@@ -588,7 +589,7 @@ export class Session {
       const context = await prepareSystemPromptContext(
         this.systemContextKaos(this.toolKaos.getcwd()),
         this.options.kimiHomeDir,
-        { additionalDirs: this.additionalDirs },
+        { additionalDirs: this.additionalDirs, customAgents: this.options.config?.customAgents },
       );
       this.agentsMdWarning = context.agentsMdWarning;
     } catch (error) {
@@ -804,11 +805,17 @@ export class Session {
     const parentAgent = parentAgentId !== null ? this.getReadyAgent(parentAgentId) : undefined;
     const cwd = parentAgent?.config.cwd ?? this.toolKaos.getcwd();
     let agent!: Agent;
+    const browser = this.options.id === undefined
+      ? undefined
+      : this.options.browserProvider?.bind({ sessionId: this.options.id, agentId: id });
+    const toolServices = browser === undefined
+      ? this.options.toolServices
+      : { ...this.options.toolServices, browser };
     agent = new Agent({
       ...config,
       type,
       kaos: this.toolKaos.withCwd(cwd),
-      toolServices: this.options.toolServices,
+      toolServices,
       config: this.options.config,
       homedir,
       skills: this.skills,
@@ -833,7 +840,7 @@ export class Session {
         prepareSystemPromptContext(
           this.systemContextKaos(agent.kaos.getcwd()),
           this.options.kimiHomeDir,
-          { additionalDirs: agent.getAdditionalDirs() },
+          { additionalDirs: agent.getAdditionalDirs(), customAgents: this.options.config?.customAgents },
         ),
     });
     return agent;

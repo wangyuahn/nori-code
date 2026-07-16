@@ -18,6 +18,41 @@ import { I18nProvider } from '../src/i18n';
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 describe('SwarmPanel projections', () => {
+  it('shows a regular background agent when there is no swarm run', async () => {
+    vi.spyOn(api, 'getConfig').mockResolvedValue({ custom_agents: {} });
+    vi.spyOn(api.sessions.tasks, 'list').mockResolvedValue({
+      items: [{
+        id: 'agent-task-1',
+        session_id: 'session-a',
+        kind: 'subagent',
+        description: 'Inspect browser integration',
+        status: 'running',
+        created_at: '2026-07-16T00:00:00.000Z',
+      }],
+    });
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(SwarmPanel, {
+          swarm: { swarmStatuses: new Map(), connected: true, error: null },
+          sessionId: 'session-a',
+          sessions: [session('session-a', 'Browser repair', 'C:\\work\\alpha')],
+        })));
+      });
+      await vi.waitFor(() => expect(container.textContent).toContain('Inspect browser integration'));
+
+      expect(container.textContent).toContain('Agents and background tasks');
+      expect(container.textContent).not.toContain('No agent activity');
+      expect(container.querySelector('.swarm-project-group')).not.toBeNull();
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      vi.restoreAllMocks();
+    }
+  });
+
   it('renders a compact custom-agent editor with explicit permission controls', async () => {
     vi.spyOn(api, 'getConfig').mockResolvedValue({ custom_agents: {} });
     const container = document.createElement('div');

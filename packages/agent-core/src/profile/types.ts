@@ -43,6 +43,7 @@ export interface SystemPromptContext {
   readonly skills?: SkillRegistry | string;
   readonly additionalDirsInfo?: string;
   readonly roleAdditional?: string;
+  readonly customAgentsInfo?: string;
 
   // NORI: 新增字段
   readonly noriPhase?: string;            // 当前 phase: 'plan' | 'implement' | 'review'

@@ -116,7 +116,7 @@ import type { SDKRPC } from './sdk-api';
 import type { SessionWarning } from '@nori-code/protocol';
 import { proxyWithExtraPayload } from './types';
 import { KaosShellNotFoundError, LocalKaos, type Kaos } from '@nori-code/kaos';
-import type { ToolServices } from '../tools/support/services';
+import type { BrowserProvider, ToolServices } from '../tools/support/services';
 
 const KIMI_CODE_PROVIDER_NAME = 'managed:nori-code';
 const NORI_CODE_BASE_URL_ENV = 'NORI_CODE_BASE_URL';
@@ -132,6 +132,7 @@ export interface KimiCoreOptions {
   readonly homeDir?: string | undefined;
   readonly configPath?: string | undefined;
   readonly runtime?: ToolServices | undefined;
+  readonly browserProvider?: BrowserProvider | undefined;
   readonly kimiRequestHeaders?: Record<string, string> | undefined;
   readonly resolveOAuthTokenProvider?: OAuthTokenProviderResolver | undefined;
   readonly skillDirs?: readonly string[];
@@ -151,6 +152,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
   private config: KimiConfig;
   private configWarnings: readonly string[] = [];
   private readonly runtimeOverride: ToolServices | undefined;
+  private readonly browserProvider: BrowserProvider | undefined;
   private readonly userHomeDir: string;
   private readonly kimiRequestHeaders: Record<string, string> | undefined;
   private readonly resolveOAuthTokenProvider: OAuthTokenProviderResolver | undefined;
@@ -174,6 +176,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     });
     this.runtimeOverride = options.runtime;
     this.runtime = options.runtime;
+    this.browserProvider = options.browserProvider;
     this.kimiRequestHeaders = options.kimiRequestHeaders;
     this.resolveOAuthTokenProvider = options.resolveOAuthTokenProvider;
     this.skillDirs = options.skillDirs ?? [];
@@ -279,6 +282,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       kaos: parentKaos.withCwd(workDir),
       persistenceKaos,
       toolServices: runtime,
+      browserProvider: this.browserProvider,
       config,
       id,
       homedir: summary.sessionDir,
@@ -417,6 +421,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       kaos: parentKaos.withCwd(summary.workDir),
       persistenceKaos,
       toolServices: runtime,
+      browserProvider: this.browserProvider,
       config,
       id: summary.id,
       homedir: summary.sessionDir,
@@ -1108,7 +1113,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
   }
 }
 
-async function createRuntimeConfig(input: {
+async function createRuntimeConfig(_input: {
   readonly config: KimiConfig;
   readonly kimiRequestHeaders?: Record<string, string> | undefined;
   readonly resolveOAuthTokenProvider?: OAuthTokenProviderResolver | undefined;
@@ -1119,11 +1124,6 @@ async function createRuntimeConfig(input: {
     urlFetcher: localFetcher,
     webSearcher: undefined,
   };
-}
-
-function nonEmptyString(value: string | undefined): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
 }
 
 function requiredWorkDir(operation: string, value: string): string {

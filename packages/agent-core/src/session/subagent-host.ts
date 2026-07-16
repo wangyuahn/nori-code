@@ -5,7 +5,11 @@ import {
 } from '@nori-code/kosong';
 
 import type { Agent } from '../agent';
-import type { BackgroundManager, BackgroundTaskInfo } from '../agent/background';
+import {
+  isBackgroundTaskTerminal,
+  type BackgroundManager,
+  type BackgroundTaskInfo,
+} from '../agent/background';
 import type { PromptOrigin } from '../agent/context';
 import { ErrorCodes, type KimiErrorPayload } from '../errors';
 import { DenyAllPermissionPolicy } from '../agent/permission/policies/deny-all';
@@ -482,11 +486,15 @@ export class SessionSubagentHost {
       runInBackground: options.runInBackground,
     });
 
-    return run({ ...options, signal: controller.signal }).finally(async () => {
-      await this.accountChildUsage(childId, child).catch(() => undefined);
-      unlinkAbortSignal();
-      this.activeChildren.delete(childId);
-    });
+    return (async () => {
+      try {
+        return await run({ ...options, signal: controller.signal });
+      } finally {
+        await this.accountChildUsage(childId, child).catch(() => undefined);
+        unlinkAbortSignal();
+        this.activeChildren.delete(childId);
+      }
+    })();
   }
 
   private async runPromptTurn(
@@ -594,6 +602,7 @@ export class SessionSubagentHost {
     options: RunSubagentOptions,
   ): Promise<SubagentCompletion> {
     await runChildTurnToCompletion(child, options.signal);
+    await waitForNestedAgentWork(child, options.signal);
 
     // A subagent that returns an overly terse summary leaves the parent
     // agent under-informed. Give it a bounded number of chances to expand
@@ -655,7 +664,7 @@ export class SessionSubagentHost {
     const context = await prepareSystemPromptContext(
       this.session.systemContextKaos(child.kaos.getcwd()),
       this.session.options.kimiHomeDir,
-      { additionalDirs: child.getAdditionalDirs() },
+      { additionalDirs: child.getAdditionalDirs(), customAgents: parent.kimiConfig?.customAgents },
     );
     child.useProfile(profile, context, this.session.options.kimiHomeDir);
     child.tools.inheritUserTools(parent.tools);
@@ -1015,6 +1024,34 @@ async function runChildTurnToCompletion(child: Agent, signal: AbortSignal): Prom
   }
   if (completion.stopReason === 'max_tokens') {
     throw new Error(`${SUBAGENT_MAX_TOKENS_ERROR}.`);
+  }
+}
+
+async function waitForNestedAgentWork(child: Agent, signal: AbortSignal): Promise<void> {
+  while (true) {
+    signal.throwIfAborted();
+    const activeAgentTasks = child.background.list(true).filter(task => task.kind === 'agent');
+    if (activeAgentTasks.length > 0) {
+      await Promise.all(activeAgentTasks.map(task => waitForBackgroundTask(child, task.taskId, signal)));
+    }
+
+    // Terminal notifications are delivered before BackgroundManager.wait resolves.
+    // If a child is idle, steer() starts its wake-up turn immediately; if it was
+    // still finishing, turnWorker starts the buffered reminder before settling.
+    if (child.turn.hasActiveTurn) {
+      await runChildTurnToCompletion(child, signal);
+      continue;
+    }
+    if (child.background.list(true).some(task => task.kind === 'agent')) continue;
+    return;
+  }
+}
+
+async function waitForBackgroundTask(child: Agent, taskId: string, signal: AbortSignal): Promise<void> {
+  while (true) {
+    signal.throwIfAborted();
+    const task = await child.background.wait(taskId, 250);
+    if (task === undefined || isBackgroundTaskTerminal(task.status)) return;
   }
 }
 

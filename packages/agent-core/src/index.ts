@@ -43,7 +43,15 @@ export type {
   ProcessBackgroundTaskInfo,
   QuestionBackgroundTaskInfo,
 } from './agent/background';
-export type { ToolServices } from './tools/support/services';
+export type {
+  BrowserActionName,
+  BrowserActionRequest,
+  BrowserActionResult,
+  BrowserExecutionScope,
+  BrowserExecutor,
+  BrowserProvider,
+  ToolServices,
+} from './tools/support/services';
 
 // Image compression — the input-stage helper each ingestion site (CLI paste,
 // server upload resolution, ACP, ReadMediaFile, MCP) calls to shrink oversized

@@ -102,6 +102,7 @@ describe('EditTool', () => {
     expect(result.output).toContain('Replaced 1 occurrence');
     expect(writeText).toHaveBeenCalledWith('/tmp/a.txt', 'alpha gamma');
     expect(reportChange).toHaveBeenCalledWith({
+      operationId: expect.any(String),
       operation: 'edit',
       path: '/tmp/a.txt',
       diff: expect.stringMatching(/-alpha beta[\s\S]*\+alpha gamma/),

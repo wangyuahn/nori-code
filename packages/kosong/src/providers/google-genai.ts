@@ -881,6 +881,11 @@ export class GoogleGenAIChatProvider implements ChatProvider {
           thinkingConfig.thinking_level = 'MINIMAL';
           thinkingConfig.include_thoughts = false;
           break;
+        case 'none':
+        case 'minimal':
+          thinkingConfig.thinking_level = 'MINIMAL';
+          thinkingConfig.include_thoughts = effort !== 'none';
+          break;
         case 'low':
           thinkingConfig.thinking_level = 'LOW';
           break;
@@ -898,6 +903,14 @@ export class GoogleGenAIChatProvider implements ChatProvider {
         case 'off':
           thinkingConfig.thinking_budget = 0;
           thinkingConfig.include_thoughts = false;
+          break;
+        case 'none':
+          thinkingConfig.thinking_budget = 0;
+          thinkingConfig.include_thoughts = false;
+          break;
+        case 'minimal':
+          thinkingConfig.thinking_budget = 512;
+          thinkingConfig.include_thoughts = true;
           break;
         case 'low':
           thinkingConfig.thinking_budget = 1024;

@@ -558,6 +558,7 @@ export class ToolManager {
           new b.NoriAskParentTool(this.agent),
         new b.WebSearchTool(toolServices?.webSearcher),
         toolServices?.urlFetcher && new b.FetchURLTool(toolServices.urlFetcher),
+        toolServices?.browser && new b.BrowserTool(toolServices.browser, modelCapabilities.image_in),
         // Nori tools - registered when the corresponding providers are injected.
         // Plan-write is always available because it does not need an external provider.
         new b.NoriPlanWriteTool(this.agent),

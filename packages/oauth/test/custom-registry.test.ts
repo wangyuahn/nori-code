@@ -75,6 +75,8 @@ describe('fetchCustomRegistry', () => {
     expect(result['registry_chat-completions']?.models['gpt-5.5']).toEqual({
       id: 'gpt-5.5',
       name: 'GPT 5.5',
+      reasoning: true,
+      support_efforts: ['none', 'low', 'medium', 'high', 'xhigh'],
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -335,6 +337,59 @@ describe('fetchCustomRegistry', () => {
     expect(model).toBeDefined();
     expect(model!.support_efforts).toEqual(['low', 'medium', 'high']);
     expect(model!.default_effort).toBe('medium');
+  });
+
+  it('converts models.dev reasoning_options into selectable efforts', async () => {
+    const fetchMock = vi.fn(async () => makeJsonResponse({
+      openai: {
+        id: 'openai',
+        name: 'OpenAI',
+        api: 'https://api.example.test/v1',
+        type: 'openai_responses',
+        models: {
+          'gpt-reasoning': {
+            id: 'gpt-reasoning',
+            reasoning: true,
+            reasoning_options: [{ type: 'effort', values: [null, 'minimal', 'low', 'medium', 'high', 'xhigh'] }],
+          },
+        },
+      },
+    }));
+
+    const result = await fetchCustomRegistry(KOKUB_SOURCE, {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    expect(result['openai']?.models['gpt-reasoning']?.support_efforts).toEqual([
+      'none', 'minimal', 'low', 'medium', 'high', 'xhigh',
+    ]);
+  });
+
+  it('does not invent fallback efforts when the catalog explicitly declares no variants', async () => {
+    const fetchMock = vi.fn(async () => makeJsonResponse({
+      openai: {
+        id: 'openai',
+        name: 'OpenAI',
+        api: 'https://api.example.test/v1',
+        type: 'openai_responses',
+        models: {
+          'fixed-reasoning': {
+            id: 'gpt-5.4',
+            reasoning: true,
+            reasoning_options: [],
+          },
+        },
+      },
+    }));
+
+    const result = await fetchCustomRegistry(KOKUB_SOURCE, {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    expect(result['openai']?.models['fixed-reasoning']).toEqual({
+      id: 'gpt-5.4',
+      reasoning: true,
+    });
   });
 });
 

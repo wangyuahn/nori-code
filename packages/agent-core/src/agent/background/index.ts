@@ -221,10 +221,10 @@ export class BackgroundManager {
     private readonly persistence?: BackgroundTaskPersistence,
   ) { }
 
-  private fireTerminalEffects(entry: ManagedTask): void {
+  private async fireTerminalEffects(entry: ManagedTask): Promise<void> {
     if (!this.isDetached(entry)) return;
     const info = this.toInfo(entry);
-    void this.notifyBackgroundTask(info).catch(() => { });
+    await this.notifyBackgroundTask(info).catch(() => { });
     this.emitTaskTerminated(info);
   }
 
@@ -703,11 +703,10 @@ export class BackgroundManager {
   private async restoreBackgroundTaskNotification(info: BackgroundTaskInfo): Promise<void> {
     const context = await this.buildBackgroundTaskNotificationContext(info);
     if (context === undefined) return;
-    if (info.status === 'completed') {
-      this.agent.context.appendUserMessage(context.content, context.origin);
-    } else {
-      this.agent.turn.steer(context.content, context.origin);
-    }
+    // Reconciliation happens while reopening a session. Restore every terminal
+    // result into context without starting unsolicited model work; live terminal
+    // events still use notifyBackgroundTask() and wake the owning agent.
+    this.agent.context.appendUserMessage(context.content, context.origin);
     this.fireNotificationHook(context.notification);
   }
 
@@ -916,7 +915,7 @@ export class BackgroundManager {
       entry.pendingOutput = [];
       entry.pendingOutputBytes = 0;
     }
-    this.fireTerminalEffects(entry);
+    await this.fireTerminalEffects(entry);
     entry.foregroundRelease?.resolve('terminal');
     entry.terminal.resolve();
   }

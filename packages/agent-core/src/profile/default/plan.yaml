@@ -18,5 +18,6 @@ tools:
   - Grep
   - WebSearch
   - FetchURL
+  - Browser
   - nori_memory_search
   - nori_plan_write

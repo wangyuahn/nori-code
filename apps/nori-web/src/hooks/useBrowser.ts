@@ -1,84 +1,130 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-export interface BrowserState {
-  url: string;
-  title: string;
-  canGoBack: boolean;
-  canGoForward: boolean;
-  loading: boolean;
-  visible: boolean;
-}
+import type { NoriBrowserState, NoriBrowserTabState } from '../types/nori-desktop';
 
-export interface UseBrowserResult extends BrowserState {
+const EMPTY_STATE: NoriBrowserState = {
+  activeTabId: null,
+  tabs: [],
+  visible: false,
+  automation: { paused: false, active: null, history: [] },
+  downloads: [],
+  permissions: { pending: [], rules: [] },
+  dialogs: [],
+};
+
+export interface UseBrowserResult extends NoriBrowserState {
+  activeTab?: NoriBrowserTabState;
+  available: boolean;
   navigate: (url: string) => void;
+  newTab: (url?: string) => void;
+  closeTab: (tabId: string) => void;
+  activateTab: (tabId: string) => void;
   goBack: () => void;
   goForward: () => void;
   reload: () => void;
+  stop: () => void;
   openDevTools: () => void;
+  openExternal: () => void;
+  setAnnotationMode: (enabled: boolean) => void;
+  clearAnnotations: () => void;
+  updateAnnotation: (id: string, note: string) => void;
+  setAutomationPaused: (paused: boolean) => void;
+  chooseUploadFiles: () => void;
+  resolvePermission: (id: string, decision: 'allow_once' | 'allow_always' | 'deny' | 'deny_always') => void;
+  resolveDialog: (id: string, accept: boolean, promptText?: string) => void;
+  openDownload: (id: string) => void;
+  clearNetwork: (tabId?: string) => void;
   setVisible: (visible: boolean) => void;
+  setBounds: (bounds: { x: number; y: number; width: number; height: number }) => void;
 }
 
 export function useBrowser(): UseBrowserResult {
-  const [url, setUrl] = useState('about:blank');
-  const [title, setTitle] = useState('');
-  const [canGoBack, setCanGoBack] = useState(false);
-  const [canGoForward, setCanGoForward] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [visible, setVisible] = useState(false);
+  const [state, setState] = useState<NoriBrowserState>(EMPTY_STATE);
+  const mountedRef = useRef(true);
+  const available = typeof window.noriDesktop?.browserGetState === 'function';
 
-  // Subscribe to browser state updates from Electron runtime
   useEffect(() => {
-    const unsubscribe = window.noriDesktop?.onBrowserState?.((state) => {
-      setUrl(state.url);
-      setTitle(state.title);
-      setCanGoBack(state.canGoBack);
-      setCanGoForward(state.canGoForward);
-      setLoading(state.loading);
-    });
-
-    return () => {
-      unsubscribe?.();
-    };
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
   }, []);
 
-  const navigate = useCallback((nextUrl: string) => {
-    setUrl(nextUrl);
-    window.noriDesktop?.browserNavigate?.(nextUrl);
-  }, []);
+  useEffect(() => {
+    if (!available) return;
+    const update = (next: NoriBrowserState) => { if (mountedRef.current) setState(normalizeState(next)); };
+    const unsubscribe = window.noriDesktop?.onBrowserState?.(update);
+    void window.noriDesktop?.browserGetState?.().then(update);
+    return () => unsubscribe?.();
+  }, [available]);
 
-  const goBack = useCallback(() => {
-    window.noriDesktop?.browserGoBack?.();
+  const apply = useCallback((result: Promise<NoriBrowserState> | undefined) => {
+    if (result !== undefined) void result.then(next => { if (mountedRef.current) setState(normalizeState(next)); });
   }, []);
-
-  const goForward = useCallback(() => {
-    window.noriDesktop?.browserGoForward?.();
-  }, []);
-
-  const reload = useCallback(() => {
-    window.noriDesktop?.browserReload?.();
-  }, []);
-
-  const openDevTools = useCallback(() => {
-    window.noriDesktop?.browserOpenDevTools?.();
-  }, []);
-
-  const setVisibleState = useCallback((v: boolean) => {
-    setVisible(v);
-    window.noriDesktop?.browserSetVisible?.(v);
-  }, []);
+  const navigate = useCallback((url: string) => apply(window.noriDesktop?.browserNavigate?.(url)), [apply]);
+  const newTab = useCallback((url?: string) => apply(window.noriDesktop?.browserNewTab?.(url)), [apply]);
+  const closeTab = useCallback((tabId: string) => apply(window.noriDesktop?.browserCloseTab?.(tabId)), [apply]);
+  const activateTab = useCallback((tabId: string) => apply(window.noriDesktop?.browserActivateTab?.(tabId)), [apply]);
+  const goBack = useCallback(() => window.noriDesktop?.browserGoBack?.(), []);
+  const goForward = useCallback(() => window.noriDesktop?.browserGoForward?.(), []);
+  const reload = useCallback(() => window.noriDesktop?.browserReload?.(), []);
+  const stop = useCallback(() => window.noriDesktop?.browserStop?.(), []);
+  const openDevTools = useCallback(() => window.noriDesktop?.browserOpenDevTools?.(), []);
+  const openExternal = useCallback(() => { void window.noriDesktop?.browserOpenExternal?.(); }, []);
+  const setAnnotationMode = useCallback((enabled: boolean) => apply(window.noriDesktop?.browserSetAnnotationMode?.(enabled)), [apply]);
+  const clearAnnotations = useCallback(() => apply(window.noriDesktop?.browserClearAnnotations?.()), [apply]);
+  const updateAnnotation = useCallback((id: string, note: string) => apply(window.noriDesktop?.browserUpdateAnnotation?.(id, note)), [apply]);
+  const setAutomationPaused = useCallback((paused: boolean) => apply(window.noriDesktop?.browserSetAutomationPaused?.(paused)), [apply]);
+  const chooseUploadFiles = useCallback(() => apply(window.noriDesktop?.browserChooseUploadFiles?.()), [apply]);
+  const resolvePermission = useCallback((id: string, decision: 'allow_once' | 'allow_always' | 'deny' | 'deny_always') => apply(window.noriDesktop?.browserResolvePermission?.(id, decision)), [apply]);
+  const resolveDialog = useCallback((id: string, accept: boolean, promptText?: string) => apply(window.noriDesktop?.browserResolveDialog?.(id, accept, promptText)), [apply]);
+  const openDownload = useCallback((id: string) => { void window.noriDesktop?.browserOpenDownload?.(id); }, []);
+  const clearNetwork = useCallback((tabId?: string) => apply(window.noriDesktop?.browserClearNetwork?.(tabId)), [apply]);
+  const setVisible = useCallback((visible: boolean) => apply(window.noriDesktop?.browserSetVisible?.(visible)), [apply]);
+  const setBounds = useCallback((bounds: { x: number; y: number; width: number; height: number }) => window.noriDesktop?.browserResize?.(bounds), []);
+  const activeTab = useMemo(
+    () => state.tabs.find(tab => tab.id === state.activeTabId),
+    [state.activeTabId, state.tabs],
+  );
 
   return {
-    url,
-    title,
-    canGoBack,
-    canGoForward,
-    loading,
-    visible,
+    ...state,
+    activeTab,
+    available,
     navigate,
+    newTab,
+    closeTab,
+    activateTab,
     goBack,
     goForward,
     reload,
+    stop,
     openDevTools,
-    setVisible: setVisibleState,
+    openExternal,
+    setAnnotationMode,
+    clearAnnotations,
+    updateAnnotation,
+    setAutomationPaused,
+    chooseUploadFiles,
+    resolvePermission,
+    resolveDialog,
+    openDownload,
+    clearNetwork,
+    setVisible,
+    setBounds,
+  };
+}
+
+function normalizeState(state: NoriBrowserState): NoriBrowserState {
+  return {
+    ...state,
+    tabs: state.tabs.map(tab => ({
+      ...tab,
+      annotationMode: tab.annotationMode ?? false,
+      annotations: tab.annotations ?? [],
+      network: tab.network ?? [],
+    })),
+    automation: state.automation ?? EMPTY_STATE.automation,
+    downloads: state.downloads ?? [],
+    permissions: state.permissions ?? EMPTY_STATE.permissions,
+    dialogs: state.dialogs ?? [],
   };
 }

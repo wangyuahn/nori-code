@@ -1,4 +1,5 @@
 export interface CodeChangeSummary {
+  readonly operationId: string;
   readonly operation: 'edit' | 'write';
   readonly path: string;
   readonly diff: string;

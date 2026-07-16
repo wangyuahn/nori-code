@@ -12,7 +12,7 @@ import { z } from 'zod';
 
 import type { BuiltinTool } from '../../../agent/tool';
 import { ToolAccesses } from '../../../loop/tool-access';
-import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
+import type { ExecutableToolContext, ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import { resolvePathAccessPath } from '../../policies/path-access';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
@@ -80,11 +80,11 @@ export class WriteTool implements BuiltinTool<WriteInput> {
           pathClass: this.kaos.pathClass(),
           homeDir: this.kaos.gethome(),
         }),
-      execute: () => this.execution(args, path),
+      execute: (context) => this.execution(args, path, context),
     };
   }
 
-  private async execution(args: WriteInput, safePath: string): Promise<ExecutableToolResult> {
+  private async execution(args: WriteInput, safePath: string, context: ExecutableToolContext): Promise<ExecutableToolResult> {
     const parentError = await this.ensureParentDirectory(safePath);
     if (parentError !== undefined) {
       return { isError: true, output: parentError };
@@ -105,7 +105,7 @@ export class WriteTool implements BuiltinTool<WriteInput> {
       // is not used here.
       const bytesWritten = Buffer.byteLength(args.content, 'utf8');
       const after = mode === 'append' ? before + args.content : args.content;
-      this.reportChange?.({ operation: 'write', path: args.path, diff: summarizeChangedLines(before, after), occurredAt: new Date().toISOString() });
+      this.reportChange?.({ operationId: context.toolCallId, operation: 'write', path: args.path, diff: summarizeChangedLines(before, after), occurredAt: new Date().toISOString() });
       return {
         output: `${mode === 'append' ? 'Appended' : 'Wrote'} ${String(bytesWritten)} bytes to ${args.path}`,
       };

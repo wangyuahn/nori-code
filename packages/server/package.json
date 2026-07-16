@@ -17,6 +17,8 @@
   "imports": {
     "#/services/approval": "./src/services/approval/index.ts",
     "#/services/approval/*": "./src/services/approval/*.ts",
+    "#/services/browser": "./src/services/browser/index.ts",
+    "#/services/browser/*": "./src/services/browser/*.ts",
     "#/services/gateway": "./src/services/gateway/index.ts",
     "#/services/gateway/*": "./src/services/gateway/*.ts",
     "#/services/guiStore/*": "./src/services/guiStore/*.ts",

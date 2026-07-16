@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_AGENT_PROFILES,
   configuredSubagentProfiles,
+  renderConfiguredAgentList,
   loadAgentProfilesFromDir,
   loadAgentProfilesFromSources,
   resolveAgentProfiles,
@@ -165,6 +166,17 @@ describe('default agent profiles', () => {
     expect(profiles?.['reviewer']?.tools).not.toContain('Bash');
     expect(profiles?.['reviewer']?.systemPrompt(promptContext)).toContain('<custom_agent_role>\nFind correctness bugs.');
     expect(profiles?.['disabled']).toBeUndefined();
+  });
+
+  it('renders enabled custom agents and their permissions for the model prompt', () => {
+    const listing = renderConfiguredAgentList({
+      reviewer: { description: 'Review risky changes', role: 'Find correctness bugs.', baseProfile: 'explore', enabled: true, permissions: { read: true, web: true } },
+      disabled: { description: 'Disabled', role: 'Do nothing.', baseProfile: 'coder', enabled: false },
+    });
+    expect(listing).toContain('<agent name="reviewer" base_profile="explore">');
+    expect(listing).toContain('Role: Find correctness bugs.');
+    expect(listing).toContain('Permissions: read, web');
+    expect(listing).not.toContain('disabled');
   });
 
   it('links bundled subagents and keeps role-specific tool sets observable', () => {

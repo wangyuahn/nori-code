@@ -23,6 +23,7 @@ tools:
   - Glob
   - WebSearch
   - FetchURL
+  - Browser
   - ReadMediaFile
   - TodoList
   - TaskList

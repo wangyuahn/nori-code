@@ -1,5 +1,6 @@
 import { readApiErrorMessage } from './api-error';
 import { isRecord } from './utils';
+import { reasoningMetadataFromRecord } from './reasoning-options';
 
 // ── types formerly from managed-kimi-code ──
 
@@ -224,7 +225,11 @@ function toStringArrayOrUndefined(value: unknown): readonly string[] | undefined
   return out;
 }
 
-function toModelEntry(value: unknown, fallbackId: string): CustomRegistryModelEntry | undefined {
+function toModelEntry(
+  value: unknown,
+  fallbackId: string,
+  providerType: string,
+): CustomRegistryModelEntry | undefined {
   if (!isRecord(value)) return undefined;
   const rawId = value['id'];
   const id =
@@ -264,8 +269,12 @@ function toModelEntry(value: unknown, fallbackId: string): CustomRegistryModelEn
   if (typeof value['tool_call'] === 'boolean') entry.tool_call = value['tool_call'];
   if (typeof value['reasoning'] === 'boolean') entry.reasoning = value['reasoning'];
 
-  const supportEfforts = toStringArrayOrUndefined(value['support_efforts']);
+  const reasoningMetadata = reasoningMetadataFromRecord(value, providerType, id);
+  const supportEfforts = reasoningMetadata.efforts;
   if (supportEfforts !== undefined) entry.support_efforts = supportEfforts;
+  if (entry.reasoning === undefined && reasoningMetadata.supported !== undefined) {
+    entry.reasoning = reasoningMetadata.supported;
+  }
   const defaultEffort = value['default_effort'];
   if (typeof defaultEffort === 'string' && defaultEffort.length > 0) {
     entry.default_effort = defaultEffort;
@@ -302,7 +311,7 @@ function toProviderEntry(value: unknown, registryKey: string): CustomRegistryPro
 
   const parsedModels: Record<string, CustomRegistryModelEntry> = {};
   for (const [key, raw] of Object.entries(models)) {
-    const modelEntry = toModelEntry(raw, key);
+    const modelEntry = toModelEntry(raw, key, type);
     if (modelEntry === undefined) continue;
     parsedModels[key] = modelEntry;
   }

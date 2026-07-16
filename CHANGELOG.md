@@ -1,7 +1,26 @@
 # Changelog
 
 ## Unreleased
-- Recover Nori Work startup from stale or incompatible local-server locks, and ensure the bundled backend replaces older globally installed servers before connecting.
+
+## v1.0.0-pre.0
+### Features
+- Add the multi-tab Nori Work browser with Agent navigation, stable-reference snapshots, interaction, uploads, screenshots, diagnostics, annotations, local HTML support, user takeover, and immediate no-page errors.
+- Add configurable custom Agent roles and permissions, built-in LSP operations, persistent terminals, movable inspector tools, and standalone inspector windows.
+- Keep Agent and AgentSwarm execution in the background with project/session ownership, nested activity, output previews, token accounting, pause/guide/resume/stop controls, and main-Agent wakeups on completion or failure.
+- Present project changes, file previews, and Git operations in one cached project-scoped inspector, including per-Agent edit attribution and accumulated edits to the same file.
+- Make project memory Obsidian-compatible with vault-relative links, outgoing links, backlinks, a movable knowledge graph, legacy-layout migration, and optional vector retrieval through a dedicated embedding provider.
+- Improve streaming chat, tool placement, Markdown rendering, image/file input, session organization, usage dashboards, rewind, approval modes, goals, prompts, and provider/model configuration.
+
+### Fixes
+- Return an immediate actionable Browser error for `snapshot`, interaction, screenshot, and diagnostics actions when no page is open instead of waiting for the bridge timeout.
+- Keep Browser tools available through bridge startup and reconnection, and keep long-running browser actions alive with independent heartbeats.
+- Allow safe local HTML preview while continuing to block arbitrary local files, remote UNC files, and privileged URL schemes.
+- Reject stale Web and SEA inputs during desktop packaging so a new renderer cannot ship with an old backend.
+- Recover desktop startup from stale or incompatible server locks and replace older bundled/global server processes before connecting.
+- Show ordinary Agent activity alongside Swarm activity, preserve project/session/nested ownership, and report completion/failure counts and states correctly.
+- Restore Chat navigation to the conversation view and session list.
+- Stop creating duplicate legacy plural Vault folders, migrate existing notes to canonical folders, and resolve Related links and backlinks by Obsidian-compatible relative paths.
+- Discover configured and installed language servers for common file types before reporting that no LSP is available.
 
 ## v0.1.18
 - Fix the settings form so selecting **New Provider** reliably opens a clean, editable provider configuration instead of snapping back to the previous connection.

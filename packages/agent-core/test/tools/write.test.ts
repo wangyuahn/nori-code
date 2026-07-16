@@ -126,6 +126,7 @@ describe('WriteTool', () => {
     expect(writeText).toHaveBeenCalledWith('/tmp/new.txt', 'hello');
     expect(result.output).toContain('Wrote 5 bytes');
     expect(reportChange).toHaveBeenCalledWith({
+      operationId: expect.any(String),
       operation: 'write',
       path: '/tmp/new.txt',
       diff: expect.stringContaining('+hello'),

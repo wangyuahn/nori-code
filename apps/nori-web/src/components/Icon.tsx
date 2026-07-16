@@ -1,4 +1,4 @@
-﻿import type { ReactNode, SVGProps } from 'react';
+import type { ReactNode, SVGProps } from 'react';
 
 export type IconName =
   | 'chat'
@@ -35,6 +35,8 @@ export type IconName =
   | 'target'
   | 'paperclip'
   | 'terminal'
+  | 'globe'
+  | 'home'
   | 'external';
 
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'name'> {
@@ -78,6 +80,8 @@ export function Icon({ name, size = 18, ...props }: IconProps) {
     target: <><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></>,
     paperclip: <path d="m20.5 11.5-8.7 8.7a6 6 0 0 1-8.5-8.5l9.4-9.4a4 4 0 0 1 5.7 5.7l-9.5 9.5a2 2 0 0 1-2.8-2.8l8.8-8.8"/>,
     terminal: <><path d="m5 7 4 4-4 4"/><path d="M11 16h8"/><rect x="2.5" y="3.5" width="19" height="17" rx="2"/></>,
+    globe: <><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.3 3 14.7 0 18M12 3c-3 3.3-3 14.7 0 18"/></>,
+    home: <><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></>,
     external: <><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6"/></>,
   };
 

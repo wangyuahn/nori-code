@@ -23,6 +23,7 @@ tools:
   - TaskStop
   - WebSearch
   - FetchURL
+  - Browser
   - Skill
   - EnterPlanMode
   - ExitPlanMode

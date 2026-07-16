@@ -5,6 +5,8 @@ import type { Kaos } from '@nori-code/kaos';
 import { normalizeAdditionalDirs } from '../config';
 import { listDirectory } from '../tools/support/list-directory';
 import type { SystemPromptContext } from './types';
+import type { CustomAgentConfig } from '../config';
+import { renderConfiguredAgentList } from './custom';
 
 // Soft budget for the combined AGENTS.md content injected into the system
 // prompt. ~32 KB is roughly 8K–20K tokens (≈1.5–3% of a 262144-token context),
@@ -17,13 +19,14 @@ const S_IFMT = 0o170000;
 const S_IFREG = 0o100000;
 
 export interface PreparedSystemPromptContext
-  extends Pick<SystemPromptContext, 'cwdListing' | 'agentsMd' | 'additionalDirsInfo'> {
+  extends Pick<SystemPromptContext, 'cwdListing' | 'agentsMd' | 'additionalDirsInfo' | 'customAgentsInfo'> {
   /** Present when the combined AGENTS.md content exceeds the recommended size. */
   readonly agentsMdWarning?: string;
 }
 
 export interface PrepareSystemPromptContextOptions {
   readonly additionalDirs?: readonly string[];
+  readonly customAgents?: Record<string, CustomAgentConfig>;
 }
 
 export async function prepareSystemPromptContext(
@@ -41,6 +44,7 @@ export async function prepareSystemPromptContext(
     cwdListing,
     agentsMd: agentsMdResult.content,
     additionalDirsInfo,
+    customAgentsInfo: renderConfiguredAgentList(options?.customAgents),
     agentsMdWarning: agentsMdResult.warning,
   };
 }

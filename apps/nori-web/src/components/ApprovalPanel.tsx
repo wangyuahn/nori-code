@@ -12,7 +12,8 @@ interface ApprovalOptions {
 
 interface ApprovalPanelProps {
   requests: ApprovalRequest[];
-  onResolve: (id: string, decision: 'approved' | 'rejected' | 'cancelled', options?: ApprovalOptions) => void;
+  onResolve: (id: string, decision: 'approved' | 'rejected' | 'cancelled', options?: ApprovalOptions) => void | Promise<void>;
+  onPermissionChange?: (mode: 'auto' | 'yolo') => void | Promise<void>;
 }
 
 interface DisplayData {
@@ -20,13 +21,15 @@ interface DisplayData {
   [key: string]: unknown;
 }
 
-export function ApprovalPanel({ requests, onResolve }: ApprovalPanelProps) {
+export function ApprovalPanel({ requests, onResolve, onPermissionChange }: ApprovalPanelProps) {
   const { tr } = useI18n();
   const [layout, setLayout] = useState<'compact' | 'stack'>('compact');
   const [activeIndex, setActiveIndex] = useState(0);
   const [remembered, setRemembered] = useState<Set<string>>(new Set());
   const [feedback, setFeedback] = useState<Record<string, string>>({});
   const [selectedLabels, setSelectedLabels] = useState<Record<string, string>>({});
+  const [switchingMode, setSwitchingMode] = useState<Record<string, 'auto' | 'yolo' | undefined>>({});
+  const [modeErrors, setModeErrors] = useState<Record<string, string | undefined>>({});
 
   useEffect(() => {
     setActiveIndex(index => Math.min(index, Math.max(0, requests.length - 1)));
@@ -45,6 +48,25 @@ export function ApprovalPanel({ requests, onResolve }: ApprovalPanelProps) {
     const requestFeedback = feedback[request.approval_id] ?? '';
     const remember = remembered.has(request.approval_id);
     const resolve = (decision: 'approved' | 'rejected' | 'cancelled', options: ApprovalOptions = {}) => onResolve(request.approval_id, decision, { remember, feedback: requestFeedback, ...options });
+    const activeModeSwitch = switchingMode[request.approval_id];
+    const switchModeAndApprove = async (mode: 'auto' | 'yolo') => {
+      if (!onPermissionChange || activeModeSwitch) return;
+      setSwitchingMode(previous => ({ ...previous, [request.approval_id]: mode }));
+      setModeErrors(previous => ({ ...previous, [request.approval_id]: undefined }));
+      try {
+        await onPermissionChange(mode);
+        await resolve('approved');
+      } catch (error) {
+        setModeErrors(previous => ({
+          ...previous,
+          [request.approval_id]: error instanceof Error
+            ? error.message
+            : tr('Unable to change permission mode.', '无法切换权限模式。'),
+        }));
+      } finally {
+        setSwitchingMode(previous => ({ ...previous, [request.approval_id]: undefined }));
+      }
+    };
 
     return <div key={request.approval_id} className={`approval-card pending approval-kind-${kind ?? 'generic'}`}>
       <div className="approval-card-header"><span className="approval-tool-icon"><Icon name={kind === 'goal_start' ? 'target' : kind === 'plan_review' ? 'list' : 'settings'} size={15}/></span><span className="approval-tool-name">{kind === 'goal_start' ? tr('Start goal', '启动目标') : kind === 'plan_review' ? tr('Review plan', '审核计划') : request.tool_name}</span><span className="approval-status approval-status--pending">{tr('Permission required', '需要授权')}</span></div>
@@ -55,10 +77,12 @@ export function ApprovalPanel({ requests, onResolve }: ApprovalPanelProps) {
 
       {(kind === 'plan_review' || kind === 'generic') && <textarea className="approval-feedback" value={requestFeedback} onChange={event => setFeedback(previous => ({ ...previous, [request.approval_id]: event.target.value }))} placeholder={tr('Optional feedback', '可选反馈')}/>} 
 
+      {modeErrors[request.approval_id] && <div className="approval-mode-error" role="alert">{modeErrors[request.approval_id]}</div>}
+
       <div className="approval-actions">
         {kind === 'goal_start' ? <GoalApprovalActions display={display} onSelect={(decision, label) => resolve(decision, { selectedLabel: label })} tr={tr}/>
           : kind === 'plan_review' ? <><button className="approval-btn approval-btn--approve" disabled={!selectedLabel} onClick={() => resolve('approved', { selectedLabel })}>{tr('Approve choice', '批准所选方案')}</button><button className="approval-btn approval-btn--decline" disabled={!requestFeedback.trim()} onClick={() => resolve('rejected', { selectedLabel: 'Revise' })}>{tr('Revise', '要求修改')}</button><button className="approval-btn approval-btn--decline" onClick={() => resolve('rejected', { selectedLabel: 'Reject' })}>{tr('Reject', '拒绝')}</button></>
-          : <><button className="approval-btn approval-btn--approve" onClick={() => resolve('approved')}>{tr('Approve', '允许')}</button><button className="approval-btn approval-btn--decline" onClick={() => resolve('rejected')}>{tr('Decline', '拒绝')}</button><label className="approval-always-allow"><input type="checkbox" checked={remember} onChange={event => setRemembered(previous => { const next = new Set(previous); if (event.target.checked) next.add(request.approval_id); else next.delete(request.approval_id); return next; })}/>{tr('Always allow this tool in this session', '本会话始终允许此工具')}</label></>}
+          : <><button className="approval-btn approval-btn--approve" disabled={Boolean(activeModeSwitch)} onClick={() => resolve('approved')}>{tr('Approve', '允许')}</button>{onPermissionChange && <><button className="approval-btn approval-btn--auto" disabled={Boolean(activeModeSwitch)} onClick={() => void switchModeAndApprove('auto')}>{activeModeSwitch === 'auto' ? tr('Switching…', '切换中…') : tr('Switch to AUTO and approve', '切换为 AUTO 并允许')}</button><button className="approval-btn approval-btn--yolo" disabled={Boolean(activeModeSwitch)} onClick={() => void switchModeAndApprove('yolo')}>{activeModeSwitch === 'yolo' ? tr('Switching…', '切换中…') : tr('Switch to YOLO and approve', '切换为 YOLO 并允许')}</button></>}<button className="approval-btn approval-btn--decline" disabled={Boolean(activeModeSwitch)} onClick={() => resolve('rejected')}>{tr('Decline', '拒绝')}</button><label className="approval-always-allow"><input type="checkbox" checked={remember} disabled={Boolean(activeModeSwitch)} onChange={event => setRemembered(previous => { const next = new Set(previous); if (event.target.checked) next.add(request.approval_id); else next.delete(request.approval_id); return next; })}/>{tr('Always allow this tool in this session', '本会话始终允许此工具')}</label></>}
       </div>
     </div>;
   };

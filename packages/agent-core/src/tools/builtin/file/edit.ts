@@ -13,7 +13,7 @@ import { z } from 'zod';
 
 import type { BuiltinTool } from '../../../agent/tool';
 import { ToolAccesses } from '../../../loop/tool-access';
-import type { ExecutableToolResult, ToolExecution } from '../../../loop/types';
+import type { ExecutableToolContext, ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import { resolvePathAccessPath } from '../../policies/path-access';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
@@ -90,11 +90,11 @@ export class EditTool implements BuiltinTool<EditInput> {
           pathClass: this.kaos.pathClass(),
           homeDir: this.kaos.gethome(),
         }),
-      execute: () => this.execution(args, path),
+      execute: (context) => this.execution(args, path, context),
     };
   }
 
-  private async execution(args: EditInput, safePath: string): Promise<ExecutableToolResult> {
+  private async execution(args: EditInput, safePath: string, context: ExecutableToolContext): Promise<ExecutableToolResult> {
     if (args.old_string === args.new_string) {
       return {
         isError: true,
@@ -136,7 +136,7 @@ export class EditTool implements BuiltinTool<EditInput> {
           safePath,
           materializeModelText(newContent, modelView.lineEndingStyle),
         );
-        this.reportChange?.({ operation: 'edit', path: args.path, diff: summarizeChangedLines(content, newContent), occurredAt: new Date().toISOString() });
+        this.reportChange?.({ operationId: context.toolCallId, operation: 'edit', path: args.path, diff: summarizeChangedLines(content, newContent), occurredAt: new Date().toISOString() });
         return { output: `Replaced 1 occurrence in ${args.path}` };
       }
 
@@ -152,7 +152,7 @@ export class EditTool implements BuiltinTool<EditInput> {
         safePath,
         materializeModelText(newContent, modelView.lineEndingStyle),
       );
-      this.reportChange?.({ operation: 'edit', path: args.path, diff: summarizeChangedLines(content, newContent), occurredAt: new Date().toISOString() });
+      this.reportChange?.({ operationId: context.toolCallId, operation: 'edit', path: args.path, diff: summarizeChangedLines(content, newContent), occurredAt: new Date().toISOString() });
       return { output: `Replaced ${String(replacementCount)} occurrences in ${args.path}` };
     } catch (error) {
       const code = (error as { code?: unknown } | null)?.code;

@@ -829,6 +829,19 @@ describe('GoogleGenAIChatProvider', () => {
       });
     });
 
+    it('maps minimal catalog effort for Gemini 3', async () => {
+      const provider = createProvider({ model: 'gemini-3-flash-preview' }).withThinking('minimal');
+      const history: Message[] = [
+        { role: 'user', content: [{ type: 'text', text: 'Think briefly' }], toolCalls: [] },
+      ];
+      const body = await captureRequestBody(provider, '', [], history);
+      const config = body['config'] as Record<string, unknown>;
+      expect(config['thinking_config']).toEqual({
+        include_thoughts: true,
+        thinking_level: 'MINIMAL',
+      });
+    });
+
     describe('Gemini 3 thinking effort mapping', () => {
       async function captureThinkingConfig(
         effort: 'off' | 'low' | 'medium' | 'high',

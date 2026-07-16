@@ -36,13 +36,13 @@ interface ServerDefinition {
   languageId: string;
   command: string;
   args: string[];
+  bundled?: boolean;
   initializationOptions?: Record<string, unknown>;
 }
 
 interface ClientRecord {
   transport?: LanguageServerTransport;
   starting?: Promise<LanguageServerTransport>;
-  error?: string;
 }
 
 export class LspService extends Disposable implements ILspService {
@@ -72,14 +72,20 @@ export class LspService extends Disposable implements ILspService {
     if (record?.transport) {
       return { available: true, running: true, server_id: definition.id, language_id: definition.languageId, capabilities: supportedOperations(record.transport.capabilities) };
     }
-    if (record?.error) {
-      return { available: false, running: false, server_id: definition.id, language_id: definition.languageId, capabilities: [], reason: record.error };
-    }
     try {
       const transport = await this.ensureClient(sessionId, resolved.root, definition);
       return { available: true, running: true, server_id: definition.id, language_id: definition.languageId, capabilities: supportedOperations(transport.capabilities) };
     } catch (error) {
-      return { available: false, running: false, server_id: definition.id, language_id: definition.languageId, capabilities: [], reason: errorMessage(error) };
+      return {
+        available: false,
+        running: false,
+        server_id: definition.id,
+        language_id: definition.languageId,
+        capabilities: [],
+        reason: definition.bundled
+          ? `${definition.id} is bundled but could not be started. ${errorMessage(error)}`
+          : `${definition.id} is configured but could not be started. Install ${definition.command} or add it to PATH. ${errorMessage(error)}`,
+      };
     }
   }
 
@@ -169,12 +175,10 @@ export class LspService extends Disposable implements ILspService {
     record.starting = this.backend.start(launch).then(transport => {
       record!.transport = transport;
       record!.starting = undefined;
-      record!.error = undefined;
       return transport;
     }).catch(error => {
       record!.starting = undefined;
-      record!.error = errorMessage(error);
-      throw new LspUnavailableError(definition.id, record!.error);
+      throw new LspUnavailableError(definition.id, errorMessage(error));
     });
     return record.starting;
   }
@@ -225,6 +229,7 @@ class NodeLanguageServerTransport implements LanguageServerTransport {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     });
+    await waitForProcessSpawn(child);
     const connection = createMessageConnection(new StreamMessageReader(child.stdout), new StreamMessageWriter(child.stdin));
     connection.listen();
     const processFailure = new Promise<never>((_resolve, reject) => {
@@ -347,23 +352,91 @@ class NodeLanguageServerTransport implements LanguageServerTransport {
   }
 }
 
-function serverDefinition(filePath: string): ServerDefinition | undefined {
-  const extension = path.extname(filePath).toLowerCase();
-  if (['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs'].includes(extension)) {
-    const packageRoot = path.dirname(require.resolve('typescript-language-server/package.json'));
-    return {
-      id: 'typescript-language-server',
-      languageId: ['.ts', '.mts', '.cts'].includes(extension) ? 'typescript' : extension === '.tsx' ? 'typescriptreact' : extension === '.jsx' ? 'javascriptreact' : 'javascript',
-      command: process.execPath,
-      args: [path.join(packageRoot, 'lib', 'cli.mjs'), '--stdio'],
-      initializationOptions: { tsserver: { path: require.resolve('typescript/lib/tsserver.js') } },
+function waitForProcessSpawn(child: ChildProcessWithoutNullStreams): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onSpawn = () => {
+      child.off('error', onError);
+      resolve();
     };
+    const onError = (error: Error) => {
+      child.off('spawn', onSpawn);
+      reject(error);
+    };
+    child.once('spawn', onSpawn);
+    child.once('error', onError);
+  });
+}
+
+export function serverDefinition(filePath: string): ServerDefinition | undefined {
+  const extension = path.extname(filePath).toLowerCase();
+  const fileName = path.basename(filePath).toLowerCase();
+  if (['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts', '.mjs', '.cjs'].includes(extension)) {
+    return typescriptServerDefinition(extension);
   }
-  if (extension === '.py') return { id: 'pyright', languageId: 'python', command: 'pyright-langserver', args: ['--stdio'] };
-  if (extension === '.rs') return { id: 'rust-analyzer', languageId: 'rust', command: 'rust-analyzer', args: [] };
-  if (extension === '.go') return { id: 'gopls', languageId: 'go', command: 'gopls', args: ['serve'] };
-  if (['.c', '.h', '.cc', '.cpp', '.cxx', '.hpp'].includes(extension)) return { id: 'clangd', languageId: extension === '.c' ? 'c' : 'cpp', command: 'clangd', args: ['--background-index'] };
-  return undefined;
+  if (fileName === 'dockerfile' || fileName.startsWith('dockerfile.')) {
+    return { id: 'docker-langserver', languageId: 'dockerfile', command: 'docker-langserver', args: ['--stdio'] };
+  }
+  const definitions: Record<string, ServerDefinition> = {
+    '.py': bundledNodeServer('pyright', 'python', 'pyright', 'langserver.index.js', ['--stdio']),
+    '.rs': { id: 'rust-analyzer', languageId: 'rust', command: 'rust-analyzer', args: [] },
+    '.go': { id: 'gopls', languageId: 'go', command: 'gopls', args: ['serve'] },
+    '.c': { id: 'clangd', languageId: 'c', command: 'clangd', args: ['--background-index'] },
+    '.h': { id: 'clangd', languageId: 'cpp', command: 'clangd', args: ['--background-index'] },
+    '.cc': { id: 'clangd', languageId: 'cpp', command: 'clangd', args: ['--background-index'] },
+    '.cpp': { id: 'clangd', languageId: 'cpp', command: 'clangd', args: ['--background-index'] },
+    '.cxx': { id: 'clangd', languageId: 'cpp', command: 'clangd', args: ['--background-index'] },
+    '.hpp': { id: 'clangd', languageId: 'cpp', command: 'clangd', args: ['--background-index'] },
+    '.hh': { id: 'clangd', languageId: 'cpp', command: 'clangd', args: ['--background-index'] },
+    '.json': bundledNodeServer('vscode-json-language-server', 'json', 'vscode-langservers-extracted', 'bin/vscode-json-language-server', ['--stdio']),
+    '.jsonc': bundledNodeServer('vscode-json-language-server', 'jsonc', 'vscode-langservers-extracted', 'bin/vscode-json-language-server', ['--stdio']),
+    '.html': bundledNodeServer('vscode-html-language-server', 'html', 'vscode-langservers-extracted', 'bin/vscode-html-language-server', ['--stdio']),
+    '.htm': bundledNodeServer('vscode-html-language-server', 'html', 'vscode-langservers-extracted', 'bin/vscode-html-language-server', ['--stdio']),
+    '.css': bundledNodeServer('vscode-css-language-server', 'css', 'vscode-langservers-extracted', 'bin/vscode-css-language-server', ['--stdio']),
+    '.scss': bundledNodeServer('vscode-css-language-server', 'scss', 'vscode-langservers-extracted', 'bin/vscode-css-language-server', ['--stdio']),
+    '.less': bundledNodeServer('vscode-css-language-server', 'less', 'vscode-langservers-extracted', 'bin/vscode-css-language-server', ['--stdio']),
+    '.yaml': bundledNodeServer('yaml-language-server', 'yaml', 'yaml-language-server', 'bin/yaml-language-server', ['--stdio']),
+    '.yml': bundledNodeServer('yaml-language-server', 'yaml', 'yaml-language-server', 'bin/yaml-language-server', ['--stdio']),
+    '.md': bundledNodeServer('vscode-markdown-language-server', 'markdown', 'vscode-langservers-extracted', 'bin/vscode-markdown-language-server', ['--stdio']),
+    '.mdx': bundledNodeServer('vscode-markdown-language-server', 'markdown', 'vscode-langservers-extracted', 'bin/vscode-markdown-language-server', ['--stdio']),
+    '.sh': bundledNodeServer('bash-language-server', 'shellscript', 'bash-language-server', 'out/cli.js', ['start']),
+    '.bash': bundledNodeServer('bash-language-server', 'shellscript', 'bash-language-server', 'out/cli.js', ['start']),
+    '.zsh': bundledNodeServer('bash-language-server', 'shellscript', 'bash-language-server', 'out/cli.js', ['start']),
+    '.java': { id: 'jdtls', languageId: 'java', command: 'jdtls', args: [] },
+    '.cs': { id: 'omnisharp', languageId: 'csharp', command: 'OmniSharp', args: ['-lsp'] },
+    '.php': { id: 'intelephense', languageId: 'php', command: 'intelephense', args: ['--stdio'] },
+    '.rb': { id: 'solargraph', languageId: 'ruby', command: 'solargraph', args: ['stdio'] },
+    '.lua': { id: 'lua-language-server', languageId: 'lua', command: 'lua-language-server', args: [] },
+    '.vue': bundledNodeServer('vue-language-server', 'vue', '@vue/language-server', 'bin/vue-language-server.js', ['--stdio']),
+    '.svelte': bundledNodeServer('svelteserver', 'svelte', 'svelte-language-server', 'bin/server.js', ['--stdio']),
+    '.tf': { id: 'terraform-ls', languageId: 'terraform', command: 'terraform-ls', args: ['serve'] },
+    '.kt': { id: 'kotlin-language-server', languageId: 'kotlin', command: 'kotlin-language-server', args: [] },
+    '.kts': { id: 'kotlin-language-server', languageId: 'kotlin', command: 'kotlin-language-server', args: [] },
+    '.dart': { id: 'dart-language-server', languageId: 'dart', command: 'dart', args: ['language-server', '--protocol=lsp'] },
+  };
+  return definitions[extension];
+}
+
+function typescriptServerDefinition(extension: string): ServerDefinition {
+  const packageRoot = path.dirname(require.resolve('typescript-language-server/package.json'));
+  return {
+    id: 'typescript-language-server',
+    languageId: ['.ts', '.mts', '.cts'].includes(extension) ? 'typescript' : extension === '.tsx' ? 'typescriptreact' : extension === '.jsx' ? 'javascriptreact' : 'javascript',
+    command: process.execPath,
+    args: [path.join(packageRoot, 'lib', 'cli.mjs'), '--stdio'],
+    bundled: true,
+    initializationOptions: { tsserver: { path: require.resolve('typescript/lib/tsserver.js') } },
+  };
+}
+
+function bundledNodeServer(id: string, languageId: string, packageName: string, entry: string, args: string[]): ServerDefinition {
+  const packageRoot = path.dirname(require.resolve(`${packageName}/package.json`));
+  return {
+    id,
+    languageId,
+    command: process.execPath,
+    args: [path.join(packageRoot, entry), ...args],
+    bundled: true,
+  };
 }
 
 function languageIdForPath(filePath: string): string {

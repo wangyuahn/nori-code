@@ -28,12 +28,13 @@ export function modelThinkingOptions(
   if (declaredEfforts.length > 0) {
     const choices = declaredEfforts.map(value => ({
       value,
-      kind: value === 'off' ? 'fast' as const : 'effort' as const,
+      kind: value === 'off' || value === 'none' ? 'fast' as const : 'effort' as const,
     }));
-    if (!alwaysThinking && !choices.some(choice => choice.value === 'off')) {
+    const hasDisabledChoice = choices.some(choice => choice.value === 'off' || choice.value === 'none');
+    if (!alwaysThinking && !hasDisabledChoice) {
       choices.unshift({ value: 'off', kind: 'fast' });
     }
-    const selectableEfforts = choices.filter(choice => choice.value !== 'off');
+    const selectableEfforts = choices.filter(choice => choice.value !== 'off' && choice.value !== 'none');
     const declaredDefault = model.default_effort;
     const defaultValue = declaredDefault !== undefined
       && choices.some(choice => choice.value === declaredDefault)

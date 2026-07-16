@@ -10,7 +10,7 @@ import './styles/nori-theme.css';
 initializeTheme();
 const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
 const inspector = hashParams.get('inspector') as InspectorTab | null;
-const content = inspector && ['preview', 'changes', 'git', 'lsp', 'terminal'].includes(inspector)
+const content = inspector && ['preview', 'changes', 'browser', 'git', 'lsp', 'terminal'].includes(inspector)
   ? <InspectorPopout tab={inspector} sessionId={hashParams.get('session')} path={hashParams.get('path') ?? ''}/>
   : <App />;
 

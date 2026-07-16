@@ -9,14 +9,31 @@ contextBridge.exposeInMainWorld('noriDesktop', {
     ipcRenderer.on('nori:toggleMode', handler);
     return () => ipcRenderer.removeListener('nori:toggleMode', handler);
   },
+  browserGetState: () => ipcRenderer.invoke('nori:browser:get-state'),
   browserNavigate: (url: string) => ipcRenderer.invoke('nori:browser:navigate', url),
+  browserNewTab: (url?: string) => ipcRenderer.invoke('nori:browser:new-tab', url),
+  browserCloseTab: (tabId: string) => ipcRenderer.invoke('nori:browser:close-tab', tabId),
+  browserActivateTab: (tabId: string) => ipcRenderer.invoke('nori:browser:activate-tab', tabId),
   browserGoBack: () => ipcRenderer.send('nori:browser:back'),
   browserGoForward: () => ipcRenderer.send('nori:browser:forward'),
   browserReload: () => ipcRenderer.send('nori:browser:reload'),
+  browserStop: () => ipcRenderer.send('nori:browser:stop'),
   browserOpenDevTools: () => ipcRenderer.send('nori:browser:devtools'),
-  browserSetVisible: (visible: boolean) => {
-    ipcRenderer.send(visible ? 'nori:browser:show' : 'nori:browser:hide');
-  },
+  browserOpenExternal: () => ipcRenderer.invoke('nori:browser:open-external'),
+  browserSetAnnotationMode: (enabled: boolean) => ipcRenderer.invoke('nori:browser:annotation-mode', enabled),
+  browserClearAnnotations: () => ipcRenderer.invoke('nori:browser:clear-annotations'),
+  browserUpdateAnnotation: (id: string, note: string) => ipcRenderer.invoke('nori:browser:update-annotation', id, note),
+  browserSetAutomationPaused: (paused: boolean) => ipcRenderer.invoke('nori:browser:set-automation-paused', paused),
+  browserChooseUploadFiles: () => ipcRenderer.invoke('nori:browser:choose-upload'),
+  browserResolvePermission: (id: string, decision: string) => ipcRenderer.invoke('nori:browser:resolve-permission', id, decision),
+  browserResolveDialog: (id: string, accept: boolean, promptText?: string) => ipcRenderer.invoke('nori:browser:resolve-dialog', id, accept, promptText),
+  browserOpenDownload: (id: string) => ipcRenderer.invoke('nori:browser:open-download', id),
+  browserClearNetwork: (tabId?: string) => ipcRenderer.invoke('nori:browser:clear-network', tabId),
+  ...(process.env['NORI_BROWSER_SMOKE'] === '1'
+    ? { browserExecuteActionForSmoke: (request: Record<string, unknown>) => ipcRenderer.invoke('nori:browser:execute-action-smoke', request) }
+    : {}),
+  browserSetVisible: (visible: boolean) => ipcRenderer.invoke('nori:browser:set-visible', visible),
+  browserResize: (bounds: { x: number; y: number; width: number; height: number }) => ipcRenderer.send('nori:browser:resize', bounds),
   onBrowserState: (callback: (state: Record<string, unknown>) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, state: Record<string, unknown>) => callback(state);
     ipcRenderer.on('nori:browser:state', handler);

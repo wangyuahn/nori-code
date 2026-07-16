@@ -89,6 +89,7 @@ export class RealtimeSubscriptionGate {
 }
 
 export interface CodeChange {
+  operationId?: string;
   agentId: string;
   operation: 'edit' | 'write';
   path: string;
@@ -156,6 +157,7 @@ interface WsPayload {
   reason?: string;
   error?: { message?: string; code?: string; [key: string]: unknown };
   agentId?: string;
+  operationId?: string;
   operation?: 'edit' | 'write';
   path?: string;
   diff?: string;
@@ -1013,6 +1015,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
             case 'code.change':
               if (payload.path && payload.operation && payload.diff !== undefined) {
                 const change: CodeChange = {
+                  operationId: payload.operationId,
                   agentId: payload.agentId || 'main',
                   operation: payload.operation,
                   path: payload.path.replaceAll('\\', '/'),
@@ -1247,6 +1250,8 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     await api.sessions.undo(sessionId, count);
     clearDraft();
     setPendingApprovals([]);
+    setPendingQuestions([]);
+    setQueuedPrompts([]);
     setIsStreaming(false);
     hasUserPromptRef.current = true;
     await refreshHistory(sessionId, true);

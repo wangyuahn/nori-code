@@ -12,6 +12,7 @@ import type { Event } from '@nori-code/protocol';
 
 import { ApprovalService } from '#/services/approval/approvalService';
 import { QuestionService } from '#/services/question/questionService';
+import { BrowserAutomationService } from '#/services/browser/browserService';
 import {
   ISessionClientsService,
   type ISessionClientsService as ISessionClientsServiceT,
@@ -159,6 +160,83 @@ afterEach(() => {
   for (const dir of tmpHomeDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+describe('BrowserAutomationService', () => {
+  it('keeps the Browser executor available before a desktop bridge connects', async () => {
+    const service = new BrowserAutomationService();
+    const executor = service.bind({ sessionId: 'session-a', agentId: 'main' });
+
+    await expect(executor.execute(
+      { action: 'snapshot' },
+      { toolCallId: 'tool-offline', signal: new AbortController().signal },
+    )).resolves.toMatchObject({
+      ok: false,
+      output: expect.stringContaining('bridge is unavailable'),
+    });
+    service.dispose();
+  });
+
+  it('restores an expired client from a heartbeat without losing its pause state', () => {
+    const service = new BrowserAutomationService();
+    service.heartbeat('desktop-1', true);
+    expect(service.getState()).toMatchObject({ connected: true, paused: true });
+
+    service.registerClient('desktop-1');
+    expect(service.getState()).toMatchObject({ connected: true, paused: true });
+    service.dispose();
+  });
+
+  it('preserves session and agent ownership through the desktop round trip', async () => {
+    const service = new BrowserAutomationService();
+    service.registerClient('desktop-1');
+    const resultPromise = service.bind({ sessionId: 'session-a', agentId: 'sub-2' })!.execute(
+      { action: 'snapshot' },
+      { toolCallId: 'tool-7', signal: new AbortController().signal },
+    );
+    const action = await service.nextAction('desktop-1', 0);
+    expect(action).toMatchObject({
+      sessionId: 'session-a',
+      agentId: 'sub-2',
+      toolCallId: 'tool-7',
+      request: { action: 'snapshot' },
+    });
+    expect(service.resolveAction('desktop-1', action!.id, { ok: true, output: 'ready' })).toBe(true);
+    await expect(resultPromise).resolves.toEqual({ ok: true, output: 'ready' });
+    service.dispose();
+  });
+
+  it('requeues an assigned action when a desktop disconnects', async () => {
+    const service = new BrowserAutomationService();
+    service.registerClient('desktop-1');
+    service.registerClient('desktop-2');
+    const resultPromise = service.bind({ sessionId: 'session-a', agentId: 'main' })!.execute(
+      { action: 'click', ref: 'n9' },
+      { toolCallId: 'tool-8', signal: new AbortController().signal },
+    );
+    const first = await service.nextAction('desktop-1', 0);
+    service.unregisterClient('desktop-1');
+    const reassigned = await service.nextAction('desktop-2', 0);
+    expect(reassigned?.id).toBe(first?.id);
+    service.resolveAction('desktop-2', reassigned!.id, { ok: true, output: 'clicked' });
+    await expect(resultPromise).resolves.toMatchObject({ ok: true });
+    service.dispose();
+  });
+
+  it('settles an aborted action and rejects late desktop results', async () => {
+    const service = new BrowserAutomationService();
+    service.registerClient('desktop-1');
+    const controller = new AbortController();
+    const resultPromise = service.bind({ sessionId: 'session-a', agentId: 'main' })!.execute(
+      { action: 'wait', timeoutMs: 10_000 },
+      { toolCallId: 'tool-9', signal: controller.signal },
+    );
+    const action = await service.nextAction('desktop-1', 0);
+    controller.abort();
+    await expect(resultPromise).rejects.toThrow('aborted');
+    expect(service.resolveAction('desktop-1', action!.id, { ok: true, output: 'late' })).toBe(false);
+    service.dispose();
+  });
 });
 
 describe('WSBroadcastService (WS transport pump)', () => {

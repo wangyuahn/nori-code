@@ -164,6 +164,7 @@ function buildTemplateVars(
     KIMI_AGENTS_MD: context.agentsMd ?? '',
     KIMI_SKILLS: tools.includes('Skill') ? skills : '',
     KIMI_ADDITIONAL_DIRS_INFO: context.additionalDirsInfo ?? '',
+    KIMI_CUSTOM_AGENTS: context.customAgentsInfo ?? '',
     ROLE_ADDITIONAL:
       context.roleAdditional ?? promptVars['ROLE_ADDITIONAL'] ?? promptVars['roleAdditional'] ?? '',
 

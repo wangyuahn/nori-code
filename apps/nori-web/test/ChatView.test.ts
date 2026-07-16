@@ -182,7 +182,7 @@ describe('chat image attachments', () => {
     await vi.waitFor(() => {
       expect(container.querySelector('.composer-attachment')).toBeNull();
       expect(container.querySelector('[role="status"]')?.textContent).toContain('does not support image input');
-    });
+    }, { timeout: 3_000 });
   });
 });
 
@@ -232,6 +232,23 @@ describe('model thinking options', () => {
         { value: 'high', kind: 'effort' },
       ],
       defaultValue: 'high',
+    });
+  });
+
+  it('uses a declared none effort as Fast without adding a duplicate off choice', () => {
+    expect(modelThinkingOptions({
+      ...model('catalog-reasoning-model', ['tool_use', 'thinking']),
+      support_efforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'],
+    })).toEqual({
+      choices: [
+        { value: 'none', kind: 'fast' },
+        { value: 'minimal', kind: 'effort' },
+        { value: 'low', kind: 'effort' },
+        { value: 'medium', kind: 'effort' },
+        { value: 'high', kind: 'effort' },
+        { value: 'xhigh', kind: 'effort' },
+      ],
+      defaultValue: 'medium',
     });
   });
 
@@ -298,22 +315,82 @@ describe('interactive user questions', () => {
   });
 });
 
+describe('tool permission controls', () => {
+  it('switches the session to AUTO before approving the pending tool', async () => {
+    const calls: string[] = [];
+    const onPermissionChange = vi.fn(async (mode: 'auto' | 'yolo' | 'manual') => {
+      calls.push(`mode:${mode}`);
+    });
+    const onResolveApproval = vi.fn(async (_id, decision) => {
+      calls.push(`resolve:${decision}`);
+    });
+    const { container } = await renderChat({
+      pendingApprovals: [approvalRequest()],
+      onPermissionChange,
+      onResolveApproval,
+    });
+    const button = Array.from(container.querySelectorAll<HTMLButtonElement>('.approval-actions button'))
+      .find(candidate => candidate.textContent?.includes('Switch to AUTO'));
+
+    await act(async () => {
+      button?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(onPermissionChange).toHaveBeenCalledWith('auto');
+    expect(onResolveApproval).toHaveBeenCalledWith(
+      'approval-1',
+      'approved',
+      expect.objectContaining({ remember: false }),
+    );
+    expect(calls).toEqual(['mode:auto', 'resolve:approved']);
+  });
+});
+
 describe('chat rewind', () => {
-  it('fills the restored prompt into the composer after rewind succeeds', async () => {
+  it('restores an editable composer with the caret at the end after rewind succeeds', async () => {
     const onRewind = vi.fn(async () => 'prompt restored from history');
     const { container } = await renderChat({ onRewind });
+    const previousInput = container.querySelector<HTMLTextAreaElement>('.chat-input')!;
 
     await act(async () => {
       container.querySelector<HTMLButtonElement>('.message-rewind-btn')!.click();
       await Promise.resolve();
+      await new Promise<void>(resolve => requestAnimationFrame(() => { resolve(); }));
     });
 
     expect(onRewind).toHaveBeenCalledWith(1);
-    expect(container.querySelector<HTMLTextAreaElement>('.chat-input')!.value).toBe('prompt restored from history');
+    const restoredInput = container.querySelector<HTMLTextAreaElement>('.chat-input')!;
+    expect(restoredInput).not.toBe(previousInput);
+    expect(restoredInput.value).toBe('prompt restored from history');
+    expect(restoredInput.selectionStart).toBe(restoredInput.value.length);
+    expect(restoredInput.selectionEnd).toBe(restoredInput.value.length);
+
+    await enterText(restoredInput, `${restoredInput.value} with a new instruction`);
+    expect(container.querySelector<HTMLTextAreaElement>('.chat-input')!.value)
+      .toBe('prompt restored from history with a new instruction');
   });
 });
 
 describe('live response controls', () => {
+  it('merges a wake-up stream into the existing assistant bubble immediately', async () => {
+    const { container } = await renderChat({
+      messages: [
+        { id: 'user-1', role: 'user', text: 'Run the swarm' },
+        { id: 'assistant-1', role: 'assistant', text: 'The swarm is running.' },
+      ],
+      streaming: 'The swarm completed successfully.',
+      isStreaming: true,
+    });
+
+    const assistantMessages = container.querySelectorAll('.chat-message-assistant');
+    expect(assistantMessages).toHaveLength(1);
+    expect(assistantMessages[0]?.textContent).toContain('The swarm is running.');
+    expect(assistantMessages[0]?.textContent).toContain('The swarm completed successfully.');
+    expect(assistantMessages[0]?.classList.contains('chat-message-streaming')).toBe(true);
+  });
+
   it('serializes immediate guidance and keeps the draft until steering succeeds', async () => {
     let resolveSteer!: (accepted: boolean) => void;
     const onSendMessage = vi.fn(() => new Promise<boolean>(resolve => { resolveSteer = resolve; }));
@@ -496,5 +573,18 @@ function questionRequest(): QuestionRequest {
       other_label: 'Other',
       other_description: 'Describe another approach',
     }],
+  };
+}
+
+function approvalRequest(): ApprovalRequest {
+  return {
+    approval_id: 'approval-1',
+    session_id: 'session-1',
+    tool_call_id: 'tool-1',
+    tool_name: 'Bash',
+    action: 'Run pnpm test',
+    tool_input_display: { kind: 'command', command: 'pnpm test' },
+    created_at: '2026-07-15T00:00:00.000Z',
+    expires_at: '2026-07-15T00:05:00.000Z',
   };
 }

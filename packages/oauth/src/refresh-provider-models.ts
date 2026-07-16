@@ -7,6 +7,7 @@ import {
   isOfficialKimiCodingEndpoint,
   OFFICIAL_KIMI_CODING_INPUT_CAPABILITIES,
 } from './provider-capabilities';
+import { reasoningMetadataFromRecord } from './reasoning-options';
 
 export interface RefreshProviderHost {
   getConfig(): Promise<ManagedKimiConfigShape>;
@@ -107,12 +108,6 @@ function isChatModel(id: string): boolean {
   return !lower.includes('embedding') && !/(^|[-_/])embed($|[-_/])/.test(lower);
 }
 
-function normalizeEfforts(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const efforts = value.filter((item): item is string => typeof item === 'string' && item.length > 0);
-  return efforts.length > 0 ? [...new Set(efforts)] : undefined;
-}
-
 function capabilitiesFor(
   record: ProviderRecord,
   id: string,
@@ -154,6 +149,7 @@ function thinkingSupportFor(
 
 function normalizeModels(
   payload: unknown,
+  providerType: string,
   endpointCapabilities: readonly string[] = [],
 ): DiscoveredModel[] {
   if (typeof payload !== 'object' || payload === null) throw new Error('Model endpoint returned an invalid JSON object.');
@@ -175,13 +171,14 @@ function normalizeModels(
     if (rawId === undefined) continue;
     const id = rawId.replace(/^models\//, '');
     if (!isChatModel(id)) continue;
-    const efforts = normalizeEfforts(record['support_efforts'] ?? record['supported_efforts']);
+    const reasoning = reasoningMetadataFromRecord(record, providerType, id);
+    const efforts = reasoning.efforts;
     models.set(id, {
       id,
       displayName: stringField(record, 'display_name') ?? stringField(record, 'displayName') ?? stringField(record, 'name'),
       maxContextSize: positiveInteger(record['context_window'], record['context_length'], record['max_context_size'], record['inputTokenLimit']),
       capabilities: capabilitiesFor(record, id, efforts, endpointCapabilities),
-      thinkingSupport: thinkingSupportFor(record, id, efforts),
+      thinkingSupport: reasoning.supported ?? thinkingSupportFor(record, id, efforts),
       supportEfforts: efforts,
       defaultEffort: stringField(record, 'default_effort'),
     });
@@ -192,6 +189,7 @@ function normalizeModels(
 async function enrichModelsFromCatalog(
   discovered: DiscoveredModel[],
   provider: ProviderRecord,
+  providerType: string,
   signal: AbortSignal,
   userAgent?: string,
 ): Promise<DiscoveredModel[]> {
@@ -234,7 +232,8 @@ async function enrichModelsFromCatalog(
   return discovered.map(model => {
     const record = byId.get(model.id);
     if (record === undefined) return model;
-    const efforts = normalizeEfforts(record['support_efforts'] ?? record['supported_efforts']);
+    const reasoning = reasoningMetadataFromRecord(record, providerType, model.id);
+    const efforts = reasoning.efforts;
     const limit = recordField(record, 'limit');
     const catalogCapabilities = capabilitiesFor(record, model.id, efforts);
     return {
@@ -242,7 +241,7 @@ async function enrichModelsFromCatalog(
       displayName: stringField(record, 'name') ?? model.displayName,
       maxContextSize: positiveInteger(limit?.['context']) ?? model.maxContextSize,
       capabilities: [...new Set([...(model.capabilities ?? []), ...catalogCapabilities])],
-      thinkingSupport: thinkingSupportFor(record, model.id, efforts) ?? model.thinkingSupport,
+      thinkingSupport: reasoning.supported ?? thinkingSupportFor(record, model.id, efforts) ?? model.thinkingSupport,
       supportEfforts: efforts ?? model.supportEfforts,
       defaultEffort: stringField(record, 'default_effort') ?? model.defaultEffort,
     };
@@ -305,8 +304,8 @@ async function discoverModels(
         const endpointCapabilities = isOfficialKimiCodingEndpoint(configuredBase)
           ? OFFICIAL_KIMI_CODING_INPUT_CAPABILITIES
           : [];
-        const discovered = normalizeModels(await readModelPayload(response, url), endpointCapabilities);
-        return await enrichModelsFromCatalog(discovered, provider, controller.signal, host.userAgent)
+        const discovered = normalizeModels(await readModelPayload(response, url), type, endpointCapabilities);
+        return await enrichModelsFromCatalog(discovered, provider, type, controller.signal, host.userAgent)
           .catch(() => discovered);
       } catch (error) {
         failures.push(error instanceof Error ? error : new Error(String(error)));

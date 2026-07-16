@@ -16,6 +16,7 @@ const COLORS: Record<Note['type'], string> = {
 
 const CLICK_MOVE_THRESHOLD = 5;
 const TYPE_CLUSTER_STRENGTH = 0.035;
+const AMBIENT_ALPHA_TARGET = 0.08;
 
 export function forceSameType(strength = TYPE_CLUSTER_STRENGTH) {
   let nodes: GraphNode[] = [];
@@ -79,12 +80,18 @@ export function VaultGraph({ notes, onOpenNote }: { notes: LinkedNote[]; onOpenN
       const position = positionsRef.current.get(id);
       return { id, note, ...position };
     });
-    const byTitle = new Map(nodes.map(node => [normalizeTitle(node.note.title), node]));
+    const byTarget = new Map<string, GraphNode>();
+    for (const node of nodes) {
+      for (const key of [node.note.path, node.note.title, node.note.path.split('/').at(-1) ?? '']) {
+        const normalized = normalizeTitle(key);
+        if (!byTarget.has(normalized)) byTarget.set(normalized, node);
+      }
+    }
     const links: GraphLink[] = [];
     const seen = new Set<string>();
     for (const node of nodes) {
       for (const target of new Set([...(node.note.links ?? []), ...extractWikiLinks(node.note.content ?? '')])) {
-        const resolved = byTitle.get(normalizeTitle(target));
+        const resolved = byTarget.get(normalizeTitle(target));
         if (!resolved || resolved.id === node.id) continue;
         const key = sorted([node.id, resolved.id]).join('\0');
         if (seen.has(key)) continue;
@@ -106,13 +113,14 @@ export function VaultGraph({ notes, onOpenNote }: { notes: LinkedNote[]; onOpenN
       .force('center', forceCenter(size.width / 2, size.height / 2))
       .force('x', forceX<GraphNode>(size.width / 2).strength(0.045))
       .force('y', forceY<GraphNode>(size.height / 2).strength(0.06))
-      .alphaMin(0.035)
+      .alphaTarget(AMBIENT_ALPHA_TARGET)
       .velocityDecay(0.5)
       .on('tick', () => {
         for (const node of graph.nodes) {
-          node.x = Math.max(24, Math.min(size.width - 190, node.x ?? size.width / 2));
-          node.y = Math.max(42, Math.min(size.height - 28, node.y ?? size.height / 2));
-          positionsRef.current.set(node.id, { x: node.x, y: node.y });
+          positionsRef.current.set(node.id, {
+            x: node.x ?? size.width / 2,
+            y: node.y ?? size.height / 2,
+          });
         }
         redraw(value => value + 1);
       });
@@ -175,7 +183,7 @@ export function VaultGraph({ notes, onOpenNote }: { notes: LinkedNote[]; onOpenN
     drag.moved ||= pointerMovedBeyondClickThreshold(drag, event);
     drag.node.fx = null;
     drag.node.fy = null;
-    simulationRef.current?.alphaTarget(0);
+    simulationRef.current?.alphaTarget(AMBIENT_ALPHA_TARGET).restart();
     suppressClickRef.current = drag.moved || event.type === 'pointercancel' ? drag.node.id : null;
     dragRef.current = null;
   };
@@ -229,7 +237,7 @@ function extractWikiLinks(content: string): string[] {
 }
 
 function normalizeTitle(value: string): string {
-  return value.replace(/^\d{4}-\d{2}-\d{2}-/, '').replace(/\.md$/i, '').trim().toLowerCase();
+  return value.replaceAll('\\', '/').replace(/^\.\//, '').replace(/\.md$/i, '').trim().toLowerCase();
 }
 
 function truncate(value: string, length: number): string {

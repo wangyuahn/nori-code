@@ -15,6 +15,7 @@
     "dev:server": "pnpm -C apps/nori-code run dev:server",
     "build:plugin-marketplace": "pnpm -C apps/nori-code run build:plugin-marketplace",
     "check:brand": "node scripts/check-nori-brand.mjs",
+    "vault:migrate": "node scripts/migrate-vault-layout.mjs",
     "vis": "pnpm -C apps/vis run dev",
     "typecheck": "pnpm run build:packages && pnpm -r --filter './packages/*' run typecheck && pnpm --filter nori-code run typecheck && pnpm --filter @nori-code/nori-web run typecheck && pnpm --filter @nori-code/vis-server run typecheck && pnpm --filter @nori-code/vis-web run typecheck && pnpm --filter @nori-code/nori-work run typecheck",
     "lint": "oxlint --type-aware",

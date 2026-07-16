@@ -29,6 +29,7 @@ import {
 import { ISnapshotService, SnapshotService, loadSnapshotConfig } from '#/services/snapshot';
 import { IGuiStoreService } from '#/services/guiStore/guiStore';
 import { GuiStoreService } from '#/services/guiStore/guiStoreService';
+import { BrowserAutomationService, IBrowserAutomationService } from '#/services/browser';
 
 export interface ServerServiceCollectionOptions {
   readonly server: ServerStartOptions;
@@ -43,6 +44,7 @@ export function createServerServiceCollection(
   const { server, app, pinoLogger, envService } = input;
 
   const snapshotConfig = loadSnapshotConfig();
+  const browserAutomation = new BrowserAutomationService();
 
   const services = new ServiceCollection(
     ...getSingletonServiceDescriptors(),
@@ -52,6 +54,7 @@ export function createServerServiceCollection(
     [IModelCatalogRefreshScheduler, new SyncDescriptor(ModelCatalogRefreshScheduler, [], false)],
     [Services.IApprovalService, new SyncDescriptor(ApprovalService, [], false)],
     [Services.IQuestionService, new SyncDescriptor(QuestionService, [], false)],
+    [IBrowserAutomationService, browserAutomation],
   );
 
   if (snapshotConfig.mode !== 'legacy') {
@@ -77,7 +80,10 @@ export function createServerServiceCollection(
   );
   services.set(
     Services.ICoreProcessService,
-    new SyncDescriptor(Services.CoreProcessService, [server.coreProcessOptions ?? {}], false),
+    new SyncDescriptor(Services.CoreProcessService, [{
+      ...server.coreProcessOptions,
+      browserProvider: browserAutomation,
+    }], false),
   );
 
   // `IAuthTokenService` (ROADMAP M2.1) is intentionally NOT registered here:

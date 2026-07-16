@@ -320,8 +320,9 @@ export class Agent {
   async refreshSystemPrompt(): Promise<void> {
     if (this.activeProfile === undefined) return;
     const context = this.systemPromptContextProvider === undefined
-      ? await prepareSystemPromptContext(this.kaos, this.brandHome, {
+        ? await prepareSystemPromptContext(this.kaos, this.brandHome, {
           additionalDirs: this.additionalDirs,
+          customAgents: this.kimiConfig?.customAgents,
         })
       : await this.systemPromptContextProvider();
     this.updateSystemPromptFromProfile(this.activeProfile, context);

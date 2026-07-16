@@ -29,6 +29,7 @@ import { registerWorkspacesRoutes } from './workspaces';
 import { registerVaultRoutes } from './vault';
 import { registerSwarmStatusRoute } from './swarmStatus';
 import { registerPhaseRoute } from './phase';
+import { registerBrowserRoutes } from './browser';
 
 interface ApiV1AppHost {
   register(
@@ -135,6 +136,7 @@ export async function registerApiV1Routes(
     registerVaultRoutes(apiV1 as unknown as Parameters<typeof registerVaultRoutes>[0], ix);
     registerSwarmStatusRoute(apiV1 as unknown as Parameters<typeof registerSwarmStatusRoute>[0], ix);
     registerPhaseRoute(apiV1 as unknown as Parameters<typeof registerPhaseRoute>[0], ix);
+    registerBrowserRoutes(apiV1 as unknown as Parameters<typeof registerBrowserRoutes>[0], ix);
 
     // NOTE: Swarm WebSocket (WS /api/v1/swarm/ws) must be registered on the
     // main Fastify app instance OUTSIDE this /api/v1 prefix register, because

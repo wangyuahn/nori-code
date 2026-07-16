@@ -75,10 +75,13 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
   protected scoreNotes(keywords: string[], options?: MemoryRetrieveOptions): MemoryNoteInfo[] {
     const allNotes = this.collectNotes(keywords, options?.type_filter);
     const linkDepth = options?.link_depth ?? 0;
-    const titleToIndex = new Map<string, number>();
+    const noteToIndex = new Map<string, number>();
     for (let i = 0; i < allNotes.length; i++) {
       const note = allNotes[i];
-      if (note !== undefined) titleToIndex.set(note.title, i);
+      if (note === undefined) continue;
+      for (const key of memoryNoteKeys(note)) {
+        if (!noteToIndex.has(key)) noteToIndex.set(key, i);
+      }
     }
 
     const adjacency = new Map<number, number[]>();
@@ -88,7 +91,7 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
       adjacency.set(
         i,
         note.links.flatMap((linkTitle) => {
-          const target = titleToIndex.get(linkTitle);
+          const target = noteToIndex.get(normalizeMemoryLink(linkTitle));
           return target === undefined ? [] : [target];
         }),
       );
@@ -197,18 +200,52 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
     const fileName = dateStr + '-' + safeName + '.md';
     const fp = path.join(dir, fileName);
 
-    const tagsYaml = params.tags?.length ? '\ntags: [' + params.tags.join(', ') + ']' : '';
-    const linksYaml = params.links?.length ? '\nlinks: [' + params.links.join(', ') + ']' : '';
+    const related = this.resolveRelatedLinks(params.links);
     const fm = [
-      '---', 'title: "' + params.title + '"', 'type: ' + params.note_type,
+      '---', `title: ${JSON.stringify(params.title)}`, `type: ${params.note_type}`,
       'date: ' + dateStr,
-      ...(tagsYaml ? [tagsYaml.trim()] : []),
-      ...(linksYaml ? [linksYaml.trim()] : []),
+      ...(params.tags?.length ? ['tags:', ...params.tags.map(tag => `  - ${JSON.stringify(tag)}`)] : []),
+      ...(related.length > 0 ? ['related:', ...related.map(link => `  - ${JSON.stringify(link)}`)] : []),
       '---',
     ].filter(l => l.length > 0).join('\n');
 
-    writeFileSync(fp, fm + '\n\n' + params.content, 'utf-8');
+    const relatedSection = related.length > 0
+      ? `\n\n## Related\n${related.map(link => `- ${link}`).join('\n')}`
+      : '';
+    writeFileSync(fp, `${fm}\n\n${params.content.trimEnd()}${relatedSection}\n`, 'utf-8');
     return { path: relative(this.vaultPath, fp).replaceAll('\\', '/') };
+  }
+
+  private resolveRelatedLinks(links: string[] | undefined): string[] {
+    if (!links?.length) return [];
+    const targets = new Map<string, { target: string; title: string }>();
+    for (const fp of this.markdownFiles(this.vaultPath).toSorted()) {
+      try {
+        const raw = readFileSync(fp, 'utf-8');
+        const { title } = this.parseFrontmatter(raw);
+        const notePath = relative(this.vaultPath, fp).replaceAll('\\', '/').replace(/\.md$/i, '');
+        const candidate = { target: notePath, title };
+        for (const key of [title, notePath, path.basename(notePath)]) {
+          const normalized = normalizeMemoryLink(key);
+          if (!targets.has(normalized)) targets.set(normalized, candidate);
+        }
+      } catch { /* skip unreadable notes */ }
+    }
+
+    const result = new Set<string>();
+    for (const rawLink of links) {
+      const parsed = parseObsidianLink(rawLink);
+      const resolved = targets.get(normalizeMemoryLink(parsed.target));
+      if (resolved !== undefined) {
+        result.add(`[[${resolved.target}|${sanitizeObsidianAlias(parsed.alias || resolved.title)}]]`);
+      } else if (parsed.target.includes('/')) {
+        result.add(`[[${parsed.target.replace(/\.md$/i, '')}${parsed.alias ? `|${sanitizeObsidianAlias(parsed.alias)}` : ''}]]`);
+      } else if (parsed.target) {
+        const unresolved = parsed.target.replaceAll(/[<>:"\\|?*]/g, '-');
+        result.add(`[[unresolved/${unresolved}|${sanitizeObsidianAlias(parsed.alias || parsed.target)}]]`);
+      }
+    }
+    return [...result];
   }
 
   async removeNote(title: string): Promise<boolean> {
@@ -509,20 +546,13 @@ function parseEmbeddingResponse(payload: unknown, expectedCount: number): number
   return vectors as number[][];
 }
 
-const MEMORY_NOTE_DIRS = [
-  'analysis',
-  'decision',
-  'decisions',
-  'task',
-  'tasks',
-  'review',
-  'reviews',
-] as const;
+const MEMORY_NOTE_DIRS = ['analysis', 'decision', 'task', 'review'] as const;
 
 function noteTypeDirs(noteType: string): string[] {
   switch (noteType) {
     case 'analysis':
-      return ['analysis'];
+    case 'analyses':
+      return ['analysis', 'analyses'];
     case 'decision':
     case 'decisions':
       return ['decision', 'decisions'];
@@ -539,6 +569,32 @@ function noteTypeDirs(noteType: string): string[] {
 
 function unique(values: readonly string[]): string[] {
   return [...new Set(values)];
+}
+
+function parseObsidianLink(value: string): { target: string; alias: string } {
+  const unwrapped = value.trim().replace(/^\[\[/, '').replace(/\]\]$/, '');
+  const [rawTarget = '', rawAlias = ''] = unwrapped.split('|', 2);
+  return {
+    target: rawTarget.split('#', 1)[0]?.trim().replaceAll('\\', '/') ?? '',
+    alias: rawAlias.trim(),
+  };
+}
+
+function normalizeMemoryLink(value: string): string {
+  return parseObsidianLink(value).target.replace(/\.md$/i, '').replace(/^\.\//, '').trim().toLowerCase();
+}
+
+function memoryNoteKeys(note: MemoryNoteInfo): string[] {
+  const notePath = note.path.replace(/\.md$/i, '');
+  return unique([
+    normalizeMemoryLink(note.title),
+    normalizeMemoryLink(notePath),
+    normalizeMemoryLink(path.basename(notePath)),
+  ]);
+}
+
+function sanitizeObsidianAlias(value: string): string {
+  return value.replaceAll(/[|\]]/g, '').trim();
 }
 
 /* ------------------------------------------------------------------ */

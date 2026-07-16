@@ -28,6 +28,7 @@ tools:
   - AgentSwarmControl
   - Agent
   - FetchURL
+  - Browser
   - AskUserQuestion
   - EnterPlanMode
   - ExitPlanMode

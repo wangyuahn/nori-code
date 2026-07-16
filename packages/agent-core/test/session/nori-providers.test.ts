@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'pathe';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -17,6 +17,44 @@ afterEach(async () => {
 });
 
 describe('Nori filesystem memory provider', () => {
+  it('creates only the canonical singular note directories', async () => {
+    const root = await tempRoot();
+    const providers = createNoriProvidersFromConfig(
+      { obsidian: { vault_path: './nori-vault' } },
+      SIMPLE_CONFIG,
+      root,
+    );
+    if (providers === null) throw new Error('expected providers');
+
+    expect((await readdir(join(root, 'nori-vault'))).toSorted()).toEqual([
+      'analysis', 'decision', 'review', 'task',
+    ]);
+  });
+
+  it('writes Related links with vault-relative Obsidian paths', async () => {
+    const root = await tempRoot();
+    const vault = join(root, 'nori-vault');
+    await mkdir(join(vault, 'decision'), { recursive: true });
+    await writeNote(join(vault, 'decision', 'architecture.md'), 'Architecture choice', 'Use the service boundary.');
+    const providers = createNoriProvidersFromConfig(
+      { obsidian: { vault_path: './nori-vault' } },
+      SIMPLE_CONFIG,
+      root,
+    );
+    if (providers === null) throw new Error('expected providers');
+
+    const written = await providers.memory.writeNote({
+      note_type: 'analysis',
+      title: 'Implementation notes',
+      content: 'The implementation follows the decision.',
+      links: ['Architecture choice'],
+    });
+    const content = await readFile(join(vault, written.path), 'utf-8');
+
+    expect(content).toContain('related:\n  - "[[decision/architecture|Architecture choice]]"');
+    expect(content).toContain('## Related\n- [[decision/architecture|Architecture choice]]');
+  });
+
   it('does not make embedding requests in simple mode', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

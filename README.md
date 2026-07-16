@@ -8,6 +8,20 @@ Nori orchestrates multiple AI agents to plan, implement, review, and persist kno
 
 ![Nori Work](docs/images/nori-work.png)
 
+> [!WARNING]
+> **v1.0.0-pre.0 is a preview release, not the stable 1.0 release.** It is intended for early testing of the expanded Nori Work desktop workflow. Back up important work before testing and report regressions through [GitHub Issues](https://github.com/wangyuahn/nori-code/issues).
+
+### What this preview fixes
+
+- Browser page actions no longer wait for the 90-second bridge timeout when no page is open; the Agent immediately receives an instruction to navigate first.
+- Browser tools remain registered while the desktop bridge reconnects, and independent heartbeats prevent long-running actions from making the bridge appear offline.
+- Local `.html` and `.htm` files open in the embedded browser without granting arbitrary `file://` access.
+- Desktop packaging rejects stale Web/SEA artifacts, and startup recovers from stale or incompatible local-server locks instead of silently connecting to an old backend.
+- Regular Agent and AgentSwarm work is visible by project and session with nested ownership, output, correct completion counts, and completed/failed states.
+- Opening **Chat** reliably returns to the conversation view and session list.
+- The vault no longer creates empty legacy plural folders; Related links use Obsidian-compatible paths and include both outgoing links and backlinks.
+- Built-in LSP discovery covers common language servers instead of reporting "No language server is configured" when a supported server is available.
+
 ---
 
 ## Products
@@ -55,9 +69,15 @@ Orchestrator, coder, and reviewer can each use a different model/provider.
 Bring any OpenAI-compatible provider — local (Ollama, LM Studio) or cloud. Each agent role (orchestrator / coder / reviewer) can run its own model.
 
 ### 🖥️ Nori Work Engineering Workspace
-Nori Work keeps the conversation, project files, live code changes, Git operations, LSP results, and a persistent PTY terminal in one resizable desktop layout. Inspector tools can be reordered or opened in standalone windows. Custom Agent roles define their own instructions and explicit read, write, terminal, web, and delegation permissions.
+Nori Work keeps the conversation, project files, live code changes, Git operations, LSP results, a persistent PTY terminal, and a multi-tab embedded browser in one resizable desktop layout. Inspector tools can be reordered or opened in standalone windows. Custom Agent roles define their own instructions and explicit read, write, terminal, web, and delegation permissions.
 
 Agent and AgentSwarm work always runs in the background. The main model can inspect, pause, guide, resume, or stop a swarm while the collaboration view shows its project/session tree, status, output, and token usage.
+
+### 🌐 Agent-Controlled Browser
+The embedded browser is available to the main Agent through a structured Browser tool: navigate, snapshot stable element references, click, type, upload files, capture screenshots, inspect console/network activity, and work with page annotations. It supports web URLs and local `.html`/`.htm` files while blocking privileged URLs and arbitrary local files. User takeover can pause automation at any time, and actions fail immediately with actionable feedback when no page is open.
+
+### 🔗 Obsidian-Compatible Knowledge
+Memory notes use vault-relative `[[folder/note|Title]]` links. Nori Work renders outgoing links, backlinks, and the movable knowledge graph while retaining compatibility with legacy vault layouts and Obsidian.
 
 ---
 
@@ -68,11 +88,11 @@ Agent and AgentSwarm work always runs in the background. The main model can insp
 | P0 | **Built-in LSP** — diagnostics, hover, definitions, references, symbols, rename, and formatting | ✅ Implemented |
 | P0 | **Custom Agent Profiles** — user-defined roles, prompts, base profiles, and tool permissions | ✅ Implemented |
 | P0 | **Nori Work — Embedded Terminal** (persistent node-pty sessions) | ✅ Implemented |
-| P0 | **Nori Work — Embedded Browser** (WebContentsView tabs for research and preview) | 🚧 In progress |
+| P0 | **Nori Work — Embedded Browser** (isolated WebContentsView tabs for research and preview) | ✅ Implemented |
 | P0 | **Nori Work — Filesystem Sandbox** (whitelist + blocklist) | 📝 Planned |
 | P0 | **Nori Work — System Tray / Notifications** | ✅ Implemented |
 | P0 | **Nori Work — Secure Preload Bridge** | ✅ Implemented |
-| P1 | **Agent Browser Tool** — headless browser for page rendering, screenshot, JS evaluation | 📝 Planned |
+| P1 | **Agent Browser Tool** — navigation, snapshots, interaction, uploads, diagnostics, and annotations | ✅ Implemented |
 
 ---
 
@@ -91,7 +111,7 @@ nori -p "your task"
 nori web
 ```
 
-Nori Work is available as a **standalone desktop installer** — see the [latest release](https://github.com/wangyuahn/nori-code/releases).
+Nori Work is available as a **standalone desktop installer**. The current preview is [v1.0.0-pre.0](https://github.com/wangyuahn/nori-code/releases/tag/v1.0.0-pre.0); stable builds remain available from [Releases](https://github.com/wangyuahn/nori-code/releases).
 
 ### From source
 

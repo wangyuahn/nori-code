@@ -3,12 +3,13 @@ import { dirname, join } from 'node:path';
 
 import { app, BrowserWindow, globalShortcut, Menu, screen, session, shell } from 'electron';
 
-import { ensureServer, serverLogPath } from './ensure-server';
+import { ensureServer, readServerToken, serverLogPath } from './ensure-server';
 import { registerIpcHandlers } from './ipc-handlers';
 import { registerUpdateHandlers } from './updater';
 import { resolveSeaPath } from './sea-path';
 import { createTray } from './tray';
-import { BrowserViewManager, registerBrowserIpc } from './browser-view';
+import { browserManagerFor, registerBrowserIpc } from './browser-view';
+import { startBrowserBridge, type BrowserBridgeHandle } from './browser-bridge';
 import { createSplashWindow } from './splash';
 import {
   configureNoriApplicationIdentity,
@@ -21,7 +22,7 @@ configureNoriApplicationIdentity();
 
 let mainWindow: BrowserWindow | null = null;
 let splashWindow: BrowserWindow | null = null;
-let browserManager: BrowserViewManager | null = null;
+let browserBridge: BrowserBridgeHandle | null = null;
 
 // --- window state persistence -------------------------------------------------
 
@@ -152,6 +153,15 @@ async function connect(win: BrowserWindow): Promise<void> {
     const { origin } = await ensureServer(resolveSeaPath(), app.getVersion());
     process.stdout.write(`[nori-desktop] connected to ${origin}\n`);
     if (!win.isDestroyed()) {
+      const token = readServerToken();
+      if (token !== undefined) {
+        browserBridge?.stop();
+        browserBridge = startBrowserBridge({ origin, token, manager: browserManagerFor(win) });
+        await Promise.race([
+          browserBridge.ready,
+          new Promise<void>(resolve => setTimeout(resolve, 3_000)),
+        ]);
+      }
       // Resolve nori-web dist path (packaged vs dev)
       const noriWebDist = app.isPackaged
         ? join(process.resourcesPath, 'nori-web', 'dist', 'index.html')
@@ -201,8 +211,6 @@ function createWindow(): void {
   win.setMenu(null);
   win.setMenuBarVisibility(false);
   mainWindow = win;
-  browserManager = new BrowserViewManager(win);
-  // Note: create() is NOT called here - lazy init; the renderer triggers it.
   createTray(win);
   // Keep the window title as the product name. The web page sets document.title
   // ("Nori Code Web"), which would otherwise replace it.
@@ -237,6 +245,8 @@ function createWindow(): void {
   win.on('closed', () => {
     if (mainWindow === win) {
       mainWindow = null;
+      browserBridge?.stop();
+      browserBridge = null;
     }
   });
   void connect(win);
@@ -271,7 +281,8 @@ function main(): void {
     process.stderr.write('[nori-desktop] failed to register nori-work:// protocol handler\n');
   }
 
-  const gotTheLock = app.requestSingleInstanceLock();
+  const allowDevelopmentInstance = process.env['NORI_DESKTOP_ALLOW_MULTI_INSTANCE'] === '1';
+  const gotTheLock = allowDevelopmentInstance || app.requestSingleInstanceLock();
   if (!gotTheLock) {
     app.quit();
     return;
@@ -323,10 +334,9 @@ function main(): void {
     splashWindow = createSplashWindow();
     createWindow();
 
-    // Register browser IPC after createWindow() so browserManager is set.
-    if (browserManager) {
-      registerBrowserIpc(browserManager);
-    }
+    // Browser views are created lazily per renderer window when the browser
+    // inspector is first opened.
+    registerBrowserIpc();
 
     const showOrHideRegistered = globalShortcut.register('CmdOrCtrl+Shift+N', () => {
       if (mainWindow === null) {

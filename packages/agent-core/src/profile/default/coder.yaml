@@ -19,6 +19,7 @@ tools:
   - Edit
   - WebSearch
   - FetchURL
+  - Browser
   - mcp__*
   - AgentSwarm
   - Agent

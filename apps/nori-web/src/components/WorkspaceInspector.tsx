@@ -8,9 +8,10 @@ import { Icon } from './Icon';
 import { LspPanel } from './LspPanel';
 
 const TerminalPanel = lazy(() => import('./TerminalPanel').then(module => ({ default: module.TerminalPanel })));
+const BrowserPanel = lazy(() => import('./BrowserPanel').then(module => ({ default: module.BrowserPanel })));
 
-export type InspectorTab = 'preview' | 'changes' | 'git' | 'lsp' | 'terminal';
-const DEFAULT_INSPECTOR_TABS: InspectorTab[] = ['changes', 'preview', 'git', 'lsp', 'terminal'];
+export type InspectorTab = 'preview' | 'changes' | 'browser' | 'git' | 'lsp' | 'terminal';
+const DEFAULT_INSPECTOR_TABS: InspectorTab[] = ['changes', 'preview', 'browser', 'git', 'lsp', 'terminal'];
 
 interface WorkspaceInspectorProps {
   sessionId: string | null;
@@ -62,7 +63,9 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
 
   return <section className="workspace-inspector">
     {!standalone && <div className="inspector-tabs" role="tablist" aria-label={tr('Inspector', '检查器')}>
-      {tabOrder.map(item => <InspectorTabButton key={item} tab={item} active={tab === item} count={item === 'changes' ? textChangeCount : item === 'lsp' ? diagnosticCount : undefined} onClick={() => { setTab(item); if (item === 'git') void refreshGitStatus(); }} onMove={target => setTabOrder(previous => moveInspectorTab(previous, item, target))} />)}
+      <div className="inspector-tab-list">
+        {tabOrder.map(item => <InspectorTabButton key={item} tab={item} active={tab === item} count={item === 'changes' ? textChangeCount : item === 'lsp' ? diagnosticCount : undefined} onClick={() => { setTab(item); if (item === 'git') void refreshGitStatus(); }} onMove={target => setTabOrder(previous => moveInspectorTab(previous, item, target))} />)}
+      </div>
       <button type="button" className="inspector-popout" onClick={() => openInspectorWindow(tab, sessionId, path)} title={tr('Open in separate window', '在独立窗口中打开')} aria-label={tr('Open in separate window', '在独立窗口中打开')}><Icon name="external" size={13}/></button>
     </div>
     }
@@ -71,6 +74,7 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
       {tab === 'changes' && <ChangesPanel sessionId={sessionId} projectPath={projectPath} status={gitStatus} messages={messages} codeChanges={codeChanges} onRefreshGitStatus={refreshGitStatus} onRefreshMessages={refreshMessages} onCountChange={setTextChangeCount} />}
       {tab === 'git' && <GitPanel sessionId={sessionId} projectPath={projectPath} status={gitStatus} error={gitError} loading={gitLoading} onRefresh={refreshGitStatus} />}
       {tab === 'lsp' && <LspPanel sessionId={sessionId} path={path} onDiagnosticCountChange={setDiagnosticCount} onReveal={(targetPath, line) => { if (targetPath !== path) onSelectFilePath?.(targetPath); setRevealLine(line + 1); setTab('preview'); }} />}
+      {tab === 'browser' && <Suspense fallback={<div className="inspector-empty"><span className="spinner"/></div>}><BrowserPanel /></Suspense>}
       {tab === 'terminal' && <Suspense fallback={<div className="inspector-empty"><span className="spinner"/></div>}><TerminalPanel sessionId={sessionId} /></Suspense>}
     </div>
   </section>;
@@ -86,6 +90,7 @@ function inspectorTabMeta(tab: InspectorTab, tr: (en: string, zh: string) => str
   const values = {
     changes: { icon: 'diff' as const, label: tr('Changes', '更改') },
     preview: { icon: 'files' as const, label: tr('Preview', '预览') },
+    browser: { icon: 'globe' as const, label: tr('Browser', '浏览器') },
     git: { icon: 'git-branch' as const, label: 'Git' },
     lsp: { icon: 'target' as const, label: 'LSP' },
     terminal: { icon: 'terminal' as const, label: tr('Terminal', '终端') },
@@ -187,7 +192,7 @@ function ChangesPanel({ sessionId, projectPath, status, messages, codeChanges, o
     collectToolCodeChanges(messages, projectPath),
   ), [codeChanges, messages, projectPath]);
   const incomingChangesKey = useMemo(() => incomingChanges
-    .map(change => [change.agentId, change.operation, change.path, change.diff, change.occurredAt].join('\u0000'))
+    .map(change => [change.operationId, change.agentId, change.operation, change.path, change.diff, change.occurredAt].join('\u0000'))
     .join('\u0001'), [incomingChanges]);
 
   useEffect(() => {
@@ -205,16 +210,11 @@ function ChangesPanel({ sessionId, projectPath, status, messages, codeChanges, o
     ...Object.keys(status?.entries ?? {}),
   ])], [projectChanges, status?.entries]);
   const pathsKey = useMemo(() => paths.join('\u0000'), [paths]);
-  const attributions = useMemo(() => projectChanges.map(change => ({
-    path: change.path,
-    agent: change.agentId === 'main' ? 'Nori' : change.agentId,
-    timestamp: Date.parse(change.occurredAt) || 0,
-  })), [projectChanges]);
   const orderedPaths = useMemo(() => [...paths].sort((left, right) => {
-    const leftTime = attributions.find(item => item.path === left || item.path.endsWith(`/${left}`))?.timestamp ?? 0;
-    const rightTime = attributions.find(item => item.path === right || item.path.endsWith(`/${right}`))?.timestamp ?? 0;
+    const leftTime = changesForPath(left, projectChanges)[0] === undefined ? 0 : codeChangeTimestamp(changesForPath(left, projectChanges)[0]!);
+    const rightTime = changesForPath(right, projectChanges)[0] === undefined ? 0 : codeChangeTimestamp(changesForPath(right, projectChanges)[0]!);
     return rightTime - leftTime || left.localeCompare(right);
-  }), [attributions, paths]);
+  }), [paths, projectChanges]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -304,7 +304,10 @@ function ChangesPanel({ sessionId, projectPath, status, messages, codeChanges, o
     return hasTextChanges(diff);
   }), [diffs, orderedPaths, projectChanges]);
   const visibleStats = useMemo(() => visiblePaths.reduce((total, path) => {
-    const stats = changedLineStats(resolvedDiff(path, projectChanges, diffs) ?? '');
+    const operations = changesForPath(path, projectChanges);
+    const stats = changedLineStats(operations.length > 0
+      ? operations.map(change => change.diff).join('\n')
+      : resolvedDiff(path, projectChanges, diffs) ?? '');
     return { additions: total.additions + stats.additions, deletions: total.deletions + stats.deletions };
   }, { additions: 0, deletions: 0 }), [diffs, projectChanges, visiblePaths]);
 
@@ -344,14 +347,13 @@ function ChangesPanel({ sessionId, projectPath, status, messages, codeChanges, o
       : <>{pendingPaths.size > 0 && <div className="change-load-status"><span className="spinner"/>{tr(`Reading ${pendingPaths.size} changes…`, `正在读取 ${pendingPaths.size} 项更改…`)}</div>}
     {failedPaths.size > 0 && <div className="change-load-status error">{tr(`${failedPaths.size} diffs could not be loaded.`, `${failedPaths.size} 项 diff 读取失败。`)}</div>}
     <div className="change-list">{visiblePaths.map((path, index) => {
-      const exact = attributions.find(item => item.path === path || item.path.endsWith(`/${path}`));
       const rawDiff = resolvedDiff(path, projectChanges, diffs) ?? '';
-      return <ChangeCard
+      return <FileChangeCard
         key={path}
         path={path}
         status={status?.entries[path] ?? 'modified'}
-        agent={exact?.agent ?? tr('Unknown', '未知')}
-        diff={rawDiff}
+        changes={changesForPath(path, projectChanges)}
+        fallbackDiff={rawDiff}
         defaultOpen={index === 0}
       />;
     })}</div></>}
@@ -371,6 +373,7 @@ export function collectToolCodeChanges(messages: ChatMessage[], projectPath?: st
         : addedTextDiff(args['content']);
       if (!diff) continue;
       changes.push({
+        operationId: tool.id,
         agentId: 'main',
         operation: tool.name === 'Edit' ? 'edit' : 'write',
         path: projectRelativePath(rawPath, projectPath),
@@ -417,20 +420,16 @@ export function mergeCodeChanges(existing: CodeChange[], incoming: CodeChange[])
   const merged: CodeChange[] = [];
   for (const change of ordered) {
     const duplicate = merged.some(candidate =>
-      candidate.operation === change.operation
-      && candidate.path === change.path
-      && candidate.diff.trim() === change.diff.trim()
-      && timestampsOverlap(candidate, change)
+      (candidate.operationId !== undefined && change.operationId !== undefined
+        ? candidate.operationId === change.operationId
+        : candidate.operation === change.operation
+          && candidate.path === change.path
+          && candidate.diff.trim() === change.diff.trim()
+          && codeChangeTimestamp(candidate) === codeChangeTimestamp(change))
     );
     if (!duplicate) merged.push(change);
   }
   return merged.slice(0, 100);
-}
-
-function timestampsOverlap(left: CodeChange, right: CodeChange): boolean {
-  const leftTime = codeChangeTimestamp(left);
-  const rightTime = codeChangeTimestamp(right);
-  return leftTime === 0 || rightTime === 0 || Math.abs(leftTime - rightTime) <= 30_000;
 }
 
 function codeChangeTimestamp(change: CodeChange): number {
@@ -491,23 +490,56 @@ function resolvedDiff(path: string, codeChanges: CodeChange[], diffs: Record<str
   return diffs[path]?.diff;
 }
 
-function ChangeCard({ path, status, agent, diff, defaultOpen }: { path: string; status: string; agent: string; diff: string; defaultOpen: boolean }) {
+function FileChangeCard({ path, status, changes, fallbackDiff, defaultOpen }: { path: string; status: string; changes: CodeChange[]; fallbackDiff: string; defaultOpen: boolean }) {
   const { tr } = useI18n();
   const [open, setOpen] = useState(defaultOpen);
-  const changedLines = compactChangedLines(diff);
-  const stats = changedLineStats(diff);
+  const orderedChanges = [...changes]
+    .filter(change => hasTextChanges(change.diff))
+    .sort((left, right) => codeChangeTimestamp(right) - codeChangeTimestamp(left));
+  const displayChanges = orderedChanges.length > 0 ? orderedChanges : [{
+    operationId: `git:${path}`,
+    agentId: 'unknown',
+    operation: 'edit' as const,
+    path,
+    diff: fallbackDiff,
+    occurredAt: new Date(0).toISOString(),
+  }];
+  const stats = changedLineStats(displayChanges.map(change => change.diff).join('\n'));
   const displayPath = splitDisplayPath(path);
-  return <article className={`change-entry${open ? ' open' : ''}`}>
+  return <article className={`change-file-card${open ? ' open' : ''}`}>
     <button type="button" className="change-entry-toggle" onClick={() => setOpen(value => !value)} aria-expanded={open}>
       <Icon name="chevron-right" size={12}/>
       <span className={`git-status-mark status-${status}`}/>
-      <span className="change-entry-title" title={path}><strong className="change-entry-path">{displayPath.directory && <><span className="change-entry-directory">{displayPath.directory}</span><span className="change-entry-separator">/</span></>}<span className="change-entry-file">{displayPath.fileName}</span></strong><small>{agent}</small></span>
+      <span className="change-entry-title" title={path}><strong className="change-entry-path">{displayPath.directory && <><span className="change-entry-directory">{displayPath.directory}</span><span className="change-entry-separator">/</span></>}<span className="change-entry-file">{displayPath.fileName}</span></strong><small>{tr(`${displayChanges.length} operations`, `${displayChanges.length} 次更改`)}</small></span>
       <span className="change-entry-stats"><b>+{stats.additions}</b><i>-{stats.deletions}</i></span>
     </button>
-    {open && (changedLines.length > 0
-      ? <pre className="compact-diff">{changedLines.map((line, index) => <span key={`${index}-${line}`} className={line.startsWith('+') ? 'added' : 'removed'}>{line}</span>)}</pre>
-      : <p>{tr('Binary, renamed, or metadata-only change.', '二进制、重命名或仅元数据更改。')}</p>)}
+    {open && <div className="change-operation-list">{displayChanges.map((change, index) => <OperationChangeCard key={change.operationId ?? `${change.occurredAt}:${index}`} change={change} defaultOpen={index === 0}/>)}</div>}
   </article>;
+}
+
+function OperationChangeCard({ change, defaultOpen }: { change: CodeChange; defaultOpen: boolean }) {
+  const { tr } = useI18n();
+  const [open, setOpen] = useState(defaultOpen);
+  const lines = compactChangedLines(change.diff);
+  const stats = changedLineStats(change.diff);
+  const agent = change.agentId === 'main' ? 'Nori' : change.agentId === 'unknown' ? tr('Unknown', '未知') : change.agentId;
+  const timestamp = codeChangeTimestamp(change);
+  return <section className={`change-operation-card${open ? ' open' : ''}`}>
+    <button type="button" onClick={() => setOpen(value => !value)} aria-expanded={open}>
+      <Icon name="chevron-right" size={11}/>
+      <strong>{agent}</strong>
+      <span>{change.operation === 'write' ? tr('Write', '写入') : tr('Edit', '编辑')}</span>
+      {timestamp > 0 && <time dateTime={change.occurredAt}>{new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</time>}
+      <i>+{stats.additions}</i><em>-{stats.deletions}</em>
+    </button>
+    {open && <pre className="compact-diff">{lines.map((line, index) => <span key={`${index}-${line}`} className={line.startsWith('+') ? 'added' : 'removed'}>{line}</span>)}</pre>}
+  </section>;
+}
+
+function changesForPath(path: string, changes: CodeChange[]): CodeChange[] {
+  return changes
+    .filter(change => change.path === path || change.path.endsWith(`/${path}`))
+    .sort((left, right) => codeChangeTimestamp(right) - codeChangeTimestamp(left));
 }
 
 export function splitDisplayPath(path: string): { directory: string; fileName: string } {

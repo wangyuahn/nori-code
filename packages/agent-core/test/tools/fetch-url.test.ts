@@ -14,6 +14,8 @@ import {
 } from '../../src/tools/builtin/web/fetch-url';
 import { toolContentString } from './fixtures/fake-kaos';
 import { executeTool } from './fixtures/execute-tool';
+import { BrowserInputSchema, BrowserTool } from '../../src/tools/builtin/web/browser';
+import type { BrowserExecutor } from '../../src/tools/support/services';
 
 const signal = new AbortController().signal;
 
@@ -291,3 +293,151 @@ describe('FetchURLTool', () => {
   });
 });
 
+describe('BrowserTool', () => {
+  it('validates action-specific inputs before dispatch', async () => {
+    const browser: BrowserExecutor = { execute: vi.fn() };
+    const tool = new BrowserTool(browser);
+    expect(BrowserInputSchema.safeParse({ action: 'snapshot' }).success).toBe(true);
+    const result = await executeTool(tool, {
+      turnId: 'turn-browser',
+      toolCallId: 'call-browser',
+      args: { action: 'click' },
+      signal,
+    });
+    expect(result.isError).toBe(true);
+    expect(browser.execute).not.toHaveBeenCalled();
+  });
+
+  it('forwards stable-reference actions and tool call context', async () => {
+    const browser: BrowserExecutor = {
+      execute: vi.fn().mockResolvedValue({ ok: true, output: 'clicked' }),
+    };
+    const tool = new BrowserTool(browser);
+    const result = await executeTool(tool, {
+      turnId: 'turn-browser',
+      toolCallId: 'call-browser',
+      args: { action: 'click', ref: 'n42' },
+      signal,
+    });
+    expect(result.isError).not.toBe(true);
+    expect(browser.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'click', ref: 'n42' }),
+      { toolCallId: 'call-browser', signal },
+    );
+  });
+
+  it('returns screenshots as multimodal tool output', async () => {
+    const browser: BrowserExecutor = {
+      execute: vi.fn().mockResolvedValue({
+        ok: true,
+        output: 'screenshot',
+        screenshotDataUrl: 'data:image/png;base64,AAAA',
+      }),
+    };
+    const result = await executeTool(new BrowserTool(browser), {
+      turnId: 'turn-browser',
+      toolCallId: 'call-browser',
+      args: { action: 'screenshot' },
+      signal,
+    });
+    expect(result.isError).not.toBe(true);
+    expect(result.output).toEqual([
+      { type: 'text', text: 'screenshot' },
+      { type: 'image_url', imageUrl: { url: 'data:image/png;base64,AAAA' } },
+    ]);
+  });
+
+  it('declares file reads and forwards upload paths', async () => {
+    const browser: BrowserExecutor = {
+      execute: vi.fn().mockResolvedValue({ ok: true, output: 'uploaded' }),
+    };
+    const tool = new BrowserTool(browser);
+    const execution = tool.resolveExecution({
+      action: 'upload',
+      ref: 'npage-4',
+      paths: ['/workspace/a.png', '/workspace/b.txt'],
+    });
+    expect(execution).toMatchObject({
+      accesses: [
+        { kind: 'file', operation: 'read', path: '/workspace/a.png' },
+        { kind: 'file', operation: 'read', path: '/workspace/b.txt' },
+      ],
+    });
+
+    const result = await executeTool(tool, {
+      turnId: 'turn-browser',
+      toolCallId: 'call-upload',
+      args: { action: 'upload', ref: 'npage-4', paths: ['/workspace/a.png'] },
+      signal,
+    });
+    expect(result.isError).not.toBe(true);
+    expect(browser.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'upload', ref: 'npage-4', paths: ['/workspace/a.png'] }),
+      { toolCallId: 'call-upload', signal },
+    );
+  });
+
+  it('declares a file read when navigating to local HTML', () => {
+    const tool = new BrowserTool({ execute: vi.fn() });
+    expect(tool.resolveExecution({
+      action: 'navigate',
+      url: 'file:///C:/workspace/demo/index.html',
+    })).toMatchObject({
+      accesses: [{ kind: 'file', operation: 'read', path: 'C:\\workspace\\demo\\index.html' }],
+    });
+  });
+
+  it('forwards network filters and JavaScript dialog responses', async () => {
+    const browser: BrowserExecutor = {
+      execute: vi.fn().mockResolvedValue({ ok: true, output: 'ok' }),
+    };
+    const tool = new BrowserTool(browser);
+    await executeTool(tool, {
+      turnId: 'turn-browser',
+      toolCallId: 'call-network',
+      args: { action: 'get_network', filter: '/api/items' },
+      signal,
+    });
+    await executeTool(tool, {
+      turnId: 'turn-browser',
+      toolCallId: 'call-dialog',
+      args: { action: 'dialog_respond', dialog_id: 'dialog-1', accept: true, prompt_text: 'Nori' },
+      signal,
+    });
+    expect(browser.execute).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ action: 'get_network', filter: '/api/items' }),
+      { toolCallId: 'call-network', signal },
+    );
+    expect(browser.execute).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        action: 'dialog_respond',
+        dialogId: 'dialog-1',
+        accept: true,
+        promptText: 'Nori',
+      }),
+      { toolCallId: 'call-dialog', signal },
+    );
+  });
+
+  it('rejects incomplete upload and dialog actions before dispatch', async () => {
+    const browser: BrowserExecutor = { execute: vi.fn() };
+    const tool = new BrowserTool(browser);
+    const upload = await executeTool(tool, {
+      turnId: 'turn-browser',
+      toolCallId: 'call-upload',
+      args: { action: 'upload', ref: 'npage-1' },
+      signal,
+    });
+    const dialog = await executeTool(tool, {
+      turnId: 'turn-browser',
+      toolCallId: 'call-dialog',
+      args: { action: 'dialog_respond', dialog_id: 'dialog-1' },
+      signal,
+    });
+    expect(upload).toMatchObject({ isError: true });
+    expect(dialog).toMatchObject({ isError: true });
+    expect(browser.execute).not.toHaveBeenCalled();
+  });
+});

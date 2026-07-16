@@ -2,6 +2,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Note } from '../src/api/client';
+import { collectRelatedNotes, resolveVaultNote } from '../src/components/VaultBrowser';
 import { forceSameType, VaultGraph } from '../src/components/VaultGraph';
 import { I18nProvider } from '../src/i18n';
 
@@ -65,6 +66,21 @@ describe('vault graph type clustering', () => {
   });
 });
 
+describe('vault related-note projection', () => {
+  it('resolves Obsidian paths and includes backlinks with folder context', () => {
+    const analysis = note('Analysis', 'analysis/analysis.md', ['decision/architecture']);
+    const decision = note('Architecture', 'decision/architecture.md', []);
+    const review = note('Review', 'review/review.md', ['analysis/analysis']);
+    const notes = [analysis, decision, review];
+
+    expect(resolveVaultNote(notes, '[[decision/architecture|Architecture]]')).toBe(decision);
+    expect(collectRelatedNotes(notes, analysis)).toEqual([
+      { note: decision, direction: 'outgoing' },
+      { note: review, direction: 'backlink' },
+    ]);
+  });
+});
+
 async function renderGraph() {
   const container = document.createElement('div');
   document.body.append(container);
@@ -78,7 +94,7 @@ async function renderGraph() {
     preview: 'A linked note',
     date: '2026-07-15',
     path: 'notes/linked-note.md',
-    links: ['Related note'],
+    links: ['notes/related-note'],
   };
   const related: Note = {
     ...note,
@@ -97,6 +113,18 @@ async function renderGraph() {
   const node = container.querySelector<SVGGElement>('[role="button"][aria-label="Linked note"]');
   expect(node).not.toBeNull();
   return { node: node!, onOpenNote };
+}
+
+function note(title: string, path: string, links: string[]): Note {
+  return {
+    title,
+    type: path.startsWith('decision/') ? 'decision' : path.startsWith('review/') ? 'review' : 'analysis',
+    folder: path.split('/')[0]!,
+    preview: '',
+    date: '2026-07-16',
+    path,
+    links,
+  };
 }
 
 async function pointerSequence(

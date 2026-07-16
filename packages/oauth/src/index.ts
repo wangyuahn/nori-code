@@ -99,6 +99,7 @@ export type {
 } from './stubs';
 
 export { refreshProviderModels } from './refresh-provider-models';
+export { reasoningEffortsFromRecord } from './reasoning-options';
 export type {
   ProviderChange,
   RefreshProviderHost,

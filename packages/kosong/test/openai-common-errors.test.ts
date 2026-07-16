@@ -315,6 +315,10 @@ describe('thinkingEffortToReasoningEffort', () => {
   it('maps off -> undefined', () => {
     expect(thinkingEffortToReasoningEffort('off')).toBeUndefined();
   });
+  it('preserves none and minimal model-declared efforts', () => {
+    expect(thinkingEffortToReasoningEffort('none')).toBe('none');
+    expect(thinkingEffortToReasoningEffort('minimal')).toBe('minimal');
+  });
   it('maps low -> "low"', () => {
     expect(thinkingEffortToReasoningEffort('low')).toBe('low');
   });

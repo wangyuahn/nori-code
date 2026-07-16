@@ -16,6 +16,7 @@ export function SwarmPanel({
 }) {
   const { tr } = useI18n();
   const { swarmStatuses, connected, error } = swarm;
+  const background = useBackgroundTasks(sessionId);
   const runs = Array.from(swarmStatuses.values())
     .sort((left, right) => {
       const timeDifference = Date.parse(right.started_at ?? '') - Date.parse(left.started_at ?? '');
@@ -23,14 +24,24 @@ export function SwarmPanel({
         ? (right.round ?? 0) - (left.round ?? 0)
         : timeDifference;
     });
-  const projectGroups = groupSwarmRunsByProject(runs, sessions);
+  const currentRuns = runs.filter(run => run.session_id === sessionId);
+  const swarmTaskIds = swarmTaskIdsForRuns(currentRuns);
+  const backgroundTasks = background.tasks.filter(task => !swarmTaskIds.has(task.id));
+  const hasCurrentBackground = background.loading || background.error !== null || backgroundTasks.length > 0;
+  const projectGroups = ensureCurrentSessionGroup(
+    groupSwarmRunsByProject(runs, sessions),
+    sessions,
+    sessionId,
+    hasCurrentBackground,
+  );
+  const hasActivity = projectGroups.length > 0;
 
   return (
     <div className="swarm-panel">
       <header className="swarm-panel-header">
         <div>
-          <strong>{tr('Agent rounds', '智能体轮次')}</strong>
-          <span>{tr('Live output grouped by project and conversation', '按项目与会话查看实时输出和 token 消耗')}</span>
+          <strong>{tr('Agent activity', '智能体活动')}</strong>
+          <span>{tr('Live agents grouped by project and conversation', '按项目与会话查看智能体、实时输出和 token 消耗')}</span>
         </div>
         <div className="live-indicator">
           <span className={`status-dot ${connected ? 'active' : 'error'}`} />
@@ -39,18 +50,18 @@ export function SwarmPanel({
       </header>
       <CustomAgentsPanel />
 
-      {runs.length === 0 ? (
+      {!hasActivity ? (
         <div className="empty-state">
           <div className="empty-state-icon">◇</div>
           <div>
             {error
               ? tr('Unable to receive swarm updates', '无法接收智能体协作更新')
-              : tr('No active swarm agents', '暂无活动智能体')}
+              : tr('No agent activity', '暂无智能体活动')}
           </div>
           <div style={{ color: 'var(--nori-text-muted)', fontSize: 12, marginTop: 4 }}>
             {error
               ? tr('Reconnect to the server to resume live updates.', '请重新连接服务器以恢复实时更新。')
-              : tr('Agents appear here when a swarm is launched', '启动智能体协作后，智能体会显示在这里。')}
+              : tr('Regular agents and swarm agents appear here when they are launched.', '普通 Agent 与 Swarm Agent 启动后都会显示在这里。')}
           </div>
         </div>
       ) : (
@@ -60,6 +71,8 @@ export function SwarmPanel({
               key={project.key}
               project={project}
               currentSessionId={sessionId}
+              background={background}
+              backgroundTasks={backgroundTasks}
             />
           ))}
         </div>
@@ -187,6 +200,13 @@ export interface SwarmProjectGroup {
   sessions: SwarmSessionGroup[];
 }
 
+interface BackgroundTasksState {
+  tasks: BackgroundTask[];
+  loading: boolean;
+  error: string | null;
+  markCancelled: (taskId: string) => void;
+}
+
 export function groupSwarmRunsByProject(
   runs: SwarmStatus[],
   sessions: Session[],
@@ -223,12 +243,43 @@ export function groupSwarmRunsByProject(
   return [...projects.values()];
 }
 
+export function ensureCurrentSessionGroup(
+  groups: SwarmProjectGroup[],
+  sessions: Session[],
+  sessionId: string | null | undefined,
+  required: boolean,
+): SwarmProjectGroup[] {
+  if (!required || !sessionId || groups.some(project => project.sessions.some(group => group.sessionId === sessionId))) {
+    return groups;
+  }
+  const session = sessions.find(item => item.id === sessionId);
+  const path = session?.metadata?.cwd?.trim().replaceAll('\\', '/').replace(/\/+$/, '');
+  const projectKey = path || '__unassigned__';
+  const result = groups.map(project => ({ ...project, sessions: [...project.sessions] }));
+  let project = result.find(item => item.key === projectKey);
+  if (project === undefined) {
+    project = { key: projectKey, path, sessions: [] };
+    result.push(project);
+  }
+  project.sessions.push({
+    key: `${projectKey}:${sessionId}`,
+    sessionId,
+    title: session?.title || sessionId.slice(0, 8),
+    runs: [],
+  });
+  return result;
+}
+
 function SwarmProject({
   project,
   currentSessionId,
+  background,
+  backgroundTasks,
 }: {
   project: SwarmProjectGroup;
   currentSessionId?: string | null;
+  background: BackgroundTasksState;
+  backgroundTasks: BackgroundTask[];
 }) {
   const { tr } = useI18n();
   const name = project.path?.split('/').filter(Boolean).at(-1)
@@ -246,21 +297,36 @@ function SwarmProject({
           key={group.key}
           group={group}
           current={group.sessionId === currentSessionId}
+          background={group.sessionId === currentSessionId ? background : undefined}
+          backgroundTasks={group.sessionId === currentSessionId ? backgroundTasks : []}
         />
       ))}
     </div>
   </section>;
 }
 
-function SwarmSession({ group, current }: { group: SwarmSessionGroup; current: boolean }) {
+function SwarmSession({
+  group,
+  current,
+  background,
+  backgroundTasks,
+}: {
+  group: SwarmSessionGroup;
+  current: boolean;
+  background?: BackgroundTasksState;
+  backgroundTasks: BackgroundTask[];
+}) {
   const { tr } = useI18n();
   const rounds = groupSwarmRuns(group.runs);
   const treeRuns = collectSwarmTreeRuns([...rounds.values()].flat(), group.runs);
   const progress = treeRuns.map(swarmRunProgress);
-  const status = aggregateSwarmStatus(progress.map(item => item.status));
+  const backgroundStatuses = backgroundTasks.map(task => backgroundTaskSwarmStatus(task.status));
+  const statuses = [...progress.map(item => item.status), ...backgroundStatuses];
+  const status = statuses.length > 0
+    ? aggregateSwarmStatus(statuses)
+    : background?.error ? 'failed' : background?.loading ? 'pending' : 'done';
   const running = status === 'running' || status === 'pending';
   const [open, setOpen] = useState(current || running);
-  const swarmTaskIds = swarmTaskIdsForRuns(group.runs);
 
   useEffect(() => {
     if (current || running) setOpen(true);
@@ -277,13 +343,13 @@ function SwarmSession({ group, current }: { group: SwarmSessionGroup; current: b
       <span className={`badge badge-${swarmStatusBadge(status)}`}>{swarmStatusLabel(status, tr)}</span>
     </summary>
     <div className="swarm-session-body">
-      <div className="swarm-round-list">
+      {rounds.size > 0 && <div className="swarm-round-list">
         {Array.from(rounds.entries()).map(([round, roundRuns]) => (
           <SwarmRound key={round} round={round} runs={roundRuns} allRuns={group.runs}/>
         ))}
-      </div>
-      {current && group.sessionId && (
-        <BackgroundTasksPanel sessionId={group.sessionId} swarmTaskIds={swarmTaskIds}/>
+      </div>}
+      {current && group.sessionId && background && (
+        <BackgroundTasksPanel sessionId={group.sessionId} state={background} tasks={backgroundTasks}/>
       )}
     </div>
   </details>;
@@ -464,31 +530,64 @@ function SwarmRun({ run, allRuns }: { run: SwarmStatus; allRuns: SwarmStatus[] }
   </section>;
 }
 
-function BackgroundTasksPanel({ sessionId, swarmTaskIds }: { sessionId: string; swarmTaskIds: ReadonlySet<string> }) {
-  const { tr } = useI18n();
+function useBackgroundTasks(sessionId: string | null | undefined): BackgroundTasksState {
   const [tasks, setTasks] = useState<BackgroundTask[]>([]);
+  const [loading, setLoading] = useState(Boolean(sessionId));
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    setTasks([]);
+    setError(null);
+    setLoading(Boolean(sessionId));
+    if (!sessionId) return () => { cancelled = true; };
+
     const refresh = async () => {
       try {
         const result = await api.sessions.tasks.list(sessionId);
-        if (!cancelled) { setTasks(result.items); setError(null); }
-      } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
+        if (!cancelled) {
+          setTasks(result.items);
+          setError(null);
+        }
+      } catch (error) {
+        if (!cancelled) setError(error instanceof Error ? error.message : String(error));
       } finally {
-        if (!cancelled) timer = setTimeout(() => void refresh(), 2_000);
+        if (!cancelled) {
+          setLoading(false);
+          timer = setTimeout(() => void refresh(), 2_000);
+        }
       }
     };
     void refresh();
-    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [sessionId]);
 
-  const otherTasks = tasks.filter(task => !swarmTaskIds.has(task.id));
-  if (!error && otherTasks.length === 0) return null;
-  return <section className="background-tasks-panel"><header><div><strong>{tr('Other background tasks', '其他后台任务')}</strong><span>{tr('Non-swarm agent and tool jobs', '非 Swarm 的智能体与工具任务')}</span></div><small>{otherTasks.filter(task => task.status === 'running').length} {tr('running', '运行中')}</small></header>{error && <PreviewNotice kind="error" text={tr('Unable to load background tasks.', '无法加载后台任务。')} detail={error}/>}<div className="background-task-list">{otherTasks.map(task => <BackgroundTaskRow key={task.id} sessionId={sessionId} task={task} onCancelled={() => setTasks(previous => previous.map(item => item.id === task.id ? { ...item, status: 'cancelled' } : item))}/>)}</div></section>;
+  return {
+    tasks,
+    loading,
+    error,
+    markCancelled: (taskId) => setTasks(previous => previous.map(item =>
+      item.id === taskId ? { ...item, status: 'cancelled' } : item,
+    )),
+  };
+}
+
+function BackgroundTasksPanel({
+  sessionId,
+  state,
+  tasks,
+}: {
+  sessionId: string;
+  state: BackgroundTasksState;
+  tasks: BackgroundTask[];
+}) {
+  const { tr } = useI18n();
+  if (!state.loading && !state.error && tasks.length === 0) return null;
+  return <section className="background-tasks-panel"><header><div><strong>{tr('Agents and background tasks', 'Agent 与后台任务')}</strong><span>{tr('Regular agents and non-swarm tool jobs', '普通 Agent 与非 Swarm 工具任务')}</span></div><small>{tasks.filter(task => task.status === 'running').length} {tr('running', '运行中')}</small></header>{state.loading && <PreviewNotice kind="loading" text={tr('Loading background agents…', '正在加载后台 Agent…')}/>} {state.error && <PreviewNotice kind="error" text={tr('Unable to load background tasks.', '无法加载后台任务。')} detail={state.error}/>}<div className="background-task-list">{tasks.map(task => <BackgroundTaskRow key={task.id} sessionId={sessionId} task={task} onCancelled={() => state.markCancelled(task.id)}/>)}</div></section>;
 }
 
 function BackgroundTaskRow({ sessionId, task, onCancelled }: { sessionId: string; task: BackgroundTask; onCancelled: () => void }) {
@@ -615,6 +714,13 @@ function taskStatusLabel(
 
 function isTaskFinished(status: string): boolean {
   return status === 'done' || status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'stopped';
+}
+
+function backgroundTaskSwarmStatus(status: BackgroundTask['status']): SwarmStatus['status'] {
+  if (status === 'running') return 'running';
+  if (status === 'failed') return 'failed';
+  if (status === 'cancelled') return 'stopped';
+  return 'done';
 }
 
 function formatBytes(bytes: number): string {

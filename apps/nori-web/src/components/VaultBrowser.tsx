@@ -34,11 +34,11 @@ export function VaultBrowser({ mode = 'list' }: { mode?: 'list' | 'graph' }) {
     setDetailLoading(true);
     setDetailError(null);
     try {
-      const detail = await api.vault.get(note.title);
+      const detail = await api.vault.get(note.path || note.title);
       if (!detail) throw new Error(tr('The note no longer exists.', '这篇笔记已不存在。'));
       setSelectedNote(detail);
-    } catch (caught) {
-      setDetailError(caught instanceof Error ? caught.message : tr('Failed to load note.', '加载笔记失败。'));
+    } catch (error) {
+      setDetailError(error instanceof Error ? error.message : tr('Failed to load note.', '加载笔记失败。'));
     } finally {
       setDetailLoading(false);
     }
@@ -52,6 +52,7 @@ export function VaultBrowser({ mode = 'list' }: { mode?: 'list' | 'graph' }) {
 
   if (selectedNote) {
     const typeColors = TYPE_COLORS[selectedNote.type] ?? TYPE_COLORS.analysis;
+    const relatedNotes = collectRelatedNotes(notes, selectedNote);
     return (
       <div className="card vault-note-detail">
         <div className="vault-note-toolbar">
@@ -67,6 +68,13 @@ export function VaultBrowser({ mode = 'list' }: { mode?: 'list' | 'graph' }) {
         ) : (
           <MarkdownView className="vault-note-content" content={noteBodyWithoutDuplicateTitle(selectedNote)} />
         )}
+        {!detailLoading && !detailError && relatedNotes.length > 0 && <section className="vault-related-notes">
+          <header><strong>{tr('Related', '相关笔记')}</strong><span>{tr('Obsidian links and backlinks', 'Obsidian 链接与反向链接')}</span></header>
+          <div>{relatedNotes.map(item => <button type="button" key={`${item.direction}:${item.note.path}`} onClick={() => void openNote(item.note)}>
+            <span><strong>{item.note.title}</strong><small>{item.note.path}</small></span>
+            <i>{item.direction === 'outgoing' ? tr('Link', '链接') : tr('Backlink', '反向链接')}</i>
+          </button>)}</div>
+        </section>}
       </div>
     );
   }
@@ -106,6 +114,49 @@ export function VaultBrowser({ mode = 'list' }: { mode?: 'list' | 'graph' }) {
   );
 }
 
+export function resolveVaultNote(notes: Note[], target: string): Note | undefined {
+  const normalized = normalizeVaultLink(target);
+  return notes.find(note => {
+    const notePath = normalizeVaultLink(note.path);
+    const basename = notePath.split('/').at(-1) ?? notePath;
+    return notePath === normalized || normalizeVaultLink(note.title) === normalized || basename === normalized;
+  });
+}
+
+export function collectRelatedNotes(
+  notes: Note[],
+  selected: Note,
+): Array<{ note: Note; direction: 'outgoing' | 'backlink' }> {
+  const selectedPath = normalizeVaultLink(selected.path);
+  const result = new Map<string, { note: Note; direction: 'outgoing' | 'backlink' }>();
+  for (const target of selected.links ?? []) {
+    const note = resolveVaultNote(notes, target);
+    if (note && normalizeVaultLink(note.path) !== selectedPath) {
+      result.set(note.path, { note, direction: 'outgoing' });
+    }
+  }
+  for (const note of notes) {
+    if (normalizeVaultLink(note.path) === selectedPath || result.has(note.path)) continue;
+    const linksToSelected = (note.links ?? []).some(target =>
+      normalizeVaultLink(resolveVaultNote(notes, target)?.path ?? target) === selectedPath,
+    );
+    if (linksToSelected) result.set(note.path, { note, direction: 'backlink' });
+  }
+  return [...result.values()];
+}
+
+function normalizeVaultLink(value: string): string {
+  return value.trim()
+    .replace(/^\[\[/, '')
+    .replace(/\]\]$/, '')
+    .split('|', 1)[0]!
+    .split('#', 1)[0]!
+    .replaceAll('\\', '/')
+    .replace(/^\.\//, '')
+    .replace(/\.md$/i, '')
+    .toLowerCase();
+}
+
 function noteBodyWithoutDuplicateTitle(note: Note): string {
   const content = note.content ?? note.preview;
   const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
@@ -114,7 +165,7 @@ function noteBodyWithoutDuplicateTitle(note: Note): string {
   const normalize = (value: string) => value
     .replace(/\.(?:md|markdown)$/i, '')
     .replace(/^\d{4}-\d{2}-\d{2}-/, '')
-    .replace(/[*_`~]/g, '')
+    .replaceAll(/[*_`~]/g, '')
     .trim()
     .toLowerCase();
   return normalize(heading[1] ?? '') === normalize(note.title)

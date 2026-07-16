@@ -10,12 +10,14 @@ import {
   FsPathEscapesError,
   LspPositionRequiredError,
   LspService,
+  NodeLanguageServerBackend,
   type ISessionService,
   type LanguageServerBackend,
   type LanguageServerDocument,
   type LanguageServerLaunch,
   type LanguageServerTransport,
 } from '../../src/services';
+import { serverDefinition } from '../../src/services/lsp/lspService';
 
 let root: string;
 
@@ -71,6 +73,72 @@ class FakeBackend implements LanguageServerBackend {
 }
 
 describe('LspService', () => {
+  it.each([
+    ['app.tsx', 'typescript-language-server', 'typescriptreact'],
+    ['config.json', 'vscode-json-language-server', 'json'],
+    ['index.html', 'vscode-html-language-server', 'html'],
+    ['style.scss', 'vscode-css-language-server', 'scss'],
+    ['main.py', 'pyright', 'python'],
+    ['lib.rs', 'rust-analyzer', 'rust'],
+    ['main.go', 'gopls', 'go'],
+    ['main.cpp', 'clangd', 'cpp'],
+    ['Main.java', 'jdtls', 'java'],
+    ['Program.cs', 'omnisharp', 'csharp'],
+    ['index.php', 'intelephense', 'php'],
+    ['main.rb', 'solargraph', 'ruby'],
+    ['init.lua', 'lua-language-server', 'lua'],
+    ['script.sh', 'bash-language-server', 'shellscript'],
+    ['config.yml', 'yaml-language-server', 'yaml'],
+    ['README.md', 'vscode-markdown-language-server', 'markdown'],
+    ['App.vue', 'vue-language-server', 'vue'],
+    ['App.svelte', 'svelteserver', 'svelte'],
+    ['Dockerfile', 'docker-langserver', 'dockerfile'],
+  ])('configures %s with %s', (fileName, serverId, languageId) => {
+    expect(serverDefinition(fileName)).toMatchObject({ id: serverId, languageId });
+  });
+
+  it('leaves unknown file types unsupported', () => {
+    expect(serverDefinition('archive.unknown-extension')).toBeUndefined();
+  });
+
+  it('reports a configured external server as unavailable and retries on refresh', async () => {
+    writeFileSync(join(root, 'Main.java'), 'class Main {}\n');
+    const starts: LanguageServerLaunch[] = [];
+    const backend: LanguageServerBackend = {
+      async start(launch) {
+        starts.push(launch);
+        throw new Error(`spawn ${launch.command} ENOENT`);
+      },
+    };
+    const service = new LspService({ backend }, sessionService(new Emitter()));
+
+    const first = await service.status('session-1', 'Main.java');
+    const second = await service.status('session-1', 'Main.java');
+
+    expect(first).toMatchObject({
+      available: false,
+      running: false,
+      server_id: 'jdtls',
+      language_id: 'java',
+    });
+    expect(first.reason).toContain('jdtls is configured but could not be started');
+    expect(first.reason).not.toContain('No language server is configured');
+    expect(second.reason).toContain('jdtls is configured but could not be started');
+    expect(starts).toHaveLength(2);
+    service.dispose();
+  });
+
+  it('rejects a missing executable without opening a JSON-RPC connection', async () => {
+    const backend = new NodeLanguageServerBackend();
+    await expect(backend.start({
+      id: 'missing-language-server',
+      languageId: 'text',
+      rootPath: root,
+      command: `nori-missing-language-server-${Date.now()}`,
+      args: [],
+    })).rejects.toThrow(/ENOENT|not found/i);
+  });
+
   it('starts the bundled TypeScript server and receives diagnostics', async () => {
     const service = new LspService({ diagnosticsTimeoutMs: 6000 }, sessionService(new Emitter()));
     try {
@@ -88,6 +156,27 @@ describe('LspService', () => {
         expect.objectContaining({ name: 'answer' }),
       ]));
       expect(diagnostics.some(item => item.message?.includes('not assignable'))).toBe(true);
+    } finally {
+      service.dispose();
+    }
+  }, 20_000);
+
+  it('starts the bundled HTML server', async () => {
+    writeFileSync(join(root, 'src', 'index.html'), '<main><h1>Nori</h1></main>\n');
+    const service = new LspService({}, sessionService(new Emitter()));
+    try {
+      const status = await service.status('session-1', 'src/index.html');
+      const symbols = await service.request('session-1', { operation: 'document_symbols', path: 'src/index.html' });
+
+      expect(status).toMatchObject({
+        available: true,
+        running: true,
+        server_id: 'vscode-html-language-server',
+        language_id: 'html',
+      });
+      expect(symbols.result).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: 'h1' }),
+      ]));
     } finally {
       service.dispose();
     }

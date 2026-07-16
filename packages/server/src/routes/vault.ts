@@ -3,8 +3,8 @@
  * Reads markdown files directly from the filesystem.
  */
 
-import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
-import { join, basename } from 'node:path';
+import { readFileSync, readdirSync, existsSync, statSync, type Dirent } from 'node:fs';
+import { join, basename, relative } from 'node:path';
 import { z } from 'zod';
 import { parse as parseYaml } from 'yaml';
 import { okEnvelope } from '../envelope';
@@ -51,7 +51,7 @@ const noteIdParamsSchema = z.object({
   note_id: z.string(),
 });
 
-type NoteEntry = z.infer<typeof noteSchema>;
+export type NoteEntry = z.infer<typeof noteSchema>;
 
 /** Resolve the vault path from project root or NORI_CODE_HOME. */
 function resolveVaultPath(): string {
@@ -70,6 +70,7 @@ function resolveVaultPath(): string {
 /** Folders that map to note types. */
 const FOLDER_TO_TYPE: Record<string, NoteEntry['type']> = {
   analysis: 'analysis',
+  analyses: 'analysis',
   decision: 'decision',
   decisions: 'decision',
   review: 'review',
@@ -78,20 +79,17 @@ const FOLDER_TO_TYPE: Record<string, NoteEntry['type']> = {
   tasks: 'task',
 };
 
-function scanVault(vaultPath: string): NoteEntry[] {
-  const notes: NoteEntry[] = [];
-  const folders = ['analysis', 'decision', 'decisions', 'review', 'reviews', 'task', 'tasks'];
+const VAULT_NOTE_FOLDERS = Object.keys(FOLDER_TO_TYPE);
 
-  for (const folder of folders) {
+export function scanVault(vaultPath: string): NoteEntry[] {
+  const notes: NoteEntry[] = [];
+
+  for (const folder of VAULT_NOTE_FOLDERS) {
     const folderPath = join(vaultPath, folder);
     if (!existsSync(folderPath)) continue;
 
-    let entries: string[];
-    try { entries = readdirSync(folderPath); } catch { continue; }
-
-    for (const entry of entries) {
-      if (!entry.endsWith('.md')) continue;
-      const filePath = join(folderPath, entry);
+    for (const filePath of markdownFiles(folderPath)) {
+      const entry = basename(filePath);
       let content: string;
       try { content = readFileSync(filePath, 'utf-8'); } catch { continue; }
 
@@ -109,9 +107,7 @@ function scanVault(vaultPath: string): NoteEntry[] {
       const title = typeof frontmatter['title'] === 'string' && frontmatter['title'].trim() !== ''
         ? frontmatter['title'].trim()
         : filenameTitle;
-      const links = Array.isArray(frontmatter['links'])
-        ? frontmatter['links'].filter((link): link is string => typeof link === 'string' && link.trim() !== '').map(link => link.trim())
-        : [];
+      const links = relatedLinks(frontmatter, content);
 
       // Preview: first non-empty, non-heading line, skipping YAML frontmatter
       const lines = content.split('\n');
@@ -132,14 +128,15 @@ function scanVault(vaultPath: string): NoteEntry[] {
       if (!preview) preview = '(empty)';
 
       const noteType = FOLDER_TO_TYPE[folder] ?? 'analysis';
+      const notePath = relative(vaultPath, filePath).replaceAll('\\', '/');
 
       notes.push({
         title,
         type: noteType,
-        folder,
+        folder: noteType,
         preview,
         date: mtime,
-        path: filePath,
+        path: notePath,
         links,
       });
     }
@@ -148,6 +145,43 @@ function scanVault(vaultPath: string): NoteEntry[] {
   // Sort by date descending
   notes.sort((a, b) => b.date.localeCompare(a.date));
   return notes;
+}
+
+function markdownFiles(root: string): string[] {
+  const result: string[] = [];
+  const stack = [root];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (current === undefined) continue;
+    let entries: Dirent[];
+    try { entries = readdirSync(current, { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      const entryPath = join(current, entry.name);
+      if (entry.isDirectory()) stack.push(entryPath);
+      else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) result.push(entryPath);
+    }
+  }
+  return result;
+}
+
+function relatedLinks(frontmatter: Record<string, unknown>, content: string): string[] {
+  const candidates = [frontmatter['related'], frontmatter['links']]
+    .flatMap(value => Array.isArray(value) ? value : [])
+    .filter((value): value is string => typeof value === 'string');
+  for (const match of content.matchAll(/\[\[([^\]]+)\]\]/g)) {
+    if (match[1]) candidates.push(match[1]);
+  }
+  return [...new Set(candidates.map(normalizeLinkTarget).filter(Boolean))];
+}
+
+function normalizeLinkTarget(value: string): string {
+  const unwrapped = value.trim().replace(/^\[\[/, '').replace(/\]\]$/, '');
+  return (unwrapped.split('|', 1)[0] ?? '')
+    .split('#', 1)[0]!
+    .trim()
+    .replaceAll('\\', '/')
+    .replace(/^\.\//, '')
+    .replace(/\.md$/i, '');
 }
 
 function parseFrontmatter(content: string): Record<string, unknown> {
@@ -175,14 +209,14 @@ function searchNotes(notes: NoteEntry[], query: string, types?: string[]): NoteE
 function findNote(notes: NoteEntry[], noteId: string): NoteEntry | null {
   let decoded = noteId;
   try { decoded = decodeURIComponent(noteId); } catch { /* invalid URI sequence, use raw value */ }
-  return notes.find(n =>
-    n.title === decoded ||
-    n.path.endsWith(decoded) ||
-    basename(n.path, '.md') === decoded
-  ) ?? null;
+  const normalized = normalizeLinkTarget(decoded).toLowerCase();
+  return notes.find(n => {
+    const notePath = n.path.replace(/\.md$/i, '').toLowerCase();
+    return n.title.toLowerCase() === normalized || notePath === normalized || basename(notePath) === normalized;
+  }) ?? null;
 }
 
-export function registerVaultRoutes(app: RouteHost, ix: IInstantiationService): void {
+export function registerVaultRoutes(app: RouteHost, _ix: IInstantiationService): void {
   const vaultPath = resolveVaultPath();
 
   // GET /vault/search?q=keywords&types=analysis,decision
@@ -245,7 +279,7 @@ export function registerVaultRoutes(app: RouteHost, ix: IInstantiationService): 
       }
       // Read full content — if the file was deleted since boot, return empty content
       let content = '';
-      try { content = readFileSync(note.path, 'utf-8'); } catch { /* file missing/deleted */ }
+      try { content = readFileSync(join(vaultPath, note.path), 'utf-8'); } catch { /* file missing/deleted */ }
       reply.send(okEnvelope({ ...note, content }, req.id));
     },
   );

@@ -107,6 +107,32 @@ describe('refreshProviderModels', () => {
     expect(harness.config().defaultModel).toBe('custom/gpt-new');
   });
 
+  it('infers OpenCode-compatible GPT-5 efforts when a manual provider only returns model IDs', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ data: [{ id: 'gpt-5.4' }] })));
+    const harness = makeHost({
+      providers: {
+        gateway: {
+          type: 'openai_responses',
+          baseUrl: 'https://gateway.example/v1',
+          apiKey: 'secret',
+          source: { kind: 'manual' },
+        },
+      },
+      models: {},
+    });
+
+    const result = await refreshProviderModels(harness.host, { providerId: 'gateway' });
+
+    expect(result.failed).toEqual([]);
+    expect(harness.config().models?.['gateway/gpt-5.4']).toEqual(
+      expect.objectContaining({
+        thinkingSupport: true,
+        capabilities: expect.arrayContaining(['thinking']),
+        supportEfforts: ['none', 'low', 'medium', 'high', 'xhigh'],
+      }),
+    );
+  });
+
   it('enriches preset models with models.dev reasoning metadata', async () => {
     const fetchMock = vi.fn(async (input: string) => input === 'https://models.dev/api.json'
       ? jsonResponse({
@@ -118,8 +144,10 @@ describe('refreshProviderModels', () => {
                 name: 'Reasoning Model',
                 reasoning: true,
                 limit: { context: 200000 },
-                support_efforts: ['low', 'high'],
-                default_effort: 'high',
+                reasoning_options: [{
+                  type: 'effort',
+                  values: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'],
+                }],
               },
             },
           },
@@ -155,8 +183,7 @@ describe('refreshProviderModels', () => {
         maxContextSize: 200000,
         thinkingSupport: true,
         capabilities: expect.arrayContaining(['thinking']),
-        supportEfforts: ['low', 'high'],
-        defaultEffort: 'high',
+        supportEfforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'],
       }),
     );
   });

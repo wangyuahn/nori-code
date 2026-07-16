@@ -24,13 +24,38 @@ export function configuredSubagentProfiles(
   return profiles;
 }
 
+export function renderConfiguredAgentList(
+  configured: Record<string, CustomAgentConfig> | undefined,
+): string {
+  if (configured === undefined) return '';
+  const entries = Object.entries(configured).filter(([, value]) => value.enabled !== false);
+  if (entries.length === 0) return '';
+  return [
+    '<available_custom_agents>',
+    ...entries.map(([name, value]) => {
+      const permissions = Object.entries(value.permissions ?? {})
+        .filter(([, enabled]) => enabled === true)
+        .map(([permission]) => permission)
+        .join(', ') || 'base profile defaults';
+      return [
+        `<agent name="${escapeAttribute(name)}" base_profile="${escapeAttribute(value.baseProfile)}">`,
+        `Description: ${value.description}`,
+        `Role: ${value.role}`,
+        `Permissions: ${permissions}`,
+        '</agent>',
+      ].join('\n');
+    }),
+    '</available_custom_agents>',
+  ].join('\n');
+}
+
 function filterTools(baseTools: string[], toolPool: string[], permissions: CustomAgentConfig['permissions']): string[] {
   if (!permissions) return [...baseTools];
   const groups: Record<keyof NonNullable<CustomAgentConfig['permissions']>, Set<string>> = {
     read: new Set(['Read', 'Grep', 'Glob', 'ReadMediaFile', 'nori_memory_search']),
     write: new Set(['Write', 'Edit', 'nori_memory_write', 'nori_memory_remove', 'nori_plan_write']),
     shell: new Set(['Bash', 'TaskList', 'TaskOutput', 'TaskStop']),
-    web: new Set(['WebSearch', 'FetchURL']),
+    web: new Set(['WebSearch', 'FetchURL', 'Browser']),
     delegate: new Set(['Agent', 'AgentSwarm', 'AgentSwarmControl', 'nori_swarm_launch', 'nori_swarm_status', 'nori_swarm_result']),
   };
   const category = (tool: string) => Object.entries(groups).find(([, names]) => names.has(tool))?.[0] as keyof NonNullable<CustomAgentConfig['permissions']> | undefined;
@@ -38,4 +63,8 @@ function filterTools(baseTools: string[], toolPool: string[], permissions: Custo
     const key = category(tool);
     return key === undefined ? baseTools.includes(tool) : permissions[key] === true;
   });
+}
+
+function escapeAttribute(value: string): string {
+  return value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }

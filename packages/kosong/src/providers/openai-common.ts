@@ -152,6 +152,10 @@ export function thinkingEffortToReasoningEffort(effort: ThinkingEffort): string 
   switch (effort) {
     case 'off':
       return undefined;
+    case 'none':
+      return 'none';
+    case 'minimal':
+      return 'minimal';
     case 'low':
       return 'low';
     case 'medium':
