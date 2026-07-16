@@ -16,7 +16,7 @@ Nori orchestrates multiple AI agents to plan, implement, review, and persist kno
 |---|---|---|
 | **What** | Terminal CLI/TUI for focused coding sessions | Electron desktop workbench |
 | **Who for** | Terminal-first power users | Full workspace with browser, terminal, Git, filesystem |
-| **Interface** | Ink-based TUI with split panes | Multi-panel desktop with embedded browser/terminal |
+| **Interface** | Ink-based TUI with split panes | Multi-panel Electron desktop |
 | **Start** | `nori` | Standalone installer (see releases) |
 
 ---
@@ -28,7 +28,7 @@ Most AI coding tools are **single-agent chat shells**: one model, one context, o
 - **Parallel, not serial.** Complex tasks decompose into DAG-shaped agent workflows — plan → implement → verify → review — running in parallel with dependency scheduling.
 - **Memory, not amnesia.** Architecture decisions, code reviews, and patterns persist in a bidirectional-link vault. What you learned last month is available next session.
 - **Policy, not guesswork.** `nori.yaml` enforces deterministic rules: search memory before coding, run tests before exit, review before merge. AI flexibility backed by project discipline.
-- **Desktop, not a web tab.** Nori Work embeds a native terminal (node-pty), browser view (WebContentsView), filesystem sandbox, system tray, notifications, and auto-update — a proper local workspace.
+- **Desktop, not a web tab.** Nori Work is an Electron native workspace — a proper local workbench.
 
 ---
 
@@ -51,15 +51,6 @@ rules:
 ```
 Orchestrator, coder, and reviewer can each use a different model/provider.
 
-### 🖥️ Nori Work Desktop
-Built from scratch (Electron + node-pty + WebContentsView):
-- Embedded terminal with full PTY support
-- Embedded browser for documentation / preview
-- Filesystem sandbox (whitelist + blocklist)
-- System tray with phase/swarm state
-- Native OS notifications
-- Secure preload bridge (no raw Node in renderer)
-
 ### 🔌 Provider Flexibility
 Bring any OpenAI-compatible provider — local (Ollama, LM Studio) or cloud. Each agent role (orchestrator / coder / reviewer) can run its own model.
 
@@ -71,9 +62,12 @@ Bring any OpenAI-compatible provider — local (Ollama, LM Studio) or cloud. Eac
 |----------|---------|--------|
 | P0 | **Built-in LSP** — symbol definition, references, types, diagnostics via language server | 📝 Planned |
 | P0 | **Custom Agent Profiles** — user-defined agents with custom prompts, tools, and model selection | 📝 Planned |
+| P0 | **Nori Work — Embedded Terminal** (node-pty integration) | 📝 Planned |
+| P0 | **Nori Work — Embedded Browser** (WebContentsView for docs/preview) | 📝 Planned |
+| P0 | **Nori Work — Filesystem Sandbox** (whitelist + blocklist) | 📝 Planned |
+| P0 | **Nori Work — System Tray / Notifications** | 📝 Planned |
+| P0 | **Nori Work — Secure Preload Bridge** | 📝 Planned |
 | P1 | **Agent Browser Tool** — headless browser for page rendering, screenshot, JS evaluation | 📝 Planned |
-
-See [plans/roadmap-todo.md](plans/roadmap-todo.md) for details.
 
 ---
 
