@@ -12,6 +12,16 @@ Nori Work combines three existing boundaries instead of duplicating Agent logic:
 - The explicit **preload bridge** exposes the small set of approved IPC operations used by the renderer, including server-token lookup and local project file access.
 - The bundled **Nori Web renderer** talks to the local Nori REST/WebSocket server for sessions, streaming events, provider settings, Agent activity, knowledge, and Git operations.
 
+The current desktop workspace also includes:
+
+- A persistent `node-pty` terminal connected to the active project.
+- LSP diagnostics, hover, definitions, references, symbols, rename, and formatting.
+- Reorderable, resizable inspector tools with standalone-window support.
+- Project file preview and direct `@path` references to the main Agent.
+- Custom Agent roles with explicit read, write, terminal, web, and delegation permissions.
+- Background AgentSwarm monitoring and controls for pause, guidance, resume, and stop.
+- Configurable completion, Agent, approval, and error notification sounds.
+
 At startup, the desktop process launches or reuses the bundled Nori SEA server, reads `~/.nori-code/server/lock`, obtains its origin and token, and loads the renderer. The shared daemon is left running when the window closes and exits after its idle period when no clients remain.
 
 Key files:
@@ -20,6 +30,7 @@ Key files:
 - `src/main/ensure-server.ts`: launch/reuse the SEA, read the lock file, and wait for health.
 - `src/main/sea-path.ts`: resolve the development or packaged SEA binary.
 - `src/main/ipc-handlers.ts`: explicit native IPC handlers.
+- `src/main/browser-view.ts`: isolated `WebContentsView` lifecycle for the embedded browser.
 - `src/preload/index.ts`: isolated renderer bridge.
 - `electron-builder.config.cjs`: installer, platform assets, and signing configuration.
 

@@ -54,19 +54,24 @@ Orchestrator, coder, and reviewer can each use a different model/provider.
 ### 🔌 Provider Flexibility
 Bring any OpenAI-compatible provider — local (Ollama, LM Studio) or cloud. Each agent role (orchestrator / coder / reviewer) can run its own model.
 
+### 🖥️ Nori Work Engineering Workspace
+Nori Work keeps the conversation, project files, live code changes, Git operations, LSP results, and a persistent PTY terminal in one resizable desktop layout. Inspector tools can be reordered or opened in standalone windows. Custom Agent roles define their own instructions and explicit read, write, terminal, web, and delegation permissions.
+
+Agent and AgentSwarm work always runs in the background. The main model can inspect, pause, guide, resume, or stop a swarm while the collaboration view shows its project/session tree, status, output, and token usage.
+
 ---
 
 ## Roadmap
 
 | Priority | Feature | Status |
 |----------|---------|--------|
-| P0 | **Built-in LSP** — symbol definition, references, types, diagnostics via language server | 📝 Planned |
-| P0 | **Custom Agent Profiles** — user-defined agents with custom prompts, tools, and model selection | 📝 Planned |
-| P0 | **Nori Work — Embedded Terminal** (node-pty integration) | 📝 Planned |
-| P0 | **Nori Work — Embedded Browser** (WebContentsView for docs/preview) | 📝 Planned |
+| P0 | **Built-in LSP** — diagnostics, hover, definitions, references, symbols, rename, and formatting | ✅ Implemented |
+| P0 | **Custom Agent Profiles** — user-defined roles, prompts, base profiles, and tool permissions | ✅ Implemented |
+| P0 | **Nori Work — Embedded Terminal** (persistent node-pty sessions) | ✅ Implemented |
+| P0 | **Nori Work — Embedded Browser** (WebContentsView tabs for research and preview) | 🚧 In progress |
 | P0 | **Nori Work — Filesystem Sandbox** (whitelist + blocklist) | 📝 Planned |
-| P0 | **Nori Work — System Tray / Notifications** | 📝 Planned |
-| P0 | **Nori Work — Secure Preload Bridge** | 📝 Planned |
+| P0 | **Nori Work — System Tray / Notifications** | ✅ Implemented |
+| P0 | **Nori Work — Secure Preload Bridge** | ✅ Implemented |
 | P1 | **Agent Browser Tool** — headless browser for page rendering, screenshot, JS evaluation | 📝 Planned |
 
 ---
