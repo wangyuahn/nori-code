@@ -14,6 +14,7 @@ export interface LanguageServerLaunch {
   readonly rootPath: string;
   readonly command: string;
   readonly args: readonly string[];
+  readonly env?: NodeJS.ProcessEnv;
   readonly initializationOptions?: Record<string, unknown>;
 }
 

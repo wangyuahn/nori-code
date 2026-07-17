@@ -2,9 +2,10 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { KimiCore } from '../../src/rpc/core-impl';
+import type { Session } from '../../src/session';
 
 const tempDirs: string[] = [];
 
@@ -106,5 +107,26 @@ max_steps_per_turn = "nope"
     const adopted = await core.getKimiConfig({ reload: true });
     expect(adopted.thinking?.enabled).toBe(true);
     await expect(core.getConfigDiagnostics({})).resolves.toEqual({ warnings: [] });
+  });
+
+  it('pushes custom agent changes into already active sessions', async () => {
+    const core = makeCore(await makeHome(VALID_TOML));
+    const updateCustomAgents = vi.fn(async () => undefined);
+    core.sessions.set('existing-session', { updateCustomAgents } as unknown as Session);
+
+    await core.setKimiConfig({
+      customAgents: {
+        reviewer: {
+          description: 'Review changes.',
+          role: 'Find correctness bugs.',
+          baseProfile: 'explore',
+          enabled: true,
+        },
+      },
+    });
+
+    expect(updateCustomAgents).toHaveBeenCalledWith({
+      reviewer: expect.objectContaining({ role: 'Find correctness bugs.' }),
+    });
   });
 });

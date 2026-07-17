@@ -340,6 +340,7 @@ export class Agent {
       cwdListing: context?.cwdListing,
       agentsMd: context?.agentsMd,
       additionalDirsInfo: context?.additionalDirsInfo,
+      customAgentsInfo: context?.customAgentsInfo,
     });
     this.config.update({ profileName: profile.name, systemPrompt });
   }

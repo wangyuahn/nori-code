@@ -569,7 +569,7 @@ describe('WSBroadcastService (WS transport pump)', () => {
     bus.dispose();
   });
 
-  it('tracks swarm rounds, live agent output, and token usage outside the main stream', async () => {
+  it('tracks swarm rounds, nested wake-ups, live agent output, and token usage outside the main stream', async () => {
     const bus = new EventService();
     const broadcast = new WSBroadcastService(
       bus,
@@ -611,7 +611,7 @@ describe('WSBroadcastService (WS transport pump)', () => {
       sessionId,
       agentId: 'main',
       subagentId: 'agent-status-1',
-      subagentName: 'nori-coder',
+      subagentName: 'deepseek-reviewer',
       parentToolCallId: 'call-swarm-1',
       parentAgentId: 'main',
       description: 'Inspect streaming',
@@ -623,7 +623,7 @@ describe('WSBroadcastService (WS transport pump)', () => {
       sessionId,
       agentId: 'main',
       subagentId: 'agent-status-1',
-      subagentName: 'nori-coder',
+      subagentName: 'deepseek-reviewer',
       parentToolCallId: 'call-swarm-1',
       parentAgentId: 'main',
       description: 'Inspect streaming',
@@ -638,6 +638,25 @@ describe('WSBroadcastService (WS transport pump)', () => {
       subagentId: 'agent-status-1',
     } as unknown as Event);
     bus.publish({
+      type: 'subagent.suspended',
+      sessionId,
+      agentId: 'main',
+      subagentId: 'agent-status-1',
+      reason: 'Waiting for nested agent work.',
+    } as unknown as Event);
+    expect(getSwarmStatus(swarmId)).toMatchObject({
+      tasks: [{ status: 'paused' }],
+    });
+    bus.publish({
+      type: 'turn.started',
+      sessionId,
+      agentId: 'agent-status-1',
+      turnId: 2,
+    } as unknown as Event);
+    expect(getSwarmStatus(swarmId)).toMatchObject({
+      tasks: [{ status: 'running' }],
+    });
+    bus.publish({
       type: 'assistant.delta',
       sessionId,
       agentId: 'agent-status-1',
@@ -647,6 +666,7 @@ describe('WSBroadcastService (WS transport pump)', () => {
 
     expect(getSwarmStatus(swarmId)).toMatchObject({
       tasks: [{
+        profile: 'deepseek-reviewer',
         status: 'running',
         output: 'live preview',
         live_output_tokens: 3,

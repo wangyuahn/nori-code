@@ -118,18 +118,28 @@ export function ChatView(props: ChatViewProps) {
   const [composerRevision, setComposerRevision] = useState(0);
   const [loopEnabled, setLoopEnabled] = useState(loadLoopMode);
   const [followOutput, setFollowOutput] = useState(true);
+  const [taskModeOverride, setTaskModeOverride] = useState<'plan' | 'code' | null>(null);
+  const [modelOverride, setModelOverride] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
+  const taskModeOverrideSessionRef = useRef<string | null>(null);
+  const modelOverrideSessionRef = useRef<string | null>(null);
   const followOutputRef = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const restoredCaretRef = useRef<number | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
-  const selectedModelId = session?.agent_config?.model ?? draftAgentConfig?.model ?? '';
+  const currentSessionId = session?.id ?? null;
+  const activeModelOverride = modelOverrideSessionRef.current === currentSessionId ? modelOverride : null;
+  const activeTaskModeOverride = taskModeOverrideSessionRef.current === currentSessionId ? taskModeOverride : null;
+  const runtimeModelValue = sessionStatus?.model?.trim();
+  const runtimeModelId = runtimeModelValue === '' ? undefined : runtimeModelValue;
+  const selectedModelId = activeModelOverride ?? runtimeModelId ?? session?.agent_config?.model ?? draftAgentConfig?.model ?? '';
   const selectedModel = models.find(model => model.model === selectedModelId);
   const thinkingOptions = modelThinkingOptions(selectedModel);
   const selectedThinking = session?.agent_config?.thinking ?? draftAgentConfig?.thinking ?? thinkingOptions.defaultValue;
   const selectedPermission = session?.agent_config?.permission_mode ?? draftAgentConfig?.permission_mode ?? 'manual';
-  const selectedTaskMode = (sessionStatus?.plan_mode ?? session?.agent_config?.plan_mode ?? draftAgentConfig?.plan_mode) ? 'plan' : 'code';
+  const persistedTaskMode = (sessionStatus?.plan_mode ?? session?.agent_config?.plan_mode ?? draftAgentConfig?.plan_mode) ? 'plan' : 'code';
+  const selectedTaskMode = activeTaskModeOverride ?? persistedTaskMode;
   const selectedMainWrite = sessionStatus?.main_write_enabled ?? session?.agent_config?.main_write_enabled ?? draftAgentConfig?.main_write_enabled ?? false;
   const commandSuggestions = chatSlashCommandSuggestions(input);
   const commandMenuOpen = !commandMenuDismissed && commandSuggestions.length > 0;
@@ -175,6 +185,14 @@ export function ChatView(props: ChatViewProps) {
     editor.setSelectionRange(caret, caret);
   }, [composerRevision]);
   useEffect(() => { setModelNotice(false); }, [selectedModelId, session?.id]);
+  useEffect(() => { setTaskModeOverride(null); }, [session?.id]);
+  useEffect(() => { setModelOverride(null); }, [session?.id]);
+  useEffect(() => {
+    if (activeTaskModeOverride === persistedTaskMode) setTaskModeOverride(null);
+  }, [activeTaskModeOverride, persistedTaskMode]);
+  useEffect(() => {
+    if (activeModelOverride !== null && runtimeModelId === activeModelOverride) setModelOverride(null);
+  }, [activeModelOverride, runtimeModelId]);
   useEffect(() => {
     const reference = (event: Event) => {
       const path = (event as CustomEvent<{ path?: string }>).detail?.path;
@@ -370,7 +388,7 @@ export function ChatView(props: ChatViewProps) {
     }
     if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && !isStreaming && pendingApprovals.length === 0 && browserPermissions.pending.length === 0 && pendingQuestions.length === 0) {
       event.preventDefault();
-      void onTaskModeChange(selectedTaskMode === 'plan' ? 'code' : 'plan');
+      void changeTaskMode(selectedTaskMode === 'plan' ? 'code' : 'plan');
       return;
     }
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -379,6 +397,16 @@ export function ChatView(props: ChatViewProps) {
       else void handleSend(undefined, isStreaming ? 'steer' : 'queue');
     }
   };
+
+  async function changeTaskMode(mode: 'plan' | 'code') {
+    taskModeOverrideSessionRef.current = currentSessionId;
+    setTaskModeOverride(mode);
+    try {
+      await onTaskModeChange(mode);
+    } catch {
+      setTaskModeOverride(current => taskModeOverrideSessionRef.current === currentSessionId && current === mode ? null : current);
+    }
+  }
 
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     if (event.clipboardData.files.length === 0) return;
@@ -392,7 +420,9 @@ export function ChatView(props: ChatViewProps) {
     void addFiles(event.clipboardData.files);
   };
 
-  const handleModelChange = (modelId: string) => {
+  const handleModelChange = async (modelId: string) => {
+    modelOverrideSessionRef.current = currentSessionId;
+    setModelOverride(modelId);
     const nextModel = models.find(model => model.model === modelId);
     if (!modelSupportsImageInput(nextModel) && attachments.some(item => item.attachment.kind === 'image')) {
       setAttachments(previous => previous.filter(item => item.attachment.kind !== 'image'));
@@ -403,7 +433,11 @@ export function ChatView(props: ChatViewProps) {
     } else {
       setAttachmentError(null);
     }
-    void onModelChange(modelId);
+    try {
+      await onModelChange(modelId);
+    } catch {
+      setModelOverride(current => modelOverrideSessionRef.current === currentSessionId && current === modelId ? null : current);
+    }
   };
 
   const handleRewind = useCallback(async (count: number) => {
@@ -438,7 +472,7 @@ export function ChatView(props: ChatViewProps) {
     <div className="chat-messages" ref={messagesScrollRef} onScroll={handleMessagesScroll}>
       {messagesLoading ? <div className="chat-history-loading" role="status"><span className="spinner"/><strong>{tr('Loading conversation…', '正在加载会话…')}</strong></div> : messages.length === 0 ? <div className="chat-welcome"><div className="welcome-mark"><Icon name="sparkles" size={27}/></div><span className="eyebrow">{tr('Your thoughtful coding partner', '你的智能编程伙伴')}</span><h2>{session ? tr('What should we make better?', '我们要改进什么？') : tr('What would you like to work on?', '你想从哪里开始？')}</h2><p>{session ? tr('Ask Nori to inspect code, plan a feature, fix a bug, or validate an API integration.', '让 Nori 检查代码、规划功能、修复缺陷或验证 API 集成。') : tr('Choose a project folder to start a new task, or open an existing conversation from the sidebar. You can also type below now.', '选择一个项目文件夹开始新任务，或从左侧打开已有对话。你也可以直接在下方输入。')}</p><UsageOverview sessions={allSessions} models={models}/><div className="starter-grid">{STARTERS.map(item => <button key={item.title} className="starter-card" onClick={() => void handleSend(tr(item.prompt, item.promptZh))}><Icon name="sparkles" size={16}/><span><strong>{tr(item.title, item.titleZh)}</strong><small>{tr(item.prompt, item.promptZh)}</small></span></button>)}</div></div> : messages.map((message, index) => <MessageBubble key={message.id} message={message} rewindCount={rewindCounts.get(message.id)} onRewind={handleRewind} live={isStreaming && index === messages.length - 1 && message.role === 'assistant' ? { streaming, thinking, workBlocks, stopping, onAbort: handleAbort } : undefined}/>) }
 
-      {isStreaming && !streamingContinuesAssistant && <div className="chat-message chat-message-assistant chat-message-streaming"><div className="message-avatar"><span>N</span></div><div className="message-body"><div className="chat-message-role">Nori <span>{pendingApprovals.length > 0 || browserPermissions.pending.length > 0 ? tr('waiting for permission', '等待授权') : tr('working', '工作中')}</span></div>{(workBlocks.length > 0 || thinking) && <WorkProcess blocks={workBlocks.length > 0 ? workBlocks : [{ id: 'live-thinking', type: 'thinking', text: thinking }]} live/>}<div className="chat-message-content">{streaming ? <MarkdownView content={streaming} /> : (!thinking && workBlocks.length === 0 && <span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span>)}<span className="streaming-cursor"/></div>{streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(streaming))} tokens</div>}<button className="chat-abort-btn" onClick={() => void handleAbort()} disabled={stopping}><Icon name="stop" size={13}/> {stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button></div></div>}
+      {isStreaming && !streamingContinuesAssistant && <div className="chat-message chat-message-assistant chat-message-streaming"><div className="message-avatar"><span>N</span></div><div className="message-body"><div className="chat-message-role">Nori <span>{pendingApprovals.length > 0 || browserPermissions.pending.length > 0 ? tr('waiting for permission', '等待授权') : tr('working', '工作中')}</span></div>{(workBlocks.length > 0 || thinking) && <WorkProcess blocks={workBlocks.length > 0 ? workBlocks : [{ id: 'live-thinking', type: 'thinking', text: thinking }]} live/>}<div className="chat-message-content">{streaming ? <MarkdownView content={streaming} streaming /> : (!thinking && workBlocks.length === 0 && <span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span>)}<span className="streaming-cursor"/></div>{streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(streaming))} tokens</div>}<button className="chat-abort-btn" onClick={() => void handleAbort()} disabled={stopping}><Icon name="stop" size={13}/> {stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button></div></div>}
       <div ref={messagesEndRef}/>
     </div>
 
@@ -461,9 +495,9 @@ export function ChatView(props: ChatViewProps) {
       </div>}
       <textarea ref={inputRef} className="chat-input" placeholder={session ? tr('Ask Nori about this project…', '向 Nori 询问此项目…') : tr('Describe what you want to work on…', '告诉 Nori 你想做什么…')} value={input} onChange={event => { setInput(event.target.value); setCommandMenuDismissed(false); setCommandSelection(0); setCommandNotice(null); }} onKeyDown={handleKeyDown} onPaste={handlePaste} rows={1} aria-label={tr('Message Nori', '向 Nori 发送消息')} aria-autocomplete="list" aria-expanded={commandMenuOpen} aria-controls={commandMenuOpen ? 'composer-command-menu' : undefined} aria-activedescendant={commandMenuOpen ? `composer-command-${commandSuggestions[commandSelection]?.name ?? commandSuggestions[0]?.name}` : undefined}/>
       <SessionUsageBar status={sessionStatus} compacting={compacting} />
-      <div className="composer-mode-row"><div className="composer-task-mode" role="group" aria-label={tr('Task mode', '任务模式')}><button type="button" className={selectedTaskMode === 'plan' ? 'active' : ''} onClick={() => void onTaskModeChange('plan')} disabled={isStreaming}>{tr('Plan', '规划')}</button><button type="button" className={selectedTaskMode === 'code' ? 'active' : ''} onClick={() => void onTaskModeChange('code')} disabled={isStreaming}>{tr('Code', '执行')}</button></div><div className="composer-mode-options"><label className="main-write-toggle loop-mode-toggle" title={tr('Create a goal before this request so Nori continues through the Loop state machine.', '发送后先创建 Goal，并由 Loop 状态机持续执行。')}><input type="checkbox" checked={loopEnabled} onChange={event => setLoopEnabled(event.target.checked)}/><span>Loop</span></label>{selectedTaskMode === 'code' && <label className="main-write-toggle" title={tr('Allow the main model to use Edit and Write directly.', '允许主模型直接使用 Edit 和 Write。')}><input type="checkbox" checked={selectedMainWrite} disabled={isStreaming} onChange={event => void onMainWriteChange(event.target.checked)}/><span>{tr('Main edits', '主模型编辑')}</span></label>}</div></div>
+      <div className="composer-mode-row"><div className="composer-task-mode" role="group" aria-label={tr('Task mode', '任务模式')}><button type="button" className={selectedTaskMode === 'plan' ? 'active' : ''} onClick={() => void changeTaskMode('plan')} disabled={isStreaming}>{tr('Plan', '规划')}</button><button type="button" className={selectedTaskMode === 'code' ? 'active' : ''} onClick={() => void changeTaskMode('code')} disabled={isStreaming}>{tr('Code', '执行')}</button></div><div className="composer-mode-options"><label className="main-write-toggle loop-mode-toggle" title={tr('Create a goal before this request so Nori continues through the Loop state machine.', '发送后先创建 Goal，并由 Loop 状态机持续执行。')}><input type="checkbox" checked={loopEnabled} onChange={event => setLoopEnabled(event.target.checked)}/><span>Loop</span></label>{selectedTaskMode === 'code' && <label className="main-write-toggle" title={tr('Allow the main model to use Edit and Write directly.', '允许主模型直接使用 Edit 和 Write。')}><input type="checkbox" checked={selectedMainWrite} disabled={isStreaming} onChange={event => void onMainWriteChange(event.target.checked)}/><span>{tr('Main edits', '主模型编辑')}</span></label>}</div></div>
       <div className="composer-footer"><div className="composer-model-controls">
-        <select className={'composer-select model-select' + (!selectedModelId ? ' invalid' : '')} value={selectedModelId} disabled={isStreaming || modelsLoading} onChange={e => handleModelChange(e.target.value)} aria-label={tr('Model', '模型')}><option value="">{modelsLoading ? tr('Loading models…', '正在加载模型…') : tr('Select model', '选择模型')}</option>{models.map(model => <option key={model.model} value={model.model}>{model.display_name || model.model}</option>)}</select>
+        <select className={'composer-select model-select' + (!selectedModelId ? ' invalid' : '')} value={selectedModelId} disabled={isStreaming || modelsLoading} onChange={e => void handleModelChange(e.target.value)} aria-label={tr('Model', '模型')}><option value="">{modelsLoading ? tr('Loading models…', '正在加载模型…') : tr('Select model', '选择模型')}</option>{selectedModelId !== '' && !selectedModel && <option value={selectedModelId}>{selectedModelId}</option>}{models.map(model => <option key={model.model} value={model.model}>{model.display_name || model.model}</option>)}</select>
         {thinkingOptions.choices.length > 0 && <select className="composer-select thinking-select" value={selectedThinking} disabled={isStreaming} onChange={e => void onThinkingChange(e.target.value)} aria-label={tr('Thinking effort', '思考等级')}>{thinkingOptions.choices.map(choice => <option key={choice.value} value={choice.value}>{choice.kind === 'fast' ? tr('Fast', '快速') : choice.kind === 'think' ? 'Think' : `${tr('Thinking', '思考')} · ${choice.value}`}</option>)}</select>}
         <select className={`composer-select permission-select permission-${selectedPermission}`} value={selectedPermission} disabled={isStreaming} onChange={event => void onPermissionChange(event.target.value as 'auto' | 'yolo' | 'manual')} aria-label={tr('Permission mode', '权限模式')} title={tr('Auto approves normal tools; YOLO asks nothing; Manual asks before commands and changes.', '自动模式放行常规工具；YOLO 不询问；手动模式在命令和更改前询问。')}><option value="auto">AUTO</option><option value="yolo">YOLO</option><option value="manual">MANUAL</option></select>
         <SkillPicker sessionId={session?.id ?? null} disabled={isStreaming}/>
@@ -588,7 +622,7 @@ function MessageBubble({ message, rewindCount, onRewind, live }: { message: Chat
     }} title={tr('Rewind to before this prompt', '回溯到此提问之前')}><Icon name="refresh" size={12}/>{tr('Rewind', '回溯')}</button>}</div>
       {hasWork && <WorkProcess blocks={blocks} live={live !== undefined}/>}
       {message.images && message.images.length > 0 && <div className="chat-message-images">{message.images.map((image, index) => <img key={`${image.src.slice(0, 80)}-${String(index)}`} src={image.src} alt={image.alt} loading="lazy" />)}</div>}
-      {(text || live) && <div className="chat-message-content">{text ? (isUser || isSystem ? text : <MarkdownView content={text} />) : (!hasWork && <span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span>)}{live && <span className="streaming-cursor"/>}</div>}{message.usage && <TokenUsageLine usage={message.usage} />}{live?.streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(live.streaming))} tokens</div>}{live && <button className="chat-abort-btn" onClick={() => void live.onAbort()} disabled={live.stopping}><Icon name="stop" size={13}/> {live.stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button>}{message.createdAt && <time className="chat-message-time">{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>}
+      {(text || live) && <div className="chat-message-content">{text ? (isUser || isSystem ? text : <MarkdownView content={text} streaming={live !== undefined} />) : (!hasWork && <span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span>)}{live && <span className="streaming-cursor"/>}</div>}{message.usage && <TokenUsageLine usage={message.usage} />}{live?.streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(live.streaming))} tokens</div>}{live && <button className="chat-abort-btn" onClick={() => void live.onAbort()} disabled={live.stopping}><Icon name="stop" size={13}/> {live.stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button>}{message.createdAt && <time className="chat-message-time">{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>}
     </div>
   </article>;
 }

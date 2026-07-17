@@ -82,7 +82,7 @@ export function isSupportedTarget(target) {
  * @property {string} id                — stable internal id used for parent refs
  * @property {(target: string) => string} name
  *           — npm package name (may depend on target)
- * @property {'js-only'|'native-files'|'js-and-native-file'|'native-file-only'|'virtual'} collect
+ * @property {'js-only'|'all-files'|'native-files'|'js-and-native-file'|'native-file-only'|'virtual'} collect
  * @property {string|null} parent
  *           — id of another registered dep this nests under (for pnpm),
  *           or null for top-level (resolvable from app root)
@@ -130,6 +130,14 @@ export const nativeDeps = Object.freeze([
     parent: null,
     runtimeFileRelatives: (target) => nodePtyRuntimeFilesByTarget[target] ?? [],
     executableFileRelatives: (target) => nodePtyExecutableFilesByTarget[target] ?? [],
+  },
+  {
+    id: 'pyright',
+    name: () => 'pyright',
+    // Pyright loads its bundled JS chunks and typeshed fallback through the
+    // filesystem at runtime, so its complete published package is required.
+    collect: 'all-files',
+    parent: null,
   },
 ]);
 

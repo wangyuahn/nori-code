@@ -260,7 +260,7 @@ export class SessionSubagentHost {
     const completion = this.runWithActiveChild(agentId, child, options, async (runOptions) => {
       this.emitSubagentSpawned(parent, agentId, profileName, runOptions);
       try {
-        child.config.update({ modelAlias: parent.config.modelAlias });
+        child.config.update({ modelAlias: this.modelAliasForProfile(parent, profileName) });
         return await this.runPromptTurn(parent, agentId, child, profileName, runOptions);
       } catch (error) {
         if (!isSwarmPauseReason(runOptions.signal.reason)) {
@@ -279,7 +279,7 @@ export class SessionSubagentHost {
     const completion = this.runWithActiveChild(agentId, child, options, async (runOptions) => {
       try {
         runOptions.signal.throwIfAborted();
-        child.config.update({ modelAlias: parent.config.modelAlias });
+        child.config.update({ modelAlias: this.modelAliasForProfile(parent, profileName) });
         this.emitSubagentStarted(parent, agentId);
         const turnId = child.turn.retry('agent-host');
         if (turnId === null) {
@@ -462,15 +462,23 @@ export class SessionSubagentHost {
   }
 
   private resolveProfile(parent: Agent, profileName: string): ResolvedAgentProfile {
-    const builtins = DEFAULT_AGENT_PROFILES[parent.config.profileName ?? 'agent']?.subagents ?? DEFAULT_AGENT_PROFILES['agent']?.subagents;
-    // Keep old persisted/tool-call inputs working without advertising the
-    // confusing legacy name in current Agent and AgentSwarm descriptions.
-    const resolvedName = profileName === 'nori-coder' ? 'orchestrator' : profileName;
-    const profile = configuredSubagentProfiles(builtins, parent.kimiConfig?.customAgents)?.[resolvedName];
+    const profile = this.findProfile(parent, profileName);
     if (profile === undefined) {
       throw new Error(`Subagent profile "${profileName}" was not found`);
     }
     return profile;
+  }
+
+  private findProfile(parent: Agent, profileName: string): ResolvedAgentProfile | undefined {
+    const builtins = DEFAULT_AGENT_PROFILES[parent.config.profileName ?? 'agent']?.subagents ?? DEFAULT_AGENT_PROFILES['agent']?.subagents;
+    // Keep old persisted/tool-call inputs working without advertising the
+    // confusing legacy name in current Agent and AgentSwarm descriptions.
+    const resolvedName = profileName === 'nori-coder' ? 'orchestrator' : profileName;
+    return configuredSubagentProfiles(builtins, parent.kimiConfig?.customAgents)?.[resolvedName];
+  }
+
+  private modelAliasForProfile(parent: Agent, profileName: string): string | undefined {
+    return this.findProfile(parent, profileName)?.modelAlias ?? parent.config.modelAlias;
   }
 
   private runWithActiveChild(
@@ -651,10 +659,10 @@ export class SessionSubagentHost {
     child: Agent,
     profile: ResolvedAgentProfile,
   ): Promise<void> {
-    // A subagent always inherits the parent agent's model.
+    // Custom profiles may pin a model; all other profiles inherit the parent model.
     child.config.update({
       cwd: parent.config.cwd,
-      modelAlias: parent.config.modelAlias,
+      modelAlias: profile.modelAlias ?? parent.config.modelAlias,
       thinkingEffort: parent.config.thinkingEffort,
     });
 

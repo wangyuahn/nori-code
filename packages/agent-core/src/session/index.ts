@@ -264,6 +264,17 @@ export class Session {
     }
   }
 
+  async updateCustomAgents(customAgents: KimiConfig['customAgents']): Promise<void> {
+    const config = this.options.config;
+    if (config === undefined) return;
+
+    config.customAgents = customAgents;
+    await Promise.all(Array.from(this.readyAgents(), async (agent) => {
+      if (agent.config.hasProvider) agent.tools.refreshBuiltinTools();
+      await agent.refreshSystemPrompt();
+    }));
+  }
+
   async addAdditionalDir(
     path: string,
     persist = true,

@@ -179,6 +179,10 @@ interface WsPayload {
   isError?: boolean;
   subagentId?: string;
   runInBackground?: boolean;
+  info?: {
+    kind?: string;
+    agentId?: string;
+  };
 }
 
 function addTokenUsage(left: TokenUsage | undefined, right: TokenUsage | undefined): TokenUsage | undefined {
@@ -550,6 +554,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
   const [codeChanges, setCodeChanges] = useState<CodeChange[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const sessionRef = useRef(sessionId);
+  const sessionStatusSessionIdRef = useRef<string | null>(null);
   const sessionTitleRef = useRef(sessionTitle);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const subscriptionGateRef = useRef(new RealtimeSubscriptionGate());
@@ -664,6 +669,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     historyRefreshTimerRef.current = null;
     compactTriggeredRef.current = false;
     compactingRef.current = false;
+    sessionStatusSessionIdRef.current = null;
     setSessionStatus(null);
     setPendingQuestions([]);
     attentionRequestIdsRef.current = new Set([
@@ -705,6 +711,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
       try {
         let status = await api.sessions.getStatus(sessionId);
         if (disposed || sessionRef.current !== sessionId) return;
+        sessionStatusSessionIdRef.current = sessionId;
         setSessionStatus(previous => preserveEqual(previous, status));
 
         if (status.context_usage < 0.78) compactTriggeredRef.current = false;
@@ -721,6 +728,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
             await api.sessions.compact(sessionId);
             status = await api.sessions.getStatus(sessionId);
             if (!disposed && sessionRef.current === sessionId) {
+              sessionStatusSessionIdRef.current = sessionId;
               setSessionStatus(previous => preserveEqual(previous, status));
             }
           } catch (error) {
@@ -1032,6 +1040,15 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
               if (type === 'subagent.completed') playNotificationSound('agent-complete');
               if (type === 'subagent.failed') playNotificationSound('error');
               break;
+            case 'background.task.terminated': {
+              const terminatedAgentId = payload.info?.kind === 'agent'
+                ? payload.info.agentId
+                : undefined;
+              if (terminatedAgentId) {
+                setActiveSubagentIds(previous => removeTerminatedAgent(previous, terminatedAgentId));
+              }
+              break;
+            }
             case 'code.change':
               if (payload.path && payload.operation && payload.diff !== undefined) {
                 const change: CodeChange = {
@@ -1375,7 +1392,22 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     await refreshQuestions();
   }, [refreshQuestions, sessionId]);
 
-  return { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort };
+  return { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus: statusForSession(sessionStatus, sessionStatusSessionIdRef.current, sessionId), compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort };
+}
+
+export function statusForSession(
+  status: SessionRealtimeStatus | null,
+  statusSessionId: string | null,
+  currentSessionId: string | null,
+): SessionRealtimeStatus | null {
+  return currentSessionId !== null && statusSessionId === currentSessionId ? status : null;
+}
+
+export function removeTerminatedAgent(
+  activeAgentIds: readonly string[],
+  terminatedAgentId: string,
+): string[] {
+  return activeAgentIds.filter(id => id !== terminatedAgentId);
 }
 
 function preserveEqual<T>(previous: T, next: T): T {

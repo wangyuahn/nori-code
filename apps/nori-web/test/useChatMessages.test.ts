@@ -1,6 +1,36 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../src/api/client';
-import { apiMessageToChat, canApplyGeneratedSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, mergeHistory, promptForRewind, RealtimeSubscriptionGate, shouldIgnoreTranscriptEvent, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
+import { apiMessageToChat, canApplyGeneratedSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, mergeHistory, promptForRewind, RealtimeSubscriptionGate, removeTerminatedAgent, shouldIgnoreTranscriptEvent, statusForSession, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
+
+describe('agent activity events', () => {
+  it('removes a manually terminated agent from the live activity set', () => {
+    expect(removeTerminatedAgent(['agent-1', 'agent-2'], 'agent-1')).toEqual(['agent-2']);
+    expect(removeTerminatedAgent(['agent-2'], 'missing')).toEqual(['agent-2']);
+  });
+});
+
+describe('session-bound realtime status', () => {
+  const status = {
+    status: 'idle',
+    model: 'session-a-model',
+    thinking_level: 'off',
+    permission: 'manual',
+    plan_mode: false,
+    main_write_enabled: true,
+    swarm_mode: false,
+    goal: null,
+    context_tokens: 0,
+    max_context_tokens: 128_000,
+    context_usage: 0,
+  };
+
+  it('hides a previous session status immediately when the active session changes', () => {
+    expect(statusForSession(status, 'session-a', 'session-a')).toBe(status);
+    expect(statusForSession(status, 'session-a', 'session-b')).toBeNull();
+    expect(statusForSession(status, 'session-a', null)).toBeNull();
+    expect(statusForSession(status, null, null)).toBeNull();
+  });
+});
 
 describe('realtime subscription readiness', () => {
   it('settles pending sends from the subscribe acknowledgement', async () => {

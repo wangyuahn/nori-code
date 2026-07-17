@@ -138,6 +138,7 @@ export const CustomAgentConfigSchema = z.object({
   description: z.string().min(1),
   role: z.string().min(1),
   baseProfile: z.enum(['orchestrator', 'nori-coder', 'coder', 'explore', 'plan']).default('coder'),
+  model: z.string().trim().min(1).optional(),
   enabled: z.boolean().default(true),
   permissions: z.object({
     read: z.boolean().optional(),

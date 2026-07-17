@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChatView } from './components/ChatView';
 import { Dashboard } from './components/Dashboard';
-import { SwarmPanel, runningSwarmAgents, swarmRunProgress, swarmRunTokens } from './components/SwarmPanel';
+import { SwarmPanel, runningSwarmAgents, swarmRunProgress, swarmRunTokens, useBackgroundTasks } from './components/SwarmPanel';
 import { CronJobPanel } from './components/CronJobPanel';
 import { VaultBrowser } from './components/VaultBrowser';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -9,7 +9,7 @@ import { CodeView } from './components/CodeView';
 import { Icon, type IconName } from './components/Icon';
 import { useSessions, usePhaseStatus, useSwarmWebSocket, useServerStatus } from './hooks/useApi';
 import { useChatMessages } from './hooks/useChatMessages';
-import { api, type FsEntry, type Message, type ModelCatalogItem, type PromptAttachment, type PromptExecutionOptions, type Session, type SessionAgentConfig, type SwarmStatus } from './api/client';
+import { api, type BackgroundTask, type FsEntry, type Message, type ModelCatalogItem, type PromptAttachment, type PromptExecutionOptions, type Session, type SessionAgentConfig, type SwarmStatus } from './api/client';
 import { FileTree } from './components/FileTree';
 import { ProjectFolderPicker } from './components/ProjectFolderPicker';
 import { useI18n } from './i18n';
@@ -109,6 +109,7 @@ export function App() {
     refresh: refreshSessions,
   } = useSessions();
   const activeSession: Session | null = sessions.find(session => session.id === sessionId) ?? null;
+  const backgroundTasks = useBackgroundTasks(sessionId);
   useEffect(() => {
     const requestId = ++cronCountRequestRef.current;
     if (!sessionId) {
@@ -154,15 +155,7 @@ export function App() {
     files: tr('Files', '文件'),
   };
   const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort } = useChatMessages(sessionId, activeSession?.title);
-  const runningSwarm = runningSwarmAgents(activeSwarmRuns);
-  const knownSwarmAgentIds = new Set(sessionSwarmRuns.flatMap(run =>
-    run.tasks?.flatMap(task => [task.id, ...(task.agent_id ? [task.agent_id] : [])]) ?? [],
-  ));
-  const activeAgentIds = new Set([
-    ...activeSubagentIds.filter(id => !knownSwarmAgentIds.has(id)),
-    ...runningSwarm.ids,
-  ]);
-  const activeAgentCount = activeAgentIds.size + runningSwarm.untracked;
+  const activeAgentCount = countActiveAgents(activeSubagentIds, sessionSwarmRuns, backgroundTasks.tasks);
   const hasSwarmActivity = activeSwarmRuns.length > 0;
 
   useEffect(() => {
@@ -371,7 +364,7 @@ export function App() {
           <div className="view-page">
             <div className="view-stack">
               <ViewHeader eyebrow={tr('Coordination', '协作')} title={tr('Swarm', '智能体协作')} description={tr('See every active agent and follow task progress in real time.', '查看所有活动智能体并实时跟踪任务进度。')} />
-              <SwarmPanel swarm={swarm} sessionId={sessionId} sessions={sessions} />
+              <SwarmPanel swarm={swarm} sessionId={sessionId} sessions={sessions} models={models} backgroundState={backgroundTasks} />
             </div>
           </div>
         );
@@ -611,7 +604,7 @@ export function PrimaryNavigation({ activeView, labels, activeAgentCount, cronJo
       const count = item.key === 'swarm' ? activeAgentCount : item.key === 'cron' ? cronJobCount : 0;
       return <button
         key={item.key}
-        className={`sidebar-nav-item${activeView === item.key ? ' active' : ''}${swarmActive && activeView === 'swarm' ? ' swarm-active' : ''}${(swarmActive && activeView !== 'swarm') || cronActive ? ' activity-pending' : ''}`}
+        className={`sidebar-nav-item${activeView === item.key ? ' active' : ''}${swarmActive || cronActive ? ' activity-pending' : ''}`}
         onClick={() => { onSelect(item.key); }}
         aria-current={activeView === item.key ? 'page' : undefined}
         title={labels[item.key]}
@@ -620,6 +613,26 @@ export function PrimaryNavigation({ activeView, labels, activeAgentCount, cronJo
       </button>;
     })}
   </nav>;
+}
+
+export function countActiveAgents(
+  activeSubagentIds: readonly string[],
+  sessionSwarmRuns: readonly SwarmStatus[],
+  backgroundTasks: readonly BackgroundTask[],
+): number {
+  const knownSwarmAgentIds = new Set(sessionSwarmRuns.flatMap(run =>
+    run.tasks?.flatMap(task => [task.id, ...(task.agent_id ? [task.agent_id] : [])]) ?? [],
+  ));
+  const liveNonSwarmCount = new Set(activeSubagentIds.filter(id => !knownSwarmAgentIds.has(id))).size;
+  const polledNonSwarmCount = backgroundTasks.filter(task =>
+    task.kind === 'subagent' && task.status === 'running' && !knownSwarmAgentIds.has(task.id),
+  ).length;
+  const activeSwarmRuns = sessionSwarmRuns.filter(run => {
+    const progress = swarmRunProgress(run);
+    return progress.running || progress.status === 'paused';
+  });
+  const runningSwarm = runningSwarmAgents(activeSwarmRuns);
+  return runningSwarm.ids.size + runningSwarm.untracked + Math.max(liveNonSwarmCount, polledNonSwarmCount);
 }
 
 function ViewHeader({

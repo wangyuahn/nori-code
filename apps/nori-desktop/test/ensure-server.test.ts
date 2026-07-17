@@ -72,6 +72,11 @@ it('replaces an unhealthy stale lock from an older bundled server', async () => 
     ['server', 'kill'],
     ['server', 'run'],
   ]);
+  const runOptions = vi.mocked(execFile).mock.calls.find(([, args]) => args?.[1] === 'run')?.[2];
+  expect(runOptions?.env).toMatchObject({
+    NORI_CODE_NODE_EXECUTABLE: process.execPath,
+    NORI_CODE_NODE_RUN_AS_NODE: '1',
+  });
 });
 
 it('replaces a healthy same-version server that lacks required desktop routes', async () => {
@@ -88,7 +93,7 @@ it('replaces a healthy same-version server that lacks required desktop routes', 
     pid: process.pid,
     host: '127.0.0.1',
     port: 58627,
-    host_version: '1.0.0-pre.1',
+    host_version: '1.0.0-pre.2',
   }));
 
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
@@ -105,14 +110,14 @@ it('replaces a healthy same-version server that lacks required desktop routes', 
         pid: process.pid,
         host: '127.0.0.1',
         port: 58628,
-        host_version: '1.0.0-pre.1',
+        host_version: '1.0.0-pre.2',
       }));
     }
     callback?.(null, '', '');
     return undefined as never;
   });
 
-  await expect(ensureServer(seaPath, '1.0.0-pre.1')).resolves.toEqual({
+  await expect(ensureServer(seaPath, '1.0.0-pre.2')).resolves.toEqual({
     origin: 'http://127.0.0.1:58628',
   });
   expect(vi.mocked(execFile).mock.calls.map(([, args]) => args?.slice(0, 2))).toEqual([

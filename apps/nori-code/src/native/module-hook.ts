@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { getNativePackageRoot } from './native-assets';
 
@@ -26,6 +26,11 @@ const PI_TUI_NATIVE_PATTERN = /native[\\/](?:win32|darwin)[\\/]prebuilds[\\/].+\
 export function installNativeModuleHook(): void {
   if (installed) return;
   installed = true;
+
+  const pyrightRoot = getNativePackageRoot('pyright');
+  if (pyrightRoot !== null) {
+    process.env['NORI_CODE_BUNDLED_NODE_MODULES'] = dirname(pyrightRoot);
+  }
 
   const moduleBuiltin = nodeRequire('node:module') as ModuleWithLoad;
   const originalLoad = moduleBuiltin._load;

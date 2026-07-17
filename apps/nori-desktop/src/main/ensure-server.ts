@@ -149,7 +149,14 @@ function runServerRun(seaPath: string): Promise<void> {
     execFile(
       seaPath,
       ['server', 'run', '--log-level', 'error'],
-      { timeout: RUN_TIMEOUT_MS },
+      {
+        timeout: RUN_TIMEOUT_MS,
+        env: {
+          ...process.env,
+          NORI_CODE_NODE_EXECUTABLE: process.execPath,
+          NORI_CODE_NODE_RUN_AS_NODE: '1',
+        },
+      },
       (error, _stdout, stderr) => {
         if (error) {
           reject(new Error(`nori server run failed: ${error.message}\n${stderr}`.trim()));

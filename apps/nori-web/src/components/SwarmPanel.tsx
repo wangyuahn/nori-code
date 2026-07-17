@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { SwarmConnectionState } from '../hooks/useApi';
-import { api, type BackgroundTask, type Session, type SwarmStatus } from '../api/client';
+import { api, type BackgroundTask, type ModelCatalogItem, type Session, type SwarmStatus } from '../api/client';
 import { useI18n } from '../i18n';
 import { MarkdownView } from './MarkdownView';
 import { Icon } from './Icon';
@@ -9,14 +9,19 @@ export function SwarmPanel({
   swarm,
   sessionId,
   sessions,
+  models = [],
+  backgroundState,
 }: {
   swarm: SwarmConnectionState;
   sessionId?: string | null;
   sessions: Session[];
+  models?: ModelCatalogItem[];
+  backgroundState?: BackgroundTasksState;
 }) {
   const { tr } = useI18n();
   const { swarmStatuses, connected, error } = swarm;
-  const background = useBackgroundTasks(sessionId);
+  const localBackground = useBackgroundTasks(backgroundState === undefined ? sessionId : null);
+  const background = backgroundState ?? localBackground;
   const runs = Array.from(swarmStatuses.values())
     .sort((left, right) => {
       const timeDifference = Date.parse(right.started_at ?? '') - Date.parse(left.started_at ?? '');
@@ -48,7 +53,7 @@ export function SwarmPanel({
           {connected ? tr('Live', '已连接') : tr('Offline', '离线')}
         </div>
       </header>
-      <CustomAgentsPanel />
+      <CustomAgentsPanel models={models} />
 
       {!hasActivity ? (
         <div className="empty-state">
@@ -86,15 +91,16 @@ interface CustomAgentDraft {
   description: string;
   role: string;
   base_profile: 'orchestrator' | 'coder' | 'explore' | 'plan';
+  model: string;
   permissions: Record<'read' | 'write' | 'shell' | 'web' | 'delegate', boolean>;
 }
 
 const DEFAULT_CUSTOM_AGENT_PERMISSIONS: CustomAgentDraft['permissions'] = { read: true, write: true, shell: true, web: false, delegate: false };
 
-function CustomAgentsPanel() {
+function CustomAgentsPanel({ models }: { models: ModelCatalogItem[] }) {
   const { tr } = useI18n();
   const [agents, setAgents] = useState<CustomAgentDraft[]>([]);
-  const [draft, setDraft] = useState<CustomAgentDraft>({ name: '', description: '', role: '', base_profile: 'coder', permissions: { ...DEFAULT_CUSTOM_AGENT_PERMISSIONS } });
+  const [draft, setDraft] = useState<CustomAgentDraft>({ name: '', description: '', role: '', base_profile: 'coder', model: '', permissions: { ...DEFAULT_CUSTOM_AGENT_PERMISSIONS } });
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
 
@@ -108,6 +114,7 @@ function CustomAgentsPanel() {
         description: typeof value.description === 'string' ? value.description : '',
         role: typeof value.role === 'string' ? value.role : '',
         base_profile: isBaseProfile(value.baseProfile ?? value.base_profile) ? (value.baseProfile ?? value.base_profile) as CustomAgentDraft['base_profile'] : 'coder',
+        model: typeof value.model === 'string' ? value.model : '',
         permissions: parseAgentPermissions(value.permissions),
       }]));
     }).catch(error => setNotice(error instanceof Error ? error.message : String(error)));
@@ -121,13 +128,14 @@ function CustomAgentsPanel() {
         description: agent.description,
         role: agent.role,
         base_profile: agent.base_profile,
+        model: agent.model.length > 0 ? agent.model : undefined,
         enabled: true,
         permissions: agent.permissions,
       }]));
-      if (disabledName) custom_agents[disabledName] = { description: 'Disabled custom agent', role: 'Disabled', base_profile: 'coder', enabled: false, permissions: DEFAULT_CUSTOM_AGENT_PERMISSIONS };
+      if (disabledName) custom_agents[disabledName] = { description: 'Disabled custom agent', role: 'Disabled', base_profile: 'coder', model: undefined, enabled: false, permissions: DEFAULT_CUSTOM_AGENT_PERMISSIONS };
       await api.updateConfig({ custom_agents });
       setAgents(next);
-      setNotice(tr('Custom agents saved. New sessions use the updated roles.', '自定义 Agent 已保存，新会话将使用更新后的角色。'));
+      setNotice(tr('Custom agents saved. Active sessions now use the updated roles.', '自定义 Agent 已保存，当前会话已使用更新后的角色。'));
     } catch (error) { setNotice(error instanceof Error ? error.message : String(error)); }
     finally { setSaving(false); }
   };
@@ -140,18 +148,35 @@ function CustomAgentsPanel() {
     }
     const next = [...agents.filter(agent => agent.name !== normalized.name), normalized];
     void saveAgents(next);
-    setDraft({ name: '', description: '', role: '', base_profile: 'coder', permissions: { ...DEFAULT_CUSTOM_AGENT_PERMISSIONS } });
+    setDraft({ name: '', description: '', role: '', base_profile: 'coder', model: '', permissions: { ...DEFAULT_CUSTOM_AGENT_PERMISSIONS } });
   };
 
   return <section className="custom-agents-panel"><header><div><strong>{tr('Custom agents', '自定义 Agent')}</strong><span>{tr('Roles available to Agent and AgentSwarm through subagent_type.', '主模型可通过 subagent_type 在 Agent 与 AgentSwarm 中指定这些角色。')}</span></div></header>
-    <div className="custom-agent-list">{agents.map(agent => <article key={agent.name}><div><strong>{agent.name}</strong><small>{agent.base_profile} · {agent.description}</small></div><span className="custom-agent-permission-preview" title={permissionSummary(agent.permissions, tr)}>{tr('Permissions', '权限')}</span><button type="button" onClick={() => void saveAgents(agents.filter(item => item.name !== agent.name), agent.name)} disabled={saving} title={tr('Remove agent', '删除 Agent')}><Icon name="trash" size={13}/></button></article>)}</div>
-    <div className="custom-agent-form"><input value={draft.name} onChange={event => setDraft(value => ({ ...value, name: event.target.value }))} placeholder="reviewer" aria-label={tr('Agent ID', 'Agent ID')}/><select value={draft.base_profile} title={baseProfileSummary(draft.base_profile, tr)} onChange={event => { const base_profile = event.target.value as CustomAgentDraft['base_profile']; setDraft(value => ({ ...value, base_profile, permissions: defaultPermissionsForBase(base_profile) })); }}><option value="coder">coder</option><option value="explore">explore</option><option value="plan">plan</option><option value="orchestrator">orchestrator</option></select><input value={draft.description} onChange={event => setDraft(value => ({ ...value, description: event.target.value }))} placeholder={tr('When should the main model use it?', '主模型什么时候使用它？')}/><textarea value={draft.role} onChange={event => setDraft(value => ({ ...value, role: event.target.value }))} placeholder={tr('Role, constraints, and expected output', '角色、约束和预期输出')}/><div className="custom-agent-permissions">{(Object.keys(draft.permissions) as Array<keyof CustomAgentDraft['permissions']>).map(key => <label key={key} title={permissionLabel(key, tr).description}><input type="checkbox" checked={draft.permissions[key]} onChange={event => setDraft(value => ({ ...value, permissions: { ...value.permissions, [key]: event.target.checked } }))}/><span>{permissionLabel(key, tr).label}</span></label>)}</div><button type="button" onClick={add} disabled={saving}>{saving ? tr('Saving...', '保存中...') : tr('Add agent', '添加 Agent')}</button></div>
+    <div className="custom-agent-list">{agents.map(agent => <article key={agent.name}><div><strong>{agent.name}</strong><small>{agent.base_profile} · {agent.description}</small></div><span className="custom-agent-model-preview" title={agent.model.length > 0 ? agent.model : tr('Inherits the parent Agent model', '继承父 Agent 模型')}>{customAgentModelLabel(agent.model, models, tr)}</span><span className="custom-agent-permission-preview" title={permissionSummary(agent.permissions, tr)}>{tr('Permissions', '权限')}</span><button type="button" onClick={() => void saveAgents(agents.filter(item => item.name !== agent.name), agent.name)} disabled={saving} title={tr('Remove agent', '删除 Agent')}><Icon name="trash" size={13}/></button></article>)}</div>
+    <div className="custom-agent-form"><input value={draft.name} onChange={event => setDraft(value => ({ ...value, name: event.target.value }))} placeholder="reviewer" aria-label={tr('Agent ID', 'Agent ID')}/><select value={draft.base_profile} title={baseProfileSummary(draft.base_profile, tr)} aria-label={tr('Base profile', '基础角色')} onChange={event => { const base_profile = event.target.value as CustomAgentDraft['base_profile']; setDraft(value => ({ ...value, base_profile, permissions: defaultPermissionsForBase(base_profile) })); }}><option value="coder">coder</option><option value="explore">explore</option><option value="plan">plan</option><option value="orchestrator">orchestrator</option></select><select value={draft.model} aria-label={tr('Agent model', 'Agent 模型')} title={tr('Choose a model for this Agent or inherit the parent Agent model.', '为这个 Agent 指定模型，或继承父 Agent 模型。')} onChange={event => setDraft(value => ({ ...value, model: event.target.value }))}><option value="">{tr('Inherit parent model', '继承父 Agent 模型')}</option>{draft.model && !models.some(model => model.model === draft.model) && <option value={draft.model}>{draft.model} · {tr('Unavailable', '不可用')}</option>}{models.map(model => <option key={model.model} value={model.model}>{modelDisplayName(model)} · {model.provider}</option>)}</select><input value={draft.description} onChange={event => setDraft(value => ({ ...value, description: event.target.value }))} placeholder={tr('When should the main model use it?', '主模型什么时候使用它？')}/><textarea value={draft.role} onChange={event => setDraft(value => ({ ...value, role: event.target.value }))} placeholder={tr('Role, constraints, and expected output', '角色、约束和预期输出')}/><div className="custom-agent-permissions">{(Object.keys(draft.permissions) as Array<keyof CustomAgentDraft['permissions']>).map(key => <label key={key} title={permissionLabel(key, tr).description}><input type="checkbox" checked={draft.permissions[key]} onChange={event => setDraft(value => ({ ...value, permissions: { ...value.permissions, [key]: event.target.checked } }))}/><span>{permissionLabel(key, tr).label}</span></label>)}</div><button type="button" onClick={add} disabled={saving}>{saving ? tr('Saving...', '保存中...') : tr('Add agent', '添加 Agent')}</button></div>
     {notice && <p className="custom-agent-notice">{notice}</p>}
   </section>;
 }
 
 function isBaseProfile(value: unknown): value is CustomAgentDraft['base_profile'] {
   return value === 'orchestrator' || value === 'coder' || value === 'explore' || value === 'plan';
+}
+
+function modelDisplayName(model: ModelCatalogItem): string {
+  const displayName = model.display_name?.trim();
+  return displayName && displayName.length > 0 ? displayName : model.model;
+}
+
+function customAgentModelLabel(
+  modelAlias: string,
+  models: ModelCatalogItem[],
+  tr: (en: string, zh: string) => string,
+): string {
+  if (!modelAlias) return tr('Inherited model', '继承模型');
+  const model = models.find(item => item.model === modelAlias);
+  return model === undefined
+    ? modelAlias
+    : `${modelDisplayName(model)} · ${model.provider}`;
 }
 
 function parseAgentPermissions(value: unknown): CustomAgentDraft['permissions'] {
@@ -200,7 +225,7 @@ export interface SwarmProjectGroup {
   sessions: SwarmSessionGroup[];
 }
 
-interface BackgroundTasksState {
+export interface BackgroundTasksState {
   tasks: BackgroundTask[];
   loading: boolean;
   error: string | null;
@@ -383,14 +408,14 @@ export function collectSwarmTreeRuns(roots: SwarmStatus[], allRuns: SwarmStatus[
   return result;
 }
 
-export function swarmTaskIdsForRuns(runs: SwarmStatus[]): Set<string> {
+export function swarmTaskIdsForRuns(runs: readonly SwarmStatus[]): Set<string> {
   return new Set(runs.flatMap(run => [
     ...(run.task_id ? [run.task_id] : []),
     ...(run.tasks?.flatMap(task => [task.id, ...(task.agent_id ? [task.agent_id] : [])]) ?? []),
   ]));
 }
 
-export function runningSwarmAgents(runs: SwarmStatus[]): { ids: Set<string>; untracked: number } {
+export function runningSwarmAgents(runs: readonly SwarmStatus[]): { ids: Set<string>; untracked: number } {
   const ids = new Set<string>();
   let untracked = 0;
   for (const run of runs) {
@@ -530,7 +555,7 @@ function SwarmRun({ run, allRuns }: { run: SwarmStatus; allRuns: SwarmStatus[] }
   </section>;
 }
 
-function useBackgroundTasks(sessionId: string | null | undefined): BackgroundTasksState {
+export function useBackgroundTasks(sessionId: string | null | undefined): BackgroundTasksState {
   const [tasks, setTasks] = useState<BackgroundTask[]>([]);
   const [loading, setLoading] = useState(Boolean(sessionId));
   const [error, setError] = useState<string | null>(null);
@@ -620,7 +645,7 @@ function TaskPreview({ task }: { task: SwarmTask }) {
         <span className={`status-dot ${task.status}`} />
         <span className="swarm-task-identity">
           <strong>{task.label || tr('Unnamed task', '未命名任务')}</strong>
-          <small>{task.id}</small>
+          <small>{task.profile ? `${task.profile} · ` : ''}{task.id}</small>
         </span>
         <span className="swarm-task-meta">
           {tokenTotal > 0 ? <small>{(task.live_output_tokens ?? 0) > 0 ? '~' : ''}{tokenTotal.toLocaleString()} tokens</small> : null}

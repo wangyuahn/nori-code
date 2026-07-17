@@ -6,6 +6,16 @@ import { collectNativeAssets } from '../scripts/native/assets.mjs';
 import { resolveTargetDeps, SUPPORTED_TARGETS } from '../scripts/native/native-deps.mjs';
 import { appRoot } from '../scripts/native/paths.mjs';
 
+let nativeAssetsPromise: ReturnType<typeof collectNativeAssets> | undefined;
+
+function hostNativeAssets(): ReturnType<typeof collectNativeAssets> {
+  nativeAssetsPromise ??= collectNativeAssets({
+    appRoot,
+    target: `${process.platform}-${process.arch}`,
+  });
+  return nativeAssetsPromise;
+}
+
 describe('native node-pty assets', () => {
   it.each(SUPPORTED_TARGETS)('declares the runtime resources for %s', (target) => {
     const dep = resolveTargetDeps(target).find((candidate) => candidate.id === 'node-pty');
@@ -40,7 +50,7 @@ describe('native node-pty assets', () => {
     const target = `${process.platform}-${process.arch}`;
     expect(SUPPORTED_TARGETS).toContain(target);
 
-    const { manifest, assets } = await collectNativeAssets({ appRoot, target });
+    const { manifest, assets } = await hostNativeAssets();
     const nodePty = manifest.packages.find((pkg) => pkg.name === 'node-pty');
     expect(nodePty).toBeDefined();
 
@@ -68,7 +78,7 @@ describe('native node-pty assets', () => {
       await access(sourcePath);
       expect((await readFile(sourcePath)).byteLength).toBeGreaterThan(0);
     }
-  });
+  }, 15_000);
 
   it('loads the installed node-pty package when not running as SEA', async () => {
     const nodePty = await import('../scripts/native/node-pty-loader');
@@ -79,4 +89,19 @@ describe('native node-pty assets', () => {
     });
     expect(nodePty.nodePtySpawnOptions({ cols: 80 }, 'linux')).toEqual({ cols: 80 });
   });
+
+  it('collects pyright entrypoints, chunks, and typeshed data', async () => {
+    const target = `${process.platform}-${process.arch}`;
+    const { manifest } = await hostNativeAssets();
+    const pyright = manifest.packages.find((pkg) => pkg.name === 'pyright');
+    const relativeFiles = new Set(
+      pyright?.files.map((file) => file.relativePath.replace('node_modules/pyright/', '')),
+    );
+
+    expect(relativeFiles.has('package.json')).toBe(true);
+    expect(relativeFiles.has('langserver.index.js')).toBe(true);
+    expect(relativeFiles.has('dist/pyright-langserver.js')).toBe(true);
+    expect(relativeFiles.has('dist/pyright-internal.js')).toBe(true);
+    expect([...relativeFiles].some((file) => file.startsWith('dist/typeshed-fallback/'))).toBe(true);
+  }, 15_000);
 });

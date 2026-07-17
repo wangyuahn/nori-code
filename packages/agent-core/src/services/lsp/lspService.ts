@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { promises as fs } from 'node:fs';
+import { existsSync, promises as fs } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -36,6 +36,7 @@ interface ServerDefinition {
   languageId: string;
   command: string;
   args: string[];
+  env?: NodeJS.ProcessEnv;
   bundled?: boolean;
   initializationOptions?: Record<string, unknown>;
 }
@@ -225,7 +226,7 @@ class NodeLanguageServerTransport implements LanguageServerTransport {
   static async start(launch: LanguageServerLaunch, diagnosticsTimeoutMs: number): Promise<NodeLanguageServerTransport> {
     const child = spawn(launch.command, [...launch.args], {
       cwd: launch.rootPath,
-      env: process.env,
+      env: { ...process.env, ...launch.env },
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     });
@@ -417,26 +418,48 @@ export function serverDefinition(filePath: string): ServerDefinition | undefined
 }
 
 function typescriptServerDefinition(extension: string): ServerDefinition {
-  const packageRoot = path.dirname(require.resolve('typescript-language-server/package.json'));
+  const packageRoot = bundledPackageRoot('typescript-language-server');
+  const runtime = bundledNodeRuntime();
   return {
     id: 'typescript-language-server',
     languageId: ['.ts', '.mts', '.cts'].includes(extension) ? 'typescript' : extension === '.tsx' ? 'typescriptreact' : extension === '.jsx' ? 'javascriptreact' : 'javascript',
-    command: process.execPath,
+    command: runtime.command,
     args: [path.join(packageRoot, 'lib', 'cli.mjs'), '--stdio'],
+    env: runtime.env,
     bundled: true,
-    initializationOptions: { tsserver: { path: require.resolve('typescript/lib/tsserver.js') } },
+    initializationOptions: { tsserver: { path: path.join(bundledPackageRoot('typescript'), 'lib', 'tsserver.js') } },
   };
 }
 
 function bundledNodeServer(id: string, languageId: string, packageName: string, entry: string, args: string[]): ServerDefinition {
-  const packageRoot = path.dirname(require.resolve(`${packageName}/package.json`));
+  const packageRoot = bundledPackageRoot(packageName);
+  const runtime = bundledNodeRuntime();
   return {
     id,
     languageId,
-    command: process.execPath,
+    command: runtime.command,
     args: [path.join(packageRoot, entry), ...args],
+    env: runtime.env,
     bundled: true,
   };
+}
+
+function bundledPackageRoot(packageName: string): string {
+  const modulesRoot = process.env['NORI_CODE_BUNDLED_NODE_MODULES'];
+  if (modulesRoot !== undefined) {
+    const candidate = path.join(modulesRoot, ...packageName.split('/'));
+    if (existsSync(path.join(candidate, 'package.json'))) return candidate;
+  }
+  return path.dirname(require.resolve(`${packageName}/package.json`));
+}
+
+function bundledNodeRuntime(): { command: string; env?: NodeJS.ProcessEnv } {
+  const configured = process.env['NORI_CODE_NODE_EXECUTABLE']?.trim();
+  const command = configured && configured.length > 0 ? configured : process.execPath;
+  const env = process.env['NORI_CODE_NODE_RUN_AS_NODE'] === '1'
+    ? { ELECTRON_RUN_AS_NODE: '1' }
+    : undefined;
+  return { command, env };
 }
 
 function languageIdForPath(filePath: string): string {

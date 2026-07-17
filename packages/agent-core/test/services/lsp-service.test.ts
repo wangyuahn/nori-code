@@ -101,6 +101,29 @@ describe('LspService', () => {
     expect(serverDefinition('archive.unknown-extension')).toBeUndefined();
   });
 
+  it('resolves packaged pyright assets and uses the desktop Node runtime', () => {
+    const modulesRoot = join(root, 'packaged-node-modules');
+    mkdirSync(join(modulesRoot, 'pyright'), { recursive: true });
+    writeFileSync(join(modulesRoot, 'pyright', 'package.json'), '{}');
+    const previousModules = process.env['NORI_CODE_BUNDLED_NODE_MODULES'];
+    const previousNode = process.env['NORI_CODE_NODE_EXECUTABLE'];
+    const previousRunAsNode = process.env['NORI_CODE_NODE_RUN_AS_NODE'];
+    process.env['NORI_CODE_BUNDLED_NODE_MODULES'] = modulesRoot;
+    process.env['NORI_CODE_NODE_EXECUTABLE'] = 'NoriWork.exe';
+    process.env['NORI_CODE_NODE_RUN_AS_NODE'] = '1';
+    try {
+      expect(serverDefinition('main.py')).toMatchObject({
+        command: 'NoriWork.exe',
+        args: [join(modulesRoot, 'pyright', 'langserver.index.js'), '--stdio'],
+        env: { ELECTRON_RUN_AS_NODE: '1' },
+      });
+    } finally {
+      restoreEnv('NORI_CODE_BUNDLED_NODE_MODULES', previousModules);
+      restoreEnv('NORI_CODE_NODE_EXECUTABLE', previousNode);
+      restoreEnv('NORI_CODE_NODE_RUN_AS_NODE', previousRunAsNode);
+    }
+  });
+
   it('reports a configured external server as unavailable and retries on refresh', async () => {
     writeFileSync(join(root, 'Main.java'), 'class Main {}\n');
     const starts: LanguageServerLaunch[] = [];
@@ -241,4 +264,9 @@ function sessionService(close: Emitter<{ sessionId: string }>): ISessionService 
     onDidCreate: created.event,
     onDidClose: close.event,
   } as unknown as ISessionService;
+}
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
 }

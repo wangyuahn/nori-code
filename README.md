@@ -9,7 +9,7 @@ Nori orchestrates multiple AI agents to plan, implement, review, and persist kno
 ![Nori Work](docs/images/nori-work.png)
 
 > [!WARNING]
-> **v1.0.0-pre.1 is a preview release, not the stable 1.0 release.** It is intended for early testing of the expanded Nori Work desktop workflow. Back up important work before testing and report regressions through [GitHub Issues](https://github.com/wangyuahn/nori-code/issues).
+> **v1.0.0-pre.2 is a preview release, not the stable 1.0 release.** It is intended for early testing of the expanded Nori Work desktop workflow. Back up important work before testing and report regressions through [GitHub Issues](https://github.com/wangyuahn/nori-code/issues).
 
 ### What this preview fixes
 
@@ -111,7 +111,7 @@ nori -p "your task"
 nori web
 ```
 
-Nori Work is available as a **standalone desktop installer**. The current preview is [v1.0.0-pre.1](https://github.com/wangyuahn/nori-code/releases/tag/v1.0.0-pre.1); stable builds remain available from [Releases](https://github.com/wangyuahn/nori-code/releases).
+Nori Work is available as a **standalone desktop installer**. The current preview is [v1.0.0-pre.2](https://github.com/wangyuahn/nori-code/releases/tag/v1.0.0-pre.2); stable builds remain available from [Releases](https://github.com/wangyuahn/nori-code/releases).
 
 ### From source
 

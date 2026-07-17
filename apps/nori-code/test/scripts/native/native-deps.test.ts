@@ -97,4 +97,10 @@ describe('nativeDeps registry shape', () => {
     expect(piTui?.collect).toBe('native-file-only');
     expect(piTui?.parent).toBe(null);
   });
+
+  it('ships the complete pyright package for packaged LSP sessions', () => {
+    const pyright = nativeDeps.find((d) => d.id === 'pyright');
+    expect(pyright?.collect).toBe('all-files');
+    expect(pyright?.parent).toBe(null);
+  });
 });

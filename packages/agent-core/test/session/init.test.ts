@@ -11,7 +11,7 @@ import type { Agent, AgentOptions } from '../../src/agent';
 import { trimTrailingOpenToolExchange } from '../../src/agent/context/projector';
 import { ProviderManager } from '../../src/session/provider-manager';
 import type { ResolvedAgentProfile } from '../../src/profile';
-import type { SDKSessionRPC } from '../../src/rpc';
+import type { KimiConfig, SDKSessionRPC } from '../../src/rpc';
 import { Session } from '../../src/session';
 import { SessionAPIImpl } from '../../src/session/rpc';
 import { estimateTokensForMessages } from '../../src/utils/tokens';
@@ -210,6 +210,56 @@ describe('Session.init', () => {
       expect(resumedAgent.config.systemPrompt).not.toContain('initial resume instructions');
     } finally {
       await resumedSession.close();
+    }
+  });
+
+  it('makes newly configured custom agents available to an existing session', async () => {
+    const workDir = await makeTempDir();
+    const sessionDir = await makeTempDir();
+    const config: KimiConfig = { providers: {} };
+    const session = new Session({
+      id: 'test-custom-agent-hot-update',
+      kaos: testKaos.withCwd(workDir),
+      persistenceKaos: testKaos.withCwd(sessionDir),
+      config,
+      homedir: sessionDir,
+      rpc: createSessionRpc([]),
+      skills: { explicitDirs: [join(workDir, 'missing-skills')] },
+      providerManager: testProviderManager(),
+    });
+
+    try {
+      const { agent } = await session.createAgent(
+        { type: 'main' },
+        {
+          profile: {
+            name: 'custom-agent-aware',
+            systemPrompt: context => context.customAgentsInfo ?? '',
+            tools: ['Agent'],
+          },
+        },
+      );
+      agent.config.update({ modelAlias: 'mock-model', thinkingEffort: 'off' });
+      agent.tools.initializeBuiltinTools();
+      expect(agent.config.systemPrompt).not.toContain('hot-reviewer');
+      expect(agent.tools.loopTools.find(tool => tool.name === 'Agent')?.description)
+        .not.toContain('hot-reviewer');
+
+      await session.updateCustomAgents({
+        'hot-reviewer': {
+          description: 'Review the current implementation.',
+          role: 'Find correctness and regression risks.',
+          baseProfile: 'explore',
+          enabled: true,
+        },
+      });
+
+      expect(config.customAgents?.['hot-reviewer']).toBeDefined();
+      expect(agent.config.systemPrompt).toContain('<agent name="hot-reviewer"');
+      expect(agent.tools.loopTools.find(tool => tool.name === 'Agent')?.description)
+        .toContain('hot-reviewer');
+    } finally {
+      await session.close();
     }
   });
 

@@ -71,7 +71,7 @@ describe('SwarmPanel projections', () => {
         id: 'agent-reviewer',
         agent_id: 'agent-reviewer',
         parent_agent_id: 'main',
-        profile: 'orchestrator',
+        profile: 'deepseek-reviewer',
         label: 'Inspect streaming',
         status: 'completed',
         output: 'Finished **stream audit**.',
@@ -124,6 +124,7 @@ describe('SwarmPanel projections', () => {
       expect(container.textContent).toContain('Streaming repair');
       expect(container.textContent).toContain('Round 1');
       expect(container.textContent).toContain('Inspect streaming');
+      expect(container.textContent).toContain('deepseek-reviewer · agent-reviewer');
       expect(container.textContent).toContain('Verify rendering');
       expect(container.querySelector('.swarm-task-output-markdown strong')?.textContent).toBe('stream audit');
       expect(container.querySelectorAll('.swarm-run-done')).toHaveLength(2);
@@ -137,7 +138,18 @@ describe('SwarmPanel projections', () => {
   });
 
   it('renders a compact custom-agent editor with explicit permission controls', async () => {
-    vi.spyOn(api, 'getConfig').mockResolvedValue({ custom_agents: {} });
+    vi.spyOn(api, 'getConfig').mockResolvedValue({
+      custom_agents: {
+        reviewer: {
+          description: 'Review risky changes',
+          role: 'Find correctness bugs.',
+          baseProfile: 'explore',
+          model: 'deepseek-review',
+          enabled: true,
+          permissions: { read: true, write: false, shell: false, web: true, delegate: false },
+        },
+      },
+    });
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -146,11 +158,21 @@ describe('SwarmPanel projections', () => {
         root.render(createElement(I18nProvider, null, createElement(SwarmPanel, {
           swarm: { swarmStatuses: new Map(), connected: true, error: null },
           sessions: [],
+          models: [{
+            provider: 'deepseek',
+            model: 'deepseek-review',
+            display_name: 'DeepSeek Review',
+            max_context_size: 128_000,
+          }],
         })));
         await Promise.resolve();
       });
+      await vi.waitFor(() => expect(container.textContent).toContain('DeepSeek Review · deepseek'));
       const form = container.querySelector('.custom-agent-form');
-      expect(form?.querySelector<HTMLSelectElement>('select')?.title).toContain('implementation worker');
+      expect(form?.querySelector<HTMLSelectElement>('[aria-label="Base profile"]')?.title).toContain('implementation worker');
+      expect([...form?.querySelectorAll<HTMLSelectElement>('[aria-label="Agent model"] option') ?? []].map(item => item.textContent)).toEqual([
+        'Inherit parent model', 'DeepSeek Review · deepseek',
+      ]);
       expect([...form?.querySelectorAll('.custom-agent-permissions label') ?? []].map(item => item.textContent)).toEqual([
         'Read', 'Write', 'Terminal', 'Web', 'Delegate',
       ]);

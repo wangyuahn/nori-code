@@ -17,6 +17,7 @@ export function configuredSubagentProfiles(
       name,
       description: value.description,
       whenToUse: value.description,
+      modelAlias: value.model,
       tools: filterTools(base.tools, toolPool, value.permissions),
       systemPrompt: context => `${base.systemPrompt(context)}\n\n<custom_agent_role>\n${value.role}\n</custom_agent_role>`,
     };
@@ -38,9 +39,10 @@ export function renderConfiguredAgentList(
         .map(([permission]) => permission)
         .join(', ') || 'base profile defaults';
       return [
-        `<agent name="${escapeAttribute(name)}" base_profile="${escapeAttribute(value.baseProfile)}">`,
+        `<agent name="${escapeAttribute(name)}" base_profile="${escapeAttribute(value.baseProfile)}" model="${escapeAttribute(value.model ?? 'inherit-parent')}">`,
         `Description: ${value.description}`,
         `Role: ${value.role}`,
+        `Model: ${value.model ?? 'inherit parent model'}`,
         `Permissions: ${permissions}`,
         '</agent>',
       ].join('\n');

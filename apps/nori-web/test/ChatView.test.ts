@@ -121,7 +121,9 @@ describe('chat image attachments', () => {
       await new Promise(resolve => setTimeout(resolve, 0));
     });
 
-    expect(container.querySelector<HTMLImageElement>('.composer-attachment img')?.alt).toBe('kimi-screen.png');
+    await vi.waitFor(() => {
+      expect(container.querySelector<HTMLImageElement>('.composer-attachment img')?.alt).toBe('kimi-screen.png');
+    });
     expect(container.querySelector('.composer-error')).toBeNull();
   });
 
@@ -213,6 +215,67 @@ describe('project file references', () => {
 });
 
 describe('model thinking options', () => {
+  it('shows the restored runtime model instead of a stale cached session model', async () => {
+    const { container } = await renderChat({
+      session: session('cached-model'),
+      models: [model('cached-model', ['tool_use'])],
+      sessionStatus: {
+        status: 'idle',
+        model: 'runtime-model',
+        thinking_level: 'off',
+        permission: 'manual',
+        plan_mode: false,
+        main_write_enabled: true,
+        swarm_mode: false,
+        goal: null,
+        context_tokens: 0,
+        max_context_tokens: 128_000,
+        context_usage: 0,
+      },
+    });
+
+    const select = container.querySelector<HTMLSelectElement>('.model-select');
+    expect(select?.value).toBe('runtime-model');
+    expect(select?.selectedOptions[0]?.textContent).toBe('runtime-model');
+  });
+
+  it('keeps a manual model selection visible while runtime status catches up', async () => {
+    let resolveChange!: () => void;
+    const onModelChange = vi.fn(() => new Promise<void>(resolve => { resolveChange = resolve; }));
+    const { container } = await renderChat({
+      session: session('old-model'),
+      models: [model('old-model', ['tool_use']), model('new-model', ['tool_use'])],
+      onModelChange,
+      sessionStatus: {
+        status: 'idle',
+        model: 'old-model',
+        thinking_level: 'off',
+        permission: 'manual',
+        plan_mode: false,
+        main_write_enabled: true,
+        swarm_mode: false,
+        goal: null,
+        context_tokens: 0,
+        max_context_tokens: 128_000,
+        context_usage: 0,
+      },
+    });
+    const select = container.querySelector<HTMLSelectElement>('.model-select')!;
+
+    await act(async () => {
+      select.value = 'new-model';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(onModelChange).toHaveBeenCalledWith('new-model');
+    expect(select.value).toBe('new-model');
+    await act(async () => {
+      resolveChange();
+      await Promise.resolve();
+    });
+  });
+
   it('offers Fast and Think when a third-party model omits reasoning metadata', () => {
     expect(modelThinkingOptions(model('gateway-model', ['tool_use']))).toEqual({
       choices: [
@@ -599,6 +662,43 @@ describe('chat slash commands and task-mode shortcut', () => {
     const blocked = await renderChat({ onTaskModeChange, pendingApprovals: [{} as ApprovalRequest] });
     await pressKey(blocked.container.querySelector<HTMLTextAreaElement>('.chat-input')!, 'Tab');
     expect(onTaskModeChange).not.toHaveBeenCalled();
+  });
+
+  it('updates the task-mode control immediately while the server status is stale', async () => {
+    let resolveUpdate!: () => void;
+    const onTaskModeChange = vi.fn(() => new Promise<void>(resolve => { resolveUpdate = resolve; }));
+    const { container } = await renderChat({
+      onTaskModeChange,
+      sessionStatus: {
+        status: 'ready',
+        thinking_level: 'off',
+        permission: 'manual',
+        plan_mode: false,
+        main_write_enabled: true,
+        swarm_mode: false,
+        goal: null,
+        context_tokens: 0,
+        max_context_tokens: 128_000,
+        context_usage: 0,
+      },
+    });
+    const [planButton, codeButton] = container.querySelectorAll<HTMLButtonElement>('.composer-task-mode button');
+
+    expect(codeButton?.classList.contains('active')).toBe(true);
+    await act(async () => {
+      planButton?.click();
+      await Promise.resolve();
+    });
+
+    expect(onTaskModeChange).toHaveBeenCalledWith('plan');
+    expect(planButton?.classList.contains('active')).toBe(true);
+    expect(codeButton?.classList.contains('active')).toBe(false);
+    expect(container.querySelector('.main-write-toggle:not(.loop-mode-toggle)')).toBeNull();
+
+    await act(async () => {
+      resolveUpdate();
+      await Promise.resolve();
+    });
   });
 
   it('executes a goal command through the injected application handler', async () => {

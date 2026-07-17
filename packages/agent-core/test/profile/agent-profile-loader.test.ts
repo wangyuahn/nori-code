@@ -159,9 +159,10 @@ tools:
 describe('default agent profiles', () => {
   it('adds configured roles while preserving the selected base profile tools', () => {
     const profiles = configuredSubagentProfiles(DEFAULT_AGENT_PROFILES['agent']?.subagents, {
-      reviewer: { description: 'Review risky changes', role: 'Find correctness bugs.', baseProfile: 'explore', enabled: true, permissions: { read: true, write: true, shell: false, web: true, delegate: false } },
+      reviewer: { description: 'Review risky changes', role: 'Find correctness bugs.', baseProfile: 'explore', model: 'deepseek-review', enabled: true, permissions: { read: true, write: true, shell: false, web: true, delegate: false } },
       disabled: { description: 'Disabled', role: 'Do nothing.', baseProfile: 'coder', enabled: false },
     });
+    expect(profiles?.['reviewer']?.modelAlias).toBe('deepseek-review');
     expect(profiles?.['reviewer']?.tools).toContain('Write');
     expect(profiles?.['reviewer']?.tools).not.toContain('Bash');
     expect(profiles?.['reviewer']?.systemPrompt(promptContext)).toContain('<custom_agent_role>\nFind correctness bugs.');
@@ -170,11 +171,12 @@ describe('default agent profiles', () => {
 
   it('renders enabled custom agents and their permissions for the model prompt', () => {
     const listing = renderConfiguredAgentList({
-      reviewer: { description: 'Review risky changes', role: 'Find correctness bugs.', baseProfile: 'explore', enabled: true, permissions: { read: true, web: true } },
+      reviewer: { description: 'Review risky changes', role: 'Find correctness bugs.', baseProfile: 'explore', model: 'deepseek-review', enabled: true, permissions: { read: true, web: true } },
       disabled: { description: 'Disabled', role: 'Do nothing.', baseProfile: 'coder', enabled: false },
     });
-    expect(listing).toContain('<agent name="reviewer" base_profile="explore">');
+    expect(listing).toContain('<agent name="reviewer" base_profile="explore" model="deepseek-review">');
     expect(listing).toContain('Role: Find correctness bugs.');
+    expect(listing).toContain('Model: deepseek-review');
     expect(listing).toContain('Permissions: read, web');
     expect(listing).not.toContain('disabled');
   });

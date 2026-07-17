@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## v1.0.0-pre.2 (2026-07-17)
+### Features
+- Allow each custom Agent profile to select its own model or inherit the parent Agent model, including model selection in the Nori Work agent editor and consistent model restoration on resume.
+- Render inline and block math through the shared Markdown component with locally bundled KaTeX assets across chat, previews, memory notes, approvals, and Agent output.
+- Bundle the complete Pyright runtime into the native server and launch packaged Node language servers through Nori Work's Electron Node runtime.
+
+### Fixes
+- Update Plan/Code controls immediately while session configuration saves in the background instead of waiting for the next status poll.
+- Keep active Agent navigation yellow in every view and theme, recover ordinary background Agent counts after reconnects, and avoid double-counting Swarm tasks.
+- Restore a parent subagent from waiting to running when nested Agent completion wakes it in a new turn.
+- Preserve custom Agent profile names and streamed output in the collaboration panel with explicit server projection coverage.
+- Apply custom Agent configuration changes to already-open sessions by rebuilding collaboration tools and refreshing their system prompts.
+- Clear collaboration activity immediately after a manual Agent termination and avoid treating stopped Swarm agents as ordinary running agents.
+- Preserve mouse text selections during fast streamed Markdown updates and defer code-copy controls until the selection is released.
+
 ## v1.0.0-pre.1
 ### Features
 - Add a session-scoped Cron Job page with create, list, refresh, and delete controls, recurring and one-shot schedules, next/last-run metadata, validation, and a live sidebar count.

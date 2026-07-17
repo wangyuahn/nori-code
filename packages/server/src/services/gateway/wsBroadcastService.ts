@@ -283,6 +283,14 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
       return;
     }
 
+    // A nested Agent completion wakes its owner in a new turn without spawning
+    // or explicitly resuming that owner. Treat the turn boundary as the source
+    // of truth so a task projected as waiting returns to running immediately.
+    if (event.type === 'turn.started') {
+      this._updateSwarmTask(sid, event.agentId, task => ({ ...task, status: 'running' }));
+      return;
+    }
+
     if (event.type === 'subagent.suspended') {
       this._updateSwarmTask(sid, event.subagentId, task => ({ ...task, status: 'paused' }));
       return;

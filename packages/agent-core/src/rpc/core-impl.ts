@@ -595,7 +595,15 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
   async setKimiConfig(input: SetKimiConfigPayload): Promise<KimiConfig> {
     const config = mergeConfigPatch(this.readConfigForWrite(), input);
     await writeConfigFile(this.configPath, config);
-    return this.reloadRuntimeConfig();
+    const updated = this.reloadRuntimeConfig();
+    if ('customAgents' in input) {
+      await Promise.all(
+        Array.from(this.sessions.values(), (session) =>
+          session.updateCustomAgents(updated.customAgents),
+        ),
+      );
+    }
+    return updated;
   }
 
   async removeKimiProvider(input: RemoveKimiProviderPayload): Promise<KimiConfig> {

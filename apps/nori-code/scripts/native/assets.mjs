@@ -160,12 +160,17 @@ async function collectPackageFiles({
   packageRoot,
   includeNativeFiles,
   includeEntryJs = true,
+  includeAllFiles = false,
   nativeFileRelatives = [],
   runtimeFileRelatives = [],
 }) {
   const packageJsonPath = join(packageRoot, 'package.json');
   const packageJson = await readJson(packageJsonPath);
   const selected = new Set([packageJsonPath]);
+
+  if (includeAllFiles) {
+    for (const file of await listFiles(packageRoot)) selected.add(file);
+  }
 
   if (includeEntryJs) {
     const entry = resolvePackageEntry(packageRoot, packageJson);
@@ -273,6 +278,7 @@ export async function collectNativeAssets({ appRoot, target }) {
       packageRoot,
       includeNativeFiles: dep.collect === 'native-files',
       includeEntryJs: dep.collect !== 'native-file-only',
+      includeAllFiles: dep.collect === 'all-files',
       nativeFileRelatives: dep.nativeFileRelatives,
       runtimeFileRelatives: dep.runtimeFileRelatives,
     });

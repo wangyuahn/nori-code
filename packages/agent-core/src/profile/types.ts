@@ -59,6 +59,8 @@ export type SystemPromptRenderer = (context: SystemPromptContext) => string;
 export interface ResolvedAgentProfile {
   name: string;
   description?: string;
+  /** Configured model alias for this profile; omitted profiles inherit their parent model. */
+  modelAlias?: string;
   systemPrompt: SystemPromptRenderer;
   tools: string[];
   toolsReadonly?: boolean;

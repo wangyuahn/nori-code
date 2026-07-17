@@ -1349,7 +1349,94 @@ describe('SessionSubagentHost', () => {
     expect(userTextMessages(histories[1] ?? [])).toEqual(['Implement the retry-safe change']);
   });
 
-  it('realigns a resumed subagent to the parent agent current model', async () => {
+  it('uses the model assigned to a custom agent profile', async () => {
+    const parent = testAgent({
+      initialConfig: {
+        providers: {},
+        customAgents: {
+          reviewer: {
+            description: 'Review risky changes',
+            role: 'Find correctness bugs.',
+            baseProfile: 'explore',
+            model: 'mock-model',
+            enabled: true,
+          },
+        },
+      },
+    });
+    parent.configure();
+    parent.agent.config.update({ modelAlias: 'parent-model' });
+
+    const child = testAgent();
+    child.configure();
+    const summary = 'Reviewed the requested changes, identified the relevant behavior, and returned a complete technical result for the parent agent. '.repeat(2);
+    child.mockNextResponse({ type: 'text', text: summary });
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+
+    const handle = await host.spawn({
+      profileName: 'reviewer',
+      parentToolCallId: 'call_agent',
+      prompt: 'Review the implementation',
+      description: 'Review changes',
+      runInBackground: false,
+      signal,
+    });
+
+    await expect(handle.completion).resolves.toMatchObject({ result: summary.trim() });
+    expect(child.agent.config.modelAlias).toBe('mock-model');
+    expect(child.agent.config.modelAlias).not.toBe(parent.agent.config.modelAlias);
+  });
+
+  it('restores the assigned custom model when resuming a subagent', async () => {
+    const parent = testAgent({
+      initialConfig: {
+        providers: {},
+        customAgents: {
+          reviewer: {
+            description: 'Review risky changes',
+            role: 'Find correctness bugs.',
+            baseProfile: 'explore',
+            model: 'mock-model',
+            enabled: true,
+          },
+        },
+      },
+    });
+    parent.configure();
+    parent.agent.config.update({ modelAlias: 'parent-model' });
+
+    const child = testAgent();
+    child.configure();
+    child.agent.config.update({ modelAlias: 'stale-model' });
+    child.agent.useProfile(
+      profile({ name: 'reviewer', tools: ['Read'], systemPrompt: 'review prompt' }),
+    );
+    const summary = 'Resumed the custom reviewer and completed the requested follow-up with enough technical detail for the parent agent to proceed. '.repeat(2);
+    child.mockNextResponse({ type: 'text', text: summary });
+
+    const session = fakeSession(parent.agent, child.agent, {
+      'agent-0': {
+        homedir: '/tmp/kimi-session/agents/agent-0',
+        type: 'sub',
+        parentAgentId: 'main',
+      },
+    });
+    const host = new SessionSubagentHost(session, 'main');
+
+    const handle = await host.resume('agent-0', {
+      parentToolCallId: 'call_agent',
+      prompt: 'Continue the review',
+      description: 'Continue review',
+      runInBackground: false,
+      signal,
+    });
+
+    await expect(handle.completion).resolves.toMatchObject({ result: summary.trim() });
+    expect(child.agent.config.modelAlias).toBe('mock-model');
+  });
+
+  it('realigns a resumed built-in subagent to the parent agent current model', async () => {
     const parent = testAgent();
     parent.configure();
     parent.agent.permission.setMode('yolo');

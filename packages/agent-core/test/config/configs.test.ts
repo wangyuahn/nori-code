@@ -374,7 +374,7 @@ removed_flag = true
       providers: {},
       loopControl: { maxStepsPerTurn: 0, goalMaxTurns: 18 },
       customAgents: {
-        reviewer: { description: 'Review risky changes', role: 'Find correctness bugs.', baseProfile: 'explore', enabled: true },
+        reviewer: { description: 'Review risky changes', role: 'Find correctness bugs.', baseProfile: 'explore', model: 'deepseek-review', enabled: true },
       },
     });
 
@@ -382,9 +382,11 @@ removed_flag = true
     expect(text).toContain('max_steps_per_turn = 0');
     expect(text).toContain('goal_max_turns = 18');
     expect(text).toContain('[custom_agents.reviewer]');
+    expect(text).toContain('model = "deepseek-review"');
     expect(parseConfigString(text, configPath).customAgents?.['reviewer']).toMatchObject({
       role: 'Find correctness bugs.',
       baseProfile: 'explore',
+      model: 'deepseek-review',
     });
   });
 
