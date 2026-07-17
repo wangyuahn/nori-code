@@ -31,10 +31,13 @@ describe('MarkdownView code blocks', () => {
       expect(button?.textContent).toBe('Copy');
 
       await act(async () => {
+        button?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+        document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
         button?.click();
         await Promise.resolve();
       });
       expect(writeText).toHaveBeenCalledWith('const answer = 42;\n');
+      expect(container.querySelector('.markdown-code-copy')).toBe(button);
       expect(button?.textContent).toBe('Copied');
     } finally {
       await act(async () => {

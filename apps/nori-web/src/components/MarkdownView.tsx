@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from 'react';
 import { marked } from 'marked';
 import markedKatex from 'marked-katex-extension';
 import 'katex/dist/katex.min.css';
@@ -28,7 +28,8 @@ export function MarkdownView({
   const displayedHtml = selectionSnapshot ?? html;
   const displayedHtmlRef = useRef(displayedHtml);
   displayedHtmlRef.current = displayedHtml;
-  const startSelecting = useCallback(() => {
+  const startSelecting = useCallback((event: ReactMouseEvent<HTMLElement>) => {
+    if (event.button !== 0 || isInteractiveTarget(event.target)) return;
     selectingRef.current = true;
     setSelectionSnapshot(current => current ?? displayedHtmlRef.current);
   }, []);
@@ -107,7 +108,7 @@ const MarkdownArticle = memo(function MarkdownArticle({
   articleRef: RefObject<HTMLElement | null>;
   className: string;
   html: string;
-  onMouseDown: () => void;
+  onMouseDown: (event: ReactMouseEvent<HTMLElement>) => void;
 }) {
   return <article
     ref={articleRef}
@@ -116,6 +117,11 @@ const MarkdownArticle = memo(function MarkdownArticle({
     dangerouslySetInnerHTML={{ __html: html }}
   />;
 });
+
+function isInteractiveTarget(target: EventTarget | null): boolean {
+  return target instanceof Element
+    && target.closest('a, button, input, select, textarea, summary, [role="button"]') !== null;
+}
 
 function selectionInside(selection: Selection | null, article: HTMLElement): boolean {
   if (selection === null || selection.isCollapsed) return false;
