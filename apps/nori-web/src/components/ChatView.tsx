@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type UIEvent } from 'react';
-import { api, type ApprovalRequest, type GoalSnapshot, type ModelCatalogItem, type PromptAttachment, type QuestionAnswer, type QuestionRequest, type Session, type SessionAgentConfig, type SessionRealtimeStatus, type TokenUsage } from '../api/client';
+import { api, type ApprovalRequest, type GoalSnapshot, type ModelCatalogItem, type PromptAttachment, type PromptExecutionOptions, type QuestionAnswer, type QuestionRequest, type Session, type SessionAgentConfig, type SessionRealtimeStatus, type TokenUsage } from '../api/client';
 import type { ChatMessage, QueuedPrompt, TodoItem, ToolCall, WorkBlock } from '../hooks/useChatMessages';
+import { useBrowserPermissions } from '../hooks/useBrowser';
 import { useI18n } from '../i18n';
 import { chatSlashCommandSuggestions, resolveChatSlashCommand, type ChatSlashCommand, type ChatSlashCommandName } from '../utils/chat-slash-commands';
 import { modelThinkingOptions } from '../utils/model-thinking';
@@ -29,7 +30,7 @@ export interface ChatViewProps {
   models: ModelCatalogItem[];
   modelsLoading: boolean;
   modelError: string | null;
-  onSendMessage: (text: string, attachments?: PromptAttachment[], behavior?: 'queue' | 'steer') => boolean | void | Promise<boolean | void>;
+  onSendMessage: (text: string, attachments?: PromptAttachment[], behavior?: 'queue' | 'steer', options?: PromptExecutionOptions) => boolean | void | Promise<boolean | void>;
   onAbort: () => boolean | void | Promise<boolean | void>;
   onRefreshModels: () => void;
   onModelChange: (model: string) => void | Promise<void>;
@@ -65,6 +66,16 @@ const STARTERS = [
   { title: 'Check recent changes', titleZh: '检查最近的更改', prompt: 'Review the current uncommitted changes for bugs, regressions, and missing tests.', promptZh: '审查当前未提交的更改，查找缺陷、回归和缺失的测试。' },
 ];
 
+const LOOP_MODE_STORAGE_KEY = 'nori-composer-loop-mode';
+
+function loadLoopMode(): boolean {
+  try {
+    return localStorage.getItem(LOOP_MODE_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
 export function modelSupportsImageInput(model: ModelCatalogItem | undefined): boolean {
   if (!model) return false;
   const mappedCapability = model.capabilities?.some(
@@ -92,6 +103,7 @@ function imageUnsupportedMessage(
 export function ChatView(props: ChatViewProps) {
   const { session, allSessions = [], messages, messagesLoading = false, streaming, thinking, workBlocks = [], isStreaming, activeAgentCount = 0, activeAgentTokens = 0, sessionStatus, compacting = false, models, modelsLoading, modelError, onSendMessage, onAbort, onRefreshModels, onModelChange, onThinkingChange, onPermissionChange, onTaskModeChange, onRunSlashCommand, onMainWriteChange, onGoalControl, pendingApprovals = [], onResolveApproval, pendingQuestions = [], onResolveQuestion, onDismissQuestion, queuedPrompts = [], todos = [], onCancelQueuedPrompt, draftAgentConfig, rewindLimit = 10, onRewind } = props;
   const { tr } = useI18n();
+  const browserPermissions = useBrowserPermissions();
   const [input, setInput] = useState('');
   const [modelNotice, setModelNotice] = useState(false);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
@@ -104,6 +116,7 @@ export function ChatView(props: ChatViewProps) {
   const [commandSelection, setCommandSelection] = useState(0);
   const [commandRunning, setCommandRunning] = useState(false);
   const [composerRevision, setComposerRevision] = useState(0);
+  const [loopEnabled, setLoopEnabled] = useState(loadLoopMode);
   const [followOutput, setFollowOutput] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
@@ -122,6 +135,13 @@ export function ChatView(props: ChatViewProps) {
   const commandMenuOpen = !commandMenuDismissed && commandSuggestions.length > 0;
   const imageCapable = modelSupportsImageInput(selectedModel);
   const streamingContinuesAssistant = messages.at(-1)?.role === 'assistant';
+
+  useEffect(() => {
+    if (selectedPermission === 'manual') return;
+    for (const request of browserPermissions.pending) {
+      void browserPermissions.resolvePermission(request.id, 'allow_once');
+    }
+  }, [browserPermissions.pending, browserPermissions.resolvePermission, selectedPermission]);
   const rewindCounts = new Map<string, number>();
   let promptsFromEnd = 0;
   for (let index = messages.length - 1; index >= 0; index--) {
@@ -131,9 +151,15 @@ export function ChatView(props: ChatViewProps) {
     if (promptsFromEnd <= rewindLimit) rewindCounts.set(message.id, promptsFromEnd);
   }
 
-  useEffect(() => {
-    if (followOutputRef.current) messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
-  }, [messages, streaming, thinking]);
+  useLayoutEffect(() => {
+    if (!followOutputRef.current) return;
+    const scrollContainer = messagesScrollRef.current;
+    if (scrollContainer) scrollContainer.scrollTop = scrollContainer.scrollHeight;
+  }, [messages, streaming, thinking, workBlocks]);
+  useLayoutEffect(() => {
+    followOutputRef.current = true;
+    setFollowOutput(true);
+  }, [session?.id]);
   useEffect(() => {
     const element = inputRef.current;
     if (!element) return;
@@ -227,7 +253,10 @@ export function ChatView(props: ChatViewProps) {
     if (attachmentsLoading || (behavior === 'steer' && steering)) return;
     if (behavior === 'steer') setSteering(true);
     try {
-      const accepted = await onSendMessage(text, attachments.map(item => item.attachment), behavior);
+      const promptAttachments = attachments.map(item => item.attachment);
+      const accepted = loopEnabled
+        ? await onSendMessage(text, promptAttachments, behavior, { loopMode: true })
+        : await onSendMessage(text, promptAttachments, behavior);
       if (accepted !== false) {
         setInput('');
         setAttachments([]);
@@ -239,7 +268,15 @@ export function ChatView(props: ChatViewProps) {
     } finally {
       if (behavior === 'steer') setSteering(false);
     }
-  }, [attachments, attachmentsLoading, imageCapable, input, onSendMessage, selectedModelId, steering, tr]);
+  }, [attachments, attachmentsLoading, imageCapable, input, loopEnabled, onSendMessage, selectedModelId, steering, tr]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LOOP_MODE_STORAGE_KEY, String(loopEnabled));
+    } catch {
+      // Keep the preference in memory when storage is unavailable.
+    }
+  }, [loopEnabled]);
 
   useEffect(() => {
     if (!isStreaming) setStopping(false);
@@ -331,7 +368,7 @@ export function ChatView(props: ChatViewProps) {
         return;
       }
     }
-    if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && !isStreaming && pendingApprovals.length === 0 && pendingQuestions.length === 0) {
+    if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && !isStreaming && pendingApprovals.length === 0 && browserPermissions.pending.length === 0 && pendingQuestions.length === 0) {
       event.preventDefault();
       void onTaskModeChange(selectedTaskMode === 'plan' ? 'code' : 'plan');
       return;
@@ -339,7 +376,7 @@ export function ChatView(props: ChatViewProps) {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       if (input.trim().startsWith('/')) void runSlashCommand();
-      else void handleSend();
+      else void handleSend(undefined, isStreaming ? 'steer' : 'queue');
     }
   };
 
@@ -401,7 +438,7 @@ export function ChatView(props: ChatViewProps) {
     <div className="chat-messages" ref={messagesScrollRef} onScroll={handleMessagesScroll}>
       {messagesLoading ? <div className="chat-history-loading" role="status"><span className="spinner"/><strong>{tr('Loading conversation…', '正在加载会话…')}</strong></div> : messages.length === 0 ? <div className="chat-welcome"><div className="welcome-mark"><Icon name="sparkles" size={27}/></div><span className="eyebrow">{tr('Your thoughtful coding partner', '你的智能编程伙伴')}</span><h2>{session ? tr('What should we make better?', '我们要改进什么？') : tr('What would you like to work on?', '你想从哪里开始？')}</h2><p>{session ? tr('Ask Nori to inspect code, plan a feature, fix a bug, or validate an API integration.', '让 Nori 检查代码、规划功能、修复缺陷或验证 API 集成。') : tr('Choose a project folder to start a new task, or open an existing conversation from the sidebar. You can also type below now.', '选择一个项目文件夹开始新任务，或从左侧打开已有对话。你也可以直接在下方输入。')}</p><UsageOverview sessions={allSessions} models={models}/><div className="starter-grid">{STARTERS.map(item => <button key={item.title} className="starter-card" onClick={() => void handleSend(tr(item.prompt, item.promptZh))}><Icon name="sparkles" size={16}/><span><strong>{tr(item.title, item.titleZh)}</strong><small>{tr(item.prompt, item.promptZh)}</small></span></button>)}</div></div> : messages.map((message, index) => <MessageBubble key={message.id} message={message} rewindCount={rewindCounts.get(message.id)} onRewind={handleRewind} live={isStreaming && index === messages.length - 1 && message.role === 'assistant' ? { streaming, thinking, workBlocks, stopping, onAbort: handleAbort } : undefined}/>) }
 
-      {isStreaming && !streamingContinuesAssistant && <div className="chat-message chat-message-assistant chat-message-streaming"><div className="message-avatar"><span>N</span></div><div className="message-body"><div className="chat-message-role">Nori <span>{pendingApprovals.length > 0 ? tr('waiting for permission', '等待授权') : tr('working', '工作中')}</span></div>{(workBlocks.length > 0 || thinking) && <WorkProcess blocks={workBlocks.length > 0 ? workBlocks : [{ id: 'live-thinking', type: 'thinking', text: thinking }]} live/>}<div className="chat-message-content">{streaming ? <MarkdownView content={streaming} /> : (!thinking && workBlocks.length === 0 && <span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span>)}<span className="streaming-cursor"/></div>{streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(streaming))} tokens</div>}<button className="chat-abort-btn" onClick={() => void handleAbort()} disabled={stopping}><Icon name="stop" size={13}/> {stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button></div></div>}
+      {isStreaming && !streamingContinuesAssistant && <div className="chat-message chat-message-assistant chat-message-streaming"><div className="message-avatar"><span>N</span></div><div className="message-body"><div className="chat-message-role">Nori <span>{pendingApprovals.length > 0 || browserPermissions.pending.length > 0 ? tr('waiting for permission', '等待授权') : tr('working', '工作中')}</span></div>{(workBlocks.length > 0 || thinking) && <WorkProcess blocks={workBlocks.length > 0 ? workBlocks : [{ id: 'live-thinking', type: 'thinking', text: thinking }]} live/>}<div className="chat-message-content">{streaming ? <MarkdownView content={streaming} /> : (!thinking && workBlocks.length === 0 && <span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span>)}<span className="streaming-cursor"/></div>{streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(streaming))} tokens</div>}<button className="chat-abort-btn" onClick={() => void handleAbort()} disabled={stopping}><Icon name="stop" size={13}/> {stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button></div></div>}
       <div ref={messagesEndRef}/>
     </div>
 
@@ -409,23 +446,29 @@ export function ChatView(props: ChatViewProps) {
       {!followOutput && <button className="chat-jump-latest" onClick={jumpToLatest} title={tr('Jump to latest', '回到最新消息')} aria-label={tr('Jump to latest', '回到最新消息')}><Icon name="chevron-down" size={16}/></button>}
       <ActivityIsland mainWorking={isStreaming} agentCount={activeAgentCount} agentTokens={activeAgentTokens} goal={sessionStatus?.goal ?? null} todos={todos} onGoalControl={onGoalControl}/>
       {pendingQuestions.length > 0 && onResolveQuestion && onDismissQuestion && <QuestionPanel requests={pendingQuestions} onSubmit={onResolveQuestion} onDismiss={onDismissQuestion}/>}
-      {pendingApprovals.length > 0 && onResolveApproval && <ApprovalPanel requests={pendingApprovals} onResolve={onResolveApproval} onPermissionChange={onPermissionChange} />}
+      {((pendingApprovals.length > 0 && onResolveApproval !== undefined) || browserPermissions.pending.length > 0) && <ApprovalPanel
+        requests={onResolveApproval === undefined ? [] : pendingApprovals}
+        onResolve={onResolveApproval}
+        onPermissionChange={onPermissionChange}
+        browserPermissions={browserPermissions.pending}
+        onResolveBrowserPermission={browserPermissions.resolvePermission}
+      />}
       <div className={'chat-input-area' + (input || attachments.length > 0 ? ' has-value' : '') + (modelNotice ? ' missing-model' : '')}>
       {queuedPrompts.length > 0 && <div className="composer-queue"><span>{tr('Queued', '排队中')} {queuedPrompts.length}</span>{queuedPrompts.map(prompt => <div key={prompt.id} title={prompt.text}><span>{prompt.text}</span>{onCancelQueuedPrompt && <button type="button" onClick={() => void onCancelQueuedPrompt(prompt.id)} title={tr('Remove queued prompt', '移除排队消息')} aria-label={tr('Remove queued prompt', '移除排队消息')}><Icon name="close" size={11}/></button>}</div>)}</div>}
       {(attachments.length > 0 || attachmentsLoading) && <div className="composer-attachments">{attachments.map(item => <div className={`composer-attachment attachment-${item.attachment.kind}`} key={item.id}>{item.preview ? <img src={item.preview} alt={item.name}/> : <span className="composer-file-icon"><Icon name="files" size={19}/></span>}<span title={item.name}>{item.name}</span><button type="button" onClick={() => removeAttachment(item)} aria-label={tr('Remove file', '移除文件')}><Icon name="close" size={12}/></button></div>)}{attachmentsLoading && <div className="composer-attachment composer-attachment-loading"><span className="composer-file-icon"><span className="spinner spinner-small"/></span><span>{tr('Uploading…', '正在上传…')}</span></div>}</div>}
       {commandMenuOpen && <div className="composer-command-menu" id="composer-command-menu" role="listbox" aria-label={tr('Slash commands', '斜杠命令')}>
         {commandSuggestions.map((command, index) => <button key={command.name} type="button" id={`composer-command-${command.name}`} role="option" aria-selected={index === commandSelection} className={index === commandSelection ? 'active' : ''} onMouseDown={event => event.preventDefault()} onClick={() => selectSlashCommand(command)}><code>/{command.name}{command.argumentHint ? ` ${command.argumentHint}` : ''}</code><span>{tr(command.description, command.descriptionZh)}</span></button>)}
       </div>}
-      <textarea key={composerRevision} ref={inputRef} className="chat-input" placeholder={session ? tr('Ask Nori about this project…', '向 Nori 询问此项目…') : tr('Describe what you want to work on…', '告诉 Nori 你想做什么…')} value={input} onChange={event => { setInput(event.target.value); setCommandMenuDismissed(false); setCommandSelection(0); setCommandNotice(null); }} onKeyDown={handleKeyDown} onPaste={handlePaste} rows={1} aria-label={tr('Message Nori', '向 Nori 发送消息')} aria-autocomplete="list" aria-expanded={commandMenuOpen} aria-controls={commandMenuOpen ? 'composer-command-menu' : undefined} aria-activedescendant={commandMenuOpen ? `composer-command-${commandSuggestions[commandSelection]?.name ?? commandSuggestions[0]?.name}` : undefined}/>
+      <textarea ref={inputRef} className="chat-input" placeholder={session ? tr('Ask Nori about this project…', '向 Nori 询问此项目…') : tr('Describe what you want to work on…', '告诉 Nori 你想做什么…')} value={input} onChange={event => { setInput(event.target.value); setCommandMenuDismissed(false); setCommandSelection(0); setCommandNotice(null); }} onKeyDown={handleKeyDown} onPaste={handlePaste} rows={1} aria-label={tr('Message Nori', '向 Nori 发送消息')} aria-autocomplete="list" aria-expanded={commandMenuOpen} aria-controls={commandMenuOpen ? 'composer-command-menu' : undefined} aria-activedescendant={commandMenuOpen ? `composer-command-${commandSuggestions[commandSelection]?.name ?? commandSuggestions[0]?.name}` : undefined}/>
       <SessionUsageBar status={sessionStatus} compacting={compacting} />
-      <div className="composer-mode-row"><div className="composer-task-mode" role="group" aria-label={tr('Task mode', '任务模式')}><button type="button" className={selectedTaskMode === 'plan' ? 'active' : ''} onClick={() => void onTaskModeChange('plan')} disabled={isStreaming}>{tr('Plan', '规划')}</button><button type="button" className={selectedTaskMode === 'code' ? 'active' : ''} onClick={() => void onTaskModeChange('code')} disabled={isStreaming}>{tr('Code', '执行')}</button></div>{selectedTaskMode === 'code' && <label className="main-write-toggle" title={tr('Allow the main model to use Edit and Write directly.', '允许主模型直接使用 Edit 和 Write。')}><input type="checkbox" checked={selectedMainWrite} disabled={isStreaming} onChange={event => void onMainWriteChange(event.target.checked)}/><span>{tr('Main edits', '主模型编辑')}</span></label>}</div>
+      <div className="composer-mode-row"><div className="composer-task-mode" role="group" aria-label={tr('Task mode', '任务模式')}><button type="button" className={selectedTaskMode === 'plan' ? 'active' : ''} onClick={() => void onTaskModeChange('plan')} disabled={isStreaming}>{tr('Plan', '规划')}</button><button type="button" className={selectedTaskMode === 'code' ? 'active' : ''} onClick={() => void onTaskModeChange('code')} disabled={isStreaming}>{tr('Code', '执行')}</button></div><div className="composer-mode-options"><label className="main-write-toggle loop-mode-toggle" title={tr('Create a goal before this request so Nori continues through the Loop state machine.', '发送后先创建 Goal，并由 Loop 状态机持续执行。')}><input type="checkbox" checked={loopEnabled} onChange={event => setLoopEnabled(event.target.checked)}/><span>Loop</span></label>{selectedTaskMode === 'code' && <label className="main-write-toggle" title={tr('Allow the main model to use Edit and Write directly.', '允许主模型直接使用 Edit 和 Write。')}><input type="checkbox" checked={selectedMainWrite} disabled={isStreaming} onChange={event => void onMainWriteChange(event.target.checked)}/><span>{tr('Main edits', '主模型编辑')}</span></label>}</div></div>
       <div className="composer-footer"><div className="composer-model-controls">
         <select className={'composer-select model-select' + (!selectedModelId ? ' invalid' : '')} value={selectedModelId} disabled={isStreaming || modelsLoading} onChange={e => handleModelChange(e.target.value)} aria-label={tr('Model', '模型')}><option value="">{modelsLoading ? tr('Loading models…', '正在加载模型…') : tr('Select model', '选择模型')}</option>{models.map(model => <option key={model.model} value={model.model}>{model.display_name || model.model}</option>)}</select>
         {thinkingOptions.choices.length > 0 && <select className="composer-select thinking-select" value={selectedThinking} disabled={isStreaming} onChange={e => void onThinkingChange(e.target.value)} aria-label={tr('Thinking effort', '思考等级')}>{thinkingOptions.choices.map(choice => <option key={choice.value} value={choice.value}>{choice.kind === 'fast' ? tr('Fast', '快速') : choice.kind === 'think' ? 'Think' : `${tr('Thinking', '思考')} · ${choice.value}`}</option>)}</select>}
         <select className={`composer-select permission-select permission-${selectedPermission}`} value={selectedPermission} disabled={isStreaming} onChange={event => void onPermissionChange(event.target.value as 'auto' | 'yolo' | 'manual')} aria-label={tr('Permission mode', '权限模式')} title={tr('Auto approves normal tools; YOLO asks nothing; Manual asks before commands and changes.', '自动模式放行常规工具；YOLO 不询问；手动模式在命令和更改前询问。')}><option value="auto">AUTO</option><option value="yolo">YOLO</option><option value="manual">MANUAL</option></select>
         <SkillPicker sessionId={session?.id ?? null} disabled={isStreaming}/>
         <button className="composer-refresh" onClick={onRefreshModels} disabled={modelsLoading} title={tr('Refresh model list', '刷新模型列表')} aria-label={tr('Refresh model list', '刷新模型列表')}><Icon name="refresh" size={14}/></button>
-      </div><div className="composer-submit-actions"><input ref={imageInputRef} className="composer-image-input" type="file" multiple onChange={event => { if (event.target.files) void addFiles(event.target.files); event.target.value = ''; }}/><button type="button" className="composer-image-button" onClick={() => imageInputRef.current?.click()} disabled={attachmentsLoading || attachments.length >= 6 || commandRunning} title={tr('Attach files', '添加文件')} aria-label={tr('Attach files', '添加文件')}><Icon name="paperclip" size={15}/></button>{isStreaming && <button className="chat-steer-btn" onClick={() => void handleSend(undefined, 'steer')} disabled={steering || attachmentsLoading || (!input.trim() && attachments.length === 0)} title={tr('Steer the active task now', '立即调整当前任务')} aria-label={tr('Steer the active task now', '立即调整当前任务')}><Icon name="sparkles" size={15}/></button>}<button className="chat-send-btn" onClick={() => input.trim().startsWith('/') ? void runSlashCommand() : void handleSend()} disabled={commandRunning || steering || attachmentsLoading || (!input.trim() && attachments.length === 0)} title={isStreaming ? tr('Queue message', '排队发送') : tr('Send message', '发送消息')} aria-label={isStreaming ? tr('Queue message', '排队发送') : tr('Send message', '发送消息')}><Icon name="send" size={16}/></button></div></div>
+      </div><div className="composer-submit-actions"><input ref={imageInputRef} className="composer-image-input" type="file" multiple onChange={event => { if (event.target.files) void addFiles(event.target.files); event.target.value = ''; }}/><button type="button" className="composer-image-button" onClick={() => imageInputRef.current?.click()} disabled={attachmentsLoading || attachments.length >= 6 || commandRunning} title={tr('Attach files', '添加文件')} aria-label={tr('Attach files', '添加文件')}><Icon name="paperclip" size={15}/></button><button className={`chat-send-btn${isStreaming ? ' chat-guide-btn' : ''}`} onClick={() => input.trim().startsWith('/') ? void runSlashCommand() : void handleSend(undefined, isStreaming ? 'steer' : 'queue')} disabled={commandRunning || steering || attachmentsLoading || (!input.trim() && attachments.length === 0)} title={isStreaming ? tr('Insert guidance into the current task', '插入引导到当前任务') : tr('Send message', '发送消息')} aria-label={isStreaming ? tr('Guide current task', '引导当前任务') : tr('Send message', '发送消息')}><Icon name={isStreaming ? 'sparkles' : 'send'} size={16}/>{isStreaming && <span>{tr('Guide', '引导')}</span>}</button></div></div>
       {(modelNotice || modelError || attachmentError) && <div className="composer-error" role="status">{modelNotice ? tr('Select a model before sending.', '请先选择模型') : attachmentError ?? modelError}</div>}
       {commandNotice && <div className="composer-command-notice" role="status">{commandNotice}</div>}
     </div></div>

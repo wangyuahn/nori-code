@@ -1,6 +1,6 @@
-import { BrowserWindow, dialog, ipcMain } from 'electron';
+import { BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { readServerToken } from './ensure-server';
 import { readDir, readTextFile } from './filesystem';
 
@@ -35,6 +35,18 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('nori:fs:readDir', (_event, dirPath: string) => readDir(dirPath));
   ipcMain.handle('nori:fs:readFile', (_event, filePath: string) => readTextFile(filePath));
+  ipcMain.handle('nori:fs:reveal', async (_event, input: { path?: string; isDirectory?: boolean }) => {
+    const targetPath = typeof input?.path === 'string' ? input.path.trim() : '';
+    if (targetPath.length === 0 || !isAbsolute(targetPath)) {
+      throw new Error('A non-empty absolute path is required.');
+    }
+    if (input.isDirectory === true) {
+      const error = await shell.openPath(targetPath);
+      if (error.length > 0) throw new Error(error);
+      return;
+    }
+    shell.showItemInFolder(targetPath);
+  });
   ipcMain.handle('nori:openInspectorWindow', (event, input: { tab?: string; sessionId?: string; path?: string }) => {
     const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
     const url = new URL(event.sender.getURL());

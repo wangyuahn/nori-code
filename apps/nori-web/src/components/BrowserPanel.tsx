@@ -13,7 +13,6 @@ export function BrowserPanel() {
   const viewportRef = useRef<HTMLDivElement>(null);
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
   const editingAnnotation = browser.activeTab?.annotations.find(item => item.id === editingAnnotationId);
-  const activePermission = browser.permissions.pending.find(item => item.tabId === browser.activeTabId) ?? browser.permissions.pending[0];
   const activeDialog = browser.dialogs.find(item => item.tabId === browser.activeTabId) ?? browser.dialogs[0];
   const activeDownloads = browser.downloads.filter(item => item.tabId === browser.activeTabId);
 
@@ -70,7 +69,6 @@ export function BrowserPanel() {
       onToggleAutomation={() => browser.setAutomationPaused(!browser.automation.paused)}
       onChooseUpload={browser.chooseUploadFiles}
     />
-    {activePermission && <div className="browser-native-prompt permission"><Icon name="alert" size={13}/><span><strong>{tr('Permission request', '权限请求')}</strong><small>{activePermission.origin}</small><b>{activePermission.permission}</b></span><button type="button" onClick={() => browser.resolvePermission(activePermission.id, 'deny_always')}>{tr('Always deny', '始终拒绝')}</button><button type="button" onClick={() => browser.resolvePermission(activePermission.id, 'deny')}>{tr('Deny', '拒绝')}</button><button type="button" onClick={() => browser.resolvePermission(activePermission.id, 'allow_once')}>{tr('Allow once', '允许一次')}</button><button type="button" onClick={() => browser.resolvePermission(activePermission.id, 'allow_always')}>{tr('Always allow', '始终允许')}</button></div>}
     {activeDialog && <BrowserDialogPrompt dialog={activeDialog} onResolve={browser.resolveDialog}/>}
     {(browser.automation.active || (browser.activeTab?.annotations.length ?? 0) > 0 || browser.automation.history.length > 0 || activeDownloads.length > 0 || (browser.activeTab?.network.length ?? 0) > 0) && <div className="browser-context-strip">
       {browser.automation.active && <span className="browser-agent-action"><span className="spinner spinner-small"/><strong>{browser.automation.active.agentId}</strong> {browser.automation.active.action}</span>}

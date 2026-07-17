@@ -66,11 +66,13 @@ describe('promptSubmissionSchema', () => {
       thinking: 'off',
       permission_mode: 'manual',
       plan_mode: false,
+      loop_mode: true,
     });
     expect(parsed.model).toBe('kimi-code/k2');
     expect(parsed.thinking).toBe('off');
     expect(parsed.permission_mode).toBe('manual');
     expect(parsed.plan_mode).toBe(false);
+    expect(parsed.loop_mode).toBe(true);
   });
 
   it('rejects empty content array', () => {

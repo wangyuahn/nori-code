@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../src/api/client';
-import { apiMessageToChat, canApplyGeneratedSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, mergeHistory, promptForRewind, RealtimeSubscriptionGate, shouldIgnoreTranscriptEvent, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
+import { apiMessageToChat, canApplyGeneratedSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, mergeHistory, promptForRewind, RealtimeSubscriptionGate, shouldIgnoreTranscriptEvent, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
 
 describe('realtime subscription readiness', () => {
   it('settles pending sends from the subscribe acknowledgement', async () => {
@@ -25,9 +25,39 @@ describe('realtime subscription readiness', () => {
     gate.reset();
     await expect(staleSession).resolves.toBe(false);
   });
+
+  it('cancels a pending subscription wait immediately when sending is aborted', async () => {
+    const gate = new RealtimeSubscriptionGate();
+    const controller = new AbortController();
+    const waiting = gate.wait(30_000, controller.signal);
+
+    controller.abort();
+
+    await expect(waiting).resolves.toBe(false);
+  });
 });
 
 describe('main transcript projection', () => {
+  it('places steer guidance between the output already shown and later output', () => {
+    const before = [{ id: 'u1', role: 'user' as const, text: 'initial task' }];
+    const withGuidance = insertSteerBoundary(
+      before,
+      { id: 'a1', role: 'assistant', text: 'First output.' },
+      { id: 'u2', role: 'user', text: 'Use the parser threshold.' },
+    );
+    const completed = foldConversationTurns([
+      ...withGuidance,
+      { id: 'a2', role: 'assistant', text: 'Second output.' },
+    ]);
+
+    expect(completed.map(item => [item.role, item.text])).toEqual([
+      ['user', 'initial task'],
+      ['assistant', 'First output.'],
+      ['user', 'Use the parser threshold.'],
+      ['assistant', 'Second output.'],
+    ]);
+  });
+
   it('asks the main agent for a title without exposing the instruction as the user message', () => {
     const prompt = firstPromptWithTitleInstruction('修复流式输出');
     const projected = apiMessageToChat(message({ role: 'user', text: prompt }));
@@ -104,6 +134,20 @@ describe('main transcript projection', () => {
       { role: 'user', text: 'Run a swarm' },
       { role: 'assistant', text: 'The swarm is running.\n\nThe swarm finished.' },
     ]);
+  });
+
+  it('preserves distinct persisted wake-up messages even when their text is identical', () => {
+    const previous = [
+      { id: 'assistant-a', role: 'assistant' as const, text: 'Done.', createdAt: '2026-07-14T00:00:01.000Z' },
+    ];
+    const incoming = [
+      { id: 'assistant-b', role: 'assistant' as const, text: 'Done.', createdAt: '2026-07-14T00:00:02.000Z' },
+    ];
+
+    const merged = mergeHistory(previous, incoming);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.text).toBe('Done.\n\nDone.');
   });
 
   it('preserves visible text from multiple model steps in one turn', () => {

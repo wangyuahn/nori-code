@@ -387,6 +387,23 @@ describe('PromptService.submit', () => {
     ]);
   });
 
+  it('forwards opt-in Loop intake to the core prompt without changing visible content', async () => {
+    const { bridge, record } = makeBridge();
+    const { bus } = makeBus();
+    const impl = newSvc(bridge, bus);
+
+    await impl.submit(SID, mkBodyMinimal({ loop_mode: true }));
+
+    expect(record.promptCalls).toEqual([
+      {
+        sessionId: SID,
+        agentId: 'main',
+        input: [{ type: 'text', text: 'hi' }],
+        goalIntake: true,
+      },
+    ]);
+  });
+
   it('translates base64 image content to a data URL image part', async () => {
     const { bridge, record } = makeBridge();
     const { bus } = makeBus();
@@ -1034,6 +1051,28 @@ describe('PromptService queue steer', () => {
       },
     ]);
     expect((await impl.list(SID)).queued).toHaveLength(0);
+  });
+
+  it('preserves Loop intake when an opted-in queued prompt is steered', async () => {
+    const { bridge, record } = makeBridge();
+    const { bus } = makeBus();
+    const impl = newSvc(bridge, bus);
+    await impl.submit(SID, mkBodyMinimal({ content: [{ type: 'text', text: 'active' }] }));
+    const queued = await impl.submit(
+      SID,
+      mkBodyMinimal({ content: [{ type: 'text', text: 'new task' }], loop_mode: true }),
+    );
+
+    await impl.steer(SID, [queued.prompt_id]);
+
+    expect(record.steerCalls).toEqual([
+      {
+        sessionId: SID,
+        agentId: 'main',
+        input: [{ type: 'text', text: 'new task' }],
+        goalIntake: true,
+      },
+    ]);
   });
 
   it('keeps queued prompts when core steer fails', async () => {

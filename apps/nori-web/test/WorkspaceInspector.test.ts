@@ -1,8 +1,8 @@
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { api, type FsGitStatusResponse } from '../src/api/client';
-import type { ChatMessage } from '../src/hooks/useChatMessages';
+import { api, type FsGitStatusResponse, type FsReadResponse } from '../src/api/client';
+import type { ChatMessage, CodeChange } from '../src/hooks/useChatMessages';
 import { useFilesystem } from '../src/hooks/useFilesystem';
 import { WorkspaceInspector, changedLineStats, collectAttributions, collectToolCodeChanges, combinedCodeChangeDiff, diffPathsToLoad, hasTextChanges, mergeCodeChanges, splitDisplayPath } from '../src/components/WorkspaceInspector';
 import { I18nProvider } from '../src/i18n';
@@ -14,6 +14,94 @@ afterEach(() => {
 });
 
 describe('workspace change presentation', () => {
+  it('opens a changed file in the Preview tab from its file card', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const onSelectFilePath = vi.fn();
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(WorkspaceInspector, {
+          sessionId: 'session-preview-card',
+          projectPath: '/project',
+          path: '',
+          file: null,
+          messages: [],
+          codeChanges: [codeChange('change-card', 'src/app.ts', '2026-07-17T01:00:00.000Z')],
+          gitStatus: null,
+          gitError: null,
+          gitLoading: false,
+          refreshGitStatus: vi.fn(async () => null),
+          isStreaming: false,
+          onSelectFilePath,
+        })));
+        await Promise.resolve();
+      });
+
+      const previewButton = container.querySelector<HTMLButtonElement>('.change-entry-preview');
+      expect(previewButton?.getAttribute('aria-label')).toContain('app.ts');
+      await act(async () => previewButton?.click());
+
+      expect(onSelectFilePath).toHaveBeenCalledWith('src/app.ts');
+      const previewTab = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+        .find(button => button.textContent?.includes('Preview') || button.textContent?.includes('预览'));
+      expect(previewTab?.getAttribute('aria-selected')).toBe('true');
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('refreshes the current preview manually and after the same file changes', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const refreshFile = vi.fn(async () => undefined);
+    const file = previewFile('src/app.md');
+    const render = async (codeChanges: CodeChange[]) => {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(WorkspaceInspector, {
+          sessionId: 'session-preview-refresh',
+          projectPath: '/project',
+          path: 'src/app.md',
+          file,
+          messages: [],
+          codeChanges,
+          gitStatus: null,
+          gitError: null,
+          gitLoading: false,
+          refreshGitStatus: vi.fn(async () => null),
+          refreshFile,
+          isStreaming: false,
+          initialTab: 'preview',
+        })));
+        await Promise.resolve();
+      });
+    };
+    try {
+      await render([codeChange('change-1', 'src/app.md', '2026-07-17T01:00:00.000Z')]);
+      expect(refreshFile).not.toHaveBeenCalled();
+
+      await act(async () => container.querySelector<HTMLButtonElement>('.file-preview-refresh')?.click());
+      expect(refreshFile).toHaveBeenCalledTimes(1);
+
+      await render([
+        codeChange('change-2', '/project/src/app.md', '2026-07-17T01:01:00.000Z'),
+        codeChange('change-1', 'src/app.md', '2026-07-17T01:00:00.000Z'),
+      ]);
+      expect(refreshFile).toHaveBeenCalledTimes(2);
+
+      await render([
+        codeChange('unrelated-change', 'src/other.md', '2026-07-17T01:02:00.000Z'),
+        codeChange('change-2', '/project/src/app.md', '2026-07-17T01:01:00.000Z'),
+      ]);
+      expect(refreshFile).toHaveBeenCalledTimes(2);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
   it('does not attribute unrelated workspace changes to a swarm invocation', () => {
     const messages: ChatMessage[] = [{
       id: 'assistant-1',
@@ -588,3 +676,27 @@ describe('workspace change presentation', () => {
     }
   });
 });
+
+function codeChange(operationId: string, path: string, occurredAt: string): CodeChange {
+  return {
+    operationId,
+    agentId: 'main',
+    operation: 'edit',
+    path,
+    diff: '-old\n+new',
+    occurredAt,
+  };
+}
+
+function previewFile(path: string): FsReadResponse {
+  return {
+    path,
+    content: '# Preview',
+    encoding: 'utf-8',
+    size: 9,
+    truncated: false,
+    mime: 'text/markdown',
+    language_id: 'markdown',
+    is_binary: false,
+  };
+}

@@ -11,6 +11,7 @@ import type {
   CancelPlanPayload,
   CancelShellCommandPayload,
   CreateGoalPayload,
+  CronCreateRequest,
   DetachBackgroundPayload,
   EmptyPayload,
   EnterSwarmPayload,
@@ -309,6 +310,18 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
 
   async getBackground({ agentId, ...payload }: AgentScopedPayload<GetBackgroundPayload>) {
     return (await this.getAgent(agentId)).getBackground(payload);
+  }
+
+  async listCron({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {
+    return (await this.getAgent(agentId)).listCron(payload);
+  }
+
+  async createCron({ agentId, ...payload }: AgentScopedPayload<CronCreateRequest>) {
+    return (await this.getAgent(agentId)).createCron(payload);
+  }
+
+  async deleteCron({ agentId, ...payload }: AgentScopedPayload<{ readonly id: string }>) {
+    return (await this.getAgent(agentId)).deleteCron(payload);
   }
 
   private async getAgent(agentId: string): Promise<PromisableMethods<AgentAPI>> {

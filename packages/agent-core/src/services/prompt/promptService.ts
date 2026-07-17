@@ -399,6 +399,7 @@ export class PromptService
         sessionId: sid,
         agentId: MAIN_AGENT_ID,
         input: steerContentToCoreParts(selected),
+        ...(selected.some((item) => item.body.loop_mode === true) ? { goalIntake: true } : {}),
       });
     } catch (error) {
       this._restoreSteeredQueueItems(sid, selected);
@@ -447,6 +448,7 @@ export class PromptService
         sessionId: sid,
         agentId: state.agentId,
         input,
+        ...(state.body.loop_mode === true ? { goalIntake: true } : {}),
       });
       this._logger.debug(
         { sid, promptId: state.promptId },

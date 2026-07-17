@@ -44,6 +44,24 @@ it('runs a text-only agent turn from prompt to completion', async () => {
   await ctx.expectResumeMatches();
 });
 
+it('preserves the Loop intake flag on the core user-prompt origin', async () => {
+  const ctx = testAgent({ type: 'main' });
+  ctx.configure({ tools: ['CreateGoal'] });
+  ctx.mockNextResponse({ type: 'text', text: 'I will start by defining the goal.' });
+
+  await ctx.rpc.prompt({
+    input: [{ type: 'text', text: 'Implement the parser fix' }],
+    goalIntake: true,
+  });
+  await ctx.untilTurnEnd();
+
+  expect(ctx.allEvents).toContainEqual(expect.objectContaining({
+    type: '[wire]',
+    event: 'turn.prompt',
+    args: expect.objectContaining({ origin: { kind: 'user', goalIntake: true } }),
+  }));
+});
+
 it('forwards provider finish diagnostics on filtered steps', async () => {
   const ctx = testAgent();
   ctx.configure();

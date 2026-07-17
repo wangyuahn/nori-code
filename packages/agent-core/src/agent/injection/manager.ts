@@ -2,6 +2,7 @@ import { formatTaskList } from '#/tools/background/task-list';
 
 import type { Agent } from '..';
 import { GoalInjector } from './goal';
+import { GoalIntakeInjector } from './goal-intake';
 import type { DynamicInjector } from './injector';
 import { PermissionModeInjector } from './permission-mode';
 import { PluginSessionStartInjector } from './plugin-session-start';
@@ -23,6 +24,7 @@ export class InjectionManager {
   constructor(protected readonly agent: Agent) {
     this.injectors = [
       new PluginSessionStartInjector(agent),
+      new GoalIntakeInjector(agent),
       new TodoListReminderInjector(agent),
       new PlanModeInjector(agent),
       new PermissionModeInjector(agent),

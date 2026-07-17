@@ -5,6 +5,8 @@ import type { BackgroundTaskStatus } from '../background';
 
 export interface UserPromptOrigin {
   readonly kind: 'user';
+  /** The host explicitly requested goal-loop intake for this prompt. */
+  readonly goalIntake?: boolean;
 }
 
 export const USER_PROMPT_ORIGIN: UserPromptOrigin = { kind: 'user' };

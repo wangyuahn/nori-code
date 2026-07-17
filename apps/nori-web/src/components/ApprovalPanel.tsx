@@ -1,5 +1,6 @@
 import { useEffect, useState, type WheelEvent } from 'react';
 import type { ApprovalRequest } from '../api/client';
+import type { NoriBrowserState } from '../types/nori-desktop';
 import { useI18n } from '../i18n';
 import { Icon } from './Icon';
 import { MarkdownView } from './MarkdownView';
@@ -12,8 +13,10 @@ interface ApprovalOptions {
 
 interface ApprovalPanelProps {
   requests: ApprovalRequest[];
-  onResolve: (id: string, decision: 'approved' | 'rejected' | 'cancelled', options?: ApprovalOptions) => void | Promise<void>;
+  onResolve?: (id: string, decision: 'approved' | 'rejected' | 'cancelled', options?: ApprovalOptions) => void | Promise<void>;
   onPermissionChange?: (mode: 'auto' | 'yolo') => void | Promise<void>;
+  browserPermissions?: NoriBrowserState['permissions']['pending'];
+  onResolveBrowserPermission?: (id: string, decision: 'allow_once' | 'allow_always' | 'deny' | 'deny_always') => void | Promise<void>;
 }
 
 interface DisplayData {
@@ -21,7 +24,7 @@ interface DisplayData {
   [key: string]: unknown;
 }
 
-export function ApprovalPanel({ requests, onResolve, onPermissionChange }: ApprovalPanelProps) {
+export function ApprovalPanel({ requests, onResolve, onPermissionChange, browserPermissions = [], onResolveBrowserPermission }: ApprovalPanelProps) {
   const { tr } = useI18n();
   const [layout, setLayout] = useState<'compact' | 'stack'>('compact');
   const [activeIndex, setActiveIndex] = useState(0);
@@ -31,14 +34,42 @@ export function ApprovalPanel({ requests, onResolve, onPermissionChange }: Appro
   const [switchingMode, setSwitchingMode] = useState<Record<string, 'auto' | 'yolo' | undefined>>({});
   const [modeErrors, setModeErrors] = useState<Record<string, string | undefined>>({});
 
+  const items = [
+    ...requests.map(request => ({ kind: 'tool' as const, request })),
+    ...browserPermissions.map(request => ({ kind: 'browser' as const, request })),
+  ];
+
   useEffect(() => {
-    setActiveIndex(index => Math.min(index, Math.max(0, requests.length - 1)));
-  }, [requests.length]);
+    setActiveIndex(index => Math.min(index, Math.max(0, items.length - 1)));
+  }, [items.length]);
 
   const onWheel = (event: WheelEvent<HTMLDivElement>) => {
-    if (layout !== 'compact' || requests.length < 2) return;
+    if (layout !== 'compact' || items.length < 2) return;
     event.preventDefault();
-    setActiveIndex(index => (index + (event.deltaY > 0 ? 1 : -1) + requests.length) % requests.length);
+    setActiveIndex(index => (index + (event.deltaY > 0 ? 1 : -1) + items.length) % items.length);
+  };
+
+  const switchModeAndResolve = async (
+    requestId: string,
+    mode: 'auto' | 'yolo',
+    resolve: () => void | Promise<void>,
+  ) => {
+    if (!onPermissionChange || switchingMode[requestId]) return;
+    setSwitchingMode(previous => ({ ...previous, [requestId]: mode }));
+    setModeErrors(previous => ({ ...previous, [requestId]: undefined }));
+    try {
+      await onPermissionChange(mode);
+      await resolve();
+    } catch (error) {
+      setModeErrors(previous => ({
+        ...previous,
+        [requestId]: error instanceof Error
+          ? error.message
+          : tr('Unable to change permission mode.', '无法切换权限模式。'),
+      }));
+    } finally {
+      setSwitchingMode(previous => ({ ...previous, [requestId]: undefined }));
+    }
   };
 
   const renderRequest = (request: ApprovalRequest) => {
@@ -47,26 +78,8 @@ export function ApprovalPanel({ requests, onResolve, onPermissionChange }: Appro
     const selectedLabel = selectedLabels[request.approval_id];
     const requestFeedback = feedback[request.approval_id] ?? '';
     const remember = remembered.has(request.approval_id);
-    const resolve = (decision: 'approved' | 'rejected' | 'cancelled', options: ApprovalOptions = {}) => onResolve(request.approval_id, decision, { remember, feedback: requestFeedback, ...options });
+    const resolve = (decision: 'approved' | 'rejected' | 'cancelled', options: ApprovalOptions = {}) => onResolve?.(request.approval_id, decision, { remember, feedback: requestFeedback, ...options });
     const activeModeSwitch = switchingMode[request.approval_id];
-    const switchModeAndApprove = async (mode: 'auto' | 'yolo') => {
-      if (!onPermissionChange || activeModeSwitch) return;
-      setSwitchingMode(previous => ({ ...previous, [request.approval_id]: mode }));
-      setModeErrors(previous => ({ ...previous, [request.approval_id]: undefined }));
-      try {
-        await onPermissionChange(mode);
-        await resolve('approved');
-      } catch (error) {
-        setModeErrors(previous => ({
-          ...previous,
-          [request.approval_id]: error instanceof Error
-            ? error.message
-            : tr('Unable to change permission mode.', '无法切换权限模式。'),
-        }));
-      } finally {
-        setSwitchingMode(previous => ({ ...previous, [request.approval_id]: undefined }));
-      }
-    };
 
     return <div key={request.approval_id} className={`approval-card pending approval-kind-${kind ?? 'generic'}`}>
       <div className="approval-card-header"><span className="approval-tool-icon"><Icon name={kind === 'goal_start' ? 'target' : kind === 'plan_review' ? 'list' : 'settings'} size={15}/></span><span className="approval-tool-name">{kind === 'goal_start' ? tr('Start goal', '启动目标') : kind === 'plan_review' ? tr('Review plan', '审核计划') : request.tool_name}</span><span className="approval-status approval-status--pending">{tr('Permission required', '需要授权')}</span></div>
@@ -82,15 +95,36 @@ export function ApprovalPanel({ requests, onResolve, onPermissionChange }: Appro
       <div className="approval-actions">
         {kind === 'goal_start' ? <GoalApprovalActions display={display} onSelect={(decision, label) => resolve(decision, { selectedLabel: label })} tr={tr}/>
           : kind === 'plan_review' ? <><button className="approval-btn approval-btn--approve" disabled={!selectedLabel} onClick={() => resolve('approved', { selectedLabel })}>{tr('Approve choice', '批准所选方案')}</button><button className="approval-btn approval-btn--decline" disabled={!requestFeedback.trim()} onClick={() => resolve('rejected', { selectedLabel: 'Revise' })}>{tr('Revise', '要求修改')}</button><button className="approval-btn approval-btn--decline" onClick={() => resolve('rejected', { selectedLabel: 'Reject' })}>{tr('Reject', '拒绝')}</button></>
-          : <><button className="approval-btn approval-btn--approve" disabled={Boolean(activeModeSwitch)} onClick={() => resolve('approved')}>{tr('Approve', '允许')}</button>{onPermissionChange && <><button className="approval-btn approval-btn--auto" disabled={Boolean(activeModeSwitch)} onClick={() => void switchModeAndApprove('auto')}>{activeModeSwitch === 'auto' ? tr('Switching…', '切换中…') : tr('Switch to AUTO and approve', '切换为 AUTO 并允许')}</button><button className="approval-btn approval-btn--yolo" disabled={Boolean(activeModeSwitch)} onClick={() => void switchModeAndApprove('yolo')}>{activeModeSwitch === 'yolo' ? tr('Switching…', '切换中…') : tr('Switch to YOLO and approve', '切换为 YOLO 并允许')}</button></>}<button className="approval-btn approval-btn--decline" disabled={Boolean(activeModeSwitch)} onClick={() => resolve('rejected')}>{tr('Decline', '拒绝')}</button><label className="approval-always-allow"><input type="checkbox" checked={remember} disabled={Boolean(activeModeSwitch)} onChange={event => setRemembered(previous => { const next = new Set(previous); if (event.target.checked) next.add(request.approval_id); else next.delete(request.approval_id); return next; })}/>{tr('Always allow this tool in this session', '本会话始终允许此工具')}</label></>}
+          : <><button className="approval-btn approval-btn--approve" disabled={Boolean(activeModeSwitch)} onClick={() => resolve('approved')}>{tr('Approve', '允许')}</button>{onPermissionChange && <><button className="approval-btn approval-btn--auto" disabled={Boolean(activeModeSwitch)} onClick={() => void switchModeAndResolve(request.approval_id, 'auto', () => resolve('approved'))}>{activeModeSwitch === 'auto' ? tr('Switching…', '切换中…') : tr('Switch to AUTO and approve', '切换为 AUTO 并允许')}</button><button className="approval-btn approval-btn--yolo" disabled={Boolean(activeModeSwitch)} onClick={() => void switchModeAndResolve(request.approval_id, 'yolo', () => resolve('approved'))}>{activeModeSwitch === 'yolo' ? tr('Switching…', '切换中…') : tr('Switch to YOLO and approve', '切换为 YOLO 并允许')}</button></>}<button className="approval-btn approval-btn--decline" disabled={Boolean(activeModeSwitch)} onClick={() => resolve('rejected')}>{tr('Decline', '拒绝')}</button><label className="approval-always-allow"><input type="checkbox" checked={remember} disabled={Boolean(activeModeSwitch)} onChange={event => setRemembered(previous => { const next = new Set(previous); if (event.target.checked) next.add(request.approval_id); else next.delete(request.approval_id); return next; })}/>{tr('Always allow this tool in this session', '本会话始终允许此工具')}</label></>}
       </div>
     </div>;
   };
 
+  const renderBrowserPermission = (request: NoriBrowserState['permissions']['pending'][number]) => {
+    const activeModeSwitch = switchingMode[request.id];
+    return <div key={request.id} className="approval-card pending browser-permission-card">
+      <div className="approval-card-header"><span className="approval-tool-icon"><Icon name="globe" size={15}/></span><span className="approval-tool-name">{tr('Browser permission', '浏览器权限')}</span><span className="approval-status approval-status--pending">{tr('Permission required', '需要授权')}</span></div>
+      <div className="approval-action-label">{request.permission}</div>
+      <pre className="approval-args">{request.origin}</pre>
+      {modeErrors[request.id] && <div className="approval-mode-error" role="alert">{modeErrors[request.id]}</div>}
+      <div className="approval-actions">
+        <button className="approval-btn approval-btn--approve" disabled={Boolean(activeModeSwitch)} onClick={() => onResolveBrowserPermission?.(request.id, 'allow_once')}>{tr('Allow once', '允许一次')}</button>
+        {onPermissionChange && <><button className="approval-btn approval-btn--auto" disabled={Boolean(activeModeSwitch)} onClick={() => void switchModeAndResolve(request.id, 'auto', () => onResolveBrowserPermission?.(request.id, 'allow_once'))}>{activeModeSwitch === 'auto' ? tr('Switching…', '切换中…') : tr('Switch to AUTO and approve', '切换为 AUTO 并允许')}</button><button className="approval-btn approval-btn--yolo" disabled={Boolean(activeModeSwitch)} onClick={() => void switchModeAndResolve(request.id, 'yolo', () => onResolveBrowserPermission?.(request.id, 'allow_once'))}>{activeModeSwitch === 'yolo' ? tr('Switching…', '切换中…') : tr('Switch to YOLO and approve', '切换为 YOLO 并允许')}</button></>}
+        <button className="approval-btn approval-btn--approve" disabled={Boolean(activeModeSwitch)} onClick={() => onResolveBrowserPermission?.(request.id, 'allow_always')}>{tr('Always allow', '始终允许')}</button>
+        <button className="approval-btn approval-btn--decline" disabled={Boolean(activeModeSwitch)} onClick={() => onResolveBrowserPermission?.(request.id, 'deny')}>{tr('Deny', '拒绝')}</button>
+        <button className="approval-btn approval-btn--decline" disabled={Boolean(activeModeSwitch)} onClick={() => onResolveBrowserPermission?.(request.id, 'deny_always')}>{tr('Always deny', '始终拒绝')}</button>
+      </div>
+    </div>;
+  };
+
+  const renderItem = (item: (typeof items)[number]) => item.kind === 'tool'
+    ? renderRequest(item.request)
+    : renderBrowserPermission(item.request);
+
   return <aside className={`approval-dock approval-dock-${layout}`} onWheel={onWheel}>
-    <header className="approval-dock-header"><span><Icon name="alert" size={14}/><strong>{tr('Tool permissions', '工具授权')}</strong><small>{requests.length}</small></span><div className="approval-layout-switch" role="group" aria-label={tr('Approval layout', '授权布局')}><button className={layout === 'compact' ? 'active' : ''} onClick={() => setLayout('compact')} title={tr('Group requests and use the mouse wheel to switch', '合并请求，用鼠标滚轮切换')}><Icon name="archive" size={13}/></button><button className={layout === 'stack' ? 'active' : ''} onClick={() => setLayout('stack')} title={tr('Show requests vertically', '纵向平铺请求')}><Icon name="list" size={13}/></button></div></header>
-    <div className="approval-panel">{layout === 'compact' ? renderRequest(requests[activeIndex]!) : requests.map(renderRequest)}</div>
-    {layout === 'compact' && requests.length > 1 && <footer className="approval-pager"><button onClick={() => setActiveIndex(index => (index - 1 + requests.length) % requests.length)}><Icon name="chevron-left" size={13}/></button><span>{activeIndex + 1} / {requests.length} · {tr('Scroll to switch', '滚轮切换')}</span><button onClick={() => setActiveIndex(index => (index + 1) % requests.length)}><Icon name="chevron-right" size={13}/></button></footer>}
+    <header className="approval-dock-header"><span><Icon name="alert" size={14}/><strong>{tr('Permissions', '授权')}</strong><small>{items.length}</small></span><div className="approval-layout-switch" role="group" aria-label={tr('Approval layout', '授权布局')}><button className={layout === 'compact' ? 'active' : ''} onClick={() => setLayout('compact')} title={tr('Group requests and use the mouse wheel to switch', '合并请求，用鼠标滚轮切换')}><Icon name="archive" size={13}/></button><button className={layout === 'stack' ? 'active' : ''} onClick={() => setLayout('stack')} title={tr('Show requests vertically', '纵向平铺请求')}><Icon name="list" size={13}/></button></div></header>
+    <div className="approval-panel">{layout === 'compact' ? renderItem(items[activeIndex]!) : items.map(renderItem)}</div>
+    {layout === 'compact' && items.length > 1 && <footer className="approval-pager"><button onClick={() => setActiveIndex(index => (index - 1 + items.length) % items.length)}><Icon name="chevron-left" size={13}/></button><span>{activeIndex + 1} / {items.length} · {tr('Scroll to switch', '滚轮切换')}</span><button onClick={() => setActiveIndex(index => (index + 1) % items.length)}><Icon name="chevron-right" size={13}/></button></footer>}
   </aside>;
 }
 

@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { unavailablePageResult } from '../src/main/browser-automation';
+import { restoreBrowserAutomationFocus } from '../src/main/browser-focus';
 
 describe('browser automation page availability', () => {
   it('fails page actions immediately when no page is open', () => {
@@ -25,3 +26,32 @@ describe('browser automation page availability', () => {
     expect(unavailablePageResult({ action: 'snapshot' }, 'file:///C:/workspace/index.html')).toBeUndefined();
   });
 });
+
+describe('browser automation focus', () => {
+  it('restores the previous surface only when the automated browser page stole focus', () => {
+    const previous = focusTarget(1);
+    const browserPage = focusTarget(2);
+
+    restoreBrowserAutomationFocus(previous, browserPage, browserPage);
+
+    expect(previous.focus).toHaveBeenCalledOnce();
+  });
+
+  it('does not override a focus change made by the user during an action', () => {
+    const previous = focusTarget(1);
+    const browserPage = focusTarget(2);
+    const userTarget = focusTarget(3);
+
+    restoreBrowserAutomationFocus(previous, userTarget, browserPage);
+
+    expect(previous.focus).not.toHaveBeenCalled();
+  });
+});
+
+function focusTarget(id: number) {
+  return {
+    id,
+    isDestroyed: () => false,
+    focus: vi.fn(),
+  };
+}

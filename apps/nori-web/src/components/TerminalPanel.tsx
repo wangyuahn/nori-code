@@ -107,8 +107,13 @@ function TerminalSurface({ sessionId, terminal, onExit }: { sessionId: string; t
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let reconnectAttempt = 0;
     let attached = false;
+    let attachRequestId: string | null = null;
+    let autoFocusPending = terminal.status !== 'exited';
+    let exited = terminal.status === 'exited';
+    let lastSentSize = '';
     let lastSeq = 0;
     let controlSequence = 0;
+    const focusOwnerAtOpen = document.activeElement;
     const xterm = new Terminal({
       allowProposedApi: false,
       convertEol: false,
@@ -124,15 +129,20 @@ function TerminalSurface({ sessionId, terminal, onExit }: { sessionId: string; t
     xterm.open(host);
 
     const nextControlId = (kind: string) => `terminal-${kind}-${++controlSequence}`;
-    const send = (type: string, payload: Record<string, unknown>) => {
-      if (socket?.readyState !== WebSocket.OPEN) return;
-      socket.send(JSON.stringify({ type, id: nextControlId(type), payload }));
+    const send = (type: string, payload: Record<string, unknown>): string | null => {
+      if (socket?.readyState !== WebSocket.OPEN) return null;
+      const id = nextControlId(type);
+      socket.send(JSON.stringify({ type, id, payload }));
+      return id;
     };
     const fit = () => {
       if (disposed || host.clientWidth === 0 || host.clientHeight === 0) return;
       try {
         fitAddon.fit();
         if (attached && xterm.cols > 0 && xterm.rows > 0) {
+          const size = `${xterm.cols}x${xterm.rows}`;
+          if (size === lastSentSize) return;
+          lastSentSize = size;
           send('terminal_resize', { session_id: sessionId, terminal_id: terminal.id, cols: xterm.cols, rows: xterm.rows });
         }
       } catch {
@@ -147,19 +157,22 @@ function TerminalSurface({ sessionId, terminal, onExit }: { sessionId: string; t
         socket = ws;
         ws.onopen = () => {
           reconnectAttempt = 0;
-          ws.send(JSON.stringify({
-            type: 'terminal_attach',
-            id: nextControlId('attach'),
-            payload: { session_id: sessionId, terminal_id: terminal.id, since_seq: lastSeq },
-          }));
+          attached = false;
+          lastSentSize = '';
+          attachRequestId = send('terminal_attach', { session_id: sessionId, terminal_id: terminal.id, since_seq: lastSeq });
         };
         ws.onmessage = event => {
           let frame: TerminalWsFrame;
           try { frame = JSON.parse(String(event.data)) as TerminalWsFrame; } catch { return; }
-          if (frame.type === 'ack' && frame.code === 0) {
+          if (frame.type === 'ack') {
+            if (!isSuccessfulTerminalAttachAck(frame, attachRequestId)) return;
+            attachRequestId = null;
             attached = true;
             fit();
-            xterm.focus();
+            if (autoFocusPending) {
+              autoFocusPending = false;
+              if (shouldAutoFocusTerminal(host, focusOwnerAtOpen)) xterm.focus();
+            }
             return;
           }
           if (frame.session_id !== sessionId || frame.terminal_id !== terminal.id) return;
@@ -167,13 +180,15 @@ function TerminalSurface({ sessionId, terminal, onExit }: { sessionId: string; t
             lastSeq = Math.max(lastSeq, frame.seq ?? 0);
             if (frame.payload?.data) xterm.write(frame.payload.data);
           } else if (frame.type === 'terminal_exit') {
+            exited = true;
             onExit(terminal.id, { status: 'exited', exit_code: frame.payload?.exit_code ?? null, exited_at: frame.timestamp });
             xterm.write(`\r\n\x1b[90m[process exited${frame.payload?.exit_code === undefined ? '' : ` with code ${frame.payload.exit_code ?? 'unknown'}`} ]\x1b[0m\r\n`);
           }
         };
         ws.onclose = () => {
           attached = false;
-          if (disposed || terminal.status === 'exited') return;
+          attachRequestId = null;
+          if (disposed || exited) return;
           reconnectTimer = setTimeout(() => void connect(), Math.min(500 * 2 ** reconnectAttempt++, 5000));
         };
       } catch {
@@ -201,19 +216,32 @@ function TerminalSurface({ sessionId, terminal, onExit }: { sessionId: string; t
       input.dispose();
       xterm.dispose();
     };
-  }, [onExit, sessionId, terminal.id, terminal.status]);
+  }, [onExit, sessionId, terminal.id]);
 
   return <div className="terminal-surface" ref={hostRef}/>;
 }
 
 interface TerminalWsFrame {
   type?: string;
+  id?: string;
   code?: number;
   seq?: number;
   session_id?: string;
   terminal_id?: string;
   timestamp?: string;
   payload?: { data?: string; exit_code?: number | null };
+}
+
+export function isSuccessfulTerminalAttachAck(frame: TerminalWsFrame, attachRequestId: string | null): boolean {
+  return attachRequestId !== null
+    && frame.type === 'ack'
+    && frame.id === attachRequestId
+    && frame.code === 0;
+}
+
+export function shouldAutoFocusTerminal(host: HTMLElement, focusOwnerAtOpen: Element | null): boolean {
+  const active = document.activeElement;
+  return active === focusOwnerAtOpen || active === document.body || (active !== null && host.contains(active));
 }
 
 function terminalTheme() {

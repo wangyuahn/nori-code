@@ -26,19 +26,21 @@ interface WorkspaceInspectorProps {
   gitLoading: boolean;
   refreshGitStatus: (options?: GitStatusRefreshOptions) => Promise<FsGitStatusResponse | null>;
   refreshMessages?: () => Promise<void>;
+  refreshFile?: () => void | Promise<void>;
   isStreaming: boolean;
   onSelectFilePath?: (path: string) => void;
   initialTab?: InspectorTab;
   standalone?: boolean;
 }
 
-export function WorkspaceInspector({ sessionId, projectPath, path, file, loading, messages, codeChanges, gitStatus, gitError, gitLoading, refreshGitStatus, refreshMessages, onSelectFilePath, initialTab = 'changes', standalone = false }: WorkspaceInspectorProps) {
+export function WorkspaceInspector({ sessionId, projectPath, path, file, loading, messages, codeChanges, gitStatus, gitError, gitLoading, refreshGitStatus, refreshMessages, refreshFile, onSelectFilePath, initialTab = 'changes', standalone = false }: WorkspaceInspectorProps) {
   const { tr } = useI18n();
   const [tab, setTab] = useState<InspectorTab>(initialTab);
   const [tabOrder, setTabOrder] = useState<InspectorTab[]>(loadInspectorTabOrder);
   const [textChangeCount, setTextChangeCount] = useState<number>();
   const [diagnosticCount, setDiagnosticCount] = useState<number>();
   const [revealLine, setRevealLine] = useState<number>();
+  const previewRefreshRef = useRef({ path: '', mutationKey: '' });
 
   useEffect(() => {
     if (path && !standalone) setTab('preview');
@@ -61,6 +63,28 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
     void refreshGitStatus({ force: true });
   }, [mutationRefreshKey, refreshGitStatus, sessionId]);
 
+  const previewMutationKey = useMemo(
+    () => latestFileMutationKey(path, projectPath, codeChanges, messages),
+    [codeChanges, messages, path, projectPath],
+  );
+  useEffect(() => {
+    const normalizedPath = normalizeComparablePath(path, projectPath);
+    const previous = previewRefreshRef.current;
+    if (previous.path !== normalizedPath) {
+      previewRefreshRef.current = { path: normalizedPath, mutationKey: previewMutationKey };
+      return;
+    }
+    if (tab !== 'preview' || !normalizedPath || !previewMutationKey || previous.mutationKey === previewMutationKey) return;
+    previewRefreshRef.current = { path: normalizedPath, mutationKey: previewMutationKey };
+    void refreshFile?.();
+  }, [path, previewMutationKey, projectPath, refreshFile, tab]);
+
+  const previewFile = (targetPath: string) => {
+    onSelectFilePath?.(targetPath);
+    setRevealLine(undefined);
+    setTab('preview');
+  };
+
   return <section className="workspace-inspector">
     {!standalone && <div className="inspector-tabs" role="tablist" aria-label={tr('Inspector', '检查器')}>
       <div className="inspector-tab-list">
@@ -70,8 +94,8 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
     </div>
     }
     <div className="inspector-content">
-      {tab === 'preview' && <FilePreview path={path} file={file} loading={loading} revealLine={revealLine} />}
-      {tab === 'changes' && <ChangesPanel sessionId={sessionId} projectPath={projectPath} status={gitStatus} messages={messages} codeChanges={codeChanges} onRefreshGitStatus={refreshGitStatus} onRefreshMessages={refreshMessages} onCountChange={setTextChangeCount} />}
+      {tab === 'preview' && <FilePreview path={path} file={file} loading={loading} revealLine={revealLine} onRefresh={refreshFile} />}
+      {tab === 'changes' && <ChangesPanel sessionId={sessionId} projectPath={projectPath} status={gitStatus} messages={messages} codeChanges={codeChanges} onRefreshGitStatus={refreshGitStatus} onRefreshMessages={refreshMessages} onPreviewFile={onSelectFilePath ? previewFile : undefined} onCountChange={setTextChangeCount} />}
       {tab === 'git' && <GitPanel sessionId={sessionId} projectPath={projectPath} status={gitStatus} error={gitError} loading={gitLoading} onRefresh={refreshGitStatus} />}
       {tab === 'lsp' && <LspPanel sessionId={sessionId} path={path} onDiagnosticCountChange={setDiagnosticCount} onReveal={(targetPath, line) => { if (targetPath !== path) onSelectFilePath?.(targetPath); setRevealLine(line + 1); setTab('preview'); }} />}
       {tab === 'browser' && <Suspense fallback={<div className="inspector-empty"><span className="spinner"/></div>}><BrowserPanel /></Suspense>}
@@ -140,6 +164,41 @@ function latestToolMutationKey(messages: ChatMessage[]): string | undefined {
   return undefined;
 }
 
+export function latestFileMutationKey(path: string, projectPath: string | undefined, codeChanges: CodeChange[], messages: ChatMessage[]): string {
+  const normalizedPath = normalizeComparablePath(path, projectPath);
+  if (!normalizedPath) return '';
+  let latestChange: CodeChange | undefined;
+  for (const change of codeChanges) {
+    if (normalizeComparablePath(change.path, projectPath) !== normalizedPath) continue;
+    if (!latestChange || codeChangeTimestamp(change) > codeChangeTimestamp(latestChange)) latestChange = change;
+  }
+  if (latestChange) {
+    return [latestChange.operationId ?? '', latestChange.agentId, latestChange.operation, latestChange.path, latestChange.occurredAt, latestChange.diff].join('\u0000');
+  }
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex--) {
+    const message = messages[messageIndex];
+    if (!message) continue;
+    const tools = message.toolCalls ?? [];
+    for (let toolIndex = tools.length - 1; toolIndex >= 0; toolIndex--) {
+      const tool = tools[toolIndex];
+      if (!tool || (tool.name !== 'Edit' && tool.name !== 'Write') || tool.result === undefined) continue;
+      const args = tool.args && typeof tool.args === 'object' ? tool.args as Record<string, unknown> : {};
+      const toolPath = typeof args['path'] === 'string' ? args['path'] : '';
+      if (normalizeComparablePath(toolPath, projectPath) !== normalizedPath) continue;
+      return [message.id, tool.id ?? '', tool.name, toolPath, tool.result].join('\u0000');
+    }
+  }
+  return '';
+}
+
+function normalizeComparablePath(path: string, projectPath?: string): string {
+  return projectRelativePath(path, projectPath)
+    .replaceAll('\\', '/')
+    .replace(/^\.\/+/, '')
+    .replace(/\/+$/, '')
+    .toLocaleLowerCase();
+}
+
 interface Attribution {
   path: string;
   agent: string;
@@ -169,7 +228,7 @@ export function collectAttributions(messages: ChatMessage[]): Attribution[] {
   return attributions.sort((left, right) => right.timestamp - left.timestamp);
 }
 
-function ChangesPanel({ sessionId, projectPath, status, messages, codeChanges, onRefreshGitStatus, onRefreshMessages, onCountChange }: { sessionId: string | null; projectPath?: string; status: FsGitStatusResponse | null; messages: ChatMessage[]; codeChanges: CodeChange[]; onRefreshGitStatus: (options?: GitStatusRefreshOptions) => Promise<FsGitStatusResponse | null>; onRefreshMessages?: () => Promise<void>; onCountChange: (count: number | undefined) => void }) {
+function ChangesPanel({ sessionId, projectPath, status, messages, codeChanges, onRefreshGitStatus, onRefreshMessages, onPreviewFile, onCountChange }: { sessionId: string | null; projectPath?: string; status: FsGitStatusResponse | null; messages: ChatMessage[]; codeChanges: CodeChange[]; onRefreshGitStatus: (options?: GitStatusRefreshOptions) => Promise<FsGitStatusResponse | null>; onRefreshMessages?: () => Promise<void>; onPreviewFile?: (path: string) => void; onCountChange: (count: number | undefined) => void }) {
   const { tr } = useI18n();
   const [diffs, setDiffs] = useState<Record<string, FsDiffResponse>>({});
   const [pendingPaths, setPendingPaths] = useState<Set<string>>(new Set());
@@ -355,6 +414,7 @@ function ChangesPanel({ sessionId, projectPath, status, messages, codeChanges, o
         changes={changesForPath(path, projectChanges)}
         fallbackDiff={rawDiff}
         defaultOpen={index === 0}
+        onPreview={onPreviewFile}
       />;
     })}</div></>}
   </div>;
@@ -490,7 +550,7 @@ function resolvedDiff(path: string, codeChanges: CodeChange[], diffs: Record<str
   return diffs[path]?.diff;
 }
 
-function FileChangeCard({ path, status, changes, fallbackDiff, defaultOpen }: { path: string; status: string; changes: CodeChange[]; fallbackDiff: string; defaultOpen: boolean }) {
+function FileChangeCard({ path, status, changes, fallbackDiff, defaultOpen, onPreview }: { path: string; status: string; changes: CodeChange[]; fallbackDiff: string; defaultOpen: boolean; onPreview?: (path: string) => void }) {
   const { tr } = useI18n();
   const [open, setOpen] = useState(defaultOpen);
   const orderedChanges = [...changes]
@@ -507,12 +567,15 @@ function FileChangeCard({ path, status, changes, fallbackDiff, defaultOpen }: { 
   const stats = changedLineStats(displayChanges.map(change => change.diff).join('\n'));
   const displayPath = splitDisplayPath(path);
   return <article className={`change-file-card${open ? ' open' : ''}`}>
-    <button type="button" className="change-entry-toggle" onClick={() => setOpen(value => !value)} aria-expanded={open}>
-      <Icon name="chevron-right" size={12}/>
-      <span className={`git-status-mark status-${status}`}/>
-      <span className="change-entry-title" title={path}><strong className="change-entry-path">{displayPath.directory && <><span className="change-entry-directory">{displayPath.directory}</span><span className="change-entry-separator">/</span></>}<span className="change-entry-file">{displayPath.fileName}</span></strong><small>{tr(`${displayChanges.length} operations`, `${displayChanges.length} 次更改`)}</small></span>
-      <span className="change-entry-stats"><b>+{stats.additions}</b><i>-{stats.deletions}</i></span>
-    </button>
+    <div className="change-entry-header">
+      <button type="button" className="change-entry-toggle" onClick={() => setOpen(value => !value)} aria-expanded={open}>
+        <Icon name="chevron-right" size={12}/>
+        <span className={`git-status-mark status-${status}`}/>
+        <span className="change-entry-title" title={path}><strong className="change-entry-path">{displayPath.directory && <><span className="change-entry-directory">{displayPath.directory}</span><span className="change-entry-separator">/</span></>}<span className="change-entry-file">{displayPath.fileName}</span></strong><small>{tr(`${displayChanges.length} operations`, `${displayChanges.length} 次更改`)}</small></span>
+        <span className="change-entry-stats"><b>+{stats.additions}</b><i>-{stats.deletions}</i></span>
+      </button>
+      {onPreview && <button type="button" className="change-entry-preview" onClick={() => onPreview(path)} title={tr('Preview this file', '预览此文件')} aria-label={tr(`Preview ${displayPath.fileName}`, `预览 ${displayPath.fileName}`)}><Icon name="files" size={13}/></button>}
+    </div>
     {open && <div className="change-operation-list">{displayChanges.map((change, index) => <OperationChangeCard key={change.operationId ?? `${change.occurredAt}:${index}`} change={change} defaultOpen={index === 0}/>)}</div>}
   </article>;
 }

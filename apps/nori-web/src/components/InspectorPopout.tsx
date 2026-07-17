@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api, type FsReadResponse, type Session } from '../api/client';
 import { useChatMessages } from '../hooks/useChatMessages';
@@ -9,8 +9,21 @@ export function InspectorPopout({ tab, sessionId, path }: { tab: InspectorTab; s
   const [session, setSession] = useState<Session | null>(null);
   const [file, setFile] = useState<FsReadResponse | null>(null);
   const [loading, setLoading] = useState(Boolean(path));
+  const fileRequestRef = useRef(0);
   const chat = useChatMessages(sessionId, session?.title);
   const filesystem = useFilesystem(sessionId, session?.metadata?.cwd);
+
+  const refreshFile = useCallback(async () => {
+    const requestId = ++fileRequestRef.current;
+    if (!path) { setFile(null); setLoading(false); return; }
+    setLoading(true);
+    try {
+      const value = await filesystem.readFile(path);
+      if (fileRequestRef.current === requestId) setFile(value);
+    } finally {
+      if (fileRequestRef.current === requestId) setLoading(false);
+    }
+  }, [filesystem.readFile, path]);
 
   useEffect(() => {
     if (!sessionId) { setSession(null); return; }
@@ -20,12 +33,9 @@ export function InspectorPopout({ tab, sessionId, path }: { tab: InspectorTab; s
   }, [sessionId]);
 
   useEffect(() => {
-    if (!path) { setFile(null); setLoading(false); return; }
-    let cancelled = false;
-    setLoading(true);
-    void filesystem.readFile(path).then(value => { if (!cancelled) setFile(value); }).finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [filesystem.readFile, path]);
+    void refreshFile();
+    return () => { fileRequestRef.current++; };
+  }, [refreshFile]);
 
   return <main className="inspector-popout-window"><WorkspaceInspector
     sessionId={sessionId}
@@ -40,6 +50,7 @@ export function InspectorPopout({ tab, sessionId, path }: { tab: InspectorTab; s
     gitLoading={filesystem.gitLoading}
     refreshGitStatus={filesystem.refreshGitStatus}
     refreshMessages={chat.refreshMessages}
+    refreshFile={refreshFile}
     isStreaming={chat.isStreaming}
     initialTab={tab}
     standalone

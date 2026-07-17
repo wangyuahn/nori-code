@@ -112,7 +112,20 @@ function toResolvedSlashCommands(
  */
 async function harnessIsAuthed(harness: KimiHarness): Promise<boolean> {
   const status = await harness.auth.status();
-  return status.some((entry) => entry.hasToken === true);
+  const providers = Array.isArray(status)
+    ? status
+    : isAuthStatusEnvelope(status)
+      ? status.providers
+      : [];
+  return providers.some((entry) => entry.hasToken === true);
+}
+
+function isAuthStatusEnvelope(
+  value: unknown,
+): value is { readonly providers: readonly { readonly hasToken?: boolean }[] } {
+  return typeof value === 'object'
+    && value !== null
+    && Array.isArray((value as { readonly providers?: unknown }).providers);
 }
 
 /**

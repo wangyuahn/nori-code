@@ -10,7 +10,7 @@ import { generate } from '@nori-code/kosong';
 
 import type { EnabledPluginSessionStart, PluginCommandDef } from '#/plugin';
 import { expandCommandArguments } from '../plugin/commands';
-import type { PluginCommandOrigin } from './context';
+import type { PluginCommandOrigin, UserPromptOrigin } from './context';
 
 import type { McpConnectionManager } from '../mcp';
 import { FlagResolver, type ExperimentalFlagResolver } from '../flags';
@@ -31,6 +31,7 @@ import {
   type MicroCompactionConfig,
 } from './compaction';
 import { CronManager } from './cron';
+import { createCronTask, deleteCronTask, listCronTasks } from '../tools/cron/operations';
 import { ConfigState } from './config';
 import { ContextMemory } from './context';
 import { GoalMode } from './goal';
@@ -362,13 +363,19 @@ export class Agent {
   get rpcMethods(): PromisableMethods<AgentAPI> {
     return {
       prompt: async (payload) => {
-        this.turn.prompt(payload.input);
+        const origin: UserPromptOrigin = payload.goalIntake === true
+          ? { kind: 'user', goalIntake: true }
+          : { kind: 'user' };
+        this.turn.prompt(payload.input, origin);
       },
       runShellCommand: (payload) => this.tools.runShellCommand(payload.command, payload.commandId),
       cancelShellCommand: (payload) => this.tools.cancelShellCommand(payload.commandId),
       steer: (payload) => {
         this.telemetry.track('input_steer', { parts: payload.input.length });
-        this.turn.steer(payload.input);
+        const origin: UserPromptOrigin = payload.goalIntake === true
+          ? { kind: 'user', goalIntake: true }
+          : { kind: 'user' };
+        this.turn.steer(payload.input, origin);
       },
       cancel: (payload) => {
         if (this.turn.hasActiveTurn) {
@@ -541,6 +548,16 @@ export class Agent {
       getUsage: () => this.usage.data(),
       getTools: () => this.tools.data(),
       getBackground: (payload) => this.background.list(payload.activeOnly ?? false, payload.limit),
+      listCron: () => this.cron === null ? [] : listCronTasks(this.cron),
+      createCron: (payload) => {
+        if (this.cron === null) throw new KimiError(ErrorCodes.REQUEST_INVALID, 'Cron is unavailable for subagents.');
+        return createCronTask(this.cron, payload);
+      },
+      deleteCron: (payload) => {
+        if (this.cron === null) throw new KimiError(ErrorCodes.REQUEST_INVALID, 'Cron is unavailable for subagents.');
+        deleteCronTask(this.cron, payload.id);
+        return { deleted: true as const };
+      },
     };
   }
 

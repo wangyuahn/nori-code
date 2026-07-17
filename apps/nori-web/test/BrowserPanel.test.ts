@@ -137,10 +137,7 @@ describe('BrowserPanel', () => {
     const { container, root } = renderBrowser();
     try {
       await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-      const alwaysDeny = [...container.querySelectorAll<HTMLButtonElement>('.browser-native-prompt.permission button')]
-        .find(button => button.textContent === 'Always deny');
-      await act(async () => alwaysDeny?.click());
-      expect(desktop.browserResolvePermission).toHaveBeenCalledWith('permission-1', 'deny_always');
+      expect(container.querySelector('.browser-native-prompt.permission')).toBeNull();
 
       const prompt = container.querySelector<HTMLInputElement>('.browser-native-prompt.dialog input');
       if (prompt !== null) {

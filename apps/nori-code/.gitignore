@@ -7,5 +7,6 @@ agents/
 # clone (before any build has produced the `.ts`).
 src/generated/vis-web-asset.ts
 
-# Copied from packages/pi-tui/native at build time by scripts/copy-native-assets.mjs
-native/
+# Copied from packages/pi-tui/native at build time by scripts/copy-native-assets.mjs.
+# Anchor this rule so the source-controlled scripts/native build pipeline is not ignored.
+/native/

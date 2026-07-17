@@ -416,6 +416,19 @@ export interface BackgroundTask {
   output_bytes?: number;
 }
 
+export interface CronJob {
+  id: string;
+  cron: string;
+  prompt: string;
+  createdAt: number;
+  recurring: boolean;
+  lastFiredAt?: number;
+  humanSchedule: string;
+  nextFireAt: number | null;
+  ageDays: number;
+  stale: boolean;
+}
+
 export interface SkillDescriptor {
   name: string;
   description: string;
@@ -436,6 +449,7 @@ export interface PromptResponse {
 export interface PromptExecutionOptions {
   goalObjective?: string;
   swarmMode?: boolean;
+  loopMode?: boolean;
 }
 
 export interface PromptListResponse {
@@ -753,6 +767,7 @@ export function createClient(
             body: {
               goal_objective: options.goalObjective,
               swarm_mode: options.swarmMode,
+              loop_mode: options.loopMode,
               content: [
                 ...(text ? [{ type: 'text' as const, text }] : []),
                 ...attachments.map(attachment => attachment.kind === 'image'
@@ -839,6 +854,11 @@ export function createClient(
           `/sessions/${encodeURIComponent(id)}/fs:read`,
           undefined,
           { method: 'POST', body: { path, encoding: 'auto', length: 10_485_760 } },
+        ),
+        reveal: (id: string, path: string) => request<{ revealed: true }>(
+          `/sessions/${encodeURIComponent(id)}/fs:reveal`,
+          undefined,
+          { method: 'POST', body: { path } },
         ),
         gitStatus: (id: string) => request<FsGitStatusResponse>(
           `/sessions/${encodeURIComponent(id)}/fs:git_status`,
@@ -931,7 +951,7 @@ export function createClient(
       prompts: {
         list: (id: string) => request<PromptListResponse>(`/sessions/${encodeURIComponent(id)}/prompts`),
         steer: (id: string, promptIds: string[]) => request<{ steered: true; prompt_ids: string[] }>(
-          `/sessions/${encodeURIComponent(id)}/prompts::steer`,
+          `/sessions/${encodeURIComponent(id)}/prompts:steer`,
           undefined,
           { method: 'POST', body: { prompt_ids: promptIds } },
         ),
@@ -952,6 +972,22 @@ export function createClient(
           `/sessions/${encodeURIComponent(id)}/tasks/${encodeURIComponent(taskId)}:cancel`,
           undefined,
           { method: 'POST', body: {} },
+        ),
+      },
+
+      cron: {
+        list: (id: string) => request<{ items: CronJob[] }>(
+          `/sessions/${encodeURIComponent(id)}/cron`,
+        ),
+        create: (id: string, input: { cron: string; prompt: string; recurring: boolean }) => request<CronJob>(
+          `/sessions/${encodeURIComponent(id)}/cron`,
+          undefined,
+          { method: 'POST', body: input },
+        ),
+        delete: (id: string, cronId: string) => request<{ deleted: true }>(
+          `/sessions/${encodeURIComponent(id)}/cron/${encodeURIComponent(cronId)}`,
+          undefined,
+          { method: 'DELETE' },
         ),
       },
 
@@ -1061,6 +1097,7 @@ export function createClient(
           body: {
             goal_objective: options.goalObjective,
             swarm_mode: options.swarmMode,
+            loop_mode: options.loopMode,
             content: [
               ...(text ? [{ type: 'text' as const, text }] : []),
               ...attachments.map(attachment => attachment.kind === 'image'

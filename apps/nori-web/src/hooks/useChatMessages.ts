@@ -44,6 +44,8 @@ export interface ChatImage {
 interface RealtimeSubscriptionWaiter {
   resolve: (ready: boolean) => void;
   timer: ReturnType<typeof setTimeout>;
+  signal?: AbortSignal;
+  onAbort?: () => void;
 }
 
 export class RealtimeSubscriptionGate {
@@ -64,15 +66,19 @@ export class RealtimeSubscriptionGate {
     this.settle(false);
   }
 
-  wait(timeoutMs = 30_000): Promise<boolean> {
+  wait(timeoutMs = 30_000, signal?: AbortSignal): Promise<boolean> {
     if (this.ready) return Promise.resolve(true);
+    if (signal?.aborted) return Promise.resolve(false);
     return new Promise(resolve => {
       const waiter: RealtimeSubscriptionWaiter = {
         resolve,
+        signal,
         timer: setTimeout(() => {
           this.finish(waiter, false);
         }, timeoutMs),
       };
+      waiter.onAbort = () => { this.finish(waiter, false); };
+      signal?.addEventListener('abort', waiter.onAbort, { once: true });
       this.waiters.add(waiter);
     });
   }
@@ -84,6 +90,7 @@ export class RealtimeSubscriptionGate {
   private finish(waiter: RealtimeSubscriptionWaiter, ready: boolean): void {
     if (!this.waiters.delete(waiter)) return;
     clearTimeout(waiter.timer);
+    if (waiter.onAbort) waiter.signal?.removeEventListener('abort', waiter.onAbort);
     waiter.resolve(ready);
   }
 }
@@ -352,6 +359,18 @@ export function foldConversationTurns(messages: ChatMessage[]): ChatMessage[] {
   return folded;
 }
 
+export function insertSteerBoundary(
+  messages: ChatMessage[],
+  assistant: ChatMessage | null,
+  user: ChatMessage,
+): ChatMessage[] {
+  return foldConversationTurns([
+    ...messages,
+    ...(assistant === null ? [] : [assistant]),
+    user,
+  ]);
+}
+
 function workBlocksFromMessage(message: Message, toolCalls: ToolCall[], thinking: string | undefined): WorkBlock[] {
   const blocks: WorkBlock[] = [];
   let thinkingIndex = 0;
@@ -458,12 +477,13 @@ export function mergeHistory(previous: ChatMessage[], remote: ChatMessage[]): Ch
 
   for (const local of previous) {
     if (remoteIds.has(local.id)) continue;
-    const duplicateIndex = remote.findIndex(serverMessage =>
+    const isOptimisticLocal = local.id.startsWith('local-user-') || local.id.startsWith('live-');
+    const duplicateIndex = isOptimisticLocal ? remote.findIndex(serverMessage =>
       serverMessage.role === local.role &&
       serverMessage.text === local.text &&
       Math.abs(messageTime(serverMessage) - messageTime(local)) < 15_000 &&
       (local.role === 'assistant' || (serverMessage.thinking ?? '') === (local.thinking ?? '')),
-    );
+    ) : -1;
     if (duplicateIndex >= 0) {
       if (local.usage !== undefined) {
         merged[duplicateIndex] = { ...merged[duplicateIndex]!, usage: local.usage };
@@ -1110,8 +1130,8 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     return () => clearInterval(timer);
   }, [clearDraft, hydrateInFlight, isStreaming, refreshHistory, sessionId]);
 
-  const waitForSubscription = useCallback(async (): Promise<boolean> => {
-    return subscriptionGateRef.current.wait();
+  const waitForSubscription = useCallback(async (signal?: AbortSignal): Promise<boolean> => {
+    return subscriptionGateRef.current.wait(30_000, signal);
   }, []);
 
   const sendMessage = useCallback(async (text: string, attachments: PromptAttachment[] = [], behavior: 'queue' | 'steer' = 'queue', options: PromptExecutionOptions = {}) => {
@@ -1140,6 +1160,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
         }]
       : []);
     const localMessageId = `local-user-${Date.now()}`;
+    const optimisticSteer = activeBeforeSubmit && behavior === 'steer';
     if (!activeBeforeSubmit) {
       clearDraft();
       setMessages(previous => [...previous, {
@@ -1149,11 +1170,50 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
         images: visibleImages.length > 0 ? visibleImages : undefined,
         createdAt: new Date().toISOString(),
       }]);
+    } else if (optimisticSteer) {
+      const boundaryTime = new Date().toISOString();
+      const boundaryText = stripGeneratedSessionTitle(streamingRef.current);
+      const boundaryThinking = thinkingRef.current;
+      const boundaryWorkBlocks = liveWorkBlocksRef.current;
+      const boundaryToolCalls = boundaryWorkBlocks.flatMap(block => block.type === 'tool' ? [block.tool] : []);
+      const boundaryAssistant: ChatMessage | null =
+        boundaryText || boundaryThinking || boundaryWorkBlocks.length > 0
+          ? {
+              id: `live-steer-boundary-${sessionId}-${Date.now()}`,
+              role: 'assistant',
+              text: boundaryText,
+              thinking: boundaryThinking || undefined,
+              workBlocks: boundaryWorkBlocks.length > 0 ? boundaryWorkBlocks : undefined,
+              toolCalls: boundaryToolCalls.length > 0 ? boundaryToolCalls : undefined,
+              usage: turnUsageRef.current,
+              createdAt: boundaryTime,
+            }
+          : null;
+      setMessages(previous => insertSteerBoundary(
+        previous,
+        boundaryAssistant,
+        {
+          id: localMessageId,
+          role: 'user',
+          text: visibleText,
+          images: visibleImages.length > 0 ? visibleImages : undefined,
+          createdAt: boundaryTime,
+        },
+      ));
+
+      // Keep raw stream accumulators for offset reconciliation. Only start a
+      // fresh visible segment after the inserted user guidance.
+      streamingRef.current = '';
+      thinkingRef.current = '';
+      liveWorkBlocksRef.current = [];
+      setCurrentStreaming('');
+      setCurrentThinking('');
+      setCurrentWorkBlocks([]);
     }
     setIsStreaming(true);
 
     try {
-      const subscribed = await waitForSubscription();
+      const subscribed = await waitForSubscription(controller.signal);
       if (!subscribed) throw new Error('Realtime connection is not ready. Please retry.');
       if (controller.signal.aborted) return false;
       const promptText = trimmed || 'Please inspect the attached files.';
@@ -1177,11 +1237,17 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
             throw error;
           }
           setQueuedPrompts(previous => previous.filter(item => item.id !== response.prompt_id));
-          setMessages(previous => [...previous, { id: response.user_message_id, role: 'user', text: visibleText, images: visibleImages.length > 0 ? visibleImages : undefined, createdAt: response.created_at }]);
+          if (optimisticSteer) {
+            setMessages(previous => previous.map(message => message.id === localMessageId
+              ? { ...message, id: response.user_message_id, createdAt: response.created_at }
+              : message));
+          } else {
+            setMessages(previous => [...previous, { id: response.user_message_id, role: 'user', text: visibleText, images: visibleImages.length > 0 ? visibleImages : undefined, createdAt: response.created_at }]);
+          }
         }
       } else {
         promptIdRef.current = response.prompt_id;
-        if (activeBeforeSubmit) {
+        if (activeBeforeSubmit && !optimisticSteer) {
           setMessages(previous => mergeHistory(previous, [{
             id: response.user_message_id,
             role: 'user',
@@ -1195,7 +1261,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     } catch (error) {
       if (controller.signal.aborted) return false;
       if (shouldGenerateTitle) hasUserPromptRef.current = false;
-      if (!activeBeforeSubmit) {
+      if (!activeBeforeSubmit || optimisticSteer) {
         setMessages(previous => previous.filter(message => message.id !== localMessageId));
       }
       setMessages(previous => [...previous, {
@@ -1222,10 +1288,11 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
 
   const abort = useCallback(async (): Promise<boolean> => {
     if (!sessionId) return false;
+    const abortRequest = api.abortSession(sessionId);
     sendAbortRef.current?.abort();
     await sendSettledRef.current?.catch(() => undefined);
     try {
-      await api.abortSession(sessionId);
+      await abortRequest;
       const stillRunning = await hydrateInFlight(sessionId).catch(() => true);
       if (!stillRunning) {
         promptIdRef.current = null;

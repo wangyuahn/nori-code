@@ -62,6 +62,7 @@ import type {
   CoreAPI,
   CoreInfo,
   CreateGoalPayload,
+  CronCreateRequest,
   CreateSessionPayload,
   DetachBackgroundPayload,
   ClientTelemetryInfo,
@@ -158,6 +159,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
   private readonly resolveOAuthTokenProvider: OAuthTokenProviderResolver | undefined;
   private readonly skillDirs: readonly string[];
   private readonly sessionStore: SessionStore;
+  private readonly sessionLifecycleTails = new Map<string, Promise<void>>();
   readonly plugins: PluginManager;
   private pluginsReady: Promise<void>;
   private pluginsLoadError: Error | undefined;
@@ -349,21 +351,29 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
   }
 
   async closeSession({ sessionId }: CloseSessionPayload): Promise<void> {
+    return this.withSessionLifecycle(sessionId, () => this.closeSessionUnlocked(sessionId));
+  }
+
+  private async closeSessionUnlocked(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (session) {
-      await session.close();
       this.sessions.delete(sessionId);
+      await session.close();
     }
   }
 
   async archiveSession({ sessionId }: ArchiveSessionPayload): Promise<void> {
-    await this.closeSession({ sessionId });
-    await this.sessionStore.archive(sessionId);
+    await this.withSessionLifecycle(sessionId, async () => {
+      await this.closeSessionUnlocked(sessionId);
+      await this.sessionStore.archive(sessionId);
+    });
   }
 
   async deleteSession({ sessionId }: DeleteSessionPayload): Promise<void> {
-    await this.closeSession({ sessionId });
-    await this.sessionStore.delete(sessionId);
+    await this.withSessionLifecycle(sessionId, async () => {
+      await this.closeSessionUnlocked(sessionId);
+      await this.sessionStore.delete(sessionId);
+    });
   }
 
   async resumeSession(input: ResumeSessionPayload): Promise<ResumeSessionResult> {
@@ -371,6 +381,19 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
   }
 
   async resumeSessionWithOverrides(
+    input: ResumeSessionPayload,
+    overrides: {
+      kaos?: Kaos;
+      persistenceKaos?: Kaos;
+      forcePluginSessionStartReminder?: boolean;
+    },
+  ): Promise<ResumeSessionResult> {
+    return this.withSessionLifecycle(input.sessionId, () =>
+      this.resumeSessionWithOverridesUnlocked(input, overrides),
+    );
+  }
+
+  private async resumeSessionWithOverridesUnlocked(
     input: ResumeSessionPayload,
     overrides: {
       kaos?: Kaos;
@@ -463,28 +486,30 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
   }
 
   async reloadSession(input: ReloadSessionPayload): Promise<ResumeSessionResult> {
-    const summary = await this.sessionStore.get(input.sessionId);
-    const active = this.sessions.get(summary.id);
-    if (active?.hasActiveTurn === true) {
-      throw new KimiError(
-        ErrorCodes.TURN_AGENT_BUSY,
-        `Session "${summary.id}" cannot be reloaded while a turn is running`,
-        { details: { sessionId: summary.id } },
+    return this.withSessionLifecycle(input.sessionId, async () => {
+      const summary = await this.sessionStore.get(input.sessionId);
+      const active = this.sessions.get(summary.id);
+      if (active?.hasActiveTurn === true) {
+        throw new KimiError(
+          ErrorCodes.TURN_AGENT_BUSY,
+          `Session "${summary.id}" cannot be reloaded while a turn is running`,
+          { details: { sessionId: summary.id } },
+        );
+      }
+
+      this.reloadProviderManager();
+      this.clearRuntimeCache();
+      await this.reloadPlugins({});
+
+      if (active !== undefined) {
+        this.sessions.delete(summary.id);
+        await active.closeForReload();
+      }
+      return this.resumeSessionWithOverridesUnlocked(
+        { sessionId: summary.id },
+        { forcePluginSessionStartReminder: input.forcePluginSessionStartReminder },
       );
-    }
-
-    this.reloadProviderManager();
-    this.clearRuntimeCache();
-    await this.reloadPlugins({});
-
-    if (active !== undefined) {
-      await active.closeForReload();
-      this.sessions.delete(summary.id);
-    }
-    return this.resumeSessionWithOverrides(
-      { sessionId: summary.id },
-      { forcePluginSessionStartReminder: input.forcePluginSessionStartReminder },
-    );
+    });
   }
 
   async forkSession(input: ForkSessionPayload): Promise<ResumeSessionResult> {
@@ -773,6 +798,18 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     return this.sessionApi(sessionId).getBackground(payload);
   }
 
+  listCron({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
+    return this.sessionApi(sessionId).listCron(payload);
+  }
+
+  createCron({ sessionId, ...payload }: SessionAgentPayload<CronCreateRequest>) {
+    return this.sessionApi(sessionId).createCron(payload);
+  }
+
+  deleteCron({ sessionId, ...payload }: SessionAgentPayload<{ readonly id: string }>) {
+    return this.sessionApi(sessionId).deleteCron(payload);
+  }
+
   updateSessionMetadata({ sessionId, ...payload }: UpdateSessionMetadataRequest): Promise<void> {
     return this.sessionApi(sessionId).updateSessionMetadata(payload);
   }
@@ -1022,6 +1059,19 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     if (baseUrl !== undefined) env[NORI_CODE_BASE_URL_ENV] = baseUrl;
     if (oauthHost !== undefined) env[NORI_CODE_OAUTH_HOST_ENV] = oauthHost;
     return env;
+  }
+
+  private withSessionLifecycle<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.sessionLifecycleTails.get(sessionId) ?? Promise.resolve();
+    const result = previous.catch(() => undefined).then(operation);
+    const tail = result.then(() => undefined, () => undefined);
+    this.sessionLifecycleTails.set(sessionId, tail);
+    void tail.then(() => {
+      if (this.sessionLifecycleTails.get(sessionId) === tail) {
+        this.sessionLifecycleTails.delete(sessionId);
+      }
+    });
+    return result;
   }
 
   private requireSession(sessionId: string): Session {

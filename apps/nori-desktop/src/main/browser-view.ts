@@ -11,10 +11,12 @@ import {
   Menu,
   session,
   shell,
+  webContents as electronWebContents,
   WebContentsView,
   type DownloadItem,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
+  type WebContents,
 } from 'electron';
 
 import { BROWSER_HOME_URL, isAllowedBrowserUrl, localHtmlPath, normalizeBrowserInput } from './browser-url';
@@ -41,6 +43,7 @@ import {
   type BrowserJavaScriptDialog,
   type BrowserNetworkEvent,
 } from './browser-debugger';
+import { restoreBrowserAutomationFocus } from './browser-focus';
 
 export interface BrowserTabState {
   id: string;
@@ -526,6 +529,7 @@ export class BrowserViewManager {
 
   async executeAction(command: BrowserAutomationCommand): Promise<NativeBrowserActionResult> {
     if (this.automationPaused) return { ok: false, output: 'Browser automation is paused for user takeover.' };
+    const previousFocus = electronWebContents.getFocusedWebContents();
     if (command.request.tabId !== undefined) {
       if (!this.tabs.has(command.request.tabId)) {
         return { ok: false, output: `Browser tab ${command.request.tabId} was not found.` };
@@ -536,6 +540,7 @@ export class BrowserViewManager {
     if (pageUnavailable !== undefined) return pageUnavailable;
     const tab = this.ensureActiveTab();
     const wc = tab.view.webContents;
+    this.restoreFocusAfterAutomation(previousFocus, wc);
     this.activeOperation = {
       id: command.id,
       agentId: command.agentId,
@@ -548,6 +553,8 @@ export class BrowserViewManager {
       result = await this.runAction(tab, command.request);
     } catch (error) {
       result = { ok: false, output: error instanceof Error ? error.message : String(error) };
+    } finally {
+      this.restoreFocusAfterAutomation(previousFocus, wc);
     }
     this.operationHistory.unshift({
       ...this.activeOperation,
@@ -559,6 +566,17 @@ export class BrowserViewManager {
     this.activeOperation = null;
     this.emitState();
     return { ...result, tabId: tab.state.id, url: result.url ?? wc.getURL(), title: result.title ?? wc.getTitle() };
+  }
+
+  private restoreFocusAfterAutomation(
+    previousFocus: WebContents | null,
+    browserPage: WebContents,
+  ): void {
+    restoreBrowserAutomationFocus(
+      previousFocus,
+      electronWebContents.getFocusedWebContents(),
+      browserPage,
+    );
   }
 
   setBounds(input: BrowserBounds): void {

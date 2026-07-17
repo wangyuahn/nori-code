@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { NoriBrowserState, NoriBrowserTabState } from '../types/nori-desktop';
 
+export type BrowserPermissionDecision = 'allow_once' | 'allow_always' | 'deny' | 'deny_always';
+export type BrowserPermissionRequest = NoriBrowserState['permissions']['pending'][number];
+
 const EMPTY_STATE: NoriBrowserState = {
   activeTabId: null,
   tabs: [],
@@ -30,7 +33,7 @@ export interface UseBrowserResult extends NoriBrowserState {
   updateAnnotation: (id: string, note: string) => void;
   setAutomationPaused: (paused: boolean) => void;
   chooseUploadFiles: () => void;
-  resolvePermission: (id: string, decision: 'allow_once' | 'allow_always' | 'deny' | 'deny_always') => void;
+  resolvePermission: (id: string, decision: BrowserPermissionDecision) => void;
   resolveDialog: (id: string, accept: boolean, promptText?: string) => void;
   openDownload: (id: string) => void;
   clearNetwork: (tabId?: string) => void;
@@ -74,7 +77,7 @@ export function useBrowser(): UseBrowserResult {
   const updateAnnotation = useCallback((id: string, note: string) => apply(window.noriDesktop?.browserUpdateAnnotation?.(id, note)), [apply]);
   const setAutomationPaused = useCallback((paused: boolean) => apply(window.noriDesktop?.browserSetAutomationPaused?.(paused)), [apply]);
   const chooseUploadFiles = useCallback(() => apply(window.noriDesktop?.browserChooseUploadFiles?.()), [apply]);
-  const resolvePermission = useCallback((id: string, decision: 'allow_once' | 'allow_always' | 'deny' | 'deny_always') => apply(window.noriDesktop?.browserResolvePermission?.(id, decision)), [apply]);
+  const resolvePermission = useCallback((id: string, decision: BrowserPermissionDecision) => apply(window.noriDesktop?.browserResolvePermission?.(id, decision)), [apply]);
   const resolveDialog = useCallback((id: string, accept: boolean, promptText?: string) => apply(window.noriDesktop?.browserResolveDialog?.(id, accept, promptText)), [apply]);
   const openDownload = useCallback((id: string) => { void window.noriDesktop?.browserOpenDownload?.(id); }, []);
   const clearNetwork = useCallback((tabId?: string) => apply(window.noriDesktop?.browserClearNetwork?.(tabId)), [apply]);
@@ -113,6 +116,40 @@ export function useBrowser(): UseBrowserResult {
   };
 }
 
+export function useBrowserPermissions(): {
+  pending: BrowserPermissionRequest[];
+  resolvePermission: (id: string, decision: BrowserPermissionDecision) => Promise<void>;
+} {
+  const [pending, setPending] = useState<BrowserPermissionRequest[]>([]);
+  const mountedRef = useRef(true);
+  const available = typeof window.noriDesktop?.browserGetState === 'function';
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  const update = useCallback((next: NoriBrowserState) => {
+    if (!mountedRef.current) return;
+    const nextPending = next.permissions?.pending ?? [];
+    setPending(current => samePermissionRequests(current, nextPending) ? current : nextPending.map(item => ({ ...item })));
+  }, []);
+
+  useEffect(() => {
+    if (!available) return;
+    const unsubscribe = window.noriDesktop?.onBrowserState?.(update);
+    void window.noriDesktop?.browserGetState?.().then(update);
+    return () => unsubscribe?.();
+  }, [available, update]);
+
+  const resolvePermission = useCallback(async (id: string, decision: BrowserPermissionDecision) => {
+    const result = window.noriDesktop?.browserResolvePermission?.(id, decision);
+    if (result !== undefined) update(await result);
+  }, [update]);
+
+  return { pending, resolvePermission };
+}
+
 function normalizeState(state: NoriBrowserState): NoriBrowserState {
   return {
     ...state,
@@ -127,4 +164,19 @@ function normalizeState(state: NoriBrowserState): NoriBrowserState {
     permissions: state.permissions ?? EMPTY_STATE.permissions,
     dialogs: state.dialogs ?? [],
   };
+}
+
+function samePermissionRequests(
+  current: readonly BrowserPermissionRequest[],
+  next: readonly BrowserPermissionRequest[],
+): boolean {
+  return current.length === next.length && current.every((item, index) => {
+    const candidate = next[index];
+    return candidate !== undefined
+      && item.id === candidate.id
+      && item.tabId === candidate.tabId
+      && item.permission === candidate.permission
+      && item.origin === candidate.origin
+      && item.createdAt === candidate.createdAt;
+  });
 }

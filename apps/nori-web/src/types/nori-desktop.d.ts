@@ -120,6 +120,7 @@ export interface NoriDesktopAPI {
   // File system methods
   fsReadDir?: (dirPath: string) => Promise<FsEntry[]>;
   fsReadFile?: (filePath: string) => Promise<string>;
+  fsReveal?: (input: { path: string; isDirectory: boolean }) => Promise<void>;
   openInspectorWindow?: (input: { tab: string; sessionId?: string; path?: string }) => Promise<void>;
 }
 

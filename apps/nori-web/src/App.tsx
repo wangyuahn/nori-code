@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { ChatView } from './components/ChatView';
 import { Dashboard } from './components/Dashboard';
 import { SwarmPanel, runningSwarmAgents, swarmRunProgress, swarmRunTokens } from './components/SwarmPanel';
+import { CronJobPanel } from './components/CronJobPanel';
 import { VaultBrowser } from './components/VaultBrowser';
 import { SettingsPanel } from './components/SettingsPanel';
 import { CodeView } from './components/CodeView';
 import { Icon, type IconName } from './components/Icon';
 import { useSessions, usePhaseStatus, useSwarmWebSocket, useServerStatus } from './hooks/useApi';
 import { useChatMessages } from './hooks/useChatMessages';
-import { api, type FsEntry, type Message, type ModelCatalogItem, type PromptAttachment, type Session, type SessionAgentConfig, type SwarmStatus } from './api/client';
+import { api, type FsEntry, type Message, type ModelCatalogItem, type PromptAttachment, type PromptExecutionOptions, type Session, type SessionAgentConfig, type SwarmStatus } from './api/client';
 import { FileTree } from './components/FileTree';
 import { ProjectFolderPicker } from './components/ProjectFolderPicker';
 import { useI18n } from './i18n';
@@ -17,15 +18,17 @@ import { loadRewindLimit } from './rewindPreferences';
 import type { ChatSlashCommandName } from './utils/chat-slash-commands';
 import { installSoundUnlock, playNotificationSound } from './notificationSounds';
 
-type View = 'chat' | 'dashboard' | 'swarm' | 'vault' | 'settings';
+type View = 'chat' | 'dashboard' | 'swarm' | 'cron' | 'vault' | 'settings';
 type SidebarTab = 'sessions' | 'vault' | 'files';
 type WorkspaceMode = 'work' | 'code';
 type VaultMode = 'list' | 'graph';
+type InitialMessage = { text: string; attachments: PromptAttachment[]; options?: PromptExecutionOptions };
 
 const NAV_ITEMS: { key: View; icon: IconName; label: string }[] = [
   { key: 'chat', icon: 'chat', label: 'Chat' },
   { key: 'dashboard', icon: 'dashboard', label: 'Overview' },
   { key: 'swarm', icon: 'swarm', label: 'Swarm' },
+  { key: 'cron', icon: 'clock', label: 'Cron Job' },
   { key: 'settings', icon: 'settings', label: 'Settings' },
 ];
 
@@ -57,8 +60,8 @@ export function App() {
   const [selectedProjectFile, setSelectedProjectFile] = useState<FsEntry | null>(null);
   const [selectedProjectRoot, setSelectedProjectRoot] = useState<string | null>(null);
   const [folderPickerOpen, setFolderPickerOpen] = useState(false);
-  const [pendingInitialMessage, setPendingInitialMessage] = useState<{ text: string; attachments: PromptAttachment[] } | null>(null);
-  const [queuedFirstMessage, setQueuedFirstMessage] = useState<{ sessionId: string; text: string; attachments: PromptAttachment[] } | null>(null);
+  const [pendingInitialMessage, setPendingInitialMessage] = useState<InitialMessage | null>(null);
+  const [queuedFirstMessage, setQueuedFirstMessage] = useState<(InitialMessage & { sessionId: string }) | null>(null);
   const [draftAgentConfig, setDraftAgentConfig] = useState<SessionAgentConfig>({
     model: '',
     thinking: 'off',
@@ -67,6 +70,8 @@ export function App() {
     main_write_enabled: true,
   });
   const [rewindLimit, setRewindLimit] = useState(loadRewindLimit);
+  const [cronJobCount, setCronJobCount] = useState(0);
+  const cronCountRequestRef = useRef(0);
   const swarm = useSwarmWebSocket();
   const swarmSoundStateRef = useRef<Map<string, SwarmStatus['status']> | null>(null);
 
@@ -104,6 +109,25 @@ export function App() {
     refresh: refreshSessions,
   } = useSessions();
   const activeSession: Session | null = sessions.find(session => session.id === sessionId) ?? null;
+  useEffect(() => {
+    const requestId = ++cronCountRequestRef.current;
+    if (!sessionId) {
+      setCronJobCount(0);
+      return;
+    }
+    setCronJobCount(0);
+    const refresh = async () => {
+      try {
+        const result = await api.sessions.cron.list(sessionId);
+        if (cronCountRequestRef.current === requestId) setCronJobCount(result.items.length);
+      } catch {
+        if (cronCountRequestRef.current === requestId) setCronJobCount(0);
+      }
+    };
+    void refresh();
+    const interval = window.setInterval(() => { void refresh(); }, 30_000);
+    return () => { window.clearInterval(interval); };
+  }, [sessionId]);
   const sessionSwarmRuns = Array.from(swarm.swarmStatuses.values()).filter(status =>
     status.session_id === sessionId,
   );
@@ -120,6 +144,7 @@ export function App() {
     chat: tr('Chat', '对话'),
     dashboard: tr('Dashboard', '仪表盘'),
     swarm: tr('Swarm', '智能体协作'),
+    cron: tr('Cron Job', '定时任务'),
     vault: tr('Vault', '知识库'),
     settings: tr('Settings', '设置'),
   };
@@ -153,7 +178,7 @@ export function App() {
     if (!queuedFirstMessage || queuedFirstMessage.sessionId !== sessionId) return;
     const queued = queuedFirstMessage;
     setQueuedFirstMessage(null);
-    void sendMessage(queued.text, queued.attachments);
+    void sendMessage(queued.text, queued.attachments, 'queue', queued.options);
   }, [queuedFirstMessage, sendMessage, sessionId]);
 
   const refreshModels = async () => {
@@ -224,7 +249,7 @@ export function App() {
     await updateSessionProfile(activeSession.id, { agent_config: { goal_control: action } });
   };
 
-  const createConversation = async (cwd: string, firstMessage?: { text: string; attachments: PromptAttachment[] }) => {
+  const createConversation = async (cwd: string, firstMessage?: InitialMessage) => {
     setSelectedProjectRoot(cwd);
     const createdId = await createNewSession({
       cwd,
@@ -241,7 +266,7 @@ export function App() {
     return createdId !== null;
   };
 
-  const chooseProject = async (firstMessage?: { text: string; attachments: PromptAttachment[] }) => {
+  const chooseProject = async (firstMessage?: InitialMessage) => {
     if (window.noriDesktop?.selectProjectDirectory) {
       const cwd = await window.noriDesktop.selectProjectDirectory();
       if (!cwd) return false;
@@ -255,26 +280,21 @@ export function App() {
     return true;
   };
 
-  const startNewConversation = async () => {
-    const cwd = activeSession?.metadata?.cwd ?? selectedProjectRoot;
+  const startNewConversation = () => {
     if (activeSession?.agent_config) {
       setDraftAgentConfig(previous => ({ ...previous, ...activeSession.agent_config }));
     }
-    if (cwd) {
-      setSelectedProjectRoot(cwd);
-      switchSession(null);
-    } else {
-      await chooseProject();
-    }
+    setSelectedProjectRoot(null);
+    switchSession(null);
     setActiveView('chat');
   };
 
-  const handleSendMessage = async (text: string, attachments: PromptAttachment[] = [], behavior: 'queue' | 'steer' = 'queue') => {
+  const handleSendMessage = async (text: string, attachments: PromptAttachment[] = [], behavior: 'queue' | 'steer' = 'queue', options?: PromptExecutionOptions) => {
     if (activeSession) {
-      await sendMessage(text, attachments, behavior);
+      await sendMessage(text, attachments, behavior, options);
       return true;
     }
-    const firstMessage = { text, attachments };
+    const firstMessage = { text, attachments, options };
     if (selectedProjectRoot) return createConversation(selectedProjectRoot, firstMessage);
     return chooseProject(firstMessage);
   };
@@ -331,6 +351,10 @@ export function App() {
     }
   };
 
+  const closeSidebarOnNarrowViewport = () => {
+    if (window.innerWidth <= 760) setSidebarExpanded(false);
+  };
+
   const renderContent = () => {
     switch (activeView) {
       case 'dashboard':
@@ -348,6 +372,17 @@ export function App() {
             <div className="view-stack">
               <ViewHeader eyebrow={tr('Coordination', '协作')} title={tr('Swarm', '智能体协作')} description={tr('See every active agent and follow task progress in real time.', '查看所有活动智能体并实时跟踪任务进度。')} />
               <SwarmPanel swarm={swarm} sessionId={sessionId} sessions={sessions} />
+            </div>
+          </div>
+        );
+      case 'cron':
+        return (
+          <div className="view-page">
+            <div className="view-stack">
+              <ViewHeader eyebrow={tr('Automation', '自动化')} title={tr('Cron Job', '定时任务')} description={tr('Schedule prompts for the main agent in a selected session.', '为指定会话的主 Agent 安排定时任务。')} />
+              <CronJobPanel sessions={sessions} sessionId={sessionId} onCountChange={(targetSessionId, count) => {
+                if (targetSessionId === sessionId) setCronJobCount(count);
+              }} />
             </div>
           </div>
         );
@@ -474,13 +509,17 @@ export function App() {
           <span>{tr('New task', '新建任务')}</span><kbd>Ctrl N</kbd>
         </button>
 
-        <nav className="sidebar-primary-nav" aria-label={tr('Primary navigation', '主导航')}>
-          {NAV_ITEMS.filter(item => item.key !== 'settings').map(item => (
-            <button key={item.key} className={`sidebar-nav-item${activeView === item.key ? ' active' : ''}${item.key === 'swarm' && activeAgentCount > 0 && activeView === 'swarm' ? ' swarm-active' : ''}${item.key === 'swarm' && activeAgentCount > 0 && activeView !== 'swarm' ? ' activity-pending' : ''}`} onClick={() => { setActiveView(item.key); if (item.key === 'chat') setSidebarTab('sessions'); }} aria-current={activeView === item.key ? 'page' : undefined} title={viewLabels[item.key]}>
-              <Icon name={item.icon} size={17} /><span>{viewLabels[item.key]}</span>{item.key === 'swarm' && activeAgentCount > 0 && <i className="sidebar-activity-count">{activeAgentCount}</i>}
-            </button>
-          ))}
-        </nav>
+        <PrimaryNavigation
+          activeView={activeView}
+          labels={viewLabels}
+          activeAgentCount={activeAgentCount}
+          cronJobCount={cronJobCount}
+          onSelect={itemKey => {
+            setActiveView(itemKey);
+            if (itemKey === 'chat') setSidebarTab('sessions');
+            closeSidebarOnNarrowViewport();
+          }}
+        />
 
         <div className="sidebar-section-label"><span>{tr('Workspace', '工作区')}</span></div>
         <div className="sidebar-tabs" role="tablist" aria-label={tr('Workspace panels', '工作区面板')}>
@@ -493,7 +532,7 @@ export function App() {
 
         <div className="sidebar-content">
           {sidebarTab === 'sessions' && (
-            <SessionsList sessions={sessions} sessionId={sessionId} sessionsLoading={sessionsLoading} sessionsError={sessionsError} sessionsCreating={sessionsCreating} onRefresh={refreshSessions} onCreateSession={() => void startNewConversation()} onSwitchSession={id => { switchSession(id); setActiveView('chat'); }} onArchiveSession={archiveSession} onDeleteSession={deleteSession} onRenameSession={renameSession} onForkSession={async (id, title) => { await forkSession(id, title); setActiveView('chat'); }} />
+            <SessionsList sessions={sessions} sessionId={sessionId} sessionsLoading={sessionsLoading} sessionsError={sessionsError} sessionsCreating={sessionsCreating} onRefresh={refreshSessions} onCreateSession={() => void startNewConversation()} onSwitchSession={id => { switchSession(id); setActiveView('chat'); closeSidebarOnNarrowViewport(); }} onArchiveSession={archiveSession} onDeleteSession={deleteSession} onRenameSession={renameSession} onForkSession={async (id, title) => { await forkSession(id, title); setActiveView('chat'); closeSidebarOnNarrowViewport(); }} />
           )}
           {sidebarTab === 'vault' && <VaultSidebar mode={vaultMode} onModeChange={setVaultMode} />}
           {sidebarTab === 'files' && <FilesSidebar session={activeSession} selectedFile={selectedProjectFile} onSelectFile={setSelectedProjectFile} />}
@@ -527,7 +566,7 @@ export function App() {
           <div className="workspace-breadcrumb"><span>Nori Work</span><Icon name="chevron-right" size={13} /><strong>{viewLabels[activeView]}</strong></div>
           <div className="top-bar-actions">
             {activeView === 'chat' && (
-              <div className="mode-toggle-bar" aria-label={tr('Workspace layout', '工作区布局')}>
+              <div className="mode-toggle-bar" data-mode={mode} aria-label={tr('Workspace layout', '工作区布局')}>
                 <button className={`mode-toggle-btn${mode === 'work' ? ' active' : ''}`} onClick={() => setMode('work')}>{tr('Focus', '专注')}</button>
                 <button className={`mode-toggle-btn${mode === 'code' ? ' active' : ''}`} onClick={() => setMode('code')}>{tr('Code', '代码')}</button>
               </div>
@@ -556,6 +595,31 @@ export function App() {
       />
     </div>
   );
+}
+
+export function PrimaryNavigation({ activeView, labels, activeAgentCount, cronJobCount, onSelect }: {
+  activeView: View;
+  labels: Record<View, string>;
+  activeAgentCount: number;
+  cronJobCount: number;
+  onSelect: (view: View) => void;
+}) {
+  return <nav className="sidebar-primary-nav" aria-label="Primary navigation">
+    {NAV_ITEMS.filter(item => item.key !== 'settings').map(item => {
+      const swarmActive = item.key === 'swarm' && activeAgentCount > 0;
+      const cronActive = item.key === 'cron' && cronJobCount > 0;
+      const count = item.key === 'swarm' ? activeAgentCount : item.key === 'cron' ? cronJobCount : 0;
+      return <button
+        key={item.key}
+        className={`sidebar-nav-item${activeView === item.key ? ' active' : ''}${swarmActive && activeView === 'swarm' ? ' swarm-active' : ''}${(swarmActive && activeView !== 'swarm') || cronActive ? ' activity-pending' : ''}`}
+        onClick={() => { onSelect(item.key); }}
+        aria-current={activeView === item.key ? 'page' : undefined}
+        title={labels[item.key]}
+      >
+        <Icon name={item.icon} size={17} /><span>{labels[item.key]}</span>{count > 0 && <i className="sidebar-activity-count">{count}</i>}
+      </button>;
+    })}
+  </nav>;
 }
 
 function ViewHeader({

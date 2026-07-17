@@ -26,3 +26,19 @@ export interface CronTask {
   readonly recurring?: boolean;
   readonly lastFiredAt?: number;
 }
+
+/** Direct management input shared by the Agent tool and product UIs. */
+export interface CronCreateRequest {
+  readonly cron: string;
+  readonly prompt: string;
+  readonly recurring?: boolean;
+}
+
+/** Structured projection used by RPC/REST clients. Timestamps are epoch ms. */
+export interface CronTaskDetails extends CronTask {
+  readonly recurring: boolean;
+  readonly humanSchedule: string;
+  readonly nextFireAt: number | null;
+  readonly ageDays: number;
+  readonly stale: boolean;
+}

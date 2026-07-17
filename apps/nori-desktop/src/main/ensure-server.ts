@@ -125,6 +125,20 @@ async function isHealthy(origin: string, timeoutMs: number): Promise<boolean> {
   }
 }
 
+async function supportsRequiredRoutes(origin: string): Promise<boolean> {
+  const token = readServerToken();
+  if (token === undefined) return true;
+  try {
+    const response = await fetch(
+      `${origin}/api/v1/sessions/__nori_capability_probe__/cron`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    return response.status !== 404;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Run the bundled Nori SEA's `server run`, which reuses a live shared daemon or
  * spawns one and exits once it is healthy. All discovery / port / lock logic
@@ -185,13 +199,19 @@ export async function ensureServer(seaPath: string, expectedVersion?: string): P
   // Production / SEA-available path
   const existingLock = readLock();
   if (existingLock !== null) {
-    const existingHealthy = await isHealthy(originFromLock(existingLock), 3000);
+    const existingOrigin = originFromLock(existingLock);
+    const existingHealthy = await isHealthy(existingOrigin, 3000);
     const versionMismatch = expectedVersion !== undefined
       && existingLock.host_version !== undefined
       && existingLock.host_version !== expectedVersion;
-    if (versionMismatch) {
+    const missingRequiredRoutes = existingHealthy
+      && !versionMismatch
+      && !(await supportsRequiredRoutes(existingOrigin));
+    if (versionMismatch || missingRequiredRoutes) {
       process.stdout.write(
-        `[nori-desktop] replacing server ${existingLock.host_version} with ${expectedVersion}\n`,
+        versionMismatch
+          ? `[nori-desktop] replacing server ${existingLock.host_version} with ${expectedVersion}\n`
+          : '[nori-desktop] replacing server that is missing required desktop routes\n',
       );
       await runServerKill(seaPath);
       // A force-killed or already-dead daemon can leave its lock behind. Only
@@ -222,6 +242,9 @@ export async function ensureServer(seaPath: string, expectedVersion?: string): P
   const deadline = Date.now() + HEALTH_TIMEOUT_MS;
   while (Date.now() < deadline) {
     if (await isHealthy(origin, 500)) {
+      if (!(await supportsRequiredRoutes(origin))) {
+        throw new Error('The bundled Nori server is missing required desktop routes.');
+      }
       process.stdout.write(`[nori-desktop] connected to ${origin}\n`);
       return { origin };
     }

@@ -53,6 +53,89 @@ describe('SwarmPanel projections', () => {
     }
   });
 
+  it('renders agents and nested swarm output from a main-model AgentSwarm call', async () => {
+    vi.spyOn(api, 'getConfig').mockResolvedValue({ custom_agents: {} });
+    vi.spyOn(api.sessions.tasks, 'list').mockResolvedValue({ items: [] });
+    const rootRun: SwarmStatus = {
+      swarm_id: 'swarm-root',
+      status: 'done',
+      task_count: 1,
+      completed_count: 1,
+      session_id: 'session-a',
+      task_id: 'swarm-task-root',
+      description: 'Agent swarm: Inspect the project',
+      owner_agent_id: 'main',
+      round: 1,
+      started_at: '2026-07-16T00:00:00.000Z',
+      tasks: [{
+        id: 'agent-reviewer',
+        agent_id: 'agent-reviewer',
+        parent_agent_id: 'main',
+        profile: 'orchestrator',
+        label: 'Inspect streaming',
+        status: 'completed',
+        output: 'Finished **stream audit**.',
+        output_bytes: 26,
+      }],
+    };
+    const childRun: SwarmStatus = {
+      swarm_id: 'swarm-child',
+      status: 'done',
+      task_count: 1,
+      completed_count: 1,
+      session_id: 'session-a',
+      task_id: 'swarm-task-child',
+      description: 'Agent swarm: Verify the fix',
+      owner_agent_id: 'agent-reviewer',
+      parent_swarm_id: 'swarm-root',
+      round: 1,
+      started_at: '2026-07-16T00:00:01.000Z',
+      tasks: [{
+        id: 'agent-verifier',
+        agent_id: 'agent-verifier',
+        parent_agent_id: 'agent-reviewer',
+        profile: 'explore',
+        label: 'Verify rendering',
+        status: 'completed',
+        output: 'Nested result',
+      }],
+    };
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(SwarmPanel, {
+          swarm: {
+            swarmStatuses: new Map([
+              [rootRun.swarm_id, rootRun],
+              [childRun.swarm_id, childRun],
+            ]),
+            connected: true,
+            error: null,
+          },
+          sessionId: 'session-a',
+          sessions: [session('session-a', 'Streaming repair', 'C:\\work\\alpha')],
+        })));
+        await Promise.resolve();
+      });
+
+      expect(container.textContent).toContain('alpha');
+      expect(container.textContent).toContain('Streaming repair');
+      expect(container.textContent).toContain('Round 1');
+      expect(container.textContent).toContain('Inspect streaming');
+      expect(container.textContent).toContain('Verify rendering');
+      expect(container.querySelector('.swarm-task-output-markdown strong')?.textContent).toBe('stream audit');
+      expect(container.querySelectorAll('.swarm-run-done')).toHaveLength(2);
+      expect(container.querySelector('.swarm-task-branch .swarm-child-runs .swarm-run-done')).not.toBeNull();
+      expect(container.querySelector('.swarm-run-running')).toBeNull();
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      vi.restoreAllMocks();
+    }
+  });
+
   it('renders a compact custom-agent editor with explicit permission controls', async () => {
     vi.spyOn(api, 'getConfig').mockResolvedValue({ custom_agents: {} });
     const container = document.createElement('div');

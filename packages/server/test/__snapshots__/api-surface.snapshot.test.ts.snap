@@ -35,11 +35,19 @@ exports[`API surface snapshot > matches the documented v1 route table and meta e
     ],
     [
       "DELETE",
+      "/api/v1/sessions/{session_id}/cron/{cron_id}",
+    ],
+    [
+      "DELETE",
       "/api/v1/workspaces/{workspace_id}",
     ],
     [
       "GET",
       "/api/v1/auth",
+    ],
+    [
+      "GET",
+      "/api/v1/browser/clients/{client_id}/actions",
     ],
     [
       "GET",
@@ -120,6 +128,10 @@ exports[`API surface snapshot > matches the documented v1 route table and meta e
     [
       "GET",
       "/api/v1/sessions/{session_id}/children",
+    ],
+    [
+      "GET",
+      "/api/v1/sessions/{session_id}/cron",
     ],
     [
       "GET",
@@ -215,6 +227,22 @@ exports[`API surface snapshot > matches the documented v1 route table and meta e
     ],
     [
       "POST",
+      "/api/v1/browser/clients/{client_id}",
+    ],
+    [
+      "POST",
+      "/api/v1/browser/clients/{client_id}/actions/{action_id}",
+    ],
+    [
+      "POST",
+      "/api/v1/browser/clients/{client_id}/heartbeat",
+    ],
+    [
+      "POST",
+      "/api/v1/browser/clients/{client_id}/pause",
+    ],
+    [
+      "POST",
       "/api/v1/config",
     ],
     [
@@ -284,6 +312,10 @@ exports[`API surface snapshot > matches the documented v1 route table and meta e
     [
       "POST",
       "/api/v1/sessions/{session_id}/children",
+    ],
+    [
+      "POST",
+      "/api/v1/sessions/{session_id}/cron",
     ],
     [
       "POST",

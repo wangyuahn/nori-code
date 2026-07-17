@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChatView, type ChatViewProps } from './ChatView';
 import { WorkspaceInspector } from './WorkspaceInspector';
 import { SplitPane } from './SplitPane';
@@ -93,28 +93,38 @@ export function CodeView({
 }: CodeViewProps) {
   const [fileContent, setFileContent] = useState<FsReadResponse | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
+  const fileRequestRef = useRef(0);
   const { readFile, gitStatus, gitError, gitLoading, refreshGitStatus } = useFilesystem(
     session?.id ?? null,
     session?.metadata?.cwd,
   );
 
   useEffect(() => {
+    fileRequestRef.current++;
     setFileContent(null);
     setFileLoading(false);
   }, [session?.id]);
 
-  useEffect(() => {
+  const refreshSelectedFile = useCallback(async () => {
+    const requestId = ++fileRequestRef.current;
     if (!selectedFile) {
       setFileContent(null);
+      setFileLoading(false);
       return;
     }
-    let cancelled = false;
     setFileLoading(true);
-    void readFile(selectedFile.path).then(content => {
-      if (!cancelled) setFileContent(content);
-    }).finally(() => { if (!cancelled) setFileLoading(false); });
-    return () => { cancelled = true; };
+    try {
+      const content = await readFile(selectedFile.path);
+      if (fileRequestRef.current === requestId) setFileContent(content);
+    } finally {
+      if (fileRequestRef.current === requestId) setFileLoading(false);
+    }
   }, [readFile, selectedFile]);
+
+  useEffect(() => {
+    void refreshSelectedFile();
+    return () => { fileRequestRef.current++; };
+  }, [refreshSelectedFile]);
 
   return (
     <SplitPane direction="horizontal" defaultSize={60} minSize={30} maxSize={80} storageKey="nori-code-inspector-split">
@@ -169,6 +179,7 @@ export function CodeView({
         gitLoading={gitLoading}
         refreshGitStatus={refreshGitStatus}
         refreshMessages={onRefreshMessages}
+        refreshFile={refreshSelectedFile}
         isStreaming={isStreaming}
         onSelectFilePath={onSelectFilePath}
       />

@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## v1.0.0-pre.1
+### Features
+- Add a session-scoped Cron Job page with create, list, refresh, and delete controls, recurring and one-shot schedules, next/last-run metadata, validation, and a live sidebar count.
+- Add an opt-in Loop switch to the composer. Enabled requests receive a goal-intake reminder so the main model creates a checkable goal before entering the loop state machine.
+- Turn the send action into a real-time Guide action while the model is working, inserting the user's guidance into the visible transcript immediately instead of leaving it in the normal prompt queue.
+- Add file-workflow shortcuts: reveal files and folders in the native file manager, refresh previews manually, jump from a changed-file card to Preview, and automatically refresh the active preview after Edit or Write changes that file.
+- Add a deterministic native SEA build pipeline for the bundled Nori server, including bundle, blob, injection, signing, verification, packaging, and smoke-test stages.
+
+### Fixes
+- Open files and folders from Nori Work through Electron's native shell so the file manager is brought forward instead of being launched by the background server.
+- Detect and replace a same-version background server when it lacks desktop-required routes, preventing a stale daemon from disabling Cron Jobs after an updated build.
+- Move website permission requests out of the browser header and into the existing permission dock above the chat composer, including the same AUTO/YOLO switching actions used by ordinary tool approvals.
+- Highlight Cron Job navigation in yellow and show the current session's scheduled-job count, updating immediately after create/delete and periodically in the background.
+- Keep the shared background server alive only while clients are connected, then retain the existing 60-second idle shutdown grace after Nori Work closes.
+- Keep terminal startup from stealing focus after the user has returned to the chat composer, while still focusing a newly opened terminal when appropriate.
+- Preserve the current chat/composer focus while an Agent activates tabs or sends input to the built-in browser, without overriding a later focus change made by the user.
+- Preserve the original new-task flow: opening a blank task does not create a session or lock a project, and the project picker appears only when the first message needs a session.
+- Keep the same composer DOM node after rewind so Windows/Electron input methods can immediately edit the restored prompt without requiring a window focus cycle.
+- Send live guidance through the supported Prompt collection action endpoint instead of the malformed double-colon URL that returned `unsupported action: prompts.steer`.
+- Serialize close, archive, delete, reload, and resume operations for the same session so overlapping lifecycle requests cannot leave stale active-session state.
+- Accept both supported provider-auth status response shapes when detecting configured credentials.
+- Add direct regression coverage for main-model AgentSwarm projection: project/session grouping, internal Agent cards, Markdown output, terminal states, and nested child Swarms all render without leaking subagent transcripts into chat.
+
 ## v1.0.0-pre.0
 ### Features
 - Add the multi-tab Nori Work browser with Agent navigation, stable-reference snapshots, interaction, uploads, screenshots, diagnostics, annotations, local HTML support, user takeover, and immediate no-page errors.

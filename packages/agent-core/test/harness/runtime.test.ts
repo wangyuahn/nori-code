@@ -22,6 +22,7 @@ import {
   resolveGlobalLogPath,
 } from '../../src/logging/logger';
 import { resolveLoggingConfig } from '../../src/logging/resolve-config';
+import { Session } from '../../src/session';
 import { testKaos } from '../fixtures/test-kaos';
 
 function requiredFlagEnv(id: string): string {
@@ -406,6 +407,49 @@ max_context_size = 100000
     expect(resumed.additionalDirs).toEqual([extraDir]);
     expect(session?.getAdditionalDirs()).toEqual([extraDir]);
     expect(mainAgent?.getAdditionalDirs()).toEqual([extraDir]);
+  });
+
+  it('serializes resume and close operations for the same session', async () => {
+    tmp = await mkdtemp(join(tmpdir(), 'kimi-core-runtime-'));
+    const homeDir = join(tmp, 'home');
+    const workDir = join(tmp, 'work');
+    await mkdir(homeDir, { recursive: true });
+    await mkdir(workDir, { recursive: true });
+    await writeFile(join(homeDir, 'config.toml'), baseModelConfig());
+
+    const [coreRpc, sdkRpc] = createRPC<CoreAPI, SDKAPI>();
+    const core = new KimiCore(coreRpc, { homeDir });
+    const rpc = await sdkRpc({
+      emitEvent: vi.fn(),
+      requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
+      requestQuestion: vi.fn(async () => null),
+      toolCall: vi.fn(async () => ({ output: '' })),
+    });
+    const created = await rpc.createSession({
+      id: 'ses_runtime_serialized_lifecycle',
+      workDir,
+      model: 'default-mock',
+    });
+    await rpc.closeSession({ sessionId: created.id });
+
+    const resumeSpy = vi.spyOn(Session.prototype, 'resume');
+    await Promise.all([
+      rpc.resumeSession({ sessionId: created.id }),
+      rpc.resumeSession({ sessionId: created.id }),
+    ]);
+    expect(resumeSpy).toHaveBeenCalledTimes(1);
+    resumeSpy.mockRestore();
+
+    const active = core.sessions.get(created.id)!;
+    let finishClose!: () => void;
+    const closeSpy = vi.spyOn(active, 'close').mockImplementation(() => new Promise<void>(resolve => {
+      finishClose = resolve;
+    }));
+    const closing = rpc.closeSession({ sessionId: created.id });
+    await vi.waitFor(() => { expect(core.sessions.has(created.id)).toBe(false); });
+    finishClose();
+    await closing;
+    closeSpy.mockRestore();
   });
 
   it('merges caller additionalDirs when resuming a closed session', async () => {
@@ -1003,7 +1047,7 @@ base_url = "https://search.example.test/v1"
     await writeFile(join(homeDir, 'config.toml'), baseModelConfig());
     await mkdir(pluginRoot, { recursive: true });
     await writeFile(
-      join(pluginRoot, 'kimi.plugin.json'),
+      join(pluginRoot, 'nori.plugin.json'),
       JSON.stringify({ name: 'demo', version: '1.0.0' }),
     );
 
@@ -1076,7 +1120,7 @@ base_url = "https://search.example.test/v1"
 async function writeSessionStartPlugin(root: string, skillBody: string): Promise<void> {
   await mkdir(join(root, 'skills', 'greeter'), { recursive: true });
   await writeFile(
-    join(root, 'kimi.plugin.json'),
+    join(root, 'nori.plugin.json'),
     JSON.stringify({
       name: 'demo',
       version: '1.0.0',

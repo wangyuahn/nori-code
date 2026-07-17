@@ -14,6 +14,7 @@ import type { PermissionData, PermissionMode } from '#/agent/permission';
 import type { PlanData } from '#/agent/plan';
 import type { SwarmModeTrigger } from '#/agent/swarm';
 import type { ToolInfo } from '#/agent/tool';
+import type { CronCreateRequest, CronTaskDetails } from '#/tools/cron/types';
 import type { KimiConfig, KimiConfigPatch, McpServerConfig } from '#/config';
 import type { ExperimentalFeatureState } from '#/flags';
 import type { ResumeSessionResult } from '#/rpc/resumed';
@@ -34,6 +35,7 @@ export type JsonObject = { readonly [key: string]: JsonValue };
 export type Unsubscribe = () => void;
 
 export type { KimiConfig, KimiConfigPatch };
+export type { CronCreateRequest, CronTaskDetails } from '#/tools/cron/types';
 
 export type TextPromptPart = Extract<ContentPart, { type: 'text' }>;
 export type PromptPart = Extract<ContentPart, { type: 'text' | 'image_url' | 'video_url' }>;
@@ -177,6 +179,7 @@ export interface SessionSummary {
 
 export interface PromptPayload {
   readonly input: readonly ContentPart[];
+  readonly goalIntake?: boolean;
 }
 export interface RunShellCommandPayload {
   readonly command: string;
@@ -203,6 +206,7 @@ export interface CancelShellCommandPayload {
 }
 export interface SteerPayload {
   readonly input: readonly ContentPart[];
+  readonly goalIntake?: boolean;
 }
 export interface CancelPayload {
   readonly turnId?: number;
@@ -442,6 +446,9 @@ export interface AgentAPI {
   getUsage: (payload: EmptyPayload) => UsageStatus;
   getTools: (payload: EmptyPayload) => readonly ToolInfo[];
   getBackground: (payload: GetBackgroundPayload) => readonly BackgroundTaskInfo[];
+  listCron: (payload: EmptyPayload) => readonly CronTaskDetails[];
+  createCron: (payload: CronCreateRequest) => CronTaskDetails;
+  deleteCron: (payload: { readonly id: string }) => { readonly deleted: true };
 }
 
 type AgentAPIWithId = WithAgentId<AgentAPI>;

@@ -6,6 +6,7 @@ import { ChatView, modelSupportsImageInput, type ChatViewProps } from '../src/co
 import { I18nProvider } from '../src/i18n';
 import { modelThinkingOptions } from '../src/utils/model-thinking';
 import { projectFileMention, referenceProjectFile } from '../src/projectFileReference';
+import type { NoriBrowserState, NoriDesktopAPI } from '../src/types/nori-desktop';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -13,6 +14,7 @@ const roots: Root[] = [];
 
 beforeEach(() => {
   localStorage.setItem('nori-ui-language', 'en');
+  localStorage.removeItem('nori-composer-loop-mode');
   Element.prototype.scrollIntoView = vi.fn();
   vi.spyOn(window, 'confirm').mockReturnValue(true);
 });
@@ -22,6 +24,7 @@ afterEach(async () => {
     await act(async () => root.unmount());
   }
   document.body.replaceChildren();
+  delete window.noriDesktop;
   vi.restoreAllMocks();
 });
 
@@ -346,10 +349,68 @@ describe('tool permission controls', () => {
     );
     expect(calls).toEqual(['mode:auto', 'resolve:approved']);
   });
+
+  it('shows browser permissions in the unified dock above the chat input', async () => {
+    const calls: string[] = [];
+    const state = browserPermissionState();
+    const resolvedState = { ...state, permissions: { ...state.permissions, pending: [] } };
+    const browserResolvePermission = vi.fn(async (_id, decision) => {
+      calls.push(`resolve:${decision}`);
+      return resolvedState;
+    });
+    const onPermissionChange = vi.fn(async (mode: 'auto' | 'yolo' | 'manual') => {
+      calls.push(`mode:${mode}`);
+    });
+    const desktop: NoriDesktopAPI = {
+      browserGetState: vi.fn(async () => state),
+      browserResolvePermission,
+      onBrowserState: () => () => undefined,
+    };
+    window.noriDesktop = desktop;
+
+    const { container } = await renderChat({ onPermissionChange });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const composer = container.querySelector('.chat-composer-wrap');
+    const permissionCard = composer?.querySelector('.browser-permission-card');
+    expect(permissionCard?.textContent).toContain('Browser permission');
+    expect(permissionCard?.textContent).toContain('https://example.com');
+    expect(container.querySelector('.browser-native-prompt.permission')).toBeNull();
+
+    expect(permissionCard?.textContent).toContain('Switch to AUTO and approve');
+    expect(permissionCard?.textContent).toContain('Switch to YOLO and approve');
+
+    const switchToAuto = [...(permissionCard?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
+      .find(button => button.textContent === 'Switch to AUTO and approve');
+    await act(async () => { switchToAuto?.click(); await Promise.resolve(); await Promise.resolve(); });
+    expect(onPermissionChange).toHaveBeenCalledWith('auto');
+    expect(browserResolvePermission).toHaveBeenCalledWith('browser-permission-1', 'allow_once');
+    expect(calls).toEqual(['mode:auto', 'resolve:allow_once']);
+  });
+
+  it.each(['auto', 'yolo'] as const)('automatically allows browser permissions in %s mode', async permissionMode => {
+    const state = browserPermissionState();
+    const resolvedState = { ...state, permissions: { ...state.permissions, pending: [] } };
+    const browserResolvePermission = vi.fn(async () => resolvedState);
+    window.noriDesktop = {
+      browserGetState: vi.fn(async () => state),
+      browserResolvePermission,
+      onBrowserState: () => () => undefined,
+    };
+    const activeSession = session('multimodal-model');
+    activeSession.agent_config = { ...activeSession.agent_config, permission_mode: permissionMode };
+
+    const { container } = await renderChat({ session: activeSession });
+
+    await vi.waitFor(() => {
+      expect(browserResolvePermission).toHaveBeenCalledWith('browser-permission-1', 'allow_once');
+      expect(container.querySelector('.browser-permission-card')).toBeNull();
+    });
+  });
 });
 
 describe('chat rewind', () => {
-  it('restores an editable composer with the caret at the end after rewind succeeds', async () => {
+  it('restores the existing editable composer with the caret at the end after rewind succeeds', async () => {
     const onRewind = vi.fn(async () => 'prompt restored from history');
     const { container } = await renderChat({ onRewind });
     const previousInput = container.querySelector<HTMLTextAreaElement>('.chat-input')!;
@@ -362,7 +423,8 @@ describe('chat rewind', () => {
 
     expect(onRewind).toHaveBeenCalledWith(1);
     const restoredInput = container.querySelector<HTMLTextAreaElement>('.chat-input')!;
-    expect(restoredInput).not.toBe(previousInput);
+    expect(restoredInput).toBe(previousInput);
+    expect(document.activeElement).toBe(restoredInput);
     expect(restoredInput.value).toBe('prompt restored from history');
     expect(restoredInput.selectionStart).toBe(restoredInput.value.length);
     expect(restoredInput.selectionEnd).toBe(restoredInput.value.length);
@@ -374,6 +436,59 @@ describe('chat rewind', () => {
 });
 
 describe('live response controls', () => {
+  it('pins fast streaming output without animation and only animates an explicit return to latest', async () => {
+    const { container, props, root } = await renderChat();
+    const messageList = container.querySelector<HTMLDivElement>('.chat-messages')!;
+    Object.defineProperty(messageList, 'scrollHeight', { configurable: true, value: 1_000 });
+    Object.defineProperty(messageList, 'clientHeight', { configurable: true, value: 400 });
+    messageList.scrollTop = 600;
+
+    await act(async () => {
+      root.render(createElement(I18nProvider, null, createElement(ChatView, {
+        ...props,
+        streaming: 'a fast streamed response',
+        isStreaming: true,
+      })));
+    });
+
+    expect(messageList.scrollTop).toBe(1_000);
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+
+    await act(async () => {
+      messageList.scrollTop = 100;
+      messageList.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    const jumpButton = container.querySelector<HTMLButtonElement>('.chat-jump-latest')!;
+    expect(jumpButton).not.toBeNull();
+
+    await act(async () => { jumpButton.click(); });
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth' });
+  });
+
+  it('re-enables follow output when switching conversations', async () => {
+    const { container, props, root } = await renderChat();
+    const messageList = container.querySelector<HTMLDivElement>('.chat-messages')!;
+    Object.defineProperty(messageList, 'scrollHeight', { configurable: true, value: 1_000 });
+    Object.defineProperty(messageList, 'clientHeight', { configurable: true, value: 400 });
+
+    await act(async () => {
+      messageList.scrollTop = 100;
+      messageList.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    expect(container.querySelector('.chat-jump-latest')).not.toBeNull();
+
+    await act(async () => {
+      root.render(createElement(I18nProvider, null, createElement(ChatView, {
+        ...props,
+        session: { ...props.session!, id: 'session-2' },
+        messages: [{ id: 'user-2', role: 'user', text: 'new conversation' }],
+      })));
+    });
+
+    expect(container.querySelector('.chat-jump-latest')).toBeNull();
+    expect(messageList.scrollTop).toBe(1_000);
+  });
+
   it('merges a wake-up stream into the existing assistant bubble immediately', async () => {
     const { container } = await renderChat({
       messages: [
@@ -398,16 +513,16 @@ describe('live response controls', () => {
     const input = container.querySelector<HTMLTextAreaElement>('.chat-input')!;
     await enterText(input, 'Focus on the parser race');
 
-    await act(async () => container.querySelector<HTMLButtonElement>('.chat-steer-btn')!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>('.chat-send-btn')!.click());
 
     expect(onSendMessage).toHaveBeenCalledWith('Focus on the parser race', [], 'steer');
-    expect(container.querySelector<HTMLButtonElement>('.chat-steer-btn')!.disabled).toBe(true);
+    expect(container.querySelector<HTMLButtonElement>('.chat-send-btn')!.disabled).toBe(true);
     expect(input.value).toBe('Focus on the parser race');
 
     await act(async () => { resolveSteer(true); await Promise.resolve(); });
     expect(input.value).toBe('');
     await enterText(input, 'One more constraint');
-    expect(container.querySelector<HTMLButtonElement>('.chat-steer-btn')!.disabled).toBe(false);
+    expect(container.querySelector<HTMLButtonElement>('.chat-send-btn')!.disabled).toBe(false);
   });
 
   it('prevents duplicate stop requests and reports a failed stop', async () => {
@@ -429,6 +544,27 @@ describe('live response controls', () => {
 });
 
 describe('chat slash commands and task-mode shortcut', () => {
+  it('sends the per-prompt Loop option when the composer toggle is enabled', async () => {
+    const { container, props } = await renderChat();
+    const toggle = container.querySelector<HTMLInputElement>('.loop-mode-toggle input')!;
+    const input = container.querySelector<HTMLTextAreaElement>('.chat-input')!;
+
+    await act(async () => {
+      toggle.click();
+      await Promise.resolve();
+    });
+    await enterText(input, 'Implement the parser fix');
+    await pressKey(input, 'Enter');
+
+    expect(props.onSendMessage).toHaveBeenCalledWith(
+      'Implement the parser fix',
+      [],
+      'queue',
+      { loopMode: true },
+    );
+    expect(localStorage.getItem('nori-composer-loop-mode')).toBe('true');
+  });
+
   it('shows supported commands without duplicating the Plan control', async () => {
     const { container } = await renderChat();
     const input = container.querySelector<HTMLTextAreaElement>('.chat-input')!;
@@ -521,7 +657,7 @@ async function renderChat(overrides: Partial<ChatViewProps> = {}) {
   await act(async () => {
     root.render(createElement(I18nProvider, null, createElement(ChatView, props)));
   });
-  return { container, props };
+  return { container, props, root };
 }
 
 async function enterText(input: HTMLTextAreaElement, value: string) {
@@ -552,6 +688,37 @@ function session(modelId: string): Session {
     created_at: '2026-07-15T00:00:00.000Z',
     updated_at: '2026-07-15T00:00:00.000Z',
     agent_config: { model: modelId },
+  };
+}
+
+function browserPermissionState(): NoriBrowserState {
+  return {
+    activeTabId: 'tab-1',
+    visible: true,
+    tabs: [{
+      id: 'tab-1',
+      url: 'https://example.com',
+      title: 'Example',
+      canGoBack: false,
+      canGoForward: false,
+      loading: false,
+      annotationMode: false,
+      annotations: [],
+      network: [],
+    }],
+    automation: { paused: false, active: null, history: [] },
+    downloads: [],
+    permissions: {
+      pending: [{
+        id: 'browser-permission-1',
+        tabId: 'tab-1',
+        permission: 'geolocation',
+        origin: 'https://example.com',
+        createdAt: '2026-07-17T00:00:00.000Z',
+      }],
+      rules: [],
+    },
+    dialogs: [],
   };
 }
 
