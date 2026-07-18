@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Fixes
+- Create `<NORI_CODE_HOME>/server/server.log` before Nori Work launches the bundled server, so first-start failures always expose a real log path instead of opening a missing Windows path.
+- Keep ordinary code previews mounted during refresh and defer highlighted DOM replacement while text is selected, preventing preview selections from expanding or disappearing.
+- Keep Markdown code-copy controls clickable during the real `mousedown`/`mouseup`/`click` sequence instead of removing them when selection protection activates.
+
+### Verification
+- Nori Work desktop tests: `14/14` passed.
+- Nori Web tests: `129/129` passed.
+- Nori Web and Nori Work type checks passed.
+- Local Windows EXE rebuilt from these fixes as `Nori-Work-1.0.0-pre.2-x64.exe` (not published).
+
 ## v1.0.0-pre.2 (2026-07-17)
 ### Features
 - Allow each custom Agent profile to select its own model or inherit the parent Agent model, including model selection in the Nori Work agent editor and consistent model restoration on resume.
