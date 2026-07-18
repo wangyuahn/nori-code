@@ -1,10 +1,10 @@
 import { execFile } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { ensureServer } from '../src/main/ensure-server';
+import { ensureServer, ensureServerLogFile } from '../src/main/ensure-server';
 
 vi.mock('node:child_process', () => ({ execFile: vi.fn() }));
 
@@ -77,6 +77,15 @@ it('replaces an unhealthy stale lock from an older bundled server', async () => 
     NORI_CODE_NODE_EXECUTABLE: process.execPath,
     NORI_CODE_NODE_RUN_AS_NODE: '1',
   });
+});
+
+it('creates the server log path before the first bundled server launch', () => {
+  const home = join(tmpdir(), `nori-desktop-first-launch-${String(Date.now())}-${Math.random().toString(36).slice(2)}`);
+  homes.push(home);
+  process.env['NORI_CODE_HOME'] = home;
+
+  expect(() => ensureServerLogFile()).not.toThrow();
+  expect(readFileSync(join(home, 'server', 'server.log'), 'utf8')).toBe('');
 });
 
 it('replaces a healthy same-version server that lacks required desktop routes', async () => {

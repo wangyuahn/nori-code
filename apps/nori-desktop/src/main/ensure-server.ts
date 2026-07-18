@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
-import { existsSync, readFileSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 /** Overall budget for the bundled `nori server run` to finish ensuring a daemon. */
 const RUN_TIMEOUT_MS = 30_000;
@@ -59,6 +59,22 @@ function removeMatchingLock(expected: LockContents): void {
 
 export function serverLogPath(): string {
   return join(noriHome(), 'server', 'server.log');
+}
+
+/**
+ * Create the diagnostic path before launching the bundled server. A server
+ * can fail before its own logger initializes; keeping an empty file here
+ * prevents the startup error page from pointing at a path that does not exist.
+ */
+export function ensureServerLogFile(): void {
+  const logPath = serverLogPath();
+  try {
+    mkdirSync(dirname(logPath), { recursive: true, mode: 0o700 });
+    if (!existsSync(logPath)) writeFileSync(logPath, '', { mode: 0o600 });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Unable to prepare the Nori server log at ${logPath}: ${reason}`);
+  }
 }
 
 /** Read the daemon's bearer token from `<NORI_CODE_HOME>/server.token` (the server's
@@ -180,6 +196,8 @@ export interface EnsureServerResult {
  * others can reuse — never a private, app-only server.
  */
 export async function ensureServer(seaPath: string, expectedVersion?: string): Promise<EnsureServerResult> {
+  ensureServerLogFile();
+
   // Development mode: if the SEA binary doesn't exist, don't try to start it.
   // Instead, check if the user already has a Nori dev server running
   // (started via `pnpm -C apps/nori-code dev:server` in another terminal).
