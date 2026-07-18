@@ -481,6 +481,7 @@ describe('chat rewind', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('.message-rewind-btn')!.click();
       await Promise.resolve();
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
       await new Promise<void>(resolve => requestAnimationFrame(() => { resolve(); }));
     });
 
@@ -495,6 +496,33 @@ describe('chat rewind', () => {
     await enterText(restoredInput, `${restoredInput.value} with a new instruction`);
     expect(container.querySelector<HTMLTextAreaElement>('.chat-input')!.value)
       .toBe('prompt restored from history with a new instruction');
+  });
+
+  it('keeps the rewind composer recoverable when the renderer regains focus later', async () => {
+    const onRewind = vi.fn(async () => 'prompt restored after native dialog');
+    const originalFocus = HTMLTextAreaElement.prototype.focus;
+    let windowReady = false;
+    vi.spyOn(HTMLTextAreaElement.prototype, 'focus').mockImplementation(function (this: HTMLTextAreaElement, options) {
+      if (!windowReady) return;
+      originalFocus.call(this, options);
+    });
+    const { container } = await renderChat({ onRewind });
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('.message-rewind-btn')!.click();
+      await Promise.resolve();
+    });
+
+    windowReady = true;
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+      await new Promise<void>(resolve => requestAnimationFrame(() => { resolve(); }));
+    });
+
+    const input = container.querySelector<HTMLTextAreaElement>('.chat-input')!;
+    expect(document.activeElement).toBe(input);
+    await enterText(input, `${input.value} and continue`);
+    expect(input.value).toBe('prompt restored after native dialog and continue');
   });
 });
 

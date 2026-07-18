@@ -1,8 +1,8 @@
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
-import { getNativePackageRoot } from './native-assets';
+import { getNativeModulesRoot, getNativePackageRoot } from './native-assets';
 
 type ModuleLoad = (request: string, parent: unknown, isMain: boolean) => unknown;
 
@@ -27,9 +27,15 @@ export function installNativeModuleHook(): void {
   if (installed) return;
   installed = true;
 
-  const pyrightRoot = getNativePackageRoot('pyright');
-  if (pyrightRoot !== null) {
-    process.env['NORI_CODE_BUNDLED_NODE_MODULES'] = dirname(pyrightRoot);
+  const modulesRoot = getNativeModulesRoot();
+  if (modulesRoot !== null) {
+    process.env['NORI_CODE_BUNDLED_NODE_MODULES'] = modulesRoot;
+    // LSP asks for pyright only when a user opens an LSP-backed file. Keep
+    // that extraction on the request path instead of blocking every CLI/SEA
+    // startup on thousands of embedded pyright files.
+    (globalThis as typeof globalThis & {
+      __noriEnsureNativePackage?: (packageName: string) => string | null;
+    }).__noriEnsureNativePackage = (packageName) => getNativePackageRoot(packageName);
   }
 
   const moduleBuiltin = nodeRequire('node:module') as ModuleWithLoad;

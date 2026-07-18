@@ -254,8 +254,31 @@ export function getNativePackageRoot(
   const pkg = manifest.packages.find((entry) => entry.name === packageName);
   if (pkg === undefined) return null;
 
-  const cacheRoot = ensureNativeAssetTree({ ...options, source, manifest });
-  return cacheRoot === null ? null : join(cacheRoot, pkg.root);
+  const cacheRoot = getNativeAssetCacheRoot(manifest, options);
+  // Package extraction is intentionally lazy. The SEA contains pyright and
+  // other large packages, but starting the CLI must not synchronously unpack
+  // all of them just because the native module hook was installed.
+  for (const file of pkg.files) {
+    const bytes = toBuffer(source.getRawAsset(file.assetKey));
+    const actualSha256 = sha256(bytes);
+    if (actualSha256 !== file.sha256) {
+      throw new Error(
+        `Native asset checksum mismatch for ${file.assetKey}: ${actualSha256} !== ${file.sha256}`,
+      );
+    }
+    ensureFile(join(cacheRoot, file.relativePath), bytes, file.sha256, file.mode);
+  }
+  ensureEntryFile(cacheRoot);
+  return join(cacheRoot, pkg.root);
+}
+
+/** Return the cache's node_modules root without extracting any embedded files. */
+export function getNativeModulesRoot(options: NativeAssetOptions = {}): string | null {
+  const source = options.source ?? getSeaAssetSource();
+  if (source === null) return null;
+  const manifest = options.manifest ?? getEmbeddedNativeAssetManifest(source, currentTarget());
+  if (manifest === null) return null;
+  return join(getNativeAssetCacheRoot(manifest, options), 'node_modules');
 }
 
 export function hasNativePackage(packageName: string, manifest: NativeAssetManifest): boolean {

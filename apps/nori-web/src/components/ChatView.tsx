@@ -126,7 +126,7 @@ export function ChatView(props: ChatViewProps) {
   const modelOverrideSessionRef = useRef<string | null>(null);
   const followOutputRef = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const restoredCaretRef = useRef<number | null>(null);
+  const rewindCaretRef = useRef<number | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const currentSessionId = session?.id ?? null;
   const activeModelOverride = modelOverrideSessionRef.current === currentSessionId ? modelOverride : null;
@@ -176,14 +176,53 @@ export function ChatView(props: ChatViewProps) {
     element.style.height = 'auto';
     element.style.height = Math.min(element.scrollHeight, 180) + 'px';
   }, [input]);
-  useLayoutEffect(() => {
-    const caret = restoredCaretRef.current;
+  const restoreRewindFocus = useCallback(() => {
+    const caret = rewindCaretRef.current;
     const editor = inputRef.current;
-    if (caret === null || editor === null) return;
-    restoredCaretRef.current = null;
-    editor.focus({ preventScroll: true });
-    editor.setSelectionRange(caret, caret);
-  }, [composerRevision]);
+    if (caret === null || editor === null) return false;
+    try {
+      editor.focus({ preventScroll: true });
+      editor.setSelectionRange(caret, caret);
+    } catch {
+      // The renderer can briefly reject focus while a native dialog is closing.
+    }
+    if (document.activeElement !== editor) return false;
+    rewindCaretRef.current = null;
+    return true;
+  }, []);
+
+  useLayoutEffect(() => {
+    if (rewindCaretRef.current === null) return;
+    let attempts = 0;
+    let frame = 0;
+    let timer: number | undefined;
+
+    const restoreFocus = () => {
+      if (restoreRewindFocus() || attempts >= 60) return;
+      attempts += 1;
+      frame = requestAnimationFrame(restoreFocus);
+    };
+    const retryOnWindowReady = () => {
+      if (restoreRewindFocus()) return;
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(restoreFocus, 0);
+    };
+
+    // A native confirm can leave Electron's renderer unfocused for longer
+    // than one animation frame. Keep the request alive until the window is
+    // focused/visible again instead of dropping it after a short retry burst.
+    window.addEventListener('focus', retryOnWindowReady);
+    window.addEventListener('pageshow', retryOnWindowReady);
+    document.addEventListener('visibilitychange', retryOnWindowReady);
+    restoreFocus();
+    return () => {
+      window.removeEventListener('focus', retryOnWindowReady);
+      window.removeEventListener('pageshow', retryOnWindowReady);
+      document.removeEventListener('visibilitychange', retryOnWindowReady);
+      if (timer !== undefined) window.clearTimeout(timer);
+      if (frame !== 0) cancelAnimationFrame(frame);
+    };
+  }, [composerRevision, restoreRewindFocus]);
   useEffect(() => { setModelNotice(false); }, [selectedModelId, session?.id]);
   useEffect(() => { setTaskModeOverride(null); }, [session?.id]);
   useEffect(() => { setModelOverride(null); }, [session?.id]);
@@ -448,7 +487,7 @@ export function ChatView(props: ChatViewProps) {
     setCommandMenuDismissed(true);
     setCommandSelection(0);
     setCommandNotice(null);
-    restoredCaretRef.current = prompt.length;
+    rewindCaretRef.current = prompt.length;
     setComposerRevision(current => current + 1);
   }, [onRewind]);
 
@@ -493,7 +532,7 @@ export function ChatView(props: ChatViewProps) {
       {commandMenuOpen && <div className="composer-command-menu" id="composer-command-menu" role="listbox" aria-label={tr('Slash commands', '斜杠命令')}>
         {commandSuggestions.map((command, index) => <button key={command.name} type="button" id={`composer-command-${command.name}`} role="option" aria-selected={index === commandSelection} className={index === commandSelection ? 'active' : ''} onMouseDown={event => event.preventDefault()} onClick={() => selectSlashCommand(command)}><code>/{command.name}{command.argumentHint ? ` ${command.argumentHint}` : ''}</code><span>{tr(command.description, command.descriptionZh)}</span></button>)}
       </div>}
-      <textarea ref={inputRef} className="chat-input" placeholder={session ? tr('Ask Nori about this project…', '向 Nori 询问此项目…') : tr('Describe what you want to work on…', '告诉 Nori 你想做什么…')} value={input} onChange={event => { setInput(event.target.value); setCommandMenuDismissed(false); setCommandSelection(0); setCommandNotice(null); }} onKeyDown={handleKeyDown} onPaste={handlePaste} rows={1} aria-label={tr('Message Nori', '向 Nori 发送消息')} aria-autocomplete="list" aria-expanded={commandMenuOpen} aria-controls={commandMenuOpen ? 'composer-command-menu' : undefined} aria-activedescendant={commandMenuOpen ? `composer-command-${commandSuggestions[commandSelection]?.name ?? commandSuggestions[0]?.name}` : undefined}/>
+      <textarea ref={inputRef} className="chat-input" placeholder={session ? tr('Ask Nori about this project…', '向 Nori 询问此项目…') : tr('Describe what you want to work on…', '告诉 Nori 你想做什么…')} value={input} onFocus={() => { void restoreRewindFocus(); }} onChange={event => { rewindCaretRef.current = null; setInput(event.target.value); setCommandMenuDismissed(false); setCommandSelection(0); setCommandNotice(null); }} onKeyDown={handleKeyDown} onPaste={handlePaste} rows={1} aria-label={tr('Message Nori', '向 Nori 发送消息')} aria-autocomplete="list" aria-expanded={commandMenuOpen} aria-controls={commandMenuOpen ? 'composer-command-menu' : undefined} aria-activedescendant={commandMenuOpen ? `composer-command-${commandSuggestions[commandSelection]?.name ?? commandSuggestions[0]?.name}` : undefined}/>
       <SessionUsageBar status={sessionStatus} compacting={compacting} />
       <div className="composer-mode-row"><div className="composer-task-mode" role="group" aria-label={tr('Task mode', '任务模式')}><button type="button" className={selectedTaskMode === 'plan' ? 'active' : ''} onClick={() => void changeTaskMode('plan')} disabled={isStreaming}>{tr('Plan', '规划')}</button><button type="button" className={selectedTaskMode === 'code' ? 'active' : ''} onClick={() => void changeTaskMode('code')} disabled={isStreaming}>{tr('Code', '执行')}</button></div><div className="composer-mode-options"><label className="main-write-toggle loop-mode-toggle" title={tr('Create a goal before this request so Nori continues through the Loop state machine.', '发送后先创建 Goal，并由 Loop 状态机持续执行。')}><input type="checkbox" checked={loopEnabled} onChange={event => setLoopEnabled(event.target.checked)}/><span>Loop</span></label>{selectedTaskMode === 'code' && <label className="main-write-toggle" title={tr('Allow the main model to use Edit and Write directly.', '允许主模型直接使用 Edit 和 Write。')}><input type="checkbox" checked={selectedMainWrite} disabled={isStreaming} onChange={event => void onMainWriteChange(event.target.checked)}/><span>{tr('Main edits', '主模型编辑')}</span></label>}</div></div>
       <div className="composer-footer"><div className="composer-model-controls">

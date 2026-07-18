@@ -10,7 +10,7 @@ import {
 
 import { installErrorHandler } from './error-handler';
 import { transformOpenApiDocument } from './openapi/transforms';
-import { acquireLock, ServerLockedError } from './lock';
+import { acquireLockSafe, ServerLockedError } from './lock';
 import { createAuthHook } from '#/middleware/auth';
 import { createAuthFailureLimiter } from '#/middleware/rateLimit';
 import {
@@ -124,7 +124,7 @@ export async function startServer(opts: ServerStartOptions): Promise<RunningServ
   const pinoLogger: ServerLogger =
     opts.logger ?? createServerLogger({ level: opts.logLevel ?? 'info' });
 
-  const lockHandle = acquireLock({
+  const lockHandle = await acquireLockSafe({
     port: opts.port,
     host: opts.host,
     lockPath: opts.lockPath,

@@ -9,7 +9,8 @@
  */
 
 import type { ChildProcess } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
 import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -1091,6 +1092,167 @@ describe('ensureDaemon surfaces boot failures via early exit', () => {
     expect(message).toContain('Refusing to bind');
     // Must fail fast — nowhere near the 20s spawn timeout.
     expect(elapsed).toBeLessThan(5000);
+  });
+
+  it('writes an early exit diagnostic when the daemon log starts empty', async () => {
+    const { spawn } = await import('node:child_process');
+    const spawnMock = vi.mocked(spawn);
+    const { daemonLogPath, ensureDaemon } = await import('#/cli/sub/server/daemon');
+    const fakeChild = {
+      unref: vi.fn(),
+      once: vi.fn((event: string, cb: (...a: unknown[]) => void) => {
+        if (event === 'exit') setTimeout(() => cb(78, null), 5);
+        return fakeChild;
+      }),
+    };
+    spawnMock.mockReturnValueOnce(fakeChild as unknown as ChildProcess);
+
+    await expect(ensureDaemon({ port: 0 })).rejects.toThrow('exited with code 78');
+    const log = readFileSync(daemonLogPath(), 'utf8');
+    expect(log).toContain('[daemon] process exited during startup');
+    expect(log).toContain('code=78');
+  });
+});
+
+describe('ensureDaemon ignores mismatched host_version locks', () => {
+  let workDir: string;
+  let prevHome: string | undefined;
+  let healthServer: HttpServer | undefined;
+
+  beforeEach(() => {
+    workDir = mkdtempSync(join(tmpdir(), 'kimi-ensure-version-'));
+    prevHome = process.env['NORI_CODE_HOME'];
+    process.env['NORI_CODE_HOME'] = workDir;
+    vi.resetModules();
+  });
+
+  afterEach(async () => {
+    if (healthServer !== undefined) {
+      await new Promise<void>((resolve) => {
+        healthServer!.close(() => resolve());
+      });
+      healthServer = undefined;
+    }
+    if (prevHome === undefined) {
+      delete process.env['NORI_CODE_HOME'];
+    } else {
+      process.env['NORI_CODE_HOME'] = prevHome;
+    }
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
+  function startHealthServer(host: string, port: number): Promise<HttpServer> {
+    return new Promise((resolve, reject) => {
+      const server = createHttpServer((req, res) => {
+        if (req.url === '/api/v1/healthz') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ code: 0 }));
+        } else {
+          res.writeHead(404);
+          res.end();
+        }
+      });
+      server.once('error', reject);
+      server.listen({ host, port }, () => resolve(server));
+    });
+  }
+
+  it('does not reuse a live server whose host_version differs from the current binary', async () => {
+    const { spawn } = await import('node:child_process');
+    const spawnMock = vi.mocked(spawn);
+    spawnMock.mockClear();
+    const { mkdirSync, writeFileSync: writeSync } = await import('node:fs');
+    const { ensureDaemon } = await import('#/cli/sub/server/daemon');
+
+    const freePort = await allocateFreePort();
+    healthServer = await startHealthServer('127.0.0.1', freePort);
+
+    mkdirSync(join(workDir, 'server'), { recursive: true });
+    writeSync(
+      join(workDir, 'server', 'lock'),
+      JSON.stringify({
+        pid: process.pid,
+        started_at: new Date().toISOString(),
+        port: freePort,
+        host: '127.0.0.1',
+        host_version: '1.0.0-pre.2',
+      }),
+    );
+
+    // Fake child that exits quickly so the promise rejects; by then the version
+    // check has already removed the stale lock and spawned a new daemon.
+    const fakeChild = {
+      unref: vi.fn(),
+      once: vi.fn((event: string, cb: (...a: unknown[]) => void) => {
+        if (event === 'exit') setTimeout(() => cb(1, null), 5);
+        return fakeChild;
+      }),
+    };
+    spawnMock.mockReturnValueOnce(fakeChild as unknown as ChildProcess);
+
+    await expect(ensureDaemon({ port: freePort, hostVersion: '1.0.0-pre.3' })).rejects.toThrow(
+      /exited with code 1/,
+    );
+
+    expect(spawnMock).toHaveBeenCalledOnce();
+    expect(existsSync(join(workDir, 'server', 'lock'))).toBe(false);
+  });
+
+  it('reuses a live server whose host_version matches the current binary', async () => {
+    const { spawn } = await import('node:child_process');
+    const spawnMock = vi.mocked(spawn);
+    spawnMock.mockClear();
+    const { mkdirSync, writeFileSync: writeSync } = await import('node:fs');
+    const { ensureDaemon } = await import('#/cli/sub/server/daemon');
+
+    const freePort = await allocateFreePort();
+    healthServer = await startHealthServer('127.0.0.1', freePort);
+
+    mkdirSync(join(workDir, 'server'), { recursive: true });
+    writeSync(
+      join(workDir, 'server', 'lock'),
+      JSON.stringify({
+        pid: process.pid,
+        started_at: new Date().toISOString(),
+        port: freePort,
+        host: '127.0.0.1',
+        host_version: '1.0.0-pre.3',
+      }),
+    );
+
+    const result = await ensureDaemon({ port: freePort, hostVersion: '1.0.0-pre.3' });
+
+    expect(result.reused).toBe(true);
+    expect(result.origin).toBe(`http://127.0.0.1:${freePort}`);
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it('reuses a live server with no host_version for backward compatibility', async () => {
+    const { spawn } = await import('node:child_process');
+    const spawnMock = vi.mocked(spawn);
+    spawnMock.mockClear();
+    const { mkdirSync, writeFileSync: writeSync } = await import('node:fs');
+    const { ensureDaemon } = await import('#/cli/sub/server/daemon');
+
+    const freePort = await allocateFreePort();
+    healthServer = await startHealthServer('127.0.0.1', freePort);
+
+    mkdirSync(join(workDir, 'server'), { recursive: true });
+    writeSync(
+      join(workDir, 'server', 'lock'),
+      JSON.stringify({
+        pid: process.pid,
+        started_at: new Date().toISOString(),
+        port: freePort,
+        host: '127.0.0.1',
+      }),
+    );
+
+    const result = await ensureDaemon({ port: freePort, hostVersion: '1.0.0-pre.3' });
+
+    expect(result.reused).toBe(true);
+    expect(result.origin).toBe(`http://127.0.0.1:${freePort}`);
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 });
 

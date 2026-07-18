@@ -1,17 +1,29 @@
 # Changelog
 
-## Unreleased
+## v1.0.0-pre.3 (2026-07-18)
 
 ### Fixes
+- **Stale server lock (root cause)** — `getLiveLock()` relied solely on `process.kill(pid, 0)` to determine whether a lock's recorded PID was alive. On Windows, a dead process's PID can be immediately recycled to an unrelated process, making `pidAlive()` return true for a stale lock. This caused `server already running` errors that persisted across restarts for days.
+- **`acquireLockSafe` (lock.ts)** — new async lock acquisition that supplements `pidAlive()` with a TCP connect probe to the recorded port. If the PID appears alive but nothing is listening on the port, the lock is treated as stale and taken over. Prevents false-positive "server already running" from recycled Windows PIDs.
+- **Desktop `ensureServer` bypasses `runServerKill` for unhealthy servers** (ensure-server.ts) — when the existing server does not respond to `/healthz`, the desktop now removes the stale lock directly instead of calling `nori server kill` first. The kill command also relies on `getLiveLock()` which suffers from the same recycled-PID blind spot, and a failed kill attempt left the lock in place, creating an infinite restart failure loop.
+- **CLI daemon cleanup** (daemon.ts) — after a health-check failure, the daemon explicitly `unlinkSync`s the stale lock before spawning a replacement, preventing the child process from hitting the same stale lock.
+- Verify with reproduction: a fake lock with a live (bash) PID and an unoccupied port was correctly taken over — the new daemon started within 5 seconds.
 - Create `<NORI_CODE_HOME>/server/server.log` before Nori Work launches the bundled server, so first-start failures always expose a real log path instead of opening a missing Windows path.
+- Record bundled server `stderr`, startup errors, exit codes, and signals in `server.log`, so the log is diagnostic rather than an empty placeholder when startup fails.
+- Record server replacement failures and daemon startup timeouts in the same log, covering failures before a server process emits its own diagnostics.
+- Include child exit metadata and the daemon log tail when Windows returns an empty `stdout`/`stderr`, and persist pre-spawn port-resolution or process-launch failures.
+- Replace a live but unhealthy same-version daemon before starting Nori Work, preventing an unresponsive process from retaining the server lock and blocking every restart.
+- Do not unpack the entire embedded native asset tree during SEA startup; extract only the package requested by a native helper or LSP, preventing `nori server run` from being killed by the desktop 30-second startup timeout.
+- Keep the restored rewind prompt editable when Electron regains window focus after the native confirmation dialog, including delayed focus and visibility recovery.
 - Keep ordinary code previews mounted during refresh and defer highlighted DOM replacement while text is selected, preventing preview selections from expanding or disappearing.
 - Keep Markdown code-copy controls clickable during the real `mousedown`/`mouseup`/`click` sequence instead of removing them when selection protection activates.
 
 ### Verification
+- Lock module tests: `18/18` passed.
 - Nori Work desktop tests: `14/14` passed.
 - Nori Web tests: `129/129` passed.
-- Nori Web and Nori Work type checks passed.
-- Local Windows EXE rebuilt from these fixes as `Nori-Work-1.0.0-pre.2-x64.exe` (not published).
+- Full workspace typecheck: all 5 packages passed.
+- Built as `Nori-Work-1.0.0-pre.3-x64.exe`.
 
 ## v1.0.0-pre.2 (2026-07-17)
 ### Features

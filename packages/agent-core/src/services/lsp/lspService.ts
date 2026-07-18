@@ -447,7 +447,14 @@ function bundledNodeServer(id: string, languageId: string, packageName: string, 
 function bundledPackageRoot(packageName: string): string {
   const modulesRoot = process.env['NORI_CODE_BUNDLED_NODE_MODULES'];
   if (modulesRoot !== undefined) {
-    const candidate = path.join(modulesRoot, ...packageName.split('/'));
+    let candidate = path.join(modulesRoot, ...packageName.split('/'));
+    if (!existsSync(path.join(candidate, 'package.json'))) {
+      const ensurePackage = (globalThis as typeof globalThis & {
+        __noriEnsureNativePackage?: (name: string) => string | null;
+      }).__noriEnsureNativePackage;
+      ensurePackage?.(packageName);
+      candidate = path.join(modulesRoot, ...packageName.split('/'));
+    }
     if (existsSync(path.join(candidate, 'package.json'))) return candidate;
   }
   return path.dirname(require.resolve(`${packageName}/package.json`));

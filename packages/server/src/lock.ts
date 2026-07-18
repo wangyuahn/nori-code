@@ -34,6 +34,7 @@ import {
   openSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { connect } from 'node:net';
 
 import { resolveNoriHome } from './home';
 
@@ -125,6 +126,21 @@ function pidAlive(pid: number): boolean {
   }
 }
 
+/** Async TCP port probe. Resolves true if something accepts on host:port within timeoutMs. */
+function probePort(host: string, port: number, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = connect({ host, port, timeout: timeoutMs }, () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once('error', () => resolve(false));
+    socket.once('timeout', () => {
+      socket.destroy();
+      resolve(false);
+    });
+  });
+}
+
 /** Read + JSON.parse the lock file; returns undefined on any error so callers can fall through. */
 function readLockContents(path: string): LockContents | undefined {
   try {
@@ -189,6 +205,10 @@ function tryExclusiveCreate(path: string, contents: LockContents): boolean {
  * Acquire an exclusive lock for this server instance. Throws `ServerLockedError`
  * if another live server holds the lock; silently takes over a stale lock whose
  * recorded pid is no longer running.
+ *
+ * **Windows note**: the pidAlive probe used here can return true for a recycled
+ * PID. When the caller is async, prefer {@link acquireLockSafe} which also
+ * validates the port is actually listening.
  */
 export function acquireLock(opts: AcquireLockOptions): AcquireLockResult {
   const lockPath = opts.lockPath ?? DEFAULT_LOCK_PATH;
@@ -234,6 +254,73 @@ export function acquireLock(opts: AcquireLockOptions): AcquireLockResult {
 
   if (!tryExclusiveCreate(lockPath, contents)) {
     // Someone slipped in. Re-read for diagnostic.
+    const winner = readLockContents(lockPath);
+    throw new ServerLockedError(
+      winner
+        ? `server already running (pid=${winner.pid}, port=${winner.port}, started=${winner.started_at})`
+        : 'lock file present but unreadable',
+      winner ?? { pid: -1, started_at: '', port: opts.port },
+    );
+  }
+  return makeReleaseHandle(lockPath, pid);
+}
+
+/**
+ * Like acquireLockSync, but when pidAlive says the owner is alive, also probes
+ * the recorded host:port via TCP connect. If the port is not listening, the
+ * lock is treated as stale (Windows PID recycling guard).
+ */
+export async function acquireLockSafe(opts: AcquireLockOptions): Promise<AcquireLockResult> {
+  const lockPath = opts.lockPath ?? DEFAULT_LOCK_PATH;
+  const pid = opts.pid ?? process.pid;
+  const startedAt = opts.nowIso ?? new Date().toISOString();
+  const contents: LockContents = {
+    pid,
+    started_at: startedAt,
+    host: opts.host,
+    port: opts.port,
+    ...(opts.hostVersion !== undefined ? { host_version: opts.hostVersion } : {}),
+    ...(opts.entry !== undefined ? { entry: opts.entry } : {}),
+  };
+
+  mkdirSync(dirname(lockPath), { recursive: true });
+
+  // First try: clean acquire.
+  if (tryExclusiveCreate(lockPath, contents)) {
+    return makeReleaseHandle(lockPath, pid);
+  }
+
+  // Lock exists — inspect.
+  const existing = readLockContents(lockPath);
+  if (existing && pidAlive(existing.pid)) {
+    // When the recorded port is 0 (ephemeral bind), the real listening port is
+    // unknown so we cannot probe it. Fall back to PID-only check — same as the
+    // synchronous acquireLock — to avoid a false-stale takeover.
+    if (existing.port === 0) {
+      throw new ServerLockedError(
+        `server already running (pid=${existing.pid}, port=${existing.port}, started=${existing.started_at})`,
+        existing,
+      );
+    }
+    // PID appears alive, but verify the port is actually serving
+    const connectHost = existing.host !== undefined && existing.host !== '0.0.0.0' ? existing.host : '127.0.0.1';
+    const portAlive = await probePort(connectHost, existing.port, 500);
+    if (portAlive) {
+      throw new ServerLockedError(
+        `server already running (pid=${existing.pid}, port=${existing.port}, started=${existing.started_at})`,
+        existing,
+      );
+    }
+    // Port not listening → stale lock from recycled PID. Fall through to takeover.
+  }
+
+  // Stale or unresponsive — takeover.
+  try {
+    unlinkSync(lockPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
+  if (!tryExclusiveCreate(lockPath, contents)) {
     const winner = readLockContents(lockPath);
     throw new ServerLockedError(
       winner

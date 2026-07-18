@@ -11,7 +11,7 @@ export type {
   ServerLogger,
   ServerLogLevel,
 } from './services/pinoLoggerService';
-export { acquireLock, getLiveLock, DEFAULT_LOCK_PATH, DEFAULT_LOCK_DIR } from './lock';
+export { acquireLock, acquireLockSafe, getLiveLock, DEFAULT_LOCK_PATH, DEFAULT_LOCK_DIR } from './lock';
 export type { AcquireLockOptions, AcquireLockResult, LockContents } from './lock';
 
 export { resolveServiceManager, ServiceUnavailableError, ServiceUnsupportedError } from './svc';

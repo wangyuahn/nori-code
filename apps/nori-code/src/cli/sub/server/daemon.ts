@@ -17,12 +17,12 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync } from 'node:fs';
+import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, unlinkSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
-import { DEFAULT_LOCK_DIR, getLiveLock, type LockContents } from '@nori-code/server';
+import { DEFAULT_LOCK_DIR, DEFAULT_LOCK_PATH, getLiveLock, type LockContents } from '@nori-code/server';
 
 import {
   DEFAULT_SERVER_HOST,
@@ -32,6 +32,7 @@ import {
   serverOrigin,
   waitForServerHealthy,
 } from './shared';
+import { getVersion } from '../../version';
 
 const SERVER_LOG_FILENAME = 'server.log';
 
@@ -63,6 +64,11 @@ export interface EnsureDaemonOptions {
   allowedHosts?: readonly string[];
   /** Idle-shutdown grace in ms for the spawned daemon (daemon mode only). */
   idleGraceMs?: number;
+  /**
+   * Host CLI version used to decide whether an existing lock is reusable.
+   * Defaults to the current binary version.
+   */
+  hostVersion?: string;
 }
 
 export interface EnsureDaemonResult {
@@ -78,6 +84,20 @@ export interface EnsureDaemonResult {
 /** Path of the daemon log file (shared with the OS-service log location). */
 export function daemonLogPath(): string {
   return join(DEFAULT_LOCK_DIR, SERVER_LOG_FILENAME);
+}
+
+function appendDaemonDiagnostic(message: string): void {
+  try {
+    mkdirSync(dirname(daemonLogPath()), { recursive: true });
+    appendFileSync(daemonLogPath(), `[${new Date().toISOString()}] ${message}\n`);
+  } catch {
+    // Preserve the startup error even when the log directory is unavailable.
+  }
+}
+
+function formatStartupError(error: unknown): string {
+  if (error instanceof Error) return error.stack ?? error.message;
+  return String(error);
 }
 
 export function lockConnectHost(lock: LockContents): string {
@@ -292,37 +312,71 @@ export async function ensureDaemon(options: EnsureDaemonOptions = {}): Promise<E
   const host = options.host ?? DEFAULT_SERVER_HOST;
   const preferred = options.port ?? DEFAULT_SERVER_PORT;
   const logLevel = options.logLevel ?? DEFAULT_DAEMON_LOG_LEVEL;
+  const hostVersion = options.hostVersion ?? getVersion();
 
-  // 1. Reuse an already-live daemon if one holds the lock.
+  // 1. Reuse an already-live daemon if one holds the lock and its version matches.
   const existing = getLiveLock();
   if (existing) {
-    const origin = serverOrigin(lockConnectHost(existing), existing.port);
-    if (await waitForServerHealthy(origin, REUSE_HEALTH_TIMEOUT_MS)) {
-      return {
-        origin,
-        reused: true,
-        host: existing.host ?? DEFAULT_SERVER_HOST,
-        port: existing.port,
-      };
+    if (existing.host_version !== undefined && existing.host_version !== hostVersion) {
+      const origin = serverOrigin(lockConnectHost(existing), existing.port);
+      appendDaemonDiagnostic(
+        `[daemon] existing server ${origin} has host version ${existing.host_version}, ` +
+          `current binary is ${hostVersion}; ignoring the stale lock and spawning a new daemon`,
+      );
+      try {
+        unlinkSync(DEFAULT_LOCK_PATH);
+      } catch {
+        // best effort cleanup
+      }
+      // Fall through and spawn a new daemon of the current version.
+    } else {
+      const origin = serverOrigin(lockConnectHost(existing), existing.port);
+      if (await waitForServerHealthy(origin, REUSE_HEALTH_TIMEOUT_MS)) {
+        return {
+          origin,
+          reused: true,
+          host: existing.host ?? DEFAULT_SERVER_HOST,
+          port: existing.port,
+        };
+      }
+      // Live pid but not responding (wedged or mid-boot failure). Clean up the
+      // stale lock so the daemon we're about to spawn can claim it.
+      try {
+        unlinkSync(DEFAULT_LOCK_PATH);
+      } catch {
+        // best effort cleanup
+      }
+      // Fall through and spawn: the stale lock is gone now, so our child can
+      // claim it via acquireLock and we reconnect below once it's healthy.
     }
-    // Live pid but not responding (wedged or mid-boot failure). Fall through
-    // and spawn: if it is truly wedged our child loses the lock race and we
-    // reconnect below; if it died, stale takeover lets our child claim it.
   }
 
   // 2. No reusable daemon — pick a free port and spawn one detached.
-  const port = await resolveDaemonPort(host, preferred);
-  const child = spawnDaemonChild({
-    host,
-    port,
-    logLevel,
-    debugEndpoints: options.debugEndpoints,
-    insecureNoTls: options.insecureNoTls,
-    allowRemoteShutdown: options.allowRemoteShutdown,
-    allowRemoteTerminals: options.allowRemoteTerminals,
-    allowedHosts: options.allowedHosts,
-    idleGraceMs: options.idleGraceMs,
-  });
+  let port: number;
+  try {
+    port = await resolveDaemonPort(host, preferred);
+  } catch (error) {
+    appendDaemonDiagnostic(`[daemon] failed to resolve a startup port: ${formatStartupError(error)}`);
+    throw error;
+  }
+
+  let child: ChildProcess;
+  try {
+    child = spawnDaemonChild({
+      host,
+      port,
+      logLevel,
+      debugEndpoints: options.debugEndpoints,
+      insecureNoTls: options.insecureNoTls,
+      allowRemoteShutdown: options.allowRemoteShutdown,
+      allowRemoteTerminals: options.allowRemoteTerminals,
+      allowedHosts: options.allowedHosts,
+      idleGraceMs: options.idleGraceMs,
+    });
+  } catch (error) {
+    appendDaemonDiagnostic(`[daemon] failed to spawn the server process: ${formatStartupError(error)}`);
+    throw error;
+  }
 
   // Watch for an early exit so a boot failure (e.g. the non-loopback TLS gate,
   // a config error, or a lost lock race with no other daemon to fall back to)
@@ -331,6 +385,9 @@ export async function ensureDaemon(options: EnsureDaemonOptions = {}): Promise<E
   // the operator *why* it failed.
   let childExit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
   child.once('exit', (code, signal) => {
+    appendDaemonDiagnostic(
+      `[daemon] process exited during startup: code=${String(code)}, signal=${String(signal)}`,
+    );
     childExit = { code, signal };
   });
   child.once('error', () => {
@@ -362,6 +419,9 @@ export async function ensureDaemon(options: EnsureDaemonOptions = {}): Promise<E
     await sleep(POLL_INTERVAL_MS);
   }
 
+  appendDaemonDiagnostic(
+    `[daemon] startup timed out after ${String(SPAWN_TIMEOUT_MS)}ms without a healthy server`,
+  );
   throw new Error(
     `Nori server daemon failed to start within ${String(SPAWN_TIMEOUT_MS)}ms.\n\n` +
       formatLogTail(daemonLogPath()),
