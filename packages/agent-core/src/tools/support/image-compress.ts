@@ -20,7 +20,7 @@
 
 import type { ContentPart } from '@nori-code/kosong';
 
-import { sniffImageDimensions } from './file-type';
+import { sniffImageDimensions, sniffMediaFromMagic } from './file-type';
 
 /** Longest-edge ceiling (px). Larger images are scaled down to fit. */
 export const MAX_IMAGE_EDGE_PX = 2000;
@@ -103,12 +103,13 @@ export async function compressImageForModel(
   const maxEdge = options.maxEdge ?? MAX_IMAGE_EDGE_PX;
   const byteBudget = options.byteBudget ?? IMAGE_BYTE_BUDGET;
   const maxDecodeBytes = options.maxDecodeBytes ?? MAX_DECODE_BYTES;
-  const normalizedMime = normalizeMime(mimeType);
+  // File and multipart MIME values are hints; magic bytes are authoritative when available.
+  const normalizedMime = resolveImageMime(bytes, mimeType);
   const dims = sniffImageDimensions(bytes);
 
   const passthrough = (): CompressImageResult => ({
     data: bytes,
-    mimeType,
+    mimeType: normalizedMime,
     width: dims?.width ?? 0,
     height: dims?.height ?? 0,
     changed: false,
@@ -196,10 +197,14 @@ export async function compressBase64ForModel(
   const maxDecodeBytes = options.maxDecodeBytes ?? MAX_DECODE_BYTES;
   const approxBytes = Math.floor((base64.length * 3) / 4);
   if (approxBytes > maxDecodeBytes) {
+    const prefix = decodeBase64Prefix(base64);
+    const normalizedMime = prefix === null
+      ? normalizeMime(mimeType)
+      : resolveImageMime(prefix, mimeType);
     return {
       base64,
-      mimeType,
-      changed: false,
+      mimeType: normalizedMime,
+      changed: normalizedMime !== mimeType,
       originalByteLength: approxBytes,
       finalByteLength: approxBytes,
     };
@@ -217,11 +222,13 @@ export async function compressBase64ForModel(
     };
   }
   const result = await compressImageForModel(bytes, mimeType, options);
+  const mimeChanged = result.mimeType !== mimeType;
   if (!result.changed) {
     return {
       base64,
-      mimeType,
-      changed: false,
+      mimeType: result.mimeType,
+      // A MIME-only rewrite must still replace the model-facing data URL.
+      changed: mimeChanged,
       originalByteLength: result.originalByteLength,
       finalByteLength: result.finalByteLength,
     };
@@ -266,8 +273,64 @@ export async function compressImageContentParts(
   return out;
 }
 
+/**
+ * Repair image data URLs that were persisted with a non-image MIME hint.
+ *
+ * Older web clients trusted File.type, so a PNG could be stored as
+ * text/plain; charset=utf-8. Rewriting that history before each provider
+ * request keeps a failed attachment from poisoning every later turn.
+ */
+export function normalizeImageContentParts(parts: readonly ContentPart[]): ContentPart[] {
+  let changed = false;
+  const out: ContentPart[] = [];
+  for (const part of parts) {
+    if (part.type !== 'image_url' || !part.imageUrl.url.startsWith('data:')) {
+      out.push(part);
+      continue;
+    }
+    const parsed = parseImageDataUrl(part.imageUrl.url);
+    if (parsed === null) {
+      out.push(part);
+      continue;
+    }
+    const declared = normalizeMime(parsed.mimeType);
+    const prefix = decodeBase64Prefix(parsed.base64);
+    const detected = prefix === null ? null : sniffMediaFromMagic(prefix);
+    if (detected?.kind === 'image') {
+      const repairedUrl = 'data:' + detected.mimeType + ';base64,' + parsed.base64;
+      if (repairedUrl !== part.imageUrl.url) {
+        changed = true;
+        out.push({ type: 'image_url', imageUrl: { ...part.imageUrl, url: repairedUrl } });
+      } else {
+        out.push(part);
+      }
+      continue;
+    }
+    if (declared === 'image/svg+xml' && prefix !== null && looksLikeSvg(prefix)) {
+      const repairedUrl = 'data:image/svg+xml;base64,' + parsed.base64;
+      if (repairedUrl !== part.imageUrl.url) {
+        changed = true;
+        out.push({ type: 'image_url', imageUrl: { ...part.imageUrl, url: repairedUrl } });
+      } else {
+        out.push(part);
+      }
+      continue;
+    }
+    changed = true;
+    out.push({
+      type: 'text',
+      text:
+        '[image omitted: the attachment declared MIME ' +
+        (declared || 'unknown') +
+        ' and its bytes are not a recognized image. ' +
+        'The image was not sent; continue with the remaining request.]',
+    });
+  }
+  return changed ? out : [...parts];
+}
+
 function parseImageDataUrl(url: string): { mimeType: string; base64: string } | null {
-  const match = /^data:([^;,]+);base64,(.*)$/s.exec(url);
+  const match = /^data:([^;,]+)(?:;[^;,]*)*;base64,(.*)$/s.exec(url);
   if (match === null) return null;
   return { mimeType: match[1]!, base64: match[2]! };
 }
@@ -365,7 +428,31 @@ function fitWithinEdge(image: JimpImage, edge: number): boolean {
   return true;
 }
 
+function resolveImageMime(bytes: Uint8Array, mimeType: string): string {
+  const declared = normalizeMime(mimeType);
+  const detected = sniffMediaFromMagic(bytes);
+  return detected?.kind === 'image' ? detected.mimeType : declared;
+}
+
+function decodeBase64Prefix(base64: string): Uint8Array | null {
+  // Magic signatures fit in this prefix; do not decode a huge history entry
+  // just to inspect its media type.
+  const prefixLength = Math.min(base64.length, 4096);
+  const usableLength = prefixLength - (prefixLength % 4);
+  if (usableLength < 4) return null;
+  try {
+    return new Uint8Array(Buffer.from(base64.slice(0, usableLength), 'base64'));
+  } catch {
+    return null;
+  }
+}
+
+function looksLikeSvg(bytes: Uint8Array): boolean {
+  const text = Buffer.from(bytes).toString('utf8');
+  return /^(?:\uFEFF)?\s*(?:<\?xml[^>]*>\s*)?(?:<!--[\s\S]*?-->\s*)*<svg(?:\s|>)/i.test(text);
+}
+
 function normalizeMime(mimeType: string): string {
-  const lower = mimeType.trim().toLowerCase();
+  const lower = mimeType.trim().toLowerCase().split(';', 1)[0] ?? '';
   return lower === 'image/jpg' ? 'image/jpeg' : lower;
 }

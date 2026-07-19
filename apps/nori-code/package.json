@@ -1,6 +1,6 @@
 {
   "name": "nori-code",
-  "version": "1.0.0-pre.3",
+  "version": "1.0.0-pre.4",
   "description": "Loop-core multi-agent coding tool — plan, delegate, review, repeat.",
   "license": "MIT",
   "author": "wangyuahn",
@@ -47,7 +47,8 @@
     "provenance": true
   },
   "scripts": {
-    "build": "pnpm -C ../nori-web run build && tsdown && node scripts/copy-native-assets.mjs && node scripts/copy-web-assets.mjs",
+    "build": "pnpm run build:web-assets && tsdown && node scripts/copy-native-assets.mjs",
+    "build:web-assets": "pnpm -C ../nori-web run build && node scripts/copy-web-assets.mjs",
     "prebuild": "node scripts/build-vis-asset.mjs",
     "catalog:update": "node scripts/update-catalog.mjs --out dist/built-in-catalog.json",
     "smoke": "node scripts/smoke.mjs",

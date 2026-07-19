@@ -40,6 +40,7 @@ import {
   type CompletionBudgetConfig,
 } from '../../utils/completion-budget';
 import type { GenerateOptionsWithRequestLogFields } from '../llm-request-logger';
+import { normalizeImageContentParts } from '../../tools/support/image-compress';
 
 export type GenerateFn = typeof kosongGenerate;
 
@@ -125,11 +126,15 @@ export class KosongLLM implements LLM {
       requestLogFields: params.requestLogFields,
     };
 
+    const normalizedMessages = params.messages.map((message) => ({
+      ...message,
+      content: normalizeImageContentParts(message.content),
+    }));
     const result = await this.generate(
       effectiveProvider,
       this.systemPrompt,
       [...params.tools],
-      downgradeUnsupportedMedia(params.messages, this.capability),
+      downgradeUnsupportedMedia(normalizedMessages, this.capability),
       callbacks,
       options,
     );

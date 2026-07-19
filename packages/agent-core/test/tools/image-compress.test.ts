@@ -26,6 +26,7 @@ import {
   compressBase64ForModel,
   compressImageContentParts,
   compressImageForModel,
+  normalizeImageContentParts,
   IMAGE_BYTE_BUDGET,
   MAX_IMAGE_EDGE_PX,
 } from '../../src/tools/support/image-compress';
@@ -353,5 +354,78 @@ describe('compressImageContentParts', () => {
     if (imagePart?.type !== 'image_url') throw new Error('expected image_url');
     expect(imagePart.imageUrl.id).toBe('att-1');
     expect(imagePart.imageUrl.url).not.toBe(dataUrl('image/png', big));
+  });
+});
+
+describe('MIME repair', () => {
+  const pngBase64 = 'iVBORw0KGgo=';
+
+  it('repairs a browser text MIME when the bytes are a PNG', async () => {
+    const result = await compressBase64ForModel(
+      pngBase64,
+      'text/plain; charset=utf-8',
+    );
+    expect(result.mimeType).toBe('image/png');
+    expect(result.changed).toBe(true);
+    expect(result.base64).toBe(pngBase64);
+  });
+
+  it('repairs MIME from a prefix when the full payload exceeds the decode cap', async () => {
+    const result = await compressBase64ForModel(
+      pngBase64,
+      'text/plain; charset=utf-8',
+      { maxDecodeBytes: 1 },
+    );
+    expect(result.mimeType).toBe('image/png');
+    expect(result.changed).toBe(true);
+  });
+
+  it('repairs historical image data URLs before model dispatch', () => {
+    const parts = [{
+      type: 'image_url' as const,
+      imageUrl: {
+        url: 'data:text/plain; charset=utf-8;base64,' + pngBase64,
+      },
+    }];
+    const normalized = normalizeImageContentParts(parts);
+    expect(normalized).toEqual([{
+      type: 'image_url',
+      imageUrl: { url: 'data:image/png;base64,' + pngBase64 },
+    }]);
+  });
+
+  it('turns an explicitly non-image attachment into a model-visible notice', () => {
+    const parts = [{
+      type: 'image_url' as const,
+      imageUrl: { url: 'data:text/plain;base64,SGVsbG8=' },
+    }];
+    const normalized = normalizeImageContentParts(parts);
+    expect(normalized).toEqual([{
+      type: 'text',
+      text: expect.stringContaining('image omitted'),
+    }]);
+  });
+
+  it('omits an attachment whose declared image MIME does not match its bytes', () => {
+    const parts = [{
+      type: 'image_url' as const,
+      imageUrl: { url: 'data:image/png;base64,SGVsbG8=' },
+    }];
+    const normalized = normalizeImageContentParts(parts);
+    expect(normalized).toEqual([{
+      type: 'text',
+      text: expect.stringContaining('declared MIME image/png'),
+    }]);
+  });
+
+  it('keeps a valid SVG image attachment', () => {
+    const base64 = Buffer.from(
+      '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"></svg>',
+    ).toString('base64');
+    const parts = [{
+      type: 'image_url' as const,
+      imageUrl: { url: 'data:image/svg+xml;base64,' + base64 },
+    }];
+    expect(normalizeImageContentParts(parts)).toEqual(parts);
   });
 });

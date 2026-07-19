@@ -17,7 +17,7 @@ function sha256(bytes: Buffer | string): string {
 
 describe('collectWebAssets', () => {
   it('collects dist-web files into deterministic SEA asset keys', async () => {
-    const appRoot = mkdtempSync(join(tmpdir(), 'kimi-web-assets-build-'));
+    const appRoot = mkdtempSync(join(tmpdir(), 'nori-web-assets-build-'));
     try {
       mkdirSync(join(appRoot, 'dist-web', 'assets'), { recursive: true });
       writeFileSync(join(appRoot, 'dist-web', 'index.html'), '<div id="app"></div>\n');
@@ -57,10 +57,10 @@ describe('collectWebAssets', () => {
   });
 
   it('fails clearly when dist-web has not been built', async () => {
-    const appRoot = mkdtempSync(join(tmpdir(), 'kimi-web-assets-missing-'));
+    const appRoot = mkdtempSync(join(tmpdir(), 'nori-web-assets-missing-'));
     try {
       await expect(collectWebAssets({ appRoot, target: 'test-target' })).rejects.toThrow(
-        /Kimi web build output was not found/,
+        /Nori web build output was not found/,
       );
     } finally {
       rmSync(appRoot, { recursive: true, force: true });
@@ -68,7 +68,7 @@ describe('collectWebAssets', () => {
   });
 
   it('keeps manifest JSON parseable and stable', async () => {
-    const appRoot = mkdtempSync(join(tmpdir(), 'kimi-web-assets-json-'));
+    const appRoot = mkdtempSync(join(tmpdir(), 'nori-web-assets-json-'));
     try {
       mkdirSync(join(appRoot, 'dist-web'), { recursive: true });
       writeFileSync(join(appRoot, 'dist-web', 'index.html'), '<html></html>');

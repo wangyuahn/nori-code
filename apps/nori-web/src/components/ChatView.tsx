@@ -13,6 +13,7 @@ import { MarkdownView } from './MarkdownView';
 import { QuestionPanel } from './QuestionPanel';
 import { SkillPicker } from './SkillPicker';
 import { UsageOverview } from './UsageOverview';
+import { detectImageMime, isLikelyImageFile } from '../utils/image-mime';
 
 export interface ChatViewProps {
   session: Session | null;
@@ -265,23 +266,23 @@ export function ChatView(props: ChatViewProps) {
     const available = Math.max(0, 6 - attachments.length);
     const selected = Array.from(files).slice(0, available);
     if (selected.length === 0) return;
-    const unsupportedImages = selected.filter(file => file.type.startsWith('image/'));
+    const imageCandidates = selected.filter(isLikelyImageFile);
     const filesToLoad = imageCapable
       ? selected
-      : selected.filter(file => !file.type.startsWith('image/'));
-    setAttachmentError(unsupportedImages.length > 0 && !imageCapable
+      : selected.filter(file => !isLikelyImageFile(file));
+    setAttachmentError(imageCandidates.length > 0 && !imageCapable
       ? imageUnsupportedMessage(Boolean(selectedModelId), tr)
       : null);
     if (filesToLoad.length === 0) return;
     setAttachmentsLoading(true);
     try {
-      const results = await Promise.allSettled(filesToLoad.map(file => file.type.startsWith('image/')
+      const results = await Promise.allSettled(filesToLoad.map(file => isLikelyImageFile(file)
         ? readImageAttachment(file)
         : uploadFileAttachment(file)));
       const loaded = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
       const failed = results.filter(result => result.status === 'rejected');
       if (loaded.length > 0) setAttachments(previous => [...previous, ...loaded].slice(0, 6));
-      if (failed.length > 0 && unsupportedImages.length === 0) {
+      if (failed.length > 0 && (imageCapable || imageCandidates.length === 0)) {
         setAttachmentError(tr(
           `${failed.length} file${failed.length === 1 ? '' : 's'} could not be attached.`,
           `${failed.length} 个文件添加失败。`,
@@ -449,7 +450,7 @@ export function ChatView(props: ChatViewProps) {
 
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     if (event.clipboardData.files.length === 0) return;
-    const hasImage = Array.from(event.clipboardData.files).some(file => file.type.startsWith('image/'));
+    const hasImage = Array.from(event.clipboardData.files).some(isLikelyImageFile);
     if (!hasImage) return;
     event.preventDefault();
     if (!imageCapable) {
@@ -741,7 +742,9 @@ async function readImageAttachment(file: File): Promise<ComposerAttachment> {
   }
   const preview = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(reader.error ?? new Error(`Unable to read ${file.name}.`));
+    reader.onerror = () => {
+      reject(reader.error ?? new Error(`Unable to read ${file.name}.`));
+    };
     reader.onload = () => {
       if (typeof reader.result === 'string') {
         resolve(reader.result);
@@ -752,21 +755,42 @@ async function readImageAttachment(file: File): Promise<ComposerAttachment> {
     reader.readAsDataURL(file);
   });
   const comma = preview.indexOf(',');
-  if (comma < 0) throw new Error(`Unable to encode ${file.name}.`);
+  if (comma < 0) throw new Error('Unable to encode ' + file.name + '.');
+  const data = preview.slice(comma + 1);
+  const mediaType = detectImageMime(decodeBase64Prefix(data), file.type);
+  if (mediaType === null) throw new Error(file.name + ' is not a supported image.');
+  const normalizedPreview = 'data:' + mediaType + ';base64,' + data;
   return {
-    id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2, 8)}`,
+    id:
+      file.name +
+      '-' +
+      String(file.size) +
+      '-' +
+      String(file.lastModified) +
+      '-' +
+      Math.random().toString(36).slice(2, 8),
     name: file.name,
-    preview,
+    preview: normalizedPreview,
     attachment: {
       kind: 'image',
       name: file.name,
       source: {
         kind: 'base64',
-        media_type: file.type || 'image/png',
-        data: preview.slice(comma + 1),
+        media_type: mediaType,
+        data,
       },
     },
   };
+}
+
+function decodeBase64Prefix(base64: string): Uint8Array {
+  const encodedPrefix = base64.slice(0, Math.min(base64.length, 4096));
+  try {
+    const binary = globalThis.atob(encodedPrefix);
+    return Uint8Array.from(binary, character => character.codePointAt(0) ?? 0);
+  } catch {
+    return new Uint8Array();
+  }
 }
 
 async function uploadFileAttachment(file: File): Promise<ComposerAttachment> {

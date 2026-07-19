@@ -12,6 +12,11 @@ import type { NoriBrowserState, NoriDesktopAPI } from '../src/types/nori-desktop
 
 const roots: Root[] = [];
 
+function pngFile(name: string): File {
+  const signature = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  return new File([signature], name, { type: 'image/png' });
+}
+
 beforeEach(() => {
   localStorage.setItem('nori-ui-language', 'en');
   localStorage.removeItem('nori-composer-loop-mode');
@@ -90,7 +95,7 @@ describe('chat image attachments', () => {
       models: [model('text-model', ['tool_use'])],
     });
     const input = container.querySelector<HTMLInputElement>('.composer-image-input')!;
-    const image = new File(['image'], 'screen.png', { type: 'image/png' });
+    const image = pngFile('screen.png');
 
     Object.defineProperty(input, 'files', { configurable: true, value: [image] });
     await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
@@ -113,7 +118,7 @@ describe('chat image attachments', () => {
     const input = container.querySelector<HTMLInputElement>('.composer-image-input')!;
     Object.defineProperty(input, 'files', {
       configurable: true,
-      value: [new File(['image'], 'kimi-screen.png', { type: 'image/png' })],
+      value: [pngFile('kimi-screen.png')],
     });
 
     await act(async () => {
@@ -133,7 +138,7 @@ describe('chat image attachments', () => {
       models: [model('multimodal-model', ['tool_use', 'image_in'])],
     });
     const fileInput = container.querySelector<HTMLInputElement>('.composer-image-input')!;
-    const image = new File(['image'], 'screen.png', { type: 'image/png' });
+    const image = pngFile('screen.png');
 
     Object.defineProperty(fileInput, 'files', { configurable: true, value: [image] });
     await act(async () => {
@@ -160,6 +165,30 @@ describe('chat image attachments', () => {
     );
   });
 
+  it('reports a mislabeled non-image instead of sending it to the model', async () => {
+    const { container } = await renderChat({
+      session: session('multimodal-model'),
+      models: [model('multimodal-model', ['tool_use', 'image_in'])],
+    });
+    const input = container.querySelector<HTMLInputElement>('.composer-image-input')!;
+    const invalidImage = new File(['not an image'], 'broken.png', {
+      type: 'text/plain; charset=utf-8',
+    });
+
+    Object.defineProperty(input, 'files', { configurable: true, value: [invalidImage] });
+    await act(async () => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[role="status"]')?.textContent).toContain(
+        'could not be attached',
+      );
+    });
+    expect(container.querySelector('.composer-attachment')).toBeNull();
+  });
+
   it('removes images with an explicit warning when switching to a text-only model', async () => {
     const { container, props } = await renderChat({
       models: [
@@ -170,7 +199,7 @@ describe('chat image attachments', () => {
     const fileInput = container.querySelector<HTMLInputElement>('.composer-image-input')!;
     Object.defineProperty(fileInput, 'files', {
       configurable: true,
-      value: [new File(['image'], 'screen.png', { type: 'image/png' })],
+      value: [pngFile('screen.png')],
     });
     await act(async () => {
       fileInput.dispatchEvent(new Event('change', { bubbles: true }));

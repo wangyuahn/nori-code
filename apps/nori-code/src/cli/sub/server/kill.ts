@@ -44,13 +44,94 @@ export interface KillCommandDeps {
   now(): number;
 }
 
+export interface ExpectedServerOwner {
+  readonly pid: number;
+  readonly started_at?: string;
+  readonly host?: string;
+  readonly port: number;
+  readonly host_version?: string;
+  readonly entry?: string;
+}
+
+const EXPECTED_OWNER_ENV = {
+  pid: 'NORI_CODE_EXPECT_SERVER_PID',
+  started_at: 'NORI_CODE_EXPECT_SERVER_STARTED_AT',
+  host: 'NORI_CODE_EXPECT_SERVER_HOST',
+  port: 'NORI_CODE_EXPECT_SERVER_PORT',
+  host_version: 'NORI_CODE_EXPECT_SERVER_HOST_VERSION',
+  entry: 'NORI_CODE_EXPECT_SERVER_ENTRY',
+} as const;
+
+function parseExpectedInteger(
+  env: NodeJS.ProcessEnv,
+  key: string,
+  minimum: number,
+): number | undefined {
+  const raw = env[key];
+  if (raw === undefined) return undefined;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < minimum) {
+    throw new Error(`Invalid ${key}: expected an integer >= ${String(minimum)}.`);
+  }
+  return value;
+}
+
+export function expectedServerOwnerFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): ExpectedServerOwner | undefined {
+  const hasExpectedOwner = Object.values(EXPECTED_OWNER_ENV)
+    .some((key) => env[key] !== undefined);
+  if (!hasExpectedOwner) return undefined;
+  const pid = parseExpectedInteger(env, EXPECTED_OWNER_ENV.pid, 1);
+  const port = parseExpectedInteger(env, EXPECTED_OWNER_ENV.port, 0);
+  if (pid === undefined || port === undefined) {
+    throw new Error(
+      `${EXPECTED_OWNER_ENV.pid} and ${EXPECTED_OWNER_ENV.port} must be provided together.`,
+    );
+  }
+  return {
+    pid,
+    started_at: env[EXPECTED_OWNER_ENV.started_at],
+    host: env[EXPECTED_OWNER_ENV.host],
+    port,
+    host_version: env[EXPECTED_OWNER_ENV.host_version],
+    entry: env[EXPECTED_OWNER_ENV.entry],
+  };
+}
+
+function matchesExpectedOwner(lock: LockContents, expected: ExpectedServerOwner): boolean {
+  return (
+    lock.pid === expected.pid &&
+    lock.started_at === expected.started_at &&
+    lock.host === expected.host &&
+    lock.port === expected.port &&
+    lock.host_version === expected.host_version &&
+    lock.entry === expected.entry
+  );
+}
+
+function sameLockOwner(left: LockContents, right: LockContents): boolean {
+  return (
+    left.pid === right.pid &&
+    left.started_at === right.started_at &&
+    left.host === right.host &&
+    left.port === right.port &&
+    left.host_version === right.host_version &&
+    left.entry === right.entry
+  );
+}
+
+function serverOwnerChangedError(): Error {
+  return new Error('Nori server owner changed; refusing to signal a different process.');
+}
+
 export function registerKillCommand(server: Command): void {
   server
     .command('kill')
     .description('Stop the running Nori server (graceful API + forced PID kill).')
     .action(async () => {
       try {
-        await handleKillCommand(DEFAULT_KILL_DEPS);
+        await handleKillCommand(DEFAULT_KILL_DEPS, expectedServerOwnerFromEnv());
       } catch (error) {
         process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
         process.exit(1);
@@ -58,11 +139,17 @@ export function registerKillCommand(server: Command): void {
     });
 }
 
-export async function handleKillCommand(deps: KillCommandDeps): Promise<void> {
+export async function handleKillCommand(
+  deps: KillCommandDeps,
+  expectedOwner?: ExpectedServerOwner,
+): Promise<void> {
   const lock = deps.getLiveLock();
   if (!lock) {
     deps.stdout.write('No running Nori server.\n');
     return;
+  }
+  if (expectedOwner !== undefined && !matchesExpectedOwner(lock, expectedOwner)) {
+    throw serverOwnerChangedError();
   }
 
   const { pid } = lock;
@@ -75,6 +162,21 @@ export async function handleKillCommand(deps: KillCommandDeps): Promise<void> {
   //    guarantees the kill.
   const token = deps.resolveToken();
   await deps.requestShutdown(origin, token).catch(() => {});
+  // The graceful request may stop the original owner or another launcher may
+  // replace its lock. Re-read before signaling so a stale decision can never
+  // terminate the new owner.
+  const currentLock = deps.getLiveLock();
+  if (currentLock === undefined) {
+    deps.stdout.write(`Nori server (pid ${String(pid)}) stopped.\n`);
+    return;
+  }
+  if (
+    !sameLockOwner(lock, currentLock) ||
+    (expectedOwner !== undefined && !matchesExpectedOwner(currentLock, expectedOwner))
+  ) {
+    throw serverOwnerChangedError();
+  }
+
 
   // 2. PID path — SIGTERM, wait, then SIGKILL.
   deps.signalPid(pid, 'SIGTERM');
@@ -82,6 +184,21 @@ export async function handleKillCommand(deps: KillCommandDeps): Promise<void> {
   if (await waitForExit(pid, TERM_GRACE_MS, deps)) {
     deps.stdout.write(`Nori server (pid ${String(pid)}) stopped.\n`);
     return;
+  }
+
+  // The process may exit and Windows may recycle its PID during the TERM
+  // grace period. Re-check the lock before a forced signal so SIGKILL can
+  // never target a replacement that inherited the same numeric PID.
+  const forceLock = deps.getLiveLock();
+  if (forceLock === undefined) {
+    deps.stdout.write(`Nori server (pid ${String(pid)}) stopped.\n`);
+    return;
+  }
+  if (
+    !sameLockOwner(lock, forceLock) ||
+    (expectedOwner !== undefined && !matchesExpectedOwner(forceLock, expectedOwner))
+  ) {
+    throw serverOwnerChangedError();
   }
 
   deps.signalPid(pid, 'SIGKILL');

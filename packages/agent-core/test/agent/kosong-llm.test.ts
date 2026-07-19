@@ -469,3 +469,39 @@ describe('downgradeUnsupportedMedia', () => {
     ]);
   });
 });
+
+describe('KosongLLM media normalization', () => {
+  it('repairs a mislabeled historical image before provider dispatch', async () => {
+    let captured: readonly Message[] | undefined;
+    const generate: GenerateFn = async (_p, _s, _t, messages) => {
+      captured = messages;
+      return {
+        id: 'response-media',
+        message: { role: 'assistant', content: [], toolCalls: [] },
+        usage: emptyUsage(),
+        finishReason: 'completed',
+        rawFinishReason: 'stop',
+      };
+    };
+    const llm = new KosongLLM({
+      provider,
+      systemPrompt: '',
+      capability: { ...makeCapability(1000), image_in: true },
+      generate,
+    });
+
+    await llm.chat({
+      messages: [mediaMessage([{
+        type: 'image_url',
+        imageUrl: { url: 'data:text/plain; charset=utf-8;base64,iVBORw0KGgo=' },
+      }])],
+      tools: [],
+      signal: new AbortController().signal,
+    });
+
+    expect(captured?.[0]?.content).toEqual([{
+      type: 'image_url',
+      imageUrl: { url: 'data:image/png;base64,iVBORw0KGgo=' },
+    }]);
+  });
+});

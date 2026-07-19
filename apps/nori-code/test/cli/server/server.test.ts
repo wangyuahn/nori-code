@@ -1424,6 +1424,80 @@ describe('`kimi server kill`', () => {
     expect(signals).toEqual([]);
   });
 
+  it('refuses to stop a lock that does not match the expected owner', async () => {
+    const { handleKillCommand } = await import('#/cli/sub/server/kill');
+    const { deps, signals, state } = makeKillDeps({ getLiveLock: () => liveLock });
+
+    await expect(handleKillCommand(deps, {
+      pid: 9999,
+      port: liveLock.port,
+      started_at: liveLock.started_at,
+    })).rejects.toThrow(/owner changed/);
+
+    expect(state.shutdownCalls).toBe(0);
+    expect(signals).toEqual([]);
+  });
+
+  it('treats missing expected owner fields as exact absence rather than wildcards', async () => {
+    const { handleKillCommand } = await import('#/cli/sub/server/kill');
+    const lockWithEntry = {
+      ...liveLock,
+      entry: 'C:\\new\\nori.exe',
+    };
+    const { deps, signals, state } = makeKillDeps({
+      getLiveLock: () => lockWithEntry,
+    });
+
+    await expect(handleKillCommand(deps, liveLock)).rejects.toThrow(/owner changed/);
+
+    expect(state.shutdownCalls).toBe(0);
+    expect(signals).toEqual([]);
+  });
+
+  it('rechecks the lock after graceful shutdown and never signals a replacement owner', async () => {
+    const { handleKillCommand } = await import('#/cli/sub/server/kill');
+    const replacement = {
+      ...liveLock,
+      pid: 5678,
+      started_at: '2026-06-17T00:01:00.000Z',
+    };
+    let reads = 0;
+    const { deps, signals, state } = makeKillDeps({
+      getLiveLock: () => {
+        reads += 1;
+        return reads === 1 ? liveLock : replacement;
+      },
+    });
+
+    await expect(handleKillCommand(deps, liveLock)).rejects.toThrow(/owner changed/);
+
+    expect(state.shutdownCalls).toBe(1);
+    expect(signals).toEqual([]);
+  });
+
+  it('rechecks the lock before SIGKILL and never signals a recycled pid owner', async () => {
+    const { handleKillCommand } = await import('#/cli/sub/server/kill');
+    const replacement = {
+      ...liveLock,
+      started_at: '2026-06-17T00:02:00.000Z',
+    };
+    let reads = 0;
+    const { deps, signals } = makeKillDeps({
+      getLiveLock: () => {
+        reads += 1;
+        if (reads <= 2) return liveLock;
+        return replacement;
+      },
+      pidAlive: () => true,
+    });
+
+    await expect(handleKillCommand(deps, liveLock)).rejects.toThrow(/owner changed/);
+
+    expect(signals).toEqual([
+      { pid: liveLock.pid, signal: 'SIGTERM' },
+    ]);
+  });
+
   it('attempts the API shutdown, then stops after SIGTERM when the pid exits promptly', async () => {
     const { handleKillCommand } = await import('#/cli/sub/server/kill');
     const { deps, writes, signals, state, clock } = makeKillDeps({

@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.0.0-pre.4 (2026-07-19)
+
+### Fixes
+
+- Nori Work no longer reuses a server started by an older or unknown Nori Code version.
+- Healthy incompatible servers are stopped before the bundled current-version server starts.
+- Stale Windows locks with recycled live PIDs are discarded without signaling an unrelated process.
+- Concurrent desktop/CLI startup races reuse the healthy winner instead of leaving the desktop on an error screen.
+- Desktop startup errors include the tail of `server.log` when the child reports empty stdout and stderr.
+- Clean desktop builds now compile and stage Web assets explicitly instead of relying on a stale `dist-web` directory.
+- Image attachments use magic-byte MIME detection instead of trusting incorrect browser metadata.
+- Historical image messages with incorrect MIME declarations are repaired before provider dispatch; invalid pseudo-images are omitted with a model-visible notice instead of breaking the conversation.
+
+### Verification
+
+- Desktop server lifecycle tests cover compatible reuse, old and unknown-version replacement, stale recycled-PID locks, startup races, and empty child-process diagnostics.
+- Web and agent-core tests cover mislabeled uploads, MIME repair, oversized base64 payloads, and historical message normalization.
+
 ## v1.0.0-pre.3 (2026-07-18)
 
 ### Fixes

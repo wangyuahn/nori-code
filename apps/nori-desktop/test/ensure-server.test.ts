@@ -11,10 +11,15 @@ vi.mock('node:child_process', () => ({ execFile: vi.fn() }));
 const homes: string[] = [];
 const originalHome = process.env['NORI_CODE_HOME'];
 
+function requestUrl(input: string | URL | Request): string {
+  if (typeof input === 'string') return input;
+  return input instanceof URL ? input.href : input.url;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
-    const url = String(input);
+    const url = requestUrl(input);
     if (url.includes(':58628/')) {
       return new Response(JSON.stringify({ code: 0 }), {
         status: 200,
@@ -97,7 +102,7 @@ it('writes server replacement failures to the server log', async () => {
   // Make the existing server respond as healthy so we enter the
   // versionMismatch → kill path, not the !existingHealthy fast path.
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
-    const url = String(input);
+    const url = requestUrl(input);
     if (url.includes(':58627/')) {
       return new Response(JSON.stringify({ code: 0 }), { status: 200 });
     }
@@ -116,8 +121,8 @@ it('writes server replacement failures to the server log', async () => {
   expect(log).toContain('kill stderr');
 });
 
-it('replaces a live same-version server that is no longer healthy', async () => {
-  const home = join(tmpdir(), `nori-desktop-unresponsive-${String(Date.now())}-${Math.random().toString(36).slice(2)}`);
+it('discards an unhealthy incompatible lock without signaling its recycled pid', async () => {
+  const home = join(tmpdir(), `nori-desktop-old-unhealthy-${String(Date.now())}-${Math.random().toString(36).slice(2)}`);
   homes.push(home);
   process.env['NORI_CODE_HOME'] = home;
   const serverDir = join(home, 'server');
@@ -133,6 +138,91 @@ it('replaces a live same-version server that is no longer healthy', async () => 
   }));
 
   vi.mocked(execFile).mockImplementation((_file, args, _options, callback) => {
+    expect(args?.[1]).toBe('run');
+    writeFileSync(lock, JSON.stringify({
+      pid: process.pid,
+      host: '127.0.0.1',
+      port: 58628,
+      host_version: '1.0.0-pre.3',
+    }));
+    callback?.(null, '', '');
+    return undefined as never;
+  });
+
+  await expect(ensureServer(seaPath, '1.0.0-pre.3')).resolves.toEqual({
+    origin: 'http://127.0.0.1:58628',
+  });
+  expect(vi.mocked(execFile).mock.calls.map(([, args]) => args?.slice(0, 2))).toEqual([
+    ['server', 'run'],
+  ]);
+});
+
+it('does not reuse a server lock without a version field', async () => {
+  const home = join(tmpdir(), `nori-desktop-unknown-version-${String(Date.now())}-${Math.random().toString(36).slice(2)}`);
+  homes.push(home);
+  process.env['NORI_CODE_HOME'] = home;
+  const serverDir = join(home, 'server');
+  const lock = join(serverDir, 'lock');
+  const seaPath = join(home, 'nori.exe');
+  mkdirSync(serverDir, { recursive: true });
+  writeFileSync(seaPath, 'test');
+  writeFileSync(lock, JSON.stringify({
+    pid: process.pid,
+    host: '127.0.0.1',
+    port: 58627,
+  }));
+
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ code: 0 }), { status: 200 })));
+  vi.mocked(execFile).mockImplementation((_file, args, _options, callback) => {
+    if (args?.[1] === 'kill') {
+      rmSync(lock, { force: true });
+      callback?.(null, '', '');
+      return undefined as never;
+    }
+    expect(args?.[1]).toBe('run');
+    writeFileSync(lock, JSON.stringify({
+      pid: process.pid,
+      host: '127.0.0.1',
+      port: 58628,
+      host_version: '1.0.0-pre.3',
+    }));
+    callback?.(null, '', '');
+    return undefined as never;
+  });
+
+  await expect(ensureServer(seaPath, '1.0.0-pre.3')).resolves.toEqual({
+    origin: 'http://127.0.0.1:58628',
+  });
+  expect(vi.mocked(execFile).mock.calls.map(([, args]) => args?.slice(0, 2))).toEqual([
+    ['server', 'kill'],
+    ['server', 'run'],
+  ]);
+});
+
+it('recovers a stale same-version lock after a startup conflict', async () => {
+  const home = join(tmpdir(), `nori-desktop-unresponsive-${String(Date.now())}-${Math.random().toString(36).slice(2)}`);
+  homes.push(home);
+  process.env['NORI_CODE_HOME'] = home;
+  const serverDir = join(home, 'server');
+  const lock = join(serverDir, 'lock');
+  const seaPath = join(home, 'nori.exe');
+  mkdirSync(serverDir, { recursive: true });
+  writeFileSync(seaPath, 'test');
+  writeFileSync(lock, JSON.stringify({
+    pid: process.pid,
+    host: '127.0.0.1',
+    port: 58627,
+    host_version: '1.0.0-pre.2',
+  }));
+
+  let runAttempts = 0;
+  vi.mocked(execFile).mockImplementation((_file, args, _options, callback) => {
+    runAttempts += 1;
+    if (runAttempts === 1) {
+      writeFileSync(join(home, 'server', 'server.log'), 'server already running (pid=4228, port=58627)\n');
+      callback?.(new Error('Command failed: nori server run'), '', '');
+      return undefined as never;
+    }
     if (args?.[1] === 'run') {
       writeFileSync(lock, JSON.stringify({
         pid: process.pid,
@@ -149,6 +239,7 @@ it('replaces a live same-version server that is no longer healthy', async () => 
     origin: 'http://127.0.0.1:58628',
   });
   expect(vi.mocked(execFile).mock.calls.map(([, args]) => args?.slice(0, 2))).toEqual([
+    ['server', 'run'],
     ['server', 'run'],
   ]);
 });
@@ -186,6 +277,29 @@ it('writes bundled server startup errors to the server log', async () => {
   expect(log).toContain('EADDRINUSE');
 });
 
+it('does not treat an old server-already-running log line as a current lock conflict', async () => {
+  const home = join(tmpdir(), `nori-desktop-old-log-${String(Date.now())}-${Math.random().toString(36).slice(2)}`);
+  homes.push(home);
+  process.env['NORI_CODE_HOME'] = home;
+  const serverDir = join(home, 'server');
+  const seaPath = join(home, 'nori.exe');
+  mkdirSync(serverDir, { recursive: true });
+  writeFileSync(seaPath, 'test');
+  writeFileSync(
+    join(serverDir, 'server.log'),
+    'server already running (pid=4228, port=58627, started=old)\n',
+  );
+
+  vi.mocked(execFile).mockImplementation((_file, args, _options, callback) => {
+    expect(args?.slice(0, 2)).toEqual(['server', 'run']);
+    callback?.(new Error('current configuration failure'), '', '');
+    return undefined as never;
+  });
+
+  await expect(ensureServer(seaPath)).rejects.toThrow('current configuration failure');
+  expect(vi.mocked(execFile)).toHaveBeenCalledTimes(1);
+});
+
 it('replaces a healthy same-version server that lacks required desktop routes', async () => {
   const home = join(tmpdir(), `nori-desktop-server-${String(Date.now())}-${Math.random().toString(36).slice(2)}`);
   homes.push(home);
@@ -204,7 +318,7 @@ it('replaces a healthy same-version server that lacks required desktop routes', 
   }));
 
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
-    const url = String(input);
+    const url = requestUrl(input);
     if (url.includes(':58627/') && url.endsWith('/cron')) return new Response('', { status: 404 });
     if (url.includes(':58627/')) return new Response(JSON.stringify({ code: 0 }), { status: 200 });
     if (url.includes(':58628/')) return new Response(JSON.stringify({ code: 0 }), { status: 200 });
@@ -243,15 +357,16 @@ it('replaces a healthy old-version server with a lock matching the desktop expec
   mkdirSync(serverDir, { recursive: true });
   writeFileSync(seaPath, 'test');
   writeFileSync(lock, JSON.stringify({
-    pid: 999_999_999,
+    pid: process.pid,
     started_at: '2026-07-15T00:00:00.000Z',
     host: '127.0.0.1',
     port: 58627,
     host_version: '1.0.0-pre.2',
+    entry: 'C:\\old\\nori.exe',
   }));
 
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
-    const url = String(input);
+    const url = requestUrl(input);
     if (url.includes(':58627/') || url.includes(':58628/')) {
       return new Response(JSON.stringify({ code: 0 }), {
         status: 200,
@@ -261,7 +376,18 @@ it('replaces a healthy old-version server with a lock matching the desktop expec
     throw new Error('unhealthy');
   }));
 
-  vi.mocked(execFile).mockImplementation((_file, args, _options, callback) => {
+  vi.mocked(execFile).mockImplementation((_file, args, options, callback) => {
+    if (args?.[1] === 'kill') {
+      const env = (options as { env?: NodeJS.ProcessEnv }).env;
+      expect(env).toEqual(expect.objectContaining({
+        NORI_CODE_EXPECT_SERVER_PID: String(process.pid),
+        NORI_CODE_EXPECT_SERVER_STARTED_AT: '2026-07-15T00:00:00.000Z',
+        NORI_CODE_EXPECT_SERVER_HOST: '127.0.0.1',
+        NORI_CODE_EXPECT_SERVER_PORT: '58627',
+        NORI_CODE_EXPECT_SERVER_HOST_VERSION: '1.0.0-pre.2',
+        NORI_CODE_EXPECT_SERVER_ENTRY: 'C:\\old\\nori.exe',
+      }));
+    }
     if (args?.[1] === 'run') {
       writeFileSync(lock, JSON.stringify({
         pid: process.pid,
@@ -294,7 +420,7 @@ it('throws an incompatibility error when the replaced lock still has the old CLI
   mkdirSync(serverDir, { recursive: true });
   writeFileSync(seaPath, 'test');
   writeFileSync(lock, JSON.stringify({
-    pid: 999_999_999,
+    pid: process.pid,
     started_at: '2026-07-15T00:00:00.000Z',
     host: '127.0.0.1',
     port: 58627,
@@ -302,7 +428,7 @@ it('throws an incompatibility error when the replaced lock still has the old CLI
   }));
 
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
-    const url = String(input);
+    const url = requestUrl(input);
     if (url.includes(':58627/')) {
       return new Response(JSON.stringify({ code: 0 }), {
         status: 200,
@@ -333,4 +459,66 @@ it('throws an incompatibility error when the replaced lock still has the old CLI
     ['server', 'kill'],
     ['server', 'run'],
   ]);
+});
+
+it('reuses a healthy compatible server without invoking server run again', async () => {
+  const home = join(tmpdir(), 'nori-desktop-compatible-' + String(Date.now()) + '-' + Math.random().toString(36).slice(2));
+  homes.push(home);
+  process.env['NORI_CODE_HOME'] = home;
+  const serverDir = join(home, 'server');
+  const lock = join(serverDir, 'lock');
+  const seaPath = join(home, 'nori.exe');
+  mkdirSync(serverDir, { recursive: true });
+  writeFileSync(seaPath, 'test');
+  writeFileSync(lock, JSON.stringify({
+    pid: process.pid,
+    host: '127.0.0.1',
+    port: 58627,
+    host_version: '1.0.0-pre.3',
+  }));
+
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+    if (requestUrl(input).includes(':58627/')) {
+      return new Response(JSON.stringify({ code: 0 }), { status: 200 });
+    }
+    throw new Error('unhealthy');
+  }));
+
+  await expect(ensureServer(seaPath, '1.0.0-pre.3')).resolves.toEqual({
+    origin: 'http://127.0.0.1:58627',
+  });
+  expect(vi.mocked(execFile)).not.toHaveBeenCalled();
+});
+
+it('recovers a healthy server that wins a startup lock race', async () => {
+  const home = join(tmpdir(), 'nori-desktop-race-' + String(Date.now()) + '-' + Math.random().toString(36).slice(2));
+  homes.push(home);
+  process.env['NORI_CODE_HOME'] = home;
+  const serverDir = join(home, 'server');
+  const lock = join(serverDir, 'lock');
+  const seaPath = join(home, 'nori.exe');
+  mkdirSync(serverDir, { recursive: true });
+  writeFileSync(seaPath, 'test');
+
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+    if (requestUrl(input).includes(':58627/')) {
+      return new Response(JSON.stringify({ code: 0 }), { status: 200 });
+    }
+    throw new Error('unhealthy');
+  }));
+  vi.mocked(execFile).mockImplementation((_file, args, _options, callback) => {
+    expect(args?.slice(0, 2)).toEqual(['server', 'run']);
+    writeFileSync(lock, JSON.stringify({
+      pid: process.pid,
+      host: '127.0.0.1',
+      port: 58627,
+      host_version: '1.0.0-pre.3',
+    }));
+    callback?.(new Error('server already running'), '', 'server already running');
+    return undefined as never;
+  });
+
+  await expect(ensureServer(seaPath, '1.0.0-pre.3')).resolves.toEqual({
+    origin: 'http://127.0.0.1:58627',
+  });
 });

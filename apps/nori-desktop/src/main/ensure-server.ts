@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -12,9 +12,11 @@ const HEALTH_POLL_MS = 200;
 /** Subset of the server lock JSON we read (apps/nori-code writes the full shape). */
 interface LockContents {
   pid: number;
+  started_at?: string;
   host?: string;
   port: number;
   host_version?: string;
+  entry?: string;
 }
 
 /** `<NORI_CODE_HOME>` or `~/.nori-code` — must match the server's home directory resolver. */
@@ -35,8 +37,11 @@ function removeMatchingLock(expected: LockContents): void {
   if (
     current === null
     || current.pid !== expected.pid
+    || current.started_at !== expected.started_at
+    || current.host !== expected.host
     || current.port !== expected.port
     || current.host_version !== expected.host_version
+    || current.entry !== expected.entry
   ) {
     return;
   }
@@ -63,7 +68,9 @@ export function ensureServerLogFile(): void {
     if (!existsSync(logPath)) writeFileSync(logPath, '', { mode: 0o600 });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`Unable to prepare the Nori server log at ${logPath}: ${reason}`);
+    throw new Error(`Unable to prepare the Nori server log at ${logPath}: ${reason}`, {
+      cause: error,
+    });
   }
 }
 
@@ -87,6 +94,24 @@ function readServerLogTail(maxLines = 30): string {
   }
 }
 
+function serverLogSize(): number {
+  try {
+    return statSync(serverLogPath()).size;
+  } catch {
+    return 0;
+  }
+}
+
+function readServerLogSince(offset: number): string {
+  try {
+    const bytes = readFileSync(serverLogPath());
+    if (bytes.byteLength <= offset) return '';
+    return bytes.subarray(offset).toString('utf-8');
+  } catch {
+    return '';
+  }
+}
+
 /** Read the daemon's bearer token from `<NORI_CODE_HOME>/server.token` (the server's
  *  `persistentToken.ts` writes the token at the home-dir root, not under `server/`). */
 export function readServerToken(): string | undefined {
@@ -104,9 +129,11 @@ export function readLock(): LockContents | null {
     if (typeof parsed.port === 'number' && typeof parsed.pid === 'number') {
       return {
         pid: parsed.pid,
+        started_at: typeof parsed.started_at === 'string' ? parsed.started_at : undefined,
         port: parsed.port,
         host: typeof parsed.host === 'string' ? parsed.host : undefined,
         host_version: typeof parsed.host_version === 'string' ? parsed.host_version : undefined,
+        entry: typeof parsed.entry === 'string' ? parsed.entry : undefined,
       };
     }
     return null;
@@ -115,23 +142,47 @@ export function readLock(): LockContents | null {
   }
 }
 
-function runServerKill(seaPath: string): Promise<void> {
+function runServerKill(seaPath: string, expected: LockContents): Promise<void> {
   return new Promise((resolve, reject) => {
-    execFile(seaPath, ['server', 'kill'], { timeout: RUN_TIMEOUT_MS }, (error, stdout, stderr) => {
-      if (error) {
-        appendServerDiagnostic(
-          [
-            '[desktop] bundled Nori server replacement could not stop the existing server',
-            `error: ${error.stack ?? error.message}`,
-            `stdout: ${String(stdout).trim() || '<empty>'}`,
-            `stderr: ${String(stderr).trim() || '<empty>'}`,
-          ].join('\n'),
-        );
-        reject(new Error(`nori server kill failed: ${error.message}\n${stderr}`.trim()));
-        return;
-      }
-      resolve();
-    });
+    execFile(
+      seaPath,
+      ['server', 'kill'],
+      {
+        timeout: RUN_TIMEOUT_MS,
+        env: {
+          ...process.env,
+          NORI_CODE_EXPECT_SERVER_PID: String(expected.pid),
+          NORI_CODE_EXPECT_SERVER_PORT: String(expected.port),
+          ...(expected.started_at === undefined
+            ? {}
+            : { NORI_CODE_EXPECT_SERVER_STARTED_AT: expected.started_at }),
+          ...(expected.host === undefined
+            ? {}
+            : { NORI_CODE_EXPECT_SERVER_HOST: expected.host }),
+          ...(expected.host_version === undefined
+            ? {}
+            : { NORI_CODE_EXPECT_SERVER_HOST_VERSION: expected.host_version }),
+          ...(expected.entry === undefined
+            ? {}
+            : { NORI_CODE_EXPECT_SERVER_ENTRY: expected.entry }),
+        },
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          appendServerDiagnostic(
+            [
+              '[desktop] bundled Nori server replacement could not stop the existing server',
+              `error: ${error.stack ?? error.message}`,
+              `stdout: ${stdout.trim() || '<empty>'}`,
+              `stderr: ${stderr.trim() || '<empty>'}`,
+            ].join('\n'),
+          );
+          reject(new Error(`nori server kill failed: ${error.message}\n${stderr}`.trim()));
+          return;
+        }
+        resolve();
+      },
+    );
   });
 }
 
@@ -174,11 +225,37 @@ async function supportsRequiredRoutes(origin: string): Promise<boolean> {
 }
 
 /**
- * Run the bundled Nori SEA's `server run`, which reuses a live shared daemon or
- * spawns one and exits once it is healthy. All discovery / port / lock logic
- * lives in apps/nori-code's `ensureDaemon`; we do not reimplement it.
+ * Find a compatible shared daemon that is already healthy.
  */
+async function findReusableServerOrigin(
+  expectedVersion?: string,
+  healthTimeoutMs = 1_000,
+): Promise<string | null> {
+  const lock = readLock();
+  if (lock === null) return null;
+  if (
+    expectedVersion !== undefined &&
+    lock.host_version !== expectedVersion
+  ) {
+    return null;
+  }
+  const origin = originFromLock(lock);
+  if (!await isHealthy(origin, healthTimeoutMs)) return null;
+  if (!await supportsRequiredRoutes(origin)) return null;
+  return origin;
+}
+
+class ServerRunError extends Error {
+  override readonly name = 'ServerRunError';
+
+  constructor(message: string, readonly alreadyRunning: boolean) {
+    super(message);
+  }
+}
+
+/** Run the bundled Nori SEA's `server run` command. */
 function runServerRun(seaPath: string): Promise<void> {
+  const logOffset = serverLogSize();
   return new Promise((resolve, reject) => {
     execFile(
       seaPath,
@@ -197,26 +274,84 @@ function runServerRun(seaPath: string): Promise<void> {
             killed?: boolean;
             signal?: NodeJS.Signals | null;
           };
+          const invocationLog = readServerLogSince(logOffset);
           const logTail = readServerLogTail();
           appendServerDiagnostic(
             [
               '[desktop] bundled Nori server failed to start',
               `error: ${error.stack ?? error.message}`,
-              `exitCode: ${String(processError.code ?? '<unknown>')}`,
-              `signal: ${String(processError.signal ?? '<none>')}`,
+              `exitCode: ${processError.code ?? '<unknown>'}`,
+              `signal: ${processError.signal ?? '<none>'}`,
               `killed: ${String(processError.killed ?? false)}`,
-              `stdout: ${String(stdout).trim() || '<empty>'}`,
-              `stderr: ${String(stderr).trim() || '<empty>'}`,
+              `stdout: ${stdout.trim() || '<empty>'}`,
+              `stderr: ${stderr.trim() || '<empty>'}`,
               `serverLogTail: ${logTail || '<empty>'}`,
             ].join('\n'),
           );
-          reject(new Error(`nori server run failed: ${error.message}\n${stderr}`.trim()));
+          const details = [
+            `nori server run failed: ${error.message}`,
+            stdout.trim(),
+            stderr.trim(),
+            logTail,
+          ].filter((part) => part.length > 0);
+          const alreadyRunning = [error.message, stdout, stderr, invocationLog]
+            .some((part) => /server already running/i.test(part));
+          reject(new ServerRunError(details.join('\n'), alreadyRunning));
           return;
         }
         resolve();
       },
     );
   });
+}
+
+function isServerAlreadyRunningError(error: unknown): boolean {
+  return error instanceof ServerRunError && error.alreadyRunning;
+}
+
+async function stopExistingServer(
+  seaPath: string,
+  lock: LockContents,
+  reason: string,
+): Promise<void> {
+  appendServerDiagnostic(
+    '[desktop] replacing incompatible server (' +
+      reason +
+      ') pid=' +
+      String(lock.pid) +
+      ' port=' +
+      String(lock.port) +
+      ' version=' +
+      (lock.host_version ?? '<unknown>'),
+  );
+  const origin = originFromLock(lock);
+  if (!await isHealthy(origin, 3_000)) {
+    // A live PID alone is not proof of ownership on Windows because PIDs are
+    // recycled. Never pass an unverified stale owner to `server kill`, whose
+    // forced fallback signals the PID recorded in the lock.
+    appendServerDiagnostic(
+      '[desktop] discarded stale server lock without signaling pid=' +
+        String(lock.pid) +
+        ' origin=' +
+        origin,
+    );
+    removeMatchingLock(lock);
+    return;
+  }
+
+  try {
+    await runServerKill(seaPath, lock);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/server owner changed/i.test(message)) throw error;
+    appendServerDiagnostic(
+      '[desktop] server owner changed during replacement; deferring to startup race recovery',
+    );
+    return;
+  }
+  // The kill command normally releases the lock; this guarded cleanup handles
+  // a process terminated before its release handler ran.
+  removeMatchingLock(lock);
 }
 
 export interface EnsureServerResult {
@@ -257,36 +392,58 @@ export async function ensureServer(seaPath: string, expectedVersion?: string): P
     throw new Error(message);
   }
 
-  // Production / SEA-available path
+  // Production / SEA-available path. Reuse a compatible healthy daemon
+  // before invoking the server-run command; the CLI intentionally refuses to
+  // acquire a second lock and reports "server already running".
+  const reusableOrigin = await findReusableServerOrigin(expectedVersion);
+  if (reusableOrigin !== null) {
+    process.stdout.write('[nori-desktop] connected to existing server at ' + reusableOrigin + '\n');
+    return { origin: reusableOrigin };
+  }
+
   const existingLock = readLock();
   if (existingLock !== null) {
-    const existingOrigin = originFromLock(existingLock);
-    const existingHealthy = await isHealthy(existingOrigin, 3000);
     const versionMismatch = expectedVersion !== undefined
-      && existingLock.host_version !== undefined
       && existingLock.host_version !== expectedVersion;
-    const missingRequiredRoutes = existingHealthy
-      && !versionMismatch
-      && !(await supportsRequiredRoutes(existingOrigin));
-    if (!existingHealthy) {
-      // Server is not responding — the lock is stale regardless of whether the
-      // recorded PID is alive (recycled) or dead. Skip the kill command entirely:
-      // on Windows a recycled PID may belong to an unrelated process, and trying
-      // to kill it either fails with EPERM or kills something innocent.
-      removeMatchingLock(existingLock);
-    } else if (versionMismatch || missingRequiredRoutes) {
-      // Server IS healthy but needs replacement (wrong version or missing routes).
-      process.stdout.write(
-        versionMismatch
-          ? `[nori-desktop] replacing server ${existingLock.host_version} with ${expectedVersion}\n`
-          : '[nori-desktop] replacing server that is missing required desktop routes\n',
-      );
-      await runServerKill(seaPath);
-      if (!await isHealthy(originFromLock(existingLock), 500)) removeMatchingLock(existingLock);
+    if (versionMismatch) {
+      await stopExistingServer(seaPath, existingLock, 'version mismatch');
+    } else {
+      const existingOrigin = originFromLock(existingLock);
+      const existingHealthy = await isHealthy(existingOrigin, 3_000);
+      const missingRequiredRoutes = existingHealthy
+        && !(await supportsRequiredRoutes(existingOrigin));
+      if (existingHealthy && missingRequiredRoutes) {
+        await stopExistingServer(seaPath, existingLock, 'missing required desktop routes');
+      }
     }
   }
-  await runServerRun(seaPath);
 
+  try {
+    await runServerRun(seaPath);
+  } catch (error) {
+    // A concurrent desktop/CLI startup can win the lock between the checks
+    // above and server run. Give that winner a little time to become healthy
+    // before treating the conflict as a wedged owner.
+    const racedOrigin = await findReusableServerOrigin(expectedVersion, 3_000);
+    if (racedOrigin !== null) {
+      appendServerDiagnostic('[desktop] reused a healthy server after startup race: ' + racedOrigin);
+      process.stdout.write('[nori-desktop] connected to existing server at ' + racedOrigin + '\n');
+      return { origin: racedOrigin };
+    }
+
+    if (!isServerAlreadyRunningError(error)) throw error;
+
+    const conflictingLock = readLock();
+    if (conflictingLock === null) throw error;
+    appendServerDiagnostic(
+      '[desktop] server run found an existing owner; recovering lock for pid=' +
+        String(conflictingLock.pid) +
+        ' port=' +
+        String(conflictingLock.port),
+    );
+    await stopExistingServer(seaPath, conflictingLock, 'startup lock conflict');
+    await runServerRun(seaPath);
+  }
   const lock = readLock();
   if (lock === null) {
     const message = `Nori server lock not found at ${lockPath()} after starting the server.`;
@@ -296,7 +453,6 @@ export async function ensureServer(seaPath: string, expectedVersion?: string): P
   const origin = originFromLock(lock);
   if (
     expectedVersion !== undefined &&
-    lock.host_version !== undefined &&
     lock.host_version !== expectedVersion
   ) {
     const message =

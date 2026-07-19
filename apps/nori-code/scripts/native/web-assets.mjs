@@ -105,14 +105,13 @@ async function collectAssetRoot({
 }
 
 export async function collectWebAssets({ appRoot, target }) {
-  const buildCommand =
-    'pnpm --filter @moonshot-ai/kimi-web run build && pnpm --filter @moonshot-ai/kimi-code run build';
+  const buildCommand = 'pnpm --filter nori-code run build';
   return collectAssetRoot({
     appRoot,
     target,
     root: WEB_ASSETS_DIR,
     requiredFile: 'index.html',
-    missingMessage: `Kimi web build output was not found at ${resolve(appRoot, WEB_ASSETS_DIR)}. Run \`${buildCommand}\` before building native SEA assets. App root: ${appRoot}`,
+    missingMessage: `Nori web build output was not found at ${resolve(appRoot, WEB_ASSETS_DIR)}. Run \`${buildCommand}\` before building native SEA assets. App root: ${appRoot}`,
     assetKey: webAssetKey,
   });
 }
