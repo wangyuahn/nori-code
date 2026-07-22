@@ -7,6 +7,7 @@ import {
   APITimeoutError,
   ChatProviderError,
   isProviderRateLimitError,
+  isRecoverableMediaRequestError,
   isRecoverableRequestStructureError,
   isRetryableGenerateError,
   isToolExchangeAdjacencyError,
@@ -304,6 +305,46 @@ describe('isRecoverableRequestStructureError', () => {
     expect(isRecoverableRequestStructureError(new APIStatusError(401, 'unauthorized'))).toBe(false);
     expect(isRecoverableRequestStructureError(new APIStatusError(400, 'Bad request'))).toBe(false);
     expect(isRecoverableRequestStructureError(new Error('roles must alternate'))).toBe(false);
+  });
+});
+
+describe('isRecoverableMediaRequestError', () => {
+  it('matches provider image format validation errors', () => {
+    expect(
+      isRecoverableMediaRequestError(
+        new APIStatusError(
+          400,
+          'Invalid request: unsupported image format: text/plain; charset=utf-8',
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      isRecoverableMediaRequestError(
+        new APIStatusError(415, 'Invalid base64-encoded image payload'),
+      ),
+    ).toBe(true);
+    expect(
+      isRecoverableMediaRequestError(
+        new APIStatusError(422, 'Could not decode the video'),
+      ),
+    ).toBe(true);
+  });
+
+  it('does not match unrelated, auth, context, or untyped errors', () => {
+    expect(
+      isRecoverableMediaRequestError(
+        new APIContextOverflowError(400, 'context length exceeded'),
+      ),
+    ).toBe(false);
+    expect(
+      isRecoverableMediaRequestError(new APIStatusError(400, 'Bad request')),
+    ).toBe(false);
+    expect(
+      isRecoverableMediaRequestError(new APIStatusError(401, 'unsupported image format')),
+    ).toBe(false);
+    expect(
+      isRecoverableMediaRequestError(new Error('unsupported image format')),
+    ).toBe(false);
   });
 });
 

@@ -2,6 +2,7 @@ import type { IInstantiationService } from '@nori-code/agent-core';
 import { ulid } from 'ulid';
 
 import { okEnvelope } from '../envelope';
+import { NORI_SERVER_APP_ID } from '../identity';
 import { registerApprovalsRoutes } from './approvals';
 import { registerAuthRoute } from './auth';
 import { registerConfigRoutes } from './config';
@@ -74,7 +75,7 @@ export async function registerApiV1Routes(
   // Register all REST routes under a single `/api/v1` prefix so individual
   // route modules do not hardcode the version segment.
   await app.register(async (apiV1) => {
-    registerHealthRoute(apiV1);
+    registerHealthRoute(apiV1, { serverVersion: opts.serverVersion });
 
     registerMetaRoute(apiV1, {
       serverVersion: opts.serverVersion,
@@ -156,7 +157,7 @@ export async function registerApiV1Routes(
   }, { prefix: '/api/v1' });
 }
 
-function registerHealthRoute(apiV1: ApiV1RouteHost): void {
+function registerHealthRoute(apiV1: ApiV1RouteHost, opts: { serverVersion: string }): void {
   apiV1.get('/healthz', {
     schema: {
       description: 'Health check',
@@ -168,7 +169,11 @@ function registerHealthRoute(apiV1: ApiV1RouteHost): void {
             msg: { type: 'string' },
             data: {
               type: 'object',
-              properties: { ok: { type: 'boolean' } },
+              properties: {
+                ok: { type: 'boolean' },
+                app: { type: 'string' },
+                version: { type: 'string' },
+              },
             },
             request_id: { type: 'string' },
           },
@@ -176,6 +181,12 @@ function registerHealthRoute(apiV1: ApiV1RouteHost): void {
       },
     },
   }, async (req, reply) => {
-    return reply.send(okEnvelope({ ok: true }, req.id));
+    // `app` identifies this as a Nori server: clients sharing the machine with
+    // products that return an identical `{code: 0}` envelope (e.g. upstream
+    // Kimi Code on the same historical default port) must not mistake them for
+    // a live Nori daemon. See `identity.ts`.
+    return reply.send(
+      okEnvelope({ ok: true, app: NORI_SERVER_APP_ID, version: opts.serverVersion }, req.id),
+    );
   });
 }

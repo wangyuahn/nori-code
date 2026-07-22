@@ -7,7 +7,7 @@
  * (REST.md §3 + WS.md §3.2).
  *
  * What's asserted here (and NOT in `client.test.ts`):
- *   1. `/healthz` returns `{ok: true}`.
+ *   1. `/healthz` returns `{ok: true, app: 'nori-code'}`.
  *   2. `/meta` exposes a non-empty `server_id`. (Since the v2 sync protocol,
  *      cursors carry a journal `epoch` and seq is durable across restarts —
  *      a stale cursor is detected server-side via `epoch_changed` instead of
@@ -33,7 +33,7 @@ import { DaemonClient, WsClient, type AnyFrame } from '../src/index.js';
 import { fetchWithReport } from '../src/report.js';
 import { createCaseLogger } from './log.js';
 
-const BASE_URL = process.env['KIMI_SERVER_URL'] ?? 'http://127.0.0.1:58627';
+const BASE_URL = process.env['KIMI_SERVER_URL'] ?? 'http://127.0.0.1:58771';
 const API_PREFIX = '/api/v1';
 const HANDSHAKE_TIMEOUT_MS = 5_000;
 const PROMPT_TIMEOUT_MS = 120_000;
@@ -163,11 +163,11 @@ afterEach(async () => {
 });
 
 describeLive('refresh-replay (live server required)', () => {
-  it('phase 0: /healthz returns ok:true', async () => {
+  it('phase 0: /healthz identifies the Nori server', async () => {
     const log = createCaseLogger('refresh: healthz');
-    const health = await getEnvelope<{ ok: boolean }>('/healthz', log);
+    const health = await getEnvelope<{ ok: boolean; app: string; version?: string }>('/healthz', log);
     log('data', health);
-    expect(health.ok).toBe(true);
+    expect(health).toMatchObject({ ok: true, app: 'nori-code' });
   });
 
   it('phase 0: /meta exposes server_id, version, started_at', async () => {

@@ -8,16 +8,17 @@
  * 0)` returns ESRCH for any unallocated pid on Linux/macOS).
  */
 
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, existsSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   DEFAULT_LOCK_PATH,
   ServerLockedError,
   acquireLock,
+  acquireLockSafe,
   getLiveLock,
   type LockContents,
 } from '../src/lock';
@@ -227,6 +228,43 @@ describe('acquireLock — updatePort', () => {
     const stored = JSON.parse(readFileSync(lockPath, 'utf8')) as LockContents;
     expect(stored.port).toBe(7878); // untouched — we don't own it anymore
     handle.release();
+  });
+});
+
+describe('acquireLockSafe - product identity', () => {
+  it('reads the legacy token from the home that owns a custom lock path', async () => {
+    const customLockPath = join(tmpDir, 'server', 'lock');
+    mkdirSync(join(tmpDir, 'server'), { recursive: true });
+    writeFileSync(join(tmpDir, 'server.token'), 'legacy-token\n');
+    writeFileSync(
+      customLockPath,
+      JSON.stringify({
+        pid: process.pid,
+        started_at: '2026-07-20T00:00:00.000Z',
+        host: '127.0.0.1',
+        port: 58627,
+      } satisfies LockContents),
+    );
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ code: 0 }), { status: 200 }))
+      .mockImplementationOnce(async (_input, init) => {
+        expect(new Headers(init?.headers).get('authorization')).toBe('Bearer legacy-token');
+        return new Response(JSON.stringify({ code: 0 }), { status: 200 });
+      });
+
+    try {
+      await expect(
+        acquireLockSafe({
+          lockPath: customLockPath,
+          port: 58771,
+        }),
+      ).rejects.toBeInstanceOf(ServerLockedError);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(readFileSync(customLockPath, 'utf8')).toContain('"port":58627');
+    } finally {
+      fetchMock.mockRestore();
+    }
   });
 });
 

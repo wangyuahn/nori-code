@@ -29,7 +29,7 @@ Not in scope (see PLAN §6): NAT traversal, untrusted relays, end-to-end encrypt
 kimi server run          # or: kimi web
 ```
 
-- Binds `127.0.0.1:58627` by default (`--host` / `--port` to override).
+- Binds `127.0.0.1:58771` by default (`--host` / `--port` to override).
 - Uses a persistent bearer token (`crypto.randomBytes(32)`, base64url) generated
   once on first boot and written to `<NORI_CODE_HOME>/server.token` with mode
   `0600` (parent directory `0700`). The same token is reused across restarts; it
@@ -83,13 +83,13 @@ kimi server run --host 0.0.0.0 --insecure-no-tls
 
 ## Reverse-proxy examples
 
-The server listens on `127.0.0.1:58627`; the proxy terminates TLS and forwards to it.
+The server listens on `127.0.0.1:58771`; the proxy terminates TLS and forwards to it.
 
 **Caddy** (`Caddyfile`; automatic HTTPS):
 
 ```
 kimi.example.com {
-    reverse_proxy 127.0.0.1:58627
+    reverse_proxy 127.0.0.1:58771
 }
 ```
 
@@ -107,7 +107,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/kimi.example.com/privkey.pem;
 
     location / {
-        proxy_pass http://127.0.0.1:58627;
+        proxy_pass http://127.0.0.1:58771;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header Authorization $http_authorization;
@@ -119,7 +119,7 @@ server {
 
 **Tunnel alternatives:**
 
-- `cloudflared tunnel --url http://127.0.0.1:58627` (Cloudflare Tunnel; no inbound
+- `cloudflared tunnel --url http://127.0.0.1:58771` (Cloudflare Tunnel; no inbound
   firewall rule).
 - `ssh -R` (SSH remote port forwarding) to publish the loopback port via a host you
   control.
@@ -186,7 +186,7 @@ The only server-exposure flags are:
 | Flag | Purpose |
 |---|---|
 | `--host <host>` | Bind host (default `127.0.0.1`). |
-| `--port <port>` | Bind port (default `58627`). |
+| `--port <port>` | Bind port (default `58771`). |
 | `--insecure-no-tls` | Allow a non-loopback bind without app-level TLS (i.e. TLS is terminated by a proxy/tunnel). |
 | `--allow-remote-shutdown` | Re-enable `POST /api/v1/shutdown` on a non-loopback bind. |
 | `--allow-remote-terminals` | Re-enable the PTY `/api/v1/terminals/*` routes on a non-loopback bind. |

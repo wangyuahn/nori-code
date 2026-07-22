@@ -23,6 +23,7 @@ import {
   type ToolArgsValidator,
 } from '../tools/args-validator';
 import { PathSecurityError } from '../tools/policies/path-access';
+import { normalizeImageContentParts } from '../tools/support/image-compress';
 
 import { isUserCancellation } from '../utils/abort';
 import { errorMessage, isAbortError } from './errors';
@@ -643,14 +644,17 @@ function normalizeToolResult(r: ExecutableToolResult): ExecutableToolResult {
   } else if (r.output.length === 0) {
     output = TOOL_OUTPUT_EMPTY;
   } else {
-    const hasMediaBlock = r.output.some(isMediaContentPart);
+    const normalizedParts = normalizeImageContentParts(r.output);
+    const hasMediaBlock = normalizedParts.some(isMediaContentPart);
     if (hasMediaBlock) {
-      const hasNonEmptyText = r.output.some((c) => c.type === 'text' && c.text.length > 0);
+      const hasNonEmptyText = normalizedParts.some(
+        (c) => c.type === 'text' && c.text.length > 0,
+      );
       output = hasNonEmptyText
-        ? r.output
-        : [{ type: 'text', text: TOOL_OUTPUT_NON_TEXT }, ...r.output];
+        ? normalizedParts
+        : [{ type: 'text', text: TOOL_OUTPUT_NON_TEXT }, ...normalizedParts];
     } else {
-      const textJoined = r.output
+      const textJoined = normalizedParts
         .filter((c): c is Extract<typeof c, { type: 'text' }> => c.type === 'text')
         .map((c) => c.text)
         .join('');

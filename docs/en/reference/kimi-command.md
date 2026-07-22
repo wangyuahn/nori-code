@@ -158,7 +158,7 @@ kimi server status             # snapshot of installed/running state
 
 | Option | Description |
 | --- | --- |
-| `--port <port>` | Bind port; defaults to `58627` |
+| `--port <port>` | Bind port; defaults to `58771` |
 | `--log-level <level>` | Enable server logs at the selected level; omitted by default |
 | `--debug-endpoints` | Mount `/api/v1/debug/*` routes (off by default) |
 | `--foreground` | Run in the foreground instead of spawning a background daemon |
@@ -176,7 +176,7 @@ Register the server as an OS-managed service so it starts at login and restarts 
 
 | Option | Description |
 | --- | --- |
-| `--port <port>` | Bind port the supervised server uses; defaults to `58627` |
+| `--port <port>` | Bind port the supervised server uses; defaults to `58771` |
 | `--log-level <level>` | Log level recorded in the generated unit |
 | `--force` | Replace an existing install instead of failing |
 | `--json` | Output JSON instead of a human-readable line |

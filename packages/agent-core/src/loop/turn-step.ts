@@ -9,7 +9,13 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { isRecoverableRequestStructureError, type TokenUsage } from '@nori-code/kosong';
+import {
+  isRecoverableMediaRequestError,
+  isRecoverableRequestStructureError,
+  type ContentPart,
+  type Message,
+  type TokenUsage,
+} from '@nori-code/kosong';
 import type { Logger } from '#/logging/types';
 
 import type { LoopEventDispatcher } from './events';
@@ -126,42 +132,70 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
   try {
     response = await chatWithRetry({ ...retryInput, params: chatParams });
   } catch (error) {
-    // A structural request rejection (tool_use/tool_result pairing, empty or
-    // whitespace-only text, non-user first message, non-alternating roles) means
-    // the projected history is not wire-compliant for a strict provider — and
-    // since the same history is re-sent every turn, the session would stay stuck
-    // on this error forever. Resend ONCE with a strict, guaranteed-compliant
-    // rebuild (every open call closed, stray results dropped, leading non-user
-    // trimmed, consecutive assistants merged) as a last resort. Any other error,
-    // or a host that supplied no strict builder, propagates unchanged.
-    if (buildMessagesStrict === undefined || !isRecoverableRequestStructureError(error)) throw error;
-    signal.throwIfAborted();
-    log?.warn('provider rejected request structure; resending with strict projection', {
-      turnStep: `${turnId}.${String(currentStep)}`,
-      model: llm.modelName,
-    });
-    const strictMessages = await buildMessagesStrict();
-    signal.throwIfAborted();
-    try {
-      response = await chatWithRetry({
-        ...retryInput,
-        params: { ...chatParams, messages: strictMessages },
-      });
-    } catch (strictError) {
-      // The strictly-sanitized rebuild was still rejected — our wire-compliance
-      // repair did not cover this case. Surface it loudly: the session is stuck
-      // and this is the signal we need to diagnose the gap.
-      log?.error('strict resend still rejected by provider; request remains wire-invalid', {
+    const mediaFallback = omitMediaAfterProviderRejection(messages);
+    if (isRecoverableMediaRequestError(error) && mediaFallback.omittedCount > 0) {
+      signal.throwIfAborted();
+      log?.warn('provider rejected media; resending once with text placeholders', {
         turnStep: `${turnId}.${String(currentStep)}`,
         model: llm.modelName,
-        originalError: errorMessage(error),
-        strictError: errorMessage(strictError),
+        omittedCount: mediaFallback.omittedCount,
+        error: errorMessage(error),
       });
-      throw strictError;
+      try {
+        response = await chatWithRetry({
+          ...retryInput,
+          params: { ...chatParams, messages: mediaFallback.messages },
+        });
+      } catch (fallbackError) {
+        log?.error('media fallback resend was rejected by provider', {
+          turnStep: `${turnId}.${String(currentStep)}`,
+          model: llm.modelName,
+          originalError: errorMessage(error),
+          fallbackError: errorMessage(fallbackError),
+        });
+        throw fallbackError;
+      }
+      log?.info('recovered after media fallback resend', {
+        turnStep: `${turnId}.${String(currentStep)}`,
+      });
+    } else {
+      // A structural request rejection (tool_use/tool_result pairing, empty or
+      // whitespace-only text, non-user first message, non-alternating roles) means
+      // the projected history is not wire-compliant for a strict provider — and
+      // since the same history is re-sent every turn, the session would stay stuck
+      // on this error forever. Resend ONCE with a strict, guaranteed-compliant
+      // rebuild (every open call closed, stray results dropped, leading non-user
+      // trimmed, consecutive assistants merged) as a last resort. Any other error,
+      // or a host that supplied no strict builder, propagates unchanged.
+      if (buildMessagesStrict === undefined || !isRecoverableRequestStructureError(error)) throw error;
+      signal.throwIfAborted();
+      log?.warn('provider rejected request structure; resending with strict projection', {
+        turnStep: `${turnId}.${String(currentStep)}`,
+        model: llm.modelName,
+      });
+      const strictMessages = await buildMessagesStrict();
+      signal.throwIfAborted();
+      try {
+        response = await chatWithRetry({
+          ...retryInput,
+          params: { ...chatParams, messages: strictMessages },
+        });
+      } catch (strictError) {
+        // The strictly-sanitized rebuild was still rejected — our wire-compliance
+        // repair did not cover this case. Surface it loudly: the session is stuck
+        // and this is the signal we need to diagnose the gap.
+        log?.error('strict resend still rejected by provider; request remains wire-invalid', {
+          turnStep: `${turnId}.${String(currentStep)}`,
+          model: llm.modelName,
+          originalError: errorMessage(error),
+          strictError: errorMessage(strictError),
+        });
+        throw strictError;
+      }
+      log?.info('recovered after strict resend', {
+        turnStep: `${turnId}.${String(currentStep)}`,
+      });
     }
-    log?.info('recovered after strict resend', {
-      turnStep: `${turnId}.${String(currentStep)}`,
-    });
   }
   const usage = response.usage;
   const usageResult = await recordUsage(usage);
@@ -223,6 +257,60 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     stopReason:
       stopTurnAfterStep && effectiveStopReason === 'tool_use' ? 'end_turn' : effectiveStopReason,
   };
+}
+
+function omitMediaAfterProviderRejection(messages: readonly Message[]): {
+  readonly messages: Message[];
+  readonly omittedCount: number;
+} {
+  let omittedCount = 0;
+  const out: Message[] = [];
+  for (const message of messages) {
+    let nextContent: ContentPart[] | undefined;
+    for (let index = 0; index < message.content.length; index += 1) {
+      const part = message.content[index]!;
+      const placeholder = rejectedMediaPlaceholder(part);
+      if (placeholder === undefined) {
+        nextContent?.push(part);
+        continue;
+      }
+      nextContent ??= message.content.slice(0, index);
+      nextContent.push({ type: 'text', text: placeholder });
+      omittedCount += 1;
+    }
+    out.push(nextContent === undefined ? message : { ...message, content: nextContent });
+  }
+  return {
+    messages: omittedCount === 0 ? [...messages] : out,
+    omittedCount,
+  };
+}
+
+function rejectedMediaPlaceholder(part: ContentPart): string | undefined {
+  switch (part.type) {
+    case 'image_url':
+      return (
+        '[image omitted: the provider rejected this media payload. ' +
+        'Continue with the surrounding text and tool output.]'
+      );
+    case 'audio_url':
+      return (
+        '[audio omitted: the provider rejected this media payload. ' +
+        'Continue with the surrounding text and tool output.]'
+      );
+    case 'video_url':
+      return (
+        '[video omitted: the provider rejected this media payload. ' +
+        'Continue with the surrounding text and tool output.]'
+      );
+    case 'text':
+    case 'think':
+      return undefined;
+    default: {
+      const _exhaustive: never = part;
+      return _exhaustive;
+    }
+  }
 }
 
 /**

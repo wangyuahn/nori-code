@@ -69,6 +69,14 @@ export interface EnsureDaemonOptions {
    * Defaults to the current binary version.
    */
   hostVersion?: string;
+  /**
+   * How long to wait for an already-running, version-matched daemon to answer
+   * `/healthz` before declaring it wedged and replacing it. Defaults to
+   * `REUSE_HEALTH_TIMEOUT_MS` (15s). Launchers that already did their own
+   * lock checks (e.g. the desktop app) pass a much smaller value so a wedged
+   * lock holder cannot burn most of their startup budget.
+   */
+  reuseHealthTimeoutMs?: number;
 }
 
 export interface EnsureDaemonResult {
@@ -313,6 +321,7 @@ export async function ensureDaemon(options: EnsureDaemonOptions = {}): Promise<E
   const preferred = options.port ?? DEFAULT_SERVER_PORT;
   const logLevel = options.logLevel ?? DEFAULT_DAEMON_LOG_LEVEL;
   const hostVersion = options.hostVersion ?? getVersion();
+  const reuseHealthTimeoutMs = options.reuseHealthTimeoutMs ?? REUSE_HEALTH_TIMEOUT_MS;
 
   // 1. Reuse an already-live daemon if one holds the lock and its version matches.
   const existing = getLiveLock();
@@ -331,7 +340,7 @@ export async function ensureDaemon(options: EnsureDaemonOptions = {}): Promise<E
       // Fall through and spawn a new daemon of the current version.
     } else {
       const origin = serverOrigin(lockConnectHost(existing), existing.port);
-      if (await waitForServerHealthy(origin, REUSE_HEALTH_TIMEOUT_MS)) {
+      if (await waitForServerHealthy(origin, reuseHealthTimeoutMs)) {
         return {
           origin,
           reused: true,
@@ -396,36 +405,72 @@ export async function ensureDaemon(options: EnsureDaemonOptions = {}): Promise<E
     childExit = { code: -1, signal: null };
   });
 
-  // 3. Wait until some live daemon (ours, or a racer that won the lock) is up.
-  const deadline = Date.now() + SPAWN_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const live = getLiveLock();
-    if (live) {
-      const origin = serverOrigin(lockConnectHost(live), live.port);
-      if (await isServerHealthy(origin, 500)) {
-        return {
-          origin,
-          reused: false,
-          host: live.host ?? DEFAULT_SERVER_HOST,
-          port: live.port,
-        };
-      }
+  // If this parent is terminated mid-wait (e.g. a launcher's startup timeout
+  // kills `server run` after it spawned the detached daemon), take the
+  // not-yet-healthy child down too — a wedged survivor would hold the lock
+  // and burn the reuse-health wait of every later launch. POSIX delivers
+  // SIGTERM/SIGINT to this handler; on Windows termination is unconditional,
+  // so the daemon child additionally guards on its parent pid (see
+  // `startServerDaemon` in ./run.ts).
+  const killSpawnedChild = (): void => {
+    if (childExit !== undefined || child.pid === undefined) return;
+    try {
+      process.kill(child.pid);
+    } catch {
+      // Best effort — the child may already be gone.
     }
-    if (childExit !== undefined && !live) {
-      // Our child exited and no other live daemon holds the lock to fall back
-      // to — this is a real boot failure, not a lost race.
-      throw new Error(formatDaemonBootFailure(childExit, daemonLogPath()));
-    }
-    await sleep(POLL_INTERVAL_MS);
-  }
+  };
+  const onSigterm = (): void => {
+    killSpawnedChild();
+    process.exit(143); // 128 + SIGTERM
+  };
+  const onSigint = (): void => {
+    killSpawnedChild();
+    process.exit(130); // 128 + SIGINT
+  };
+  process.once('SIGTERM', onSigterm);
+  process.once('SIGINT', onSigint);
 
-  appendDaemonDiagnostic(
-    `[daemon] startup timed out after ${String(SPAWN_TIMEOUT_MS)}ms without a healthy server`,
-  );
-  throw new Error(
-    `Nori server daemon failed to start within ${String(SPAWN_TIMEOUT_MS)}ms.\n\n` +
-      formatLogTail(daemonLogPath()),
-  );
+  let startupSucceeded = false;
+  try {
+    // 3. Wait until some live daemon (ours, or a racer that won the lock) is up.
+    const deadline = Date.now() + SPAWN_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      const live = getLiveLock();
+      if (live) {
+        const origin = serverOrigin(lockConnectHost(live), live.port);
+        if (await isServerHealthy(origin, 500)) {
+          startupSucceeded = true;
+          return {
+            origin,
+            reused: false,
+            host: live.host ?? DEFAULT_SERVER_HOST,
+            port: live.port,
+          };
+        }
+      }
+      if (childExit !== undefined && !live) {
+        // Our child exited and no other live daemon holds the lock to fall back
+        // to — this is a real boot failure, not a lost race.
+        throw new Error(formatDaemonBootFailure(childExit, daemonLogPath()));
+      }
+      await sleep(POLL_INTERVAL_MS);
+    }
+
+    appendDaemonDiagnostic(
+      `[daemon] startup timed out after ${String(SPAWN_TIMEOUT_MS)}ms without a healthy server`,
+    );
+    throw new Error(
+      `Nori server daemon failed to start within ${String(SPAWN_TIMEOUT_MS)}ms.\n\n` +
+        formatLogTail(daemonLogPath()),
+    );
+  } finally {
+    process.removeListener('SIGTERM', onSigterm);
+    process.removeListener('SIGINT', onSigint);
+    if (!startupSucceeded) {
+      killSpawnedChild();
+    }
+  }
 }
 
 function formatDaemonBootFailure(

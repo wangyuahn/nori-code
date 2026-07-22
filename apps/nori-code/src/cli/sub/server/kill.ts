@@ -15,8 +15,15 @@
  */
 
 import type { Command } from 'commander';
+import { unlinkSync } from 'node:fs';
 
-import { getLiveLock, type LockContents } from '@nori-code/server';
+import {
+  classifyServerIdentity,
+  DEFAULT_LOCK_PATH,
+  getLiveLock,
+  type LockContents,
+  type ServerIdentityClass,
+} from '@nori-code/server';
 
 import { getDataDir } from '#/utils/paths';
 
@@ -37,6 +44,14 @@ export interface KillCommandDeps {
   requestShutdown(origin: string, token: string | undefined): Promise<void>;
   /** Best-effort read of the persistent bearer token; undefined on miss. */
   resolveToken(): string | undefined;
+  /**
+   * Identify which product serves the origin ('nori' | 'foreign' |
+   * 'unreachable'). Guards the forced PID path against signaling a foreign
+   * process that recycled the recorded PID or shares the port.
+   */
+  probeIdentity(origin: string, token: string | undefined): Promise<ServerIdentityClass>;
+  /** Remove the stale lock file after a foreign owner was detected. */
+  discardLock(): void;
   signalPid(pid: number, signal: NodeJS.Signals): boolean;
   pidAlive(pid: number): boolean;
   sleep(ms: number): Promise<void>;
@@ -154,14 +169,32 @@ export async function handleKillCommand(
 
   const { pid } = lock;
   const origin = serverOrigin(lockConnectHost(lock), lock.port);
+  const token = deps.resolveToken();
+
+  // Identify the product before any destructive request or signal. Upstream
+  // Kimi Code historically shared both this port and the bare `{code: 0}`
+  // health envelope, so even POSTing /shutdown before this check can stop the
+  // wrong product. An unreachable owner still takes the forced PID path: that
+  // is how a wedged Nori daemon recorded by this lock is recovered.
+  const identity = await deps.probeIdentity(origin, token);
+  if (identity === 'foreign') {
+    deps.discardLock();
+    deps.stdout.write(
+      `The port recorded in the Nori server lock is now served by a different product; ` +
+        `discarded the stale lock without signaling pid ${String(pid)}.\n`,
+    );
+    return;
+  }
 
   // 1. API path — best-effort graceful shutdown. Ignore every outcome: the
   //    server may be an older build without the route, already wedged, or may
   //    drop the connection as it exits. The bearer token (M5.1) is best-effort
   //    too: if it can't be read the API call 401s and the PID path below still
   //    guarantees the kill.
-  const token = deps.resolveToken();
-  await deps.requestShutdown(origin, token).catch(() => {});
+  if (identity === 'nori') {
+    await deps.requestShutdown(origin, token).catch(() => {});
+  }
+
   // The graceful request may stop the original owner or another launcher may
   // replace its lock. Re-read before signaling so a stale decision can never
   // terminate the new owner.
@@ -177,8 +210,19 @@ export async function handleKillCommand(
     throw serverOwnerChangedError();
   }
 
-
   // 2. PID path — SIGTERM, wait, then SIGKILL.
+  // The graceful request can close the original server while another product
+  // wins the same port before the lock release is observed. Re-check the
+  // product immediately before the first PID signal as a second safety gate.
+  if (identity === 'nori' && (await deps.probeIdentity(origin, token)) === 'foreign') {
+    deps.discardLock();
+    deps.stdout.write(
+      `The port recorded in the Nori server lock is now served by a different product; ` +
+        `discarded the stale lock without signaling pid ${String(pid)}.\n`,
+    );
+    return;
+  }
+
   deps.signalPid(pid, 'SIGTERM');
 
   if (await waitForExit(pid, TERM_GRACE_MS, deps)) {
@@ -273,6 +317,14 @@ const DEFAULT_KILL_DEPS: KillCommandDeps = {
   getLiveLock,
   requestShutdown: requestShutdownViaApi,
   resolveToken: () => tryResolveServerToken(getDataDir()),
+  probeIdentity: (origin, token) => classifyServerIdentity(origin, token, API_TIMEOUT_MS),
+  discardLock: () => {
+    try {
+      unlinkSync(DEFAULT_LOCK_PATH);
+    } catch {
+      // Best effort — a concurrent release/takeover may have removed it.
+    }
+  },
   signalPid,
   pidAlive,
   sleep: (ms) =>

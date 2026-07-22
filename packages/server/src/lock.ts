@@ -34,9 +34,10 @@ import {
   openSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { connect } from 'node:net';
 
+import { classifyServerIdentity } from './identity';
 import { resolveNoriHome } from './home';
+import { serverTokenPath } from './services/auth/persistentToken';
 
 export const DEFAULT_LOCK_DIR = join(resolveNoriHome(), 'server');
 export const DEFAULT_LOCK_PATH = join(DEFAULT_LOCK_DIR, 'lock');
@@ -126,19 +127,15 @@ function pidAlive(pid: number): boolean {
   }
 }
 
-/** Async TCP port probe. Resolves true if something accepts on host:port within timeoutMs. */
-function probePort(host: string, port: number, timeoutMs: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = connect({ host, port, timeout: timeoutMs }, () => {
-      socket.destroy();
-      resolve(true);
-    });
-    socket.once('error', () => resolve(false));
-    socket.once('timeout', () => {
-      socket.destroy();
-      resolve(false);
-    });
-  });
+/** Best-effort read of the local persistent server token (for legacy-server identification). */
+function readLocalServerToken(lockPath: string): string | undefined {
+  try {
+    const homeDir = dirname(dirname(lockPath));
+    const token = readFileSync(serverTokenPath(homeDir), 'utf8').trim();
+    return token.length > 0 ? token : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Read + JSON.parse the lock file; returns undefined on any error so callers can fall through. */
@@ -267,8 +264,10 @@ export function acquireLock(opts: AcquireLockOptions): AcquireLockResult {
 
 /**
  * Like acquireLockSync, but when pidAlive says the owner is alive, also probes
- * the recorded host:port via TCP connect. If the port is not listening, the
- * lock is treated as stale (Windows PID recycling guard).
+ * the recorded host:port for a Nori-identified `/api/v1/healthz` response. If
+ * the port is not serving a Nori server, the lock is treated as stale
+ * (Windows PID recycling guard; also covers a foreign product sharing the
+ * historical default port).
  */
 export async function acquireLockSafe(opts: AcquireLockOptions): Promise<AcquireLockResult> {
   const lockPath = opts.lockPath ?? DEFAULT_LOCK_PATH;
@@ -302,16 +301,29 @@ export async function acquireLockSafe(opts: AcquireLockOptions): Promise<Acquire
         existing,
       );
     }
-    // PID appears alive, but verify the port is actually serving
-    const connectHost = existing.host !== undefined && existing.host !== '0.0.0.0' ? existing.host : '127.0.0.1';
-    const portAlive = await probePort(connectHost, existing.port, 500);
-    if (portAlive) {
+    // PID appears alive, but verify the port is actually serving *a Nori
+    // server* (any build). A bare TCP/probe check is not enough: the port may
+    // be held by a different product speaking the same health envelope (e.g.
+    // upstream Kimi Code sharing the historical default port) or by a process
+    // that recycled the recorded PID on Windows. Anything not identified as
+    // Nori is treated as a stale lock and taken over.
+    const connectHost =
+      existing.host !== undefined && existing.host !== '0.0.0.0'
+        ? existing.host
+        : '127.0.0.1';
+    const identity = await classifyServerIdentity(
+      `http://${connectHost}:${existing.port}`,
+      readLocalServerToken(lockPath),
+      500,
+    );
+    if (identity === 'nori') {
       throw new ServerLockedError(
         `server already running (pid=${existing.pid}, port=${existing.port}, started=${existing.started_at})`,
         existing,
       );
     }
-    // Port not listening → stale lock from recycled PID. Fall through to takeover.
+    // Port not serving a Nori server → stale lock from a dead/replaced owner.
+    // Fall through to takeover.
   }
 
   // Stale or unresponsive — takeover.

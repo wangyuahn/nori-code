@@ -193,10 +193,32 @@ export async function waitForPage(
 export async function captureScreenshot(webContents: WebContents): Promise<NativeBrowserActionResult> {
   const image = await webContents.capturePage();
   const size = image.getSize();
+  if (image.isEmpty() || size.width <= 0 || size.height <= 0) {
+    return {
+      ok: false,
+      output:
+        'Browser screenshot is unavailable because the page capture was empty ' +
+        '(' + String(size.width) + 'x' + String(size.height) + '). Wait for the page to render or use ' +
+        'Browser snapshot, then retry the screenshot.',
+    };
+  }
   const bounded = size.width > 1440 ? image.resize({ width: 1440, quality: 'good' }) : image;
+  if (bounded.isEmpty()) {
+    return {
+      ok: false,
+      output: 'Browser screenshot is unavailable because resizing produced an empty image. Use Browser snapshot and retry.',
+    };
+  }
+  const screenshotDataUrl = bounded.toDataURL();
+  if (!/^data:image\/[a-z0-9.+-]+;base64,.+/is.test(screenshotDataUrl)) {
+    return {
+      ok: false,
+      output: 'Browser screenshot is unavailable because Electron returned empty or invalid image data. Use Browser snapshot and retry.',
+    };
+  }
   return {
     ...pageResult(webContents, `Screenshot captured at ${String(size.width)}x${String(size.height)}.`),
-    screenshotDataUrl: bounded.toDataURL(),
+    screenshotDataUrl,
   };
 }
 

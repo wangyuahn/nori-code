@@ -13,6 +13,8 @@ export type {
 } from './services/pinoLoggerService';
 export { acquireLock, acquireLockSafe, getLiveLock, DEFAULT_LOCK_PATH, DEFAULT_LOCK_DIR } from './lock';
 export type { AcquireLockOptions, AcquireLockResult, LockContents } from './lock';
+export { NORI_SERVER_APP_ID, probeNoriServer, classifyServerIdentity } from './identity';
+export type { ServerIdentityClass } from './identity';
 
 export { resolveServiceManager, ServiceUnavailableError, ServiceUnsupportedError } from './svc';
 export type {

@@ -206,6 +206,19 @@ const STRUCTURAL_REQUEST_MESSAGE_PATTERNS = [
   /multiple .*(?:user|assistant).* roles in a row/,
 ] as const;
 
+// Providers validate media before generation and return deterministic 4xx
+// errors for malformed bytes or unsupported media encodings. The caller can
+// recover by replacing media blocks with model-visible text and resending the
+// same request once. Keep these patterns format-specific so unrelated 400s are
+// never silently downgraded.
+const MEDIA_REQUEST_MESSAGE_PATTERNS = [
+  /unsupported (?:image|audio|video) format/,
+  /invalid (?:base64[- ]encoded )?(?:image|audio|video)(?: data| format| payload)?/,
+  /(?:image|audio|video) (?:mime|content)[ _-]?type .*not supported/,
+  /(?:mime|content)[ _-]?type .*not supported.*(?:image|audio|video)/,
+  /could not (?:decode|process) (?:the )?(?:image|audio|video)/,
+] as const;
+
 export function isRecoverableRequestStructureError(error: unknown): boolean {
   if (isToolExchangeAdjacencyError(error)) return true;
   if (!(error instanceof APIStatusError)) return false;
@@ -213,6 +226,16 @@ export function isRecoverableRequestStructureError(error: unknown): boolean {
   if (error.statusCode !== 400 && error.statusCode !== 422) return false;
   const lowerMessage = error.message.toLowerCase();
   return STRUCTURAL_REQUEST_MESSAGE_PATTERNS.some((pattern) => pattern.test(lowerMessage));
+}
+
+export function isRecoverableMediaRequestError(error: unknown): boolean {
+  if (!(error instanceof APIStatusError)) return false;
+  if (error instanceof APIContextOverflowError) return false;
+  if (error.statusCode !== 400 && error.statusCode !== 415 && error.statusCode !== 422) {
+    return false;
+  }
+  const lowerMessage = error.message.toLowerCase();
+  return MEDIA_REQUEST_MESSAGE_PATTERNS.some((pattern) => pattern.test(lowerMessage));
 }
 
 export function isProviderRateLimitError(error: unknown): boolean {

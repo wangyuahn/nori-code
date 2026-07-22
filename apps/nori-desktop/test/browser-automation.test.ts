@@ -1,6 +1,7 @@
+import type { WebContents } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
 
-import { unavailablePageResult } from '../src/main/browser-automation';
+import { captureScreenshot, unavailablePageResult } from '../src/main/browser-automation';
 import { restoreBrowserAutomationFocus } from '../src/main/browser-focus';
 
 describe('browser automation page availability', () => {
@@ -24,6 +25,54 @@ describe('browser automation page availability', () => {
   it('allows page actions after a real page is open', () => {
     expect(unavailablePageResult({ action: 'snapshot' }, 'https://example.com/')).toBeUndefined();
     expect(unavailablePageResult({ action: 'snapshot' }, 'file:///C:/workspace/index.html')).toBeUndefined();
+  });
+});
+
+describe('browser screenshot capture', () => {
+  it('rejects an empty 0x0 NativeImage before encoding it', async () => {
+    const webContents = screenshotWebContents({
+      getSize: () => ({ width: 0, height: 0 }),
+      isEmpty: () => true,
+      toDataURL: vi.fn(),
+    });
+
+    const result = await captureScreenshot(webContents);
+
+    expect(result).toEqual({
+      ok: false,
+      output: expect.stringContaining('page capture was empty (0x0)'),
+    });
+  });
+
+  it('rejects an empty screenshot data URL', async () => {
+    const webContents = screenshotWebContents({
+      getSize: () => ({ width: 800, height: 600 }),
+      isEmpty: () => false,
+      toDataURL: () => 'data:image/png;base64,',
+    });
+
+    const result = await captureScreenshot(webContents);
+
+    expect(result).toEqual({
+      ok: false,
+      output: expect.stringContaining('Electron returned empty or invalid image data'),
+    });
+  });
+
+  it('returns a non-empty screenshot with page metadata', async () => {
+    const webContents = screenshotWebContents({
+      getSize: () => ({ width: 800, height: 600 }),
+      isEmpty: () => false,
+      toDataURL: () => 'data:image/png;base64,iVBORw0KGgo=',
+    });
+
+    await expect(captureScreenshot(webContents)).resolves.toEqual({
+      ok: true,
+      output: 'Screenshot captured at 800x600.',
+      url: 'https://example.com/',
+      title: 'Example',
+      screenshotDataUrl: 'data:image/png;base64,iVBORw0KGgo=',
+    });
   });
 });
 
@@ -54,4 +103,16 @@ function focusTarget(id: number) {
     isDestroyed: () => false,
     focus: vi.fn(),
   };
+}
+
+function screenshotWebContents(image: {
+  readonly getSize: () => { readonly width: number; readonly height: number };
+  readonly isEmpty: () => boolean;
+  readonly toDataURL: () => string;
+}): WebContents {
+  return {
+    capturePage: vi.fn().mockResolvedValue(image),
+    getURL: () => 'https://example.com/',
+    getTitle: () => 'Example',
+  } as unknown as WebContents;
 }

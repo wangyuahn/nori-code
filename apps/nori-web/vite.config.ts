@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const devServerToken = env.NORI_DEV_SERVER_TOKEN;
-  const devServerOrigin = (env.NORI_DEV_SERVER_ORIGIN || 'http://127.0.0.1:58627').replace(/\/$/, '');
+  const devServerOrigin = (env.NORI_DEV_SERVER_ORIGIN || 'http://127.0.0.1:58771').replace(/\/$/, '');
 
   return {
     base: './',

@@ -28,6 +28,11 @@ const ADJACENCY_400 = new APIStatusError(
     '`tool_result` block in the next message.',
 );
 
+const MEDIA_400 = new APIStatusError(
+  400,
+  'Invalid request: unsupported image format: text/plain; charset=utf-8',
+);
+
 function userMessage(text: string): Message {
   return { role: 'user', content: [{ type: 'text', text }], toolCalls: [] };
 }
@@ -120,5 +125,52 @@ describe('executeLoopStep — tool exchange adjacency fallback', () => {
     await expect(runTurn(input)).rejects.toBe(ADJACENCY_400);
     expect(calls).toBe(2); // first attempt + one strict resend, then give up
     expect(strictCount).toBe(1);
+  });
+
+  it('replaces rejected media with model-visible text and continues the turn', async () => {
+    const llm = new FakeLLM({
+      responses: [makeEndTurnResponse('unused'), makeEndTurnResponse('recovered')],
+      throwOnIndex: { index: 0, error: MEDIA_400 },
+    });
+    const context = new RecordingContext({
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Inspect this screenshot.' },
+          {
+            type: 'image_url',
+            imageUrl: { url: 'data:image/png;base64,iVBORw0KGgo=' },
+          },
+        ],
+        toolCalls: [],
+      }],
+    });
+    const sink = new CollectingSink({});
+    const input: RunTurnInput = {
+      turnId: 'turn-media',
+      signal: new AbortController().signal,
+      llm,
+      buildMessages: context.buildMessages,
+      dispatchEvent: createLoopEventDispatcher({
+        appendTranscriptRecord: context.appendTranscriptRecord,
+        emitLiveEvent: sink.emit,
+      }),
+    };
+
+    const result = await runTurn(input);
+
+    expect(result.stopReason).toBe('end_turn');
+    expect(llm.callCount).toBe(2);
+    expect(
+      llm.calls[0]?.messages.some(message =>
+        message.content.some(part => part.type === 'image_url')),
+    ).toBe(true);
+    expect(
+      llm.calls[1]?.messages.some(message =>
+        message.content.some(part => part.type === 'image_url')),
+    ).toBe(false);
+    expect(JSON.stringify(llm.calls[1]?.messages)).toContain(
+      'Continue with the surrounding text and tool output.',
+    );
   });
 });

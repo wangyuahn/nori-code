@@ -13,7 +13,7 @@ import { ErrorCode } from '@nori-code/protocol';
 
 import { DaemonClient, EnvelopeError } from '../src/index';
 
-const KIMI_SERVER_URL = process.env['KIMI_SERVER_URL'] ?? 'http://127.0.0.1:58627';
+const KIMI_SERVER_URL = process.env['KIMI_SERVER_URL'] ?? 'http://127.0.0.1:58771';
 const SHORT_TIMEOUT_MS = 15_000;
 
 const ONE_BY_ONE_PNG = Buffer.from(

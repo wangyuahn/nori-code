@@ -547,6 +547,11 @@ describe('`kimi server` does not register a legacy `daemon` command', () => {
 });
 
 describe('shared parsers stay strict', () => {
+  it('uses a Nori-specific default port that does not collide with Kimi Code', async () => {
+    const { DEFAULT_SERVER_PORT } = await import('#/cli/sub/server/shared');
+    expect(DEFAULT_SERVER_PORT).toBe(58771);
+  });
+
   it('rejects out-of-range --port', async () => {
     const { parsePort } = await import('#/cli/sub/server/shared');
     expect(() => parsePort('99999', '--port', 58627)).toThrow(/invalid --port/);
@@ -1094,6 +1099,38 @@ describe('ensureDaemon surfaces boot failures via early exit', () => {
     expect(elapsed).toBeLessThan(5000);
   });
 
+  it('terminates the child when the startup wait times out', async () => {
+    const { spawn } = await import('node:child_process');
+    const spawnMock = vi.mocked(spawn);
+    const { ensureDaemon } = await import('#/cli/sub/server/daemon');
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    const nowSpy = vi.spyOn(Date, 'now');
+    let nowCalls = 0;
+    const fakeChild = {
+      pid: 43210,
+      unref: vi.fn(),
+      once: vi.fn(function () {
+        return fakeChild;
+      }),
+    };
+    spawnMock.mockImplementationOnce(() => {
+      // Start the deadline clock only after port resolution and spawn have
+      // completed, then make the first loop condition expire immediately.
+      nowSpy.mockImplementation(() => nowCalls++ === 0 ? 0 : 20_001);
+      return fakeChild as unknown as ChildProcess;
+    });
+
+    try {
+      await expect(ensureDaemon({ port: 0 })).rejects.toThrow(
+        'failed to start within 20000ms',
+      );
+      expect(killSpy).toHaveBeenCalledWith(43210);
+    } finally {
+      nowSpy.mockRestore();
+      killSpy.mockRestore();
+    }
+  });
+
   it('writes an early exit diagnostic when the daemon log starts empty', async () => {
     const { spawn } = await import('node:child_process');
     const spawnMock = vi.mocked(spawn);
@@ -1146,7 +1183,7 @@ describe('ensureDaemon ignores mismatched host_version locks', () => {
       const server = createHttpServer((req, res) => {
         if (req.url === '/api/v1/healthz') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ code: 0 }));
+          res.end(JSON.stringify({ code: 0, data: { app: 'nori-code' } }));
         } else {
           res.writeHead(404);
           res.end();
@@ -1297,6 +1334,51 @@ describe('createIdleShutdownHandler', () => {
     expect(onIdle).not.toHaveBeenCalled();
   });
 
+  it('renews the grace while authenticated HTTP activity continues', async () => {
+    const { createIdleShutdownHandler } = await import('#/cli/sub/server/run');
+    const onIdle = vi.fn();
+    const handler = createIdleShutdownHandler({ graceMs: 1000, onIdle });
+    handler.onConnectionCountChange(1);
+    handler.onConnectionCountChange(0);
+    vi.advanceTimersByTime(700);
+    handler.onActivity();
+    vi.advanceTimersByTime(700);
+    expect(onIdle).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(300);
+    expect(onIdle).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats REST-only activity as a client lease', async () => {
+    const { createIdleShutdownHandler } = await import('#/cli/sub/server/run');
+    const onIdle = vi.fn();
+    const handler = createIdleShutdownHandler({ graceMs: 1000, onIdle });
+    handler.onActivity();
+    vi.advanceTimersByTime(1000);
+    expect(onIdle).toHaveBeenCalledTimes(1);
+  });
+
+  it('cannot re-arm after cancellation or after onIdle fires', async () => {
+    const { createIdleShutdownHandler } = await import('#/cli/sub/server/run');
+    const cancelledIdle = vi.fn();
+    const cancelled = createIdleShutdownHandler({ graceMs: 1000, onIdle: cancelledIdle });
+    cancelled.onActivity();
+    cancelled.cancel();
+    cancelled.onActivity();
+    cancelled.onConnectionCountChange(1);
+    cancelled.onConnectionCountChange(0);
+    vi.advanceTimersByTime(2000);
+    expect(cancelledIdle).not.toHaveBeenCalled();
+
+    const completedIdle = vi.fn();
+    const completed = createIdleShutdownHandler({ graceMs: 1000, onIdle: completedIdle });
+    completed.onActivity();
+    vi.advanceTimersByTime(1000);
+    completed.onActivity();
+    completed.onConnectionCountChange(0);
+    vi.advanceTimersByTime(2000);
+    expect(completedIdle).toHaveBeenCalledTimes(1);
+  });
+
   it('only the final drop to zero arms the timer with multiple clients', async () => {
     const { createIdleShutdownHandler } = await import('#/cli/sub/server/run');
     const onIdle = vi.fn();
@@ -1309,6 +1391,31 @@ describe('createIdleShutdownHandler', () => {
     handler.onConnectionCountChange(0); // now none
     vi.advanceTimersByTime(500);
     expect(onIdle).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('createShutdownDeadline', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('forces shutdown at the deadline unless cleanup cancels it', async () => {
+    const { createShutdownDeadline } = await import('#/cli/sub/server/run');
+    const timedOut = vi.fn();
+    createShutdownDeadline({ timeoutMs: 3000, onTimeout: timedOut });
+    vi.advanceTimersByTime(2999);
+    expect(timedOut).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(timedOut).toHaveBeenCalledTimes(1);
+
+    const cancelledTimeout = vi.fn();
+    const cancelled = createShutdownDeadline({ timeoutMs: 3000, onTimeout: cancelledTimeout });
+    cancelled.cancel();
+    vi.advanceTimersByTime(3000);
+    expect(cancelledTimeout).not.toHaveBeenCalled();
   });
 });
 
@@ -1378,12 +1485,12 @@ function makeKillDeps(overrides: Partial<KillCommandDeps> = {}): {
   deps: KillCommandDeps;
   writes: string[];
   signals: Array<{ pid: number; signal: NodeJS.Signals }>;
-  state: { shutdownCalls: number };
+  state: { shutdownCalls: number; discardCalls: number };
   clock: { t: number };
 } {
   const writes: string[] = [];
   const signals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
-  const state = { shutdownCalls: 0 };
+  const state = { shutdownCalls: 0, discardCalls: 0 };
   const clock = { t: 0 };
   const deps: KillCommandDeps = {
     getLiveLock: () => undefined,
@@ -1391,6 +1498,10 @@ function makeKillDeps(overrides: Partial<KillCommandDeps> = {}): {
       state.shutdownCalls += 1;
     },
     resolveToken: () => undefined,
+    probeIdentity: async () => 'nori',
+    discardLock: () => {
+      state.discardCalls += 1;
+    },
     signalPid: (pid, signal) => {
       signals.push({ pid, signal });
       return true;
@@ -1422,6 +1533,37 @@ describe('`kimi server kill`', () => {
 
     expect(writes.join('')).toContain('No running Nori server.');
     expect(signals).toEqual([]);
+  });
+
+  it('does not send shutdown or a signal to a foreign product', async () => {
+    const { handleKillCommand } = await import('#/cli/sub/server/kill');
+    const { deps, writes, signals, state } = makeKillDeps({
+      getLiveLock: () => liveLock,
+      probeIdentity: async () => 'foreign',
+    });
+
+    await handleKillCommand(deps);
+
+    expect(state.shutdownCalls).toBe(0);
+    expect(state.discardCalls).toBe(1);
+    expect(signals).toEqual([]);
+    expect(writes.join('')).toContain('different product');
+  });
+
+  it('forces an unreachable lock owner without sending an HTTP shutdown', async () => {
+    const { handleKillCommand } = await import('#/cli/sub/server/kill');
+    const { deps, writes, signals, state } = makeKillDeps({
+      getLiveLock: () => liveLock,
+      probeIdentity: async () => 'unreachable',
+      pidAlive: () => false,
+    });
+
+    await handleKillCommand(deps);
+
+    expect(state.shutdownCalls).toBe(0);
+    expect(state.discardCalls).toBe(0);
+    expect(signals).toEqual([{ pid: liveLock.pid, signal: 'SIGTERM' }]);
+    expect(writes.join('')).toContain('stopped.');
   });
 
   it('refuses to stop a lock that does not match the expected owner', async () => {
@@ -1472,6 +1614,25 @@ describe('`kimi server kill`', () => {
     await expect(handleKillCommand(deps, liveLock)).rejects.toThrow(/owner changed/);
 
     expect(state.shutdownCalls).toBe(1);
+    expect(signals).toEqual([]);
+  });
+
+  it('does not signal a foreign HTTP service that takes the port after graceful shutdown', async () => {
+    const { handleKillCommand } = await import('#/cli/sub/server/kill');
+    let probes = 0;
+    const { deps, signals, state } = makeKillDeps({
+      getLiveLock: () => liveLock,
+      probeIdentity: async () => {
+        probes += 1;
+        return probes === 1 ? 'nori' : 'foreign';
+      },
+    });
+
+    await handleKillCommand(deps);
+
+    expect(state.shutdownCalls).toBe(1);
+    expect(probes).toBe(2);
+    expect(state.discardCalls).toBe(1);
     expect(signals).toEqual([]);
   });
 

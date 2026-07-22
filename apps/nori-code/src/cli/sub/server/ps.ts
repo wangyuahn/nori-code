@@ -9,12 +9,12 @@
 import chalk from 'chalk';
 import type { Command } from 'commander';
 
-import { getLiveLock } from '@nori-code/server';
+import { classifyServerIdentity, getLiveLock } from '@nori-code/server';
 
 import { getDataDir } from '#/utils/paths';
 
 import { lockConnectHost } from './daemon';
-import { authHeaders, isServerHealthy, resolveServerToken, serverOrigin } from './shared';
+import { authHeaders, resolveServerToken, serverOrigin } from './shared';
 
 /** Wire shape of a single connection returned by `GET /api/v1/connections`. */
 interface ConnectionInfo {
@@ -60,14 +60,19 @@ async function handlePsCommand(opts: { json?: boolean }): Promise<void> {
   }
 
   const origin = serverOrigin(lockConnectHost(lock), lock.port);
-  if (!(await isServerHealthy(origin, HEALTH_TIMEOUT_MS))) {
-    throw new Error(`Nori server at ${origin} is not responding.`);
-  }
 
   // The `/api/v1/connections` route is gated by bearer auth (M5.1). Read the
   // persistent token; a clear error here means the server has never been
   // started (no token file yet) or the token file was removed.
   const token = resolveServerToken(getDataDir());
+
+  // Identify any Nori build — current builds self-identify in healthz, legacy
+  // builds pass the token-gated meta route — so an older daemon stays
+  // manageable instead of being reported as "not responding".
+  if ((await classifyServerIdentity(origin, token, HEALTH_TIMEOUT_MS)) !== 'nori') {
+    throw new Error(`Nori server at ${origin} is not responding.`);
+  }
+
   const connections = await fetchConnections(origin, token);
 
   if (opts.json) {

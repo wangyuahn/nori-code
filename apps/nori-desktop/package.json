@@ -1,6 +1,6 @@
 {
     "name": "@nori-code/nori-work",
-    "version": "1.0.0-pre.4",
+    "version": "1.0.0-pre.5",
     "private": true,
     "license": "MIT",
     "description": "Nori Work — an independent desktop workspace for Nori Code.",

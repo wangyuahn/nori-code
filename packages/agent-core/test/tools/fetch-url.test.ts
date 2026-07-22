@@ -331,7 +331,7 @@ describe('BrowserTool', () => {
       execute: vi.fn().mockResolvedValue({
         ok: true,
         output: 'screenshot',
-        screenshotDataUrl: 'data:image/png;base64,AAAA',
+        screenshotDataUrl: 'data:image/png;base64,iVBORw0KGgo=',
       }),
     };
     const result = await executeTool(new BrowserTool(browser), {
@@ -343,8 +343,31 @@ describe('BrowserTool', () => {
     expect(result.isError).not.toBe(true);
     expect(result.output).toEqual([
       { type: 'text', text: 'screenshot' },
-      { type: 'image_url', imageUrl: { url: 'data:image/png;base64,AAAA' } },
+      { type: 'image_url', imageUrl: { url: 'data:image/png;base64,iVBORw0KGgo=' } },
     ]);
+  });
+
+  it('returns a model-visible error instead of an empty screenshot', async () => {
+    const browser: BrowserExecutor = {
+      execute: vi.fn().mockResolvedValue({
+        ok: true,
+        output: 'Screenshot captured at 0x0.',
+        screenshotDataUrl: 'data:image/png;base64,',
+      }),
+    };
+
+    const result = await executeTool(new BrowserTool(browser), {
+      turnId: 'turn-browser',
+      toolCallId: 'call-browser',
+      args: { action: 'screenshot' },
+      signal,
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.output).toEqual(
+      expect.stringContaining('browser returned empty or invalid image data'),
+    );
+    expect(JSON.stringify(result.output)).not.toContain('image_url');
   });
 
   it('declares file reads and forwards upload paths', async () => {

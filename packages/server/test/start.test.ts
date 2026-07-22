@@ -23,7 +23,7 @@ import { createServer, type Server } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { pino } from 'pino';
 
@@ -162,6 +162,28 @@ describe('startServer — lock + healthz smoke', () => {
     await r.close(); // second call is a no-op (would throw on double-app.close otherwise)
     expect(existsSync(lockPath)).toBe(false);
   });
+
+  it('reports request activity only after authentication succeeds', async () => {
+    const onRequestActivity = vi.fn();
+    const r = await startServer({
+      serviceOverrides: [fixedTokenAuth()],
+      host: '127.0.0.1',
+      port: 0,
+      lockPath,
+      logger: silentLogger(),
+      coreProcessOptions: { homeDir: bridgeHome },
+      onRequestActivity,
+    });
+    running.push(r);
+
+    const rejected = await fetch(`${r.address}/openapi.json`);
+    expect(rejected.status).toBe(401);
+    expect(onRequestActivity).not.toHaveBeenCalled();
+
+    const accepted = await fetch(`${r.address}/openapi.json`, { headers: authHeaders() });
+    expect(accepted.status).toBe(200);
+    expect(onRequestActivity).toHaveBeenCalledTimes(1);
+  }, 15_000);
 
   it('retries on port+1 and updates the lock when the requested port is held by a third party', async () => {
     // Occupy the requested port with a raw TCP server (a "third-party" process
@@ -330,14 +352,21 @@ describe('startServer — web assets', () => {
     );
 
     const health = await fetch(`${r.address}/api/v1/healthz`);
-    await expect(health.json()).resolves.toMatchObject({ code: 0 });
+    await expect(health.json()).resolves.toMatchObject({
+      code: 0,
+      data: {
+        ok: true,
+        app: 'nori-code',
+        version: expect.any(String),
+      },
+    });
 
     const openApi = await fetch(`${r.address}/openapi.json`, { headers: authHeaders() });
     expect(openApi.status).toBe(200);
     expect(openApi.headers.get('content-type')).toContain('application/json');
     await expect(openApi.json()).resolves.toMatchObject({
       info: {
-        title: 'Kimi Code Server API',
+        title: 'Nori Code Server API',
       },
       paths: {
         '/api/v1/healthz': {},

@@ -64,6 +64,13 @@ export interface ServerStartOptions {
 
   wsGatewayOptions?: WSGatewayOptions;
 
+  /**
+   * Called after a request passes authentication. Daemon hosts use this as a
+   * liveness lease so REST-only clients are not mistaken for idle while their
+   * WebSocket is reconnecting.
+   */
+  onRequestActivity?: () => void;
+
   debugEndpoints?: boolean;
 
   /**
@@ -137,6 +144,9 @@ export async function startServer(opts: ServerStartOptions): Promise<RunningServ
   const app = Fastify({
     loggerInstance: pinoLogger,
     disableRequestLogging: false,
+    // Browser automation uses long-polling requests. Do not let one keep a
+    // daemon in Fastify's closing state indefinitely during shutdown.
+    forceCloseConnections: true,
     genReqId: (req) => resolveRequestId(req.headers),
   });
 
@@ -302,6 +312,12 @@ export async function startServer(opts: ServerStartOptions): Promise<RunningServ
   const authFailureLimiter =
     bindClass !== 'loopback' ? createAuthFailureLimiter() : undefined;
   app.addHook('onRequest', createAuthHook(authTokenService, { limiter: authFailureLimiter }));
+  if (opts.onRequestActivity !== undefined) {
+    app.addHook('onRequest', (_request, _reply, done) => {
+      opts.onRequestActivity?.();
+      done();
+    });
+  }
 
   // Security response headers (ROADMAP M6.6): only on a non-loopback bind.
   // TLS is terminated by a reverse proxy in this phase, so HSTS is omitted

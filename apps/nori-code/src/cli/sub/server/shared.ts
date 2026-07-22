@@ -8,12 +8,15 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { ServerLogLevel } from '@nori-code/server';
+import { probeNoriServer, type ServerLogLevel } from '@nori-code/server';
 
 export const LOCAL_SERVER_HOST = '127.0.0.1';
 export const DEFAULT_LAN_HOST = '0.0.0.0';
 export const DEFAULT_SERVER_HOST = LOCAL_SERVER_HOST;
-export const DEFAULT_SERVER_PORT = 58627;
+// Nori-specific default port. Must NOT collide with upstream Kimi Code's
+// daemon (58627): both products share the health envelope, so a port clash
+// makes liveness probes mistake the foreign server for ours.
+export const DEFAULT_SERVER_PORT = 58771;
 export const DEFAULT_SERVER_ORIGIN = serverOrigin(DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT);
 
 /** Filename (under NORI_CODE_HOME) of the persistent server bearer token. */
@@ -56,6 +59,8 @@ export interface ParsedServerOptions {
   daemon: boolean;
   /** Internal: idle-shutdown grace in ms (daemon mode only). */
   idleGraceMs: number;
+  /** Internal: reuse-health wait in ms before replacing a wedged existing daemon. */
+  reuseHealthTimeoutMs?: number;
 }
 
 export interface ServerCliOptions {
@@ -75,6 +80,8 @@ export interface ServerCliOptions {
   daemon?: boolean;
   /** Internal flag set by the daemon spawner / tests. */
   idleGraceMs?: string;
+  /** Internal flag set by launchers that pre-checked the lock (e.g. desktop). */
+  reuseHealthTimeoutMs?: string;
 }
 
 export function parseServerOptions(opts: ServerCliOptions): ParsedServerOptions {
@@ -89,7 +96,20 @@ export function parseServerOptions(opts: ServerCliOptions): ParsedServerOptions 
     allowedHosts: parseAllowedHostArgs(opts.allowedHost),
     daemon: opts.daemon === true,
     idleGraceMs: parseIdleGraceMs(opts.idleGraceMs),
+    reuseHealthTimeoutMs: parseOptionalTimeoutMs(
+      opts.reuseHealthTimeoutMs,
+      '--reuse-health-timeout-ms',
+    ),
   };
+}
+
+function parseOptionalTimeoutMs(raw: string | undefined, label: string): number | undefined {
+  if (raw === undefined) return undefined;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new Error(`error: invalid ${label} value: ${raw}`);
+  }
+  return n;
 }
 
 export function parseAllowedHostArgs(raw: readonly string[] | undefined): string[] {
@@ -147,24 +167,11 @@ export function normalizeServerOrigin(value: string): string {
   return url.toString().replace(/\/$/, '');
 }
 
-/** Single probe of `/api/v1/healthz`. Returns true if the response envelope reports `code: 0`. */
+/** Single probe of `/api/v1/healthz`. Returns true only when the response reports
+ *  `code: 0` *and* identifies itself as a Nori server (`data.app`) — a bare
+ *  `code: 0` is not enough because upstream Kimi Code answers identically. */
 export async function isServerHealthy(origin: string, timeoutMs: number): Promise<boolean> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, timeoutMs);
-  try {
-    const response = await fetch(`${origin}/api/v1/healthz`, {
-      signal: controller.signal,
-    });
-    if (!response.ok) return false;
-    const body = (await response.json()) as { code?: unknown };
-    return body.code === 0;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timeout);
-  }
+  return probeNoriServer(origin, timeoutMs);
 }
 
 /** Poll `/api/v1/healthz` until it reports healthy or `timeoutMs` elapses. */

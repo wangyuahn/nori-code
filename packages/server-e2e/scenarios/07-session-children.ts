@@ -16,7 +16,7 @@ import { ErrorCode } from '@nori-code/protocol';
 
 import { DaemonClient, EnvelopeError } from '../src/index';
 
-const KIMI_SERVER_URL = process.env['KIMI_SERVER_URL'] ?? 'http://127.0.0.1:58627';
+const KIMI_SERVER_URL = process.env['KIMI_SERVER_URL'] ?? 'http://127.0.0.1:58771';
 const PROMPT_TIMEOUT_MS = 120_000;
 const PARENT_PROMPT_TOKEN = 'PARENT_SESSION_OK';
 const CHILD_PROMPT_TOKEN = 'CHILD_SESSION_OK';

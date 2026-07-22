@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.0.0-pre.5 (2026-07-22)
+
+### Fixes
+
+- Move the Nori server default from the upstream-compatible port `58627` to the Nori-specific port `58771`, preventing Nori Work from connecting to a running Kimi Code daemon by mistake.
+- Add explicit Nori server identity to health checks and legacy token-based detection before lock takeover, shutdown, or PID signaling, so stale locks cannot stop an unrelated process.
+- Replace unhealthy same-version daemons during desktop startup and clean up partially started children when their launcher exits or times out.
+- Keep daemon startup within a bounded recovery budget, force stalled long-polling connections closed during shutdown, and force process exit if graceful shutdown itself stalls.
+- Count authenticated REST traffic as server activity so a desktop client is not treated as idle while its WebSocket reconnects.
+- Recover deterministic provider media rejections by replacing rejected image, audio, or video blocks with model-visible placeholders and retrying once, instead of leaving the conversation permanently unusable.
+- Reject empty or malformed browser screenshots with actionable model-visible errors and normalize valid screenshot media before returning it from the Browser tool.
+
+### Verification
+
+- CLI lifecycle coverage includes same-version recovery, launcher termination, bounded shutdown, identity-aware kill behavior, and the new default port.
+- Desktop recovery coverage includes unhealthy daemon replacement, foreign-server protection, startup diagnostics, and browser screenshot validation.
+- Server, agent-core, and provider tests cover identity-aware locks, authenticated activity leases, media fallback, and normalized tool media.
+
 ## v1.0.0-pre.4 (2026-07-19)
 
 ### Fixes

@@ -68,6 +68,7 @@ export {
   ChatProviderError,
   isContextOverflowStatusError,
   isProviderRateLimitError,
+  isRecoverableMediaRequestError,
   isRecoverableRequestStructureError,
   isRetryableGenerateError,
   isToolExchangeAdjacencyError,

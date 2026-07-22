@@ -7,6 +7,7 @@ import type { BuiltinTool } from '../../../agent/tool';
 import { ToolAccesses } from '../../../loop/tool-access';
 import type { ExecutableToolContext, ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import type { BrowserActionRequest, BrowserExecutor } from '../../support/services';
+import { normalizeImageContentParts } from '../../support/image-compress';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern } from '../../support/rule-match';
 import DESCRIPTION from './browser.md?raw';
@@ -112,10 +113,20 @@ export class BrowserTool implements BuiltinTool<BrowserInput> {
       });
       if (!result.ok) return { output: result.output, isError: true };
       if (result.screenshotDataUrl !== undefined) {
+        const image = normalizeScreenshot(result.screenshotDataUrl);
+        if (image === undefined) {
+          return {
+            output:
+              result.output +
+              '\nBrowser screenshot failed because the browser returned empty or invalid image data. ' +
+              'Use Browser snapshot to inspect the page and retry the screenshot after it has rendered.',
+            isError: true,
+          };
+        }
         return {
           output: [
             { type: 'text', text: result.output },
-            { type: 'image_url', imageUrl: { url: result.screenshotDataUrl } },
+            image,
           ],
         };
       }
@@ -125,6 +136,14 @@ export class BrowserTool implements BuiltinTool<BrowserInput> {
       return { output: `Browser action failed: ${message}`, isError: true };
     }
   }
+}
+
+function normalizeScreenshot(url: string) {
+  if (!url.startsWith('data:')) return undefined;
+  const [part] = normalizeImageContentParts([
+    { type: 'image_url', imageUrl: { url } },
+  ]);
+  return part?.type === 'image_url' ? part : undefined;
 }
 
 function browserAccesses(input: BrowserInput) {

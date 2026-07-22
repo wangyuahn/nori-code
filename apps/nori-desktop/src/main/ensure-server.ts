@@ -3,11 +3,21 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSy
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-/** Overall budget for the bundled `nori server run` to finish ensuring a daemon. */
-const RUN_TIMEOUT_MS = 30_000;
+/**
+ * Overall budget for the bundled `nori server run` to finish ensuring a daemon.
+ * Must cover the CLI's own worst case: the reuse-health wait (kept small via
+ * `--reuse-health-timeout-ms`) plus a cold SEA start and the daemon spawn
+ * window (20s) — the previous 30s value truncated that path mid-flight and
+ * SIGTERMed the CLI before it could report its own diagnostics.
+ */
+const RUN_TIMEOUT_MS = 60_000;
 /** How long to keep polling `/healthz` before declaring the daemon unhealthy. */
 const HEALTH_TIMEOUT_MS = 20_000;
 const HEALTH_POLL_MS = 200;
+
+/** Product identity reported by a Nori server in healthz `data.app`.
+ *  Mirrors `NORI_SERVER_APP_ID` in packages/server/src/identity.ts. */
+const NORI_SERVER_APP_ID = 'nori-code';
 
 /** Subset of the server lock JSON we read (apps/nori-code writes the full shape). */
 interface LockContents {
@@ -201,10 +211,44 @@ async function isHealthy(origin: string, timeoutMs: number): Promise<boolean> {
     if (!res.ok) {
       return false;
     }
-    const body = (await res.json()) as { code?: unknown };
-    return body.code === 0;
+    const body = (await res.json()) as { code?: unknown; data?: { app?: unknown } };
+    // `code: 0` alone is not proof of a Nori server: upstream Kimi Code answers
+    // healthz with the same envelope (and historically the same default port),
+    // so only a self-identifying Nori server counts as healthy.
+    return body.code === 0 && body.data?.app === NORI_SERVER_APP_ID;
   } catch {
     return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+type ServerIdentity = 'nori' | 'foreign' | 'unreachable';
+
+/**
+ * Identify whether any Nori build serves `origin`. Current builds
+ * self-identify in healthz; legacy builds share this app's bearer token file,
+ * so they answer the token-gated `/api/v1/meta` while a foreign product
+ * rejects it. Destructive paths (`server kill` via the lock's recorded pid)
+ * must never proceed for a positively identified foreign product; an
+ * unreachable owner is handled by the guarded expected-owner recovery path.
+ */
+async function probeServerIdentity(origin: string, timeoutMs: number): Promise<ServerIdentity> {
+  if (await isHealthy(origin, timeoutMs)) return 'nori';
+  const token = readServerToken();
+  if (token === undefined) return 'unreachable';
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+  try {
+    const response = await fetch(`${origin}/api/v1/meta`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    });
+    return response.ok ? 'nori' : 'foreign';
+  } catch {
+    return 'unreachable';
   } finally {
     clearTimeout(timer);
   }
@@ -259,7 +303,19 @@ function runServerRun(seaPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
     execFile(
       seaPath,
-      ['server', 'run', '--log-level', 'error'],
+      // --log-level info: startup must stay diagnosable in the server log; the
+      // previous `error` level swallowed every boot milestone and left startup
+      // failures with zero evidence. --reuse-health-timeout-ms: this launcher
+      // already did its own lock checks above, so don't let a wedged lock
+      // holder burn the CLI's default 15s reuse wait inside our budget.
+      [
+        'server',
+        'run',
+        '--log-level',
+        'info',
+        '--reuse-health-timeout-ms',
+        '3000',
+      ],
       {
         timeout: RUN_TIMEOUT_MS,
         env: {
@@ -315,7 +371,7 @@ async function stopExistingServer(
   reason: string,
 ): Promise<void> {
   appendServerDiagnostic(
-    '[desktop] replacing incompatible server (' +
+    '[desktop] replacing server (' +
       reason +
       ') pid=' +
       String(lock.pid) +
@@ -325,15 +381,21 @@ async function stopExistingServer(
       (lock.host_version ?? '<unknown>'),
   );
   const origin = originFromLock(lock);
-  if (!await isHealthy(origin, 3_000)) {
-    // A live PID alone is not proof of ownership on Windows because PIDs are
-    // recycled. Never pass an unverified stale owner to `server kill`, whose
-    // forced fallback signals the PID recorded in the lock.
+  const identity = await probeServerIdentity(origin, 3_000);
+  if (identity === 'foreign') {
+    // A foreign HTTP responder is positive evidence that this lock no longer
+    // points at a Nori server. Do not invoke the kill command: its forced
+    // fallback signals the PID recorded in the lock. Unreachable owners still
+    // go through the expected-owner kill path below so wedged old Nori builds
+    // are actually replaced instead of surviving as detached processes.
     appendServerDiagnostic(
       '[desktop] discarded stale server lock without signaling pid=' +
         String(lock.pid) +
         ' origin=' +
-        origin,
+        origin +
+        ' (identity: ' +
+        identity +
+        ')',
     );
     removeMatchingLock(lock);
     return;
@@ -412,7 +474,9 @@ export async function ensureServer(seaPath: string, expectedVersion?: string): P
       const existingHealthy = await isHealthy(existingOrigin, 3_000);
       const missingRequiredRoutes = existingHealthy
         && !(await supportsRequiredRoutes(existingOrigin));
-      if (existingHealthy && missingRequiredRoutes) {
+      if (!existingHealthy) {
+        await stopExistingServer(seaPath, existingLock, 'same-version server is unhealthy');
+      } else if (missingRequiredRoutes) {
         await stopExistingServer(seaPath, existingLock, 'missing required desktop routes');
       }
     }

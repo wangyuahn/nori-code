@@ -46,7 +46,14 @@ function testProviderManager(): ProviderManager {
   return new ProviderManager({
     config: {
       providers: { test: { type: MOCK_PROVIDER.type, apiKey: MOCK_PROVIDER.apiKey } },
-      models: { [MOCK_PROVIDER.model]: { provider: 'test', model: MOCK_PROVIDER.model, maxContextSize: 1_000_000 } },
+      models: {
+        [MOCK_PROVIDER.model]: {
+          provider: 'test',
+          model: MOCK_PROVIDER.model,
+          maxContextSize: 1_000_000,
+          capabilities: ['image_in', 'tool_use'],
+        },
+      },
     },
   });
 }
@@ -403,6 +410,63 @@ describe('goal session end-to-end', () => {
     );
     expect((await api.getGoal({ agentId: 'main' })).goal).toBeNull();
     expect(JSON.stringify(agent.context.history)).not.toContain('Write a concise final message');
+  });
+
+  it('continues and completes a goal after provider media rejection fallback', async () => {
+    const sessionDir = await makeTempDir();
+    const events: Array<Record<string, unknown>> = [];
+    const recovered = createScriptedGenerate();
+    recovered.mockNextResponse({
+      type: 'function',
+      id: 'complete-after-media-fallback',
+      name: 'UpdateGoal',
+      arguments: JSON.stringify({ status: 'complete' }),
+    });
+    recovered.mockNextResponse({
+      type: 'text',
+      text: 'Completed after the rejected screenshot was omitted.',
+    });
+
+    let providerAttempts = 0;
+    const generate: NonNullable<AgentOptions['generate']> = async (...args) => {
+      providerAttempts += 1;
+      const history = args[3];
+      const hasImage = history.some(message =>
+        message.content.some(part => part.type === 'image_url'));
+      if (hasImage) {
+        throw new APIStatusError(
+          400,
+          'Invalid request: unsupported image format: text/plain; charset=utf-8',
+        );
+      }
+      return recovered.generate(...args);
+    };
+
+    const { session, agent } = await setupSession(
+      sessionDir,
+      events,
+      ['GetGoal', 'UpdateGoal'],
+      generate,
+    );
+    const api = new SessionAPIImpl(session);
+    await api.createGoal({ agentId: 'main', objective: 'Inspect and finish' });
+
+    agent.turn.prompt([
+      { type: 'text', text: 'Inspect and finish' },
+      { type: 'image_url', imageUrl: { url: 'data:image/png;base64,iVBORw0KGgo=' } },
+    ]);
+    await agent.turn.waitForCurrentTurn();
+
+    expect(providerAttempts).toBe(4);
+    expect(recovered.calls).toHaveLength(2);
+    expect(JSON.stringify(recovered.calls)).not.toContain('image_url');
+    expect(JSON.stringify(recovered.calls)).toContain(
+      'Continue with the surrounding text and tool output.',
+    );
+    expect((await api.getGoal({ agentId: 'main' })).goal).toBeNull();
+    expect(events).not.toContainEqual(
+      expect.objectContaining({ type: 'turn.ended', reason: 'failed' }),
+    );
   });
 
   it('pauses the goal on provider rate limits', async () => {

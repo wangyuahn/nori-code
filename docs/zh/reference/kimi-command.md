@@ -158,7 +158,7 @@ kimi server status             # 查看安装与运行状态
 
 | 选项 | 说明 |
 | --- | --- |
-| `--port <port>` | 绑定端口；默认 `58627` |
+| `--port <port>` | 绑定端口；默认 `58771` |
 | `--log-level <level>` | 按所选级别开启服务日志；默认不输出 |
 | `--debug-endpoints` | 挂载 `/api/v1/debug/*` 调试路由（默认关闭） |
 | `--foreground` | 前台运行，不 spawn 后台守护进程 |
@@ -176,7 +176,7 @@ kimi server status             # 查看安装与运行状态
 
 | 选项 | 说明 |
 | --- | --- |
-| `--port <port>` | 被托管的服务绑定端口；默认 `58627` |
+| `--port <port>` | 被托管的服务绑定端口；默认 `58771` |
 | `--log-level <level>` | 写入生成 unit 的日志级别 |
 | `--force` | 已安装时强制覆盖 |
 | `--json` | 用 JSON 替代人类可读输出 |

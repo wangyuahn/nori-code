@@ -617,7 +617,7 @@ describe('runTurn — tool-call behaviour', () => {
         { type: 'text', text: 'see image:' },
         {
           type: 'image_url',
-          imageUrl: { url: 'data:image/png;base64,AAAA' },
+          imageUrl: { url: 'data:image/png;base64,iVBORw0KGgo=' },
         },
       ],
     });
@@ -641,6 +641,37 @@ describe('runTurn — tool-call behaviour', () => {
     expect(Array.isArray(eventOutput)).toBe(true);
   });
 
+  it('replaces an empty image tool result before transcript and live dispatch', async () => {
+    const blocks = new ContentBlocksTool({
+      output: [
+        { type: 'text', text: 'Screenshot captured at 0x0.' },
+        {
+          type: 'image_url',
+          imageUrl: { url: 'data:image/png;base64,' },
+        },
+      ],
+    });
+    const { context, sink } = await runTurn({
+      tools: [blocks],
+      responses: [
+        makeToolUseResponse([makeToolCall('blocks', {}, 'tc-empty-image')]),
+        makeEndTurnResponse('continued'),
+      ],
+    });
+
+    const transcriptOutput = expectTextOutput(
+      context.toolResults()[0]?.result.output,
+    );
+    expect(transcriptOutput).toContain('Screenshot captured at 0x0.');
+    expect(transcriptOutput).toContain('[image omitted:');
+    expect(transcriptOutput).not.toContain('data:image/png');
+
+    const eventOutput = expectTextOutput(
+      sink.byType('tool.result')[0]?.result.output,
+    );
+    expect(eventOutput).toBe(transcriptOutput);
+  });
+
   it('preserves media-only image output with a text companion', async () => {
     const image: ContentPart = {
       type: 'image_url',
@@ -659,11 +690,11 @@ describe('runTurn — tool-call behaviour', () => {
   it('preserves a list of only image ContentParts', async () => {
     const img1: ContentPart = {
       type: 'image_url',
-      imageUrl: { url: 'data:image/png;base64,abc' },
+      imageUrl: { url: 'data:image/png;base64,iVBORw0KGgo=' },
     };
     const img2: ContentPart = {
       type: 'image_url',
-      imageUrl: { url: 'data:image/png;base64,def' },
+      imageUrl: { url: 'data:image/png;base64,iVBORw0KGgo=' },
     };
 
     const output = await contentBlockOutput([img1, img2]);

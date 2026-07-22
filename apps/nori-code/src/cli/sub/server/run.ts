@@ -38,6 +38,7 @@ import {
   splitTokenFragment,
 } from './access-urls';
 import { ensureDaemon, type EnsureDaemonResult } from './daemon';
+import { pidAlive } from './kill';
 import { type NetworkAddress } from './networks';
 import {
   DEFAULT_FOREGROUND_LOG_LEVEL,
@@ -169,6 +170,12 @@ export function buildRunCommand(cmd: Command, options: { defaultOpen: boolean })
         'Idle-shutdown grace in ms (daemon mode, internal).',
       ).hideHelp(),
     )
+    .addOption(
+      new Option(
+        '--reuse-health-timeout-ms <ms>',
+        'How long to wait for an existing version-matched daemon to answer /healthz before replacing it (internal; used by launchers that pre-checked the lock).',
+      ).hideHelp(),
+    )
     .action(async (opts: RunCliOptions) => {
       try {
         await handleRunCommand(opts);
@@ -258,6 +265,7 @@ export async function startServerBackground(
     allowRemoteTerminals: options.allowRemoteTerminals,
     allowedHosts: options.allowedHosts,
     idleGraceMs: options.idleGraceMs,
+    reuseHealthTimeoutMs: options.reuseHealthTimeoutMs,
   });
 }
 
@@ -315,6 +323,16 @@ async function runServerInProcess(
     stopping = true;
     idle?.cancel();
     running?.logger.info({ reason }, 'server shutting down');
+    const deadline = createShutdownDeadline({
+      timeoutMs: CLI_SHUTDOWN_TIMEOUT_MS,
+      onTimeout: () => {
+        running?.logger.error(
+          { reason, timeoutMs: CLI_SHUTDOWN_TIMEOUT_MS },
+          'server shutdown timed out; forcing process exit',
+        );
+        process.exit(1);
+      },
+    });
     try {
       await running?.close();
       await shutdownTelemetry({ timeoutMs: CLI_SHUTDOWN_TIMEOUT_MS });
@@ -323,34 +341,67 @@ async function runServerInProcess(
         { err: error instanceof Error ? error : new Error(String(error)) },
         'server shutdown error',
       );
+    } finally {
+      deadline.cancel();
     }
     process.exit(0);
   }
 
-  running = await startServer({
-    host: options.host,
-    port: options.port,
-    logLevel: options.logLevel,
-    debugEndpoints: options.debugEndpoints,
-    insecureNoTls: options.insecureNoTls,
-    allowRemoteShutdown: options.allowRemoteShutdown,
-    allowRemoteTerminals: options.allowRemoteTerminals,
-    allowedHosts: options.allowedHosts,
-    webAssetsDir: serverWebAssetsDir(),
-    coreProcessOptions: {
-      homeDir: getDataDir(),
-      identity: createKimiCodeHostIdentity(version),
-      telemetry,
-    },
-    wsGatewayOptions: {
-      telemetry,
-      onConnectionCountChange: idle
-        ? (size) => {
-            idle.onConnectionCountChange(size);
+  // Windows spawner-death guard: when the process that spawned this daemon is
+  // force-terminated (e.g. a launcher's startup timeout — Windows termination
+  // is unconditional, so the spawner cannot run its own cleanup), this
+  // detached daemon would otherwise survive mid-boot as a wedged orphan that
+  // holds the lock and burns every later launch's reuse-health wait. Watch
+  // the parent pid until the server is up; once healthy, the daemon
+  // intentionally outlives its spawner. (On POSIX the spawner's own
+  // SIGTERM/SIGINT handler kills the child, and a reaped parent reparents us
+  // to pid 1, which stays "alive" — so this guard is a no-op there.)
+  let spawnerGuard: NodeJS.Timeout | undefined;
+  if (mode.daemon) {
+    const spawnerPid = process.ppid;
+    spawnerGuard = setInterval(() => {
+      if (!pidAlive(spawnerPid)) {
+        process.exit(1);
+      }
+    }, 1000);
+    spawnerGuard.unref();
+  }
+
+  try {
+    running = await startServer({
+      host: options.host,
+      port: options.port,
+      logLevel: options.logLevel,
+      debugEndpoints: options.debugEndpoints,
+      insecureNoTls: options.insecureNoTls,
+      allowRemoteShutdown: options.allowRemoteShutdown,
+      allowRemoteTerminals: options.allowRemoteTerminals,
+      allowedHosts: options.allowedHosts,
+      webAssetsDir: serverWebAssetsDir(),
+      onRequestActivity: idle
+        ? () => {
+            idle.onActivity();
           }
         : undefined,
-    },
-  });
+      coreProcessOptions: {
+        homeDir: getDataDir(),
+        identity: createKimiCodeHostIdentity(version),
+        telemetry,
+      },
+      wsGatewayOptions: {
+        telemetry,
+        onConnectionCountChange: idle
+          ? (size) => {
+              idle.onConnectionCountChange(size);
+            }
+          : undefined,
+      },
+    });
+  } finally {
+    if (spawnerGuard !== undefined) {
+      clearInterval(spawnerGuard);
+    }
+  }
 
   track('server_started', { daemon: mode.daemon });
 
@@ -376,39 +427,71 @@ async function runServerInProcess(
 /**
  * Pure idle-shutdown state machine, exported for tests.
  *
- * Watches the live WS connection count and fires `onIdle` exactly once, after
- * the count has dropped back to zero for `graceMs` ms *and* at least one
- * client had connected since startup. A reconnect before the grace elapses
- * cancels the pending exit. The initial "no clients yet" state never arms the
- * timer (so a freshly-spawned daemon is not killed before anyone connects).
+ * Watches both the live WS connection count and authenticated HTTP activity.
+ * REST activity renews the same grace lease, so a desktop client whose socket
+ * is reconnecting cannot be shut down while heartbeat requests still succeed.
+ * The initial state with no WS connection and no request activity never arms.
  */
 export function createIdleShutdownHandler(opts: { graceMs: number; onIdle: () => void }): {
   onConnectionCountChange(size: number): void;
+  onActivity(): void;
   cancel(): void;
 } {
   let timer: NodeJS.Timeout | undefined;
   let seenClient = false;
+  let connectionCount = 0;
+  let stopped = false;
 
-  const cancel = (): void => {
+  const clearTimer = (): void => {
     if (timer !== undefined) {
       clearTimeout(timer);
       timer = undefined;
     }
   };
 
+  const arm = (): void => {
+    clearTimer();
+    if (stopped || !seenClient || connectionCount > 0) return;
+    timer = setTimeout(() => {
+      timer = undefined;
+      if (stopped) return;
+      stopped = true;
+      opts.onIdle();
+    }, opts.graceMs);
+  };
+
   return {
     onConnectionCountChange(size: number): void {
+      if (stopped) return;
+      connectionCount = size;
       if (size > 0) {
         seenClient = true;
-        cancel();
+        clearTimer();
         return;
       }
-      if (seenClient) {
-        cancel();
-        timer = setTimeout(opts.onIdle, opts.graceMs);
-      }
+      arm();
     },
-    cancel,
+    onActivity(): void {
+      if (stopped) return;
+      seenClient = true;
+      arm();
+    },
+    cancel(): void {
+      stopped = true;
+      clearTimer();
+    },
+  };
+}
+
+export function createShutdownDeadline(opts: { timeoutMs: number; onTimeout: () => void }): {
+  cancel(): void;
+} {
+  const timer = setTimeout(opts.onTimeout, opts.timeoutMs);
+  timer.unref?.();
+  return {
+    cancel(): void {
+      clearTimeout(timer);
+    },
   };
 }
 

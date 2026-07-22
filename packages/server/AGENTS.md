@@ -43,7 +43,7 @@ Service conventions (naming, file layout, registration) live in `packages/agent-
 - `pnpm --filter @nori-code/server test` — `vitest run`.
 - `pnpm --filter @nori-code/server clean` — `rm -rf dist`.
 - Dev server: `pnpm dev:server` at the repo root.
-- E2E: in-process tests live in `test/*.e2e.test.ts` and boot `startServer` directly. Live e2e against a running server lives in `packages/server-e2e` (default `http://127.0.0.1:58627`, override with `KIMI_SERVER_URL`).
+- E2E: in-process tests live in `test/*.e2e.test.ts` and boot `startServer` directly. Live e2e against a running server lives in `packages/server-e2e` (default `http://127.0.0.1:58771`, override with `KIMI_SERVER_URL`).
 
 ## Gotchas / hard rules
 
