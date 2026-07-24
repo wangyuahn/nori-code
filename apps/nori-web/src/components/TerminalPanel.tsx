@@ -9,9 +9,10 @@ import { Icon } from './Icon';
 
 interface TerminalPanelProps {
   sessionId: string | null;
+  reuseExisting?: boolean;
 }
 
-export function TerminalPanel({ sessionId }: TerminalPanelProps) {
+export function TerminalPanel({ sessionId, reuseExisting = true }: TerminalPanelProps) {
   const { tr } = useI18n();
   const [terminals, setTerminals] = useState<TerminalSession[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -47,26 +48,18 @@ export function TerminalPanel({ sessionId }: TerminalPanelProps) {
       .then(result => {
         if (cancelled) return;
         setTerminals(result.items);
-        const preferred = result.items.find(item => item.status === 'running') ?? result.items[0];
-        if (preferred) setActiveId(preferred.id);
-        else void createTerminal();
+        if (reuseExisting) {
+          const preferred = result.items.find(item => item.status === 'running') ?? result.items[0];
+          if (preferred) setActiveId(preferred.id);
+          else void createTerminal();
+        } else {
+          void createTerminal();
+        }
       })
       .catch(cause => { if (!cancelled) setError(errorMessage(cause)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [createTerminal, sessionId]);
-
-  const closeTerminal = useCallback(async (terminalId: string) => {
-    if (!sessionId) return;
-    try {
-      await api.sessions.terminals.close(sessionId, terminalId);
-      setTerminals(previous => previous.map(item => item.id === terminalId
-        ? { ...item, status: 'exited', exited_at: new Date().toISOString() }
-        : item));
-    } catch (cause) {
-      setError(errorMessage(cause));
-    }
-  }, [sessionId]);
+  }, [createTerminal, reuseExisting, sessionId]);
 
   const updateTerminal = useCallback((terminalId: string, patch: Partial<TerminalSession>) => {
     setTerminals(previous => previous.map(item => item.id === terminalId ? { ...item, ...patch } : item));
@@ -76,23 +69,9 @@ export function TerminalPanel({ sessionId }: TerminalPanelProps) {
   if (!sessionId) return <div className="inspector-empty"><Icon name="terminal" size={24}/><span>{tr('Open a project conversation to use the terminal.', '打开项目会话后即可使用终端。')}</span></div>;
 
   return <section className="terminal-panel">
-    <header className="terminal-tabs">
-      <div className="terminal-tab-list">
-        {terminals.map((terminal, index) => <button
-          type="button"
-          key={terminal.id}
-          className={`terminal-tab${terminal.id === activeId ? ' active' : ''}`}
-          onClick={() => setActiveId(terminal.id)}
-          title={`${terminal.shell} - ${terminal.cwd}`}
-        ><span className={`terminal-status ${terminal.status}`}/><span>{terminalLabel(terminal, index)}</span>{terminal.status === 'running' && <i onClick={event => { event.stopPropagation(); void closeTerminal(terminal.id); }} role="button" aria-label={tr('Close terminal', '关闭终端')}><Icon name="close" size={11}/></i>}</button>)}
-      </div>
-      <button type="button" className="terminal-new" onClick={() => void createTerminal()} disabled={loading} title={tr('New terminal', '新建终端')} aria-label={tr('New terminal', '新建终端')}>
-        {loading ? <span className="spinner spinner-small"/> : <Icon name="plus" size={14}/>} 
-      </button>
-    </header>
     {error && <div className="terminal-error" role="status"><Icon name="alert" size={13}/><span>{error}</span></div>}
     {active ? <TerminalSurface key={active.id} sessionId={sessionId} terminal={active} onExit={updateTerminal}/>
-      : <div className="inspector-empty"><span className="spinner"/><span>{tr('Starting terminal…', '正在启动终端…')}</span></div>}
+      : <div className="inspector-empty"><span className="spinner"/><span>{loading ? tr('Starting terminal…', '正在启动终端…') : tr('No terminal available.', '没有可用终端。')}</span></div>}
   </section>;
 }
 
@@ -249,11 +228,6 @@ function terminalTheme() {
   return light
     ? { background: '#ffffff', foreground: '#202124', cursor: '#168f9f', selectionBackground: '#b8e8ed' }
     : { background: '#0f1115', foreground: '#d8dce5', cursor: '#55c5d3', selectionBackground: '#28464d' };
-}
-
-function terminalLabel(terminal: TerminalSession, index: number): string {
-  const shell = terminal.shell.replaceAll('\\', '/').split('/').at(-1)?.replace(/\.exe$/i, '') || 'shell';
-  return `${shell} ${index + 1}`;
 }
 
 function errorMessage(cause: unknown): string {

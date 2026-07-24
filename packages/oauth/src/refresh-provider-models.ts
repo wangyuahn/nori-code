@@ -367,6 +367,10 @@ export async function refreshProviderModels(
     }
     const provider = rawProvider as ProviderRecord;
     if (options.scope === 'oauth' && recordField(provider, 'oauth') === undefined) continue;
+    if (provider['disabled'] === true || provider['autoDiscover'] === false) {
+      unchanged.push(providerId);
+      continue;
+    }
 
     try {
       const discovered = await discoverModels(providerId, provider, host);

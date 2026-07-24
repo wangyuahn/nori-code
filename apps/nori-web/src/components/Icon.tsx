@@ -13,6 +13,8 @@ export type IconName =
   | 'chevron-left'
   | 'chevron-down'
   | 'refresh'
+  | 'eye'
+  | 'copy'
   | 'plus'
   | 'send'
   | 'stop'
@@ -31,14 +33,21 @@ export type IconName =
   | 'close'
   | 'git-branch'
   | 'diff'
+  | 'edit'
   | 'upload'
   | 'target'
   | 'paperclip'
+  | 'pin'
   | 'terminal'
   | 'globe'
   | 'home'
   | 'external'
-  | 'clock';
+  | 'clock'
+  | 'shield'
+  | 'user'
+  | 'minimize'
+  | 'maximize'
+  | 'restore';
 
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'name'> {
   name: IconName;
@@ -58,6 +67,8 @@ export function Icon({ name, size = 18, ...props }: IconProps) {
     'chevron-left': <path d="m15 18-6-6 6-6"/>,
     'chevron-down': <path d="m6 9 6 6 6-6"/>,
     refresh: <><path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/></>,
+    eye: <><path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"/><circle cx="12" cy="12" r="2.5"/></>,
+    copy: <><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></>,
     'panel-left': <><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></>,
     plus: <path d="M12 5v14M5 12h14"/>,
     send: <><path d="M12 19V5"/><path d="m6.5 10.5 5.5-5.5 5.5 5.5"/></>,
@@ -77,14 +88,21 @@ export function Icon({ name, size = 18, ...props }: IconProps) {
     close: <path d="m6 6 12 12M18 6 6 18"/>,
     'git-branch': <><circle cx="6" cy="5" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="19" r="2"/><path d="M6 7v10M8 12h4a6 6 0 0 0 6-4"/></>,
     diff: <><path d="M7 3v18M17 3v18M4 7h6M14 17h6"/><path d="m17 4 3 3-3 3M17 14l3 3-3 3"/></>,
+    edit: <><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></>,
     upload: <><path d="M12 16V4M7 9l5-5 5 5"/><path d="M5 20h14"/></>,
     target: <><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></>,
     paperclip: <path d="m20.5 11.5-8.7 8.7a6 6 0 0 1-8.5-8.5l9.4-9.4a4 4 0 0 1 5.7 5.7l-9.5 9.5a2 2 0 0 1-2.8-2.8l8.8-8.8"/>,
+    pin: <><path d="M12 17v5"/><path d="M5 3h14M7 3l1 7-3 3h14l-3-3 1-7"/></>,
     terminal: <><path d="m5 7 4 4-4 4"/><path d="M11 16h8"/><rect x="2.5" y="3.5" width="19" height="17" rx="2"/></>,
     globe: <><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.3 3 14.7 0 18M12 3c-3 3.3-3 14.7 0 18"/></>,
     home: <><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></>,
     external: <><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6"/></>,
     clock: <><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></>,
+    shield: <><path d="M12 3 19 6v5c0 4.5-2.9 8.2-7 10-4.1-1.8-7-5.5-7-10V6Z"/><path d="M12 8v4M12 16h.01"/></>,
+    user: <><circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/></>,
+    minimize: <path d="M5 12h14"/>,
+    maximize: <rect x="5" y="5" width="14" height="14" rx="1"/>,
+    restore: <><rect x="7" y="7" width="12" height="12" rx="1"/><path d="M5 16V5h11"/></>,
   };
 
   return (

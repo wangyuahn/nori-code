@@ -7,6 +7,23 @@ import { readDir, readTextFile } from './filesystem';
 export function registerIpcHandlers(): void {
   ipcMain.handle('nori:getServerToken', () => readServerToken());
 
+  ipcMain.on('nori:window:minimize', (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.minimize();
+  });
+  ipcMain.handle('nori:window:toggle-maximize', (event) => {
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    if (owner === null) return false;
+    if (owner.isMaximized()) owner.unmaximize();
+    else owner.maximize();
+    return owner.isMaximized();
+  });
+  ipcMain.handle('nori:window:is-maximized', (event) =>
+    BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false,
+  );
+  ipcMain.on('nori:window:close', (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.close();
+  });
+
   ipcMain.handle('nori:selectProjectDirectory', async (event) => {
     const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
     const result = owner

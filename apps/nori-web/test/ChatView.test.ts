@@ -220,6 +220,56 @@ describe('chat image attachments', () => {
   });
 });
 
+describe('conversation turn rail', () => {
+  it('keeps one visible marker for a single-turn conversation', async () => {
+    const { container } = await renderChat({
+      messages: [{ id: 'user-1', role: 'user', text: 'single prompt' }],
+    });
+
+    const rail = container.querySelector('.chat-turn-rail');
+    expect(rail).not.toBeNull();
+    expect(rail?.querySelectorAll('button')).toHaveLength(1);
+  });
+
+  it('renders one marker per user turn, previews the nearest turn on hover, and jumps on click', async () => {
+    const { container } = await renderChat({
+      messages: [
+        { id: 'user-1', role: 'user', text: 'first prompt' },
+        { id: 'assistant-1', role: 'assistant', text: 'first answer' },
+        { id: 'user-2', role: 'user', text: 'second prompt' },
+        { id: 'assistant-2', role: 'assistant', text: 'second answer' },
+        { id: 'user-3', role: 'user', text: 'third prompt' },
+      ],
+    });
+    const scrollContainer = container.querySelector<HTMLDivElement>('.chat-messages')!;
+    const scrollTo = vi.fn();
+    Object.defineProperty(scrollContainer, 'scrollTo', { configurable: true, value: scrollTo });
+    const markers = [...container.querySelectorAll<HTMLButtonElement>('.chat-turn-rail button')];
+
+    expect(markers).toHaveLength(3);
+    expect(markers[2]?.classList.contains('active')).toBe(true);
+
+    const rail = container.querySelector<HTMLElement>('.chat-turn-rail')!;
+    Object.defineProperty(rail, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ top: 0, bottom: 100, left: 0, right: 30, width: 30, height: 100, x: 0, y: 0, toJSON: () => ({}) }),
+    });
+    await act(async () => {
+      rail.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientY: 50 }));
+    });
+    expect(markers[1]?.classList.contains('active')).toBe(true);
+    expect(container.querySelector('.chat-turn-preview')?.textContent).toContain('second prompt');
+    expect(container.querySelector('.chat-turn-preview')?.textContent).toContain('second answer');
+
+    await act(async () => {
+      markers[1]?.click();
+      await Promise.resolve();
+    });
+    expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ top: 0 }));
+    expect(markers[1]?.getAttribute('aria-current')).toBe('step');
+  });
+});
+
 describe('project file references', () => {
   it('formats relative paths safely for the main agent', () => {
     expect(projectFileMention('src/app.ts')).toBe('@src/app.ts');
@@ -303,6 +353,53 @@ describe('model thinking options', () => {
       resolveChange();
       await Promise.resolve();
     });
+  });
+
+  it('uses themed in-app lists for model and reasoning selection', async () => {
+    const onModelChange = vi.fn();
+    const onThinkingChange = vi.fn();
+    const { container } = await renderChat({
+      models: [model('multimodal-model', ['tool_use', 'image_in']), model('second-model', ['tool_use'])],
+      onModelChange,
+      onThinkingChange,
+    });
+
+    expect(container.querySelector('.model-select')?.classList.contains('composer-native-select')).toBe(true);
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('.composer-model-trigger')!.click();
+      container.querySelector<HTMLButtonElement>('[data-composer-setting="model"] .composer-setting-trigger')!.click();
+      await Promise.resolve();
+    });
+    const modelOptions = container.querySelector('[data-composer-setting="model"] .composer-setting-options');
+    expect(modelOptions?.getAttribute('aria-hidden')).toBe('false');
+
+    await act(async () => {
+      modelOptions?.querySelector<HTMLButtonElement>('[data-value="second-model"]')?.click();
+      await Promise.resolve();
+    });
+    expect(onModelChange).toHaveBeenCalledWith('second-model');
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-composer-setting="thinking"] .composer-setting-trigger')!.click();
+      container.querySelector<HTMLButtonElement>('[data-composer-setting="thinking"] [data-value="medium"]')!.click();
+      await Promise.resolve();
+    });
+    expect(onThinkingChange).toHaveBeenCalledWith('medium');
+  });
+
+  it('opens model settings immediately while the catalog is still loading', async () => {
+    const { container } = await renderChat({ modelsLoading: true, models: [] });
+    const trigger = container.querySelector<HTMLButtonElement>('.composer-model-trigger')!;
+
+    expect(trigger.disabled).toBe(false);
+    expect(trigger.getAttribute('aria-busy')).toBe('true');
+
+    await act(async () => {
+      trigger.click();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('.composer-model-popover')?.getAttribute('aria-hidden')).toBe('false');
   });
 
   it('offers Fast and Think when a third-party model omits reasoning metadata', () => {
@@ -739,18 +836,52 @@ describe('chat slash commands and task-mode shortcut', () => {
         context_usage: 0,
       },
     });
-    const [planButton, codeButton] = container.querySelectorAll<HTMLButtonElement>('.composer-task-mode button');
+    const modeButton = container.querySelector<HTMLButtonElement>('.composer-task-cycle')!;
 
-    expect(codeButton?.classList.contains('active')).toBe(true);
+    expect(modeButton.dataset.mode).toBe('code');
     await act(async () => {
-      planButton?.click();
+      modeButton.click();
       await Promise.resolve();
     });
 
     expect(onTaskModeChange).toHaveBeenCalledWith('plan');
-    expect(planButton?.classList.contains('active')).toBe(true);
-    expect(codeButton?.classList.contains('active')).toBe(false);
-    expect(container.querySelector('.main-write-toggle:not(.loop-mode-toggle)')).toBeNull();
+    expect(modeButton.dataset.mode).toBe('plan');
+    expect(container.querySelector('.main-write-icon-toggle')).toBeNull();
+
+    await act(async () => {
+      resolveUpdate();
+      await Promise.resolve();
+    });
+  });
+
+  it('updates the main-write control immediately while the server profile is stale', async () => {
+    let resolveUpdate!: () => void;
+    const onMainWriteChange = vi.fn(() => new Promise<void>(resolve => { resolveUpdate = resolve; }));
+    const { container } = await renderChat({
+      onMainWriteChange,
+      sessionStatus: {
+        status: 'ready',
+        thinking_level: 'off',
+        permission: 'manual',
+        plan_mode: false,
+        main_write_enabled: true,
+        swarm_mode: false,
+        goal: null,
+        context_tokens: 0,
+        max_context_tokens: 128_000,
+        context_usage: 0,
+      },
+    });
+    const toggle = container.querySelector<HTMLInputElement>('.main-write-icon-toggle input')!;
+
+    await act(async () => {
+      toggle.click();
+      await Promise.resolve();
+    });
+
+    expect(onMainWriteChange).toHaveBeenCalledWith(false);
+    expect(toggle.checked).toBe(false);
+    expect(container.querySelector('.main-write-icon-toggle')?.classList.contains('active')).toBe(false);
 
     await act(async () => {
       resolveUpdate();
@@ -782,6 +913,127 @@ describe('chat slash commands and task-mode shortcut', () => {
     expect(props.onRunSlashCommand).not.toHaveBeenCalled();
     expect(props.onSendMessage).not.toHaveBeenCalled();
     expect(container.querySelector('.composer-command-notice')?.textContent).toContain('Unknown slash command');
+  });
+});
+
+describe('conversation presentation', () => {
+  it('uses the application title bar and renders assistant replies without an avatar', async () => {
+    const { container } = await renderChat({
+      messages: [
+        { id: 'user-1', role: 'user', text: 'Inspect the layout.' },
+        { id: 'assistant-1', role: 'assistant', text: 'The reply now uses the full conversation column.' },
+      ],
+    });
+
+    expect(container.querySelector('.chat-header')).toBeNull();
+    expect(container.querySelector('.chat-message-assistant .message-avatar')).toBeNull();
+    expect(container.querySelector('.chat-message-assistant .message-body')?.textContent).toContain('full conversation column');
+    expect(container.querySelector('.chat-message-user .message-avatar')).toBeNull();
+    expect(container.querySelector('.chat-message-user .chat-message-role')?.textContent).not.toContain('You');
+    expect(container.querySelector('.chat-message-user .chat-message-content')?.textContent).toBe('Inspect the layout.');
+  });
+
+  it('updates work elapsed time while live and freezes it when the turn completes', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-23T12:00:05.000Z'));
+    const startedAt = '2026-07-23T12:00:00.000Z';
+    const { container, props, root } = await renderChat({
+      messages: [
+        { id: 'user-1', role: 'user', text: 'Measure this turn.', createdAt: startedAt },
+        { id: 'assistant-1', role: 'assistant', text: '', createdAt: '2026-07-23T12:00:01.000Z' },
+      ],
+      workBlocks: [{ id: 'thinking-1', type: 'thinking', text: 'Checking.' }],
+      isStreaming: true,
+    });
+
+    expect(container.querySelector('.work-process-elapsed')?.textContent).toBe('5s');
+    await act(async () => { vi.advanceTimersByTime(2_000); });
+    expect(container.querySelector('.work-process-elapsed')?.textContent).toBe('7s');
+
+    await act(async () => {
+      root.render(createElement(I18nProvider, null, createElement(ChatView, {
+        ...props,
+        messages: [
+          { id: 'user-1', role: 'user', text: 'Measure this turn.', createdAt: startedAt },
+          { id: 'assistant-1', role: 'assistant', text: 'Done.', createdAt: '2026-07-23T12:01:05.000Z', workBlocks: [{ id: 'thinking-1', type: 'thinking', text: 'Checking.' }] },
+        ],
+        workBlocks: [],
+        isStreaming: false,
+      })));
+    });
+    expect(container.querySelector('.work-process-elapsed')?.textContent).toBe('1m 05s');
+    await act(async () => { vi.advanceTimersByTime(5_000); });
+    expect(container.querySelector('.work-process-elapsed')?.textContent).toBe('1m 05s');
+    vi.useRealTimers();
+  });
+
+  it('grows the composer with content and caps it at the scrolling height', async () => {
+    const { container } = await renderChat();
+    const input = container.querySelector<HTMLTextAreaElement>('.chat-input')!;
+    expect(input.rows).toBe(1);
+
+    Object.defineProperty(input, 'scrollHeight', { configurable: true, value: 196 });
+    await enterText(input, 'one\ntwo\nthree\nfour');
+    expect(input.style.height).toBe('196px');
+    expect(input.style.overflowY).toBe('hidden');
+
+    Object.defineProperty(input, 'scrollHeight', { configurable: true, value: 420 });
+    await enterText(input, 'one\ntwo\nthree\nfour\nfive\nsix\nseven\neight');
+    expect(input.style.height).toBe('260px');
+    expect(input.style.overflowY).toBe('auto');
+  });
+
+  it('keeps live reasoning open, collapses it on completion, and lets the user reopen it', async () => {
+    const blocks = [
+      { id: 'thinking-1', type: 'thinking' as const, text: 'Inspecting the relevant call path.' },
+      { id: 'tool-1', type: 'tool' as const, tool: { id: 'tool-1', name: 'ReadFile', args: { path: 'src/app.ts' }, result: 'ok' } },
+    ];
+    const liveMessage = { id: 'assistant-1', role: 'assistant' as const, text: '' };
+    const { container, props, root } = await renderChat({
+      messages: [liveMessage],
+      workBlocks: blocks,
+      isStreaming: true,
+    });
+
+    let details = container.querySelector<HTMLDetailsElement>('.chat-work-process')!;
+    expect(details.open).toBe(true);
+    expect(details.textContent).toContain('Nori is working');
+    expect(details.textContent).toContain('ReadFile');
+
+    await act(async () => {
+      root.render(createElement(I18nProvider, null, createElement(ChatView, {
+        ...props,
+        messages: [{ ...liveMessage, text: 'Finished.', workBlocks: blocks }],
+        workBlocks: [],
+        isStreaming: false,
+      })));
+    });
+
+    details = container.querySelector<HTMLDetailsElement>('.chat-work-process')!;
+    expect(details.open).toBe(false);
+    expect(details.textContent).toContain('Work details');
+
+    await act(async () => {
+      details.querySelector('summary')?.click();
+      await Promise.resolve();
+    });
+    expect(details.open).toBe(true);
+  });
+
+  it('renders ordinary live text inside work details instead of as a finished answer', async () => {
+    const { container } = await renderChat({
+      messages: [{ id: 'assistant-1', role: 'assistant', text: 'The first inspection pass is complete.' }],
+      streaming: 'I am checking the event boundary now.',
+      isStreaming: true,
+    });
+
+    const details = container.querySelector<HTMLDetailsElement>('.chat-work-process')!;
+    expect(details.open).toBe(true);
+    expect(details.querySelectorAll('.work-progress-block')).toHaveLength(2);
+    expect(details.textContent).toContain('The first inspection pass is complete.');
+    expect(details.textContent).toContain('I am checking the event boundary now.');
+    expect(container.querySelector('.chat-message-content')).toBeNull();
+    expect(container.querySelector('.activity-island')).toBeNull();
   });
 });
 

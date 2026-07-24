@@ -2,7 +2,9 @@
 
 Nori Work is the Electron desktop workspace for Nori Code. The package name is `@nori-code/nori-work`.
 
-![Nori Work](../../docs/images/nori-work.png)
+![Nori Work conversation workspace](../../docs/images/nori-work-overview.png)
+
+![Nori Work browser workspace](../../docs/images/nori-work-browser.png)
 
 ## Architecture
 
@@ -22,7 +24,7 @@ The current desktop workspace also includes:
 - Background AgentSwarm monitoring and controls for pause, guidance, resume, and stop.
 - Configurable completion, Agent, approval, and error notification sounds.
 
-At startup, the desktop process launches or reuses the bundled Nori SEA server, reads `~/.nori-code/server/lock`, obtains its origin and token, and loads the renderer. The shared daemon is left running when the window closes and exits after its idle period when no clients remain.
+At startup, the desktop process launches or reuses the bundled Nori SEA server, reads `~/.nori-code/server/lock`, obtains its origin and token, and loads the renderer. On a normal Nori Work exit, the desktop process stops the associated Nori daemon through the lock-validated server kill command.
 
 Key files:
 

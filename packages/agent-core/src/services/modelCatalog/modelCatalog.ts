@@ -26,6 +26,9 @@ export interface IModelCatalogService {
   listModels(): Promise<readonly ModelCatalogItem[]>;
   listProviders(): Promise<readonly ProviderCatalogItem[]>;
   getProvider(providerId: string): Promise<ProviderCatalogItem>;
+  getProviderSecret(providerId: string): Promise<{ provider_id: string; api_key: string }>;
+  removeProvider(providerId: string): Promise<{ deleted: true }>;
+  testProvider(providerId: string): Promise<{ ok: boolean; message: string }>;
   setDefaultModel(modelId: string): Promise<SetDefaultModelResponse>;
   refreshOAuthProviderModels(): Promise<RefreshOAuthProviderModelsResponse>;
   refreshProviderModels(
@@ -72,6 +75,7 @@ export function toProtocolModel(
   }
   return {
     provider: effective.provider,
+    provider_name: provider?.name ?? effective.provider,
     model: modelId,
     display_name: effective.displayName ?? effective.model,
     max_context_size: effective.maxContextSize,
@@ -98,11 +102,17 @@ export function toProtocolProvider(
   const defaultModel = provider.defaultModel ?? globalDefaultForProvider(config, providerId);
   return {
     id: providerId,
+    name: provider.name ?? providerId,
     type: provider.type,
     base_url: provider.baseUrl,
     default_model: defaultModel,
     has_api_key: credential.hasApiKey,
-    status: credential.hasApiKey || credential.hasOAuthToken ? 'connected' : 'unconfigured',
+    status: provider.disabled
+      ? 'error'
+      : credential.hasApiKey || credential.hasOAuthToken ? 'connected' : 'unconfigured',
+    disabled: provider.disabled,
+    auto_discover: provider.autoDiscover,
+    custom_models: provider.customModels,
     models,
   };
 }
@@ -111,6 +121,8 @@ export function modelIdsForProvider(
   config: KimiConfig,
   providerId: string,
 ): string[] {
+  const customModels = config.providers?.[providerId]?.customModels;
+  if (customModels !== undefined) return [...customModels];
   const models = config.models ?? {};
   return Object.entries(models)
     .filter(([, alias]) => alias.provider === providerId)

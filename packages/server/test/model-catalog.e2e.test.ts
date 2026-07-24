@@ -255,6 +255,15 @@ describe('model/provider catalog routes', () => {
       getProvider: async () => {
         throw new Error('unused');
       },
+      getProviderSecret: async () => {
+        throw new Error('unused');
+      },
+      removeProvider: async () => {
+        throw new Error('unused');
+      },
+      testProvider: async () => {
+        throw new Error('unused');
+      },
       setDefaultModel: async () => {
         throw new Error('unused');
       },
@@ -304,6 +313,7 @@ describe('model/provider catalog routes', () => {
   function refreshStub(): {
     stub: ModelCatalogServiceShape;
     refreshProviderModels: ReturnType<typeof vi.fn>;
+    testProvider: ReturnType<typeof vi.fn>;
   } {
     const refreshProviderModels = vi.fn(async () => ({
       changed: [
@@ -317,6 +327,10 @@ describe('model/provider catalog routes', () => {
       unchanged: ['moonshot-cn'],
       failed: [],
     }));
+    const testProvider = vi.fn(async () => ({
+      ok: true,
+      message: 'Provider is ready.',
+    }));
     const stub: ModelCatalogServiceShape = {
       _serviceBrand: undefined,
       listModels: async () => [],
@@ -324,13 +338,20 @@ describe('model/provider catalog routes', () => {
       getProvider: async () => {
         throw new Error('unused');
       },
+      getProviderSecret: async () => {
+        throw new Error('unused');
+      },
+      removeProvider: async () => {
+        throw new Error('unused');
+      },
+      testProvider,
       setDefaultModel: async () => {
         throw new Error('unused');
       },
       refreshOAuthProviderModels: async () => ({ changed: [], unchanged: [], failed: [] }),
       refreshProviderModels,
     };
-    return { stub, refreshProviderModels };
+    return { stub, refreshProviderModels, testProvider };
   }
 
   it('refreshes all provider models through POST /providers:refresh', async () => {
@@ -363,6 +384,24 @@ describe('model/provider catalog routes', () => {
     expect(refreshProviderModels).toHaveBeenCalledWith({
       providerId: 'managed:kimi-code',
     });
+  });
+
+  it('tests a single provider through POST /providers/{id}:test', async () => {
+    const { stub, testProvider } = refreshStub();
+    const r = await bootDaemon([[IModelCatalogService, stub]]);
+
+    const res = await appOf(r).inject({
+      method: 'POST',
+      url: '/api/v1/providers/managed%3Akimi-code:test',
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(envelopeOf<unknown>(res.json())).toMatchObject({
+      code: 0,
+      data: { ok: true, message: 'Provider is ready.' },
+    });
+    expect(testProvider).toHaveBeenCalledWith('managed:kimi-code');
   });
 
   it('rejects unsupported provider actions', async () => {

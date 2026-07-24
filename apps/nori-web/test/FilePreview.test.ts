@@ -7,7 +7,7 @@ import { FilePreview } from '../src/components/FilePreview';
 import { I18nProvider } from '../src/i18n';
 
 vi.mock('shiki', () => ({
-  codeToHtml: vi.fn(async (content: string) => `<pre><code><span class="line">${content}</span></code></pre>`),
+  codeToHtml: vi.fn(async (content: string) => `<pre><code>${content.split('\n').map(line => `<span class="line">${line}</span>`).join('')}</code></pre>`),
 }));
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -19,6 +19,31 @@ afterEach(() => {
 });
 
 describe('FilePreview', () => {
+  it('keeps highlighted code split into numbered lines', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(FilePreview, {
+          path: 'src/example.ts',
+          file: sourceFile('const first = 1;\n\nconst third = 3;'),
+          revealLine: 2,
+        })));
+        await Promise.resolve();
+      });
+
+      await vi.waitFor(() => expect(container.querySelectorAll('.code-preview .line')).toHaveLength(3));
+      const lines = [...container.querySelectorAll<HTMLElement>('.code-preview .line')];
+      expect(lines.map(line => line.dataset.lineNumber)).toEqual(['1', '2', '3']);
+      await vi.waitFor(() => expect(lines[1]?.classList.contains('lsp-reveal-line')).toBe(true));
+    } finally {
+      await act(async () => { root.unmount(); });
+      container.remove();
+    }
+  });
+
   it('keeps a code selection stable while the same file refreshes', async () => {
     const container = document.createElement('div');
     document.body.append(container);

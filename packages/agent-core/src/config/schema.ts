@@ -26,9 +26,13 @@ const StringRecordSchema = z.record(z.string(), z.string());
 
 export const ProviderConfigSchema = z.object({
   type: ProviderTypeSchema,
+  name: z.string().trim().min(1).optional(),
   apiKey: z.string().optional(),
   baseUrl: z.string().optional(),
   defaultModel: z.string().optional(),
+  disabled: z.boolean().optional(),
+  autoDiscover: z.boolean().optional(),
+  customModels: z.array(z.string().trim().min(1)).optional(),
   oauth: OAuthRefSchema.optional(),
   env: StringRecordSchema.optional(),
   customHeaders: StringRecordSchema.optional(),
@@ -291,8 +295,14 @@ export const KimiConfigSchema = z.object({
 
 export type KimiConfig = z.infer<typeof KimiConfigSchema>;
 
-const ProviderConfigPatchSchema = ProviderConfigSchema.partial();
-const ModelAliasPatchSchema = ModelAliasSchema.partial();
+const ProviderConfigPatchSchema = ProviderConfigSchema.partial().extend({
+  // `null` is an explicit delete marker for fields whose omission must be
+  // distinguishable from "leave the existing value unchanged".
+  customModels: z
+    .union([ProviderConfigSchema.shape.customModels, z.null()])
+    .optional(),
+});
+const ModelAliasPatchSchema = z.union([ModelAliasSchema.partial(), z.null()]);
 const ThinkingConfigPatchSchema = ThinkingConfigSchema.partial();
 const PermissionConfigPatchSchema = PermissionConfigSchema.partial();
 const LoopControlPatchSchema = LoopControlSchema.partial();

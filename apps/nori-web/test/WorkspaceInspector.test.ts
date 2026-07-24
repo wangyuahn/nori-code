@@ -6,14 +6,216 @@ import type { ChatMessage, CodeChange } from '../src/hooks/useChatMessages';
 import { useFilesystem } from '../src/hooks/useFilesystem';
 import { WorkspaceInspector, changedLineStats, collectAttributions, collectToolCodeChanges, combinedCodeChangeDiff, diffPathsToLoad, hasTextChanges, mergeCodeChanges, splitDisplayPath } from '../src/components/WorkspaceInspector';
 import { I18nProvider } from '../src/i18n';
+import type { NoriBrowserState, NoriDesktopAPI } from '../src/types/nori-desktop';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  delete window.noriDesktop;
+  localStorage.removeItem('nori-inspector-overview-pinned');
 });
 
 describe('workspace change presentation', () => {
+  it('detaches the native browser view when another inspector tab becomes active', async () => {
+    class TestResizeObserver {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element) { this.callback([{ target } as ResizeObserverEntry], this as unknown as ResizeObserver); }
+      disconnect() {}
+      unobserve() {}
+    }
+
+    vi.stubGlobal('ResizeObserver', TestResizeObserver);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 240, y: 120, left: 240, top: 120, right: 840, bottom: 620,
+      width: 600, height: 500, toJSON: () => ({}),
+    });
+    const browserState: NoriBrowserState = {
+      activeTabId: 'browser-1',
+      visible: false,
+      tabs: [{ id: 'browser-1', url: 'https://example.com', title: 'Example', canGoBack: false, canGoForward: false, loading: false }],
+    };
+    const desktop: NoriDesktopAPI = {
+      browserGetState: vi.fn(async () => browserState),
+      browserSetVisible: vi.fn(async visible => ({ ...browserState, visible })),
+      browserResize: vi.fn(),
+      onBrowserState: () => () => undefined,
+    };
+    window.noriDesktop = desktop;
+
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(WorkspaceInspector, {
+          sessionId: 'session-browser-visibility',
+          projectPath: '/project',
+          path: '',
+          file: null,
+          messages: [],
+          codeChanges: [],
+          gitStatus: null,
+          gitError: null,
+          gitLoading: false,
+          refreshGitStatus: vi.fn(async () => null),
+          isStreaming: false,
+          initialTab: 'browser',
+        })));
+      });
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)); });
+      expect(desktop.browserSetVisible).toHaveBeenCalledWith(true);
+
+      const previewButton = [...container.querySelectorAll<HTMLButtonElement>('.inspector-tab-list > button')]
+        .find(button => button.title === 'Preview' || button.title === '预览');
+      expect(previewButton).toBeDefined();
+      await act(async () => {
+        previewButton?.click();
+        await Promise.resolve();
+      });
+
+      expect(container.querySelector('.browser-panel')).toBeNull();
+      expect(desktop.browserSetVisible).toHaveBeenLastCalledWith(false);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('renders todos as distinct rows without repeating the first item in the headline', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(WorkspaceInspector, {
+          sessionId: 'session-todo-island',
+          projectPath: '/project',
+          path: '',
+          file: null,
+          messages: [],
+          codeChanges: [],
+          gitStatus: null,
+          gitError: null,
+          gitLoading: false,
+          refreshGitStatus: vi.fn(async () => null),
+          isStreaming: false,
+          overviewFirst: true,
+          todos: [
+            { title: 'First task', status: 'done' },
+            { title: 'Second task', status: 'in_progress' },
+            { title: 'Third task', status: 'pending' },
+          ],
+        })));
+        await Promise.resolve();
+      });
+
+      expect(container.querySelectorAll('.inspector-activity-todos li')).toHaveLength(3);
+      expect(container.querySelector('.inspector-activity-todos-heading')?.textContent).toContain('Todo list');
+      expect(container.textContent?.match(/First task/g)).toHaveLength(1);
+      expect(container.textContent?.match(/Second task/g)).toHaveLength(1);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('pins the tool island from its header and keeps sidebar collapse as a separate control', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(WorkspaceInspector, {
+          sessionId: 'session-inspector-collapse',
+          projectPath: '/project',
+          path: '',
+          file: null,
+          messages: [],
+          codeChanges: [],
+          gitStatus: null,
+          gitError: null,
+          gitLoading: false,
+          refreshGitStatus: vi.fn(async () => null),
+          isStreaming: false,
+          overviewFirst: true,
+        })));
+        await Promise.resolve();
+      });
+
+      const inspector = container.querySelector('.workspace-inspector')!;
+      const pinButton = () => container.querySelector<HTMLButtonElement>('.inspector-pin-button')!;
+      expect(pinButton().getAttribute('aria-label')).toMatch(/Auto-hide tool island|自动隐藏工具岛/);
+
+      await act(async () => pinButton().click());
+      expect(inspector.classList.contains('inspector-overview-auto-hide')).toBe(true);
+      expect(pinButton().getAttribute('aria-label')).toMatch(/Keep tool island visible|常驻工具岛/);
+
+      await act(async () => pinButton().click());
+      expect(inspector.classList.contains('inspector-overview-auto-hide')).toBe(false);
+
+      const changesButton = [...container.querySelectorAll<HTMLButtonElement>('.inspector-tab-list > button')]
+        .find(button => button.textContent?.includes('Changes') || button.textContent?.includes('更改'))!;
+      await act(async () => changesButton.click());
+      expect(inspector.classList.contains('inspector-view-open')).toBe(true);
+      expect(container.querySelector('.inspector-pin-button')).toBeNull();
+      const collapseButton = container.querySelector<HTMLButtonElement>('.inspector-collapse-button')!;
+      expect(collapseButton.getAttribute('aria-label')).toMatch(/Collapse tool sidebar|收起工具侧栏/);
+
+      await act(async () => collapseButton.click());
+      expect(inspector.classList.contains('inspector-overview-open')).toBe(true);
+      expect(inspector.classList.contains('inspector-view-open')).toBe(false);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('reuses an existing tool tab from the island and lets the user close it', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(WorkspaceInspector, {
+          sessionId: 'session-inspector-tabs',
+          projectPath: '/project',
+          path: '',
+          file: null,
+          messages: [],
+          codeChanges: [],
+          gitStatus: null,
+          gitError: null,
+          gitLoading: false,
+          refreshGitStatus: vi.fn(async () => null),
+          isStreaming: false,
+          overviewFirst: true,
+        })));
+        await Promise.resolve();
+      });
+
+      const changesButton = [...container.querySelectorAll<HTMLButtonElement>('.inspector-tab-list > button')]
+        .find(button => button.textContent?.includes('Changes') || button.textContent?.includes('更改'))!;
+      await act(async () => changesButton.click());
+      expect(container.querySelectorAll('.inspector-open-tab')).toHaveLength(1);
+
+      await act(async () => container.querySelector<HTMLButtonElement>('.inspector-collapse-button')!.click());
+      await act(async () => changesButton.click());
+      expect(container.querySelectorAll('.inspector-open-tab')).toHaveLength(1);
+      expect(container.querySelector('.workspace-inspector')?.classList.contains('inspector-view-open')).toBe(true);
+
+      const closeButton = container.querySelector<HTMLButtonElement>('.inspector-close-tab')!;
+      expect(closeButton.getAttribute('aria-label')).toMatch(/Close Changes tab|关闭更改标签页/);
+      await act(async () => closeButton.click());
+      expect(container.querySelectorAll('.inspector-open-tab')).toHaveLength(0);
+      expect(container.querySelector('.workspace-inspector')?.classList.contains('inspector-overview-open')).toBe(true);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
   it('opens a changed file in the Preview tab from its file card', async () => {
     const container = document.createElement('div');
     document.body.append(container);
@@ -499,17 +701,13 @@ describe('workspace change presentation', () => {
       await render([], status({ 'src/a.ts': 'modified' }));
       const inspectorTabs = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
       const changesTab = inspectorTabs
-        .find(button => button.textContent?.includes('更改') || button.textContent?.includes('Changes'));
+        .find(button => button.title === '更改' || button.title === 'Changes' || button.textContent?.includes('更改') || button.textContent?.includes('Changes'));
       const browserTab = inspectorTabs
-        .find(button => button.textContent?.includes('浏览器') || button.textContent?.includes('Browser'));
+        .find(button => button.title === '浏览器' || button.title === 'Browser' || button.textContent?.includes('浏览器') || button.textContent?.includes('Browser'));
       expect(changesTab).toBeDefined();
       expect(browserTab).toBeDefined();
       expect(inspectorTabs[0]).toBe(changesTab);
       expect(changesTab!.getAttribute('aria-selected')).toBe('true');
-      await act(async () => {
-        changesTab!.click();
-        await new Promise(resolve => setTimeout(resolve, 0));
-      });
       expect(diff).toHaveBeenCalledTimes(1);
 
       await render([{ id: 'user-2', role: 'user', text: 'next question' }], status({ 'src/a.ts': 'modified' }, 2));

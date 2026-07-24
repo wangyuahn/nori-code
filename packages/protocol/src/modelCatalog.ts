@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const modelCatalogItemSchema = z.object({
   provider: z.string().min(1),
+  provider_name: z.string().min(1).optional(),
   model: z.string().min(1),
   display_name: z.string().min(1).optional(),
   max_context_size: z.number().int().min(1),
@@ -21,11 +22,15 @@ export type ProviderCatalogStatus = z.infer<typeof providerCatalogStatusSchema>;
 
 export const providerCatalogItemSchema = z.object({
   id: z.string().min(1),
+  name: z.string().min(1).optional(),
   type: z.string().min(1),
   base_url: z.string().min(1).optional(),
   default_model: z.string().min(1).optional(),
   has_api_key: z.boolean(),
   status: providerCatalogStatusSchema,
+  disabled: z.boolean().optional(),
+  auto_discover: z.boolean().optional(),
+  custom_models: z.array(z.string().min(1)).optional(),
   models: z.array(z.string().min(1)).optional(),
 });
 export type ProviderCatalogItem = z.infer<typeof providerCatalogItemSchema>;

@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChatView } from './components/ChatView';
 import { Dashboard } from './components/Dashboard';
 import { SwarmPanel, runningSwarmAgents, swarmRunProgress, swarmRunTokens, useBackgroundTasks } from './components/SwarmPanel';
 import { CronJobPanel } from './components/CronJobPanel';
-import { VaultBrowser } from './components/VaultBrowser';
-import { SettingsPanel } from './components/SettingsPanel';
+import { AccountCenter } from './components/AccountCenter';
 import { CodeView } from './components/CodeView';
 import { Icon, type IconName } from './components/Icon';
 import { useSessions, usePhaseStatus, useSwarmWebSocket, useServerStatus } from './hooks/useApi';
@@ -18,10 +16,8 @@ import { loadRewindLimit } from './rewindPreferences';
 import type { ChatSlashCommandName } from './utils/chat-slash-commands';
 import { installSoundUnlock, playNotificationSound } from './notificationSounds';
 
-type View = 'chat' | 'dashboard' | 'swarm' | 'cron' | 'vault' | 'settings';
-type SidebarTab = 'sessions' | 'vault' | 'files';
-type WorkspaceMode = 'work' | 'code';
-type VaultMode = 'list' | 'graph';
+type View = 'chat' | 'dashboard' | 'swarm' | 'cron' | 'account';
+type SidebarTab = 'sessions' | 'files';
 type InitialMessage = { text: string; attachments: PromptAttachment[]; options?: PromptExecutionOptions };
 
 const NAV_ITEMS: { key: View; icon: IconName; label: string }[] = [
@@ -29,34 +25,43 @@ const NAV_ITEMS: { key: View; icon: IconName; label: string }[] = [
   { key: 'dashboard', icon: 'dashboard', label: 'Overview' },
   { key: 'swarm', icon: 'swarm', label: 'Swarm' },
   { key: 'cron', icon: 'clock', label: 'Cron Job' },
-  { key: 'settings', icon: 'settings', label: 'Settings' },
 ];
 
 const SIDEBAR_TABS: { key: SidebarTab; icon: IconName; label: string }[] = [
   { key: 'sessions', icon: 'sessions', label: 'Sessions' },
-  { key: 'vault', icon: 'vault', label: 'Vault' },
   { key: 'files', icon: 'files', label: 'Files' },
 ];
 
-function loadWorkspaceMode(): WorkspaceMode {
+const SIDEBAR_EXPANDED_STORAGE_KEY = 'nori-sidebar-expanded';
+
+function loadSidebarExpanded(): boolean {
   try {
-    return localStorage.getItem('nori-ui-mode') === 'code' ? 'code' : 'work';
+    const saved = window.localStorage.getItem(SIDEBAR_EXPANDED_STORAGE_KEY);
+    if (saved === 'true') return true;
+    if (saved === 'false') return false;
   } catch {
-    return 'work';
+    // Use the expanded default when storage is unavailable.
+  }
+  return true;
+}
+
+function persistSidebarExpanded(expanded: boolean): void {
+  try {
+    window.localStorage.setItem(SIDEBAR_EXPANDED_STORAGE_KEY, String(expanded));
+  } catch {
+    // Keep the state in memory when storage is unavailable.
   }
 }
 
 export function App() {
   const { tr } = useI18n();
   const [activeView, setActiveView] = useState<View>('chat');
-  const [sidebarExpanded, setSidebarExpanded] = useState(true);
+  const [sidebarExpanded, setSidebarExpanded] = useState(loadSidebarExpanded);
   const [sidebarWidth, setSidebarWidth] = useState(() => Math.max(220, Math.min(480, Number(localStorage.getItem('nori-sidebar-width')) || 256)));
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('sessions');
-  const [mode, setMode] = useState<WorkspaceMode>(loadWorkspaceMode);
   const [models, setModels] = useState<ModelCatalogItem[]>([]);
   const [modelsLoading, setModelsLoading] = useState(true);
   const [modelError, setModelError] = useState<string | null>(null);
-  const [vaultMode, setVaultMode] = useState<VaultMode>('list');
   const [selectedProjectFile, setSelectedProjectFile] = useState<FsEntry | null>(null);
   const [selectedProjectRoot, setSelectedProjectRoot] = useState<string | null>(null);
   const [folderPickerOpen, setFolderPickerOpen] = useState(false);
@@ -76,6 +81,10 @@ export function App() {
   const swarmSoundStateRef = useRef<Map<string, SwarmStatus['status']> | null>(null);
 
   useEffect(() => installSoundUnlock(), []);
+
+  useEffect(() => {
+    persistSidebarExpanded(sidebarExpanded);
+  }, [sidebarExpanded]);
 
   useEffect(() => {
     const roots = Array.from(swarm.swarmStatuses.values()).filter(run => !run.parent_swarm_id);
@@ -146,12 +155,10 @@ export function App() {
     dashboard: tr('Dashboard', '仪表盘'),
     swarm: tr('Swarm', '智能体协作'),
     cron: tr('Cron Job', '定时任务'),
-    vault: tr('Vault', '知识库'),
-    settings: tr('Settings', '设置'),
+    account: tr('My profile', '我的'),
   };
   const sidebarLabels: Record<SidebarTab, string> = {
     sessions: tr('Sessions', '会话'),
-    vault: tr('Vault', '知识库'),
     files: tr('Files', '文件'),
   };
   const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort } = useChatMessages(sessionId, activeSession?.title);
@@ -305,26 +312,6 @@ export function App() {
   };
 
   useEffect(() => {
-    try {
-      localStorage.setItem('nori-ui-mode', mode);
-    } catch {
-      // Local storage can be disabled in hardened browser contexts.
-    }
-  }, [mode]);
-
-  useEffect(() => {
-    const unsubscribe = window.noriDesktop?.onToggleMode?.((receivedMode: string) => {
-      if (receivedMode === 'work' || receivedMode === 'code') {
-        setMode(receivedMode);
-      } else {
-        setMode(previous => previous === 'work' ? 'code' : 'work');
-      }
-      setActiveView('chat');
-    });
-    return () => unsubscribe?.();
-  }, []);
-
-  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'b') {
         event.preventDefault();
@@ -337,11 +324,7 @@ export function App() {
 
   const selectSidebarTab = (tab: SidebarTab) => {
     setSidebarTab(tab);
-    setSidebarExpanded(true);
-    if (tab === 'vault') setActiveView('vault');
-    if (tab === 'files') {
-      setMode('code');
-    }
+    setActiveView('chat');
   };
 
   const closeSidebarOnNarrowViewport = () => {
@@ -379,74 +362,18 @@ export function App() {
             </div>
           </div>
         );
-      case 'vault':
+      case 'account':
         return (
-          <div className="view-page view-page-wide">
+          <div className="view-page view-page-wide account-page">
             <div className="view-stack">
-              <ViewHeader eyebrow={tr('Knowledge', '知识')} title={tr('Vault', '知识库')} description={tr('Browse durable analysis, decisions, reviews, and task notes.', '浏览长期保存的分析、决策、评审和任务笔记。')} />
-              <VaultBrowser mode={vaultMode} />
-            </div>
-          </div>
-        );
-      case 'settings':
-        return (
-          <div className="view-page">
-            <div className="view-stack">
-              <ViewHeader eyebrow={tr('Preferences', '偏好设置')} title={tr('Settings', '设置')} description={tr('Tune how Nori works and make the workspace feel like yours.', '调整 Nori 的工作方式和工作区体验。')} />
-              <SettingsPanel />
+              <AccountCenter />
             </div>
           </div>
         );
       case 'chat':
       default:
-        if (mode === 'code') {
-          return (
-            <CodeView
-              session={activeSession}
-              allSessions={sessions}
-              messages={messages}
-              messagesLoading={messagesLoading}
-              streaming={currentStreaming}
-              thinking={currentThinking}
-              workBlocks={currentWorkBlocks}
-              isStreaming={isStreaming}
-              activeAgentCount={activeAgentCount}
-              activeAgentTokens={activeAgentTokens}
-              sessionStatus={sessionStatus}
-              compacting={compacting}
-              models={models}
-              modelsLoading={modelsLoading}
-              modelError={modelError}
-              onRefreshModels={() => void refreshModels()}
-              onModelChange={changeModel}
-              onThinkingChange={changeThinking}
-              onPermissionChange={changePermission}
-              onTaskModeChange={changeTaskMode}
-              onRunSlashCommand={handleRunSlashCommand}
-              onMainWriteChange={changeMainWrite}
-              onGoalControl={controlGoal}
-              onSendMessage={handleSendMessage}
-              onAbort={abort}
-              pendingApprovals={pendingApprovals}
-              onResolveApproval={resolveApproval}
-              pendingQuestions={pendingQuestions}
-              onResolveQuestion={resolveQuestion}
-              onDismissQuestion={dismissQuestion}
-              queuedPrompts={queuedPrompts}
-              todos={todos}
-              onCancelQueuedPrompt={cancelQueuedPrompt}
-              selectedFile={selectedProjectFile}
-              codeChanges={codeChanges}
-              draftAgentConfig={draftAgentConfig}
-              rewindLimit={rewindLimit}
-              onRewind={rewindToPrompt}
-              onRefreshMessages={refreshMessages}
-              onSelectFilePath={path => setSelectedProjectFile({ path, name: path.replaceAll('\\', '/').split('/').at(-1) ?? path, kind: 'file', modified_at: '' })}
-            />
-          );
-        }
         return (
-          <ChatView
+          <CodeView
             session={activeSession}
             allSessions={sessions}
             messages={messages}
@@ -480,9 +407,13 @@ export function App() {
             queuedPrompts={queuedPrompts}
             todos={todos}
             onCancelQueuedPrompt={cancelQueuedPrompt}
+            selectedFile={selectedProjectFile}
+            codeChanges={codeChanges}
             draftAgentConfig={draftAgentConfig}
             rewindLimit={rewindLimit}
             onRewind={rewindToPrompt}
+            onRefreshMessages={refreshMessages}
+            onSelectFilePath={path => setSelectedProjectFile({ path, name: path.replaceAll('\\', '/').split('/').at(-1) ?? path, kind: 'file', modified_at: '' })}
           />
         );
     }
@@ -494,15 +425,17 @@ export function App() {
         <div className="sidebar-brand">
           <span className="app-logo" aria-hidden="true"><span>N</span></span>
           <span className="sidebar-brand-copy"><strong>Nori Work</strong><small>{tr('Independent workspace', '独立工作区')}</small></span>
-          <button className="brand-collapse" onClick={() => setSidebarExpanded(previous => !previous)} title={tr('Toggle sidebar (Ctrl+B)', '切换侧栏 (Ctrl+B)')}><Icon name="panel-left" size={16} /></button>
         </div>
 
-        <button className="new-task-button" onClick={() => void startNewConversation()} disabled={sessionsCreating}>
-          {sessionsCreating ? <span className="spinner spinner-small" /> : <Icon name="plus" size={16} />}
-          <span>{tr('New task', '新建任务')}</span><kbd>Ctrl N</kbd>
-        </button>
+        <div className="sidebar-tabs sidebar-workspace-switch" role="tablist" aria-label={tr('Workspace panels', '工作区面板')}>
+          {SIDEBAR_TABS.map(tab => (
+            <button key={tab.key} className={`sidebar-tab${sidebarTab === tab.key ? ' active' : ''}`} onClick={() => selectSidebarTab(tab.key)} title={sidebarLabels[tab.key]} role="tab" aria-selected={sidebarTab === tab.key}>
+              <Icon name={tab.icon} size={16} /><span className="sidebar-tab-label">{sidebarLabels[tab.key]}</span>
+            </button>
+          ))}
+        </div>
 
-        <PrimaryNavigation
+        {sidebarTab === 'sessions' && <PrimaryNavigation
           activeView={activeView}
           labels={viewLabels}
           activeAgentCount={activeAgentCount}
@@ -512,34 +445,30 @@ export function App() {
             if (itemKey === 'chat') setSidebarTab('sessions');
             closeSidebarOnNarrowViewport();
           }}
-        />
-
-        <div className="sidebar-section-label"><span>{tr('Workspace', '工作区')}</span></div>
-        <div className="sidebar-tabs" role="tablist" aria-label={tr('Workspace panels', '工作区面板')}>
-          {SIDEBAR_TABS.map(tab => (
-            <button key={tab.key} className={`sidebar-tab${sidebarTab === tab.key ? ' active' : ''}`} onClick={() => selectSidebarTab(tab.key)} title={sidebarLabels[tab.key]} role="tab" aria-selected={sidebarTab === tab.key}>
-              <Icon name={tab.icon} size={16} /><span className="sidebar-tab-label">{sidebarLabels[tab.key]}</span>
-            </button>
-          ))}
-        </div>
+        />}
 
         <div className="sidebar-content">
           {sidebarTab === 'sessions' && (
             <SessionsList sessions={sessions} sessionId={sessionId} sessionsLoading={sessionsLoading} sessionsError={sessionsError} sessionsCreating={sessionsCreating} onRefresh={refreshSessions} onCreateSession={() => void startNewConversation()} onSwitchSession={id => { switchSession(id); setActiveView('chat'); closeSidebarOnNarrowViewport(); }} onArchiveSession={archiveSession} onDeleteSession={deleteSession} onRenameSession={renameSession} onForkSession={async (id, title) => { await forkSession(id, title); setActiveView('chat'); closeSidebarOnNarrowViewport(); }} />
           )}
-          {sidebarTab === 'vault' && <VaultSidebar mode={vaultMode} onModeChange={setVaultMode} />}
           {sidebarTab === 'files' && <FilesSidebar session={activeSession} selectedFile={selectedProjectFile} onSelectFile={setSelectedProjectFile} />}
         </div>
 
         <div className="sidebar-footer-nav">
-          <button className={`sidebar-nav-item${activeView === 'settings' ? ' active' : ''}`} onClick={() => setActiveView('settings')} title={tr('Settings', '设置')}>
-            <Icon name="settings" size={17} /><span>{tr('Settings', '设置')}</span>
+          <button className={`sidebar-nav-item sidebar-account${activeView === 'account' ? ' active' : ''}`} onClick={() => {
+            setActiveView('account');
+          }} title={tr('My memory and settings', '我的记忆和设置')}>
+            <span className="sidebar-account-avatar"><Icon name="user" size={13}/></span><span className="sidebar-account-copy"><strong>{tr('My profile', '我的')}</strong><small>{tr('Memory and settings', '记忆和设置')}</small></span>
           </button>
           <button className="sidebar-nav-item sidebar-collapse-row" onClick={() => setSidebarExpanded(previous => !previous)} title={tr('Toggle sidebar (Ctrl+B)', '切换侧栏 (Ctrl+B)')}>
             <Icon name="panel-left" size={17} /><span>{tr('Collapse sidebar', '收起侧栏')}</span><kbd>Ctrl B</kbd>
           </button>
         </div>
-        {sidebarExpanded && <div className="sidebar-resizer" onPointerDown={event => {
+        {sidebarExpanded && <div className="sidebar-resizer" onPointerMove={event => {
+          const bounds = event.currentTarget.getBoundingClientRect();
+          const y = Math.max(0, Math.min(bounds.height, event.clientY - bounds.top));
+          event.currentTarget.style.setProperty('--resize-highlight-y', `${y}px`);
+        }} onPointerDown={event => {
           event.currentTarget.setPointerCapture(event.pointerId);
           const startX = event.clientX;
           const startWidth = sidebarWidth;
@@ -558,14 +487,9 @@ export function App() {
         <header className="top-bar">
           <div className="workspace-breadcrumb"><span>Nori Work</span><Icon name="chevron-right" size={13} /><strong>{viewLabels[activeView]}</strong></div>
           <div className="top-bar-actions">
-            {activeView === 'chat' && (
-              <div className="mode-toggle-bar" data-mode={mode} aria-label={tr('Workspace layout', '工作区布局')}>
-                <button className={`mode-toggle-btn${mode === 'work' ? ' active' : ''}`} onClick={() => setMode('work')}>{tr('Focus', '专注')}</button>
-                <button className={`mode-toggle-btn${mode === 'code' ? ' active' : ''}`} onClick={() => setMode('code')}>{tr('Code', '代码')}</button>
-              </div>
-            )}
             <div className="session-chip" title={activeSession?.id ?? tr('No active session', '无活动会话')}><span className={`status-dot${activeSession ? ' active' : ' idle'}`} /><span>{activeSession?.title || tr('No session', '无会话')}</span></div>
           </div>
+          <WindowControls />
         </header>
         <main className={`content-area content-area-${activeView}`}>{renderContent()}</main>
         <StatusBar sending={isStreaming} activeAgentCount={activeAgentCount} hasSwarmActivity={hasSwarmActivity} />
@@ -598,7 +522,7 @@ export function PrimaryNavigation({ activeView, labels, activeAgentCount, cronJo
   onSelect: (view: View) => void;
 }) {
   return <nav className="sidebar-primary-nav" aria-label="Primary navigation">
-    {NAV_ITEMS.filter(item => item.key !== 'settings').map(item => {
+    {NAV_ITEMS.map(item => {
       const swarmActive = item.key === 'swarm' && activeAgentCount > 0;
       const cronActive = item.key === 'cron' && cronJobCount > 0;
       const count = item.key === 'swarm' ? activeAgentCount : item.key === 'cron' ? cronJobCount : 0;
@@ -613,6 +537,36 @@ export function PrimaryNavigation({ activeView, labels, activeAgentCount, cronJo
       </button>;
     })}
   </nav>;
+}
+
+export function WindowControls() {
+  const { tr } = useI18n();
+  const desktop = window.noriDesktop;
+  const [maximized, setMaximized] = useState(false);
+
+  useEffect(() => {
+    if (!desktop?.windowIsMaximized) return;
+    let active = true;
+    void desktop.windowIsMaximized().then(value => {
+      if (active) setMaximized(value);
+    });
+    const unsubscribe = desktop.onWindowMaximizedChange?.(setMaximized);
+    return () => {
+      active = false;
+      unsubscribe?.();
+    };
+  }, [desktop]);
+
+  if (desktop?.usesCustomWindowControls !== true || !desktop.windowMinimize || !desktop.windowToggleMaximize || !desktop.windowClose) return null;
+  return <div className="window-controls" aria-label={tr('Window controls', '窗口控制')}>
+    <button type="button" onClick={() => {
+      desktop.windowMinimize?.();
+    }} title={tr('Minimize', '最小化')} aria-label={tr('Minimize', '最小化')}><Icon name="minimize" size={14}/></button>
+    <button type="button" onClick={() => { void desktop.windowToggleMaximize?.().then(setMaximized); }} title={maximized ? tr('Restore', '还原') : tr('Maximize', '最大化')} aria-label={maximized ? tr('Restore', '还原') : tr('Maximize', '最大化')}><Icon name={maximized ? 'restore' : 'maximize'} size={12}/></button>
+    <button type="button" className="window-close" onClick={() => {
+      desktop.windowClose?.();
+    }} title={tr('Close', '关闭')} aria-label={tr('Close', '关闭')}><Icon name="close" size={14}/></button>
+  </div>;
 }
 
 export function countActiveAgents(
@@ -736,6 +690,12 @@ function SessionsList({
     };
   }, [contextMenu]);
 
+  useEffect(() => {
+    if (!actionNotice || actionSessionId !== null) return;
+    const timer = window.setTimeout(() => setActionNotice(null), 3_500);
+    return () => window.clearTimeout(timer);
+  }, [actionNotice, actionSessionId]);
+
   const groupSessions = (items: Session[]) => Array.from(
     items.reduce((groups, session) => {
       const key = sessionProjectKey(session);
@@ -756,7 +716,7 @@ function SessionsList({
       try {
         localStorage.setItem(COLLAPSED_SESSION_GROUPS_KEY, JSON.stringify([...next]));
       } catch {
-        // The collapse state can remain in memory when storage is unavailable.
+        // Keep the collapse state in memory when storage is unavailable.
       }
       return next;
     });
@@ -779,10 +739,13 @@ function SessionsList({
       return;
     }
     setActionSessionId(session.id);
+    if (action === 'export') setActionNotice(tr('Exporting Markdown…', '正在导出 Markdown…'));
     try {
       if (action === 'export') {
         const exported = await exportSessionMarkdown(session);
-        if (exported) setActionNotice(tr('Markdown exported.', 'Markdown 已导出。'));
+        setActionNotice(exported
+          ? tr('Markdown exported.', 'Markdown 已导出。')
+          : tr('Markdown export cancelled.', '已取消导出 Markdown。'));
       } else if (action === 'archive') {
         await onArchiveSession(session.id);
       } else {
@@ -854,7 +817,7 @@ function SessionsList({
               disabled={actionSessionId === session.id}
             >
               <span className={'status-dot' + (session.id === sessionId ? ' active' : ' idle')} />
-              <span className="sidebar-item-copy"><strong>{session.title || tr('Untitled conversation', '未命名会话')}</strong><small>{archived ? tr('Archived', '已归档') : session.status || 'ready'}</small></span>
+              <span className="sidebar-item-copy"><strong title={session.title || tr('Untitled conversation', '未命名会话')}>{session.title || tr('Untitled conversation', '未命名会话')}</strong><small>{archived ? tr('Archived', '已归档') : session.status || 'ready'}</small></span>
               {session.message_count !== undefined && session.message_count !== null && <span className="sidebar-item-count">{session.message_count}</span>}
             </button>
           ))}
@@ -889,7 +852,7 @@ function SessionsList({
             <button className="session-project-header session-archive-header" onClick={() => setArchiveCollapsed(previous => !previous)} aria-expanded={!archiveCollapsed}>
               <Icon name="archive" size={15} />
               <span className="session-project-copy"><strong>{tr('Archive', '归档')}</strong><small>{tr('Archived conversations', '已归档会话')}</small></span>
-              <span className="session-project-count">{sessions.filter(session => session.archived).length}</span>
+              <span className="session-project-count">{archivedGroups.reduce((count, [, group]) => count + group.length, 0)}</span>
               <Icon name="chevron-right" size={14} />
             </button>
             {!archiveCollapsed && <div className="session-archive-groups">{renderGroups(archivedGroups, true)}</div>}
@@ -903,7 +866,7 @@ function SessionsList({
         {!contextMenu.session.archived && <button role="menuitem" onClick={() => void runSessionAction('archive', contextMenu.session)}><Icon name="archive" size={14} />{tr('Archive session', '归档会话')}</button>}
         <button className="danger" role="menuitem" onClick={() => void runSessionAction('delete', contextMenu.session)}><Icon name="trash" size={14} />{tr('Delete session', '删除会话')}</button>
       </div>}
-      {(actionError || actionNotice) && <div className={`session-action-notice${actionError ? ' error' : ''}`} role="status">{actionError ?? actionNotice}</div>}
+      {(actionError || actionNotice) && <div className={`session-action-notice${actionError ? ' error' : ' success'}`} role="status" aria-live="polite"><Icon name={actionError ? 'alert' : 'check'} size={14}/><span>{actionError ?? actionNotice}</span></div>}
       {actionDialog && <div className="session-action-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && actionSessionId === null) setActionDialog(null); }}>
         <form className="session-action-dialog" role="dialog" aria-modal="true" aria-labelledby="session-action-title" onSubmit={event => { event.preventDefault(); void submitActionDialog(); }}>
           <header><div><span>{tr('Conversation', '会话')}</span><h2 id="session-action-title">{actionDialog.action === 'rename' ? tr('Rename conversation', '重命名会话') : tr('Fork conversation', '创建会话分支')}</h2></div><button type="button" onClick={() => setActionDialog(null)} disabled={actionSessionId !== null} aria-label={tr('Close', '关闭')}><Icon name="close" size={14}/></button></header>
@@ -922,8 +885,9 @@ async function exportSessionMarkdown(session: Session): Promise<boolean> {
   for (const message of response.items as Message[]) {
     const originKind = message.metadata?.origin?.kind;
     if (message.role === 'user' && originKind && originKind !== 'user') continue;
-    const text = message.content.filter(part => part.type === 'text').map(part => part.text ?? '').join('').trim();
-    const thinking = message.content.filter(part => part.type === 'thinking').map(part => part.thinking ?? part.text ?? '').join('\n').trim();
+    const parts = Array.isArray(message.content) ? message.content : [];
+    const text = parts.filter(part => part.type === 'text').map(part => part.text ?? '').join('').trim();
+    const thinking = parts.filter(part => part.type === 'thinking').map(part => part.thinking ?? part.text ?? '').join('\n').trim() || message.thinking?.trim() || '';
     const role = message.role === 'user' ? 'User' : message.role === 'assistant' ? 'Nori' : 'System';
     if (!text && !thinking) continue;
     lines.push(`## ${role}`, '');
@@ -949,28 +913,6 @@ async function exportSessionMarkdown(session: Session): Promise<boolean> {
 
 function safeDownloadName(value: string): string {
   return value.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').trim() || 'nori-session';
-}
-
-function VaultSidebar({ mode, onModeChange }: { mode: VaultMode; onModeChange: (mode: VaultMode) => void }) {
-  const { tr } = useI18n();
-  const modes: Array<{ key: VaultMode; label: string; description: string; icon: IconName }> = [
-    { key: 'list', label: tr('Note list', '笔记列表'), description: tr('Browse and search notes', '浏览和搜索笔记'), icon: 'list' },
-    { key: 'graph', label: tr('Linked graph', '双向链接图'), description: tr('Explore relationships', '查看笔记关系'), icon: 'graph' },
-  ];
-
-  return (
-    <div className="sidebar-panel">
-      <div className="sidebar-header">{tr('Knowledge vault', '知识库')}</div>
-      <div className="sidebar-list">
-        {modes.map(item => (
-          <button key={item.key} className={`sidebar-item${mode === item.key ? ' active' : ''}`} onClick={() => onModeChange(item.key)}>
-            <Icon name={item.icon} size={15} />
-            <span className="sidebar-item-copy"><strong>{item.label}</strong><small>{item.description}</small></span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 function FilesSidebar({ session, selectedFile, onSelectFile }: { session: Session | null; selectedFile: FsEntry | null; onSelectFile: (file: FsEntry) => void }) {

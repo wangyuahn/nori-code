@@ -31,6 +31,10 @@ function deepMerge(
   const result = { ...target };
   for (const [key, sourceValue] of Object.entries(source)) {
     if (sourceValue === undefined) continue;
+    if (sourceValue === null) {
+      delete result[key];
+      continue;
+    }
     const targetValue = result[key];
     if (isPlainObject(targetValue) && isPlainObject(sourceValue)) {
       result[key] = deepMerge(targetValue, sourceValue);

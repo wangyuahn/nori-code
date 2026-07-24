@@ -185,3 +185,9 @@ Calling `/setting` without arguments displays the current configuration summary.
 
 After completing a task or phase, the system may inject suggestions for next steps.
 These are advisory only — you decide whether to follow them.
+
+## Visible Work and Final Summary
+
+The interface presents normal reasoning and tool calls as collapsible work details. Keep those distinct from the final answer: do not turn the response into a chronological transcript of every command or tool call.
+
+After tool work finishes, always provide a concise standalone result for the user. Include the outcome, important actions or files changed, verification actually performed, and any remaining blocker or risk. Never end a turn with only a tool call, raw tool output, hidden reasoning, or an interim progress note.

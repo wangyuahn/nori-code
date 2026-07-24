@@ -2,6 +2,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, type ConfigResponse } from '../src/api/client';
+import { AccountCenter } from '../src/components/AccountCenter';
 import { SettingsPanel } from '../src/components/SettingsPanel';
 import { I18nProvider } from '../src/i18n';
 
@@ -11,9 +12,6 @@ const roots: Root[] = [];
 
 beforeEach(() => {
   localStorage.setItem('nori-ui-language', 'en');
-  vi.spyOn(api.providers, 'list').mockResolvedValue({ items: [] });
-  vi.spyOn(api.providers, 'refresh').mockResolvedValue({ changed: [], failed: [] });
-  vi.spyOn(api.providerPresets, 'list').mockResolvedValue({ items: [], source: 'test' });
   vi.spyOn(api, 'updateConfig').mockResolvedValue({});
 });
 
@@ -121,63 +119,46 @@ describe('SettingsPanel Memory settings', () => {
   });
 });
 
-describe('SettingsPanel Provider settings', () => {
-  it('clears the existing connection when New provider is selected', async () => {
-    vi.mocked(api.providers.list).mockResolvedValue({
-      items: [{
-        id: 'existing-provider',
-        type: 'anthropic',
-        base_url: 'https://existing.example.test',
-        has_api_key: true,
-        status: 'connected',
-      }],
-    });
+describe('SettingsPanel provider separation', () => {
+  it('keeps provider controls out of preferences and uses a settings-only save action', async () => {
     const { container } = await renderSettings({});
-    const configuredProvider = providerControl<HTMLSelectElement>(container, 'Configured provider');
 
-    expect(configuredProvider.value).toBe('existing-provider');
-    expect(providerControl<HTMLInputElement>(container, 'Provider ID').value).toBe('existing-provider');
-
-    await selectValue(configuredProvider, '');
-
-    expect(configuredProvider.value).toBe('');
-    expect(providerControl<HTMLInputElement>(container, 'Provider ID').value).toBe('');
-    expect(providerControl<HTMLInputElement>(container, 'API Base URL').value).toBe('');
+    expect(container.querySelector('[aria-label="Configured provider"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Provider ID"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Online preset"]')).toBeNull();
+    expect(saveButton(container).textContent).toBe('Save settings');
   });
+});
 
-  it('stores the models.dev source when an online preset is selected', async () => {
-    vi.mocked(api.providerPresets.list).mockResolvedValue({
-      source: 'https://models.dev/api.json',
-      items: [{
-        id: 'openai',
-        name: 'OpenAI',
-        type: 'openai',
-        base_url: 'https://api.openai.com/v1',
-        env: ['OPENAI_API_KEY'],
-        model_count: 4,
-      }],
-    });
-    const updateConfig = vi.mocked(api.updateConfig);
-    const { container } = await renderSettings({});
+describe('AccountCenter', () => {
+  it('keeps preferences and durable memory in one personal center', async () => {
+    vi.spyOn(api, 'getConfig').mockResolvedValue({});
+    const listNotes = vi.spyOn(api.vault, 'list').mockResolvedValue([]);
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
 
-    await selectValue(providerControl<HTMLSelectElement>(container, 'Online preset'), 'openai');
     await act(async () => {
-      saveButton(container).click();
+      root.render(createElement(I18nProvider, null, createElement(AccountCenter)));
+    });
+    await vi.waitFor(() => {
+      expect(container.querySelector('.account-tabs button.active')?.textContent).toContain('Preferences');
+    });
+
+    const memoryButton = Array.from(container.querySelectorAll<HTMLButtonElement>('.account-tabs button'))
+      .find(button => button.textContent?.includes('Memory'));
+    await act(async () => {
+      memoryButton?.click();
       await Promise.resolve();
     });
 
-    await vi.waitFor(() => { expect(updateConfig).toHaveBeenCalled(); });
-    expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({
-      providers: {
-        openai: expect.objectContaining({
-          source: {
-            kind: 'modelsDev',
-            url: 'https://models.dev/api.json',
-            catalog_id: 'openai',
-          },
-        }),
-      },
-    }));
+    await vi.waitFor(() => {
+      expect(listNotes).toHaveBeenCalled();
+      expect(container.querySelector<HTMLInputElement>('.vault-browser input')?.placeholder).toBe('Search notes...');
+    });
+    expect(memoryButton?.classList.contains('active')).toBe(true);
+    expect(container.querySelector('[aria-label="Memory view"]')).not.toBeNull();
   });
 });
 
@@ -204,15 +185,9 @@ function memoryInput<T extends HTMLInputElement | HTMLSelectElement>(container: 
   return input;
 }
 
-function providerControl<T extends HTMLInputElement | HTMLSelectElement>(container: HTMLElement, label: string): T {
-  const control = container.querySelector<T>(`[aria-label="${label}"]`);
-  if (!control) throw new Error(`Missing Provider control: ${label}`);
-  return control;
-}
-
 function saveButton(container: HTMLElement) {
   const button = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
-    .find(item => item.textContent === 'Save and refresh models');
+    .find(item => item.textContent === 'Save settings');
   if (!button) throw new Error('Missing save button');
   return button;
 }
@@ -222,15 +197,6 @@ async function enterValue(input: HTMLInputElement, value: string) {
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
     setter?.call(input, value);
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    await Promise.resolve();
-  });
-}
-
-async function selectValue(select: HTMLSelectElement, value: string) {
-  await act(async () => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
-    setter?.call(select, value);
-    select.dispatchEvent(new Event('change', { bubbles: true }));
     await Promise.resolve();
   });
 }

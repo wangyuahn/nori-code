@@ -15,6 +15,7 @@ export interface ToolCall {
 
 export type WorkBlock =
   | { id: string; type: 'thinking'; text: string }
+  | { id: string; type: 'progress'; text: string }
   | { id: string; type: 'tool'; tool: ToolCall };
 
 export interface TodoItem {
@@ -212,9 +213,9 @@ function stripLeadingSystemReminders(text: string): string {
   return result.trim();
 }
 
-const GENERATED_TITLE_OPEN = '<nori-session-title>';
+const GENERATED_TITLE_OPEN = '<nori-session-title';
 const GENERATED_TITLE_CLOSE = '</nori-session-title>';
-const GENERATED_TITLE_PATTERN = /<nori-session-title>([\s\S]*?)<\/nori-session-title>\s*/i;
+const GENERATED_TITLE_PATTERN = /<nori-session-title\b[^>]*>\s*([\s\S]*?)\s*<\/nori-session-title>\s*/i;
 
 export function generatedSessionTitle(text: string): string | undefined {
   const match = GENERATED_TITLE_PATTERN.exec(text);
@@ -243,6 +244,18 @@ export function canApplyGeneratedSessionTitle(currentTitle: string | undefined):
     return true;
   }
   return /^\s*<(?:system-reminder|nori-session-title)>/i.test(currentTitle);
+}
+
+export function fallbackSessionTitle(text: string): string | undefined {
+  const firstLine = text
+    .replaceAll(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, '')
+    .replaceAll(/\s+/g, ' ')
+    .trim()
+    .split(/\n|(?<=[。！？.!?])\s+/u, 1)[0]
+    ?.trim();
+  if (!firstLine) return undefined;
+  const words = firstLine.split(' ').filter(Boolean).slice(0, 8).join(' ');
+  return (words || firstLine).slice(0, 80).trim();
 }
 
 export function apiMessageToChat(m: Message): ChatMessage | null {
@@ -307,13 +320,15 @@ export function apiMessageToChat(m: Message): ChatMessage | null {
   }
 
   const thinking = m.thinking || thinkingFromContent || undefined;
-  const workBlocks = workBlocksFromMessage(m, toolCalls, thinking);
-  if (!text && !thinking && toolCalls.length === 0 && images.length === 0) return null;
+  const textIsProgress = m.role === 'assistant' && toolCalls.length > 0 && Boolean(text.trim());
+  const workBlocks = workBlocksFromMessage(m, toolCalls, thinking, textIsProgress ? text : undefined);
+  const visibleText = textIsProgress ? '' : text;
+  if (!visibleText && !thinking && toolCalls.length === 0 && images.length === 0) return null;
 
   return {
     id: m.id,
     role: m.role === 'tool' ? 'assistant' : m.role,
-    text,
+    text: visibleText,
     images: images.length > 0 ? images : undefined,
     thinking,
     workBlocks: workBlocks.length > 0 ? workBlocks : undefined,
@@ -338,25 +353,28 @@ export function foldConversationTurns(messages: ChatMessage[]): ChatMessage[] {
       continue;
     }
 
+    const incoming = normalizeAssistantMessage(message);
     if (assistantIndex < 0) {
       assistantIndex = folded.length;
-      folded.push(message);
+      folded.push(incoming);
       continue;
     }
 
-    const previous = folded[assistantIndex]!;
-    const toolCalls = mergeToolCalls(previous.toolCalls ?? [], message.toolCalls ?? []);
-    const thinking = [previous.thinking, message.thinking].filter(Boolean).join('\n\n');
-    const workBlocks = mergeWorkBlocks(previous.workBlocks ?? [], message.workBlocks ?? []);
-    const text = [previous.text.trimEnd(), message.text.trimStart()].filter(Boolean).join('\n\n');
+    const previous = moveAssistantTextToProgress(
+      folded[assistantIndex]!,
+      `${folded[assistantIndex]!.id}-progress-before-${incoming.id}`,
+    );
+    const toolCalls = mergeToolCalls(previous.toolCalls ?? [], incoming.toolCalls ?? []);
+    const thinking = [previous.thinking, incoming.thinking].filter(Boolean).join('\n\n');
+    const workBlocks = mergeWorkBlocks(materializeWorkBlocks(previous), materializeWorkBlocks(incoming));
     folded[assistantIndex] = {
       ...previous,
-      text,
+      text: incoming.text,
       thinking: thinking || undefined,
       workBlocks: workBlocks.length > 0 ? workBlocks : undefined,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-      createdAt: message.createdAt ?? previous.createdAt,
-      usage: addTokenUsage(previous.usage, message.usage),
+      createdAt: incoming.createdAt ?? previous.createdAt,
+      usage: addTokenUsage(previous.usage, incoming.usage),
     };
   }
 
@@ -368,19 +386,33 @@ export function insertSteerBoundary(
   assistant: ChatMessage | null,
   user: ChatMessage,
 ): ChatMessage[] {
+  const progressAssistant = assistant === null
+    ? null
+    : moveAssistantTextToProgress(assistant, `${assistant.id}-steer-progress`);
   return foldConversationTurns([
     ...messages,
-    ...(assistant === null ? [] : [assistant]),
+    ...(progressAssistant === null ? [] : [progressAssistant]),
     user,
   ]);
 }
 
-function workBlocksFromMessage(message: Message, toolCalls: ToolCall[], thinking: string | undefined): WorkBlock[] {
+function workBlocksFromMessage(
+  message: Message,
+  toolCalls: ToolCall[],
+  thinking: string | undefined,
+  progressText?: string,
+): WorkBlock[] {
   const blocks: WorkBlock[] = [];
   let thinkingIndex = 0;
   const representedToolIds = new Set<string>();
+  let progressInserted = false;
 
   for (const content of message.content) {
+    if (!progressInserted && progressText !== undefined && content.type === 'text') {
+      const progress = createProgressBlock(`${message.id}-progress`, progressText);
+      if (progress !== undefined) blocks.push(progress);
+      progressInserted = true;
+    }
     if (content.type === 'thinking') {
       const text = content.thinking ?? content.text ?? '';
       if (text) blocks.push({ id: `${message.id}-thinking-${thinkingIndex++}`, type: 'thinking', text });
@@ -398,11 +430,58 @@ function workBlocksFromMessage(message: Message, toolCalls: ToolCall[], thinking
   if (thinking && !blocks.some(block => block.type === 'thinking')) {
     blocks.unshift({ id: `${message.id}-thinking`, type: 'thinking', text: thinking });
   }
+  if (!progressInserted && progressText !== undefined) {
+    const progress = createProgressBlock(`${message.id}-progress`, progressText);
+    if (progress !== undefined) {
+      const firstToolIndex = blocks.findIndex(block => block.type === 'tool');
+      blocks.splice(firstToolIndex < 0 ? blocks.length : firstToolIndex, 0, progress);
+    }
+  }
   for (const tool of toolCalls) {
     if (tool.id && representedToolIds.has(tool.id)) continue;
     blocks.push({ id: tool.id ?? `${message.id}-tool-${blocks.length}`, type: 'tool', tool });
   }
   return blocks;
+}
+
+function createProgressBlock(id: string, text: string): Extract<WorkBlock, { type: 'progress' }> | undefined {
+  const normalized = stripGeneratedSessionTitle(text).trim();
+  return normalized ? { id, type: 'progress', text: normalized } : undefined;
+}
+
+function materializeWorkBlocks(message: ChatMessage): WorkBlock[] {
+  if (message.workBlocks !== undefined) return message.workBlocks;
+  return [
+    ...(message.thinking
+      ? [{ id: `${message.id}-thinking`, type: 'thinking' as const, text: message.thinking }]
+      : []),
+    ...(message.toolCalls ?? []).map((tool, index) => ({
+      id: tool.id ?? `${message.id}-tool-${index}`,
+      type: 'tool' as const,
+      tool,
+    })),
+  ];
+}
+
+function moveAssistantTextToProgress(message: ChatMessage, blockId: string): ChatMessage {
+  const progress = createProgressBlock(blockId, message.text);
+  if (progress === undefined) return message;
+
+  const blocks = mergeWorkBlocks([], materializeWorkBlocks(message));
+  const alreadyRepresented = blocks.some(block => block.type === 'progress' && block.text === progress.text);
+  if (!alreadyRepresented) {
+    const firstToolIndex = blocks.findIndex(block => block.type === 'tool');
+    blocks.splice(firstToolIndex < 0 ? blocks.length : firstToolIndex, 0, progress);
+  }
+  return { ...message, text: '', workBlocks: blocks };
+}
+
+function normalizeAssistantMessage(message: ChatMessage): ChatMessage {
+  const hasToolWork = (message.toolCalls?.length ?? 0) > 0
+    || message.workBlocks?.some(block => block.type === 'tool') === true;
+  return hasToolWork && message.workBlocks === undefined
+    ? moveAssistantTextToProgress(message, `${message.id}-progress`)
+    : message;
 }
 
 function mergeWorkBlocks(previous: WorkBlock[], incoming: WorkBlock[]): WorkBlock[] {
@@ -570,6 +649,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
   const thinkingRawRef = useRef('');
   const hasUserPromptRef = useRef(false);
   const titleAppliedRef = useRef(false);
+  const titlePromptRef = useRef<string | null>(null);
   const turnUsageRef = useRef<TokenUsage | undefined>(undefined);
   const activeTurnIdRef = useRef<number | null>(null);
   const completedTurnIdsRef = useRef(new Set<number>());
@@ -583,11 +663,11 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
   sessionRef.current = sessionId;
   sessionTitleRef.current = sessionTitle;
 
-  const applyGeneratedTitle = useCallback((text: string) => {
+  const applyGeneratedTitle = useCallback((text: string, fallbackText?: string) => {
     if (!sessionId || titleAppliedRef.current || !canApplyGeneratedSessionTitle(sessionTitleRef.current)) {
       return;
     }
-    const title = generatedSessionTitle(text);
+    const title = generatedSessionTitle(text) ?? (fallbackText ? fallbackSessionTitle(fallbackText) : undefined);
     if (!title) return;
     titleAppliedRef.current = true;
     void api.renameSession(sessionId, title).then(() => {
@@ -617,12 +697,31 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     setPendingQuestions(previous => preserveEqual(previous, snapshot.pending_questions ?? []));
     const inFlight = snapshot.in_flight_turn;
     if (!inFlight) return false;
-    streamingRef.current = inFlight.assistant_text;
+    const restoredProgress = inFlight.running_tools.length > 0
+      ? createProgressBlock(`snapshot-progress-${inFlight.turn_id}`, inFlight.assistant_text)
+      : undefined;
+    streamingRef.current = restoredProgress === undefined ? inFlight.assistant_text : '';
     assistantRawRef.current = inFlight.assistant_text;
     thinkingRef.current = inFlight.thinking_text;
     thinkingRawRef.current = inFlight.thinking_text;
-    setCurrentStreaming(stripGeneratedSessionTitle(inFlight.assistant_text));
+    activeTurnIdRef.current = inFlight.turn_id;
+    activeToolCallsRef.current.clear();
+    const restoredBlocks: WorkBlock[] = [
+      ...(inFlight.thinking_text.trim()
+        ? [{ id: `snapshot-thinking-${inFlight.turn_id}`, type: 'thinking' as const, text: inFlight.thinking_text }]
+        : []),
+      ...(restoredProgress === undefined ? [] : [restoredProgress]),
+      ...inFlight.running_tools.map(tool => {
+        const restoredTool: ToolCall = { id: tool.tool_call_id, name: tool.name, args: tool.args };
+        activeToolCallsRef.current.set(tool.tool_call_id, restoredTool);
+        return { id: tool.tool_call_id, type: 'tool' as const, tool: restoredTool };
+      }),
+    ];
+    liveWorkBlocksRef.current = restoredBlocks;
+    setCurrentStreaming(restoredProgress === undefined ? stripGeneratedSessionTitle(inFlight.assistant_text) : '');
     setCurrentThinking(inFlight.thinking_text);
+    setCurrentWorkBlocks(restoredBlocks);
+    lastStreamActivityAtRef.current = Date.now();
     setIsStreaming(true);
     return true;
   }, []);
@@ -662,6 +761,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     promptIdRef.current = null;
     hasUserPromptRef.current = false;
     titleAppliedRef.current = false;
+    titlePromptRef.current = null;
     turnUsageRef.current = undefined;
     activeTurnIdRef.current = null;
     completedTurnIdsRef.current.clear();
@@ -850,11 +950,11 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
           if (oldest !== undefined) completedTurnIdsRef.current.delete(oldest);
         }
       }
-      applyGeneratedTitle(assistantRawRef.current);
+      applyGeneratedTitle(assistantRawRef.current, titlePromptRef.current ?? undefined);
       const text = stripGeneratedSessionTitle(streamingRef.current);
       const thinking = thinkingRef.current;
       const toolCalls = liveWorkBlocksRef.current.flatMap(block => block.type === 'tool' ? [block.tool] : []);
-      if (text || thinking) {
+      if (text || thinking || liveWorkBlocksRef.current.length > 0) {
         const completed: ChatMessage = {
           id: `live-${sessionId}-${Date.now()}`,
           role: 'assistant',
@@ -999,7 +1099,9 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
               break;
             case 'prompt.completed':
               playNotificationSound(payload.reason === 'failed' ? 'error' : 'complete');
-              if (streamingRef.current || thinkingRef.current) finishTurn(activeTurnIdRef.current ?? undefined);
+              if (streamingRef.current || thinkingRef.current || liveWorkBlocksRef.current.length > 0) {
+                finishTurn(activeTurnIdRef.current ?? undefined);
+              }
               else setIsStreaming(false);
               scheduleHistoryRefresh();
               break;
@@ -1007,7 +1109,17 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
               if (payload.toolCallId && payload.name) {
                 const tool = { id: payload.toolCallId, name: payload.name, args: payload.args };
                 activeToolCallsRef.current.set(payload.toolCallId, tool);
-                liveWorkBlocksRef.current = [...liveWorkBlocksRef.current, { id: payload.toolCallId, type: 'tool', tool }];
+                const progress = createProgressBlock(
+                  `live-progress-${payload.turnId ?? 'turn'}-${liveWorkBlocksRef.current.length}`,
+                  streamingRef.current,
+                );
+                streamingRef.current = '';
+                setCurrentStreaming('');
+                liveWorkBlocksRef.current = [
+                  ...liveWorkBlocksRef.current,
+                  ...(progress === undefined ? [] : [progress]),
+                  { id: payload.toolCallId, type: 'tool', tool },
+                ];
                 setCurrentWorkBlocks(liveWorkBlocksRef.current);
                 if (payload.name === 'TodoList') {
                   const nextTodos = todosFromToolArgs(payload.args);
@@ -1191,14 +1303,18 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
       const boundaryTime = new Date().toISOString();
       const boundaryText = stripGeneratedSessionTitle(streamingRef.current);
       const boundaryThinking = thinkingRef.current;
-      const boundaryWorkBlocks = liveWorkBlocksRef.current;
+      const boundaryProgress = createProgressBlock(`live-steer-progress-${sessionId}-${Date.now()}`, boundaryText);
+      const boundaryWorkBlocks = [
+        ...liveWorkBlocksRef.current,
+        ...(boundaryProgress === undefined ? [] : [boundaryProgress]),
+      ];
       const boundaryToolCalls = boundaryWorkBlocks.flatMap(block => block.type === 'tool' ? [block.tool] : []);
       const boundaryAssistant: ChatMessage | null =
-        boundaryText || boundaryThinking || boundaryWorkBlocks.length > 0
+        boundaryThinking || boundaryWorkBlocks.length > 0
           ? {
               id: `live-steer-boundary-${sessionId}-${Date.now()}`,
               role: 'assistant',
-              text: boundaryText,
+              text: '',
               thinking: boundaryThinking || undefined,
               workBlocks: boundaryWorkBlocks.length > 0 ? boundaryWorkBlocks : undefined,
               toolCalls: boundaryToolCalls.length > 0 ? boundaryToolCalls : undefined,
@@ -1234,6 +1350,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
       if (!subscribed) throw new Error('Realtime connection is not ready. Please retry.');
       if (controller.signal.aborted) return false;
       const promptText = trimmed || 'Please inspect the attached files.';
+      if (shouldGenerateTitle) titlePromptRef.current = promptText;
       const response = await api.sendPrompt(
         sessionId,
         shouldGenerateTitle ? firstPromptWithTitleInstruction(promptText) : promptText,

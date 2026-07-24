@@ -49,7 +49,9 @@ export function FilePreview({ path, file, loading, revealLine, onRefresh }: File
       for (const line of lines) line.classList.remove('lsp-reveal-line');
       const target = lines.item(revealLine - 1);
       target?.classList.add('lsp-reveal-line');
-      target?.scrollIntoView({ block: 'center' });
+      if (target && typeof target.scrollIntoView === 'function') {
+        target.scrollIntoView({ block: 'center' });
+      }
     });
     return () => cancelAnimationFrame(timer);
   }, [highlightedHtml, revealLine]);
@@ -77,6 +79,9 @@ const SelectionStableCodePreview = memo(function SelectionStableCodePreview({ ht
     const preview = previewRef.current;
     if (preview === null || appliedHtmlRef.current === nextHtml) return;
     preview.innerHTML = nextHtml;
+    preview.querySelectorAll<HTMLElement>('.line').forEach((line, index) => {
+      line.dataset.lineNumber = String(index + 1);
+    });
     appliedHtmlRef.current = nextHtml;
   }, []);
 

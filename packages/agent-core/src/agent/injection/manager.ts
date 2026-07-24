@@ -7,6 +7,7 @@ import type { DynamicInjector } from './injector';
 import { PermissionModeInjector } from './permission-mode';
 import { PluginSessionStartInjector } from './plugin-session-start';
 import { PlanModeInjector } from './plan-mode';
+import { ResponseSummaryInjector } from './response-summary';
 import { TodoListReminderInjector } from './todo-list';
 
 const ACTIVE_BACKGROUND_TASK_GUIDANCE =
@@ -25,6 +26,7 @@ export class InjectionManager {
     this.injectors = [
       new PluginSessionStartInjector(agent),
       new GoalIntakeInjector(agent),
+      new ResponseSummaryInjector(agent),
       new TodoListReminderInjector(agent),
       new PlanModeInjector(agent),
       new PermissionModeInjector(agent),

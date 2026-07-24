@@ -1,7 +1,23 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('noriDesktop', {
+  usesCustomWindowControls: process.platform !== 'darwin',
   getServerToken: () => ipcRenderer.invoke('nori:getServerToken') as Promise<string | undefined>,
+  windowMinimize: () => {
+    ipcRenderer.send('nori:window:minimize');
+  },
+  windowToggleMaximize: () => ipcRenderer.invoke('nori:window:toggle-maximize') as Promise<boolean>,
+  windowIsMaximized: () => ipcRenderer.invoke('nori:window:is-maximized') as Promise<boolean>,
+  windowClose: () => {
+    ipcRenderer.send('nori:window:close');
+  },
+  onWindowMaximizedChange: (callback: (maximized: boolean) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, maximized: boolean) => {
+      callback(maximized);
+    };
+    ipcRenderer.on('nori:window:maximized-change', handler);
+    return () => ipcRenderer.removeListener('nori:window:maximized-change', handler);
+  },
   selectProjectDirectory: () => ipcRenderer.invoke('nori:selectProjectDirectory') as Promise<string | undefined>,
   saveMarkdown: (input: { suggestedName: string; content: string }) => ipcRenderer.invoke('nori:saveMarkdown', input) as Promise<string | undefined>,
   onToggleMode: (callback: (mode: string) => void) => {

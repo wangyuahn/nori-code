@@ -3,6 +3,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { BackgroundTaskInfo } from '../../../src/agent/background';
 import { DynamicInjector } from '../../../src/agent/injection/injector';
 import { InjectionManager } from '../../../src/agent/injection/manager';
+import {
+  RESPONSE_SUMMARY_REMINDER_VARIANT,
+  ResponseSummaryInjector,
+} from '../../../src/agent/injection/response-summary';
 import { TodoListReminderInjector } from '../../../src/agent/injection/todo-list';
 import { testAgent } from '../harness/agent';
 
@@ -104,13 +108,54 @@ describe('InjectionManager.onContextCompacted', () => {
 });
 
 describe('InjectionManager registration', () => {
-  it('registers TodoListReminderInjector in the default injector chain', () => {
+  it('registers the default reminder injectors', () => {
     const ctx = testAgent();
     ctx.configure();
 
     const injectors = (ctx.agent.injection as unknown as { injectors: DynamicInjector[] }).injectors;
 
     expect(injectors.some((injector) => injector instanceof TodoListReminderInjector)).toBe(true);
+    expect(injectors.some((injector) => injector instanceof ResponseSummaryInjector)).toBe(true);
+  });
+
+  it('adds one response-summary reminder for each main-agent user prompt', async () => {
+    const ctx = testAgent();
+    ctx.configure();
+    const appendPrompt = (text: string) => {
+      ctx.agent.context.appendUserMessage(
+        [{ type: 'text', text }],
+        { kind: 'user' },
+      );
+    };
+
+    appendPrompt('Implement the feature.');
+    await ctx.agent.injection.inject();
+    await ctx.agent.injection.inject();
+    appendPrompt('Now verify it.');
+    await ctx.agent.injection.inject();
+
+    const reminders = ctx.agent.context.history.filter(message =>
+      message.origin?.kind === 'injection'
+      && message.origin.variant === RESPONSE_SUMMARY_REMINDER_VARIANT,
+    );
+    expect(reminders).toHaveLength(2);
+    expect(JSON.stringify(reminders[0]?.content)).toContain('standalone summary');
+  });
+
+  it('does not add the response-summary reminder to subagents', async () => {
+    const ctx = testAgent({ type: 'sub' });
+    ctx.configure();
+    ctx.agent.context.appendUserMessage(
+      [{ type: 'text', text: 'Inspect this implementation.' }],
+      { kind: 'user' },
+    );
+
+    await ctx.agent.injection.inject();
+
+    expect(ctx.agent.context.history.some(message =>
+      message.origin?.kind === 'injection'
+      && message.origin.variant === RESPONSE_SUMMARY_REMINDER_VARIANT,
+    )).toBe(false);
   });
 });
 

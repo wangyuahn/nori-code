@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../src/api/client';
-import { apiMessageToChat, canApplyGeneratedSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, mergeHistory, promptForRewind, RealtimeSubscriptionGate, removeTerminatedAgent, shouldIgnoreTranscriptEvent, statusForSession, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
+import { apiMessageToChat, canApplyGeneratedSessionTitle, fallbackSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, mergeHistory, promptForRewind, RealtimeSubscriptionGate, removeTerminatedAgent, shouldIgnoreTranscriptEvent, statusForSession, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
 
 describe('agent activity events', () => {
   it('removes a manually terminated agent from the live activity set', () => {
@@ -68,7 +68,7 @@ describe('realtime subscription readiness', () => {
 });
 
 describe('main transcript projection', () => {
-  it('places steer guidance between the output already shown and later output', () => {
+  it('places steer guidance between work progress already shown and the final summary', () => {
     const before = [{ id: 'u1', role: 'user' as const, text: 'initial task' }];
     const withGuidance = insertSteerBoundary(
       before,
@@ -82,9 +82,12 @@ describe('main transcript projection', () => {
 
     expect(completed.map(item => [item.role, item.text])).toEqual([
       ['user', 'initial task'],
-      ['assistant', 'First output.'],
+      ['assistant', ''],
       ['user', 'Use the parser threshold.'],
       ['assistant', 'Second output.'],
+    ]);
+    expect(completed[1]?.workBlocks).toMatchObject([
+      { type: 'progress', text: 'First output.' },
     ]);
   });
 
@@ -102,6 +105,13 @@ describe('main transcript projection', () => {
     expect(generatedSessionTitle(answer)).toBe('修复流式输出');
     expect(stripGeneratedSessionTitle(answer)).toBe('我会先检查事件链。');
     expect(generatedSessionTitle('用户要求修复流式输出')).toBeUndefined();
+  });
+
+  it('accepts a title marker with harmless attributes and has a prompt fallback', () => {
+    const answer = '<nori-session-title data-source="model">修复标题</nori-session-title>\n\n完成。';
+    expect(generatedSessionTitle(answer)).toBe('修复标题');
+    expect(stripGeneratedSessionTitle(answer)).toBe('完成。');
+    expect(fallbackSessionTitle('修复模型标题显示问题，并保留项目会话。')).toBe('修复模型标题显示问题，并保留项目会话。');
   });
 
   it('only repairs missing or reminder-polluted automatic titles', () => {
@@ -146,8 +156,10 @@ describe('main transcript projection', () => {
     const first = apiMessageToChat(message({ id: 'a1', role: 'assistant', text: 'Agent started in the background.' }))!;
     const boundary = apiMessageToChat(message({ id: 'wake', role: 'user', text: 'done', originKind: 'background_task' }))!;
     const second = apiMessageToChat(message({ id: 'a2', role: 'assistant', text: 'The agent completed successfully.' }))!;
-    expect(foldConversationTurns([first, boundary, second]).map(item => item.text)).toEqual([
-      'Agent started in the background.\n\nThe agent completed successfully.',
+    const folded = foldConversationTurns([first, boundary, second]);
+    expect(folded.map(item => item.text)).toEqual(['The agent completed successfully.']);
+    expect(folded[0]?.workBlocks).toMatchObject([
+      { type: 'progress', text: 'Agent started in the background.' },
     ]);
   });
 
@@ -162,7 +174,11 @@ describe('main transcript projection', () => {
 
     expect(mergeHistory(previous, completedAfterWake)).toMatchObject([
       { role: 'user', text: 'Run a swarm' },
-      { role: 'assistant', text: 'The swarm is running.\n\nThe swarm finished.' },
+      {
+        role: 'assistant',
+        text: 'The swarm finished.',
+        workBlocks: [{ type: 'progress', text: 'The swarm is running.' }],
+      },
     ]);
   });
 
@@ -177,17 +193,58 @@ describe('main transcript projection', () => {
     const merged = mergeHistory(previous, incoming);
 
     expect(merged).toHaveLength(1);
-    expect(merged[0]?.text).toBe('Done.\n\nDone.');
+    expect(merged[0]?.text).toBe('Done.');
+    expect(merged[0]?.workBlocks).toMatchObject([{ type: 'progress', text: 'Done.' }]);
   });
 
-  it('preserves visible text from multiple model steps in one turn', () => {
+  it('keeps earlier model text as progress and only the last segment as the answer', () => {
     const folded = foldConversationTurns([
       { id: 'a1', role: 'assistant', text: 'I will inspect the files.' },
       { id: 'a2', role: 'assistant', text: 'The issue is in the event projector.' },
     ]);
     expect(folded).toHaveLength(1);
-    expect(folded[0]?.text).toBe('I will inspect the files.\n\nThe issue is in the event projector.');
+    expect(folded[0]?.text).toBe('The issue is in the event projector.');
+    expect(folded[0]?.workBlocks).toMatchObject([
+      { type: 'progress', text: 'I will inspect the files.' },
+    ]);
     expect(folded[0]?.thinking).toBeUndefined();
+  });
+
+  it('projects text before a tool call into the ordered work process', () => {
+    const projected = apiMessageToChat({
+      id: 'step-with-progress',
+      role: 'assistant',
+      created_at: '2026-07-14T00:00:01.000Z',
+      content: [
+        { type: 'thinking', thinking: 'Choose the smallest change.' },
+        { type: 'text', text: 'I am updating the event projector now.' },
+        { type: 'tool_use', tool_call_id: 'edit-1', tool_name: 'Edit', input: { path: 'src/events.ts' } },
+      ],
+    });
+
+    expect(projected?.text).toBe('');
+    expect(projected?.workBlocks).toMatchObject([
+      { type: 'thinking', text: 'Choose the smallest change.' },
+      { type: 'progress', text: 'I am updating the event projector now.' },
+      { type: 'tool', tool: { id: 'edit-1', name: 'Edit' } },
+    ]);
+  });
+
+  it('keeps a folded final summary stable when history is reconciled again', () => {
+    const once = foldConversationTurns([
+      {
+        id: 'step-1',
+        role: 'assistant',
+        text: 'I am applying the change.',
+        toolCalls: [{ id: 'edit-1', name: 'Edit', args: { path: 'src/events.ts' }, result: 'ok' }],
+      },
+      { id: 'step-2', role: 'assistant', text: 'The change is complete and verified.' },
+    ]);
+
+    const twice = foldConversationTurns(once);
+
+    expect(twice).toEqual(once);
+    expect(twice[0]?.text).toBe('The change is complete and verified.');
   });
 
   it('keeps tool calls between the reasoning blocks that surrounded them', () => {

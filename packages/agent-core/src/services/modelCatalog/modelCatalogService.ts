@@ -60,10 +60,14 @@ export class ModelCatalogService
 
   async listModels(): Promise<readonly ModelCatalogItem[]> {
     const config = await this._readConfig();
-    return Object.entries(config.models ?? {}).map(([modelId, alias]) => {
+    const models: ModelCatalogItem[] = [];
+    for (const [modelId, alias] of Object.entries(config.models ?? {})) {
       const provider = config.providers[alias.provider];
-      return toProtocolModel(modelId, alias, provider);
-    });
+      if (provider === undefined || provider.disabled) continue;
+      if (provider.customModels !== undefined && provider.customModels.length > 0 && !provider.customModels.includes(alias.model)) continue;
+      models.push(toProtocolModel(modelId, alias, provider));
+    }
+    return models;
   }
 
   async listProviders(): Promise<readonly ProviderCatalogItem[]> {
@@ -82,6 +86,41 @@ export class ModelCatalogService
       throw new ProviderNotFoundError(providerId);
     }
     return this._provider(config, providerId, provider);
+  }
+
+  async getProviderSecret(providerId: string): Promise<{ provider_id: string; api_key: string }> {
+    const config = await this._readConfig();
+    const provider = config.providers?.[providerId];
+    if (provider === undefined) throw new ProviderNotFoundError(providerId);
+    return { provider_id: providerId, api_key: provider.apiKey ?? '' };
+  }
+
+  async removeProvider(providerId: string): Promise<{ deleted: true }> {
+    const config = await this._readConfig();
+    if (config.providers?.[providerId] === undefined) throw new ProviderNotFoundError(providerId);
+    await this.core.rpc.removeKimiProvider({ providerId });
+    return { deleted: true };
+  }
+
+  async testProvider(providerId: string): Promise<{ ok: boolean; message: string }> {
+    const config = await this._readConfig();
+    const provider = config.providers?.[providerId];
+    if (provider === undefined) throw new ProviderNotFoundError(providerId);
+    if (provider.disabled) return { ok: false, message: 'Provider is disabled.' };
+    if (!hasConfiguredApiKey(provider) && provider.oauth === undefined) {
+      return { ok: false, message: 'Provider has no API key or OAuth credential.' };
+    }
+    if (provider.autoDiscover === false) {
+      const count = provider.customModels?.length ?? 0;
+      return count > 0
+        ? { ok: true, message: `Configuration is valid with ${String(count)} custom model(s).` }
+        : { ok: false, message: 'Add at least one custom model when automatic discovery is disabled.' };
+    }
+    const result = await this.refreshProviderModels({ providerId });
+    const failure = result.failed[0];
+    return failure === undefined
+      ? { ok: true, message: 'Provider responded and its model catalog is up to date.' }
+      : { ok: false, message: failure.reason };
   }
 
   async setDefaultModel(modelId: string): Promise<SetDefaultModelResponse> {

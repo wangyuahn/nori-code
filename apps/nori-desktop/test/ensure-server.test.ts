@@ -1,10 +1,14 @@
 import { execFile } from 'node:child_process';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { ensureServer, ensureServerLogFile } from '../src/main/ensure-server';
+import {
+  ensureServer,
+  ensureServerLogFile,
+  stopServerForDesktopExit,
+} from '../src/main/ensure-server';
 
 vi.mock('node:child_process', () => ({ execFile: vi.fn() }));
 
@@ -43,6 +47,34 @@ afterEach(() => {
   if (originalHome === undefined) delete process.env['NORI_CODE_HOME'];
   else process.env['NORI_CODE_HOME'] = originalHome;
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
+});
+
+it('stops the daemon when Nori Work exits and clears only its matching lock', async () => {
+  const home = join(tmpdir(), `nori-desktop-exit-${String(Date.now())}-${Math.random().toString(36).slice(2)}`);
+  homes.push(home);
+  process.env['NORI_CODE_HOME'] = home;
+  const serverDir = join(home, 'server');
+  const lock = join(serverDir, 'lock');
+  const seaPath = join(home, 'nori.exe');
+  mkdirSync(serverDir, { recursive: true });
+  writeFileSync(seaPath, 'test');
+  writeFileSync(lock, JSON.stringify({
+    pid: 999_999_999,
+    started_at: '2026-07-24T00:00:00.000Z',
+    host: '127.0.0.1',
+    port: 58627,
+    host_version: '1.0.0-pre.6',
+  }));
+
+  vi.mocked(execFile).mockImplementation((_file, args, _options, callback) => {
+    expect(args?.slice(0, 2)).toEqual(['server', 'kill']);
+    callback?.(null, '', '');
+    return undefined as never;
+  });
+
+  await expect(stopServerForDesktopExit(seaPath)).resolves.toBeUndefined();
+  expect(vi.mocked(execFile)).toHaveBeenCalledTimes(1);
+  expect(existsSync(lock)).toBe(false);
 });
 
 it('replaces an unhealthy stale lock from an older bundled server', async () => {

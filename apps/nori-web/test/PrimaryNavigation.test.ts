@@ -1,14 +1,18 @@
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { countActiveAgents, PrimaryNavigation } from '../src/App';
+import { countActiveAgents, PrimaryNavigation, WindowControls } from '../src/App';
 import type { BackgroundTask, SwarmStatus } from '../src/api/client';
+import { I18nProvider } from '../src/i18n';
+import type { NoriDesktopAPI } from '../src/types/nori-desktop';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 afterEach(() => {
   document.body.replaceChildren();
+  delete window.noriDesktop;
+  vi.restoreAllMocks();
 });
 
 describe('PrimaryNavigation', () => {
@@ -21,7 +25,7 @@ describe('PrimaryNavigation', () => {
         activeView: 'chat',
         labels: {
           chat: 'Chat', dashboard: 'Dashboard', swarm: 'Swarm', cron: 'Cron Job',
-          vault: 'Vault', settings: 'Settings',
+          account: 'My profile',
         },
         activeAgentCount: 0,
         cronJobCount: 3,
@@ -45,7 +49,7 @@ describe('PrimaryNavigation', () => {
         activeView: 'chat',
         labels: {
           chat: 'Chat', dashboard: 'Dashboard', swarm: 'Swarm', cron: 'Cron Job',
-          vault: 'Vault', settings: 'Settings',
+          account: 'My profile',
         },
         activeAgentCount: 0,
         cronJobCount: 0,
@@ -69,7 +73,7 @@ describe('PrimaryNavigation', () => {
         activeView: 'swarm',
         labels: {
           chat: 'Chat', dashboard: 'Dashboard', swarm: 'Swarm', cron: 'Cron Job',
-          vault: 'Vault', settings: 'Settings',
+          account: 'My profile',
         },
         activeAgentCount: 2,
         cronJobCount: 0,
@@ -134,5 +138,46 @@ describe('PrimaryNavigation', () => {
     };
 
     expect(countActiveAgents(['agent-stopped'], [stopped], [])).toBe(0);
+  });
+});
+
+describe('WindowControls', () => {
+  it('routes frameless window actions through the desktop bridge', async () => {
+    localStorage.setItem('nori-ui-language', 'en');
+    const minimize = vi.fn();
+    const toggleMaximize = vi.fn(async () => true);
+    const close = vi.fn();
+    const unsubscribe = vi.fn();
+    window.noriDesktop = {
+      usesCustomWindowControls: true,
+      windowMinimize: minimize,
+      windowToggleMaximize: toggleMaximize,
+      windowIsMaximized: vi.fn(async () => false),
+      windowClose: close,
+      onWindowMaximizedChange: vi.fn(() => unsubscribe),
+    } satisfies NoriDesktopAPI;
+
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(createElement(I18nProvider, null, createElement(WindowControls)));
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[aria-label="Minimize"]')?.click();
+      container.querySelector<HTMLButtonElement>('button[aria-label="Maximize"]')?.click();
+      container.querySelector<HTMLButtonElement>('button[aria-label="Close"]')?.click();
+      await Promise.resolve();
+    });
+
+    expect(minimize).toHaveBeenCalledOnce();
+    expect(toggleMaximize).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+    expect(container.querySelector('button[aria-label="Restore"]')).not.toBeNull();
+
+    await act(async () => { root.unmount(); });
+    expect(unsubscribe).toHaveBeenCalledOnce();
   });
 });

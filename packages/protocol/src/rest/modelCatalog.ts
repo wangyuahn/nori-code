@@ -20,6 +20,18 @@ export type ListProvidersResponse = z.infer<typeof listProvidersResponseSchema>;
 export const getProviderResponseSchema = providerCatalogItemSchema;
 export type GetProviderResponse = z.infer<typeof getProviderResponseSchema>;
 
+export const providerSecretResponseSchema = z.object({
+  provider_id: z.string().min(1),
+  api_key: z.string(),
+});
+export type ProviderSecretResponse = z.infer<typeof providerSecretResponseSchema>;
+
+export const testProviderResponseSchema = z.object({
+  ok: z.boolean(),
+  message: z.string().min(1),
+});
+export type TestProviderResponse = z.infer<typeof testProviderResponseSchema>;
+
 export const setDefaultModelResponseSchema = z.object({
   default_model: z.string().min(1),
   model: modelCatalogItemSchema,

@@ -282,6 +282,7 @@ export interface LspResult {
 
 export interface ModelCatalogItem {
   provider: string;
+  provider_name?: string;
   model: string;
   display_name?: string;
   max_context_size: number;
@@ -301,12 +302,26 @@ export interface ModelCatalogItem {
 
 export interface ProviderCatalogItem {
   id: string;
+  name?: string;
   type: string;
   base_url?: string;
   default_model?: string;
   has_api_key: boolean;
   status: 'connected' | 'error' | 'unconfigured';
+  disabled?: boolean;
+  auto_discover?: boolean;
+  custom_models?: string[];
   models?: string[];
+}
+
+export interface ProviderSecretResponse {
+  provider_id: string;
+  api_key: string;
+}
+
+export interface ProviderTestResponse {
+  ok: boolean;
+  message: string;
 }
 
 export interface ProviderPreset {
@@ -1032,6 +1047,19 @@ export function createClient(
 
     providers: {
       list: () => request<{ items: ProviderCatalogItem[] }>('/providers'),
+      secret: (id: string) => request<ProviderSecretResponse>(
+        `/providers/${encodeURIComponent(id)}/secret`,
+      ),
+      remove: (id: string) => request<{ deleted: true }>(
+        `/providers/${encodeURIComponent(id)}`,
+        undefined,
+        { method: 'DELETE' },
+      ),
+      test: (id: string) => request<ProviderTestResponse | ProviderRefreshResult>(
+        `/providers/${encodeURIComponent(id)}:test`,
+        undefined,
+        { method: 'POST' },
+      ),
       refresh: (id: string) => request<ProviderRefreshResult>(
         `/providers/${encodeURIComponent(id)}:refresh`,
         undefined,

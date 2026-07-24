@@ -1116,13 +1116,13 @@ describe('ensureDaemon surfaces boot failures via early exit', () => {
     spawnMock.mockImplementationOnce(() => {
       // Start the deadline clock only after port resolution and spawn have
       // completed, then make the first loop condition expire immediately.
-      nowSpy.mockImplementation(() => nowCalls++ === 0 ? 0 : 20_001);
+      nowSpy.mockImplementation(() => nowCalls++ === 0 ? 0 : 90_001);
       return fakeChild as unknown as ChildProcess;
     });
 
     try {
       await expect(ensureDaemon({ port: 0 })).rejects.toThrow(
-        'failed to start within 20000ms',
+        'failed to start within 90000ms',
       );
       expect(killSpy).toHaveBeenCalledWith(43210);
     } finally {

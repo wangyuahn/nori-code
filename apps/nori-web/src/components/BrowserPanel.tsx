@@ -41,17 +41,6 @@ export function BrowserPanel() {
   const blank = !browser.activeTab || browser.activeTab.url === 'about:blank';
 
   return <section className="browser-panel">
-    <div className="browser-tab-strip" role="tablist" aria-label={tr('Browser tabs', '浏览器标签页')}>
-      <div className="browser-tabs-scroll">
-        {browser.tabs.map(tab => <div key={tab.id} className={`browser-tab${tab.id === browser.activeTabId ? ' active' : ''}`}>
-          <button type="button" role="tab" aria-selected={tab.id === browser.activeTabId} onClick={() => browser.activateTab(tab.id)} title={tab.title || tab.url}>
-            <Icon name="globe" size={12}/><span>{tab.title || tr('New tab', '新标签页')}</span>{tab.loading && <i/>}
-          </button>
-          <button type="button" className="browser-tab-close" onClick={() => browser.closeTab(tab.id)} title={tr('Close tab', '关闭标签页')} aria-label={tr('Close tab', '关闭标签页')}><Icon name="close" size={11}/></button>
-        </div>)}
-      </div>
-      <button type="button" className="browser-new-tab" onClick={() => browser.newTab()} disabled={!browser.available} title={tr('New tab', '新标签页')} aria-label={tr('New tab', '新标签页')}><Icon name="plus" size={14}/></button>
-    </div>
     <BrowserToolbar
       tab={browser.activeTab}
       available={browser.available}

@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { I18nProvider } from '../src/i18n';
-import { MarkdownView, normalizeLatexMathDelimiters } from '../src/components/MarkdownView';
+import { MarkdownView, normalizeLatexMathDelimiters, normalizeMarkdownEscapedLineBreaks } from '../src/components/MarkdownView';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -207,6 +207,68 @@ describe('MarkdownView code blocks', () => {
       await act(async () => {
         root.unmount();
       });
+    }
+  });
+
+  it('decodes escaped Markdown line breaks without changing code', async () => {
+    const markdown = [
+      'Implemented the refreshed chat workflow.\\n\\n- The composer grows with the prompt.\\n- Markdown stays readable.',
+      '',
+      '`literal \\n text`',
+      '',
+      '```text',
+      'line \\n remains literal',
+      '```',
+    ].join('\n');
+    const normalized = normalizeMarkdownEscapedLineBreaks(markdown);
+
+    expect(normalized).toContain(['Implemented the refreshed chat workflow.', '', '- The composer'].join('\n'));
+    expect(normalized).toContain('`literal \\n text`');
+    expect(normalized).toContain('line \\n remains literal');
+
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(MarkdownView, { content: markdown })));
+      });
+
+      expect(container.querySelectorAll('li')).toHaveLength(2);
+      expect(container.querySelector('code')?.textContent).toBe('literal \\n text');
+      expect(container.querySelector('pre code')?.textContent).toBe('line \\n remains literal\n');
+    } finally {
+      await act(async () => { root.unmount(); });
+    }
+  });
+
+  it('renders common Markdown constructs and sanitizes unsafe markup', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(MarkdownView, {
+          content: '# Heading\n\n**bold** *italic* ~~deleted~~ and `inline`.\n\n- unordered\n- list\n\n1. ordered\n2. list\n\n> quote\n\n| Name | Value |\n| --- | --- |\n| one | two |\n\n[link](https://example.com) ![image](https://example.com/image.png)\n\n<script>alert(1)</script> [bad](javascript:alert(1))\n\n```js\nconst answer = 42;\n```',
+        })));
+      });
+
+      expect(container.querySelector('h1')?.textContent).toBe('Heading');
+      expect(container.querySelector('strong')?.textContent).toBe('bold');
+      expect(container.querySelector('em')?.textContent).toBe('italic');
+      expect(container.querySelector('del')?.textContent).toBe('deleted');
+      expect(container.querySelector('ul li')?.textContent).toBe('unordered');
+      expect(container.querySelectorAll('ol li')).toHaveLength(2);
+      expect(container.querySelector('blockquote')?.textContent).toContain('quote');
+      expect(container.querySelector('table')).not.toBeNull();
+      expect(container.querySelector('a[href="https://example.com"]')?.getAttribute('target')).toBe('_blank');
+      expect(container.querySelector('img[alt="image"]')).not.toBeNull();
+      expect(container.querySelector('script')).toBeNull();
+      expect(container.querySelector('a[href^="javascript:"]')).toBeNull();
+      expect(container.querySelector('.markdown-code-copy')?.textContent).toBe('Copy');
+    } finally {
+      await act(async () => { root.unmount(); });
     }
   });
 });

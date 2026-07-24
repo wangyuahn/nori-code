@@ -11,7 +11,7 @@
 // We also stage the built nori-web assets into `resources-stage/nori-web/dist`
 // so the packaged app contains `<resources>/nori-web/dist/index.html`.
 
-const { existsSync, rmSync, mkdirSync, cpSync, readdirSync, statSync } = require('node:fs');
+const { existsSync, rmSync, mkdirSync, cpSync, readdirSync, statSync, readFileSync } = require('node:fs');
 const { join, resolve } = require('node:path');
 
 // electron-builder Arch enum -> Node `process.arch` name.
@@ -64,6 +64,21 @@ exports.default = async function beforePack(context) {
       `Bundled Nori server not found for ${target} at ${seaExe}. ` +
         `Build it for this platform first: \`pnpm -C apps/nori-code build:native:sea\` ` +
         `(CI builds the SEA on each platform runner before packaging).`,
+    );
+  }
+  const desktopPackage = JSON.parse(readFileSync(resolve(desktopRoot, 'package.json'), 'utf-8'));
+  const nativeVersionPath = `${seaExe}.version`;
+  if (!existsSync(nativeVersionPath)) {
+    throw new Error(
+      `Native version marker not found at ${nativeVersionPath}. ` +
+        'Rebuild the native SEA before packaging.',
+    );
+  }
+  const nativeVersion = readFileSync(nativeVersionPath, 'utf-8').trim();
+  if (nativeVersion !== desktopPackage.version) {
+    throw new Error(
+      `Native SEA version ${nativeVersion} does not match Nori Work ${desktopPackage.version}. ` +
+        'Rebuild the native SEA and desktop app from the same checkout.',
     );
   }
   const packageInputs = readdirSync(resolve(workspaceRoot, 'packages'), { withFileTypes: true })

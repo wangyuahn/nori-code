@@ -51,6 +51,7 @@ module.exports = {
     uninstallDisplayName: 'Nori Work',
     createDesktopShortcut: 'always',
     createStartMenuShortcut: true,
+    include: 'build/installer.nsh',
   },
 
   linux: {

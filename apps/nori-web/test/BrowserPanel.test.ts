@@ -26,7 +26,7 @@ describe('BrowserPanel', () => {
     try {
       await act(async () => Promise.resolve());
       expect(container.textContent).toContain('Built-in browser requires Nori Work');
-      expect(container.querySelector<HTMLButtonElement>('.browser-new-tab')?.disabled).toBe(true);
+      expect(container.querySelector('.browser-tab-strip')).toBeNull();
     } finally {
       await act(async () => {
         root.unmount();
@@ -35,7 +35,7 @@ describe('BrowserPanel', () => {
     }
   });
 
-  it('connects tabs, navigation, visibility, and native viewport bounds', async () => {
+  it('connects navigation, visibility, and native viewport bounds', async () => {
     vi.stubGlobal('ResizeObserver', TestResizeObserver);
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
       x: 240, y: 120, left: 240, top: 120, right: 840, bottom: 620,
@@ -62,20 +62,17 @@ describe('BrowserPanel', () => {
     const { container, root } = renderBrowser();
     try {
       await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-      expect(container.querySelectorAll('[role="tab"]')).toHaveLength(1);
+      expect(container.querySelector('.browser-tab-strip')).toBeNull();
       expect(desktop.browserSetVisible).toHaveBeenCalledWith(true);
       expect(desktop.browserResize).toHaveBeenCalledWith({ x: 240, y: 120, width: 600, height: 500 });
-
-      await act(async () => container.querySelector<HTMLButtonElement>('.browser-new-tab')?.click());
-      expect(desktop.browserNewTab).toHaveBeenCalledTimes(1);
 
       const github = [...container.querySelectorAll<HTMLButtonElement>('.browser-start-links button')]
         .find(button => button.textContent === 'GitHub');
       await act(async () => github?.click());
       expect(desktop.browserNavigate).toHaveBeenCalledWith('https://github.com');
 
-      act(() => listener?.({ ...state, tabs: [{ ...state.tabs[0], title: 'Updated title' }] }));
-      expect(container.textContent).toContain('Updated title');
+      act(() => listener?.({ ...state, tabs: [{ ...state.tabs[0], url: 'https://example.com/updated' }] }));
+      expect(container.querySelector<HTMLInputElement>('.browser-address')?.value).toBe('https://example.com/updated');
     } finally {
       await act(async () => {
         root.unmount();

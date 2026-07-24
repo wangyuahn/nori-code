@@ -38,8 +38,15 @@ const SERVER_LOG_FILENAME = 'server.log';
 
 /** How long to wait for an already-running daemon to answer `/healthz`. */
 const REUSE_HEALTH_TIMEOUT_MS = 15_000;
-/** How long to wait for a freshly-spawned daemon to come up. */
-const SPAWN_TIMEOUT_MS = 20_000;
+/**
+ * How long to wait for a freshly-spawned daemon to come up.
+ *
+ * The packaged SEA has to initialize its embedded snapshot before the daemon
+ * can write its lock or answer health checks. On a cold Windows install that
+ * alone can exceed 20 seconds, so the former budget killed a valid daemon
+ * while it was still booting.
+ */
+const SPAWN_TIMEOUT_MS = 90_000;
 /** Poll cadence while waiting for the daemon to appear in the lock + healthz. */
 const POLL_INTERVAL_MS = 200;
 /** Default log level for a daemon spawned without an explicit `--log-level`. */
@@ -311,6 +318,18 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
+/** Remove a lock only when it still belongs to the child we just stopped. */
+function removeSpawnedChildLock(pid: number | undefined): void {
+  if (pid === undefined) return;
+  try {
+    const parsed = JSON.parse(readFileSync(DEFAULT_LOCK_PATH, 'utf8')) as Partial<LockContents>;
+    if (parsed.pid === pid) unlinkSync(DEFAULT_LOCK_PATH);
+  } catch {
+    // The child normally removes its own lock. Missing, malformed and replaced
+    // locks are all safe no-ops here.
+  }
+}
+
 /**
  * Ensure a daemon is running and return its origin. Non-blocking for the
  * caller beyond the short health wait — the server itself keeps running in a
@@ -469,6 +488,10 @@ export async function ensureDaemon(options: EnsureDaemonOptions = {}): Promise<E
     process.removeListener('SIGINT', onSigint);
     if (!startupSucceeded) {
       killSpawnedChild();
+      // A forced Windows termination cannot run the daemon's release handler.
+      // Without this guarded cleanup the next launch sees a dead PID lock and
+      // spends another startup cycle trying to recover it.
+      removeSpawnedChildLock(child.pid);
     }
   }
 }

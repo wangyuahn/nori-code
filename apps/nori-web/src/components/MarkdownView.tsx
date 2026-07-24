@@ -21,7 +21,8 @@ export function MarkdownView({
   const selectingRef = useRef(false);
   const [selectionSnapshot, setSelectionSnapshot] = useState<string | null>(null);
   const html = useMemo(() => {
-    const withoutFrontmatter = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
+    const normalizedEscapedBreaks = normalizeMarkdownEscapedLineBreaks(content);
+    const withoutFrontmatter = normalizedEscapedBreaks.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
     const normalizedMath = normalizeLatexMathDelimiters(withoutFrontmatter);
     return sanitizeMarkdown(marked.parse(normalizedMath, { async: false }));
   }, [content]);
@@ -180,6 +181,72 @@ export function normalizeLatexMathDelimiters(markdown: string): string {
 
       normalized += line[index];
       index += 1;
+    }
+    return normalized;
+  }).join('');
+}
+
+/**
+ * Some model/provider paths return Markdown line breaks as the two literal
+ * characters `\\` and `n`. Decode those only in Markdown prose so that lists,
+ * paragraphs, and fenced code are parsed correctly without changing source
+ * code or inline-code content.
+ */
+export function normalizeMarkdownEscapedLineBreaks(markdown: string): string {
+  const segments = markdown.split(/(\r?\n)/);
+  let fence: { marker: '`' | '~'; length: number } | undefined;
+  let inlineTicks = 0;
+
+  return segments.map(segment => {
+    if (/^\r?\n$/.test(segment)) return segment;
+
+    const fenceMatch = /^(?: {0,3})(`{3,}|~{3,})/.exec(segment);
+    if (fenceMatch) {
+      const marker = fenceMatch[1][0] as '`' | '~';
+      const length = fenceMatch[1].length;
+      if (!fence) {
+        fence = { marker, length };
+      } else if (fence.marker === marker && length >= fence.length) {
+        fence = undefined;
+      }
+      return segment;
+    }
+    if (fence) return segment;
+
+    let normalized = '';
+    for (let index = 0; index < segment.length;) {
+      if (segment[index] === '`') {
+        let end = index + 1;
+        while (segment[end] === '`') end += 1;
+        const runLength = end - index;
+        if (inlineTicks === 0) inlineTicks = runLength;
+        else if (inlineTicks === runLength) inlineTicks = 0;
+        normalized += segment.slice(index, end);
+        index = end;
+        continue;
+      }
+
+      if (segment[index] !== '\\' || inlineTicks !== 0) {
+        normalized += segment[index];
+        index += 1;
+        continue;
+      }
+
+      let slashEnd = index;
+      while (segment[slashEnd] === '\\') slashEnd += 1;
+      const slashCount = slashEnd - index;
+      const next = segment[slashEnd];
+      const isCrLf = next === 'r' && segment[slashEnd + 1] === '\\' && segment[slashEnd + 2] === 'n';
+      const encodedLength = isCrLf ? 3 : next === 'n' || next === 'r' ? 1 : 0;
+      if (encodedLength > 0 && slashCount % 2 === 1) {
+        normalized += '\\'.repeat(Math.floor(slashCount / 2));
+        normalized += isCrLf ? '\r\n' : next === 'r' ? '\r' : '\n';
+        index = slashEnd + encodedLength;
+        continue;
+      }
+
+      normalized += segment.slice(index, slashEnd);
+      index = slashEnd;
     }
     return normalized;
   }).join('');

@@ -5,12 +5,16 @@ import { dirname, join } from 'node:path';
 
 /**
  * Overall budget for the bundled `nori server run` to finish ensuring a daemon.
- * Must cover the CLI's own worst case: the reuse-health wait (kept small via
- * `--reuse-health-timeout-ms`) plus a cold SEA start and the daemon spawn
- * window (20s) — the previous 30s value truncated that path mid-flight and
- * SIGTERMed the CLI before it could report its own diagnostics.
+ * It must cover the CLI's own 90s cold SEA boot window plus launcher overhead,
+ * otherwise Electron can terminate the parent while its daemon is still validly
+ * starting.
  */
-const RUN_TIMEOUT_MS = 60_000;
+// The bundled SEA can take more than a minute to cold-start on Windows before
+// its child daemon reaches healthz. This must outlive the daemon's own 90s
+// startup budget or Electron would terminate a healthy-in-progress launch.
+const RUN_TIMEOUT_MS = 120_000;
+/** Bound shutdown during application exit so the window is never held indefinitely. */
+const EXIT_STOP_TIMEOUT_MS = 12_000;
 /** How long to keep polling `/healthz` before declaring the daemon unhealthy. */
 const HEALTH_TIMEOUT_MS = 20_000;
 const HEALTH_POLL_MS = 200;
@@ -152,13 +156,17 @@ export function readLock(): LockContents | null {
   }
 }
 
-function runServerKill(seaPath: string, expected: LockContents): Promise<void> {
+function runServerKill(
+  seaPath: string,
+  expected: LockContents,
+  timeoutMs: number = RUN_TIMEOUT_MS,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     execFile(
       seaPath,
       ['server', 'kill'],
       {
-        timeout: RUN_TIMEOUT_MS,
+        timeout: timeoutMs,
         env: {
           ...process.env,
           NORI_CODE_EXPECT_SERVER_PID: String(expected.pid),
@@ -414,6 +422,48 @@ async function stopExistingServer(
   // The kill command normally releases the lock; this guarded cleanup handles
   // a process terminated before its release handler ran.
   removeMatchingLock(lock);
+}
+
+/**
+ * Stop the local daemon when Nori Work exits.
+ *
+ * The kill command validates the recorded PID, startup timestamp and endpoint
+ * before it sends a signal. That keeps shutdown targeted at the server Nori
+ * Work was using instead of an unrelated process that later reused the port.
+ */
+export async function stopServerForDesktopExit(seaPath: string): Promise<void> {
+  if (!existsSync(seaPath)) return;
+  const lock = readLock();
+  if (lock === null) return;
+
+  appendServerDiagnostic(
+    '[desktop] stopping server for Nori Work exit pid=' +
+      String(lock.pid) +
+      ' port=' +
+      String(lock.port) +
+      ' version=' +
+      (lock.host_version ?? '<unknown>'),
+  );
+
+  const origin = originFromLock(lock);
+  const identity = await probeServerIdentity(origin, 3_000);
+  if (identity === 'foreign') {
+    // Never signal a process that is positively identified as another product.
+    // Its stale Nori lock is safe to remove, but its process must be left alone.
+    removeMatchingLock(lock);
+    appendServerDiagnostic(
+      '[desktop] did not stop foreign process recorded by stale Nori lock pid=' + String(lock.pid),
+    );
+    return;
+  }
+
+  try {
+    await runServerKill(seaPath, lock, EXIT_STOP_TIMEOUT_MS);
+  } finally {
+    // The server normally releases this itself. This only removes the exact
+    // lock that was validated above, never a replacement owner's lock.
+    removeMatchingLock(lock);
+  }
 }
 
 export interface EnsureServerResult {

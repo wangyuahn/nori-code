@@ -1,29 +1,23 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { api, type ProviderCatalogItem, type ProviderPreset } from '../api/client';
+import { api } from '../api/client';
 import { useI18n, type Locale } from '../i18n';
 import {
   DEFAULT_ACCENT,
   applyThemeColor,
   applyThemeMode,
+  applyUiScale,
   isHexColor,
   loadThemeColor,
   loadThemeMode,
+  loadUiScale,
   type ThemeMode,
+  type UiScale,
 } from '../theme';
 import { Icon } from './Icon';
 import { loadRewindLimit, MAX_REWIND_LIMIT, saveRewindLimit } from '../rewindPreferences';
 import { loadSoundPreferences, playNotificationSound, saveSoundPreferences } from '../notificationSounds';
 
-type ProviderType = ProviderPreset['type'];
-type MemoryProviderType = Extract<ProviderType, 'openai' | 'openai_responses'>;
-
-const API_FORMATS: Array<{ value: ProviderType; label: string }> = [
-  { value: 'openai', label: 'OpenAI Chat Completions' },
-  { value: 'openai_responses', label: 'OpenAI Responses' },
-  { value: 'anthropic', label: 'Anthropic Messages' },
-  { value: 'google-genai', label: 'Google Gemini' },
-  { value: 'vertexai', label: 'Vertex AI' },
-];
+type MemoryProviderType = 'openai' | 'openai_responses';
 
 const MEMORY_API_FORMATS: Array<{ value: MemoryProviderType; label: string }> = [
   { value: 'openai', label: 'OpenAI compatible' },
@@ -37,15 +31,7 @@ export function SettingsPanel() {
   const [autoUpdate, setAutoUpdate] = useState(false);
   const [themeColor, setThemeColor] = useState(loadThemeColor);
   const [theme, setTheme] = useState<ThemeMode>(loadThemeMode);
-  const [providers, setProviders] = useState<ProviderCatalogItem[]>([]);
-  const [presets, setPresets] = useState<ProviderPreset[]>([]);
-  const [presetSource, setPresetSource] = useState('https://models.dev/api.json');
-  const [presetId, setPresetId] = useState('custom');
-  const [providerId, setProviderId] = useState('custom');
-  const [providerType, setProviderType] = useState<ProviderType>('openai');
-  const [baseUrl, setBaseUrl] = useState('https://api.openai.com/v1');
-  const [apiKey, setApiKey] = useState('');
-  const [apiKeyTouched, setApiKeyTouched] = useState(false);
+  const [uiScale, setUiScale] = useState<UiScale>(loadUiScale);
   const [memoryVectorEnabled, setMemoryVectorEnabled] = useState(false);
   const [memoryProviderType, setMemoryProviderType] = useState<MemoryProviderType>('openai');
   const [memoryBaseUrl, setMemoryBaseUrl] = useState('');
@@ -57,20 +43,16 @@ export function SettingsPanel() {
   const [soundPreferences, setSoundPreferences] = useState(loadSoundPreferences);
   const [maxStepsPerTurn, setMaxStepsPerTurn] = useState(0);
   const [goalMaxTurns, setGoalMaxTurns] = useState(0);
-  const [presetWarning, setPresetWarning] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveMessage, setSaveMessage] = useState('');
   const [saveError, setSaveError] = useState(false);
-
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const [config, providerResult, presetResult] = await Promise.all([
-        api.getConfig(), api.providers.list(), api.providerPresets.list(),
-      ]);
+      const config = await api.getConfig();
       if (typeof config.default_permission_mode === 'string') setPermissionMode(config.default_permission_mode);
       if (typeof config.default_plan_mode === 'boolean') setPlanMode(config.default_plan_mode);
       const loopControl = typeof config.loop_control === 'object' && config.loop_control !== null ? config.loop_control as Record<string, unknown> : {};
@@ -92,56 +74,12 @@ export function SettingsPanel() {
       setMemoryHasApiKey(memory.has_api_key === true);
       setMemoryApiKey('');
       setMemoryApiKeyTouched(false);
-      setProviders(providerResult.items);
-      setPresets(presetResult.items);
-      setPresetSource(presetResult.source);
-      setPresetWarning(presetResult.warning ?? '');
-      const first = providerResult.items[0];
-      if (first) {
-        setProviderId(first.id);
-        if (API_FORMATS.some(item => item.value === first.type)) setProviderType(first.type as ProviderType);
-        setBaseUrl(first.base_url ?? '');
-        const matchingPreset = presetResult.items.find(item =>
-          item.id === first.id && (item.base_url ?? '') === (first.base_url ?? ''));
-        setPresetId(matchingPreset?.id ?? 'custom');
-      }
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : tr('Failed to load settings', '加载设置失败'));
     } finally { setLoading(false); }
   }, [tr]);
 
   useEffect(() => { void load(); }, [load]);
-
-  const selectPreset = (id: string) => {
-    setPresetId(id);
-    const preset = presets.find(item => item.id === id);
-    if (!preset) return;
-    setProviderId(preset.id);
-    setProviderType(preset.type);
-    setBaseUrl(preset.base_url ?? '');
-  };
-
-  const selectConfiguredProvider = (id: string) => {
-    if (!id) {
-      setProviderId('');
-      setPresetId('custom');
-      setProviderType('openai');
-      setBaseUrl('');
-      setApiKey('');
-      setApiKeyTouched(false);
-      return;
-    }
-    const provider = providers.find(item => item.id === id);
-    if (!provider) return;
-    setProviderId(provider.id);
-    if (API_FORMATS.some(item => item.value === provider.type)) setProviderType(provider.type as ProviderType);
-    setBaseUrl(provider.base_url ?? '');
-    const matchingPreset = presets.find(item =>
-      item.id === provider.id && (item.base_url ?? '') === (provider.base_url ?? ''));
-    setPresetId(matchingPreset?.id ?? 'custom');
-    setApiKey('');
-    setApiKeyTouched(false);
-  };
 
   const save = async () => {
     setSaveMessage(''); setSaveError(false);
@@ -164,14 +102,6 @@ export function SettingsPanel() {
 
     setSaving(true);
     try {
-      const id = providerId.trim();
-      const providerPatch: Record<string, unknown> = { type: providerType };
-      if (baseUrl.trim()) providerPatch.base_url = baseUrl.trim();
-      if (apiKeyTouched && apiKey.trim()) providerPatch.api_key = apiKey.trim();
-      const selectedPreset = presets.find(item => item.id === presetId);
-      providerPatch.source = selectedPreset === undefined
-        ? { kind: 'manual' }
-        : { kind: 'modelsDev', url: presetSource, catalog_id: selectedPreset.id };
       const memoryPatch: Record<string, unknown> = {
         vector_enabled: memoryVectorEnabled,
         provider_type: memoryProviderType,
@@ -186,24 +116,11 @@ export function SettingsPanel() {
         memory: memoryPatch,
         loop_control: { max_steps_per_turn: maxStepsPerTurn, goal_max_turns: goalMaxTurns },
       };
-      if (id) patch.providers = { [id]: providerPatch };
       await api.updateConfig(patch);
-      let refreshMessage = '';
-      if (id) {
-        const result = await api.providers.refresh(id);
-        refreshMessage = result.failed.length > 0
-          ? tr('Provider saved, but model discovery failed: ', 'Provider 已保存，但获取模型失败：') + result.failed[0]?.reason
-          : tr('Provider saved and models refreshed', 'Provider 已保存并刷新模型列表');
-      }
-      setApiKey('');
-      setApiKeyTouched(false);
       if (memoryApiKeyTouched && memoryApiKey.trim()) setMemoryHasApiKey(true);
       setMemoryApiKey('');
       setMemoryApiKeyTouched(false);
-      setSaveMessage(refreshMessage || tr('Settings saved', '设置已保存'));
-      window.dispatchEvent(new CustomEvent('nori:model-catalog-changed'));
-      const currentProviders = await api.providers.list();
-      setProviders(currentProviders.items);
+      setSaveMessage(tr('Settings saved', '设置已保存'));
     } catch (error) {
       setSaveError(true);
       setSaveMessage(error instanceof Error ? error.message : tr('Failed to save', '保存失败'));
@@ -212,11 +129,10 @@ export function SettingsPanel() {
 
   const changeTheme = (mode: ThemeMode) => { setTheme(mode); applyThemeMode(mode); };
   const changeAccent = (color: string) => { setThemeColor(color); applyThemeColor(color); };
+  const changeUiScale = (scale: UiScale) => { setUiScale(scale); applyUiScale(scale); };
   const changeSoundPreferences = (patch: Partial<typeof soundPreferences>) => {
     setSoundPreferences(previous => saveSoundPreferences({ ...previous, ...patch }));
   };
-  const selectedProvider = providers.find(item => item.id === providerId);
-  const displayedApiKey = apiKeyTouched ? apiKey : selectedProvider?.has_api_key ? '••••••••' : '';
   const displayedMemoryApiKey = memoryApiKeyTouched ? memoryApiKey : memoryHasApiKey ? '••••••••' : '';
 
   return <div className="settings-panel">
@@ -229,19 +145,6 @@ export function SettingsPanel() {
       <SettingRow label={tr('Goal turns', 'Goal 最大轮次')} desc={tr('Default continuation-turn budget for new goals. 0 means unlimited.', '新 Goal 默认允许的连续轮次；0 表示无限。')}><input aria-label={tr('Goal turns', 'Goal 最大轮次')} type="number" min="0" step="1" className="input settings-control" value={goalMaxTurns} onChange={event => setGoalMaxTurns(nonNegativeInteger(event.target.value))}/></SettingRow>
     </div></section>
     {loadError && <div className="settings-notice"><Icon name="alert" size={17} /><div><strong>{tr('Server settings are unavailable', '服务器设置不可用')}</strong><p>{loadError}</p></div><button className="btn btn-secondary btn-compact" onClick={() => void load()}>{tr('Retry', '重试')}</button></div>}
-
-    <section className="settings-card">
-      <div className="settings-card-heading"><span>Provider</span><h2>{tr('API connection', 'API 连接')}</h2><p>{tr('Configure any compatible API and fetch its models automatically.', '配置任意兼容 API，并自动获取模型列表。')}</p></div>
-      <div className="settings-card-body provider-settings-grid">
-        <SettingRow label={tr('Configured provider', '已配置 Provider')} desc={tr('Edit an existing connection or create a new one.', '编辑已有连接或新建连接。')}><select aria-label={tr('Configured provider', '已配置 Provider')} className="input settings-control" value={providers.some(p => p.id === providerId) ? providerId : ''} onChange={e => { selectConfiguredProvider(e.target.value); }}><option value="">{tr('New provider', '新建 Provider')}</option>{providers.map(p => <option key={p.id} value={p.id}>{p.id} · {p.status}</option>)}</select></SettingRow>
-        <SettingRow label={tr('Online preset', '在线预设')} desc={tr('Loaded from models.dev, the same catalog used by Nori CLI.', '来自 models.dev，与 Nori CLI 使用同一目录。')}><select aria-label={tr('Online preset', '在线预设')} className="input settings-control" value={presetId} onChange={e => { selectPreset(e.target.value); }}><option value="custom">{tr('Custom / manual', '自定义 / 手动')}</option>{presets.map(p => <option key={p.id} value={p.id}>{p.name} ({p.model_count})</option>)}</select></SettingRow>
-        {presetWarning && <div className="provider-warning">{tr('Online presets unavailable; manual configuration still works.', '在线预设暂不可用，仍可手动配置。')} {presetWarning}</div>}
-        <SettingRow label="Provider ID" desc={tr('A stable local identifier, such as openrouter.', '稳定的本地标识，例如 openrouter。')}><input aria-label="Provider ID" className="input settings-control" value={providerId} onChange={e => { setProviderId(e.target.value); }} /></SettingRow>
-        <SettingRow label={tr('API format', 'API 格式')} desc={tr('Choose the request and response protocol.', '选择请求与响应协议。')}><select className="input settings-control" value={providerType} onChange={e => { setProviderType(e.target.value as ProviderType); }}>{API_FORMATS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></SettingRow>
-        <SettingRow label="API Base URL" desc={tr('The model endpoint is derived from this URL.', '模型列表端点会由此地址推导。')}><input aria-label="API Base URL" className="input settings-control settings-url-input" value={baseUrl} onChange={e => { setBaseUrl(e.target.value); }} placeholder="https://api.example.com/v1" /></SettingRow>
-        <SettingRow label="API Key" desc={selectedProvider?.has_api_key ? tr('A key is stored. Enter a new value only to replace it.', '密钥已保存；只有输入新值时才会替换。') : tr('Stored only in the local Nori configuration.', '仅保存在本机 Nori 配置中。')}><input type="password" className="input settings-control" value={displayedApiKey} onFocus={() => { if (!apiKeyTouched && selectedProvider?.has_api_key) { setApiKey(''); setApiKeyTouched(true); } }} onChange={e => { setApiKeyTouched(true); setApiKey(e.target.value); }} placeholder="sk-..." /></SettingRow>
-      </div>
-    </section>
 
     <section className="settings-card">
       <div className="settings-card-heading"><span>Memory</span><h2>{tr('Memory retrieval', 'Memory 检索')}</h2><p>{tr('Configure a separate embedding connection for semantic memory search.', '为语义记忆检索配置独立的 Embedding 连接。')}</p></div>
@@ -266,9 +169,10 @@ export function SettingsPanel() {
       <SettingRow label={tr('Color mode', '颜色模式')} desc={tr('Applied to the entire application.', '应用到整个应用。')}><div className="theme-segment"><button onClick={() => { changeTheme('dark'); }} className={theme === 'dark' ? 'active' : ''}><Icon name="moon" size={15}/>{tr('Dark', '深色')}</button><button onClick={() => { changeTheme('light'); }} className={theme === 'light' ? 'active' : ''}><Icon name="sun" size={15}/>{tr('Light', '浅色')}</button></div></SettingRow>
       <SettingRow label={tr('Accent color', '强调色')} desc={tr('Used for focus and primary actions.', '用于焦点与主要操作。')}><div className="accent-control"><input type="color" value={isHexColor(themeColor) ? themeColor : DEFAULT_ACCENT} onChange={e => { changeAccent(e.target.value); }}/><input className="input accent-value" value={themeColor} onChange={e => { changeAccent(e.target.value); }}/></div></SettingRow>
       <SettingRow label={tr('Interface language', '界面语言')} desc={tr('Applied immediately.', '立即生效。')}><select className="input settings-control" value={locale} onChange={e => { setLocale(e.target.value as Locale); }}><option value="zh-CN">简体中文</option><option value="en">English</option></select></SettingRow>
+      <SettingRow label={tr('UI size', '界面大小')} desc={tr('Adjust the workspace density without changing the content.', '调整工作区界面密度，不改变内容。')}><div className="theme-segment ui-scale-segment"><button type="button" onClick={() => changeUiScale('compact')} className={uiScale === 'compact' ? 'active' : ''}>{tr('Compact', '紧凑')}</button><button type="button" onClick={() => changeUiScale('default')} className={uiScale === 'default' ? 'active' : ''}>{tr('Standard', '标准')}</button><button type="button" onClick={() => changeUiScale('large')} className={uiScale === 'large' ? 'active' : ''}>{tr('Large', '大')}</button></div></SettingRow>
     </div></section>
 
-    <div className="settings-actions"><button className="btn btn-primary" onClick={() => void save()} disabled={saving || loading}>{saving ? tr('Saving…', '正在保存…') : tr('Save and refresh models', '保存并刷新模型')}</button>{saveMessage && <span className={'settings-save-status ' + (saveError ? 'error' : 'success')}><Icon name={saveError ? 'alert' : 'check'} size={15}/>{saveMessage}</span>}</div>
+    <div className="settings-actions"><button className="btn btn-primary" onClick={() => void save()} disabled={saving || loading}>{saving ? tr('Saving…', '正在保存…') : tr('Save settings', '保存设置')}</button>{saveMessage && <span className={'settings-save-status ' + (saveError ? 'error' : 'success')}><Icon name={saveError ? 'alert' : 'check'} size={15}/>{saveMessage}</span>}</div>
   </div>;
 }
 

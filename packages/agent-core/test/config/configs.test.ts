@@ -579,6 +579,27 @@ micro_compaction = false
     expect(merged.memory?.apiKey).toBe('sk-memory');
   });
 
+  it('deletes model aliases and provider custom models with explicit null markers', () => {
+    const base = parseConfigString(`
+      [providers.local]
+      type = "openai"
+      custom_models = ["old-model"]
+
+      [models."local/old-model"]
+      provider = "local"
+      model = "old-model"
+      max_context_size = 128000
+    `);
+
+    const merged = mergeConfigPatch(base, {
+      providers: { local: { customModels: null } },
+      models: { 'local/old-model': null },
+    });
+
+    expect(merged.providers['local']?.customModels).toBeUndefined();
+    expect(merged.models?.['local/old-model']).toBeUndefined();
+  });
+
   it('rejects unknown fields in config patches', () => {
     expectKimiErrorCode(
       () => mergeConfigPatch({ providers: {} }, { theme: 'dark' } as never),

@@ -2,8 +2,11 @@ export type ThemeMode = 'dark' | 'light';
 
 const THEME_KEY = 'nori-theme-color';
 const THEME_MODE_KEY = 'nori-theme';
+const UI_SCALE_KEY = 'nori-ui-scale';
 export const DEFAULT_ACCENT = '#9BE8B0';
 const LEGACY_ACCENTS = new Set(['#00bcd4', '#6dd6c7']);
+
+export type UiScale = 'compact' | 'default' | 'large';
 
 export function isHexColor(color: string): boolean {
   return /^#[0-9a-f]{6}$/i.test(color);
@@ -27,6 +30,23 @@ export function loadThemeMode(): ThemeMode {
     // Use dark mode when browser storage and media queries are unavailable.
   }
   return 'dark';
+}
+
+export function loadUiScale(): UiScale {
+  try {
+    const saved = localStorage.getItem(UI_SCALE_KEY);
+    if (saved === 'compact' || saved === 'default' || saved === 'large') return saved;
+  } catch {
+    // Use the default scale when browser storage is unavailable.
+  }
+  return 'default';
+}
+
+export function applyUiScale(scale: UiScale, persist = true): void {
+  if (persist) {
+    try { localStorage.setItem(UI_SCALE_KEY, scale); } catch { /* no-op */ }
+  }
+  document.documentElement.dataset.uiScale = scale;
 }
 
 export function applyThemeColor(color: string, persist = true): void {
@@ -54,4 +74,5 @@ export function applyThemeMode(mode: ThemeMode, persist = true): void {
 export function initializeTheme(): void {
   applyThemeMode(loadThemeMode(), false);
   applyThemeColor(loadThemeColor(), false);
+  applyUiScale(loadUiScale(), false);
 }

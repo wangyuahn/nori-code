@@ -5,8 +5,10 @@ import {
   getProviderResponseSchema,
   listModelsResponseSchema,
   listProvidersResponseSchema,
+  providerSecretResponseSchema,
   refreshProviderModelsResponseSchema,
   setDefaultModelResponseSchema,
+  testProviderResponseSchema,
 } from '@nori-code/protocol';
 import { IModelCatalogService, ModelNotFoundError, ProviderNotFoundError, type IInstantiationService } from '@nori-code/agent-core';
 
@@ -28,6 +30,14 @@ interface ModelCatalogRouteHost {
     options: { preHandler: unknown[]; schema?: Record<string, unknown> },
     handler: (
       req: { id: string; body: unknown; params: unknown },
+      reply: { send(payload: unknown): unknown },
+    ) => Promise<void> | void,
+  ): unknown;
+  delete(
+    path: string,
+    options: { preHandler: unknown[]; schema?: Record<string, unknown> },
+    handler: (
+      req: { id: string; params: unknown },
       reply: { send(payload: unknown): unknown },
     ) => Promise<void> | void,
   ): unknown;
@@ -244,7 +254,7 @@ export function registerModelCatalogRoutes(
       method: 'POST',
       path: '/providers:action',
       params: providerCollectionActionParamSchema,
-      success: { data: refreshProviderModelsResponseSchema },
+      success: { data: z.union([refreshProviderModelsResponseSchema, testProviderResponseSchema]) },
       errors: {
         [ErrorCode.VALIDATION_FAILED]: {},
       },
@@ -286,7 +296,7 @@ export function registerModelCatalogRoutes(
       method: 'POST',
       path: '/providers/{tail}',
       params: providerActionTailParamSchema,
-      success: { data: refreshProviderModelsResponseSchema },
+      success: { data: z.union([refreshProviderModelsResponseSchema, testProviderResponseSchema]) },
       errors: {
         [ErrorCode.VALIDATION_FAILED]: {},
         [ErrorCode.PROVIDER_NOT_FOUND]: {},
@@ -300,7 +310,7 @@ export function registerModelCatalogRoutes(
         const { tail } = req.params;
         const parsed = parseActionSuffix({
           tail,
-          allowedActions: ['refresh'] as const,
+          allowedActions: ['refresh', 'test'] as const,
           resourceLabel: 'provider',
         });
         if (parsed.kind !== 'action') {
@@ -310,9 +320,9 @@ export function registerModelCatalogRoutes(
           reply.send(errEnvelope(ErrorCode.VALIDATION_FAILED, message, req.id));
           return;
         }
-        const result = await ix.invokeFunction((a) =>
-          a.get(IModelCatalogService).refreshProviderModels({ providerId: parsed.id }),
-        );
+        const result = parsed.action === 'test'
+          ? await ix.invokeFunction((a) => a.get(IModelCatalogService).testProvider(parsed.id))
+          : await ix.invokeFunction((a) => a.get(IModelCatalogService).refreshProviderModels({ providerId: parsed.id }));
         reply.send(okEnvelope(result, req.id));
       } catch (err) {
         sendMappedError(reply, req.id, err);
@@ -354,6 +364,64 @@ export function registerModelCatalogRoutes(
     getProviderRoute.path,
     getProviderRoute.options,
     getProviderRoute.handler as Parameters<ModelCatalogRouteHost['get']>[2],
+  );
+
+  const providerSecretRoute = defineRoute(
+    {
+      method: 'GET',
+      path: '/providers/{provider_id}/secret',
+      params: providerIdParamSchema,
+      success: { data: providerSecretResponseSchema },
+      errors: {
+        [ErrorCode.VALIDATION_FAILED]: {},
+        [ErrorCode.PROVIDER_NOT_FOUND]: {},
+      },
+      description: 'Read a configured provider API key for local UI use',
+      tags: ['providers'],
+    },
+    async (req, reply) => {
+      try {
+        const { provider_id } = req.params;
+        const secret = await ix.invokeFunction((a) => a.get(IModelCatalogService).getProviderSecret(provider_id));
+        reply.send(okEnvelope(secret, req.id));
+      } catch (err) {
+        sendMappedError(reply, req.id, err);
+      }
+    },
+  );
+  app.get(
+    providerSecretRoute.path,
+    providerSecretRoute.options,
+    providerSecretRoute.handler as Parameters<ModelCatalogRouteHost['get']>[2],
+  );
+
+  const removeProviderRoute = defineRoute(
+    {
+      method: 'DELETE',
+      path: '/providers/{provider_id}',
+      params: providerIdParamSchema,
+      success: { data: z.object({ deleted: z.literal(true) }) },
+      errors: {
+        [ErrorCode.VALIDATION_FAILED]: {},
+        [ErrorCode.PROVIDER_NOT_FOUND]: {},
+      },
+      description: 'Delete a configured provider',
+      tags: ['providers'],
+    },
+    async (req, reply) => {
+      try {
+        const { provider_id } = req.params;
+        const result = await ix.invokeFunction((a) => a.get(IModelCatalogService).removeProvider(provider_id));
+        reply.send(okEnvelope(result, req.id));
+      } catch (err) {
+        sendMappedError(reply, req.id, err);
+      }
+    },
+  );
+  app.delete(
+    removeProviderRoute.path,
+    removeProviderRoute.options,
+    removeProviderRoute.handler as Parameters<ModelCatalogRouteHost['delete']>[2],
   );
 }
 

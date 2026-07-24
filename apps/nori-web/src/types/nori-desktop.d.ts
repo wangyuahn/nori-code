@@ -83,7 +83,13 @@ export interface NoriBrowserState {
 }
 
 export interface NoriDesktopAPI {
+  usesCustomWindowControls?: boolean;
   getServerToken?: () => Promise<string | undefined>;
+  windowMinimize?: () => void;
+  windowToggleMaximize?: () => Promise<boolean>;
+  windowIsMaximized?: () => Promise<boolean>;
+  windowClose?: () => void;
+  onWindowMaximizedChange?: (callback: (maximized: boolean) => void) => () => void;
   selectProjectDirectory?: () => Promise<string | undefined>;
   saveMarkdown?: (input: { suggestedName: string; content: string }) => Promise<string | undefined>;
   onToggleMode?: (callback: (mode: string) => void) => () => void;

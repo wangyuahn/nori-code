@@ -3,7 +3,12 @@ import { dirname, join } from 'node:path';
 
 import { app, BrowserWindow, globalShortcut, Menu, screen, session, shell } from 'electron';
 
-import { ensureServer, readServerToken, serverLogPath } from './ensure-server';
+import {
+  ensureServer,
+  readServerToken,
+  serverLogPath,
+  stopServerForDesktopExit,
+} from './ensure-server';
 import { registerIpcHandlers } from './ipc-handlers';
 import { registerUpdateHandlers } from './updater';
 import { resolveSeaPath } from './sea-path';
@@ -23,6 +28,9 @@ configureNoriApplicationIdentity();
 let mainWindow: BrowserWindow | null = null;
 let splashWindow: BrowserWindow | null = null;
 let browserBridge: BrowserBridgeHandle | null = null;
+let connectedToServer = false;
+let quitCleanupStarted = false;
+let quitCleanupComplete = false;
 
 // --- window state persistence -------------------------------------------------
 
@@ -151,6 +159,7 @@ async function connect(win: BrowserWindow): Promise<void> {
   await win.loadURL(dataUrl(loadingHtml()));
   try {
     const { origin } = await ensureServer(resolveSeaPath(), app.getVersion());
+    connectedToServer = true;
     process.stdout.write(`[nori-desktop] connected to ${origin}\n`);
     if (!win.isDestroyed()) {
       const token = readServerToken();
@@ -196,9 +205,9 @@ function createWindow(): void {
     autoHideMenuBar: true,
     title: NORI_PRODUCT_NAME,
     icon: noriRuntimeIconPath(),
-    // macOS: hide the native title bar and float the traffic lights over the
-    // content; the web UI reserves a draggable strip at the top to clear them.
-    // 'default' on other platforms (they keep their native title bar).
+    frame: process.platform === 'darwin',
+    // macOS keeps hidden-inset traffic lights. Windows and Linux use the
+    // renderer controls and draggable regions exposed by the web shell.
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {
       contextIsolation: true,
@@ -210,6 +219,13 @@ function createWindow(): void {
   });
   win.setMenu(null);
   win.setMenuBarVisibility(false);
+  const publishMaximizedState = () => {
+    if (!win.isDestroyed()) win.webContents.send('nori:window:maximized-change', win.isMaximized());
+  };
+  win.on('maximize', publishMaximizedState);
+  win.on('unmaximize', publishMaximizedState);
+  win.on('enter-full-screen', publishMaximizedState);
+  win.on('leave-full-screen', publishMaximizedState);
   mainWindow = win;
   createTray(win);
   // Keep the window title as the product name. The web page sets document.title
@@ -288,13 +304,27 @@ function main(): void {
     return;
   }
 
-  // The shared daemon is deliberately left running on quit - it self-exits ~60s
-  // after the last client disconnects, so we never tear down a server another
-  // client (CLI / browser / TUI) may still be using.
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') {
       app.quit();
     }
+  });
+
+  app.on('before-quit', (event) => {
+    if (quitCleanupComplete || !connectedToServer) return;
+    event.preventDefault();
+    if (quitCleanupStarted) return;
+    quitCleanupStarted = true;
+
+    void stopServerForDesktopExit(resolveSeaPath())
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        process.stderr.write(`[nori-desktop] failed to stop local server during exit: ${message}\n`);
+      })
+      .finally(() => {
+        quitCleanupComplete = true;
+        app.quit();
+      });
   });
 
   app.on('will-quit', () => {

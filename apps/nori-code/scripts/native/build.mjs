@@ -1,3 +1,4 @@
+import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
@@ -7,7 +8,7 @@ import { runSeaBlobStep } from './02-sea-blob.mjs';
 import { runSignStep } from './04-sign.mjs';
 import { runVerifyStep } from './05-verify.mjs';
 import { run } from './exec.mjs';
-import { appRoot, nativeIntermediatesDir } from './paths.mjs';
+import { appRoot, nativeBinPath, nativeIntermediatesDir, targetTriple } from './paths.mjs';
 import { BUILT_IN_CATALOG_ENV } from '../built-in-catalog.mjs';
 
 const { values } = parseArgs({
@@ -53,5 +54,16 @@ await runSignStep({ identity, keychainPath });
 // Verify always runs (codesign -dv); spctl gatekeeper gate only after notarization
 // (CI macos-notarize composite action) — orchestrator just self-checks signing here.
 await runVerifyStep({ requireGatekeeper: false });
+
+// Keep the packaged desktop launcher from accidentally embedding a stale SEA.
+// The marker is checked by electron-builder before staging resources.
+const packageJson = JSON.parse(
+  await readFile(resolve(appRoot, 'package.json'), 'utf-8'),
+);
+await writeFile(
+  `${nativeBinPath(targetTriple())}.version`,
+  `${String(packageJson.version)}\n`,
+  'utf-8',
+);
 
 console.log('==> Native build complete');
