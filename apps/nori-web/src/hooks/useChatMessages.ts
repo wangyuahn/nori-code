@@ -501,6 +501,21 @@ function mergeWorkBlocks(previous: WorkBlock[], incoming: WorkBlock[]): WorkBloc
   return merged;
 }
 
+/**
+ * A reconnect snapshot only contains tools that are still running. Keep the
+ * completed steps already received over the socket instead of replacing the
+ * visible work log with that intentionally partial snapshot.
+ */
+export function mergeInFlightWorkBlocks(previous: WorkBlock[], snapshot: WorkBlock[]): WorkBlock[] {
+  if (previous.length === 0) return mergeWorkBlocks([], snapshot);
+
+  const missingThinking = previous.some(block => block.type === 'thinking')
+    ? []
+    : snapshot.filter(block => block.type === 'thinking');
+  const runningTools = snapshot.filter(block => block.type === 'tool');
+  return mergeWorkBlocks(previous, [...missingThinking, ...runningTools]);
+}
+
 function appendStreamDelta(current: string, delta: string, offset: number | undefined): { text: string; appended: string } | null {
   if (offset === undefined) return { text: current + delta, appended: delta };
   if (offset > current.length) return null;
@@ -697,16 +712,15 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     setPendingQuestions(previous => preserveEqual(previous, snapshot.pending_questions ?? []));
     const inFlight = snapshot.in_flight_turn;
     if (!inFlight) return false;
+    const isSameTurn = activeTurnIdRef.current === inFlight.turn_id;
     const restoredProgress = inFlight.running_tools.length > 0
       ? createProgressBlock(`snapshot-progress-${inFlight.turn_id}`, inFlight.assistant_text)
       : undefined;
-    streamingRef.current = restoredProgress === undefined ? inFlight.assistant_text : '';
     assistantRawRef.current = inFlight.assistant_text;
-    thinkingRef.current = inFlight.thinking_text;
     thinkingRawRef.current = inFlight.thinking_text;
     activeTurnIdRef.current = inFlight.turn_id;
     activeToolCallsRef.current.clear();
-    const restoredBlocks: WorkBlock[] = [
+    const snapshotBlocks: WorkBlock[] = [
       ...(inFlight.thinking_text.trim()
         ? [{ id: `snapshot-thinking-${inFlight.turn_id}`, type: 'thinking' as const, text: inFlight.thinking_text }]
         : []),
@@ -717,9 +731,17 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
         return { id: tool.tool_call_id, type: 'tool' as const, tool: restoredTool };
       }),
     ];
+    const preservesLiveBlocks = isSameTurn && liveWorkBlocksRef.current.length > 0;
+    const restoredBlocks = preservesLiveBlocks
+      ? mergeInFlightWorkBlocks(liveWorkBlocksRef.current, snapshotBlocks)
+      : snapshotBlocks;
     liveWorkBlocksRef.current = restoredBlocks;
-    setCurrentStreaming(restoredProgress === undefined ? stripGeneratedSessionTitle(inFlight.assistant_text) : '');
-    setCurrentThinking(inFlight.thinking_text);
+    if (!preservesLiveBlocks) {
+      streamingRef.current = restoredProgress === undefined ? inFlight.assistant_text : '';
+      thinkingRef.current = inFlight.thinking_text;
+      setCurrentStreaming(restoredProgress === undefined ? stripGeneratedSessionTitle(inFlight.assistant_text) : '');
+      setCurrentThinking(inFlight.thinking_text);
+    }
     setCurrentWorkBlocks(restoredBlocks);
     lastStreamActivityAtRef.current = Date.now();
     setIsStreaming(true);
@@ -1035,10 +1057,12 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
 
           switch (type) {
             case 'turn.started':
+              if (activeTurnIdRef.current === null && liveWorkBlocksRef.current.length === 0) {
+                clearDraft();
+              }
               activeTurnIdRef.current = payload.turnId ?? null;
               lastStreamActivityAtRef.current = Date.now();
               turnUsageRef.current = undefined;
-              clearDraft();
               setIsStreaming(true);
               break;
             case 'assistant.delta': {
@@ -1095,7 +1119,9 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
                 }]));
                 }
               }
-              finishTurn(payload.turnId);
+              // A turn can finish immediately before prompt.completed. Keep
+              // the streamed work visible until that prompt-level terminal
+              // event commits the complete transcript exactly once.
               break;
             case 'prompt.completed':
               playNotificationSound(payload.reason === 'failed' ? 'error' : 'complete');
@@ -1103,9 +1129,9 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
                 finishTurn(activeTurnIdRef.current ?? undefined);
               }
               else setIsStreaming(false);
-              scheduleHistoryRefresh();
               break;
             case 'tool.call.started':
+              lastStreamActivityAtRef.current = Date.now();
               if (payload.toolCallId && payload.name) {
                 const tool = { id: payload.toolCallId, name: payload.name, args: payload.args };
                 activeToolCallsRef.current.set(payload.toolCallId, tool);
@@ -1129,6 +1155,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
               setIsStreaming(true);
               break;
             case 'tool.result':
+              lastStreamActivityAtRef.current = Date.now();
               if (payload.toolCallId) {
                 const result = serializeToolOutput(payload.output ?? payload.result);
                 liveWorkBlocksRef.current = liveWorkBlocksRef.current.map(block => block.type === 'tool' && block.tool.id === payload.toolCallId
@@ -1137,6 +1164,9 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
                 setCurrentWorkBlocks(liveWorkBlocksRef.current);
                 activeToolCallsRef.current.delete(payload.toolCallId);
               }
+              break;
+            case 'tool.progress':
+              lastStreamActivityAtRef.current = Date.now();
               break;
             case 'subagent.started':
               if (payload.subagentId) {

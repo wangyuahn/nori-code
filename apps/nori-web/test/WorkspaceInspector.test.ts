@@ -1,7 +1,7 @@
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { api, type FsGitStatusResponse, type FsReadResponse } from '../src/api/client';
+import { api, type FsGitStatusResponse, type FsReadResponse, type GoalSnapshot } from '../src/api/client';
 import type { ChatMessage, CodeChange } from '../src/hooks/useChatMessages';
 import { useFilesystem } from '../src/hooks/useFilesystem';
 import { WorkspaceInspector, changedLineStats, collectAttributions, collectToolCodeChanges, combinedCodeChangeDiff, diffPathsToLoad, hasTextChanges, mergeCodeChanges, splitDisplayPath } from '../src/components/WorkspaceInspector';
@@ -64,8 +64,9 @@ describe('workspace change presentation', () => {
           initialTab: 'browser',
         })));
       });
-      await act(async () => { await new Promise(resolve => setTimeout(resolve, 25)); });
-      expect(desktop.browserSetVisible).toHaveBeenCalledWith(true);
+      await vi.waitFor(() => {
+        expect(desktop.browserSetVisible).toHaveBeenCalledWith(true);
+      });
 
       const previewButton = [...container.querySelectorAll<HTMLButtonElement>('.inspector-tab-list > button')]
         .find(button => button.title === 'Preview' || button.title === '预览');
@@ -112,9 +113,65 @@ describe('workspace change presentation', () => {
       });
 
       expect(container.querySelectorAll('.inspector-activity-todos li')).toHaveLength(3);
-      expect(container.querySelector('.inspector-activity-todos-heading')?.textContent).toContain('Todo list');
+      expect(container.querySelector('.inspector-activity-card-heading')?.textContent).toContain('Todo list');
+      expect(container.querySelector('.inspector-activity-todos-progress')?.textContent).toContain('1/3');
       expect(container.textContent?.match(/First task/g)).toHaveLength(1);
       expect(container.textContent?.match(/Second task/g)).toHaveLength(1);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('renders a structured goal card without repeating its objective in the activity header', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const goal: GoalSnapshot = {
+      goalId: 'goal-card',
+      objective: 'Finish the workspace migration.',
+      completionCriterion: 'All migration checks pass.',
+      status: 'active',
+      turnsUsed: 1,
+      tokensUsed: 1_200,
+      wallClockMs: 62_000,
+      budget: {
+        tokenBudget: 4_000,
+        turnBudget: 4,
+        wallClockBudgetMs: null,
+        remainingTokens: 2_800,
+        remainingTurns: 3,
+        remainingWallClockMs: null,
+        tokenBudgetReached: false,
+        turnBudgetReached: false,
+        wallClockBudgetReached: false,
+        overBudget: false,
+      },
+    };
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(WorkspaceInspector, {
+          sessionId: 'session-goal-card',
+          projectPath: '/project',
+          path: '',
+          file: null,
+          messages: [],
+          codeChanges: [],
+          gitStatus: null,
+          gitError: null,
+          gitLoading: false,
+          refreshGitStatus: vi.fn(async () => null),
+          isStreaming: false,
+          overviewFirst: true,
+          goal,
+        })));
+        await Promise.resolve();
+      });
+
+      expect(container.querySelector('.inspector-activity-goal')?.textContent).toContain('Finish the workspace migration.');
+      expect(container.querySelector('.inspector-activity-goal-heading')?.textContent).toContain('Active');
+      expect(container.querySelector('.inspector-activity-goal-meta')?.textContent).toContain('1/4 turns');
+      expect(container.querySelector('.inspector-activity-highlight')).toBeNull();
     } finally {
       await act(async () => root.unmount());
       container.remove();

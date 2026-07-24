@@ -63,7 +63,7 @@ it('stops the daemon when Nori Work exits and clears only its matching lock', as
     started_at: '2026-07-24T00:00:00.000Z',
     host: '127.0.0.1',
     port: 58627,
-    host_version: '1.0.0-pre.6',
+    host_version: '1.0.0',
   }));
 
   vi.mocked(execFile).mockImplementation((_file, args, _options, callback) => {

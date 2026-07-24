@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../src/api/client';
-import { apiMessageToChat, canApplyGeneratedSessionTitle, fallbackSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, mergeHistory, promptForRewind, RealtimeSubscriptionGate, removeTerminatedAgent, shouldIgnoreTranscriptEvent, statusForSession, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
+import { apiMessageToChat, canApplyGeneratedSessionTitle, fallbackSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, mergeHistory, mergeInFlightWorkBlocks, promptForRewind, RealtimeSubscriptionGate, removeTerminatedAgent, shouldIgnoreTranscriptEvent, statusForSession, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
 
 describe('agent activity events', () => {
   it('removes a manually terminated agent from the live activity set', () => {
@@ -68,6 +68,24 @@ describe('realtime subscription readiness', () => {
 });
 
 describe('main transcript projection', () => {
+  it('keeps completed tool calls when a reconnect snapshot lists only the currently running tool', () => {
+    const merged = mergeInFlightWorkBlocks([
+      { id: 'thinking-1', type: 'thinking', text: 'Inspect the target first.' },
+      { id: 'read-1', type: 'tool', tool: { id: 'read-1', name: 'Read', args: { path: 'src/a.ts' }, result: 'file contents' } },
+      { id: 'edit-1', type: 'tool', tool: { id: 'edit-1', name: 'Edit', args: { path: 'src/a.ts' }, result: 'updated' } },
+    ], [
+      { id: 'snapshot-thinking-7', type: 'thinking', text: 'Inspect the target first. Apply the follow-up.' },
+      { id: 'write-1', type: 'tool', tool: { id: 'write-1', name: 'Write', args: { path: 'src/b.ts' } } },
+    ]);
+
+    expect(merged).toMatchObject([
+      { type: 'thinking', text: 'Inspect the target first.' },
+      { type: 'tool', tool: { id: 'read-1', result: 'file contents' } },
+      { type: 'tool', tool: { id: 'edit-1', result: 'updated' } },
+      { type: 'tool', tool: { id: 'write-1', name: 'Write' } },
+    ]);
+  });
+
   it('places steer guidance between work progress already shown and the final summary', () => {
     const before = [{ id: 'u1', role: 'user' as const, text: 'initial task' }];
     const withGuidance = insertSteerBoundary(

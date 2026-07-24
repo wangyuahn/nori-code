@@ -271,38 +271,38 @@ function WorkspaceActivitySummary({ mainWorking, agentCount, agentTokens, goal, 
     goal.budget.tokenBudget === null ? `${formatTokens(goal.tokensUsed)} tokens` : `${formatTokens(goal.tokensUsed)}/${formatTokens(goal.budget.tokenBudget)} tokens`,
     formatGoalTime(goal.wallClockMs, tr),
   ];
-  const headline = mainWorking
-    ? currentMainPhrase
-    : agentCount > 0
-      ? currentAgentPhrase
-      : goal?.objective ?? (todos.length > 0 ? tr('Todo list', '待办列表') : '');
+  const hasLiveActivity = mainWorking || agentCount > 0;
+  const headline = mainWorking ? currentMainPhrase : currentAgentPhrase;
   const icon = mainWorking ? 'sparkles' : agentCount > 0 ? 'swarm' : goal ? 'target' : 'list';
   const statusSummary = [
     mainWorking ? tr('Nori active', 'Nori 工作中') : '',
     agentCount > 0 ? tr(`${agentCount} agents`, `${agentCount} 个智能体`) : '',
-    goal ? tr('Goal tracked', '目标跟踪中') : '',
-    todos.length > 0 ? tr(`${completedTodos}/${todos.length} todos`, `${completedTodos}/${todos.length} 待办`) : '',
   ].filter(Boolean).join(' · ');
 
   return <section className={`inspector-activity-summary${goal ? ` goal-${goal.status}` : ''}`} aria-live={mainWorking || agentCount > 0 ? 'polite' : undefined}>
-    <div className="inspector-activity-highlight">
+    {hasLiveActivity && <div className="inspector-activity-highlight">
       <span className="inspector-activity-icon"><Icon name={icon} size={14}/></span>
       <span><small>{statusSummary}</small><strong>{headline}</strong></span>
       {agentTokens > 0 && <em>{formatTokens(agentTokens)} tokens</em>}
-    </div>
+    </div>}
     {agentCount > 0 && <p className="inspector-activity-line active"><span>{tr('Subagents', '子智能体')}</span><strong>{currentAgentPhrase}{agentTokens > 0 ? ` · ${formatTokens(agentTokens)} tokens` : ''}</strong></p>}
-    {goal && <div className="inspector-activity-section">
-      <p className="inspector-activity-line"><span>{tr('Goal', '目标')}</span><strong>{goal.objective}</strong></p>
-      <p className="inspector-activity-line"><span>{tr('Status', '状态')}</span><strong>{goalStatusLabel}</strong></p>
-      <p className="inspector-activity-line"><span>{tr('Budget', '预算')}</span><strong>{budgetItems.join(' · ')}</strong></p>
-      {goal.completionCriterion && <p className="inspector-activity-line"><span>{tr('Done when', '完成标准')}</span><strong>{goal.completionCriterion}</strong></p>}
-      {goal.terminalReason && <p className="inspector-activity-line"><span>{tr('Status note', '状态说明')}</span><strong>{goal.terminalReason}</strong></p>}
+    {goal && <section className={`inspector-activity-card inspector-activity-goal goal-${goal.status}`}>
+      <header className="inspector-activity-card-heading inspector-activity-goal-heading"><span><Icon name="target" size={13}/><strong>{tr('Goal', '目标')}</strong></span><em>{goalStatusLabel}</em></header>
+      <div className="inspector-activity-card-divider"/>
+      <p className="inspector-activity-goal-objective">{goal.objective}</p>
+      <div className="inspector-activity-goal-meta">
+        <p><span>{tr('Budget', '预算')}</span><strong>{budgetItems.join(' · ')}</strong></p>
+        {goal.completionCriterion && <p><span>{tr('Done when', '完成标准')}</span><strong>{goal.completionCriterion}</strong></p>}
+        {goal.terminalReason && <p><span>{tr('Status note', '状态说明')}</span><strong>{goal.terminalReason}</strong></p>}
+      </div>
       {onGoalControl && goal.status !== 'complete' && <div className="inspector-activity-actions">{goal.status === 'active' ? <button type="button" onClick={() => void onGoalControl('pause')}>{tr('Pause', '暂停')}</button> : <button type="button" onClick={() => void onGoalControl('resume')}>{tr('Resume', '继续')}</button>}<button type="button" className="danger" onClick={() => { if (window.confirm(tr('Cancel this goal?', '取消这个目标吗？'))) void onGoalControl('cancel'); }}>{tr('Cancel goal', '取消目标')}</button></div>}
-    </div>}
-    {todos.length > 0 && <div className="inspector-activity-section inspector-activity-todos">
-      <div className="inspector-activity-todos-heading"><span className="inspector-activity-label">{tr('Todo list', '待办')}</span><strong>{completedTodos}/{todos.length}</strong></div>
-      <ol>{todos.map((todo, index) => <li key={`${todo.title}-${index}`} className={`todo-${todo.status}`}><Icon name={todo.status === 'done' ? 'check' : todo.status === 'in_progress' ? 'sparkles' : 'target'} size={12}/><strong>{todo.title}</strong></li>)}</ol>
-    </div>}
+    </section>}
+    {todos.length > 0 && <section className="inspector-activity-card inspector-activity-todos">
+      <header className="inspector-activity-card-heading"><span><Icon name="list" size={13}/><strong>{tr('Todo list', '待办')}</strong></span></header>
+      <div className="inspector-activity-card-divider"/>
+      <div className="inspector-activity-todos-progress"><span>{tr('Progress', '进程')}</span><strong>{completedTodos}/{todos.length}</strong></div>
+      <ol>{todos.map((todo, index) => <li key={`${todo.title}-${index}`} className={`todo-${todo.status}`}><span className="inspector-todo-status"><Icon name={todo.status === 'done' ? 'check' : todo.status === 'in_progress' ? 'sparkles' : 'target'} size={10}/></span><span>{todo.title}</span></li>)}</ol>
+    </section>}
   </section>;
 }
 

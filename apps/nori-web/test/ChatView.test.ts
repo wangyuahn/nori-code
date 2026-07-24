@@ -946,9 +946,9 @@ describe('conversation presentation', () => {
       isStreaming: true,
     });
 
-    expect(container.querySelector('.work-process-elapsed')?.textContent).toBe('5s');
+    expect(container.querySelector('.live-work-elapsed')?.textContent).toBe('5s');
     await act(async () => { vi.advanceTimersByTime(2_000); });
-    expect(container.querySelector('.work-process-elapsed')?.textContent).toBe('7s');
+    expect(container.querySelector('.live-work-elapsed')?.textContent).toBe('7s');
 
     await act(async () => {
       root.render(createElement(I18nProvider, null, createElement(ChatView, {
@@ -983,10 +983,11 @@ describe('conversation presentation', () => {
     expect(input.style.overflowY).toBe('auto');
   });
 
-  it('keeps live reasoning open, collapses it on completion, and lets the user reopen it', async () => {
+  it('keeps live thought separate from normal output, then collapses the completed work', async () => {
     const blocks = [
       { id: 'thinking-1', type: 'thinking' as const, text: 'Inspecting the relevant call path.' },
       { id: 'tool-1', type: 'tool' as const, tool: { id: 'tool-1', name: 'ReadFile', args: { path: 'src/app.ts' }, result: 'ok' } },
+      { id: 'progress-1', type: 'progress' as const, text: 'The target file is loaded.' },
     ];
     const liveMessage = { id: 'assistant-1', role: 'assistant' as const, text: '' };
     const { container, props, root } = await renderChat({
@@ -995,10 +996,11 @@ describe('conversation presentation', () => {
       isStreaming: true,
     });
 
-    let details = container.querySelector<HTMLDetailsElement>('.chat-work-process')!;
-    expect(details.open).toBe(true);
-    expect(details.textContent).toContain('Nori is working');
-    expect(details.textContent).toContain('ReadFile');
+    expect(container.querySelector('.chat-work-process')).toBeNull();
+    const liveThought = container.querySelector<HTMLDetailsElement>('.live-thinking-block')!;
+    expect(liveThought.open).toBe(false);
+    expect(liveThought.textContent).toContain('Inspecting the relevant call path.');
+    expect(container.querySelector('.compact-tool-call')?.textContent).toContain('ReadFile');
 
     await act(async () => {
       root.render(createElement(I18nProvider, null, createElement(ChatView, {
@@ -1009,30 +1011,36 @@ describe('conversation presentation', () => {
       })));
     });
 
-    details = container.querySelector<HTMLDetailsElement>('.chat-work-process')!;
+    const details = container.querySelector<HTMLDetailsElement>('.chat-work-process')!;
     expect(details.open).toBe(false);
-    expect(details.textContent).toContain('Work details');
+    expect(details.textContent).toContain('Work process');
+    expect(details.textContent).toContain('1 tool');
+    expect(details.querySelector('.work-process-chevron')).not.toBeNull();
+    expect(details.querySelector('.work-process-status')).toBeNull();
+    expect(container.querySelector('.chat-message-content:not(.transcript-assistant-output)')?.textContent).toContain('Finished.');
 
     await act(async () => {
       details.querySelector('summary')?.click();
       await Promise.resolve();
     });
     expect(details.open).toBe(true);
+    expect(container.querySelector<HTMLDetailsElement>('.work-thinking-block')?.open).toBe(false);
+    expect(container.querySelector('.transcript-assistant-output')?.textContent).toContain('The target file is loaded.');
   });
 
-  it('renders ordinary live text inside work details instead of as a finished answer', async () => {
+  it('renders ordinary live text as normal assistant output while work is active', async () => {
     const { container } = await renderChat({
       messages: [{ id: 'assistant-1', role: 'assistant', text: 'The first inspection pass is complete.' }],
       streaming: 'I am checking the event boundary now.',
       isStreaming: true,
     });
 
-    const details = container.querySelector<HTMLDetailsElement>('.chat-work-process')!;
-    expect(details.open).toBe(true);
-    expect(details.querySelectorAll('.work-progress-block')).toHaveLength(2);
-    expect(details.textContent).toContain('The first inspection pass is complete.');
-    expect(details.textContent).toContain('I am checking the event boundary now.');
-    expect(container.querySelector('.chat-message-content')).toBeNull();
+    expect(container.querySelector('.chat-work-process')).toBeNull();
+    expect(container.querySelectorAll('.work-progress-block')).toHaveLength(0);
+    const outputs = container.querySelectorAll('.transcript-assistant-output');
+    expect(outputs).toHaveLength(2);
+    expect(outputs[0]?.textContent).toContain('The first inspection pass is complete.');
+    expect(outputs[1]?.textContent).toContain('I am checking the event boundary now.');
     expect(container.querySelector('.activity-island')).toBeNull();
   });
 });
