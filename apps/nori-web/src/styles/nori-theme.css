@@ -5,26 +5,26 @@
 /* ── Variables ─────────────────────────────────────────────────────────── */
 
 :root {
-  /* accent */
-  --nori-cyan: #00BCD4;
-  --nori-cyan-dim: rgba(0, 188, 212, 0.12);
-  --nori-thinking: #9be8b0;
+  /* accent — Linear indigo */
+  --nori-cyan: #5E6AD2;
+  --nori-cyan-dim: rgba(94, 106, 210, 0.18);
+  --nori-thinking: #8b8d98;
 
-  /* backgrounds — Linear-inspired neutral palette */
-  --nori-bg: #09090b;
-  --nori-surface: #111113;
-  --nori-surface-raised: #18181b;
-  --nori-surface-hover: #1f1f23;
-  --nori-bg-elevated: #18181b;
+  /* backgrounds — Linear cool dark palette */
+  --nori-bg: #0a0a0b;
+  --nori-surface: #101012;
+  --nori-surface-raised: #16161a;
+  --nori-surface-hover: #1c1c21;
+  --nori-bg-elevated: #16161a;
 
   /* borders */
-  --nori-border: #27272a;
+  --nori-border: #2c2c30;
   --nori-border-active: #52525b;
 
   /* text */
-  --nori-text: #fafafa;
-  --nori-text-secondary: #a1a1aa;
-  --nori-text-muted: #71717a;
+  --nori-text: #f0f0f3;
+  --nori-text-secondary: #8b8d98;
+  --nori-text-muted: #5c5c65;
 
   /* semantic */
   --nori-success: #22c55e;
@@ -1500,58 +1500,62 @@ select.input option {
    Nori Desktop shell refresh
    ========================================================================== */
 :root {
-  /* Linear-inspired design tokens — see linear-flat.css for component overrides */
-  --nori-bg: #09090b;
-  --nori-surface: #111113;
-  --nori-surface-raised: #18181b;
-  --nori-surface-hover: #1f1f23;
-  --nori-bg-elevated: #18181b;
-  --nori-border: #27272a;
-  --nori-border-strong: #3f3f46;
+  /* Linear design tokens — see linear-flat.css for component overrides */
+  --nori-bg: #0a0a0b;
+  --nori-surface: #101012;
+  --nori-surface-raised: #16161a;
+  --nori-surface-hover: #1c1c21;
+  --nori-bg-elevated: #16161a;
+  --nori-border: #2c2c30;
+  --nori-border-strong: #3a3a40;
   --nori-border-active: #52525b;
-  --nori-text: #fafafa;
-  --nori-text-secondary: #a1a1aa;
-  --nori-text-muted: #71717a;
-  --nori-text-subtle: #52525b;
+  --nori-text: #f0f0f3;
+  --nori-text-secondary: #8b8d98;
+  --nori-text-muted: #5c5c65;
+  --nori-text-subtle: #45454d;
+  --nori-cyan: #5E6AD2;
+  --nori-cyan-dim: rgba(94, 106, 210, 0.18);
   --nori-radius: 6px;
   --nori-radius-sm: 4px;
   --nori-shadow: none;
   --nori-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.32);
   --nori-shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.24);
-  --nori-shell: #09090b;
-  --nori-topbar: #09090b;
-  --nori-statusbar: #111113;
-  --nori-control: #18181b;
-  --nori-control-hover: #1f1f23;
-  --nori-control-active: #27272a;
+  --nori-shell: #0a0a0b;
+  --nori-topbar: #0a0a0b;
+  --nori-statusbar: #101012;
+  --nori-control: #16161a;
+  --nori-control-hover: #1c1c21;
+  --nori-control-active: #242429;
   --nori-font-ui: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
   color-scheme: dark;
 }
 
 [data-theme="light"] {
-  --nori-bg: #fafafa;
+  --nori-bg: #f9f9fb;
   --nori-surface: #ffffff;
-  --nori-surface-raised: #f4f4f5;
-  --nori-surface-hover: #f4f4f5;
+  --nori-surface-raised: #f4f4f6;
+  --nori-surface-hover: #ececf0;
   --nori-bg-elevated: #ffffff;
-  --nori-border: #e4e4e7;
-  --nori-border-strong: #d4d4d8;
-  --nori-border-active: #a1a1aa;
-  --nori-text: #18181b;
-  --nori-text-secondary: #52525b;
-  --nori-text-muted: #71717a;
-  --nori-text-subtle: #a1a1aa;
+  --nori-border: #e0e0e6;
+  --nori-border-strong: #cacad4;
+  --nori-border-active: #8b8d98;
+  --nori-text: #1a1a1e;
+  --nori-text-secondary: #5c5c65;
+  --nori-text-muted: #8b8d98;
+  --nori-text-subtle: #a8a8b3;
+  --nori-cyan: #4f57c7;
+  --nori-cyan-dim: rgba(79, 87, 199, 0.14);
   --nori-shadow: none;
   --nori-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08);
   --nori-shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.06);
   color-scheme: light;
-  --nori-shell: #fafafa;
+  --nori-shell: #f9f9fb;
   --nori-topbar: #ffffff;
-  --nori-statusbar: #f4f4f5;
-  --nori-control: #f4f4f5;
-  --nori-control-hover: #e4e4e7;
-  --nori-control-active: #d4d4d8;
-  --nori-border-strong: #d4d4d8;
+  --nori-statusbar: #f4f4f6;
+  --nori-control: #f4f4f6;
+  --nori-control-hover: #ececf0;
+  --nori-control-active: #e0e0e6;
+  --nori-border-strong: #cacad4;
 }
 
 body {

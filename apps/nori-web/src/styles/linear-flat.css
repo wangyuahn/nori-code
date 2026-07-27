@@ -5,19 +5,29 @@
    ========================================================================== */
 
 :root {
-  /* Linear-like neutral palette */
-  --nori-bg: #09090b;
-  --nori-surface: #111113;
-  --nori-surface-raised: #18181b;
-  --nori-surface-hover: #1f1f23;
-  --nori-bg-elevated: #18181b;
-  --nori-border: #27272a;
-  --nori-border-strong: #3f3f46;
+  /* Linear accent — indigo, used sparingly for links & focus */
+  --nori-cyan: #5E6AD2;
+  --nori-cyan-dim: rgba(94, 106, 210, 0.18);
+  --nori-thinking: #8b8d98;
+
+  /* Linear cool dark palette */
+  --nori-bg: #0a0a0b;
+  --nori-surface: #101012;
+  --nori-surface-raised: #16161a;
+  --nori-surface-hover: #1c1c21;
+  --nori-bg-elevated: #16161a;
+  --nori-border: #2c2c30;
+  --nori-border-strong: #3a3a40;
   --nori-border-active: #52525b;
-  --nori-text: #fafafa;
-  --nori-text-secondary: #a1a1aa;
-  --nori-text-muted: #71717a;
-  --nori-text-subtle: #52525b;
+  --nori-text: #f0f0f3;
+  --nori-text-secondary: #8b8d98;
+  --nori-text-muted: #5c5c65;
+  --nori-text-subtle: #45454d;
+
+  /* Primary action — Linear uses light buttons on dark bg */
+  --nori-primary-bg: #e8e8ed;
+  --nori-primary-fg: #0a0a0b;
+  --nori-primary-hover: #f4f4f6;
 
   /* Shape — smaller, consistent radii */
   --nori-radius: 6px;
@@ -29,12 +39,12 @@
   --nori-shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.24);
 
   /* Shell tokens */
-  --nori-shell: #09090b;
-  --nori-topbar: #09090b;
-  --nori-statusbar: #111113;
-  --nori-control: #18181b;
-  --nori-control-hover: #1f1f23;
-  --nori-control-active: #27272a;
+  --nori-shell: #0a0a0b;
+  --nori-topbar: #0a0a0b;
+  --nori-statusbar: #101012;
+  --nori-control: #16161a;
+  --nori-control-hover: #1c1c21;
+  --nori-control-active: #242429;
 
   /* Spacing scale */
   --nori-space-1: 4px;
@@ -48,27 +58,32 @@
 }
 
 [data-theme="light"] {
-  --nori-bg: #fafafa;
+  --nori-cyan: #4f57c7;
+  --nori-cyan-dim: rgba(79, 87, 199, 0.14);
+  --nori-bg: #f9f9fb;
   --nori-surface: #ffffff;
-  --nori-surface-raised: #f4f4f5;
-  --nori-surface-hover: #f4f4f5;
+  --nori-surface-raised: #f4f4f6;
+  --nori-surface-hover: #ececf0;
   --nori-bg-elevated: #ffffff;
-  --nori-border: #e4e4e7;
-  --nori-border-strong: #d4d4d8;
-  --nori-border-active: #a1a1aa;
-  --nori-text: #18181b;
-  --nori-text-secondary: #52525b;
-  --nori-text-muted: #71717a;
-  --nori-text-subtle: #a1a1aa;
+  --nori-border: #e0e0e6;
+  --nori-border-strong: #cacad4;
+  --nori-border-active: #8b8d98;
+  --nori-text: #1a1a1e;
+  --nori-text-secondary: #5c5c65;
+  --nori-text-muted: #8b8d98;
+  --nori-text-subtle: #a8a8b3;
+  --nori-primary-bg: #1a1a1e;
+  --nori-primary-fg: #f9f9fb;
+  --nori-primary-hover: #2c2c32;
   --nori-shadow: none;
   --nori-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08);
   --nori-shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.06);
-  --nori-shell: #fafafa;
+  --nori-shell: #f9f9fb;
   --nori-topbar: #ffffff;
-  --nori-statusbar: #f4f4f5;
-  --nori-control: #f4f4f5;
-  --nori-control-hover: #e4e4e7;
-  --nori-control-active: #d4d4d8;
+  --nori-statusbar: #f4f4f6;
+  --nori-control: #f4f4f6;
+  --nori-control-hover: #ececf0;
+  --nori-control-active: #e0e0e6;
   color-scheme: light;
 }
 
@@ -80,8 +95,73 @@
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--nori-cyan) 20%, transparent);
+  background: color-mix(in srgb, var(--nori-cyan) 24%, transparent);
   color: var(--nori-text);
+}
+
+/* ── Linear primary actions (light button on dark bg) ──────────────────── */
+
+.btn-primary {
+  background: var(--nori-primary-bg);
+  border-color: var(--nori-primary-bg);
+  color: var(--nori-primary-fg);
+}
+
+.btn-primary:hover {
+  background: var(--nori-primary-hover);
+  border-color: var(--nori-primary-hover);
+  color: var(--nori-primary-fg);
+  filter: none;
+}
+
+.chat-send-btn {
+  background: var(--nori-primary-bg);
+  color: var(--nori-primary-fg);
+}
+
+.chat-send-btn:hover:not(:disabled) {
+  background: var(--nori-primary-hover);
+  color: var(--nori-primary-fg);
+}
+
+.chat-send-btn:disabled {
+  background: var(--nori-control-active);
+  color: var(--nori-text-muted);
+}
+
+.question-submit,
+.folder-picker-footer button.primary,
+.session-action-dialog footer button.primary,
+.mcp-elicitation-dock > footer button.primary {
+  background: var(--nori-primary-bg) !important;
+  border-color: var(--nori-primary-bg) !important;
+  color: var(--nori-primary-fg) !important;
+}
+
+/* Accent only for links & subtle highlights, not large fills */
+.view-eyebrow,
+.provider-settings-heading span,
+.settings-card-heading > span {
+  color: var(--nori-text-muted);
+}
+
+.starter-card svg,
+.welcome-mark,
+.sidebar-empty svg {
+  color: var(--nori-text-secondary);
+}
+
+.welcome-mark {
+  background: var(--nori-control);
+  border-color: var(--nori-border);
+}
+
+.markdown-view a {
+  color: var(--nori-cyan);
+}
+
+.status-accent {
+  color: var(--nori-text-secondary);
 }
 
 /* ── Shell layout ──────────────────────────────────────────────────────── */
@@ -114,7 +194,8 @@
 
 .app-logo {
   border-radius: var(--nori-radius-sm);
-  background: var(--nori-cyan);
+  background: var(--nori-primary-bg);
+  color: var(--nori-primary-fg);
   box-shadow: none;
 }
 
@@ -272,7 +353,7 @@ textarea.input:focus {
 }
 
 .chat-input-area:focus-within {
-  border-color: var(--nori-border-active);
+  border-color: var(--nori-border-strong);
   box-shadow: none;
 }
 
@@ -284,7 +365,8 @@ textarea.input:focus {
   transform: none;
   filter: none;
   box-shadow: none;
-  background: color-mix(in srgb, var(--nori-cyan) 88%, white);
+  background: var(--nori-primary-hover);
+  color: var(--nori-primary-fg);
 }
 
 .chat-jump-latest {
@@ -552,8 +634,7 @@ textarea.input:focus {
 /* ── Reduce motion on decorative transforms ────────────────────────────── */
 
 .provider-card:hover,
-.starter-card:hover,
-.chat-send-btn:hover:not(:disabled) {
+.starter-card:hover {
   transform: none;
 }
 

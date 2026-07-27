@@ -3,8 +3,8 @@ export type ThemeMode = 'dark' | 'light';
 const THEME_KEY = 'nori-theme-color';
 const THEME_MODE_KEY = 'nori-theme';
 const UI_SCALE_KEY = 'nori-ui-scale';
-export const DEFAULT_ACCENT = '#9BE8B0';
-const LEGACY_ACCENTS = new Set(['#00bcd4', '#6dd6c7']);
+export const DEFAULT_ACCENT = '#5E6AD2';
+const LEGACY_ACCENTS = new Set(['#00bcd4', '#6dd6c7', '#9be8b0']);
 
 export type UiScale = 'compact' | 'default' | 'large';
 
@@ -55,7 +55,6 @@ export function applyThemeColor(color: string, persist = true): void {
     try { localStorage.setItem(THEME_KEY, color); } catch { /* no-op */ }
   }
   document.documentElement.style.setProperty('--nori-cyan', color);
-  document.documentElement.style.setProperty('--nori-border-active', color);
   document.documentElement.style.setProperty(
     '--nori-cyan-dim',
     color + (document.documentElement.dataset.theme === 'light' ? '19' : '26'),
