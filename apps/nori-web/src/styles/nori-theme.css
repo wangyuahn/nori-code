@@ -3428,7 +3428,7 @@ kbd {
 .composer-image-button { display: grid; width: 27px; height: 27px; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 6px; color: var(--nori-text-muted); background: transparent; cursor: pointer; }
 .composer-image-button:hover:not(:disabled) { color: var(--nori-text); background: var(--nori-control-hover); }
 .composer-image-button:disabled { opacity: .35; cursor: default; }
-.chat-send-btn.chat-guide-btn { width: auto; min-width: 58px; gap: 5px; padding: 0 10px; color: var(--nori-bg); line-height: 1; }
+.chat-send-btn.chat-guide-btn { width: auto; min-width: 58px; gap: 5px; padding: 0 10px; color: #090909; line-height: 1; }
 .chat-guide-btn span { font-size: calc(10px * var(--nori-ui-font-scale)); font-weight: 700; }
 
 /* Floating workspace tools and persistent multi-tool panel. */

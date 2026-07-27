@@ -124,18 +124,28 @@
 }
 
 .chat-send-btn {
-  background: var(--nori-primary-bg);
-  color: var(--nori-primary-fg);
+  background: var(--nori-accent);
+  color: #090909;
 }
 
 .chat-send-btn:hover:not(:disabled) {
-  background: var(--nori-primary-hover);
-  color: var(--nori-primary-fg);
+  background: color-mix(in srgb, var(--nori-accent) 88%, #ffffff);
+  color: #090909;
 }
 
 .chat-send-btn:disabled {
   background: var(--nori-control-active);
   color: var(--nori-text-muted);
+}
+
+.chat-send-btn.chat-guide-btn {
+  background: var(--nori-accent);
+  color: #090909;
+}
+
+.chat-send-btn.chat-guide-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--nori-accent) 88%, #ffffff);
+  color: #090909;
 }
 
 .question-submit,
@@ -397,8 +407,8 @@ textarea.input:focus {
   transform: none;
   filter: none;
   box-shadow: none;
-  background: var(--nori-primary-hover);
-  color: var(--nori-primary-fg);
+  background: color-mix(in srgb, var(--nori-accent) 88%, #ffffff);
+  color: #090909;
 }
 
 .chat-jump-latest {
@@ -820,13 +830,23 @@ textarea.input:focus {
 }
 
 .codex-layout .chat-send-btn {
-  color: var(--nori-primary-fg);
-  background: var(--nori-primary-bg);
+  color: #090909;
+  background: var(--nori-accent);
 }
 
 .codex-layout .chat-send-btn:hover:not(:disabled) {
-  color: var(--nori-primary-fg);
-  background: var(--nori-primary-hover);
+  color: #090909;
+  background: color-mix(in srgb, var(--nori-accent) 88%, #ffffff);
+}
+
+.codex-layout .chat-send-btn.chat-guide-btn {
+  color: #090909;
+  background: var(--nori-accent);
+}
+
+.codex-layout .chat-send-btn.chat-guide-btn:hover:not(:disabled) {
+  color: #090909;
+  background: color-mix(in srgb, var(--nori-accent) 88%, #ffffff);
 }
 
 .codex-layout .chat-input-area {
