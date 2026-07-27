@@ -5,26 +5,26 @@
 /* ── Variables ─────────────────────────────────────────────────────────── */
 
 :root {
-  /* accent — Linear indigo */
-  --nori-cyan: #5E6AD2;
-  --nori-cyan-dim: rgba(94, 106, 210, 0.18);
-  --nori-thinking: #8b8d98;
+  /* accent — neutral chrome gray */
+  --nori-cyan: #8b8b8b;
+  --nori-cyan-dim: rgba(255, 255, 255, 0.06);
+  --nori-thinking: #8b8b8b;
 
-  /* backgrounds — Linear cool dark palette */
-  --nori-bg: #0a0a0b;
-  --nori-surface: #101012;
-  --nori-surface-raised: #16161a;
-  --nori-surface-hover: #1c1c21;
-  --nori-bg-elevated: #16161a;
+  /* backgrounds — neutral dark palette */
+  --nori-bg: #090909;
+  --nori-surface: #0f0f0f;
+  --nori-surface-raised: #141414;
+  --nori-surface-hover: #1a1a1a;
+  --nori-bg-elevated: #141414;
 
   /* borders */
-  --nori-border: #2c2c30;
-  --nori-border-active: #52525b;
+  --nori-border: #262626;
+  --nori-border-active: #525252;
 
   /* text */
-  --nori-text: #f0f0f3;
-  --nori-text-secondary: #8b8d98;
-  --nori-text-muted: #5c5c65;
+  --nori-text: #ededed;
+  --nori-text-secondary: #8b8b8b;
+  --nori-text-muted: #5c5c5c;
 
   /* semantic */
   --nori-success: #22c55e;
@@ -1501,31 +1501,31 @@ select.input option {
    ========================================================================== */
 :root {
   /* Linear design tokens — see linear-flat.css for component overrides */
-  --nori-bg: #0a0a0b;
-  --nori-surface: #101012;
-  --nori-surface-raised: #16161a;
-  --nori-surface-hover: #1c1c21;
-  --nori-bg-elevated: #16161a;
-  --nori-border: #2c2c30;
-  --nori-border-strong: #3a3a40;
-  --nori-border-active: #52525b;
-  --nori-text: #f0f0f3;
-  --nori-text-secondary: #8b8d98;
-  --nori-text-muted: #5c5c65;
-  --nori-text-subtle: #45454d;
-  --nori-cyan: #5E6AD2;
-  --nori-cyan-dim: rgba(94, 106, 210, 0.18);
+  --nori-bg: #090909;
+  --nori-surface: #0f0f0f;
+  --nori-surface-raised: #141414;
+  --nori-surface-hover: #1a1a1a;
+  --nori-bg-elevated: #141414;
+  --nori-border: #262626;
+  --nori-border-strong: #333333;
+  --nori-border-active: #525252;
+  --nori-text: #ededed;
+  --nori-text-secondary: #8b8b8b;
+  --nori-text-muted: #5c5c5c;
+  --nori-text-subtle: #454545;
+  --nori-cyan: #8b8b8b;
+  --nori-cyan-dim: rgba(255, 255, 255, 0.06);
   --nori-radius: 6px;
   --nori-radius-sm: 4px;
   --nori-shadow: none;
   --nori-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.32);
   --nori-shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.24);
-  --nori-shell: #0a0a0b;
-  --nori-topbar: #0a0a0b;
-  --nori-statusbar: #101012;
-  --nori-control: #16161a;
-  --nori-control-hover: #1c1c21;
-  --nori-control-active: #242429;
+  --nori-shell: #090909;
+  --nori-topbar: #090909;
+  --nori-statusbar: #0f0f0f;
+  --nori-control: #141414;
+  --nori-control-hover: #1a1a1a;
+  --nori-control-active: #222222;
   --nori-font-ui: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
   color-scheme: dark;
 }
@@ -1543,8 +1543,8 @@ select.input option {
   --nori-text-secondary: #5c5c65;
   --nori-text-muted: #8b8d98;
   --nori-text-subtle: #a8a8b3;
-  --nori-cyan: #4f57c7;
-  --nori-cyan-dim: rgba(79, 87, 199, 0.14);
+  --nori-cyan: #5c5c5c;
+  --nori-cyan-dim: rgba(0, 0, 0, 0.06);
   --nori-shadow: none;
   --nori-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08);
   --nori-shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.06);

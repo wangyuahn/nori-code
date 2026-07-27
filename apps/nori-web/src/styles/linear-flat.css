@@ -5,29 +5,29 @@
    ========================================================================== */
 
 :root {
-  /* Linear accent — indigo, used sparingly for links & focus */
-  --nori-cyan: #5E6AD2;
-  --nori-cyan-dim: rgba(94, 106, 210, 0.18);
-  --nori-thinking: #8b8d98;
+  /* Chrome accent — neutral gray, not a brand hue */
+  --nori-cyan: #8b8b8b;
+  --nori-cyan-dim: rgba(255, 255, 255, 0.06);
+  --nori-thinking: #8b8b8b;
 
-  /* Linear cool dark palette */
-  --nori-bg: #0a0a0b;
-  --nori-surface: #101012;
-  --nori-surface-raised: #16161a;
-  --nori-surface-hover: #1c1c21;
-  --nori-bg-elevated: #16161a;
-  --nori-border: #2c2c30;
-  --nori-border-strong: #3a3a40;
-  --nori-border-active: #52525b;
-  --nori-text: #f0f0f3;
-  --nori-text-secondary: #8b8d98;
-  --nori-text-muted: #5c5c65;
-  --nori-text-subtle: #45454d;
+  /* Linear neutral dark palette (equal RGB channels) */
+  --nori-bg: #090909;
+  --nori-surface: #0f0f0f;
+  --nori-surface-raised: #141414;
+  --nori-surface-hover: #1a1a1a;
+  --nori-bg-elevated: #141414;
+  --nori-border: #262626;
+  --nori-border-strong: #333333;
+  --nori-border-active: #525252;
+  --nori-text: #ededed;
+  --nori-text-secondary: #8b8b8b;
+  --nori-text-muted: #5c5c5c;
+  --nori-text-subtle: #454545;
 
   /* Primary action — Linear uses light buttons on dark bg */
-  --nori-primary-bg: #e8e8ed;
-  --nori-primary-fg: #0a0a0b;
-  --nori-primary-hover: #f4f4f6;
+  --nori-primary-bg: #e8e8e8;
+  --nori-primary-fg: #090909;
+  --nori-primary-hover: #f5f5f5;
 
   /* Shape — smaller, consistent radii */
   --nori-radius: 6px;
@@ -39,13 +39,13 @@
   --nori-shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.24);
 
   /* Shell tokens */
-  --nori-shell: #0a0a0b;
-  --nori-sidebar-bg: #0c0c0e;
-  --nori-topbar: #0a0a0b;
-  --nori-statusbar: #101012;
-  --nori-control: #16161a;
-  --nori-control-hover: #1c1c21;
-  --nori-control-active: #242429;
+  --nori-shell: #090909;
+  --nori-sidebar-bg: #090909;
+  --nori-topbar: #090909;
+  --nori-statusbar: #0f0f0f;
+  --nori-control: #141414;
+  --nori-control-hover: #1a1a1a;
+  --nori-control-active: #222222;
 
   /* Spacing scale */
   --nori-space-1: 4px;
@@ -59,8 +59,9 @@
 }
 
 [data-theme="light"] {
-  --nori-cyan: #4f57c7;
-  --nori-cyan-dim: rgba(79, 87, 199, 0.14);
+  --nori-cyan: #5c5c65;
+  --nori-cyan-dim: rgba(0, 0, 0, 0.06);
+  --nori-link: #3a3a3a;
   --nori-bg: #f9f9fb;
   --nori-surface: #ffffff;
   --nori-surface-raised: #f4f4f6;
@@ -97,7 +98,7 @@
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--nori-cyan) 24%, transparent);
+  background: rgba(255, 255, 255, 0.12);
   color: var(--nori-text);
 }
 
@@ -159,7 +160,9 @@
 }
 
 .markdown-view a {
-  color: var(--nori-cyan);
+  color: var(--nori-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .status-accent {
@@ -297,19 +300,6 @@
   background: var(--nori-control-hover);
 }
 
-.btn:active {
-  transform: none;
-}
-
-.btn-primary {
-  font-weight: 600;
-}
-
-.btn-primary:hover {
-  filter: none;
-  background: color-mix(in srgb, var(--nori-cyan) 88%, white);
-}
-
 .btn-secondary:hover {
   border-color: var(--nori-border-strong);
 }
@@ -356,6 +346,11 @@ textarea.input:focus {
 .settings-notice-icon,
 .provider-card-mark {
   border-radius: var(--nori-radius-sm);
+}
+
+.provider-card-mark {
+  color: var(--nori-text-secondary);
+  background: var(--nori-control);
 }
 
 /* ── Lists & sidebar empty states ──────────────────────────────────────── */
@@ -680,6 +675,8 @@ textarea.input:focus {
 
 .cron-job-icon {
   border-radius: var(--nori-radius-sm);
+  color: var(--nori-text-secondary);
+  background: var(--nori-control);
 }
 
 /* ── Inspector ───────────────────────────────────────────────────────────── */
@@ -749,4 +746,40 @@ textarea.input:focus {
   letter-spacing: 0;
   font-weight: 500;
   color: var(--nori-text-muted);
+}
+
+/* ── Neutralize legacy teal / purple chrome accents ──────────────────────── */
+
+.goal-island-icon {
+  color: var(--nori-text-secondary);
+  background: var(--nori-control);
+}
+
+.streaming-cursor {
+  background: var(--nori-text-muted);
+}
+
+.badge-info {
+  background: var(--nori-control);
+  color: var(--nori-text-secondary);
+}
+
+.spinner {
+  border-top-color: var(--nori-text-muted);
+}
+
+.chat-message-role span {
+  color: var(--nori-text-muted);
+}
+
+.chat-turn-rail button:focus-visible i {
+  background: var(--nori-border-strong);
+}
+
+.composer-usage i b {
+  background: var(--nori-text-muted);
+}
+
+.nav-btn.active {
+  box-shadow: none;
 }
