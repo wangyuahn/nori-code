@@ -254,6 +254,7 @@ export function CodeView({
         onResolveMcpElicitation={onResolveMcpElicitation}
         queuedPrompts={queuedPrompts}
         todos={todos}
+        codeChanges={codeChanges}
         onCancelQueuedPrompt={onCancelQueuedPrompt}
         draftAgentConfig={draftAgentConfig}
         rewindLimit={rewindLimit}

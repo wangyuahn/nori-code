@@ -56,15 +56,23 @@ export function editLineOperationStats(value: unknown): { additions: number; del
   return { additions, deletions };
 }
 
+export function editOperationLabel(operation: EditLineOperation): string {
+  switch (operation.op) {
+    case 'swap':
+      return `replace lines ${String(operation.start)}-${String(operation.end)}`;
+    case 'del':
+      return `delete lines ${String(operation.start)}-${String(operation.end)}`;
+    case 'insert_pre':
+      return `insert before line ${String(operation.line)}`;
+    case 'insert_post':
+      return `insert after line ${String(operation.line)}`;
+  }
+}
+
 export function editLineOperationsDiff(value: unknown): string[] {
   const lines: string[] = [];
   for (const operation of parseEditLineOperations(value)) {
-    if (operation.op === 'swap' || operation.op === 'del') {
-      const action = operation.op === 'swap' ? 'replaced' : 'deleted';
-      for (let line = operation.start; line <= operation.end; line += 1) {
-        lines.push(`- [original line ${String(line)} ${action}]`);
-      }
-    }
+    lines.push(`@@ ${editOperationLabel(operation)} @@`);
     if (operation.op !== 'del') {
       const contentLines = operation.content.replaceAll('\r\n', '\n').split('\n');
       if (operation.content.endsWith('\n')) contentLines.pop();

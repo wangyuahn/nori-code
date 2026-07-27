@@ -6,6 +6,7 @@ import { initializeTheme } from './theme';
 import { InspectorPopout } from './components/InspectorPopout';
 import type { InspectorTab } from './components/WorkspaceInspector';
 import { ExitPlanModeMockPage } from './components/dev/ExitPlanModeMockPage';
+import { ToolCallDetailMockPage } from './components/dev/ToolCallDetailMockPage';
 import './styles/nori-theme.css';
 import './styles/linear-flat.css';
 
@@ -15,6 +16,8 @@ const mockScenario = new URLSearchParams(window.location.search).get('mock');
 const inspector = hashParams.get('inspector') as InspectorTab | null;
 const content = import.meta.env.DEV && mockScenario === 'exit-plan-mode'
   ? <ExitPlanModeMockPage />
+  : import.meta.env.DEV && mockScenario === 'tool-call-detail'
+    ? <ToolCallDetailMockPage />
   : inspector && ['preview', 'changes', 'browser', 'git', 'lsp', 'terminal'].includes(inspector)
   ? <InspectorPopout tab={inspector} sessionId={hashParams.get('session')} path={hashParams.get('path') ?? ''}/>
   : <App />;
