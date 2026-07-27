@@ -1,0 +1,873 @@
+/* ==========================================================================
+   Linear-inspired flat design overrides for Nori Web
+   Scope: visual style only — no interaction or layout structure changes.
+   Priority: shell → nav → primitives → chat → dialogs → settings pages
+   ========================================================================== */
+
+:root {
+  /* Accent — user-overridable via Settings → Accent color (--nori-cyan) */
+  --nori-cyan: #5e6ad2;
+  --nori-accent: var(--nori-cyan);
+  --nori-cyan-dim: color-mix(in srgb, var(--nori-cyan) 10%, transparent);
+  --nori-accent-dim: color-mix(in srgb, var(--nori-accent) 10%, transparent);
+  --nori-thinking: #8b8b8b;
+  --nori-shell-gradient: none;
+
+  /* Neutral gray palette — no purple tint in surfaces */
+  --nori-bg: #090909;
+  --nori-surface: #0f0f0f;
+  --nori-surface-raised: #141414;
+  --nori-surface-hover: #1a1a1a;
+  --nori-bg-elevated: #141414;
+  --nori-border: #262626;
+  --nori-border-strong: #333333;
+  --nori-border-active: #525252;
+  --nori-text: #ededed;
+  --nori-text-secondary: #8b8b8b;
+  --nori-text-muted: #5c5c5c;
+  --nori-text-subtle: #454545;
+
+  /* Primary action — Linear uses light buttons on dark bg */
+  --nori-primary-bg: #e8e8e8;
+  --nori-primary-fg: #090909;
+  --nori-primary-hover: #f5f5f5;
+
+  /* Shape — smaller, consistent radii */
+  --nori-radius: 6px;
+  --nori-radius-sm: 4px;
+
+  /* Flat elevation — borders over shadows */
+  --nori-shadow: none;
+  --nori-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.32);
+  --nori-shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.24);
+
+  /* Shell tokens */
+  --nori-shell: #090909;
+  --nori-sidebar-bg: #090909;
+  --nori-topbar: #090909;
+  --nori-statusbar: #0f0f0f;
+  --nori-control: #141414;
+  --nori-control-hover: #1a1a1a;
+  --nori-control-active: #222222;
+
+  /* Spacing scale */
+  --nori-space-1: 4px;
+  --nori-space-2: 8px;
+  --nori-space-3: 12px;
+  --nori-space-4: 16px;
+  --nori-space-5: 20px;
+  --nori-space-6: 24px;
+
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --nori-cyan: #5e6ad2;
+  --nori-accent: var(--nori-cyan);
+  --nori-cyan-dim: color-mix(in srgb, var(--nori-cyan) 10%, transparent);
+  --nori-accent-dim: color-mix(in srgb, var(--nori-accent) 10%, transparent);
+  --nori-shell-gradient: none;
+  --nori-link: var(--nori-accent);
+  --nori-bg: #f9f9fb;
+  --nori-surface: #ffffff;
+  --nori-surface-raised: #f4f4f6;
+  --nori-surface-hover: #ececf0;
+  --nori-bg-elevated: #ffffff;
+  --nori-border: #e0e0e6;
+  --nori-border-strong: #cacad4;
+  --nori-border-active: #8b8d98;
+  --nori-text: #1a1a1e;
+  --nori-text-secondary: #5c5c65;
+  --nori-text-muted: #8b8d98;
+  --nori-text-subtle: #a8a8b3;
+  --nori-primary-bg: #1a1a1e;
+  --nori-primary-fg: #f9f9fb;
+  --nori-primary-hover: #2c2c32;
+  --nori-shadow: none;
+  --nori-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08);
+  --nori-shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.06);
+  --nori-shell: #f9f9fb;
+  --nori-sidebar-bg: #f4f4f6;
+  --nori-topbar: #ffffff;
+  --nori-statusbar: #f4f4f6;
+  --nori-control: #f4f4f6;
+  --nori-control-hover: #ececf0;
+  --nori-control-active: #e0e0e6;
+  color-scheme: light;
+}
+
+/* ── Focus & selection ─────────────────────────────────────────────────── */
+
+:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--nori-accent) 45%, var(--nori-border-active));
+  outline-offset: 1px;
+}
+
+::selection {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--nori-text);
+}
+
+/* ── Linear primary actions (light button on dark bg) ──────────────────── */
+
+.btn-primary {
+  background: var(--nori-primary-bg);
+  border-color: var(--nori-primary-bg);
+  color: var(--nori-primary-fg);
+}
+
+.btn-primary:hover {
+  background: var(--nori-primary-hover);
+  border-color: var(--nori-primary-hover);
+  color: var(--nori-primary-fg);
+  filter: none;
+}
+
+.chat-send-btn {
+  background: var(--nori-primary-bg);
+  color: var(--nori-primary-fg);
+}
+
+.chat-send-btn:hover:not(:disabled) {
+  background: var(--nori-primary-hover);
+  color: var(--nori-primary-fg);
+}
+
+.chat-send-btn:disabled {
+  background: var(--nori-control-active);
+  color: var(--nori-text-muted);
+}
+
+.question-submit,
+.folder-picker-footer button.primary,
+.session-action-dialog footer button.primary,
+.mcp-elicitation-dock > footer button.primary {
+  background: var(--nori-primary-bg) !important;
+  border-color: var(--nori-primary-bg) !important;
+  color: var(--nori-primary-fg) !important;
+}
+
+/* Accent only for links & subtle highlights, not large fills */
+.view-eyebrow,
+.provider-settings-heading span,
+.settings-card-heading > span {
+  color: var(--nori-text-muted);
+}
+
+.starter-card svg,
+.welcome-mark,
+.sidebar-empty svg {
+  color: var(--nori-text-secondary);
+}
+
+.welcome-mark {
+  border-color: var(--nori-border);
+  background: var(--nori-control);
+  box-shadow: none;
+}
+
+.markdown-view a {
+  color: var(--nori-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.status-accent {
+  color: var(--nori-text-secondary);
+}
+
+/* ── Shell layout ──────────────────────────────────────────────────────── */
+
+.codex-layout {
+  background-color: var(--nori-bg);
+  background-image: var(--nori-shell-gradient);
+}
+
+.codex-layout .sidebar,
+.sidebar {
+  background: var(--nori-sidebar-bg);
+  backdrop-filter: none;
+  border-right: 1px solid var(--nori-border);
+  box-shadow: none;
+}
+
+[data-theme="light"] .codex-layout .sidebar,
+[data-theme="light"] .sidebar {
+  background: var(--nori-sidebar-bg);
+}
+
+.sidebar-footer-nav {
+  border-top: 1px solid var(--nori-border);
+}
+
+.codex-layout .sidebar-workspace-switch {
+  border-radius: var(--nori-radius-sm);
+  background: var(--nori-control);
+  border-color: var(--nori-border);
+}
+
+.codex-layout .sidebar-nav-item.active,
+.codex-layout .sidebar-tab.active,
+.sidebar-nav-item.active {
+  background: var(--nori-control-active);
+  color: var(--nori-text);
+  box-shadow: none;
+}
+
+.codex-layout .sidebar-nav-item,
+.codex-layout .sidebar-tab,
+.sidebar-nav-item {
+  border-radius: var(--nori-radius-sm);
+}
+
+.top-bar {
+  height: 48px;
+  background: var(--nori-topbar);
+  backdrop-filter: none;
+  border-bottom: 1px solid var(--nori-border);
+  box-shadow: none;
+}
+
+[data-theme="light"] .top-bar {
+  background: var(--nori-topbar);
+}
+
+.status-bar {
+  background: var(--nori-statusbar);
+  border-top: 1px solid var(--nori-border);
+}
+
+.app-logo {
+  border-radius: var(--nori-radius-sm);
+  background: var(--nori-primary-bg);
+  color: var(--nori-primary-fg);
+  box-shadow: none;
+}
+
+.app-logo::after {
+  display: none;
+}
+
+/* ── Navigation ────────────────────────────────────────────────────────── */
+
+.sidebar-tab,
+.sidebar-item,
+.sidebar-toggle,
+.nav-btn {
+  border-radius: var(--nori-radius-sm);
+}
+
+.sidebar-tab.active {
+  background: var(--nori-control-hover);
+  color: var(--nori-text);
+}
+
+.sidebar-item {
+  border: 1px solid transparent;
+}
+
+.sidebar-item:hover {
+  border-color: var(--nori-border);
+  background: var(--nori-control-hover);
+}
+
+.sidebar-item.active {
+  border-color: var(--nori-border);
+  background: var(--nori-control-hover);
+  color: var(--nori-text);
+}
+
+.nav-btn.active {
+  background: var(--nori-control-hover);
+  color: var(--nori-text);
+  box-shadow: none;
+}
+
+.mode-toggle-bar {
+  border-radius: var(--nori-radius-sm);
+  padding: 2px;
+}
+
+.mode-toggle-btn {
+  border-radius: var(--nori-radius-sm);
+}
+
+.mode-toggle-btn.active {
+  background: var(--nori-control-active);
+  box-shadow: none;
+}
+
+.session-chip {
+  border-radius: var(--nori-radius-sm);
+}
+
+/* ── Buttons ───────────────────────────────────────────────────────────── */
+
+.btn {
+  border-radius: var(--nori-radius-sm);
+  font-weight: 500;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.btn:hover {
+  border-color: var(--nori-border-strong);
+  color: var(--nori-text);
+  background: var(--nori-control-hover);
+}
+
+.btn-secondary:hover {
+  border-color: var(--nori-border-strong);
+}
+
+.btn-icon {
+  border-radius: var(--nori-radius-sm);
+}
+
+/* ── Inputs ────────────────────────────────────────────────────────────── */
+
+.input,
+textarea.input,
+select.input {
+  border-radius: var(--nori-radius-sm);
+  background: var(--nori-control);
+  transition: border-color 0.12s ease;
+}
+
+.input:focus,
+textarea.input:focus {
+  box-shadow: none;
+  border-color: var(--nori-border-active);
+}
+
+/* ── Cards ─────────────────────────────────────────────────────────────── */
+
+.card {
+  border-radius: var(--nori-radius);
+  box-shadow: none;
+}
+
+.card:hover {
+  border-color: var(--nori-border-strong);
+}
+
+.settings-card,
+.settings-notice,
+.provider-card,
+.provider-editor {
+  border-radius: var(--nori-radius);
+  box-shadow: none;
+}
+
+.settings-notice-icon,
+.provider-card-mark {
+  border-radius: var(--nori-radius-sm);
+}
+
+/* ── Lists & sidebar empty states ──────────────────────────────────────── */
+
+.sidebar-empty {
+  border-radius: var(--nori-radius);
+  border-style: solid;
+  border-color: var(--nori-border);
+}
+
+/* ── Chat ──────────────────────────────────────────────────────────────── */
+
+.chat-composer-wrap {
+  background: linear-gradient(transparent, var(--nori-bg) 24%);
+}
+
+.chat-input-area {
+  border-radius: var(--nori-radius);
+  background: var(--nori-surface);
+  box-shadow: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.chat-input-area:focus-within {
+  border-color: color-mix(in srgb, var(--nori-accent) 30%, var(--nori-border-strong));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--nori-accent) 10%, transparent);
+}
+
+.chat-send-btn {
+  border-radius: var(--nori-radius-sm);
+}
+
+.chat-send-btn:hover:not(:disabled) {
+  transform: none;
+  filter: none;
+  box-shadow: none;
+  background: var(--nori-primary-hover);
+  color: var(--nori-primary-fg);
+}
+
+.chat-jump-latest {
+  box-shadow: var(--nori-shadow-popover);
+  border-color: var(--nori-border);
+}
+
+.welcome-mark {
+  border-radius: var(--nori-radius);
+  background: var(--nori-control);
+  box-shadow: none;
+  border-color: var(--nori-border);
+}
+
+.starter-card {
+  border-radius: var(--nori-radius);
+  background: var(--nori-surface);
+}
+
+.starter-card:hover {
+  transform: none;
+  border-color: var(--nori-border-strong);
+  box-shadow: none;
+  background: var(--nori-control-hover);
+}
+
+.message-avatar {
+  border-radius: var(--nori-radius-sm);
+}
+
+.chat-message-thinking,
+.tool-call {
+  border-radius: var(--nori-radius-sm);
+}
+
+.chat-turn-preview {
+  border-radius: var(--nori-radius);
+  box-shadow: var(--nori-shadow-popover);
+}
+
+.chat-turn-rail button:hover i,
+.chat-turn-rail button.active i {
+  box-shadow: none;
+}
+
+.goal-island {
+  border-radius: var(--nori-radius);
+  box-shadow: none;
+  background: var(--nori-surface);
+}
+
+/* ── Dialogs & overlays ────────────────────────────────────────────────── */
+
+.folder-picker-backdrop {
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: none;
+}
+
+.folder-picker {
+  border-radius: var(--nori-radius);
+  box-shadow: var(--nori-shadow-lg);
+}
+
+.session-context-menu,
+.file-context-menu {
+  border-radius: var(--nori-radius-sm);
+  border-color: var(--nori-border);
+  box-shadow: var(--nori-shadow-popover);
+}
+
+.approval-dock,
+.question-dock,
+.mcp-elicitation-dock {
+  border-radius: var(--nori-radius);
+  box-shadow: none;
+}
+
+/* ── View pages ────────────────────────────────────────────────────────── */
+
+.view-page {
+  padding: var(--nori-space-6) clamp(20px, 4vw, 48px);
+}
+
+.view-header h1 {
+  font-weight: 600;
+}
+
+.view-eyebrow {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* ── Provider status dots — flat ring ──────────────────────────────────── */
+
+.provider-status {
+  box-shadow: none;
+}
+
+.provider-status-connected,
+.provider-status-error,
+.provider-status-disabled {
+  box-shadow: none;
+}
+
+/* ── Dashboard & swarm ─────────────────────────────────────────────────── */
+
+.phase-bar,
+.swarm-run-card,
+.cron-job-card {
+  border-radius: var(--nori-radius);
+}
+
+/* ── Account center tabs ───────────────────────────────────────────────── */
+
+.account-tabs button {
+  border-radius: var(--nori-radius-sm);
+}
+
+.account-tabs button.active {
+  box-shadow: none;
+}
+
+/* ── Sidebar — neutral active states (no accent tint) ──────────────────── */
+
+.sidebar-tab.active,
+.codex-layout .sidebar-tab.active {
+  background: var(--nori-control-active);
+  color: var(--nori-text);
+}
+
+.sidebar-tab.active svg,
+.codex-layout .sidebar-tab.active svg,
+.sidebar-nav-item.active svg,
+.codex-layout .sidebar-nav-item.active svg {
+  color: var(--nori-text);
+}
+
+.sidebar-item.active,
+.codex-layout .sidebar-item.active {
+  border-color: transparent;
+  background: var(--nori-control-hover);
+  color: var(--nori-text);
+}
+
+.codex-layout .sidebar-workspace-switch .sidebar-tab.active {
+  border-color: var(--nori-border-strong);
+  background: var(--nori-control-active);
+  box-shadow: none;
+}
+
+.codex-layout .sidebar-workspace-switch .sidebar-tab.active svg {
+  color: var(--nori-text);
+}
+
+.sidebar-empty svg {
+  color: var(--nori-text-muted);
+}
+
+/* ── Inspector — flat docked panel (no floating island) ────────────────── */
+
+.workspace-inspector,
+.codex-layout .inspector-pane {
+  border-left: none;
+}
+
+.inspector-navigation {
+  border: 1px solid var(--nori-border);
+  border-radius: var(--nori-radius);
+  background: var(--nori-surface);
+  box-shadow: none;
+}
+
+.inspector-navigation.compact {
+  border-radius: var(--nori-radius);
+  box-shadow: none;
+}
+
+.inspector-stage {
+  border: 1px solid var(--nori-border);
+  border-radius: var(--nori-radius);
+  background: var(--nori-surface);
+  box-shadow: none;
+}
+
+.inspector-stage.open {
+  transform: none;
+}
+
+.inspector-overview-open .inspector-tab-list > button:hover {
+  transform: none;
+}
+
+.inspector-nav-icon {
+  border-radius: var(--nori-radius-sm);
+  background: var(--nori-control);
+}
+
+.inspector-tab-list > button:hover .inspector-nav-icon,
+.inspector-tab-list > button.active .inspector-nav-icon {
+  color: var(--nori-text);
+  background: var(--nori-control-hover);
+  transform: none;
+}
+
+.inspector-navigation.compact button:hover,
+.inspector-navigation.compact .inspector-collapse-button:hover {
+  transform: none;
+}
+
+.inspector-navigation.compact button.active {
+  color: var(--nori-text);
+  background: var(--nori-control-active);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--nori-accent) 20%, var(--nori-border));
+}
+
+.inspector-navigation.compact .inspector-tab-list em {
+  background: var(--nori-control-active);
+  color: var(--nori-text-secondary);
+}
+
+.inspector-pin-button.active {
+  color: var(--nori-text);
+  background: var(--nori-control-hover);
+}
+
+.inspector-activity-icon,
+.inspector-activity-highlight strong,
+.inspector-activity-line.active strong {
+  color: var(--nori-text-secondary);
+}
+
+.inspector-open-tab.active {
+  box-shadow: inset 0 -2px var(--nori-accent);
+}
+
+.inspector-tool-menu {
+  border-radius: var(--nori-radius-sm);
+  box-shadow: var(--nori-shadow-popover);
+}
+
+.inspector-collapse-button:hover {
+  transform: none;
+}
+
+/* Auto-hide peek: no border artifact on the edge */
+.workspace-chat-layout .workspace-inspector.inspector-overview-auto-hide:not(.standalone) {
+  transform: translateX(calc(100% - 8px));
+  border: none;
+}
+
+.workspace-chat-layout .workspace-inspector.inspector-overview-auto-hide:not(.standalone):hover,
+.workspace-chat-layout .workspace-inspector.inspector-overview-auto-hide:not(.standalone):focus-within {
+  transform: translateX(0);
+}
+
+/* ── Inspector panels (legacy class names) ───────────────────────────────── */
+
+.inspector-tabs button {
+  border-radius: var(--nori-radius-sm);
+}
+
+.inspector-tabs button.active {
+  box-shadow: none;
+}
+
+/* ── Reduce motion on decorative transforms ────────────────────────────── */
+
+.provider-card:hover,
+.starter-card:hover {
+  transform: none;
+}
+
+/* ── Session dialogs ───────────────────────────────────────────────────── */
+
+.session-action-dialog {
+  border-radius: var(--nori-radius);
+  box-shadow: var(--nori-shadow-lg);
+}
+
+/* ── Cron jobs ───────────────────────────────────────────────────────────── */
+
+.cron-job-card {
+  border-radius: var(--nori-radius);
+}
+
+.cron-job-icon {
+  border-radius: var(--nori-radius-sm);
+}
+
+/* ── Inspector ───────────────────────────────────────────────────────────── */
+
+.inspector-pin-button {
+  border-radius: var(--nori-radius-sm);
+}
+
+.inspector-pin-button:hover {
+  transform: none;
+}
+
+/* ── File tree ───────────────────────────────────────────────────────────── */
+
+.file-tree-row {
+  border-radius: var(--nori-radius-sm);
+}
+
+/* ── Toggle switch — flat track ──────────────────────────────────────────── */
+
+.toggle input:checked + .toggle-slider {
+  box-shadow: none;
+}
+
+/* ── Badges — flat pills ─────────────────────────────────────────────────── */
+
+.badge {
+  border-radius: var(--nori-radius-sm);
+}
+
+/* ── Phase bar ───────────────────────────────────────────────────────────── */
+
+.phase-bar {
+  border-radius: var(--nori-radius);
+}
+
+.phase-bar button {
+  border-radius: var(--nori-radius-sm);
+}
+
+/* ── Vault graph ───────────────────────────────────────────────────────── */
+
+.vault-graph {
+  border-radius: var(--nori-radius);
+}
+
+/* ── Swarm preview ───────────────────────────────────────────────────────── */
+
+.swarm-preview-notice {
+  border-radius: var(--nori-radius-sm);
+}
+
+/* ── Top bar height consistency ────────────────────────────────────────── */
+
+.sidebar-brand {
+  height: 48px;
+}
+
+.sidebar-tabs {
+  padding-top: var(--nori-space-2);
+}
+
+/* ── Card header — Linear-style section labels ───────────────────────────── */
+
+.card-header {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  color: var(--nori-text-muted);
+}
+
+/* ── Gray base + visible edge accents (rim lines, not fills) ─────────────── */
+
+.codex-layout .sidebar,
+.sidebar {
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--nori-accent) 28%, transparent);
+}
+
+.codex-layout .sidebar-nav-item.active,
+.codex-layout .sidebar-tab.active {
+  background: var(--nori-control-active);
+  box-shadow: inset 3px 0 0 var(--nori-accent);
+}
+
+.starter-card svg {
+  color: var(--nori-accent);
+}
+
+.starter-card {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--nori-accent) 22%, transparent);
+}
+
+.inspector-navigation,
+.inspector-navigation.compact {
+  border-color: var(--nori-border);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--nori-accent) 38%, transparent);
+}
+
+.inspector-stage {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--nori-accent) 28%, transparent);
+}
+
+.sidebar-resizer::after,
+.workspace-inspector-resizer::after {
+  background: radial-gradient(
+    ellipse 2px 72px at center var(--resize-highlight-y),
+    color-mix(in srgb, var(--nori-accent) 75%, transparent) 0,
+    transparent 100%
+  );
+  opacity: 0.35;
+}
+
+.sidebar-resizer:hover::after,
+.sidebar-resizer:active::after,
+.workspace-inspector-resizer:hover::after,
+.workspace-inspector-resizer:focus-visible::after,
+.workspace-chat-layout.inspector-resizing .workspace-inspector-resizer::after {
+  opacity: 0.9;
+}
+
+.streaming-cursor {
+  background: var(--nori-accent);
+}
+
+/* nori-theme .codex-layout rules are earlier — these must win */
+
+.codex-layout .chat-welcome .welcome-mark {
+  color: var(--nori-accent);
+  border: 1px solid var(--nori-border-strong);
+  background: var(--nori-control);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--nori-accent) 55%, transparent);
+}
+
+.codex-layout .chat-send-btn {
+  color: var(--nori-primary-fg);
+  background: var(--nori-primary-bg);
+}
+
+.codex-layout .chat-send-btn:hover:not(:disabled) {
+  color: var(--nori-primary-fg);
+  background: var(--nori-primary-hover);
+}
+
+.codex-layout .chat-input-area {
+  border: 1px solid var(--nori-border-strong);
+  background: var(--nori-control);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--nori-accent) 20%, transparent),
+    0 14px 38px rgba(0, 0, 0, 0.18);
+  backdrop-filter: none;
+}
+
+.codex-layout .chat-input-area:focus-within {
+  border-color: color-mix(in srgb, var(--nori-accent) 40%, var(--nori-border-strong));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--nori-accent) 35%, transparent),
+    0 16px 42px rgba(0, 0, 0, 0.2),
+    0 0 0 1px color-mix(in srgb, var(--nori-accent) 20%, transparent);
+}
+
+.initial-usage {
+  border: 1px solid color-mix(in srgb, var(--nori-accent) 24%, var(--nori-border-strong));
+  background: color-mix(in srgb, var(--nori-surface-raised) 92%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--nori-accent) 42%, transparent),
+    0 14px 38px rgba(0, 0, 0, 0.2);
+  backdrop-filter: none;
+}
+
+.initial-usage-metrics > div {
+  border-color: var(--nori-border);
+  background: var(--nori-control);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--nori-accent) 12%, transparent);
+}
+
+.inspector-navigation.compact button.active {
+  color: var(--nori-accent);
+  background: var(--nori-control-active);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--nori-accent) 28%, transparent);
+}
+
+.codex-layout .inspector-open-tab.active,
+.inspector-open-tab.active {
+  box-shadow: inset 0 -2px var(--nori-accent);
+}

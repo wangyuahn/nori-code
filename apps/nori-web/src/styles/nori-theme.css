@@ -5,44 +5,44 @@
 /* ── Variables ─────────────────────────────────────────────────────────── */
 
 :root {
-  /* accent */
-  --nori-cyan: #00BCD4;
-  --nori-cyan-dim: rgba(0, 188, 212, 0.15);
-  --nori-thinking: #9be8b0;
+  /* accent — neutral chrome gray */
+  --nori-cyan: #8b8b8b;
+  --nori-cyan-dim: rgba(255, 255, 255, 0.06);
+  --nori-thinking: #8b8b8b;
 
-  /* backgrounds */
-  --nori-bg: #08080a;
-  --nori-surface: #111114;
-  --nori-surface-raised: #16161a;
-  --nori-surface-hover: #18181c;
-  --nori-bg-elevated: #16161a;
+  /* backgrounds — neutral dark palette */
+  --nori-bg: #090909;
+  --nori-surface: #0f0f0f;
+  --nori-surface-raised: #141414;
+  --nori-surface-hover: #1a1a1a;
+  --nori-bg-elevated: #141414;
 
   /* borders */
-  --nori-border: #1e1e22;
-  --nori-border-active: #00BCD4;
+  --nori-border: #262626;
+  --nori-border-active: #525252;
 
   /* text */
-  --nori-text: #e4e4e7;
-  --nori-text-secondary: #a1a1aa;
-  --nori-text-muted: #71717a;
+  --nori-text: #ededed;
+  --nori-text-secondary: #8b8b8b;
+  --nori-text-muted: #5c5c5c;
 
   /* semantic */
   --nori-success: #22c55e;
-  --nori-success-dim: rgba(34, 197, 94, 0.15);
+  --nori-success-dim: rgba(34, 197, 94, 0.12);
   --nori-warning: #f59e0b;
-  --nori-warning-dim: rgba(245, 158, 11, 0.15);
+  --nori-warning-dim: rgba(245, 158, 11, 0.12);
   --nori-danger: #ef4444;
-  --nori-danger-dim: rgba(239, 68, 68, 0.15);
+  --nori-danger-dim: rgba(239, 68, 68, 0.12);
   --nori-purple: #7c3aed;
-  --nori-purple-dim: rgba(124, 58, 237, 0.15);
+  --nori-purple-dim: rgba(124, 58, 237, 0.12);
 
   /* shape */
-  --nori-radius: 8px;
+  --nori-radius: 6px;
   --nori-radius-sm: 4px;
 
   /* typography */
   --nori-font: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', monospace;
-  --nori-font-ui: system-ui, -apple-system, sans-serif;
+  --nori-font-ui: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
   --nori-ui-font-scale: 1;
   --nori-ui-control-scale: 1;
   --nori-ui-space-scale: 1;
@@ -1500,55 +1500,62 @@ select.input option {
    Nori Desktop shell refresh
    ========================================================================== */
 :root {
-  --nori-bg: #151515;
-  --nori-surface: #1c1c1c;
-  --nori-surface-raised: #232323;
-  --nori-surface-hover: #292929;
-  --nori-bg-elevated: #232323;
-  --nori-border: #303030;
-  --nori-text: #f2f2f2;
-  --nori-text-secondary: #b7b7b7;
-  --nori-text-muted: #818181;
-  --nori-cyan: #9be8b0;
-  --nori-cyan-dim: rgba(155, 232, 176, 0.10);
-  --nori-border-active: #767676;
-  --nori-radius: 12px;
-  --nori-radius-sm: 8px;
-  --nori-shadow: 0 18px 50px rgba(0, 0, 0, 0.24);
-  color-scheme: dark;
-  --nori-shell: #151515;
-  --nori-topbar: #151515;
-  --nori-statusbar: #191919;
-  --nori-control: #202020;
-  --nori-control-hover: #292929;
-  --nori-control-active: #303030;
-  --nori-border-strong: #3a3a3a;
+  /* Linear design tokens — see linear-flat.css for component overrides */
+  --nori-bg: #090909;
+  --nori-surface: #0f0f0f;
+  --nori-surface-raised: #141414;
+  --nori-surface-hover: #1a1a1a;
+  --nori-bg-elevated: #141414;
+  --nori-border: #262626;
+  --nori-border-strong: #333333;
+  --nori-border-active: #525252;
+  --nori-text: #ededed;
+  --nori-text-secondary: #8b8b8b;
+  --nori-text-muted: #5c5c5c;
+  --nori-text-subtle: #454545;
+  --nori-cyan: #8b8b8b;
+  --nori-cyan-dim: rgba(255, 255, 255, 0.06);
+  --nori-radius: 6px;
+  --nori-radius-sm: 4px;
+  --nori-shadow: none;
+  --nori-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.32);
+  --nori-shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.24);
+  --nori-shell: #090909;
+  --nori-topbar: #090909;
+  --nori-statusbar: #0f0f0f;
+  --nori-control: #141414;
+  --nori-control-hover: #1a1a1a;
+  --nori-control-active: #222222;
   --nori-font-ui: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
+  color-scheme: dark;
 }
 
 [data-theme="light"] {
-  --nori-bg: #eef2f0;
+  --nori-bg: #f9f9fb;
   --nori-surface: #ffffff;
-  --nori-surface-raised: #f8fbfa;
-  --nori-surface-hover: #e6eeeb;
+  --nori-surface-raised: #f4f4f6;
+  --nori-surface-hover: #ececf0;
   --nori-bg-elevated: #ffffff;
-  --nori-border: #c6d1ce;
-  --nori-border-active: #4a9f74;
-  --nori-text: #18231f;
-  --nori-text-secondary: #3f514b;
-  --nori-text-muted: #687a73;
-  --nori-cyan: #267a52;
-  --nori-cyan-dim: rgba(38, 122, 82, 0.14);
-  --nori-thinking: #17633f;
-  --nori-shadow: 0 18px 50px rgba(28, 53, 41, 0.16);
+  --nori-border: #e0e0e6;
+  --nori-border-strong: #cacad4;
+  --nori-border-active: #8b8d98;
+  --nori-text: #1a1a1e;
+  --nori-text-secondary: #5c5c65;
+  --nori-text-muted: #8b8d98;
+  --nori-text-subtle: #a8a8b3;
+  --nori-cyan: #5c5c5c;
+  --nori-cyan-dim: rgba(0, 0, 0, 0.06);
+  --nori-shadow: none;
+  --nori-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08);
+  --nori-shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.06);
   color-scheme: light;
-  --nori-shell: #f3f6f4;
+  --nori-shell: #f9f9fb;
   --nori-topbar: #ffffff;
-  --nori-statusbar: #edf2ef;
-  --nori-control: #f8fbfa;
-  --nori-control-hover: #e8f0ed;
-  --nori-control-active: #dce8e3;
-  --nori-border-strong: #aebfba;
+  --nori-statusbar: #f4f4f6;
+  --nori-control: #f4f4f6;
+  --nori-control-hover: #ececf0;
+  --nori-control-active: #e0e0e6;
+  --nori-border-strong: #cacad4;
 }
 
 body {
@@ -1575,12 +1582,13 @@ kbd {
   width: 64px;
   min-width: 64px;
   height: 100vh;
-  background: rgba(17, 20, 25, 0.94);
-  backdrop-filter: blur(18px);
+  background: var(--nori-shell);
+  border-right: 1px solid var(--nori-border);
+  backdrop-filter: none;
   transition: width .22s cubic-bezier(.2,.8,.2,1), min-width .22s cubic-bezier(.2,.8,.2,1);
   z-index: 10;
 }
-[data-theme="light"] .sidebar { background: rgba(251, 252, 252, 0.94); }
+[data-theme="light"] .sidebar { background: var(--nori-shell); }
 .sidebar:hover { width: 64px; }
 .sidebar.expanded { width: 272px; min-width: 272px; }
 .sidebar-brand {
@@ -1635,7 +1643,7 @@ kbd {
   white-space: nowrap;
 }
 .sidebar.expanded .sidebar-tab { width: 100%; }
-.sidebar-tab.active { background: var(--nori-cyan-dim); color: var(--nori-cyan); }
+.sidebar-tab.active { background: var(--nori-control-active); color: var(--nori-text); }
 .sidebar-tab-label { display: none; opacity: 0; transform: translateX(-4px); transition: .15s ease; font-size: calc(12px * var(--nori-ui-font-scale)); font-weight: 600; }
 .sidebar.expanded .sidebar-tab-label { display: inline; opacity: 1; transform: none; }
 .sidebar-content { display: block; min-height: 0; padding: 5px 0 10px; opacity: 0; pointer-events: none; transition: opacity .12s ease; }
@@ -2051,8 +2059,8 @@ kbd {
 .codex-layout .sidebar {
   width: 64px;
   min-width: 64px;
-  background: #1d1d1d;
-  border-right-color: #2b2b2b;
+  background: var(--nori-shell);
+  border-right: 1px solid var(--nori-border);
   backdrop-filter: none;
 }
 .codex-layout .sidebar.expanded {
@@ -2081,7 +2089,7 @@ kbd {
   height: 6px;
   border: 1.5px solid var(--nori-control);
   border-radius: 50%;
-  background: var(--nori-cyan);
+  background: var(--nori-text-muted);
 }
 .sidebar-brand-copy {
   flex: 1;
@@ -2162,7 +2170,11 @@ kbd {
   color: var(--nori-text);
   background: var(--nori-control-active);
 }
-.sidebar-nav-item.active svg { color: var(--nori-cyan); }
+.sidebar-nav-item.active svg,
+.codex-layout .sidebar-tab.active svg,
+.codex-layout .sidebar-nav-item.active svg {
+  color: var(--nori-text);
+}
 
 .sidebar-section-label {
   display: flex;
@@ -2193,7 +2205,6 @@ kbd {
 .codex-layout .sidebar.expanded .sidebar-tab { width: 100%; }
 .codex-layout .sidebar-tab:hover { color: var(--nori-text); background: var(--nori-control-hover); }
 .codex-layout .sidebar-tab.active { color: var(--nori-text); background: var(--nori-control-active); }
-.codex-layout .sidebar-tab.active svg { color: var(--nori-cyan); }
 .codex-layout .sidebar-workspace-switch {
   display: grid;
   width: 44px;
@@ -2223,9 +2234,9 @@ kbd {
 }
 .codex-layout .sidebar.expanded .sidebar-workspace-switch .sidebar-tab { width: 100%; }
 .codex-layout .sidebar-workspace-switch .sidebar-tab.active {
-  border-color: color-mix(in srgb, var(--nori-border-strong) 82%, transparent);
-  background: var(--nori-control-active);
-  box-shadow: 0 1px 3px rgba(0,0,0,.16), inset 0 1px rgba(255,255,255,.04);
+  border-color: var(--nori-border-strong);
+  background: var(--nori-surface-raised);
+  box-shadow: none;
 }
 .codex-layout .sidebar-workspace-switch .sidebar-tab.active svg { color: var(--nori-text); }
 
@@ -3456,9 +3467,9 @@ kbd {
 .workspace-inspector-resizer::after {
   position: absolute;
   inset: 0;
-  background: radial-gradient(ellipse 3px 82px at center var(--resize-highlight-y), color-mix(in srgb, var(--nori-cyan) 72%, transparent) 0, color-mix(in srgb, var(--nori-cyan) 48%, transparent) 32%, transparent 100%);
+  background: radial-gradient(ellipse 2px 72px at center var(--resize-highlight-y), color-mix(in srgb, var(--nori-text-muted) 55%, transparent) 0, transparent 100%);
   content: '';
-  opacity: .2;
+  opacity: .35;
   transition: opacity 140ms ease;
 }
 .sidebar-resizer:hover::after,
