@@ -5,11 +5,11 @@
    ========================================================================== */
 
 :root {
-  /* Accent — sparse: edges, focus, active tab underline only */
-  --nori-accent: #5e6ad2;
+  /* Accent — user-overridable via Settings → Accent color (--nori-cyan) */
   --nori-cyan: #5e6ad2;
-  --nori-cyan-dim: rgba(94, 106, 210, 0.1);
-  --nori-accent-dim: rgba(94, 106, 210, 0.1);
+  --nori-accent: var(--nori-cyan);
+  --nori-cyan-dim: color-mix(in srgb, var(--nori-cyan) 10%, transparent);
+  --nori-accent-dim: color-mix(in srgb, var(--nori-accent) 10%, transparent);
   --nori-thinking: #8b8b8b;
   --nori-shell-gradient: none;
 
@@ -63,17 +63,11 @@
 
 [data-theme="light"] {
   --nori-cyan: #5e6ad2;
-  --nori-cyan-dim: rgba(94, 106, 210, 0.1);
-  --nori-accent: #5e6ad2;
-  --nori-accent-dim: rgba(94, 106, 210, 0.1);
-  --nori-accent-edge: rgba(94, 106, 210, 0.3);
-  --nori-accent-soft: rgba(94, 106, 210, 0.05);
-  --nori-accent-hover: #828fff;
-  --nori-accent-focus: #5e69d1;
-  --nori-shell-gradient:
-    radial-gradient(ellipse 120% 80% at 0% 0%, rgba(94, 106, 210, 0.06), transparent 50%),
-    radial-gradient(ellipse 90% 70% at 100% 100%, rgba(130, 143, 255, 0.04), transparent 45%);
-  --nori-link: #5e6ad2;
+  --nori-accent: var(--nori-cyan);
+  --nori-cyan-dim: color-mix(in srgb, var(--nori-cyan) 10%, transparent);
+  --nori-accent-dim: color-mix(in srgb, var(--nori-accent) 10%, transparent);
+  --nori-shell-gradient: none;
+  --nori-link: var(--nori-accent);
   --nori-bg: #f9f9fb;
   --nori-surface: #ffffff;
   --nori-surface-raised: #f4f4f6;
@@ -392,7 +386,7 @@ textarea.input:focus {
 
 .chat-input-area:focus-within {
   border-color: color-mix(in srgb, var(--nori-accent) 30%, var(--nori-border-strong));
-  box-shadow: 0 0 0 1px rgba(94, 106, 210, 0.1);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--nori-accent) 10%, transparent);
 }
 
 .chat-send-btn {
@@ -767,7 +761,7 @@ textarea.input:focus {
 
 .codex-layout .sidebar,
 .sidebar {
-  box-shadow: inset -1px 0 0 rgba(94, 106, 210, 0.28);
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--nori-accent) 28%, transparent);
 }
 
 .codex-layout .sidebar-nav-item.active,
@@ -781,24 +775,24 @@ textarea.input:focus {
 }
 
 .starter-card {
-  box-shadow: inset 0 1px 0 rgba(94, 106, 210, 0.22);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--nori-accent) 22%, transparent);
 }
 
 .inspector-navigation,
 .inspector-navigation.compact {
   border-color: var(--nori-border);
-  box-shadow: inset 0 1px 0 rgba(94, 106, 210, 0.38);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--nori-accent) 38%, transparent);
 }
 
 .inspector-stage {
-  box-shadow: inset 0 1px 0 rgba(94, 106, 210, 0.28);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--nori-accent) 28%, transparent);
 }
 
 .sidebar-resizer::after,
 .workspace-inspector-resizer::after {
   background: radial-gradient(
     ellipse 2px 72px at center var(--resize-highlight-y),
-    rgba(94, 106, 210, 0.75) 0,
+    color-mix(in srgb, var(--nori-accent) 75%, transparent) 0,
     transparent 100%
   );
   opacity: 0.35;
@@ -822,7 +816,7 @@ textarea.input:focus {
   color: var(--nori-accent);
   border: 1px solid var(--nori-border-strong);
   background: var(--nori-control);
-  box-shadow: inset 0 1px 0 rgba(94, 106, 210, 0.55);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--nori-accent) 55%, transparent);
 }
 
 .codex-layout .chat-send-btn {
@@ -839,7 +833,7 @@ textarea.input:focus {
   border: 1px solid var(--nori-border-strong);
   background: var(--nori-control);
   box-shadow:
-    inset 0 1px 0 rgba(94, 106, 210, 0.2),
+    inset 0 1px 0 color-mix(in srgb, var(--nori-accent) 20%, transparent),
     0 14px 38px rgba(0, 0, 0, 0.18);
   backdrop-filter: none;
 }
@@ -847,16 +841,16 @@ textarea.input:focus {
 .codex-layout .chat-input-area:focus-within {
   border-color: color-mix(in srgb, var(--nori-accent) 40%, var(--nori-border-strong));
   box-shadow:
-    inset 0 1px 0 rgba(94, 106, 210, 0.35),
+    inset 0 1px 0 color-mix(in srgb, var(--nori-accent) 35%, transparent),
     0 16px 42px rgba(0, 0, 0, 0.2),
-    0 0 0 1px rgba(94, 106, 210, 0.2);
+    0 0 0 1px color-mix(in srgb, var(--nori-accent) 20%, transparent);
 }
 
 .initial-usage {
   border: 1px solid color-mix(in srgb, var(--nori-accent) 24%, var(--nori-border-strong));
   background: color-mix(in srgb, var(--nori-surface-raised) 92%, transparent);
   box-shadow:
-    inset 0 1px 0 rgba(94, 106, 210, 0.42),
+    inset 0 1px 0 color-mix(in srgb, var(--nori-accent) 42%, transparent),
     0 14px 38px rgba(0, 0, 0, 0.2);
   backdrop-filter: none;
 }
@@ -864,13 +858,13 @@ textarea.input:focus {
 .initial-usage-metrics > div {
   border-color: var(--nori-border);
   background: var(--nori-control);
-  box-shadow: inset 0 1px 0 rgba(94, 106, 210, 0.12);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--nori-accent) 12%, transparent);
 }
 
 .inspector-navigation.compact button.active {
   color: var(--nori-accent);
   background: var(--nori-control-active);
-  box-shadow: inset 0 0 0 1px rgba(94, 106, 210, 0.28);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--nori-accent) 28%, transparent);
 }
 
 .codex-layout .inspector-open-tab.active,

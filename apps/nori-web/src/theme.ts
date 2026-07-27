@@ -55,8 +55,13 @@ export function applyThemeColor(color: string, persist = true): void {
     try { localStorage.setItem(THEME_KEY, color); } catch { /* no-op */ }
   }
   document.documentElement.style.setProperty('--nori-cyan', color);
+  document.documentElement.style.setProperty('--nori-accent', color);
   document.documentElement.style.setProperty(
     '--nori-cyan-dim',
+    color + (document.documentElement.dataset.theme === 'light' ? '19' : '26'),
+  );
+  document.documentElement.style.setProperty(
+    '--nori-accent-dim',
     color + (document.documentElement.dataset.theme === 'light' ? '19' : '26'),
   );
 }
