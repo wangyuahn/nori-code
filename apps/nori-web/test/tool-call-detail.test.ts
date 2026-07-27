@@ -12,7 +12,7 @@ describe('tool-call-detail', () => {
     expect(isToolCallFailed('Bash', 'stdout\nCommand failed with exit code: 0.')).toBe(false);
   });
 
-  it('builds edit diff lines from line_ops', () => {
+  it('builds edit preview lines from line_ops when no recorded diff exists', () => {
     const diff = buildToolCallChangeDiff({
       name: 'Edit',
       args: {
@@ -20,8 +20,23 @@ describe('tool-call-detail', () => {
         line_ops: [{ op: 'swap', start: 1, end: 1, content: 'new line' }],
       },
     });
-    expect(diff).toContain('- [original line 1 replaced]');
+    expect(diff).toContain('@@ replace lines 1-1 @@');
     expect(diff).toContain('+new line');
+    expect(diff).not.toContain('[original line');
+  });
+
+  it('prefers recorded diff from code.change events for Edit tools', () => {
+    const diff = buildToolCallChangeDiff({
+      id: 'edit-1',
+      name: 'Edit',
+      args: {
+        path: 'src/a.ts',
+        line_ops: [{ op: 'swap', start: 1, end: 1, content: 'new line' }],
+      },
+    }, {
+      recordedDiff: '-old line\n+new line',
+    });
+    expect(diff).toBe('-old line\n+new line');
   });
 
   it('builds write diff from content', () => {

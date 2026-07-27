@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import type { ModelCatalogItem, Session } from '../../api/client';
-import type { ChatMessage, WorkBlock } from '../../hooks/useChatMessages';
+import type { ChatMessage, CodeChange, WorkBlock } from '../../hooks/useChatMessages';
 import { ChatView } from '../ChatView';
 
 const MOCK_STARTED_AT = new Date().toISOString();
@@ -80,6 +80,23 @@ const MESSAGES: ChatMessage[] = [
   },
 ];
 
+const CODE_CHANGES: CodeChange[] = [{
+  operationId: 'mock-edit-tool',
+  agentId: 'main',
+  operation: 'edit',
+  path: 'apps/nori-web/src/components/ChatView.tsx',
+  diff: [
+    '-const summary = summarizeToolCall(tool, tr);',
+    '-return <div className={`compact-tool-call tool-${tool.name.toLowerCase()}`} title={tool.result?.slice(0, 600)}>',
+    '+const summary = summarizeToolCall(tool, tr);',
+    '+const failed = isToolCallFailed(tool.name, tool.result);',
+    '+const hasDetails = buildToolCallDetailSections(tool, detailOptions).length > 0;',
+    '-',
+    '-',
+  ].join('\n'),
+  occurredAt: MOCK_STARTED_AT,
+}];
+
 export function ToolCallDetailMockPage() {
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -115,6 +132,7 @@ export function ToolCallDetailMockPage() {
         onTaskModeChange={() => undefined}
         onRunSlashCommand={() => false}
         onMainWriteChange={() => undefined}
+        codeChanges={CODE_CHANGES}
       />
     </main>
   </div>;

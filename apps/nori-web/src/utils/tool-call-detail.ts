@@ -1,5 +1,9 @@
-import type { ToolCall } from '../hooks/useChatMessages';
+import type { CodeChange, ToolCall } from '../hooks/useChatMessages';
 import { editLineOperationsDiff, parseEditLineOperations } from './edit-line-ops';
+
+export interface ToolCallDetailOptions {
+  readonly recordedDiff?: string | undefined;
+}
 
 export interface ToolCallDetailSection {
   readonly kind: 'heading' | 'diff' | 'pre' | 'error';
@@ -46,18 +50,30 @@ function writeContentDiff(content: unknown): string {
 
 function compactDiffLines(diff: string): string[] {
   const lines = diff.split('\n').filter(line =>
-    (line.startsWith('+') && !line.startsWith('+++'))
-    || (line.startsWith('-') && !line.startsWith('---')),
+    line.startsWith('@@')
+    || ((line.startsWith('+') && !line.startsWith('+++'))
+    || (line.startsWith('-') && !line.startsWith('---'))),
   );
   if (lines.length <= MAX_DIFF_LINES) return lines;
   return [...lines.slice(0, MAX_DIFF_LINES), `... ${String(lines.length - MAX_DIFF_LINES)} more changed lines`];
 }
 
-export function buildToolCallChangeDiff(tool: ToolCall): string | undefined {
+function hasTextDiff(diff: string): boolean {
+  return diff.split('\n').some(line =>
+    (line.startsWith('+') && !line.startsWith('+++'))
+    || (line.startsWith('-') && !line.startsWith('---')),
+  );
+}
+
+export function buildToolCallChangeDiff(tool: ToolCall, options?: ToolCallDetailOptions): string | undefined {
   const args = asRecord(tool.args);
   const normalized = normalizeToolName(tool.name);
+  const recordedDiff = options?.recordedDiff?.trim();
 
   if (normalized === 'edit') {
+    if (recordedDiff !== undefined && recordedDiff.length > 0 && hasTextDiff(recordedDiff)) {
+      return recordedDiff;
+    }
     const diff = editLineOperationsDiff(args['line_ops']).join('\n');
     return diff.length > 0 ? diff : undefined;
   }
@@ -110,12 +126,12 @@ function formatArgsSummary(tool: ToolCall, excludeKeys: Set<string>): string | u
   return lines.join('\n');
 }
 
-export function buildToolCallDetailSections(tool: ToolCall): ToolCallDetailSection[] {
+export function buildToolCallDetailSections(tool: ToolCall, options?: ToolCallDetailOptions): ToolCallDetailSection[] {
   const sections: ToolCallDetailSection[] = [];
   const normalized = normalizeToolName(tool.name);
   const args = asRecord(tool.args);
   const failed = isToolCallFailed(tool.name, tool.result);
-  const changeDiff = buildToolCallChangeDiff(tool);
+  const changeDiff = buildToolCallChangeDiff(tool, options);
 
   const excludeArgKeys = new Set<string>();
   if (normalized === 'write') excludeArgKeys.add('content');

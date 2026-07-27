@@ -1,8 +1,10 @@
 import type { ToolCall } from '../hooks/useChatMessages';
+import type { ToolCallDetailOptions } from '../utils/tool-call-detail';
 import { buildToolCallDetailSections } from '../utils/tool-call-detail';
 
-export function ToolCallDetailBody({ tool }: { tool: ToolCall }) {
-  const sections = buildToolCallDetailSections(tool);
+export function ToolCallDetailBody({ tool, recordedDiff }: { tool: ToolCall; recordedDiff?: string | undefined }) {
+  const options: ToolCallDetailOptions | undefined = recordedDiff !== undefined ? { recordedDiff } : undefined;
+  const sections = buildToolCallDetailSections(tool, options);
   if (sections.length === 0) return null;
 
   return (
@@ -26,7 +28,7 @@ export function ToolCallDetailBody({ tool }: { tool: ToolCall }) {
                 {section.lines.map((line, lineIndex) => (
                   <span
                     key={`${lineIndex}-${line}`}
-                    className={line.startsWith('+') ? 'added' : line.startsWith('-') ? 'removed' : undefined}
+                    className={line.startsWith('+') ? 'added' : line.startsWith('-') ? 'removed' : line.startsWith('@@') ? 'meta' : undefined}
                   >
                     {line}
                   </span>

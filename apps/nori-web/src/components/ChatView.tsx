@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type UIEvent } from 'react';
 import { api, type ApprovalRequest, type McpElicitationRequest, type McpElicitationResponse, type ModelCatalogItem, type PromptAttachment, type PromptExecutionOptions, type QuestionAnswer, type QuestionRequest, type Session, type SessionAgentConfig, type SessionRealtimeStatus, type TokenUsage } from '../api/client';
-import type { ChatMessage, QueuedPrompt, TodoItem, ToolCall, WorkBlock } from '../hooks/useChatMessages';
+import type { ChatMessage, QueuedPrompt, TodoItem, ToolCall, WorkBlock, CodeChange } from '../hooks/useChatMessages';
 import { useBrowserPermissions } from '../hooks/useBrowser';
 import { useI18n } from '../i18n';
 import { chatSlashCommandSuggestions, resolveChatSlashCommand, type ChatSlashCommand, type ChatSlashCommandName } from '../utils/chat-slash-commands';
@@ -54,6 +54,7 @@ export interface ChatViewProps {
   onResolveMcpElicitation?: (elicitationId: string, response: McpElicitationResponse) => void | Promise<void>;
   queuedPrompts?: QueuedPrompt[];
   todos?: TodoItem[];
+  codeChanges?: CodeChange[];
   onCancelQueuedPrompt?: (promptId: string) => void | Promise<void>;
   draftAgentConfig?: SessionAgentConfig;
   rewindLimit?: number;
@@ -181,7 +182,7 @@ function ComposerSettingPicker({ id, label, ariaLabel, value, choices, open, dis
 }
 
 export function ChatView(props: ChatViewProps) {
-  const { session, allSessions = [], messages, messagesLoading = false, streaming, thinking, workBlocks = [], isStreaming, sessionStatus, compacting = false, models, modelsLoading, modelError, onSendMessage, onAbort, onRefreshModels, onModelChange, onThinkingChange, onPermissionChange, onTaskModeChange, onRunSlashCommand, onMainWriteChange, pendingApprovals = [], onResolveApproval, pendingQuestions = [], onResolveQuestion, onDismissQuestion, pendingMcpElicitations = [], onResolveMcpElicitation, queuedPrompts = [], onCancelQueuedPrompt, draftAgentConfig, rewindLimit = 10, onRewind } = props;
+  const { session, allSessions = [], messages, messagesLoading = false, streaming, thinking, workBlocks = [], isStreaming, sessionStatus, compacting = false, models, modelsLoading, modelError, onSendMessage, onAbort, onRefreshModels, onModelChange, onThinkingChange, onPermissionChange, onTaskModeChange, onRunSlashCommand, onMainWriteChange, pendingApprovals = [], onResolveApproval, pendingQuestions = [], onResolveQuestion, onDismissQuestion, pendingMcpElicitations = [], onResolveMcpElicitation, queuedPrompts = [], codeChanges = [], onCancelQueuedPrompt, draftAgentConfig, rewindLimit = 10, onRewind } = props;
   const { tr } = useI18n();
   const browserPermissions = useBrowserPermissions();
   const [input, setInput] = useState('');
@@ -778,9 +779,9 @@ export function ChatView(props: ChatViewProps) {
   return <section className="chat-view" aria-label={tr('Conversation', '对话')}>
     <div className="chat-messages-shell">
     <div className="chat-messages" ref={messagesScrollRef} onScroll={handleMessagesScroll}>
-      {messagesLoading ? <div className="chat-history-loading" role="status"><span className="spinner"/><strong>{tr('Loading conversation…', '正在加载会话…')}</strong></div> : messages.length === 0 ? <div className="chat-welcome"><div className="welcome-mark"><Icon name="sparkles" size={27}/></div><span className="eyebrow">{tr('Your thoughtful coding partner', '你的智能编程伙伴')}</span><h2>{session ? tr('What should we make better?', '我们要改进什么？') : tr('What would you like to work on?', '你想从哪里开始？')}</h2><p>{session ? tr('Ask Nori to inspect code, plan a feature, fix a bug, or validate an API integration.', '让 Nori 检查代码、规划功能、修复缺陷或验证 API 集成。') : tr('Choose a project folder to start a new task, or open an existing conversation from the sidebar. You can also type below now.', '选择一个项目文件夹开始新任务，或从左侧打开已有对话。你也可以直接在下方输入。')}</p><UsageOverview sessions={allSessions} models={models}/><div className="starter-grid">{STARTERS.map(item => <button key={item.title} className="starter-card" onClick={() => void handleSend(tr(item.prompt, item.promptZh))}><Icon name="sparkles" size={16}/><span><strong>{tr(item.title, item.titleZh)}</strong><small>{tr(item.prompt, item.promptZh)}</small></span></button>)}</div></div> : presentedMessages.map(({ message, workStartedAt }, index) => <MessageBubble key={message.id} message={message} workStartedAt={workStartedAt} rewindCount={rewindCounts.get(message.id)} onRewind={handleRewind} approvalRequests={pendingApprovals} live={isStreaming && index === presentedMessages.length - 1 && message.role === 'assistant' ? { streaming, thinking, workBlocks, stopping, onAbort: handleAbort } : undefined}/>) }
+      {messagesLoading ? <div className="chat-history-loading" role="status"><span className="spinner"/><strong>{tr('Loading conversation…', '正在加载会话…')}</strong></div> : messages.length === 0 ? <div className="chat-welcome"><div className="welcome-mark"><Icon name="sparkles" size={27}/></div><span className="eyebrow">{tr('Your thoughtful coding partner', '你的智能编程伙伴')}</span><h2>{session ? tr('What should we make better?', '我们要改进什么？') : tr('What would you like to work on?', '你想从哪里开始？')}</h2><p>{session ? tr('Ask Nori to inspect code, plan a feature, fix a bug, or validate an API integration.', '让 Nori 检查代码、规划功能、修复缺陷或验证 API 集成。') : tr('Choose a project folder to start a new task, or open an existing conversation from the sidebar. You can also type below now.', '选择一个项目文件夹开始新任务，或从左侧打开已有对话。你也可以直接在下方输入。')}</p><UsageOverview sessions={allSessions} models={models}/><div className="starter-grid">{STARTERS.map(item => <button key={item.title} className="starter-card" onClick={() => void handleSend(tr(item.prompt, item.promptZh))}><Icon name="sparkles" size={16}/><span><strong>{tr(item.title, item.titleZh)}</strong><small>{tr(item.prompt, item.promptZh)}</small></span></button>)}</div></div> : presentedMessages.map(({ message, workStartedAt }, index) => <MessageBubble key={message.id} message={message} workStartedAt={workStartedAt} rewindCount={rewindCounts.get(message.id)} onRewind={handleRewind} approvalRequests={pendingApprovals} codeChanges={codeChanges} live={isStreaming && index === presentedMessages.length - 1 && message.role === 'assistant' ? { streaming, thinking, workBlocks, stopping, onAbort: handleAbort } : undefined}/>) }
 
-      {isStreaming && !streamingContinuesAssistant && <div className="chat-message chat-message-assistant chat-message-streaming"><div className="message-body"><div className="chat-message-role">Nori <span>{pendingApprovals.length > 0 || browserPermissions.pending.length > 0 ? tr('waiting for permission', '等待授权') : tr('working', '工作中')}</span></div>{standaloneLiveBlocks.length > 0 ? <LiveWorkStream blocks={standaloneLiveBlocks} activeProgressId={standaloneLiveProgressId} startedAt={latestUserStartedAt} approvalRequests={pendingApprovals}/> : <div className="chat-message-content"><span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span><span className="streaming-cursor"/></div>}{streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(streaming))} tokens</div>}<button className="chat-abort-btn" onClick={() => void handleAbort()} disabled={stopping}><Icon name="stop" size={13}/> {stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button></div></div>}
+      {isStreaming && !streamingContinuesAssistant && <div className="chat-message chat-message-assistant chat-message-streaming"><div className="message-body"><div className="chat-message-role">Nori <span>{pendingApprovals.length > 0 || browserPermissions.pending.length > 0 ? tr('waiting for permission', '等待授权') : tr('working', '工作中')}</span></div>{standaloneLiveBlocks.length > 0 ? <LiveWorkStream blocks={standaloneLiveBlocks} activeProgressId={standaloneLiveProgressId} startedAt={latestUserStartedAt} approvalRequests={pendingApprovals} codeChanges={codeChanges}/> : <div className="chat-message-content"><span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span><span className="streaming-cursor"/></div>}{streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(streaming))} tokens</div>}<button className="chat-abort-btn" onClick={() => void handleAbort()} disabled={stopping}><Icon name="stop" size={13}/> {stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button></div></div>}
       <div ref={messagesEndRef}/>
     </div>
     {turnPreviews.length > 0 && <nav className="chat-turn-rail" style={{ height: `${Math.min(360, Math.max(54, turnPreviews.length * 14))}px` }} aria-label={tr('Conversation turns', '对话轮次')} onPointerMove={event => {
@@ -898,7 +899,7 @@ function formatElapsedDuration(durationMs: number): string {
   return `${hours}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
 }
 
-function MessageBubble({ message, workStartedAt, rewindCount, onRewind, approvalRequests = [], live }: { message: ChatMessage; workStartedAt?: number; rewindCount?: number; onRewind?: (count: number) => void | Promise<void>; approvalRequests?: ApprovalRequest[]; live?: LiveAssistantContinuation }) {
+function MessageBubble({ message, workStartedAt, rewindCount, onRewind, approvalRequests = [], codeChanges = [], live }: { message: ChatMessage; workStartedAt?: number; rewindCount?: number; onRewind?: (count: number) => void | Promise<void>; approvalRequests?: ApprovalRequest[]; codeChanges?: CodeChange[]; live?: LiveAssistantContinuation }) {
   const { tr } = useI18n();
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
@@ -936,10 +937,10 @@ function MessageBubble({ message, workStartedAt, rewindCount, onRewind, approval
     }} title={tr('Rewind to before this prompt', '回溯到此提问之前')}><Icon name="refresh" size={12}/>{tr('Rewind', '回溯')}</button>}</div>}
       {live !== undefined
         ? hasLiveTranscript
-          ? <LiveWorkStream blocks={liveTranscriptBlocks} activeProgressId={liveProgressId} startedAt={workStartedAt} approvalRequests={approvalRequests}/>
+          ? <LiveWorkStream blocks={liveTranscriptBlocks} activeProgressId={liveProgressId} startedAt={workStartedAt} approvalRequests={approvalRequests} codeChanges={codeChanges}/>
           : null
         : hasWork
-          ? <WorkProcess blocks={storedBlocks} startedAt={workStartedAt} durationMs={workDurationMs} approvalRequests={approvalRequests}/>
+          ? <WorkProcess blocks={storedBlocks} startedAt={workStartedAt} durationMs={workDurationMs} approvalRequests={approvalRequests} codeChanges={codeChanges}/>
           : null}
       {message.images && message.images.length > 0 && <div className="chat-message-images">{message.images.map((image, index) => <img key={`${image.src.slice(0, 80)}-${String(index)}`} src={image.src} alt={image.alt} loading="lazy" />)}</div>}
       {(text || (live && !hasWork)) && <div className="chat-message-content">{text ? (isUser || isSystem ? text : <MarkdownView content={text} />) : <span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span>}{live && !hasWork && <span className="streaming-cursor"/>}</div>}{message.usage && <TokenUsageLine usage={message.usage} />}{live?.streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(live.streaming))} tokens</div>}{live && <button className="chat-abort-btn" onClick={() => void live.onAbort()} disabled={live.stopping}><Icon name="stop" size={13}/> {live.stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button>}{message.createdAt && <time className="chat-message-time">{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>}
@@ -947,7 +948,7 @@ function MessageBubble({ message, workStartedAt, rewindCount, onRewind, approval
   </article>;
 }
 
-function WorkProcess({ blocks, live = false, activeProgressId, startedAt, durationMs, approvalRequests = [] }: { blocks: WorkBlock[]; live?: boolean; activeProgressId?: string; startedAt?: number; durationMs?: number; approvalRequests?: ApprovalRequest[] }) {
+function WorkProcess({ blocks, live = false, activeProgressId, startedAt, durationMs, approvalRequests = [], codeChanges = [] }: { blocks: WorkBlock[]; live?: boolean; activeProgressId?: string; startedAt?: number; durationMs?: number; approvalRequests?: ApprovalRequest[]; codeChanges?: CodeChange[] }) {
   const { tr } = useI18n();
   const [open, setOpen] = useState(live);
   const fallbackStartedAtRef = useRef(Date.now());
@@ -990,12 +991,12 @@ function WorkProcess({ blocks, live = false, activeProgressId, startedAt, durati
         const isActive = live && block.id === activeProgressId;
         return <TranscriptOutput key={block.id} text={block.text} streaming={isActive}/>;
       }
-      return <CompactToolCall key={block.id} tool={block.tool} approvalRequest={approvalForTool(block.tool, approvalRequests)}/>;
+      return <CompactToolCall key={block.id} tool={block.tool} approvalRequest={approvalForTool(block.tool, approvalRequests)} codeChanges={codeChanges}/>;
     })}</div>
   </details>;
 }
 
-function LiveWorkStream({ blocks, activeProgressId, startedAt, approvalRequests = [] }: { blocks: WorkBlock[]; activeProgressId?: string; startedAt?: number; approvalRequests?: ApprovalRequest[] }) {
+function LiveWorkStream({ blocks, activeProgressId, startedAt, approvalRequests = [], codeChanges = [] }: { blocks: WorkBlock[]; activeProgressId?: string; startedAt?: number; approvalRequests?: ApprovalRequest[]; codeChanges?: CodeChange[] }) {
   const { tr } = useI18n();
   const fallbackStartedAtRef = useRef(Date.now());
   const [clockNow, setClockNow] = useState(Date.now);
@@ -1009,7 +1010,7 @@ function LiveWorkStream({ blocks, activeProgressId, startedAt, approvalRequests 
     <div className="live-work-status"><Icon name="sparkles" size={12}/><span>{tr('Working', '处理中')}</span><time className="live-work-elapsed" title={tr(`Elapsed ${elapsedLabel}`, `耗时 ${elapsedLabel}`)}>{elapsedLabel}</time></div>
     {blocks.map(block => {
       if (block.type === 'thinking') return <ThoughtDisclosure key={block.id} text={block.text} live/>;
-      if (block.type === 'tool') return <CompactToolCall key={block.id} tool={block.tool} approvalRequest={approvalForTool(block.tool, approvalRequests)}/>;
+      if (block.type === 'tool') return <CompactToolCall key={block.id} tool={block.tool} approvalRequest={approvalForTool(block.tool, approvalRequests)} codeChanges={codeChanges}/>;
       const active = block.id === activeProgressId;
       return <TranscriptOutput key={block.id} text={block.text} streaming={active}/>;
     })}
@@ -1028,12 +1029,14 @@ function ThoughtDisclosure({ text, live = false }: { text: string; live?: boolea
   </details>;
 }
 
-function CompactToolCall({ tool, approvalRequest }: { tool: ToolCall; approvalRequest?: ApprovalRequest }) {
+function CompactToolCall({ tool, approvalRequest, codeChanges = [] }: { tool: ToolCall; approvalRequest?: ApprovalRequest; codeChanges?: CodeChange[] }) {
   if (isExitPlanModeTool(tool.name)) return <ExitPlanModeToolCall tool={tool} approvalRequest={approvalRequest}/>;
   const { tr } = useI18n();
+  const recordedDiff = tool.id ? codeChanges.find(change => change.operationId === tool.id)?.diff : undefined;
+  const detailOptions = recordedDiff !== undefined ? { recordedDiff } : undefined;
   const summary = summarizeToolCall(tool, tr);
   const failed = isToolCallFailed(tool.name, tool.result);
-  const hasDetails = buildToolCallDetailSections(tool).length > 0;
+  const hasDetails = buildToolCallDetailSections(tool, detailOptions).length > 0;
   const statusLabel = tool.result === undefined
     ? tr('Running', '运行中')
     : failed
@@ -1048,7 +1051,7 @@ function CompactToolCall({ tool, approvalRequest }: { tool: ToolCall; approvalRe
       <small className={statusClass}>{statusLabel}</small>
       {hasDetails && <Icon className="tool-call-chevron" name="chevron-right" size={11}/>}
     </summary>
-    {hasDetails && <ToolCallDetailBody tool={tool}/>}
+    {hasDetails && <ToolCallDetailBody tool={tool} recordedDiff={recordedDiff}/>}
   </details>;
 }
 

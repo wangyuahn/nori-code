@@ -3742,6 +3742,7 @@ kbd {
 .compact-diff span, .git-diff-view pre span { display: block; min-width: max-content; padding: 0 11px; white-space: pre; }
 .compact-diff .added, .git-diff-view .added { color: var(--nori-success); background: color-mix(in srgb, var(--nori-success) 8%, transparent); }
 .compact-diff .removed, .git-diff-view .removed { color: var(--nori-danger); background: color-mix(in srgb, var(--nori-danger) 8%, transparent); }
+.compact-diff .meta { color: var(--nori-text-muted); background: transparent; }
 .git-unavailable { gap: 7px; padding-inline: 20px; text-align: center; }
 .git-unavailable strong { color: var(--nori-text-secondary); font-size: calc(11px * var(--nori-ui-font-scale)); }
 .git-unavailable span { max-width: 100%; overflow-wrap: anywhere; }
