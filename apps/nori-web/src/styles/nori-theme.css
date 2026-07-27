@@ -7,42 +7,42 @@
 :root {
   /* accent */
   --nori-cyan: #00BCD4;
-  --nori-cyan-dim: rgba(0, 188, 212, 0.15);
+  --nori-cyan-dim: rgba(0, 188, 212, 0.12);
   --nori-thinking: #9be8b0;
 
-  /* backgrounds */
-  --nori-bg: #08080a;
-  --nori-surface: #111114;
-  --nori-surface-raised: #16161a;
-  --nori-surface-hover: #18181c;
-  --nori-bg-elevated: #16161a;
+  /* backgrounds — Linear-inspired neutral palette */
+  --nori-bg: #09090b;
+  --nori-surface: #111113;
+  --nori-surface-raised: #18181b;
+  --nori-surface-hover: #1f1f23;
+  --nori-bg-elevated: #18181b;
 
   /* borders */
-  --nori-border: #1e1e22;
-  --nori-border-active: #00BCD4;
+  --nori-border: #27272a;
+  --nori-border-active: #52525b;
 
   /* text */
-  --nori-text: #e4e4e7;
+  --nori-text: #fafafa;
   --nori-text-secondary: #a1a1aa;
   --nori-text-muted: #71717a;
 
   /* semantic */
   --nori-success: #22c55e;
-  --nori-success-dim: rgba(34, 197, 94, 0.15);
+  --nori-success-dim: rgba(34, 197, 94, 0.12);
   --nori-warning: #f59e0b;
-  --nori-warning-dim: rgba(245, 158, 11, 0.15);
+  --nori-warning-dim: rgba(245, 158, 11, 0.12);
   --nori-danger: #ef4444;
-  --nori-danger-dim: rgba(239, 68, 68, 0.15);
+  --nori-danger-dim: rgba(239, 68, 68, 0.12);
   --nori-purple: #7c3aed;
-  --nori-purple-dim: rgba(124, 58, 237, 0.15);
+  --nori-purple-dim: rgba(124, 58, 237, 0.12);
 
   /* shape */
-  --nori-radius: 8px;
+  --nori-radius: 6px;
   --nori-radius-sm: 4px;
 
   /* typography */
   --nori-font: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'Consolas', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', monospace;
-  --nori-font-ui: system-ui, -apple-system, sans-serif;
+  --nori-font-ui: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
   --nori-ui-font-scale: 1;
   --nori-ui-control-scale: 1;
   --nori-ui-space-scale: 1;
@@ -1500,55 +1500,58 @@ select.input option {
    Nori Desktop shell refresh
    ========================================================================== */
 :root {
-  --nori-bg: #151515;
-  --nori-surface: #1c1c1c;
-  --nori-surface-raised: #232323;
-  --nori-surface-hover: #292929;
-  --nori-bg-elevated: #232323;
-  --nori-border: #303030;
-  --nori-text: #f2f2f2;
-  --nori-text-secondary: #b7b7b7;
-  --nori-text-muted: #818181;
-  --nori-cyan: #9be8b0;
-  --nori-cyan-dim: rgba(155, 232, 176, 0.10);
-  --nori-border-active: #767676;
-  --nori-radius: 12px;
-  --nori-radius-sm: 8px;
-  --nori-shadow: 0 18px 50px rgba(0, 0, 0, 0.24);
-  color-scheme: dark;
-  --nori-shell: #151515;
-  --nori-topbar: #151515;
-  --nori-statusbar: #191919;
-  --nori-control: #202020;
-  --nori-control-hover: #292929;
-  --nori-control-active: #303030;
-  --nori-border-strong: #3a3a3a;
+  /* Linear-inspired design tokens — see linear-flat.css for component overrides */
+  --nori-bg: #09090b;
+  --nori-surface: #111113;
+  --nori-surface-raised: #18181b;
+  --nori-surface-hover: #1f1f23;
+  --nori-bg-elevated: #18181b;
+  --nori-border: #27272a;
+  --nori-border-strong: #3f3f46;
+  --nori-border-active: #52525b;
+  --nori-text: #fafafa;
+  --nori-text-secondary: #a1a1aa;
+  --nori-text-muted: #71717a;
+  --nori-text-subtle: #52525b;
+  --nori-radius: 6px;
+  --nori-radius-sm: 4px;
+  --nori-shadow: none;
+  --nori-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.32);
+  --nori-shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.24);
+  --nori-shell: #09090b;
+  --nori-topbar: #09090b;
+  --nori-statusbar: #111113;
+  --nori-control: #18181b;
+  --nori-control-hover: #1f1f23;
+  --nori-control-active: #27272a;
   --nori-font-ui: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
+  color-scheme: dark;
 }
 
 [data-theme="light"] {
-  --nori-bg: #eef2f0;
+  --nori-bg: #fafafa;
   --nori-surface: #ffffff;
-  --nori-surface-raised: #f8fbfa;
-  --nori-surface-hover: #e6eeeb;
+  --nori-surface-raised: #f4f4f5;
+  --nori-surface-hover: #f4f4f5;
   --nori-bg-elevated: #ffffff;
-  --nori-border: #c6d1ce;
-  --nori-border-active: #4a9f74;
-  --nori-text: #18231f;
-  --nori-text-secondary: #3f514b;
-  --nori-text-muted: #687a73;
-  --nori-cyan: #267a52;
-  --nori-cyan-dim: rgba(38, 122, 82, 0.14);
-  --nori-thinking: #17633f;
-  --nori-shadow: 0 18px 50px rgba(28, 53, 41, 0.16);
+  --nori-border: #e4e4e7;
+  --nori-border-strong: #d4d4d8;
+  --nori-border-active: #a1a1aa;
+  --nori-text: #18181b;
+  --nori-text-secondary: #52525b;
+  --nori-text-muted: #71717a;
+  --nori-text-subtle: #a1a1aa;
+  --nori-shadow: none;
+  --nori-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08);
+  --nori-shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.06);
   color-scheme: light;
-  --nori-shell: #f3f6f4;
+  --nori-shell: #fafafa;
   --nori-topbar: #ffffff;
-  --nori-statusbar: #edf2ef;
-  --nori-control: #f8fbfa;
-  --nori-control-hover: #e8f0ed;
-  --nori-control-active: #dce8e3;
-  --nori-border-strong: #aebfba;
+  --nori-statusbar: #f4f4f5;
+  --nori-control: #f4f4f5;
+  --nori-control-hover: #e4e4e7;
+  --nori-control-active: #d4d4d8;
+  --nori-border-strong: #d4d4d8;
 }
 
 body {

@@ -7,6 +7,7 @@ import { InspectorPopout } from './components/InspectorPopout';
 import type { InspectorTab } from './components/WorkspaceInspector';
 import { ExitPlanModeMockPage } from './components/dev/ExitPlanModeMockPage';
 import './styles/nori-theme.css';
+import './styles/linear-flat.css';
 
 initializeTheme();
 const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
