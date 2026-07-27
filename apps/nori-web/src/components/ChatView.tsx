@@ -15,7 +15,9 @@ import { McpElicitationPanel } from './McpElicitationPanel';
 import { SkillPicker } from './SkillPicker';
 import { UsageOverview } from './UsageOverview';
 import { detectImageMime, isLikelyImageFile } from '../utils/image-mime';
+import { ToolCallDetailBody } from './ToolCallDetailBody';
 import { editLineOperationStats } from '../utils/edit-line-ops';
+import { buildToolCallDetailSections, isToolCallFailed } from '../utils/tool-call-detail';
 
 export interface ChatViewProps {
   session: Session | null;
@@ -1030,11 +1032,24 @@ function CompactToolCall({ tool, approvalRequest }: { tool: ToolCall; approvalRe
   if (isExitPlanModeTool(tool.name)) return <ExitPlanModeToolCall tool={tool} approvalRequest={approvalRequest}/>;
   const { tr } = useI18n();
   const summary = summarizeToolCall(tool, tr);
-  return <div className={`compact-tool-call tool-${tool.name.toLowerCase()}`} title={tool.result?.slice(0, 600)}>
-    <span className="compact-tool-icon"><Icon name={toolCallIcon(tool.name)} size={12}/></span>
-    <span className="compact-tool-copy"><strong>{tool.name}</strong>{summary && <span>{summary}</span>}</span>
-    <small className={tool.result === undefined ? 'running' : 'done'}>{tool.result === undefined ? tr('Running', '运行中') : tr('Done', '完成')}</small>
-  </div>;
+  const failed = isToolCallFailed(tool.name, tool.result);
+  const hasDetails = buildToolCallDetailSections(tool).length > 0;
+  const statusLabel = tool.result === undefined
+    ? tr('Running', '运行中')
+    : failed
+      ? tr('Failed', '失败')
+      : tr('Done', '完成');
+  const statusClass = tool.result === undefined ? 'running' : failed ? 'failed' : 'done';
+
+  return <details className={`compact-tool-call expandable-tool-call tool-${tool.name.toLowerCase()}`}>
+    <summary>
+      <span className="compact-tool-icon"><Icon name={toolCallIcon(tool.name)} size={12}/></span>
+      <span className="compact-tool-copy"><strong>{tool.name}</strong>{summary && <span>{summary}</span>}</span>
+      <small className={statusClass}>{statusLabel}</small>
+      {hasDetails && <Icon className="tool-call-chevron" name="chevron-right" size={11}/>}
+    </summary>
+    {hasDetails && <ToolCallDetailBody tool={tool}/>}
+  </details>;
 }
 
 function ExitPlanModeToolCall({ tool, approvalRequest }: { tool: ToolCall; approvalRequest?: ApprovalRequest }) {

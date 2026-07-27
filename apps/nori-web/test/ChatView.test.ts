@@ -1190,6 +1190,60 @@ describe('conversation presentation', () => {
     expect(container.querySelector('.transcript-assistant-output')?.textContent).toContain('The target file is loaded.');
   });
 
+  it('expands tool call details with diff and failure output', async () => {
+    const blocks = [
+      {
+        id: 'tool-edit-1',
+        type: 'tool' as const,
+        tool: {
+          id: 'tool-edit-1',
+          name: 'Edit',
+          args: {
+            path: 'src/a.ts',
+            line_ops: [{ op: 'swap', start: 1, end: 1, content: 'updated' }],
+          },
+          result: 'Updated src/a.ts',
+        },
+      },
+      {
+        id: 'tool-bash-1',
+        type: 'tool' as const,
+        tool: {
+          id: 'tool-bash-1',
+          name: 'Bash',
+          args: { command: 'npm test' },
+          result: 'stderr\nCommand failed with exit code: 1.',
+        },
+      },
+    ];
+    const { container } = await renderChat({
+      messages: [{ id: 'assistant-1', role: 'assistant', text: 'Done.', workBlocks: blocks }],
+      isStreaming: false,
+    });
+
+    const toolCalls = container.querySelectorAll<HTMLDetailsElement>('.expandable-tool-call');
+    expect(toolCalls).toHaveLength(2);
+
+    const editDetails = toolCalls[0]!;
+    expect(editDetails.textContent).toContain('Edit');
+    expect(editDetails.textContent).toContain('src/a.ts');
+    await act(async () => {
+      editDetails.querySelector('summary')?.click();
+      await Promise.resolve();
+    });
+    expect(editDetails.open).toBe(true);
+    expect(editDetails.textContent).toContain('+updated');
+
+    const bashDetails = toolCalls[1]!;
+    expect(bashDetails.textContent).toContain('Failed');
+    await act(async () => {
+      bashDetails.querySelector('summary')?.click();
+      await Promise.resolve();
+    });
+    expect(bashDetails.textContent).toContain('npm test');
+    expect(bashDetails.textContent).toContain('Command failed with exit code: 1.');
+  });
+
   it('renders ordinary live text as normal assistant output while work is active', async () => {
     const { container } = await renderChat({
       messages: [{ id: 'assistant-1', role: 'assistant', text: 'The first inspection pass is complete.' }],
