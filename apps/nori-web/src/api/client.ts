@@ -307,6 +307,7 @@ export interface ProviderCatalogItem {
   base_url?: string;
   default_model?: string;
   has_api_key: boolean;
+  api_key_length?: number;
   status: 'connected' | 'error' | 'unconfigured';
   disabled?: boolean;
   auto_discover?: boolean;

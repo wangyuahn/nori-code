@@ -92,6 +92,35 @@ export interface ProviderCredentialState {
   readonly hasOAuthToken: boolean;
 }
 
+export function configuredApiKeyLength(provider: ProviderConfig): number | undefined {
+  const inline = nonEmpty(provider.apiKey);
+  if (inline !== undefined) return inline.length;
+  const env = provider.env;
+  if (env === undefined) return undefined;
+  switch (provider.type) {
+    case 'anthropic':
+      return nonEmpty(env['ANTHROPIC_API_KEY'])?.length;
+    case 'openai':
+    case 'openai_responses':
+      return nonEmpty(env['OPENAI_API_KEY'])?.length;
+    case 'kimi':
+      return nonEmpty(env['KIMI_API_KEY'])?.length;
+    case 'google-genai':
+      return nonEmpty(env['GOOGLE_API_KEY'])?.length;
+    case 'vertexai': {
+      const vertex = nonEmpty(env['VERTEXAI_API_KEY']);
+      if (vertex !== undefined) return vertex.length;
+      return nonEmpty(env['GOOGLE_API_KEY'])?.length;
+    }
+  }
+}
+
+function nonEmpty(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? undefined : trimmed;
+}
+
 export function toProtocolProvider(
   providerId: string,
   provider: ProviderConfig,
@@ -100,6 +129,7 @@ export function toProtocolProvider(
 ): ProviderCatalogItem {
   const models = modelIdsForProvider(config, providerId);
   const defaultModel = provider.defaultModel ?? globalDefaultForProvider(config, providerId);
+  const apiKeyLength = credential.hasApiKey ? configuredApiKeyLength(provider) : undefined;
   return {
     id: providerId,
     name: provider.name ?? providerId,
@@ -107,6 +137,7 @@ export function toProtocolProvider(
     base_url: provider.baseUrl,
     default_model: defaultModel,
     has_api_key: credential.hasApiKey,
+    api_key_length: apiKeyLength,
     status: provider.disabled
       ? 'error'
       : credential.hasApiKey || credential.hasOAuthToken ? 'connected' : 'unconfigured',
