@@ -30,10 +30,6 @@ export function modelThinkingOptions(
       value,
       kind: value === 'off' || value === 'none' ? 'fast' as const : 'effort' as const,
     }));
-    const hasDisabledChoice = choices.some(choice => choice.value === 'off' || choice.value === 'none');
-    if (!alwaysThinking && !hasDisabledChoice) {
-      choices.unshift({ value: 'off', kind: 'fast' });
-    }
     const selectableEfforts = choices.filter(choice => choice.value !== 'off' && choice.value !== 'none');
     const declaredDefault = model.default_effort;
     const defaultValue = declaredDefault !== undefined

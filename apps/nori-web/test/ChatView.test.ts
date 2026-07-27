@@ -419,11 +419,69 @@ describe('model thinking options', () => {
       default_effort: 'high',
     })).toEqual({
       choices: [
-        { value: 'off', kind: 'fast' },
         { value: 'minimal', kind: 'effort' },
         { value: 'high', kind: 'effort' },
       ],
       defaultValue: 'high',
+    });
+  });
+
+  it('renders every provider-declared effort and sends the selected value', async () => {
+    const onThinkingChange = vi.fn();
+    const reasoningModel: ModelCatalogItem = {
+      ...model('reasoning-model', ['tool_use', 'thinking']),
+      support_efforts: ['low', 'medium', 'high', 'max'],
+      default_effort: 'medium',
+    };
+    const { container } = await renderChat({
+      session: session('reasoning-model'),
+      models: [reasoningModel],
+      onThinkingChange,
+    });
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('.composer-model-trigger')?.click();
+      container.querySelector<HTMLButtonElement>('[data-composer-setting="thinking"] .composer-setting-trigger')?.click();
+      await Promise.resolve();
+    });
+
+    const effortOptions = container.querySelectorAll('[data-composer-setting="thinking"] .composer-setting-options [data-value]');
+    expect(Array.from(effortOptions, option => option.getAttribute('data-value'))).toEqual([
+      'low',
+      'medium',
+      'high',
+      'max',
+    ]);
+    expect(Array.from(effortOptions, option => option.textContent)).toEqual([
+      'Low',
+      'Medium',
+      'High',
+      'Maximum',
+    ]);
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-composer-setting="thinking"] [data-value="max"]')?.click();
+      await Promise.resolve();
+    });
+    expect(onThinkingChange).toHaveBeenCalledWith('max');
+  });
+
+  it('replaces a stale Fast value when the provider only declares concrete efforts', async () => {
+    const onThinkingChange = vi.fn(async () => undefined);
+    await renderChat({
+      session: {
+        ...session('reasoning-model'),
+        agent_config: { model: 'reasoning-model', thinking: 'off' },
+      },
+      models: [{
+        ...model('reasoning-model', ['tool_use', 'thinking']),
+        support_efforts: ['high', 'max'],
+      }],
+      onThinkingChange,
+    });
+
+    await vi.waitFor(() => {
+      expect(onThinkingChange).toHaveBeenCalledWith('max');
     });
   });
 
@@ -508,6 +566,110 @@ describe('interactive user questions', () => {
 });
 
 describe('tool permission controls', () => {
+  it('renders ExitPlanMode as an expanded plan and approves it without a fake choice', async () => {
+    const onResolveApproval = vi.fn(async () => undefined);
+    const request = exitPlanApprovalRequest();
+    const plan = '# Implementation plan\n\n1. Inspect the call path.\n2. Apply the fix.\n\nInline: $T(n) = O(n)$\n\n$$S_{next} = f(S_{current})$$';
+    const { container } = await renderChat({
+      messages: [{ id: 'assistant-plan', role: 'assistant', text: '' }],
+      workBlocks: [{
+        id: 'plan-block',
+        type: 'tool',
+        tool: { id: request.tool_call_id, name: 'ExitPlanMode', args: {} },
+      }],
+      isStreaming: true,
+      pendingApprovals: [{
+        ...request,
+        tool_input_display: { kind: 'plan_review', plan, path: 'C:\\workspace\\plan.md' },
+      }],
+      onResolveApproval,
+    });
+
+    const planDetails = container.querySelector<HTMLDetailsElement>('.exit-plan-tool-call')!;
+    expect(planDetails.open).toBe(true);
+    expect(planDetails.querySelector('.exit-plan-markdown h1')?.textContent).toBe('Implementation plan');
+    expect(planDetails.querySelectorAll('.exit-plan-markdown ol li')).toHaveLength(2);
+    expect(planDetails.querySelectorAll('.exit-plan-markdown .katex')).toHaveLength(2);
+    expect(planDetails.querySelector('.exit-plan-markdown .katex-display')).not.toBeNull();
+    expect(container.querySelector('.approval-choice-list')).toBeNull();
+    expect(container.querySelectorAll('.exit-plan-markdown')).toHaveLength(1);
+    expect(container.querySelector('.approval-card')?.textContent).not.toContain('Implementation plan');
+
+    const allowButton = Array.from(container.querySelectorAll<HTMLButtonElement>('.approval-actions button'))
+      .find(button => button.textContent?.includes('Allow plan'));
+    await act(async () => {
+      allowButton?.click();
+      await Promise.resolve();
+    });
+
+    expect(onResolveApproval).toHaveBeenCalledWith(
+      request.approval_id,
+      'approved',
+      expect.objectContaining({ selectedLabel: 'Approve' }),
+    );
+  });
+
+  it('retains and collapses an ExitPlanMode plan after approval completes', async () => {
+    const request = exitPlanApprovalRequest();
+    const plan = '# Approved work\n\n- Keep this plan visible.';
+    const tool = { id: request.tool_call_id, name: 'ExitPlanMode', args: {} };
+    const { container, props, root } = await renderChat({
+      messages: [{ id: 'assistant-plan', role: 'assistant', text: '' }],
+      workBlocks: [{ id: 'plan-block', type: 'tool', tool }],
+      isStreaming: true,
+      pendingApprovals: [{
+        ...request,
+        tool_input_display: { kind: 'plan_review', plan },
+      }],
+      onResolveApproval: vi.fn(async () => undefined),
+    });
+
+    expect(container.querySelector<HTMLDetailsElement>('.exit-plan-tool-call')?.open).toBe(true);
+
+    await act(async () => {
+      root.render(createElement(I18nProvider, null, createElement(ChatView, {
+        ...props,
+        workBlocks: [{
+          id: 'plan-block',
+          type: 'tool',
+          tool: { ...tool, result: `Plan approved.\n\n## Approved Plan:\n${plan}` },
+        }],
+        pendingApprovals: [],
+      })));
+      await Promise.resolve();
+    });
+
+    const completedDetails = container.querySelector<HTMLDetailsElement>('.exit-plan-tool-call')!;
+    expect(completedDetails.open).toBe(false);
+    expect(completedDetails.querySelector('.exit-plan-markdown')?.textContent).toContain('Approved work');
+    expect(container.querySelector('.approval-dock')).toBeNull();
+  });
+
+  it('starts historical approved ExitPlanMode plans collapsed', async () => {
+    const plan = '# Historical plan\n\n1. Already approved.';
+    const { container } = await renderChat({
+      messages: [{
+        id: 'assistant-plan-history',
+        role: 'assistant',
+        text: 'Implemented.',
+        workBlocks: [{
+          id: 'plan-block-history',
+          type: 'tool',
+          tool: {
+            id: 'plan-tool-history',
+            name: 'ExitPlanMode',
+            args: {},
+            result: `Approved.\n\n## Approved Plan:\n${plan}`,
+          },
+        }],
+      }],
+    });
+
+    const details = container.querySelector<HTMLDetailsElement>('.exit-plan-tool-call')!;
+    expect(details.open).toBe(false);
+    expect(details.querySelector('.exit-plan-markdown')?.textContent).toContain('Historical plan');
+  });
+
   it('switches the session to AUTO before approving the pending tool', async () => {
     const calls: string[] = [];
     const onPermissionChange = vi.fn(async (mode: 'auto' | 'yolo' | 'manual') => {
@@ -1168,6 +1330,22 @@ function approvalRequest(): ApprovalRequest {
     tool_name: 'Bash',
     action: 'Run pnpm test',
     tool_input_display: { kind: 'command', command: 'pnpm test' },
+    created_at: '2026-07-15T00:00:00.000Z',
+    expires_at: '2026-07-15T00:05:00.000Z',
+  };
+}
+
+function exitPlanApprovalRequest(): ApprovalRequest {
+  return {
+    approval_id: 'approval-plan-1',
+    session_id: 'session-1',
+    tool_call_id: 'tool-plan-1',
+    tool_name: 'ExitPlanMode',
+    action: 'Review the implementation plan',
+    tool_input_display: {
+      kind: 'plan_review',
+      plan: '# Plan',
+    },
     created_at: '2026-07-15T00:00:00.000Z',
     expires_at: '2026-07-15T00:05:00.000Z',
   };

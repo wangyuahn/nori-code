@@ -4,7 +4,7 @@ import type { ChatProvider, ModelCapability } from '@nori-code/kosong';
 export interface CompletionBudgetConfig {
   /** Explicit user-configured maximum. */
   readonly hardCap?: number;
-  /** Conservative cap for providers/models whose context window is unknown. */
+  /** Conservative default when the model output limit is not configured. */
   readonly fallback?: number;
 }
 
@@ -55,13 +55,10 @@ export function computeCompletionBudgetCap(args: {
   readonly budget: CompletionBudgetConfig;
   readonly capability: ModelCapability | undefined;
 }): number {
-  const maxCtx = args.capability?.max_context_tokens ?? 0;
-  // The provider backend computes the safe request-specific value from the
-  // serialized prompt. Locally using the largest cap avoids cutting off
-  // thinking before the model produces a summary.
-  const cap =
-    args.budget.hardCap ??
-    (maxCtx > 0 ? maxCtx : args.budget.fallback ?? DEFAULT_UNKNOWN_CONTEXT_FALLBACK);
+  // A context window is an input + output capacity, not a valid per-request
+  // output limit. Providers still receive the context metadata below so they
+  // can tighten an explicit/fallback cap to the remaining window when needed.
+  const cap = args.budget.hardCap ?? args.budget.fallback ?? DEFAULT_UNKNOWN_CONTEXT_FALLBACK;
   return Math.max(MIN_FLOOR, cap);
 }
 

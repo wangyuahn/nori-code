@@ -5,12 +5,16 @@ import { I18nProvider } from './i18n';
 import { initializeTheme } from './theme';
 import { InspectorPopout } from './components/InspectorPopout';
 import type { InspectorTab } from './components/WorkspaceInspector';
+import { ExitPlanModeMockPage } from './components/dev/ExitPlanModeMockPage';
 import './styles/nori-theme.css';
 
 initializeTheme();
 const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+const mockScenario = new URLSearchParams(window.location.search).get('mock');
 const inspector = hashParams.get('inspector') as InspectorTab | null;
-const content = inspector && ['preview', 'changes', 'browser', 'git', 'lsp', 'terminal'].includes(inspector)
+const content = import.meta.env.DEV && mockScenario === 'exit-plan-mode'
+  ? <ExitPlanModeMockPage />
+  : inspector && ['preview', 'changes', 'browser', 'git', 'lsp', 'terminal'].includes(inspector)
   ? <InspectorPopout tab={inspector} sessionId={hashParams.get('session')} path={hashParams.get('path') ?? ''}/>
   : <App />;
 

@@ -10,7 +10,11 @@
  *   - empty-session-list behavior (returns [] / throws not found)
  */
 
-import { describe, expect, it } from 'vitest';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
 
 import type {
   CoreRPC,
@@ -19,8 +23,10 @@ import type {
   ReconnectMcpServerPayload,
   SessionSummary,
 } from '../../src';
+import { ErrorCodes, KimiError } from '../../src';
 
 import {
+  type IEnvironmentService,
   type ICoreProcessService,
   McpServerNotFoundError,
   McpService,
@@ -68,6 +74,28 @@ function fakeSession(id: string, createdAt: number): SessionSummary {
 
 function freshState(): FakeBridgeState {
   return { sessions: [], tools: [], mcpServers: [], reconnectCalls: [] };
+}
+
+const testEnvironment: IEnvironmentService = {
+  _serviceBrand: undefined,
+  homeDir: '/tmp/nori-home',
+  configPath: '/tmp/nori-home/config.toml',
+};
+
+const temporaryHomes: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(temporaryHomes.splice(0).map(path => rm(path, { recursive: true, force: true })));
+});
+
+async function temporaryEnvironment(): Promise<IEnvironmentService> {
+  const homeDir = await mkdtemp(join(tmpdir(), 'nori-mcp-config-'));
+  temporaryHomes.push(homeDir);
+  return {
+    _serviceBrand: undefined,
+    homeDir,
+    configPath: join(homeDir, 'config.toml'),
+  };
 }
 
 // --- Adapter tests ----------------------------------------------------------
@@ -186,7 +214,7 @@ describe('ToolService.list', () => {
 
 describe('McpService.list', () => {
   it('returns [] when no sessions exist (registrar not reachable)', async () => {
-    const svc = new McpService(makeFakeBridge(freshState()));
+    const svc = new McpService(makeFakeBridge(freshState()), testEnvironment);
     expect(await svc.list()).toEqual([]);
   });
 
@@ -199,17 +227,40 @@ describe('McpService.list', () => {
       status: 'connected',
       toolCount: 7,
     });
-    const svc = new McpService(makeFakeBridge(state));
+    const svc = new McpService(makeFakeBridge(state), testEnvironment);
     const out = await svc.list();
     expect(out).toHaveLength(1);
     expect(out[0]!.id).toBe('lark');
     expect(out[0]!.tool_count).toBe(7);
   });
+
+  it('skips unloaded historical sessions and uses the newest loaded session', async () => {
+    const state = freshState();
+    state.sessions.push(fakeSession('loaded', 1), fakeSession('unloaded', 2));
+    state.mcpServers.push({
+      name: 'filesystem',
+      transport: 'stdio',
+      status: 'connected',
+      toolCount: 2,
+    });
+    const bridge = makeFakeBridge(state);
+    const list = bridge.rpc.listMcpServers;
+    bridge.rpc.listMcpServers = async (payload) => {
+      if (payload.sessionId === 'unloaded') {
+        throw new KimiError(ErrorCodes.SESSION_NOT_FOUND, 'session not loaded');
+      }
+      return list(payload);
+    };
+
+    await expect(new McpService(bridge, testEnvironment).list()).resolves.toEqual([
+      expect.objectContaining({ id: 'filesystem', status: 'connected' }),
+    ]);
+  });
 });
 
 describe('McpService.restart', () => {
   it('throws McpServerNotFoundError when no sessions exist', async () => {
-    const svc = new McpService(makeFakeBridge(freshState()));
+    const svc = new McpService(makeFakeBridge(freshState()), testEnvironment);
     await expect(svc.restart('lark')).rejects.toBeInstanceOf(McpServerNotFoundError);
   });
 
@@ -222,7 +273,7 @@ describe('McpService.restart', () => {
       status: 'connected',
       toolCount: 1,
     });
-    const svc = new McpService(makeFakeBridge(state));
+    const svc = new McpService(makeFakeBridge(state), testEnvironment);
     await expect(svc.restart('unknown')).rejects.toBeInstanceOf(McpServerNotFoundError);
   });
 
@@ -235,10 +286,61 @@ describe('McpService.restart', () => {
       status: 'connected',
       toolCount: 1,
     });
-    const svc = new McpService(makeFakeBridge(state));
+    const svc = new McpService(makeFakeBridge(state), testEnvironment);
     const result = await svc.restart('lark');
     expect(result).toEqual({ restarting: true });
     expect(state.reconnectCalls).toHaveLength(1);
     expect(state.reconnectCalls[0]!.name).toBe('lark');
+  });
+});
+
+describe('McpService global configuration', () => {
+  it('reads legacy inferred transports from the global mcp.json', async () => {
+    const environment = await temporaryEnvironment();
+    await writeFile(join(environment.homeDir, 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        local: { command: 'node', args: ['server.mjs'] },
+        remote: { url: 'https://example.test/mcp' },
+      },
+    }));
+
+    const config = await new McpService(makeFakeBridge(freshState()), environment).getConfig();
+
+    expect(config.path).toBe(join(environment.homeDir, 'mcp.json'));
+    expect(config.mcp_servers.local?.transport).toBe('stdio');
+    expect(config.mcp_servers.remote?.transport).toBe('http');
+  });
+
+  it('merges updates, deletes null entries, and preserves unrelated JSON fields', async () => {
+    const environment = await temporaryEnvironment();
+    const configPath = join(environment.homeDir, 'mcp.json');
+    await writeFile(configPath, JSON.stringify({
+      metadata: { owner: 'user' },
+      mcpServers: {
+        keep: { command: 'node', args: ['keep.mjs'] },
+        remove: { command: 'node', args: ['remove.mjs'] },
+      },
+    }));
+    const service = new McpService(makeFakeBridge(freshState()), environment);
+
+    const updated = await service.setConfig({
+      mcp_servers: {
+        remove: null,
+        docs: {
+          transport: 'http',
+          url: 'https://example.test/mcp',
+          enabledTools: ['search'],
+        },
+      },
+    });
+
+    expect(updated.mcp_servers.remove).toBeUndefined();
+    expect(updated.mcp_servers.docs).toMatchObject({ transport: 'http', enabledTools: ['search'] });
+    const persisted = JSON.parse(await readFile(configPath, 'utf8')) as Record<string, unknown>;
+    expect(persisted['metadata']).toEqual({ owner: 'user' });
+    expect(persisted['mcpServers']).toMatchObject({
+      keep: { command: 'node', args: ['keep.mjs'] },
+      docs: { transport: 'http', url: 'https://example.test/mcp' },
+    });
   });
 });

@@ -15,17 +15,19 @@
  * NOT here. The peer-service interfaces stay SDK-shaped.
  */
 
-import type { ApprovalRequest, ApprovalResponse, Event, QuestionRequest, QuestionResult, SDKAPI, ToolCallRequest, ToolCallResponse } from '../../rpc';
+import type { ApprovalRequest, ApprovalResponse, Event, McpElicitationComplete, McpElicitationRequest, McpElicitationResult, QuestionRequest, QuestionResult, SDKAPI, ToolCallRequest, ToolCallResponse } from '../../rpc';
 
 import type { IApprovalService } from '../approval/approval';
 import type { IEventService } from '../event/event';
 import type { ILogService } from '../logger/logger';
 import type { IQuestionService } from '../question/question';
+import type { IMcpElicitationService } from '../mcpElicitation/mcpElicitation';
 
 export interface CoreProcessClientDeps {
   readonly eventService: IEventService;
   readonly approvalService: IApprovalService;
   readonly questionService: IQuestionService;
+  readonly mcpElicitationService?: IMcpElicitationService;
   readonly logService: ILogService;
 }
 
@@ -56,6 +58,19 @@ export class BridgeClientAPI implements SDKAPI {
     options?: { signal?: AbortSignal },
   ): Promise<QuestionResult> {
     return this.deps.questionService.request(request, options);
+  }
+
+  async requestMcpElicitation(
+    request: McpElicitationRequest & { sessionId: string; agentId: string },
+    options?: { signal?: AbortSignal },
+  ): Promise<McpElicitationResult> {
+    return this.deps.mcpElicitationService?.request(request, options) ?? { action: 'cancel' };
+  }
+
+  completeMcpElicitation(
+    notification: McpElicitationComplete & { sessionId: string; agentId: string },
+  ): void {
+    this.deps.mcpElicitationService?.complete(notification);
   }
 
   async toolCall(

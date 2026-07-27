@@ -14,12 +14,14 @@
  * sandboxed.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { pino } from 'pino';
 import {
+  ErrorCode,
+  mcpConfigurationResponseSchema,
   listMcpServersResponseSchema,
   listToolsResponseSchema,
 } from '@nori-code/protocol';
@@ -184,6 +186,55 @@ describe('GET /api/v1/mcp/servers', () => {
     expect(env.code).toBe(0);
     const parsed = listMcpServersResponseSchema.parse(env.data);
     expect(parsed.servers).toEqual([]);
+  });
+});
+
+describe('GET/POST /api/v1/mcp/config', () => {
+  it('persists, reads, and deletes user-global MCP server entries', async () => {
+    const r = await bootDaemon();
+    const save = await appOf(r).inject({
+      method: 'POST',
+      url: '/api/v1/mcp/config',
+      payload: {
+        mcp_servers: {
+          docs: {
+            transport: 'http',
+            url: 'https://example.test/mcp',
+            enabledTools: ['search'],
+          },
+        },
+      },
+    });
+    expect(save.statusCode).toBe(200);
+    const savedEnvelope = envelopeOf<unknown>(save.json());
+    expect(savedEnvelope.code).toBe(0);
+    const saved = mcpConfigurationResponseSchema.parse(savedEnvelope.data);
+    expect(saved.path).toBe(join(bridgeHome, 'mcp.json'));
+    expect(saved.mcp_servers.docs).toMatchObject({ transport: 'http', enabledTools: ['search'] });
+    expect(JSON.parse(readFileSync(join(bridgeHome, 'mcp.json'), 'utf8'))).toMatchObject({
+      mcpServers: { docs: { url: 'https://example.test/mcp' } },
+    });
+
+    const get = await appOf(r).inject({ method: 'GET', url: '/api/v1/mcp/config' });
+    expect(mcpConfigurationResponseSchema.parse(envelopeOf<unknown>(get.json()).data)).toEqual(saved);
+
+    const remove = await appOf(r).inject({
+      method: 'POST',
+      url: '/api/v1/mcp/config',
+      payload: { mcp_servers: { docs: null } },
+    });
+    const removed = mcpConfigurationResponseSchema.parse(envelopeOf<unknown>(remove.json()).data);
+    expect(removed.mcp_servers).toEqual({});
+  });
+
+  it('rejects an invalid remote URL before writing the file', async () => {
+    const r = await bootDaemon();
+    const res = await appOf(r).inject({
+      method: 'POST',
+      url: '/api/v1/mcp/config',
+      payload: { mcp_servers: { bad: { transport: 'http', url: 'not-a-url' } } },
+    });
+    expect(envelopeOf<unknown>(res.json()).code).toBe(ErrorCode.VALIDATION_FAILED);
   });
 });
 

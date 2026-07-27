@@ -94,6 +94,20 @@ const MUL_TOOL: Tool = {
   },
 };
 
+const DIALECT_TAGGED_TOOL: Tool = {
+  name: 'read_file',
+  description: 'Read a file.',
+  parameters: {
+    $schema: 'http://json-schema.org/draft-07/schema#',
+    type: 'object',
+    properties: {
+      path: { type: 'string' },
+    },
+    required: ['path'],
+    additionalProperties: false,
+  },
+};
+
 describe('OpenAIResponsesChatProvider', () => {
   describe('message conversion', () => {
     it('sends system prompt as top-level instructions', async () => {
@@ -660,6 +674,34 @@ describe('OpenAIResponsesChatProvider', () => {
           strict: false,
         },
       ]);
+    });
+
+    it('removes the top-level JSON Schema dialect declaration from tool parameters', async () => {
+      const provider = createProvider();
+      const history: Message[] = [
+        { role: 'user', content: [{ type: 'text', text: 'Read a file' }], toolCalls: [] },
+      ];
+      const body = await captureRequestBody(provider, '', [DIALECT_TAGGED_TOOL], history);
+
+      expect(body['tools']).toEqual([
+        {
+          type: 'function',
+          name: 'read_file',
+          description: 'Read a file.',
+          parameters: {
+            type: 'object',
+            properties: {
+              path: { type: 'string' },
+            },
+            required: ['path'],
+            additionalProperties: false,
+          },
+          strict: false,
+        },
+      ]);
+      expect(DIALECT_TAGGED_TOOL.parameters['$schema']).toBe(
+        'http://json-schema.org/draft-07/schema#',
+      );
     });
 
     it('tool call and tool result', async () => {

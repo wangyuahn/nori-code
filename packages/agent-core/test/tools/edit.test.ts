@@ -1,3 +1,4 @@
+import { computeContentTag } from '@nori-code/kaos';
 import { describe, expect, it, vi } from 'vitest';
 
 import { type EditInput, EditInputSchema, EditTool } from '../../src/tools/builtin/file/edit';
@@ -10,316 +11,370 @@ function context(args: EditInput) {
   return { turnId: '0', toolCallId: 'call_edit', args, signal };
 }
 
-describe('EditTool', () => {
-  it('exposes before/after on the file_io display so the approval panel can render a diff', () => {
-    const tool = new EditTool(createFakeKaos(), PERMISSIVE_WORKSPACE);
-    const execution = tool.resolveExecution({
-      path: '/tmp/foo.ts',
-      old_string: 'a\nb\nc',
-      new_string: 'a\nB\nc',
-    });
-    if (execution.isError === true) {
-      throw new TypeError('expected runnable execution');
-    }
-    expect(execution.display).toEqual({
-      kind: 'file_io',
-      operation: 'edit',
-      path: '/tmp/foo.ts',
-      before: 'a\nb\nc',
-      after: 'a\nB\nc',
-    });
-  });
+function input(
+  content: string,
+  lineOps: EditInput['line_ops'],
+  path = '/tmp/a.txt',
+): EditInput {
+  return {
+    path,
+    expected_tag: computeContentTag(content),
+    line_ops: lineOps,
+  };
+}
 
-  it('exposes current metadata and schema', () => {
+describe('EditTool', () => {
+  it('exposes a strict hash-anchored line operation schema', () => {
     const tool = new EditTool(createFakeKaos(), PERMISSIVE_WORKSPACE);
 
     expect(tool.name).toBe('Edit');
-    expect(tool.description).toContain('Read the target file before every Edit');
-    expect(tool.description).toContain('DO NOT call Edit from memory');
-    expect(tool.description).toContain('Read output view');
-    expect(tool.description).toContain('line-number prefix');
-    expect(tool.description).toContain('`old_string` must be unique');
-    expect(tool.description).toContain('only when they do not target the same file');
-    expect(tool.description).toContain('DO NOT issue consecutive Edit calls on the same file');
-    // replace_all should be framed with its positive rename-across-file use-case.
-    expect(tool.description.toLowerCase()).toContain('renam');
-    // Editing files should go through Edit, not Write and not a Bash `sed`
-    // command. The prompt names both alternatives explicitly.
-    expect(tool.description).toContain('DO NOT use Write or Bash `sed`');
-    // Parallel Edit calls on the same file are serialized and applied in
-    // response order; mismatched old_string fails explicitly.
-    expect(tool.description).toContain('same-file edits in response order');
-    expect(tool.description).toContain('old_string not found');
+    expect(tool.description).toContain('expected_tag');
+    expect(tool.description).toContain('line_ops');
+    expect(tool.description).toContain('re-read');
+    expect(tool.description).toContain('Do not include `-old`');
+    expect(tool.description).toContain('do not widen a `swap`');
+    expect(tool.description).toContain('Do not use Write or Bash `sed`');
     expect(tool.parameters).toMatchObject({
       type: 'object',
       properties: {
-        path: {
-          type: 'string',
-          description: expect.stringContaining('working directory'),
-        },
-        old_string: {
-          type: 'string',
-          description: expect.stringContaining('without the line-number prefix'),
-        },
-        new_string: {
-          type: 'string',
-          description: expect.stringContaining('same Read output view'),
-        },
+        path: { type: 'string' },
+        expected_tag: { type: 'string' },
+        line_ops: { type: 'array' },
       },
+      required: expect.arrayContaining(['path', 'expected_tag', 'line_ops']),
     });
+
     expect(
       EditInputSchema.safeParse({
         path: '/tmp/a.txt',
-        old_string: 'old',
-        new_string: 'new',
+        expected_tag: 'A1B2',
+        line_ops: [{ op: 'del', start: 1, end: 1 }],
       }).success,
     ).toBe(true);
     expect(
       EditInputSchema.safeParse({
         path: '/tmp/a.txt',
-        old_string: '',
-        new_string: 'new',
+        expected_tag: 'A1B2',
+        line_ops: [{ op: 'del', start: 1, end: 1 }],
+        unsupported_field: true,
+      }).success,
+    ).toBe(false);
+    expect(
+      EditInputSchema.safeParse({
+        path: '/tmp/a.txt',
+        expected_tag: 'A1B2',
+        line_ops: [],
+      }).success,
+    ).toBe(false);
+    expect(
+      EditInputSchema.safeParse({
+        path: '/tmp/a.txt',
+        expected_tag: 'not-a-tag',
+        line_ops: [{ op: 'del', start: 1, end: 1 }],
       }).success,
     ).toBe(false);
   });
 
-  it('replaces a unique first occurrence and writes the updated content', async () => {
+  it('shows the expected tag and operations in approval metadata', () => {
+    const tool = new EditTool(createFakeKaos(), PERMISSIVE_WORKSPACE);
+    const execution = tool.resolveExecution({
+      path: '/tmp/foo.ts',
+      expected_tag: 'a1b2',
+      line_ops: [
+        { op: 'swap', start: 2, end: 3, content: 'updated' },
+        { op: 'insert_post', line: 5, content: 'tail' },
+      ],
+    });
+    if (execution.isError === true) throw new TypeError('expected runnable execution');
+
+    expect(execution.display).toEqual({
+      kind: 'file_io',
+      operation: 'edit',
+      path: '/tmp/foo.ts',
+      detail: 'Expected tag: A1B2\nswap 2-3\ninsert after 5',
+    });
+  });
+
+  it('applies swap, delete, insert-before, and insert-after in original coordinates', async () => {
+    const original = ['one', 'two', 'three', 'four', 'five'].join('\n');
     const writeText = vi.fn().mockResolvedValue(0);
     const reportChange = vi.fn();
     const tool = new EditTool(
-      createFakeKaos({
-        readText: vi.fn().mockResolvedValue('alpha beta'),
-        writeText,
-      }),
+      createFakeKaos({ readText: vi.fn().mockResolvedValue(original), writeText }),
       PERMISSIVE_WORKSPACE,
       reportChange,
     );
 
-    const result = await executeTool(tool,
-      context({ path: '/tmp/a.txt', old_string: 'beta', new_string: 'gamma' }),
+    const result = await executeTool(
+      tool,
+      context(
+        input(original, [
+          { op: 'insert_pre', line: 1, content: 'zero' },
+          { op: 'swap', start: 2, end: 2, content: 'TWO\nsecond-extra' },
+          { op: 'del', start: 4, end: 4 },
+          { op: 'insert_post', line: 5, content: 'six' },
+        ]),
+      ),
     );
 
-    expect(result.output).toContain('Replaced 1 occurrence');
-    expect(writeText).toHaveBeenCalledWith('/tmp/a.txt', 'alpha gamma');
+    const expected = ['zero', 'one', 'TWO', 'second-extra', 'three', 'five', 'six'].join('\n');
+    expect(result.isError).toBeFalsy();
+    expect(result.output).toBe(
+      `[/tmp/a.txt#${computeContentTag(expected)}]\nApplied 4 line operations to /tmp/a.txt.`,
+    );
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(writeText).toHaveBeenCalledWith('/tmp/a.txt', expected);
     expect(reportChange).toHaveBeenCalledWith({
-      operationId: expect.any(String),
+      operationId: 'call_edit',
       operation: 'edit',
       path: '/tmp/a.txt',
-      diff: expect.stringMatching(/-alpha beta[\s\S]*\+alpha gamma/),
+      diff: expect.stringContaining('+zero'),
       occurredAt: expect.any(String),
     });
   });
 
-  it('expands leading tilde paths using the kaos home directory', async () => {
-    const readText = vi.fn().mockResolvedValue('alpha beta');
-    const writeText = vi.fn().mockResolvedValue(0);
-    const tool = new EditTool(createFakeKaos({ readText, writeText }), PERMISSIVE_WORKSPACE);
-
-    const result = await executeTool(tool,
-      context({ path: '~/notes/today.txt', old_string: 'beta', new_string: 'gamma' }),
-    );
-
-    expect(result.output).toContain('Replaced 1 occurrence');
-    expect(readText).toHaveBeenCalledWith('/home/test/notes/today.txt');
-    expect(writeText).toHaveBeenCalledWith('/home/test/notes/today.txt', 'alpha gamma');
-  });
-
-  it('treats replacement dollar sequences literally for single edits', async () => {
+  it('rejects a stale tag and returns the live tag without writing', async () => {
+    const original = 'alpha\nbeta\n';
     const writeText = vi.fn().mockResolvedValue(0);
     const tool = new EditTool(
-      createFakeKaos({
-        readText: vi.fn().mockResolvedValue('alpha beta gamma'),
-        writeText,
-      }),
+      createFakeKaos({ readText: vi.fn().mockResolvedValue(original), writeText }),
       PERMISSIVE_WORKSPACE,
     );
 
-    const result = await executeTool(tool,
-      context({ path: '/tmp/a.txt', old_string: 'beta', new_string: "$& $$ $` $'" }),
-    );
-
-    expect(result.output).toContain('Replaced 1 occurrence');
-    expect(writeText).toHaveBeenCalledWith('/tmp/a.txt', "alpha $& $$ $` $' gamma");
-  });
-
-  it('treats replacement dollar sequences literally for replace_all edits', async () => {
-    const writeText = vi.fn().mockResolvedValue(0);
-    const tool = new EditTool(
-      createFakeKaos({
-        readText: vi.fn().mockResolvedValue('a b a'),
-        writeText,
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/a.txt',
+        expected_tag: '0000',
+        line_ops: [{ op: 'swap', start: 2, end: 2, content: 'BETA' }],
       }),
-      PERMISSIVE_WORKSPACE,
-    );
-
-    const result = await executeTool(tool,
-      context({ path: '/tmp/a.txt', old_string: 'a', new_string: '$&', replace_all: true }),
-    );
-
-    expect(result.output).toContain('Replaced 2 occurrences');
-    expect(writeText).toHaveBeenCalledWith('/tmp/a.txt', '$& b $&');
-  });
-
-  it('matches pure CRLF files through the LF model view and writes back CRLF', async () => {
-    const writeText = vi.fn().mockResolvedValue(0);
-    const tool = new EditTool(
-      createFakeKaos({
-        readText: vi.fn().mockResolvedValue('alpha\r\nbeta\r\ngamma\r\n'),
-        writeText,
-      }),
-      PERMISSIVE_WORKSPACE,
-    );
-
-    const result = await executeTool(tool,
-      context({ path: '/tmp/a.txt', old_string: 'alpha\nbeta', new_string: 'one\ntwo' }),
-    );
-
-    expect(result.output).toContain('Replaced 1 occurrence');
-    expect(writeText).toHaveBeenCalledWith('/tmp/a.txt', 'one\r\ntwo\r\ngamma\r\n');
-  });
-
-  it('does not double carriage returns when editing pure CRLF files', async () => {
-    const writeText = vi.fn().mockResolvedValue(0);
-    const tool = new EditTool(
-      createFakeKaos({
-        readText: vi.fn().mockResolvedValue('alpha\r\nbeta\r\n'),
-        writeText,
-      }),
-      PERMISSIVE_WORKSPACE,
-    );
-
-    const result = await executeTool(tool,
-      context({ path: '/tmp/a.txt', old_string: 'alpha\nbeta', new_string: 'one\r\ntwo' }),
-    );
-
-    expect(result.output).toContain('Replaced 1 occurrence');
-    expect(writeText).toHaveBeenCalledWith('/tmp/a.txt', 'one\r\ntwo\r\n');
-  });
-
-  it('keeps mixed line ending files on the raw exact path', async () => {
-    const writeText = vi.fn().mockResolvedValue(0);
-    const tool = new EditTool(
-      createFakeKaos({
-        readText: vi.fn().mockResolvedValue('alpha\r\nbeta\ngamma\r\n'),
-        writeText,
-      }),
-      PERMISSIVE_WORKSPACE,
-    );
-
-    const result = await executeTool(tool,
-      context({ path: '/tmp/a.txt', old_string: 'alpha\nbeta', new_string: 'one\ntwo' }),
     );
 
     expect(result).toMatchObject({ isError: true });
-    expect(result.output).toContain('old_string not found');
+    expect(result.output).toContain('Content tag mismatch');
+    expect(result.output).toContain(`current ${computeContentTag(original)}`);
+    expect(result.output).toContain('Re-read');
     expect(writeText).not.toHaveBeenCalled();
   });
 
-  it('allows exact raw edits in mixed line ending files without normalizing the rest', async () => {
+  it('uses the same tag for LF, CRLF, lone CR, and a leading BOM', () => {
+    expect(computeContentTag('\uFEFFa\r\nb\r')).toBe(computeContentTag('a\nb\n'));
+  });
+
+  it('preserves pure CRLF files and returns the tag for materialized content', async () => {
+    const original = 'alpha\r\nbeta\r\ngamma\r\n';
+    const expected = 'alpha\r\nBETA\r\ngamma\r\n';
     const writeText = vi.fn().mockResolvedValue(0);
     const tool = new EditTool(
-      createFakeKaos({
-        readText: vi.fn().mockResolvedValue('alpha\r\nbeta\ngamma\r\n'),
-        writeText,
-      }),
+      createFakeKaos({ readText: vi.fn().mockResolvedValue(original), writeText }),
       PERMISSIVE_WORKSPACE,
     );
 
-    const result = await executeTool(tool,
-      context({ path: '/tmp/a.txt', old_string: 'alpha\r\nbeta', new_string: 'one\r\ntwo' }),
+    const result = await executeTool(
+      tool,
+      context(input(original, [{ op: 'swap', start: 2, end: 2, content: 'BETA' }])),
     );
 
-    expect(result.output).toContain('Replaced 1 occurrence');
-    expect(writeText).toHaveBeenCalledWith('/tmp/a.txt', 'one\r\ntwo\ngamma\r\n');
+    expect(writeText).toHaveBeenCalledWith('/tmp/a.txt', expected);
+    expect(result.output).toContain(`[/tmp/a.txt#${computeContentTag(expected)}]`);
   });
 
-  it('replace_all replaces every occurrence', async () => {
+  it('preserves a leading BOM without requiring it in replacement content', async () => {
+    const original = '\uFEFFalpha\nbeta';
     const writeText = vi.fn().mockResolvedValue(0);
     const tool = new EditTool(
-      createFakeKaos({
-        readText: vi.fn().mockResolvedValue('a b a'),
-        writeText,
-      }),
+      createFakeKaos({ readText: vi.fn().mockResolvedValue(original), writeText }),
       PERMISSIVE_WORKSPACE,
     );
 
-    const result = await executeTool(tool,
-      context({ path: '/tmp/a.txt', old_string: 'a', new_string: 'x', replace_all: true }),
+    const result = await executeTool(
+      tool,
+      context(input(original, [{ op: 'swap', start: 1, end: 1, content: 'ALPHA' }])),
     );
 
-    expect(result.output).toContain('Replaced 2 occurrences');
-    expect(writeText).toHaveBeenCalledWith('/tmp/a.txt', 'x b x');
+    expect(result.isError).toBeFalsy();
+    expect(writeText).toHaveBeenCalledWith('/tmp/a.txt', '\uFEFFALPHA\nbeta');
   });
 
-  it('rejects no-op edits before file I/O', async () => {
-    const readText = vi.fn().mockResolvedValue('same');
+  it('preserves a trailing newline after line operations', async () => {
+    const original = 'a\nb\n';
     const writeText = vi.fn().mockResolvedValue(0);
-    const tool = new EditTool(createFakeKaos({ readText, writeText }), PERMISSIVE_WORKSPACE);
+    const tool = new EditTool(
+      createFakeKaos({ readText: vi.fn().mockResolvedValue(original), writeText }),
+      PERMISSIVE_WORKSPACE,
+    );
 
-    const result = await executeTool(tool,
-      context({
-        path: '/tmp/a.txt',
-        old_string: 'same',
-        new_string: 'same',
-        replace_all: true,
-      }),
+    await executeTool(
+      tool,
+      context(input(original, [{ op: 'insert_post', line: 2, content: 'c' }])),
+    );
+
+    expect(writeText).toHaveBeenCalledWith('/tmp/a.txt', 'a\nb\nc\n');
+  });
+
+  it('deleting the only line produces an empty file rather than a newline', async () => {
+    const original = 'only\n';
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeKaos({ readText: vi.fn().mockResolvedValue(original), writeText }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    await executeTool(tool, context(input(original, [{ op: 'del', start: 1, end: 1 }])));
+
+    expect(writeText).toHaveBeenCalledWith('/tmp/a.txt', '');
+  });
+
+  it('allows insertions at the outside boundaries of a replaced range', async () => {
+    const original = 'a\nb\nc\nd';
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeKaos({ readText: vi.fn().mockResolvedValue(original), writeText }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context(
+        input(original, [
+          { op: 'insert_pre', line: 2, content: 'before' },
+          { op: 'swap', start: 2, end: 3, content: 'middle' },
+          { op: 'insert_post', line: 3, content: 'after' },
+        ]),
+      ),
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(writeText).toHaveBeenCalledWith('/tmp/a.txt', 'a\nbefore\nmiddle\nafter\nd');
+  });
+
+  it('rejects overlapping replacement ranges before writing', async () => {
+    const original = 'a\nb\nc\nd';
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeKaos({ readText: vi.fn().mockResolvedValue(original), writeText }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context(
+        input(original, [
+          { op: 'swap', start: 1, end: 2, content: 'x' },
+          { op: 'del', start: 2, end: 3 },
+        ]),
+      ),
+    );
+
+    expect(result).toMatchObject({ isError: true });
+    expect(result.output).toContain('overlap');
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('rejects reversed and out-of-bounds ranges before writing', async () => {
+    const original = 'a\nb';
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeKaos({ readText: vi.fn().mockResolvedValue(original), writeText }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const reversed = await executeTool(
+      tool,
+      context(input(original, [{ op: 'del', start: 2, end: 1 }])),
+    );
+    const outside = await executeTool(
+      tool,
+      context(input(original, [{ op: 'swap', start: 3, end: 3, content: 'x' }])),
+    );
+
+    expect(reversed.output).toContain('greater than end');
+    expect(outside.output).toContain('outside the original file');
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('rejects insert anchors inside a multi-line replacement range', async () => {
+    const original = 'a\nb\nc\nd';
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeKaos({ readText: vi.fn().mockResolvedValue(original), writeText }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context(
+        input(original, [
+          { op: 'swap', start: 1, end: 3, content: 'x' },
+          { op: 'insert_pre', line: 2, content: 'ambiguous' },
+        ]),
+      ),
+    );
+
+    expect(result.output).toContain('falls inside range');
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('rejects no-op operations without writing', async () => {
+    const original = 'same';
+    const writeText = vi.fn().mockResolvedValue(0);
+    const tool = new EditTool(
+      createFakeKaos({ readText: vi.fn().mockResolvedValue(original), writeText }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context(input(original, [{ op: 'swap', start: 1, end: 1, content: 'same' }])),
     );
 
     expect(result).toMatchObject({ isError: true });
     expect(result.output).toContain('No changes to make');
-    expect(readText).not.toHaveBeenCalled();
     expect(writeText).not.toHaveBeenCalled();
   });
 
-  it('errors when old_string is missing', async () => {
+  it('rejects line operations against an empty file', async () => {
     const writeText = vi.fn().mockResolvedValue(0);
     const tool = new EditTool(
-      createFakeKaos({
-        readText: vi.fn().mockResolvedValue('alpha beta'),
-        writeText,
-      }),
+      createFakeKaos({ readText: vi.fn().mockResolvedValue(''), writeText }),
       PERMISSIVE_WORKSPACE,
     );
 
-    const result = await executeTool(tool,
-      context({ path: '/tmp/a.txt', old_string: 'delta', new_string: 'gamma' }),
+    const result = await executeTool(
+      tool,
+      context(input('', [{ op: 'insert_pre', line: 1, content: 'first' }])),
     );
 
-    expect(result).toMatchObject({ isError: true });
-    expect(result.output).toContain('old_string not found');
+    expect(result.output).toContain('file is empty');
     expect(writeText).not.toHaveBeenCalled();
   });
 
-  it('errors when old_string is not unique and replace_all is false', async () => {
+  it('expands leading tilde paths through the Kaos home directory', async () => {
+    const original = 'alpha\nbeta';
+    const readText = vi.fn().mockResolvedValue(original);
     const writeText = vi.fn().mockResolvedValue(0);
-    const tool = new EditTool(
-      createFakeKaos({
-        readText: vi.fn().mockResolvedValue('same same'),
-        writeText,
-      }),
-      PERMISSIVE_WORKSPACE,
+    const tool = new EditTool(createFakeKaos({ readText, writeText }), PERMISSIVE_WORKSPACE);
+
+    const result = await executeTool(
+      tool,
+      context(input(original, [{ op: 'swap', start: 2, end: 2, content: 'BETA' }], '~/notes/today.txt')),
     );
 
-    const result = await executeTool(tool,
-      context({ path: '/tmp/a.txt', old_string: 'same', new_string: 'other' }),
-    );
-
-    expect(result).toMatchObject({ isError: true });
-    expect(result.output).toContain('not unique');
-    expect(result.output).toContain('set replace_all=true');
-    expect(result.output).toContain('include more surrounding context');
-    expect(writeText).not.toHaveBeenCalled();
+    expect(result.isError).toBeFalsy();
+    expect(readText).toHaveBeenCalledWith('/home/test/notes/today.txt');
+    expect(writeText).toHaveBeenCalledWith('/home/test/notes/today.txt', 'alpha\nBETA');
   });
 
-  it('rejects relative traversal edits before reading', async () => {
+  it('rejects relative traversal before reading', async () => {
     const readText = vi.fn().mockResolvedValue('secret');
     const tool = new EditTool(createFakeKaos({ readText }), {
       workspaceDir: '/workspace/project',
       additionalDirs: [],
     });
 
-    const result = await executeTool(tool,
-      context({ path: '../outside.txt', old_string: 'secret', new_string: 'x' }),
+    const result = await executeTool(
+      tool,
+      context(input('secret', [{ op: 'del', start: 1, end: 1 }], '../outside.txt')),
     );
 
     expect(result).toMatchObject({ isError: true });
@@ -327,121 +382,39 @@ describe('EditTool', () => {
     expect(readText).not.toHaveBeenCalled();
   });
 
-  it('replaces unicode strings (CJK) and round-trips the surrounding text', async () => {
+  it('supports Unicode replacement content', async () => {
+    const original = 'Hello\n世界';
     const writeText = vi.fn().mockResolvedValue(0);
     const tool = new EditTool(
-      createFakeKaos({
-        readText: vi.fn().mockResolvedValue('Hello 世界! café'),
-        writeText,
-      }),
+      createFakeKaos({ readText: vi.fn().mockResolvedValue(original), writeText }),
       PERMISSIVE_WORKSPACE,
     );
 
-    const result = await executeTool(tool,
-      context({ path: '/tmp/u.txt', old_string: '世界', new_string: '地球' }),
+    await executeTool(
+      tool,
+      context(input(original, [{ op: 'swap', start: 2, end: 2, content: '地球 🌍' }])),
     );
 
-    expect(result.output).toContain('Replaced 1 occurrence');
-    expect(writeText).toHaveBeenCalledWith('/tmp/u.txt', 'Hello 地球! café');
+    expect(writeText).toHaveBeenCalledWith('/tmp/a.txt', 'Hello\n地球 🌍');
   });
 
-  it('leaves the file byte-identical when old_string is not present', async () => {
-    const writeText = vi.fn().mockResolvedValue(0);
-    const original = 'Hello world!';
-    const tool = new EditTool(
-      createFakeKaos({
-        readText: vi.fn().mockResolvedValue(original),
-        writeText,
-      }),
-      PERMISSIVE_WORKSPACE,
-    );
-
-    const result = await executeTool(tool,
-      context({ path: '/tmp/n.txt', old_string: 'notfound', new_string: 'replacement' }),
-    );
-
-    expect(result.isError).toBe(true);
-    // Lockdown the negative side-effect: no write should have been issued.
-    expect(writeText).not.toHaveBeenCalled();
-  });
-
-  it('errors with an is-not-a-file phrasing when the path resolves to a directory', async () => {
-    // py wording is "is not a file"; TS currently relies on readText to fail.
-    // fake-kaos's notImplemented() defaults make this surface a generic
-    // readText error today — fail-divergent until the path-type check moves
-    // upstream of read.
+  it('reports directories as not files', async () => {
+    const original = 'old';
     const tool = new EditTool(
       createFakeKaos({
         readText: vi.fn().mockRejectedValue(
-          Object.assign(new Error('EISDIR: illegal operation on a directory'), {
-            code: 'EISDIR',
-          }),
+          Object.assign(new Error('EISDIR: illegal operation on a directory'), { code: 'EISDIR' }),
         ),
       }),
       PERMISSIVE_WORKSPACE,
     );
 
-    const result = await executeTool(tool,
-      context({ path: '/tmp/dir', old_string: 'old', new_string: 'new' }),
+    const result = await executeTool(
+      tool,
+      context(input(original, [{ op: 'swap', start: 1, end: 1, content: 'new' }], '/tmp/dir')),
     );
 
     expect(result.isError).toBe(true);
     expect(result.output).toContain('is not a file');
-  });
-
-  it('replaces a substring with an empty new_string (deletion)', async () => {
-    const writeText = vi.fn().mockResolvedValue(0);
-    const tool = new EditTool(
-      createFakeKaos({
-        readText: vi.fn().mockResolvedValue('Hello world!'),
-        writeText,
-      }),
-      PERMISSIVE_WORKSPACE,
-    );
-
-    const result = await executeTool(tool,
-      context({ path: '/tmp/e.txt', old_string: 'world', new_string: '' }),
-    );
-
-    expect(result.output).toContain('Replaced 1 occurrence');
-    expect(writeText).toHaveBeenCalledWith('/tmp/e.txt', 'Hello !');
-  });
-
-  it('allows absolute edits outside the workspace under default policy', async () => {
-    const writeText = vi.fn().mockResolvedValue(0);
-    const tool = new EditTool(
-      createFakeKaos({
-        readText: vi.fn().mockResolvedValue('old content'),
-        writeText,
-      }),
-      { workspaceDir: '/workspace', additionalDirs: [] },
-    );
-
-    const result = await executeTool(tool,
-      context({ path: '/tmp/outside.txt', old_string: 'old', new_string: 'new' }),
-    );
-
-    expect(result.isError).toBeFalsy();
-    expect(writeText).toHaveBeenCalledWith('/tmp/outside.txt', 'new content');
-  });
-
-  it('allows absolute edits to a sibling dir that merely shares the work-dir prefix', async () => {
-    // /workspace-sneaky/* is outside /workspace — string prefix check must not
-    // mistake "shares a prefix" for "inside workspace".
-    const writeText = vi.fn().mockResolvedValue(0);
-    const tool = new EditTool(
-      createFakeKaos({
-        readText: vi.fn().mockResolvedValue('content'),
-        writeText,
-      }),
-      { workspaceDir: '/workspace', additionalDirs: [] },
-    );
-
-    const result = await executeTool(tool,
-      context({ path: '/workspace-sneaky/test.txt', old_string: 'content', new_string: 'new' }),
-    );
-
-    expect(result.isError).toBeFalsy();
-    expect(writeText).toHaveBeenCalledWith('/workspace-sneaky/test.txt', 'new');
   });
 });

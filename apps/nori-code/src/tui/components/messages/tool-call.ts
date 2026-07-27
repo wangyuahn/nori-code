@@ -8,7 +8,6 @@ import { isAbsolute, relative, sep } from 'node:path';
 import { Container, Spacer, Text, truncateToWidth, visibleWidth } from '@nori-code/pi-tui';
 import type { Component, TUI } from '@nori-code/pi-tui';
 import { highlightLines, langFromPath } from '#/tui/components/media/code-highlight';
-import { renderDiffLinesClustered } from '#/tui/components/media/diff-preview';
 import {
   COMMAND_PREVIEW_LINES,
   RESULT_PREVIEW_LINES,
@@ -32,6 +31,10 @@ import { agentSwarmResultSummaryFromOutput } from './agent-swarm-progress';
 import { PlanBoxComponent } from './plan-box';
 import { ShellExecutionComponent } from './shell-execution';
 import { countNonEmptyLines, pickChip } from './tool-renderers/chip';
+import {
+  editOperationLabel,
+  parseEditLineOperations,
+} from './tool-renderers/edit-line-ops';
 import { buildGoalToolHeader } from './tool-renderers/goal';
 import { isGenericToolResult, pickResultRenderer } from './tool-renderers/registry';
 import { TruncatedOutputComponent } from './tool-renderers/truncated';
@@ -1914,16 +1917,32 @@ export class ToolCallComponent extends Container {
         );
       }
     } else if (name === 'Edit') {
-      const oldStr = str(this.toolCall.args['old_string']);
-      const newStr = str(this.toolCall.args['new_string']);
-      if (oldStr.length === 0 && newStr.length === 0) return;
       const filePath = str(this.toolCall.args['file_path'] ?? this.toolCall.args['path']);
-      const lines = renderDiffLinesClustered(oldStr, newStr, filePath, {
-        contextLines: 3,
-        ...(shouldCap ? { maxLines: COMMAND_PREVIEW_LINES } : {}),
-      });
+      const operations = parseEditLineOperations(this.toolCall.args);
+      if (operations.length === 0) return;
+      const lang = langFromPath(filePath);
+      const allLines: string[] = [];
+      for (const operation of operations) {
+        allLines.push(currentTheme.dim(editOperationLabel(operation)));
+        if (operation.op === 'del') continue;
+        for (const contentLine of highlightLines(operation.content, lang)) {
+          allLines.push(currentTheme.fg('success', '+ ') + contentLine);
+        }
+      }
+      const lines = shouldCap ? allLines.slice(0, COMMAND_PREVIEW_LINES) : allLines;
       for (const line of lines) {
         this.addChild(new Text(line, 2, 0));
+      }
+      if (shouldCap && allLines.length > lines.length) {
+        this.addChild(
+          new Text(
+            currentTheme.dim(
+              `... (${String(allLines.length - lines.length)} more lines, ctrl+o to expand)`,
+            ),
+            2,
+            0,
+          ),
+        );
       }
     } else if (name === 'Bash' && this.result === undefined) {
       // While a long-running Bash call is in-flight (args finalized, no result

@@ -1,25 +1,13 @@
 import { ErrorCodes, KimiError } from '#/errors';
 import type { McpServerStdioConfig } from '#/config/schema';
 import { proxyEnvForChild, reconcileChildNoProxy } from '#/utils/proxy';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { isAbsolute, resolve } from 'pathe';
 
-import {
-  buildRequestOptions,
-  KIMI_MCP_CLIENT_NAME,
-  KIMI_MCP_CLIENT_VERSION,
-  toMcpToolDefinition,
-  toMcpToolResult,
-  type UnexpectedCloseListener,
-  type UnexpectedCloseReason,
-} from './client-shared';
-import type { MCPClient, MCPToolDefinition, MCPToolResult } from './types';
+import { McpSdkClientBase, type McpSdkClientOptions } from './client-base';
+import type { UnexpectedCloseListener, UnexpectedCloseReason } from './client-shared';
 
-export interface StdioMcpClientOptions {
-  readonly clientName?: string;
-  readonly clientVersion?: string;
-  readonly toolCallTimeoutMs?: number;
+export interface StdioMcpClientOptions extends McpSdkClientOptions {
   readonly defaultCwd?: string;
 }
 
@@ -31,10 +19,8 @@ const STDERR_BUFFER_CAPACITY = 4 * 1024;
  * the caller must `connect()` before use and `close()` to terminate the
  * child process.
  */
-export class StdioMcpClient implements MCPClient {
-  private readonly client: Client;
+export class StdioMcpClient extends McpSdkClientBase {
   private readonly transport: StdioClientTransport;
-  private readonly toolCallTimeoutMs?: number;
   private readonly stderrBuffer = new BoundedTail(STDERR_BUFFER_CAPACITY);
   private started = false;
   private closed = false;
@@ -59,6 +45,7 @@ export class StdioMcpClient implements MCPClient {
     if (config.executor !== undefined && config.executor !== 'local') {
       throw new KimiError(ErrorCodes.NOT_IMPLEMENTED, `MCP stdio executor '${config.executor}' is not yet implemented`);
     }
+    super(options);
     this.transport = new StdioClientTransport({
       command: config.command,
       args: config.args,
@@ -73,11 +60,6 @@ export class StdioMcpClient implements MCPClient {
     this.transport.stderr?.on('data', (chunk: Buffer | string) => {
       this.stderrBuffer.push(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
     });
-    this.client = new Client({
-      name: options.clientName ?? KIMI_MCP_CLIENT_NAME,
-      version: options.clientVersion ?? KIMI_MCP_CLIENT_VERSION,
-    });
-    this.toolCallTimeoutMs = options.toolCallTimeoutMs;
   }
 
   async connect(): Promise<void> {
@@ -137,24 +119,10 @@ export class StdioMcpClient implements MCPClient {
     return this.stderrBuffer.snapshot();
   }
 
-  async listTools(): Promise<MCPToolDefinition[]> {
-    const result = await this.client.listTools();
-    return result.tools.map(toMcpToolDefinition);
-  }
-
-  async callTool(
-    name: string,
-    args: Record<string, unknown>,
-    signal?: AbortSignal,
-  ): Promise<MCPToolResult> {
-    const requestOptions = buildRequestOptions(this.toolCallTimeoutMs, signal);
-    const result = await this.client.callTool({ name, arguments: args }, undefined, requestOptions);
-    return toMcpToolResult(result);
-  }
-
   private async closeStartedClient(): Promise<void> {
     if (!this.started) return;
     this.started = false;
+    this.closeProtocol();
     await this.client.close();
   }
 

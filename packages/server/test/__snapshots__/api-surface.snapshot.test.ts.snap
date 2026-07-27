@@ -35,6 +35,10 @@ exports[`API surface snapshot > matches the documented v1 route table and meta e
     ],
     [
       "DELETE",
+      "/api/v1/providers/{provider_id}",
+    ],
+    [
+      "DELETE",
       "/api/v1/sessions/{session_id}/cron/{cron_id}",
     ],
     [
@@ -83,6 +87,10 @@ exports[`API surface snapshot > matches the documented v1 route table and meta e
     ],
     [
       "GET",
+      "/api/v1/mcp/config",
+    ],
+    [
+      "GET",
       "/api/v1/mcp/servers",
     ],
     [
@@ -115,6 +123,10 @@ exports[`API surface snapshot > matches the documented v1 route table and meta e
     ],
     [
       "GET",
+      "/api/v1/providers/{provider_id}/secret",
+    ],
+    [
+      "GET",
       "/api/v1/sessions",
     ],
     [
@@ -136,6 +148,10 @@ exports[`API surface snapshot > matches the documented v1 route table and meta e
     [
       "GET",
       "/api/v1/sessions/{session_id}/fs/{*}",
+    ],
+    [
+      "GET",
+      "/api/v1/sessions/{session_id}/mcp-elicitations",
     ],
     [
       "GET",
@@ -263,6 +279,10 @@ exports[`API surface snapshot > matches the documented v1 route table and meta e
     ],
     [
       "POST",
+      "/api/v1/mcp/config",
+    ],
+    [
+      "POST",
       "/api/v1/mcp/servers/{tail}",
     ],
     [
@@ -324,6 +344,10 @@ exports[`API surface snapshot > matches the documented v1 route table and meta e
     [
       "POST",
       "/api/v1/sessions/{session_id}/lsp:status",
+    ],
+    [
+      "POST",
+      "/api/v1/sessions/{session_id}/mcp-elicitations/{elicitation_id}",
     ],
     [
       "POST",

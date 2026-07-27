@@ -23,9 +23,17 @@ import {
   listMcpServersResponseSchema,
   listToolsQuerySchema,
   listToolsResponseSchema,
+  mcpConfigurationResponseSchema,
+  patchMcpConfigurationRequestSchema,
   restartMcpServerResultSchema,
 } from '@nori-code/protocol';
-import { IMcpService, IToolService, McpServerNotFoundError, type IInstantiationService } from '@nori-code/agent-core';
+import {
+  IMcpService,
+  IToolService,
+  McpConfigInvalidError,
+  McpServerNotFoundError,
+  type IInstantiationService,
+} from '@nori-code/agent-core';
 
 
 import { errEnvelope, okEnvelope } from '../envelope';
@@ -106,6 +114,55 @@ export function registerToolsRoutes(
     listMcpServersRoute.handler as Parameters<ToolsRouteHost['get']>[2],
   );
 
+  const getMcpConfigurationRoute = defineRoute(
+    {
+      method: 'GET',
+      path: '/mcp/config',
+      success: { data: mcpConfigurationResponseSchema },
+      errors: { [ErrorCode.VALIDATION_FAILED]: {} },
+      description: 'Read the user-global MCP server configuration',
+      tags: ['tools'],
+    },
+    async (req, reply) => {
+      try {
+        const config = await ix.invokeFunction((a) => a.get(IMcpService).getConfig());
+        reply.send(okEnvelope(config, req.id));
+      } catch (err) {
+        sendMappedError(reply, req.id, err);
+      }
+    },
+  );
+  app.get(
+    getMcpConfigurationRoute.path,
+    getMcpConfigurationRoute.options,
+    getMcpConfigurationRoute.handler as Parameters<ToolsRouteHost['get']>[2],
+  );
+
+  const setMcpConfigurationRoute = defineRoute(
+    {
+      method: 'POST',
+      path: '/mcp/config',
+      body: patchMcpConfigurationRequestSchema,
+      success: { data: mcpConfigurationResponseSchema },
+      errors: { [ErrorCode.VALIDATION_FAILED]: {} },
+      description: 'Update the user-global MCP server configuration',
+      tags: ['tools'],
+    },
+    async (req, reply) => {
+      try {
+        const config = await ix.invokeFunction((a) => a.get(IMcpService).setConfig(req.body));
+        reply.send(okEnvelope(config, req.id));
+      } catch (err) {
+        sendMappedError(reply, req.id, err);
+      }
+    },
+  );
+  app.post(
+    setMcpConfigurationRoute.path,
+    setMcpConfigurationRoute.options,
+    setMcpConfigurationRoute.handler as Parameters<ToolsRouteHost['post']>[2],
+  );
+
   // POST /mcp/servers/{mcp_server_id}:restart ---------------------------
   const restartMcpServerRoute = defineRoute(
     {
@@ -170,6 +227,10 @@ function sendMappedError(
 ): void {
   if (err instanceof McpServerNotFoundError) {
     reply.send(errEnvelope(ErrorCode.MCP_SERVER_NOT_FOUND, err.message, requestId));
+    return;
+  }
+  if (err instanceof McpConfigInvalidError) {
+    reply.send(errEnvelope(ErrorCode.VALIDATION_FAILED, err.message, requestId));
     return;
   }
   throw err;

@@ -581,9 +581,17 @@ function convertTool(tool: Tool): ResponseToolParam {
     type: 'function',
     name: tool.name,
     description: tool.description,
-    parameters: tool.parameters,
+    parameters: stripToolSchemaDialect(tool.parameters),
     strict: false,
   };
+}
+
+function stripToolSchemaDialect(
+  parameters: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(parameters).filter(([key]) => key !== '$schema'),
+  );
 }
 
 /**

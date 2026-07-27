@@ -29,11 +29,15 @@ describe('chip registry', () => {
     expect(pickChip('Bash')).toBeUndefined();
   });
 
-  it('Edit chip shows +N -M from args diff', () => {
+  it('Edit chip shows +N -M from line operations', () => {
     const c = chipFor(
       'Edit',
-      { path: 'foo.ts', old_string: 'a\nb\nc', new_string: 'a\nB\nc\nd' },
-      result('Replaced 1 occurrence in foo.ts'),
+      {
+        path: 'foo.ts',
+        expected_tag: 'A1B2',
+        line_ops: [{ op: 'swap', start: 2, end: 2, content: 'B\nd' }],
+      },
+      result('[foo.ts#C3D4]\nApplied 1 line operation to foo.ts.'),
     );
     expect(c).toMatch(/\+\d+/);
     expect(c).toMatch(/-\d+/);
@@ -122,23 +126,35 @@ describe('computeWriteStats', () => {
 });
 
 describe('computeEditStats', () => {
-  it('returns zero when both strings are empty', () => {
+  it('returns zero when line operations are absent', () => {
     expect(computeEditStats({})).toEqual({ added: 0, removed: 0 });
-    expect(computeEditStats({ old_string: '', new_string: '' })).toEqual({
+    expect(computeEditStats({ line_ops: [] })).toEqual({
       added: 0,
       removed: 0,
     });
   });
 
-  it('counts added and removed lines for a replacement', () => {
-    const stats = computeEditStats({ old_string: 'a\nb\nc', new_string: 'a\nB\nc\nd' });
-    expect(stats.added).toBeGreaterThan(0);
-    expect(stats.removed).toBeGreaterThan(0);
+  it('counts added and removed lines for swap and delete operations', () => {
+    const stats = computeEditStats({
+      line_ops: [
+        { op: 'swap', start: 2, end: 3, content: 'B\nC\nD' },
+        { op: 'del', start: 5, end: 5 },
+      ],
+    });
+    expect(stats).toEqual({ added: 3, removed: 3 });
   });
 
-  it('counts only adds when old is empty', () => {
-    const stats = computeEditStats({ old_string: '', new_string: 'x\ny\nz' });
+  it('counts only additions for insertion operations', () => {
+    const stats = computeEditStats({
+      line_ops: [{ op: 'insert_post', line: 4, content: 'x\ny\nz' }],
+    });
     expect(stats.added).toBe(3);
     expect(stats.removed).toBe(0);
+  });
+
+  it('counts an empty operation content as an inserted blank line', () => {
+    expect(computeEditStats({
+      line_ops: [{ op: 'insert_pre', line: 1, content: '' }],
+    })).toEqual({ added: 1, removed: 0 });
   });
 });

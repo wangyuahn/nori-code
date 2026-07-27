@@ -82,6 +82,55 @@ describe('BrowserPanel', () => {
     }
   });
 
+  it('keeps full viewport bounds and renders a captured page behind an overlapping menu', async () => {
+    vi.stubGlobal('ResizeObserver', TestResizeObserver);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 240, y: 120, left: 240, top: 120, right: 840, bottom: 620,
+      width: 600, height: 500, toJSON: () => ({}),
+    });
+    const state: NoriBrowserState = {
+      activeTabId: 'tab-1',
+      visible: true,
+      tabs: [{ id: 'tab-1', url: 'https://example.com', title: 'Example', canGoBack: false, canGoForward: false, loading: false }],
+    };
+    const desktop: NoriDesktopAPI = {
+      browserGetState: vi.fn(async () => state),
+      browserSetVisible: vi.fn(async visible => ({ ...state, visible })),
+      browserSetOccluded: vi.fn(async occluded => ({
+        occluded,
+        previewDataUrl: occluded ? 'data:image/png;base64,cHJldmlldw==' : null,
+      })),
+      browserResize: vi.fn(),
+      onBrowserState: () => () => undefined,
+    };
+    window.noriDesktop = desktop;
+
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(BrowserPanel, { occluded: true })));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(desktop.browserResize).toHaveBeenCalledWith({ x: 240, y: 120, width: 600, height: 500 });
+      expect(desktop.browserSetOccluded).toHaveBeenCalledWith(true);
+      expect(container.querySelector<HTMLImageElement>('.browser-occlusion-preview')?.src).toBe('data:image/png;base64,cHJldmlldw==');
+
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(BrowserPanel, { occluded: false })));
+        await Promise.resolve();
+      });
+      expect(desktop.browserSetOccluded).toHaveBeenCalledWith(false);
+      expect(container.querySelector('.browser-occlusion-preview')).toBeNull();
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
   it('forwards permission, dialog, download, and network controls to the desktop bridge', async () => {
     vi.stubGlobal('ResizeObserver', TestResizeObserver);
     const state: NoriBrowserState = {

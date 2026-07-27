@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type UIEvent } from 'react';
-import { api, type ApprovalRequest, type ModelCatalogItem, type PromptAttachment, type PromptExecutionOptions, type QuestionAnswer, type QuestionRequest, type Session, type SessionAgentConfig, type SessionRealtimeStatus, type TokenUsage } from '../api/client';
+import { api, type ApprovalRequest, type McpElicitationRequest, type McpElicitationResponse, type ModelCatalogItem, type PromptAttachment, type PromptExecutionOptions, type QuestionAnswer, type QuestionRequest, type Session, type SessionAgentConfig, type SessionRealtimeStatus, type TokenUsage } from '../api/client';
 import type { ChatMessage, QueuedPrompt, TodoItem, ToolCall, WorkBlock } from '../hooks/useChatMessages';
 import { useBrowserPermissions } from '../hooks/useBrowser';
 import { useI18n } from '../i18n';
@@ -11,9 +11,11 @@ import { Icon, type IconName } from './Icon';
 import { ApprovalPanel } from './ApprovalPanel';
 import { MarkdownView } from './MarkdownView';
 import { QuestionPanel } from './QuestionPanel';
+import { McpElicitationPanel } from './McpElicitationPanel';
 import { SkillPicker } from './SkillPicker';
 import { UsageOverview } from './UsageOverview';
 import { detectImageMime, isLikelyImageFile } from '../utils/image-mime';
+import { editLineOperationStats } from '../utils/edit-line-ops';
 
 export interface ChatViewProps {
   session: Session | null;
@@ -46,6 +48,8 @@ export interface ChatViewProps {
   pendingQuestions?: QuestionRequest[];
   onResolveQuestion?: (questionId: string, answers: Record<string, QuestionAnswer>) => void | Promise<void>;
   onDismissQuestion?: (questionId: string) => void | Promise<void>;
+  pendingMcpElicitations?: McpElicitationRequest[];
+  onResolveMcpElicitation?: (elicitationId: string, response: McpElicitationResponse) => void | Promise<void>;
   queuedPrompts?: QueuedPrompt[];
   todos?: TodoItem[];
   onCancelQueuedPrompt?: (promptId: string) => void | Promise<void>;
@@ -132,6 +136,7 @@ function thinkingChoiceLabel(choice: { value: string; kind: 'fast' | 'think' | '
     medium: tr('Medium', '中'),
     high: tr('High', '高'),
     xhigh: tr('Extra high', '极高'),
+    max: tr('Maximum', '最大'),
   };
   return labels[choice.value] ?? choice.value;
 }
@@ -174,7 +179,7 @@ function ComposerSettingPicker({ id, label, ariaLabel, value, choices, open, dis
 }
 
 export function ChatView(props: ChatViewProps) {
-  const { session, allSessions = [], messages, messagesLoading = false, streaming, thinking, workBlocks = [], isStreaming, sessionStatus, compacting = false, models, modelsLoading, modelError, onSendMessage, onAbort, onRefreshModels, onModelChange, onThinkingChange, onPermissionChange, onTaskModeChange, onRunSlashCommand, onMainWriteChange, pendingApprovals = [], onResolveApproval, pendingQuestions = [], onResolveQuestion, onDismissQuestion, queuedPrompts = [], onCancelQueuedPrompt, draftAgentConfig, rewindLimit = 10, onRewind } = props;
+  const { session, allSessions = [], messages, messagesLoading = false, streaming, thinking, workBlocks = [], isStreaming, sessionStatus, compacting = false, models, modelsLoading, modelError, onSendMessage, onAbort, onRefreshModels, onModelChange, onThinkingChange, onPermissionChange, onTaskModeChange, onRunSlashCommand, onMainWriteChange, pendingApprovals = [], onResolveApproval, pendingQuestions = [], onResolveQuestion, onDismissQuestion, pendingMcpElicitations = [], onResolveMcpElicitation, queuedPrompts = [], onCancelQueuedPrompt, draftAgentConfig, rewindLimit = 10, onRewind } = props;
   const { tr } = useI18n();
   const browserPermissions = useBrowserPermissions();
   const [input, setInput] = useState('');
@@ -211,6 +216,7 @@ export function ChatView(props: ChatViewProps) {
   const imageInputRef = useRef<HTMLInputElement>(null);
   const permissionMenuRef = useRef<HTMLDivElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
+  const thinkingCorrectionRef = useRef('');
   const currentSessionId = session?.id ?? null;
   const activeModelOverride = modelOverrideSessionRef.current === currentSessionId ? modelOverride : null;
   const activeTaskModeOverride = taskModeOverrideSessionRef.current === currentSessionId ? taskModeOverride : null;
@@ -221,6 +227,7 @@ export function ChatView(props: ChatViewProps) {
   const selectedModel = models.find(model => model.model === selectedModelId);
   const thinkingOptions = modelThinkingOptions(selectedModel);
   const selectedThinking = session?.agent_config?.thinking ?? draftAgentConfig?.thinking ?? thinkingOptions.defaultValue;
+  const thinkingChoiceKey = thinkingOptions.choices.map(choice => choice.value).join('\u0000');
   const selectedPermission = session?.agent_config?.permission_mode ?? draftAgentConfig?.permission_mode ?? 'manual';
   const persistedTaskMode = (sessionStatus?.plan_mode ?? session?.agent_config?.plan_mode ?? draftAgentConfig?.plan_mode) ? 'plan' : 'code';
   const selectedTaskMode = activeTaskModeOverride ?? persistedTaskMode;
@@ -432,6 +439,19 @@ export function ChatView(props: ChatViewProps) {
     };
   }, [composerRevision, restoreRewindFocus]);
   useEffect(() => { setModelNotice(false); }, [selectedModelId, session?.id]);
+  useEffect(() => {
+    if (selectedModel === undefined || isStreaming || thinkingOptions.choices.length === 0) return;
+    if (thinkingOptions.choices.some(choice => choice.value === selectedThinking)) {
+      thinkingCorrectionRef.current = '';
+      return;
+    }
+    const correctionKey = `${currentSessionId ?? 'draft'}\u0000${selectedModelId}\u0000${selectedThinking}\u0000${thinkingOptions.defaultValue}`;
+    if (thinkingCorrectionRef.current === correctionKey) return;
+    thinkingCorrectionRef.current = correctionKey;
+    void Promise.resolve(onThinkingChange(thinkingOptions.defaultValue)).catch(() => {
+      if (thinkingCorrectionRef.current === correctionKey) thinkingCorrectionRef.current = '';
+    });
+  }, [currentSessionId, isStreaming, onThinkingChange, selectedModel, selectedModelId, selectedThinking, thinkingChoiceKey, thinkingOptions.defaultValue]);
   useEffect(() => { setTaskModeOverride(null); }, [session?.id]);
   useEffect(() => { setModelOverride(null); }, [session?.id]);
   useEffect(() => { setMainWriteOverride(null); }, [session?.id]);
@@ -642,7 +662,7 @@ export function ChatView(props: ChatViewProps) {
         return;
       }
     }
-    if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && !isStreaming && pendingApprovals.length === 0 && browserPermissions.pending.length === 0 && pendingQuestions.length === 0) {
+    if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && !isStreaming && pendingApprovals.length === 0 && browserPermissions.pending.length === 0 && pendingQuestions.length === 0 && pendingMcpElicitations.length === 0) {
       event.preventDefault();
       void changeTaskMode(selectedTaskMode === 'plan' ? 'code' : 'plan');
       return;
@@ -756,9 +776,9 @@ export function ChatView(props: ChatViewProps) {
   return <section className="chat-view" aria-label={tr('Conversation', '对话')}>
     <div className="chat-messages-shell">
     <div className="chat-messages" ref={messagesScrollRef} onScroll={handleMessagesScroll}>
-      {messagesLoading ? <div className="chat-history-loading" role="status"><span className="spinner"/><strong>{tr('Loading conversation…', '正在加载会话…')}</strong></div> : messages.length === 0 ? <div className="chat-welcome"><div className="welcome-mark"><Icon name="sparkles" size={27}/></div><span className="eyebrow">{tr('Your thoughtful coding partner', '你的智能编程伙伴')}</span><h2>{session ? tr('What should we make better?', '我们要改进什么？') : tr('What would you like to work on?', '你想从哪里开始？')}</h2><p>{session ? tr('Ask Nori to inspect code, plan a feature, fix a bug, or validate an API integration.', '让 Nori 检查代码、规划功能、修复缺陷或验证 API 集成。') : tr('Choose a project folder to start a new task, or open an existing conversation from the sidebar. You can also type below now.', '选择一个项目文件夹开始新任务，或从左侧打开已有对话。你也可以直接在下方输入。')}</p><UsageOverview sessions={allSessions} models={models}/><div className="starter-grid">{STARTERS.map(item => <button key={item.title} className="starter-card" onClick={() => void handleSend(tr(item.prompt, item.promptZh))}><Icon name="sparkles" size={16}/><span><strong>{tr(item.title, item.titleZh)}</strong><small>{tr(item.prompt, item.promptZh)}</small></span></button>)}</div></div> : presentedMessages.map(({ message, workStartedAt }, index) => <MessageBubble key={message.id} message={message} workStartedAt={workStartedAt} rewindCount={rewindCounts.get(message.id)} onRewind={handleRewind} live={isStreaming && index === presentedMessages.length - 1 && message.role === 'assistant' ? { streaming, thinking, workBlocks, stopping, onAbort: handleAbort } : undefined}/>) }
+      {messagesLoading ? <div className="chat-history-loading" role="status"><span className="spinner"/><strong>{tr('Loading conversation…', '正在加载会话…')}</strong></div> : messages.length === 0 ? <div className="chat-welcome"><div className="welcome-mark"><Icon name="sparkles" size={27}/></div><span className="eyebrow">{tr('Your thoughtful coding partner', '你的智能编程伙伴')}</span><h2>{session ? tr('What should we make better?', '我们要改进什么？') : tr('What would you like to work on?', '你想从哪里开始？')}</h2><p>{session ? tr('Ask Nori to inspect code, plan a feature, fix a bug, or validate an API integration.', '让 Nori 检查代码、规划功能、修复缺陷或验证 API 集成。') : tr('Choose a project folder to start a new task, or open an existing conversation from the sidebar. You can also type below now.', '选择一个项目文件夹开始新任务，或从左侧打开已有对话。你也可以直接在下方输入。')}</p><UsageOverview sessions={allSessions} models={models}/><div className="starter-grid">{STARTERS.map(item => <button key={item.title} className="starter-card" onClick={() => void handleSend(tr(item.prompt, item.promptZh))}><Icon name="sparkles" size={16}/><span><strong>{tr(item.title, item.titleZh)}</strong><small>{tr(item.prompt, item.promptZh)}</small></span></button>)}</div></div> : presentedMessages.map(({ message, workStartedAt }, index) => <MessageBubble key={message.id} message={message} workStartedAt={workStartedAt} rewindCount={rewindCounts.get(message.id)} onRewind={handleRewind} approvalRequests={pendingApprovals} live={isStreaming && index === presentedMessages.length - 1 && message.role === 'assistant' ? { streaming, thinking, workBlocks, stopping, onAbort: handleAbort } : undefined}/>) }
 
-      {isStreaming && !streamingContinuesAssistant && <div className="chat-message chat-message-assistant chat-message-streaming"><div className="message-body"><div className="chat-message-role">Nori <span>{pendingApprovals.length > 0 || browserPermissions.pending.length > 0 ? tr('waiting for permission', '等待授权') : tr('working', '工作中')}</span></div>{standaloneLiveBlocks.length > 0 ? <LiveWorkStream blocks={standaloneLiveBlocks} activeProgressId={standaloneLiveProgressId} startedAt={latestUserStartedAt}/> : <div className="chat-message-content"><span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span><span className="streaming-cursor"/></div>}{streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(streaming))} tokens</div>}<button className="chat-abort-btn" onClick={() => void handleAbort()} disabled={stopping}><Icon name="stop" size={13}/> {stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button></div></div>}
+      {isStreaming && !streamingContinuesAssistant && <div className="chat-message chat-message-assistant chat-message-streaming"><div className="message-body"><div className="chat-message-role">Nori <span>{pendingApprovals.length > 0 || browserPermissions.pending.length > 0 ? tr('waiting for permission', '等待授权') : tr('working', '工作中')}</span></div>{standaloneLiveBlocks.length > 0 ? <LiveWorkStream blocks={standaloneLiveBlocks} activeProgressId={standaloneLiveProgressId} startedAt={latestUserStartedAt} approvalRequests={pendingApprovals}/> : <div className="chat-message-content"><span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span><span className="streaming-cursor"/></div>}{streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(streaming))} tokens</div>}<button className="chat-abort-btn" onClick={() => void handleAbort()} disabled={stopping}><Icon name="stop" size={13}/> {stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button></div></div>}
       <div ref={messagesEndRef}/>
     </div>
     {turnPreviews.length > 0 && <nav className="chat-turn-rail" style={{ height: `${Math.min(360, Math.max(54, turnPreviews.length * 14))}px` }} aria-label={tr('Conversation turns', '对话轮次')} onPointerMove={event => {
@@ -778,6 +798,7 @@ export function ChatView(props: ChatViewProps) {
 
     <div className="chat-composer-wrap">
       {!followOutput && <button className="chat-jump-latest" onClick={jumpToLatest} title={tr('Jump to latest', '回到最新消息')} aria-label={tr('Jump to latest', '回到最新消息')}><Icon name="chevron-down" size={16}/></button>}
+      {pendingMcpElicitations.length > 0 && onResolveMcpElicitation && <McpElicitationPanel requests={pendingMcpElicitations} onResolve={onResolveMcpElicitation}/>}
       {pendingQuestions.length > 0 && onResolveQuestion && onDismissQuestion && <QuestionPanel requests={pendingQuestions} onSubmit={onResolveQuestion} onDismiss={onDismissQuestion}/>}
       {((pendingApprovals.length > 0 && onResolveApproval !== undefined) || browserPermissions.pending.length > 0) && <ApprovalPanel
         requests={onResolveApproval === undefined ? [] : pendingApprovals}
@@ -875,7 +896,7 @@ function formatElapsedDuration(durationMs: number): string {
   return `${hours}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
 }
 
-function MessageBubble({ message, workStartedAt, rewindCount, onRewind, live }: { message: ChatMessage; workStartedAt?: number; rewindCount?: number; onRewind?: (count: number) => void | Promise<void>; live?: LiveAssistantContinuation }) {
+function MessageBubble({ message, workStartedAt, rewindCount, onRewind, approvalRequests = [], live }: { message: ChatMessage; workStartedAt?: number; rewindCount?: number; onRewind?: (count: number) => void | Promise<void>; approvalRequests?: ApprovalRequest[]; live?: LiveAssistantContinuation }) {
   const { tr } = useI18n();
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
@@ -913,10 +934,10 @@ function MessageBubble({ message, workStartedAt, rewindCount, onRewind, live }: 
     }} title={tr('Rewind to before this prompt', '回溯到此提问之前')}><Icon name="refresh" size={12}/>{tr('Rewind', '回溯')}</button>}</div>}
       {live !== undefined
         ? hasLiveTranscript
-          ? <LiveWorkStream blocks={liveTranscriptBlocks} activeProgressId={liveProgressId} startedAt={workStartedAt}/>
+          ? <LiveWorkStream blocks={liveTranscriptBlocks} activeProgressId={liveProgressId} startedAt={workStartedAt} approvalRequests={approvalRequests}/>
           : null
         : hasWork
-          ? <WorkProcess blocks={storedBlocks} startedAt={workStartedAt} durationMs={workDurationMs}/>
+          ? <WorkProcess blocks={storedBlocks} startedAt={workStartedAt} durationMs={workDurationMs} approvalRequests={approvalRequests}/>
           : null}
       {message.images && message.images.length > 0 && <div className="chat-message-images">{message.images.map((image, index) => <img key={`${image.src.slice(0, 80)}-${String(index)}`} src={image.src} alt={image.alt} loading="lazy" />)}</div>}
       {(text || (live && !hasWork)) && <div className="chat-message-content">{text ? (isUser || isSystem ? text : <MarkdownView content={text} />) : <span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span>}{live && !hasWork && <span className="streaming-cursor"/>}</div>}{message.usage && <TokenUsageLine usage={message.usage} />}{live?.streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(live.streaming))} tokens</div>}{live && <button className="chat-abort-btn" onClick={() => void live.onAbort()} disabled={live.stopping}><Icon name="stop" size={13}/> {live.stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button>}{message.createdAt && <time className="chat-message-time">{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>}
@@ -924,7 +945,7 @@ function MessageBubble({ message, workStartedAt, rewindCount, onRewind, live }: 
   </article>;
 }
 
-function WorkProcess({ blocks, live = false, activeProgressId, startedAt, durationMs }: { blocks: WorkBlock[]; live?: boolean; activeProgressId?: string; startedAt?: number; durationMs?: number }) {
+function WorkProcess({ blocks, live = false, activeProgressId, startedAt, durationMs, approvalRequests = [] }: { blocks: WorkBlock[]; live?: boolean; activeProgressId?: string; startedAt?: number; durationMs?: number; approvalRequests?: ApprovalRequest[] }) {
   const { tr } = useI18n();
   const [open, setOpen] = useState(live);
   const fallbackStartedAtRef = useRef(Date.now());
@@ -967,12 +988,12 @@ function WorkProcess({ blocks, live = false, activeProgressId, startedAt, durati
         const isActive = live && block.id === activeProgressId;
         return <TranscriptOutput key={block.id} text={block.text} streaming={isActive}/>;
       }
-      return <CompactToolCall key={block.id} tool={block.tool}/>;
+      return <CompactToolCall key={block.id} tool={block.tool} approvalRequest={approvalForTool(block.tool, approvalRequests)}/>;
     })}</div>
   </details>;
 }
 
-function LiveWorkStream({ blocks, activeProgressId, startedAt }: { blocks: WorkBlock[]; activeProgressId?: string; startedAt?: number }) {
+function LiveWorkStream({ blocks, activeProgressId, startedAt, approvalRequests = [] }: { blocks: WorkBlock[]; activeProgressId?: string; startedAt?: number; approvalRequests?: ApprovalRequest[] }) {
   const { tr } = useI18n();
   const fallbackStartedAtRef = useRef(Date.now());
   const [clockNow, setClockNow] = useState(Date.now);
@@ -986,7 +1007,7 @@ function LiveWorkStream({ blocks, activeProgressId, startedAt }: { blocks: WorkB
     <div className="live-work-status"><Icon name="sparkles" size={12}/><span>{tr('Working', '处理中')}</span><time className="live-work-elapsed" title={tr(`Elapsed ${elapsedLabel}`, `耗时 ${elapsedLabel}`)}>{elapsedLabel}</time></div>
     {blocks.map(block => {
       if (block.type === 'thinking') return <ThoughtDisclosure key={block.id} text={block.text} live/>;
-      if (block.type === 'tool') return <CompactToolCall key={block.id} tool={block.tool}/>;
+      if (block.type === 'tool') return <CompactToolCall key={block.id} tool={block.tool} approvalRequest={approvalForTool(block.tool, approvalRequests)}/>;
       const active = block.id === activeProgressId;
       return <TranscriptOutput key={block.id} text={block.text} streaming={active}/>;
     })}
@@ -1005,7 +1026,8 @@ function ThoughtDisclosure({ text, live = false }: { text: string; live?: boolea
   </details>;
 }
 
-function CompactToolCall({ tool }: { tool: ToolCall }) {
+function CompactToolCall({ tool, approvalRequest }: { tool: ToolCall; approvalRequest?: ApprovalRequest }) {
+  if (isExitPlanModeTool(tool.name)) return <ExitPlanModeToolCall tool={tool} approvalRequest={approvalRequest}/>;
   const { tr } = useI18n();
   const summary = summarizeToolCall(tool, tr);
   return <div className={`compact-tool-call tool-${tool.name.toLowerCase()}`} title={tool.result?.slice(0, 600)}>
@@ -1013,6 +1035,74 @@ function CompactToolCall({ tool }: { tool: ToolCall }) {
     <span className="compact-tool-copy"><strong>{tool.name}</strong>{summary && <span>{summary}</span>}</span>
     <small className={tool.result === undefined ? 'running' : 'done'}>{tool.result === undefined ? tr('Running', '运行中') : tr('Done', '完成')}</small>
   </div>;
+}
+
+function ExitPlanModeToolCall({ tool, approvalRequest }: { tool: ToolCall; approvalRequest?: ApprovalRequest }) {
+  const { tr } = useI18n();
+  const pendingPlan = planFromApproval(approvalRequest);
+  const resultPlan = approvedPlanFromResult(tool.result);
+  const nextPlan = pendingPlan ?? resultPlan;
+  const [retainedPlan, setRetainedPlan] = useState(nextPlan ?? '');
+  const pending = approvalRequest !== undefined;
+  const [open, setOpen] = useState(pending && Boolean(nextPlan));
+  const wasPendingRef = useRef(pending);
+
+  useEffect(() => {
+    if (nextPlan !== undefined) setRetainedPlan(nextPlan);
+  }, [nextPlan]);
+
+  useEffect(() => {
+    if (pending && !wasPendingRef.current) setOpen(true);
+    if (!pending && wasPendingRef.current) setOpen(false);
+    wasPendingRef.current = pending;
+  }, [pending]);
+
+  const path = planPathFromApproval(approvalRequest);
+  const status = pending
+    ? tr('Awaiting approval', '等待授权')
+    : tool.result === undefined
+      ? tr('Running', '运行中')
+      : tr('Done', '完成');
+
+  return <details className="compact-tool-call exit-plan-tool-call" open={open} onToggle={event => setOpen(event.currentTarget.open)}>
+    <summary>
+      <span className="compact-tool-icon"><Icon name="list" size={12}/></span>
+      <span className="compact-tool-copy"><strong>{tr('Plan', '执行计划')}</strong>{path && <span title={path}>{path}</span>}</span>
+      <small className={tool.result === undefined ? 'running' : 'done'}>{status}</small>
+      <Icon className="exit-plan-chevron" name="chevron-right" size={11}/>
+    </summary>
+    {retainedPlan && <div className="exit-plan-markdown"><MarkdownView content={retainedPlan}/></div>}
+  </details>;
+}
+
+function approvalForTool(tool: ToolCall, approvals: readonly ApprovalRequest[]): ApprovalRequest | undefined {
+  if (!tool.id) return undefined;
+  return approvals.find(request => request.tool_call_id === tool.id);
+}
+
+function isExitPlanModeTool(name: string): boolean {
+  return name.replaceAll(/[-_\s]/g, '').toLowerCase() === 'exitplanmode';
+}
+
+function planFromApproval(request: ApprovalRequest | undefined): string | undefined {
+  if (request === undefined || request.tool_input_display === null || typeof request.tool_input_display !== 'object') return undefined;
+  const display = request.tool_input_display as Record<string, unknown>;
+  return display.kind === 'plan_review' && typeof display.plan === 'string' ? display.plan : undefined;
+}
+
+function planPathFromApproval(request: ApprovalRequest | undefined): string | undefined {
+  if (request === undefined || request.tool_input_display === null || typeof request.tool_input_display !== 'object') return undefined;
+  const path = (request.tool_input_display as Record<string, unknown>).path;
+  return typeof path === 'string' ? path : undefined;
+}
+
+function approvedPlanFromResult(result: string | undefined): string | undefined {
+  if (!result) return undefined;
+  const marker = '## Approved Plan:';
+  const index = result.indexOf(marker);
+  if (index < 0) return undefined;
+  const plan = result.slice(index + marker.length).trim();
+  return plan || undefined;
 }
 
 function toolCallIcon(name: string): IconName {
@@ -1029,11 +1119,12 @@ function summarizeToolCall(tool: ToolCall, tr: (english: string, chinese: string
   const normalized = tool.name.toLowerCase();
   const path = firstString(args.path, args.file_path, args.filename, args.file);
   if (normalized === 'edit' || normalized === 'write') {
-    const oldText = firstString(args.old_string, args.old_text) ?? '';
-    const newText = firstString(args.new_string, args.content, args.new_text) ?? '';
     const resultCounts = diffCounts(tool.result);
-    const additions = resultCounts?.additions ?? countLines(newText);
-    const deletions = resultCounts?.deletions ?? (normalized === 'edit' ? countLines(oldText) : 0);
+    const operationCounts = normalized === 'edit'
+      ? editLineOperationStats(args.line_ops)
+      : { additions: countLines(firstString(args.content) ?? ''), deletions: 0 };
+    const additions = resultCounts?.additions ?? operationCounts.additions;
+    const deletions = resultCounts?.deletions ?? operationCounts.deletions;
     return [path, `+${additions} -${deletions}`].filter(Boolean).join(' · ');
   }
   if (normalized === 'agentswarm' || normalized === 'agent_swarm') {

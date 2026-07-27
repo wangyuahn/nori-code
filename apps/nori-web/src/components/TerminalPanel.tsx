@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FitAddon } from '@xterm/addon-fit';
-import { Terminal } from '@xterm/xterm';
+import { Terminal, type ITerminalOptions } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 
 import { api, getWebSocketProtocols, type TerminalSession } from '../api/client';
@@ -93,16 +93,7 @@ function TerminalSurface({ sessionId, terminal, onExit }: { sessionId: string; t
     let lastSeq = 0;
     let controlSequence = 0;
     const focusOwnerAtOpen = document.activeElement;
-    const xterm = new Terminal({
-      allowProposedApi: false,
-      convertEol: false,
-      cursorBlink: true,
-      fontFamily: 'var(--nori-font-mono)',
-      fontSize: 12,
-      lineHeight: 1.25,
-      scrollback: 5000,
-      theme: terminalTheme(),
-    });
+    const xterm = new Terminal(terminalOptions());
     const fitAddon = new FitAddon();
     xterm.loadAddon(fitAddon);
     xterm.open(host);
@@ -221,6 +212,19 @@ export function isSuccessfulTerminalAttachAck(frame: TerminalWsFrame, attachRequ
 export function shouldAutoFocusTerminal(host: HTMLElement, focusOwnerAtOpen: Element | null): boolean {
   const active = document.activeElement;
   return active === focusOwnerAtOpen || active === document.body || (active !== null && host.contains(active));
+}
+
+export function terminalOptions(): ITerminalOptions {
+  return {
+    allowProposedApi: false,
+    convertEol: false,
+    cursorBlink: true,
+    fontFamily: 'Consolas, monospace',
+    fontSize: 12,
+    lineHeight: 1.25,
+    scrollback: 5000,
+    theme: terminalTheme(),
+  };
 }
 
 function terminalTheme() {

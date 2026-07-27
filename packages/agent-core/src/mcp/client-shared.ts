@@ -1,6 +1,6 @@
 import { getCoreVersion } from '#/version';
 
-import type { MCPToolDefinition, MCPToolResult } from './types';
+import type { MCPProgressUpdate, MCPToolDefinition, MCPToolResult } from './types';
 
 export const KIMI_MCP_CLIENT_NAME = 'nori-code';
 // Resolved from agent-core's package.json so MCP servers see the real version
@@ -29,6 +29,7 @@ export type UnexpectedCloseListener = (reason: UnexpectedCloseReason) => void;
 export interface McpRequestOptions {
   readonly timeout?: number;
   readonly signal?: AbortSignal;
+  readonly onprogress?: (progress: Omit<MCPProgressUpdate, 'progressToken'>) => void;
 }
 
 /**
@@ -40,15 +41,24 @@ export interface McpRequestOptions {
 export function buildRequestOptions(
   toolCallTimeoutMs: number | undefined,
   signal: AbortSignal | undefined,
+  onprogress?: (progress: Omit<MCPProgressUpdate, 'progressToken'>) => void,
 ): McpRequestOptions | undefined {
-  if (toolCallTimeoutMs === undefined && signal === undefined) return undefined;
-  return { timeout: toolCallTimeoutMs, signal };
+  if (toolCallTimeoutMs === undefined && signal === undefined && onprogress === undefined) {
+    return undefined;
+  }
+  return { timeout: toolCallTimeoutMs, signal, onprogress };
 }
 
 interface SdkListedTool {
   readonly name: string;
   readonly description?: string;
   readonly inputSchema: Record<string, unknown>;
+  readonly title?: string;
+  readonly icons?: MCPToolDefinition['icons'];
+  readonly annotations?: Record<string, unknown>;
+  readonly outputSchema?: Record<string, unknown>;
+  readonly execution?: Record<string, unknown>;
+  readonly _meta?: Record<string, unknown>;
 }
 
 export function toMcpToolDefinition(tool: SdkListedTool): MCPToolDefinition {
@@ -56,6 +66,12 @@ export function toMcpToolDefinition(tool: SdkListedTool): MCPToolDefinition {
     name: tool.name,
     description: tool.description ?? '',
     inputSchema: tool.inputSchema,
+    title: tool.title,
+    icons: tool.icons,
+    annotations: tool.annotations,
+    outputSchema: tool.outputSchema,
+    execution: tool.execution,
+    _meta: tool._meta,
   };
 }
 
@@ -67,11 +83,26 @@ export function toMcpToolDefinition(tool: SdkListedTool): MCPToolDefinition {
  */
 export function toMcpToolResult(result: unknown): MCPToolResult {
   if (typeof result === 'object' && result !== null && 'content' in result) {
-    const typed = result as { content: unknown; isError?: unknown };
+    const typed = result as {
+      content: unknown;
+      isError?: unknown;
+      structuredContent?: unknown;
+      _meta?: unknown;
+    };
     if (Array.isArray(typed.content)) {
       return {
         content: typed.content as MCPToolResult['content'],
         isError: typed.isError === true,
+        structuredContent:
+          typeof typed.structuredContent === 'object' &&
+          typed.structuredContent !== null &&
+          !Array.isArray(typed.structuredContent)
+            ? (typed.structuredContent as Record<string, unknown>)
+            : undefined,
+        _meta:
+          typeof typed._meta === 'object' && typed._meta !== null && !Array.isArray(typed._meta)
+            ? (typed._meta as Record<string, unknown>)
+            : undefined,
       };
     }
   }

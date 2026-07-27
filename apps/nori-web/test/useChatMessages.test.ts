@@ -272,7 +272,7 @@ describe('main transcript projection', () => {
       created_at: '2026-07-14T00:00:01.000Z',
       content: [
         { type: 'thinking', thinking: 'Inspect the target.' },
-        { type: 'tool_use', tool_call_id: 'edit-1', tool_name: 'Edit', input: { path: 'src/a.ts', old_string: 'a', new_string: 'b' } },
+        { type: 'tool_use', tool_call_id: 'edit-1', tool_name: 'Edit', input: { path: 'src/a.ts', expected_tag: 'A1B2', line_ops: [{ op: 'swap', start: 1, end: 1, content: 'b' }] } },
       ],
     })!;
     const result = apiMessageToChat({

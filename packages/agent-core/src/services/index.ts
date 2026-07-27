@@ -26,6 +26,17 @@ export {
   type QuestionToBrokerRequestParams,
 } from './question/question';
 
+export {
+  IMcpElicitationService,
+  toAgentCoreResponse as mcpElicitationToAgentCoreResponse,
+  toBrokerRequest as mcpElicitationToBrokerRequest,
+} from './mcpElicitation/mcpElicitation';
+export type {
+  McpElicitationToBrokerRequestParams,
+  SessionMcpElicitationComplete,
+  SessionMcpElicitationRequest,
+} from './mcpElicitation/mcpElicitation';
+
 export { IEnvironmentService } from './environment/environment';
 
 export { ILogService } from './logger/logger';
@@ -173,6 +184,7 @@ export { ToolService } from './tool/toolService';
 
 export {
   IMcpService,
+  McpConfigInvalidError,
   McpServerNotFoundError,
   toProtocolMcpServer,
 } from './mcp/mcp';

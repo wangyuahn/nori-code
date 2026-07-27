@@ -1,4 +1,5 @@
 import type { ToolCall } from '@nori-code/kosong';
+import { computeContentTag } from '@nori-code/kaos';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createFakeKaos } from '../tools/fixtures/fake-kaos';
@@ -404,7 +405,11 @@ describe('plan allows safe tool flow', () => {
       const args =
         toolName === 'Write'
           ? { path: planPath, content: expectedContent }
-          : { path: planPath, old_string: '- Draft', new_string: '- Draft\n- Verify' };
+          : {
+              path: planPath,
+              expected_tag: computeContentTag('# Plan\n\n- Draft'),
+              line_ops: [{ op: 'insert_post', line: 3, content: '- Verify' }],
+            };
       const writePlanCall: ToolCall = {
         type: 'function',
         id: `call_${toolName.toLowerCase()}_plan`,

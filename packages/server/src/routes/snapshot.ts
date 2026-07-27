@@ -26,7 +26,7 @@ import {
   type Message,
   type Session,
 } from '@nori-code/protocol';
-import { IApprovalService, IMessageService, IPromptService, IQuestionService, ISessionService, ILogService, SessionNotFoundError, type IInstantiationService } from '@nori-code/agent-core';
+import { IApprovalService, IMessageService, IMcpElicitationService, IPromptService, IQuestionService, ISessionService, ILogService, SessionNotFoundError, type IInstantiationService } from '@nori-code/agent-core';
 import { z } from 'zod';
 
 
@@ -34,6 +34,7 @@ import { errEnvelope, okEnvelope } from '../envelope';
 import { defineRoute } from '../middleware/defineRoute';
 import type { ApprovalService } from '#/services/approval/approvalService';
 import type { QuestionService } from '#/services/question/questionService';
+import type { McpElicitationService } from '#/services/mcpElicitation';
 import { IWSBroadcastService } from '#/services/gateway';
 import {
   ISnapshotService,
@@ -137,6 +138,7 @@ async function readViaLegacyAssembly(ix: IInstantiationService, sid: string) {
     const promptService = a.get(IPromptService);
     const approvals = a.get(IApprovalService) as ApprovalService;
     const questions = a.get(IQuestionService) as QuestionService;
+    const mcpElicitations = a.get(IMcpElicitationService) as McpElicitationService;
 
     let snapState = await broadcast.getSnapshotState(sid);
     let session: Session | undefined;
@@ -171,6 +173,7 @@ async function readViaLegacyAssembly(ix: IInstantiationService, sid: string) {
       in_flight_turn: inFlightTurn,
       pending_approvals: approvals.listPending(sid),
       pending_questions: questions.listPending(sid),
+      pending_mcp_elicitations: mcpElicitations.listPending(sid),
     };
   });
 }

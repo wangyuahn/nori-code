@@ -135,6 +135,11 @@ export interface BrowserState {
   dialogs: BrowserDialogState[];
 }
 
+export interface BrowserOcclusionState {
+  readonly occluded: boolean;
+  readonly previewDataUrl: string | null;
+}
+
 interface ManagedTab {
   readonly view: WebContentsView;
   state: BrowserTabState;
@@ -167,6 +172,9 @@ export class BrowserViewManager {
   private readonly tabs = new Map<string, ManagedTab>();
   private activeTabId: string | null = null;
   private visible = false;
+  private occluded = false;
+  private occlusionPreviewDataUrl: string | null = null;
+  private occlusionRevision = 0;
   private destroying = false;
   private bounds: BrowserBounds = { x: 0, y: 0, width: 0, height: 0 };
   private automationPaused = false;
@@ -592,6 +600,30 @@ export class BrowserViewManager {
     return this.getState();
   }
 
+  async setOccluded(occluded: boolean): Promise<BrowserOcclusionState> {
+    const revision = ++this.occlusionRevision;
+    if (!occluded) {
+      this.occluded = false;
+      this.syncViews();
+      return { occluded: false, previewDataUrl: null };
+    }
+
+    const active = this.activeTab();
+    if (active !== undefined && active.state.url !== BROWSER_HOME_URL && !active.view.webContents.isDestroyed()) {
+      try {
+        const image = await active.view.webContents.capturePage();
+        if (revision !== this.occlusionRevision) return this.getOcclusionState();
+        this.occlusionPreviewDataUrl = image.toDataURL();
+      } catch {
+        if (revision !== this.occlusionRevision) return this.getOcclusionState();
+      }
+    }
+
+    this.occluded = true;
+    this.syncViews();
+    return this.getOcclusionState();
+  }
+
   destroy(): void {
     this.destroying = true;
     for (const pending of this.pendingPermissions.values()) {
@@ -908,6 +940,7 @@ export class BrowserViewManager {
     for (const tab of this.tabs.values()) {
       const shouldAttach = tab === active
         && this.visible
+        && !this.occluded
         && tab.state.url !== BROWSER_HOME_URL
         && this.bounds.width > 0
         && this.bounds.height > 0;
@@ -929,6 +962,13 @@ export class BrowserViewManager {
     tab.view.setVisible(false);
     this.window.contentView.removeChildView(tab.view);
     tab.attached = false;
+  }
+
+  private getOcclusionState(): BrowserOcclusionState {
+    return {
+      occluded: this.occluded,
+      previewDataUrl: this.occluded ? this.occlusionPreviewDataUrl : null,
+    };
   }
 
   private emitState(): void {
@@ -956,6 +996,7 @@ export function registerBrowserIpc(): void {
   ipcMain.handle('nori:browser:close-tab', (event, tabId: string) => managerFor(event).closeTab(tabId));
   ipcMain.handle('nori:browser:activate-tab', (event, tabId: string) => managerFor(event).activateTab(tabId));
   ipcMain.handle('nori:browser:set-visible', (event, visible: boolean) => managerFor(event).setVisible(visible));
+  ipcMain.handle('nori:browser:set-occluded', (event, occluded: boolean) => managerFor(event).setOccluded(occluded));
   ipcMain.handle('nori:browser:open-external', event => managerFor(event).openExternal());
   ipcMain.handle('nori:browser:annotation-mode', (event, enabled: boolean) => managerFor(event).setAnnotationMode(enabled));
   ipcMain.handle('nori:browser:clear-annotations', event => managerFor(event).clearAnnotations());

@@ -50,6 +50,10 @@ export type {
   ToolCallResponse,
   ToolUpdate,
   McpOAuthAuthorizationUrlUpdateData,
+  McpResourceUpdatedEvent,
+  McpServerListChangedEvent,
+  McpServerLogEvent,
+  McpServerProgressEvent,
 } from '@nori-code/agent-core';
 
 // MCP tool-list and server status events.

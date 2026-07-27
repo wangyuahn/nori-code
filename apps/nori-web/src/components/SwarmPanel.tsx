@@ -20,7 +20,7 @@ export function SwarmPanel({
 }) {
   const { tr } = useI18n();
   const { swarmStatuses, connected, error } = swarm;
-  const localBackground = useBackgroundTasks(backgroundState === undefined ? sessionId : null);
+  const localBackground = useBackgroundTasks(backgroundState === undefined && sessionId ? [sessionId] : []);
   const background = backgroundState ?? localBackground;
   const runs = Array.from(swarmStatuses.values())
     .sort((left, right) => {
@@ -29,15 +29,17 @@ export function SwarmPanel({
         ? (right.round ?? 0) - (left.round ?? 0)
         : timeDifference;
     });
-  const currentRuns = runs.filter(run => run.session_id === sessionId);
-  const swarmTaskIds = swarmTaskIdsForRuns(currentRuns);
+  const swarmTaskIds = swarmTaskIdsForRuns(runs);
   const backgroundTasks = background.tasks.filter(task => !swarmTaskIds.has(task.id));
-  const hasCurrentBackground = background.loading || background.error !== null || backgroundTasks.length > 0;
-  const projectGroups = ensureCurrentSessionGroup(
+  const activitySessionIds = [
+    ...runs.flatMap(run => run.session_id ? [run.session_id] : []),
+    ...backgroundTasks.map(task => task.session_id),
+    ...(sessionId && (background.loading || background.error !== null) ? [sessionId] : []),
+  ];
+  const projectGroups = ensureSessionGroups(
     groupSwarmRunsByProject(runs, sessions),
     sessions,
-    sessionId,
-    hasCurrentBackground,
+    activitySessionIds,
   );
   const hasActivity = projectGroups.length > 0;
 
@@ -229,7 +231,7 @@ export interface BackgroundTasksState {
   tasks: BackgroundTask[];
   loading: boolean;
   error: string | null;
-  markCancelled: (taskId: string) => void;
+  markCancelled: (sessionId: string, taskId: string) => void;
 }
 
 export function groupSwarmRunsByProject(
@@ -274,24 +276,36 @@ export function ensureCurrentSessionGroup(
   sessionId: string | null | undefined,
   required: boolean,
 ): SwarmProjectGroup[] {
-  if (!required || !sessionId || groups.some(project => project.sessions.some(group => group.sessionId === sessionId))) {
-    return groups;
-  }
-  const session = sessions.find(item => item.id === sessionId);
-  const path = session?.metadata?.cwd?.trim().replaceAll('\\', '/').replace(/\/+$/, '');
-  const projectKey = path || '__unassigned__';
+  return required && sessionId ? ensureSessionGroups(groups, sessions, [sessionId]) : groups;
+}
+
+export function ensureSessionGroups(
+  groups: SwarmProjectGroup[],
+  sessions: Session[],
+  sessionIds: readonly string[],
+): SwarmProjectGroup[] {
+  const missing = [...new Set(sessionIds)].filter(sessionId =>
+    !groups.some(project => project.sessions.some(group => group.sessionId === sessionId)),
+  );
+  if (missing.length === 0) return groups;
+
   const result = groups.map(project => ({ ...project, sessions: [...project.sessions] }));
-  let project = result.find(item => item.key === projectKey);
-  if (project === undefined) {
-    project = { key: projectKey, path, sessions: [] };
-    result.push(project);
+  for (const sessionId of missing) {
+    const session = sessions.find(item => item.id === sessionId);
+    const path = session?.metadata?.cwd?.trim().replaceAll('\\', '/').replace(/\/+$/, '');
+    const projectKey = path || '__unassigned__';
+    let project = result.find(item => item.key === projectKey);
+    if (project === undefined) {
+      project = { key: projectKey, path, sessions: [] };
+      result.push(project);
+    }
+    project.sessions.push({
+      key: `${projectKey}:${sessionId}`,
+      sessionId,
+      title: session?.title || sessionId.slice(0, 8),
+      runs: [],
+    });
   }
-  project.sessions.push({
-    key: `${projectKey}:${sessionId}`,
-    sessionId,
-    title: session?.title || sessionId.slice(0, 8),
-    runs: [],
-  });
   return result;
 }
 
@@ -322,8 +336,8 @@ function SwarmProject({
           key={group.key}
           group={group}
           current={group.sessionId === currentSessionId}
-          background={group.sessionId === currentSessionId ? background : undefined}
-          backgroundTasks={group.sessionId === currentSessionId ? backgroundTasks : []}
+          background={background}
+          backgroundTasks={backgroundTasks.filter(task => task.session_id === group.sessionId)}
         />
       ))}
     </div>
@@ -349,8 +363,11 @@ function SwarmSession({
   const statuses = [...progress.map(item => item.status), ...backgroundStatuses];
   const status = statuses.length > 0
     ? aggregateSwarmStatus(statuses)
-    : background?.error ? 'failed' : background?.loading ? 'pending' : 'done';
+    : current && background?.error ? 'failed' : current && background?.loading ? 'pending' : 'done';
   const running = status === 'running' || status === 'pending';
+  const swarmAgentCount = uniqueSwarmTasks(treeRuns).length;
+  const backgroundAgentCount = backgroundTasks.filter(task => task.kind === 'subagent').length;
+  const agentCount = swarmAgentCount + backgroundAgentCount;
   const [open, setOpen] = useState(current || running);
 
   useEffect(() => {
@@ -365,15 +382,18 @@ function SwarmSession({
     <summary>
       <span className={`status-dot ${status}`}/>
       <span><strong>{group.title}</strong><small>{group.sessionId ?? tr('Unknown conversation', '未知会话')}</small></span>
-      <span className={`badge badge-${swarmStatusBadge(status)}`}>{swarmStatusLabel(status, tr)}</span>
+      <span className="swarm-session-meta">
+        <small>{agentCount} {tr('agents', '个智能体')}</small>
+        <span className={`badge badge-${swarmStatusBadge(status)}`}>{swarmStatusLabel(status, tr)}</span>
+      </span>
     </summary>
-    <div className="swarm-session-body">
+    <div className="swarm-session-body" role="tree">
       {rounds.size > 0 && <div className="swarm-round-list">
         {Array.from(rounds.entries()).map(([round, roundRuns]) => (
           <SwarmRound key={round} round={round} runs={roundRuns} allRuns={group.runs}/>
         ))}
       </div>}
-      {current && group.sessionId && background && (
+      {group.sessionId && background && (backgroundTasks.length > 0 || (current && (background.loading || background.error))) && (
         <BackgroundTasksPanel sessionId={group.sessionId} state={background} tasks={backgroundTasks}/>
       )}
     </div>
@@ -406,6 +426,14 @@ export function collectSwarmTreeRuns(roots: SwarmStatus[], allRuns: SwarmStatus[
   };
   for (const root of roots) visit(root);
   return result;
+}
+
+function uniqueSwarmTasks(runs: readonly SwarmStatus[]): NonNullable<SwarmStatus['tasks']> {
+  const tasks = new Map<string, NonNullable<SwarmStatus['tasks']>[number]>();
+  for (const run of runs) {
+    for (const task of run.tasks ?? []) tasks.set(task.agent_id ?? task.id, task);
+  }
+  return [...tasks.values()];
 }
 
 export function swarmTaskIdsForRuns(runs: readonly SwarmStatus[]): Set<string> {
@@ -471,8 +499,9 @@ function SwarmRound({ round, runs, allRuns }: { round: number; runs: SwarmStatus
   const status = aggregateSwarmStatus(progressByRun.map(progress => progress.status));
   const running = status === 'running' || status === 'pending';
   const [open, setOpen] = useState(running);
-  const agentCount = progressByRun.reduce((total, progress) => total + progress.total, 0);
-  const completedCount = progressByRun.reduce((total, progress) => total + progress.completed, 0);
+  const agentTasks = uniqueSwarmTasks(treeRuns);
+  const agentCount = agentTasks.length;
+  const completedCount = agentTasks.filter(task => isTaskFinished(task.status)).length;
   const tokens = treeRuns.reduce((total, run) => total + swarmRunTokens(run), 0);
   const hasLiveTokens = treeRuns.some(run => run.tasks?.some(task => (task.live_output_tokens ?? 0) > 0));
 
@@ -480,21 +509,22 @@ function SwarmRound({ round, runs, allRuns }: { round: number; runs: SwarmStatus
     if (running) setOpen(true);
   }, [running]);
 
-  return <details className={`swarm-round swarm-round-${status}${running ? ' running' : ''}`} open={open} onToggle={event => setOpen(event.currentTarget.open)}>
+  return <details className={`swarm-round swarm-round-${status}${running ? ' running' : ''}`} open={open} onToggle={event => setOpen(event.currentTarget.open)} role="treeitem">
     <summary>
       <span className={`status-dot ${status}`}/>
-      <span className="swarm-round-copy"><strong>{tr(`Round ${round}`, `第 ${round} 轮`)}</strong><small>{completedCount}/{agentCount} {tr('agents finished', '个智能体已结束')}</small></span>
+      <span className="swarm-round-copy"><strong>{tr(`Round ${round}`, `第 ${round} 轮`)}</strong><small>{agentCount > 0 ? `${completedCount}/${agentCount} ${tr('agents finished', '个智能体已结束')}` : tr('Waiting for agents', '等待智能体启动')}</small></span>
       <span className="swarm-round-meta">{tokens > 0 && <small>{hasLiveTokens ? '~' : ''}{tokens.toLocaleString()} tokens</small>}<span className={`badge badge-${swarmStatusBadge(status)}`}>{swarmStatusLabel(status, tr)}</span></span>
     </summary>
-    <div className="swarm-round-body">{runs.map(run => <SwarmRun key={run.swarm_id} run={run} allRuns={allRuns}/>)}</div>
+    <div className="swarm-round-body" role="group">{runs.map(run => <SwarmRun key={run.swarm_id} run={run} allRuns={allRuns}/>)}</div>
   </details>;
 }
 
 function SwarmRun({ run, allRuns }: { run: SwarmStatus; allRuns: SwarmStatus[] }) {
   const { tr } = useI18n();
   const runProgress = swarmRunProgress(run);
-  const progress = Math.round((runProgress.completed / runProgress.total) * 100);
   const tasks = run.tasks ?? [];
+  const displayedCompleted = tasks.filter(task => isTaskFinished(task.status)).length;
+  const progress = tasks.length > 0 ? Math.round((displayedCompleted / tasks.length) * 100) : 0;
   const childRuns = allRuns.filter(child => child.parent_swarm_id === run.swarm_id);
   const taskAgentIds = new Set(tasks.flatMap(task => task.agent_id ? [task.agent_id] : []));
   const unattachedChildren = childRuns.filter(child => !child.owner_agent_id || !taskAgentIds.has(child.owner_agent_id));
@@ -522,12 +552,12 @@ function SwarmRun({ run, allRuns }: { run: SwarmStatus; allRuns: SwarmStatus[] }
     }
   };
 
-  return <section className={`swarm-run swarm-run-${runProgress.status}`}>
+  return <section className={`swarm-run swarm-run-${runProgress.status}`} role="treeitem">
     <header>
       <span className={`status-dot ${runProgress.status}`}/>
       <span><strong>{run.description || run.swarm_id}</strong><small>{run.owner_agent_id === 'main' ? tr('Started by Nori', '由 Nori 发起') : tr('Started by an agent', '由智能体发起')}</small></span>
       <span className="swarm-run-stats">
-        <small>{runProgress.completed}/{runProgress.total}</small>
+        {tasks.length > 0 && <small>{displayedCompleted}/{tasks.length}</small>}
         {tokens > 0 && <small>{hasLiveTokens ? '~' : ''}{tokens.toLocaleString()} tokens</small>}
         {controllable && <span className="swarm-run-controls">
           {runProgress.status === 'paused'
@@ -543,40 +573,62 @@ function SwarmRun({ run, allRuns }: { run: SwarmStatus; allRuns: SwarmStatus[] }
       <button type="button" onClick={() => void control('guide')} disabled={!guidance.trim() || busy !== null}>{busy === 'guide' ? tr('Adding…', '添加中…') : tr('Add', '追加')}</button>
     </div>}
     {controlError && <div className="swarm-control-error">{controlError}</div>}
-    <div className="swarm-task-items">
+    <div className="swarm-task-items" role="group">
       {tasks.length > 0
         ? tasks.map(task => {
           const children = childRuns.filter(child => child.owner_agent_id === task.agent_id);
-          return <div className="swarm-task-branch" key={task.id}><TaskPreview task={task}/>{children.length > 0 && <div className="swarm-child-runs">{children.map(child => <SwarmRun key={child.swarm_id} run={child} allRuns={allRuns}/>)}</div>}</div>;
+          return <div className="swarm-task-branch" key={task.id} role="treeitem"><TaskPreview task={task}/>{children.length > 0 && <div className="swarm-child-runs" role="group">{children.map(child => <SwarmRun key={child.swarm_id} run={child} allRuns={allRuns}/>)}</div>}</div>;
         })
         : <PreviewNotice kind="loading" text={tr('Waiting for agents to start…', '正在等待智能体启动…')}/>}
-      {unattachedChildren.length > 0 && <div className="swarm-child-runs swarm-child-runs-unattached">{unattachedChildren.map(child => <SwarmRun key={child.swarm_id} run={child} allRuns={allRuns}/>)}</div>}
+      {unattachedChildren.length > 0 && <div className="swarm-child-runs swarm-child-runs-unattached" role="group">{unattachedChildren.map(child => <SwarmRun key={child.swarm_id} run={child} allRuns={allRuns}/>)}</div>}
     </div>
   </section>;
 }
 
-export function useBackgroundTasks(sessionId: string | null | undefined): BackgroundTasksState {
+export function useBackgroundTasks(sessionIds: readonly string[] | string | null | undefined): BackgroundTasksState {
   const [tasks, setTasks] = useState<BackgroundTask[]>([]);
-  const [loading, setLoading] = useState(Boolean(sessionId));
+  const normalizedSessionIds = [...new Set(
+    (typeof sessionIds === 'string' ? [sessionIds] : sessionIds ?? []).filter(Boolean),
+  )].sort();
+  const sessionIdsKey = normalizedSessionIds.join('\n');
+  const [loading, setLoading] = useState(normalizedSessionIds.length > 0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    setTasks([]);
+    const ids = sessionIdsKey ? sessionIdsKey.split('\n') : [];
+    const requestedIds = new Set(ids);
+    setTasks(previous => previous.filter(task => requestedIds.has(task.session_id)));
     setError(null);
-    setLoading(Boolean(sessionId));
-    if (!sessionId) return () => { cancelled = true; };
+    setLoading(ids.length > 0);
+    if (ids.length === 0) return () => { cancelled = true; };
 
     const refresh = async () => {
       try {
-        const result = await api.sessions.tasks.list(sessionId);
+        const results = await Promise.allSettled(ids.map(sessionId => api.sessions.tasks.list(sessionId)));
         if (!cancelled) {
-          setTasks(result.items);
-          setError(null);
+          const refreshedIds = new Set<string>();
+          const refreshedTasks: BackgroundTask[] = [];
+          const failures: string[] = [];
+          results.forEach((result, index) => {
+            const sessionId = ids[index];
+            if (sessionId === undefined) return;
+            if (result.status === 'fulfilled') {
+              refreshedIds.add(sessionId);
+              refreshedTasks.push(...result.value.items);
+            } else {
+              failures.push(result.reason instanceof Error ? result.reason.message : String(result.reason));
+            }
+          });
+          setTasks(previous => [
+            ...previous.filter(task => requestedIds.has(task.session_id) && !refreshedIds.has(task.session_id)),
+            ...refreshedTasks,
+          ].sort((left, right) => Date.parse(right.started_at ?? right.created_at) - Date.parse(left.started_at ?? left.created_at)));
+          setError(failures.length > 0
+            ? `${failures.length}/${ids.length} sessions failed to load: ${failures[0]}`
+            : null);
         }
-      } catch (error) {
-        if (!cancelled) setError(error instanceof Error ? error.message : String(error));
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -589,14 +641,14 @@ export function useBackgroundTasks(sessionId: string | null | undefined): Backgr
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [sessionId]);
+  }, [sessionIdsKey]);
 
   return {
     tasks,
     loading,
     error,
-    markCancelled: (taskId) => setTasks(previous => previous.map(item =>
-      item.id === taskId ? { ...item, status: 'cancelled' } : item,
+    markCancelled: (sessionId, taskId) => setTasks(previous => previous.map(item =>
+      item.session_id === sessionId && item.id === taskId ? { ...item, status: 'cancelled' } : item,
     )),
   };
 }
@@ -612,7 +664,7 @@ function BackgroundTasksPanel({
 }) {
   const { tr } = useI18n();
   if (!state.loading && !state.error && tasks.length === 0) return null;
-  return <section className="background-tasks-panel"><header><div><strong>{tr('Agents and background tasks', 'Agent 与后台任务')}</strong><span>{tr('Regular agents and non-swarm tool jobs', '普通 Agent 与非 Swarm 工具任务')}</span></div><small>{tasks.filter(task => task.status === 'running').length} {tr('running', '运行中')}</small></header>{state.loading && <PreviewNotice kind="loading" text={tr('Loading background agents…', '正在加载后台 Agent…')}/>} {state.error && <PreviewNotice kind="error" text={tr('Unable to load background tasks.', '无法加载后台任务。')} detail={state.error}/>}<div className="background-task-list">{tasks.map(task => <BackgroundTaskRow key={task.id} sessionId={sessionId} task={task} onCancelled={() => state.markCancelled(task.id)}/>)}</div></section>;
+  return <section className="background-tasks-panel" role="treeitem"><header><div><strong>{tr('Agents and background tasks', 'Agent 与后台任务')}</strong><span>{tr('Regular agents and non-swarm tool jobs', '普通 Agent 与非 Swarm 工具任务')}</span></div><small>{tasks.filter(task => task.status === 'running').length} {tr('running', '运行中')}</small></header>{state.loading && <PreviewNotice kind="loading" text={tr('Loading background agents…', '正在加载后台 Agent…')}/>} {state.error && <PreviewNotice kind="error" text={tr('Unable to load background tasks.', '无法加载后台任务。')} detail={state.error}/>}<div className="background-task-list" role="group">{tasks.map(task => <BackgroundTaskRow key={`${task.session_id}:${task.id}`} sessionId={sessionId} task={task} onCancelled={() => state.markCancelled(sessionId, task.id)}/>)}</div></section>;
 }
 
 function BackgroundTaskRow({ sessionId, task, onCancelled }: { sessionId: string; task: BackgroundTask; onCancelled: () => void }) {

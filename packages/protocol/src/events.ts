@@ -12,6 +12,10 @@ import {
   type ProviderRefreshFailure,
 } from './modelCatalog';
 import { workspaceSchema, type Workspace } from './workspace';
+import {
+  mcpElicitationRequestedSchema,
+  type McpElicitationRequestedSchema,
+} from './mcp-elicitation';
 
 export interface TokenUsage {
   readonly inputOther: number;
@@ -702,6 +706,78 @@ export interface McpServerStatusPayload {
   readonly error?: string;
 }
 
+export type McpListKind = 'tools' | 'resources' | 'prompts';
+
+export interface McpServerListChangedEvent {
+  readonly type: 'mcp.server.list.changed';
+  readonly serverName: string;
+  readonly kind: McpListKind;
+  readonly error?: string;
+}
+
+export interface McpResourceUpdatedEvent {
+  readonly type: 'mcp.resource.updated';
+  readonly serverName: string;
+  readonly uri: string;
+}
+
+export type McpLoggingLevel =
+  | 'debug'
+  | 'info'
+  | 'notice'
+  | 'warning'
+  | 'error'
+  | 'critical'
+  | 'alert'
+  | 'emergency';
+
+export interface McpServerLogEvent {
+  readonly type: 'mcp.server.log';
+  readonly serverName: string;
+  readonly level: McpLoggingLevel;
+  readonly logger?: string;
+  readonly data: unknown;
+}
+
+export interface McpServerProgressEvent {
+  readonly type: 'mcp.server.progress';
+  readonly serverName: string;
+  readonly progressToken: string | number;
+  readonly progress: number;
+  readonly total?: number;
+  readonly message?: string;
+}
+
+export interface McpElicitationRequestedEvent {
+  readonly type: 'event.mcp.elicitation.requested';
+  readonly elicitation_id: string;
+  readonly session_id: string;
+  readonly request_id: string;
+  readonly server_name: string;
+  readonly mode: 'form' | 'url';
+  readonly message: string;
+  readonly status: 'pending';
+  readonly requested_schema?: McpElicitationRequestedSchema;
+  readonly server_elicitation_id?: string;
+  readonly url?: string;
+  readonly created_at: string;
+}
+
+export interface McpElicitationResolvedEvent {
+  readonly type: 'event.mcp.elicitation.resolved';
+  readonly elicitation_id: string;
+  readonly action: 'accept' | 'decline' | 'cancel';
+  readonly status: 'resolved' | 'awaiting_completion';
+  readonly resolved_at: string;
+}
+
+export interface McpElicitationCompletedEvent {
+  readonly type: 'event.mcp.elicitation.completed';
+  readonly elicitation_id: string;
+  readonly server_elicitation_id: string;
+  readonly completed_at: string;
+}
+
 export type AgentEvent =
   | ErrorEvent
   | WarningEvent
@@ -735,6 +811,13 @@ export type AgentEvent =
   | ToolResultEvent
   | ToolListUpdatedEvent
   | McpServerStatusEvent
+  | McpServerListChangedEvent
+  | McpResourceUpdatedEvent
+  | McpServerLogEvent
+  | McpServerProgressEvent
+  | McpElicitationRequestedEvent
+  | McpElicitationResolvedEvent
+  | McpElicitationCompletedEvent
   | SubagentSpawnedEvent
   | SubagentStartedEvent
   | SubagentSuspendedEvent
@@ -1396,7 +1479,7 @@ export const toolListUpdatedEventSchema = z.object({
 
 export const mcpServerStatusPayloadSchema = z.object({
   name: z.string(),
-  transport: z.enum(['stdio', 'http']),
+  transport: z.enum(['stdio', 'http', 'sse']),
   status: z.enum(['pending', 'connected', 'failed', 'disabled', 'needs-auth']),
   toolCount: z.number(),
   error: z.string().optional(),
@@ -1406,6 +1489,83 @@ export const mcpServerStatusEventSchema = z.object({
   type: z.literal('mcp.server.status'),
   server: mcpServerStatusPayloadSchema,
 }) satisfies z.ZodType<McpServerStatusEvent>;
+
+export const mcpListKindSchema = z.enum([
+  'tools',
+  'resources',
+  'prompts',
+]) satisfies z.ZodType<McpListKind>;
+
+export const mcpServerListChangedEventSchema = z.object({
+  type: z.literal('mcp.server.list.changed'),
+  serverName: z.string(),
+  kind: mcpListKindSchema,
+  error: z.string().optional(),
+}) satisfies z.ZodType<McpServerListChangedEvent>;
+
+export const mcpResourceUpdatedEventSchema = z.object({
+  type: z.literal('mcp.resource.updated'),
+  serverName: z.string(),
+  uri: z.string(),
+}) satisfies z.ZodType<McpResourceUpdatedEvent>;
+
+export const mcpLoggingLevelSchema = z.enum([
+  'debug',
+  'info',
+  'notice',
+  'warning',
+  'error',
+  'critical',
+  'alert',
+  'emergency',
+]) satisfies z.ZodType<McpLoggingLevel>;
+
+export const mcpServerLogEventSchema = z.object({
+  type: z.literal('mcp.server.log'),
+  serverName: z.string(),
+  level: mcpLoggingLevelSchema,
+  logger: z.string().optional(),
+  data: z.unknown(),
+}) satisfies z.ZodType<McpServerLogEvent>;
+
+export const mcpServerProgressEventSchema = z.object({
+  type: z.literal('mcp.server.progress'),
+  serverName: z.string(),
+  progressToken: z.union([z.string(), z.number()]),
+  progress: z.number(),
+  total: z.number().optional(),
+  message: z.string().optional(),
+}) satisfies z.ZodType<McpServerProgressEvent>;
+
+export const mcpElicitationRequestedEventSchema = z.object({
+  type: z.literal('event.mcp.elicitation.requested'),
+  elicitation_id: z.string().min(1),
+  session_id: z.string().min(1),
+  request_id: z.string().min(1),
+  server_name: z.string().min(1),
+  mode: z.enum(['form', 'url']),
+  message: z.string(),
+  status: z.literal('pending'),
+  requested_schema: mcpElicitationRequestedSchema.optional(),
+  server_elicitation_id: z.string().min(1).optional(),
+  url: z.url().optional(),
+  created_at: isoDateTimeSchema,
+}) satisfies z.ZodType<McpElicitationRequestedEvent>;
+
+export const mcpElicitationResolvedEventSchema = z.object({
+  type: z.literal('event.mcp.elicitation.resolved'),
+  elicitation_id: z.string().min(1),
+  action: z.enum(['accept', 'decline', 'cancel']),
+  status: z.enum(['resolved', 'awaiting_completion']),
+  resolved_at: isoDateTimeSchema,
+}) satisfies z.ZodType<McpElicitationResolvedEvent>;
+
+export const mcpElicitationCompletedEventSchema = z.object({
+  type: z.literal('event.mcp.elicitation.completed'),
+  elicitation_id: z.string().min(1),
+  server_elicitation_id: z.string().min(1),
+  completed_at: isoDateTimeSchema,
+}) satisfies z.ZodType<McpElicitationCompletedEvent>;
 
 export const agentEventSchema = z.discriminatedUnion('type', [
   errorEventSchema,
@@ -1439,6 +1599,13 @@ export const agentEventSchema = z.discriminatedUnion('type', [
   toolResultEventSchema,
   toolListUpdatedEventSchema,
   mcpServerStatusEventSchema,
+  mcpServerListChangedEventSchema,
+  mcpResourceUpdatedEventSchema,
+  mcpServerLogEventSchema,
+  mcpServerProgressEventSchema,
+  mcpElicitationRequestedEventSchema,
+  mcpElicitationResolvedEventSchema,
+  mcpElicitationCompletedEventSchema,
   subagentSpawnedEventSchema,
   subagentStartedEventSchema,
   subagentSuspendedEventSchema,
@@ -1482,6 +1649,10 @@ export const VOLATILE_EVENT_TYPES = [
   'shell.output',
   'shell.started',
   'agent.status.updated',
+  'mcp.server.list.changed',
+  'mcp.resource.updated',
+  'mcp.server.log',
+  'mcp.server.progress',
 ] as const satisfies readonly AgentEvent['type'][];
 
 export type VolatileEventType = (typeof VOLATILE_EVENT_TYPES)[number];

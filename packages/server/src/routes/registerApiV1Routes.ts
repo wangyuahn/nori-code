@@ -17,6 +17,7 @@ import { registerModelCatalogRoutes } from './modelCatalog';
 import { registerOAuthRoutes } from './oauth';
 import { registerPromptsRoutes } from './prompts';
 import { registerQuestionsRoutes } from './questions';
+import { registerMcpElicitationRoutes } from './mcpElicitations';
 import { registerSessionsRoutes } from './sessions';
 import { registerShutdownRoutes } from './shutdown';
 import { registerSkillsRoutes } from './skills';
@@ -110,6 +111,10 @@ export async function registerApiV1Routes(
     );
     registerQuestionsRoutes(
       apiV1 as unknown as Parameters<typeof registerQuestionsRoutes>[0],
+      ix,
+    );
+    registerMcpElicitationRoutes(
+      apiV1 as unknown as Parameters<typeof registerMcpElicitationRoutes>[0],
       ix,
     );
     registerToolsRoutes(apiV1 as unknown as Parameters<typeof registerToolsRoutes>[0], ix);

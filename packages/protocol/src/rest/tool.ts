@@ -15,7 +15,7 @@
 
 import { z } from 'zod';
 
-import { mcpServerSchema, toolDescriptorSchema } from '../tool';
+import { mcpServerConfigSchema, mcpServerSchema, toolDescriptorSchema } from '../tool';
 
 export const listToolsQuerySchema = z.object({
   session_id: z.string().min(1).optional(),
@@ -36,3 +36,14 @@ export const restartMcpServerResultSchema = z.object({
   restarting: z.literal(true),
 });
 export type RestartMcpServerResult = z.infer<typeof restartMcpServerResultSchema>;
+
+export const mcpConfigurationResponseSchema = z.object({
+  path: z.string().min(1),
+  mcp_servers: z.record(z.string(), mcpServerConfigSchema),
+});
+export type McpConfigurationResponse = z.infer<typeof mcpConfigurationResponseSchema>;
+
+export const patchMcpConfigurationRequestSchema = z.object({
+  mcp_servers: z.record(z.string().min(1), mcpServerConfigSchema.nullable()),
+});
+export type PatchMcpConfigurationRequest = z.infer<typeof patchMcpConfigurationRequestSchema>;

@@ -7,7 +7,7 @@
 
 import { Readable, type Writable } from 'node:stream';
 
-import type { Kaos, KaosProcess } from '@nori-code/kaos';
+import { computeContentTag, type Kaos, type KaosProcess } from '@nori-code/kaos';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Agent } from '../../src/agent';
@@ -179,6 +179,7 @@ describe('current builtin file and shell tools', () => {
     const result = await executeTool(tool, context({ path: '/workspace/a.txt' }));
     expect(result.output).toBe(
       [
+        `[/workspace/a.txt#${computeContentTag(content)}]`,
         '1\talpha',
         '2\tbeta',
         '<system>2 lines read from file starting from line 1. Total lines in file: 2. End of file reached.</system>',
@@ -206,29 +207,28 @@ describe('current builtin file and shell tools', () => {
     expect(result.output).toContain('Wrote 5 bytes');
   });
 
-  it('Edit exposes parameters and errors when old_string is missing', async () => {
+  it('Edit exposes hash-anchored line operation parameters and writes through kaos', async () => {
+    const original = 'alpha\nbeta\n';
+    const writeText = vi.fn().mockResolvedValue(12);
     const tool = new EditTool(
-      createFakeKaos({ readText: vi.fn().mockResolvedValue('alpha\nbeta\n') }),
+      createFakeKaos({ readText: vi.fn().mockResolvedValue(original), writeText }),
       workspace,
     );
 
-    expect(
-      EditInputSchema.safeParse({
-        path: '/workspace/a.txt',
-        old_string: 'gamma',
-        new_string: 'delta',
-      }).success,
-    ).toBe(true);
+    const args = {
+      path: '/workspace/a.txt',
+      expected_tag: computeContentTag(original),
+      line_ops: [{ op: 'swap' as const, start: 2, end: 2, content: 'delta' }],
+    };
+    expect(EditInputSchema.safeParse(args).success).toBe(true);
     expect(tool.parameters).toMatchObject({
       type: 'object',
-      properties: { old_string: { type: 'string' } },
+      properties: { expected_tag: { type: 'string' }, line_ops: { type: 'array' } },
     });
 
-    const result = await executeTool(tool,
-      context({ path: '/workspace/a.txt', old_string: 'gamma', new_string: 'delta' }),
-    );
-    expect(result).toMatchObject({ isError: true });
-    expect(result.output).toContain('old_string not found');
+    const result = await executeTool(tool, context(args));
+    expect(result.isError).toBeFalsy();
+    expect(writeText).toHaveBeenCalledWith('/workspace/a.txt', 'alpha\ndelta\n');
   });
 
   it('Glob exposes parameters and walks pure-wildcard patterns capped at MAX_MATCHES', async () => {

@@ -28,24 +28,31 @@ import {
   closeSync,
   existsSync,
   mkdirSync,
+  renameSync,
   readFileSync,
   unlinkSync,
   writeFileSync,
   openSync,
 } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 
-import { classifyServerIdentity } from './identity';
 import { resolveNoriHome } from './home';
-import { serverTokenPath } from './services/auth/persistentToken';
 
 export const DEFAULT_LOCK_DIR = join(resolveNoriHome(), 'server');
 export const DEFAULT_LOCK_PATH = join(DEFAULT_LOCK_DIR, 'lock');
+export const SERVER_LOCK_SCHEMA_VERSION = 2 as const;
+
+export type ServerLockState = 'starting' | 'ready';
 
 /** JSON shape stored in the lock file. snake_case to match operator-facing logs. */
 export interface LockContents {
+  schema_version?: typeof SERVER_LOCK_SCHEMA_VERSION;
+  launch_id?: string;
+  state?: ServerLockState;
   pid: number;
   started_at: string;
+  ready_at?: string;
   host?: string;
   port: number;
   /** Host CLI version that started this server (e.g. Nori package version).
@@ -56,6 +63,12 @@ export interface LockContents {
       installs that share a version string (e.g. two pkg.pr.new builds of the
       same base version living in different npx cache dirs). */
   entry?: string;
+}
+
+export interface ServerLockV2 extends LockContents {
+  schema_version: typeof SERVER_LOCK_SCHEMA_VERSION;
+  launch_id: string;
+  state: ServerLockState;
 }
 
 export interface AcquireLockOptions {
@@ -71,6 +84,8 @@ export interface AcquireLockOptions {
   entry?: string;
   /** Override `new Date().toISOString()` — used in tests for deterministic output. */
   nowIso?: string;
+  /** Stable owner nonce. Production callers normally accept the generated UUID. */
+  launchId?: string;
   /**
    * Override `process.pid` — used in tests where we want to simulate a
    * different server owning the lock. Production callers should not set this.
@@ -79,6 +94,8 @@ export interface AcquireLockOptions {
 }
 
 export interface AcquireLockResult {
+  /** Owner nonce written into the lock. */
+  launchId: string;
   /** Idempotent release: safe to call multiple times; best-effort on missing/mismatched lock. */
   release(): void;
   /** Absolute path of the lock file that was acquired. */
@@ -92,6 +109,8 @@ export interface AcquireLockResult {
    * pid, or already records `port`.
    */
   updatePort(port: number): void;
+  /** Atomically publish the bound port and transition the lock to `ready`. */
+  markReady(port: number, readyAt?: string): void;
 }
 
 /** Error thrown when another server is already holding the lock. */
@@ -113,7 +132,7 @@ export class ServerLockedError extends Error {
 }
 
 /** `process.kill(pid, 0)` probe — true if the pid exists, false on ESRCH. */
-function pidAlive(pid: number): boolean {
+export function pidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
@@ -127,19 +146,8 @@ function pidAlive(pid: number): boolean {
   }
 }
 
-/** Best-effort read of the local persistent server token (for legacy-server identification). */
-function readLocalServerToken(lockPath: string): string | undefined {
-  try {
-    const homeDir = dirname(dirname(lockPath));
-    const token = readFileSync(serverTokenPath(homeDir), 'utf8').trim();
-    return token.length > 0 ? token : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 /** Read + JSON.parse the lock file; returns undefined on any error so callers can fall through. */
-function readLockContents(path: string): LockContents | undefined {
+export function readLockContents(path: string = DEFAULT_LOCK_PATH): LockContents | undefined {
   try {
     const raw = readFileSync(path, 'utf8');
     const parsed = JSON.parse(raw) as unknown;
@@ -156,6 +164,34 @@ function readLockContents(path: string): LockContents | undefined {
   } catch {
     return undefined;
   }
+}
+
+export function isServerLockV2(lock: LockContents): lock is ServerLockV2 {
+  return (
+    lock.schema_version === SERVER_LOCK_SCHEMA_VERSION
+    && typeof lock.launch_id === 'string'
+    && lock.launch_id.length > 0
+    && (lock.state === 'starting' || lock.state === 'ready')
+  );
+}
+
+export function sameLockOwner(left: LockContents, right: LockContents): boolean {
+  const leftV2 = isServerLockV2(left);
+  const rightV2 = isServerLockV2(right);
+  if (leftV2 || rightV2) {
+    return leftV2
+      && rightV2
+      && left.pid === right.pid
+      && left.launch_id === right.launch_id;
+  }
+  return (
+    left.pid === right.pid
+    && left.started_at === right.started_at
+    && left.host === right.host
+    && left.port === right.port
+    && left.host_version === right.host_version
+    && left.entry === right.entry
+  );
 }
 
 /**
@@ -211,7 +247,10 @@ export function acquireLock(opts: AcquireLockOptions): AcquireLockResult {
   const lockPath = opts.lockPath ?? DEFAULT_LOCK_PATH;
   const pid = opts.pid ?? process.pid;
   const startedAt = opts.nowIso ?? new Date().toISOString();
-  const contents: LockContents = {
+  const contents: ServerLockV2 = {
+    schema_version: SERVER_LOCK_SCHEMA_VERSION,
+    launch_id: opts.launchId ?? randomUUID(),
+    state: 'starting',
     pid,
     started_at: startedAt,
     host: opts.host,
@@ -224,7 +263,7 @@ export function acquireLock(opts: AcquireLockOptions): AcquireLockResult {
 
   // First try: clean acquire.
   if (tryExclusiveCreate(lockPath, contents)) {
-    return makeReleaseHandle(lockPath, pid);
+    return makeReleaseHandle(lockPath, contents);
   }
 
   // Lock exists — inspect.
@@ -259,21 +298,21 @@ export function acquireLock(opts: AcquireLockOptions): AcquireLockResult {
       winner ?? { pid: -1, started_at: '', port: opts.port },
     );
   }
-  return makeReleaseHandle(lockPath, pid);
+  return makeReleaseHandle(lockPath, contents);
 }
 
 /**
- * Like acquireLockSync, but when pidAlive says the owner is alive, also probes
- * the recorded host:port for a Nori-identified `/api/v1/healthz` response. If
- * the port is not serving a Nori server, the lock is treated as stale
- * (Windows PID recycling guard; also covers a foreign product sharing the
- * historical default port).
+ * Async lock acquisition used by server bootstrap. A live PID always owns its
+ * lock until a coordinator validates and stops that exact owner.
  */
 export async function acquireLockSafe(opts: AcquireLockOptions): Promise<AcquireLockResult> {
   const lockPath = opts.lockPath ?? DEFAULT_LOCK_PATH;
   const pid = opts.pid ?? process.pid;
   const startedAt = opts.nowIso ?? new Date().toISOString();
-  const contents: LockContents = {
+  const contents: ServerLockV2 = {
+    schema_version: SERVER_LOCK_SCHEMA_VERSION,
+    launch_id: opts.launchId ?? randomUUID(),
+    state: 'starting',
     pid,
     started_at: startedAt,
     host: opts.host,
@@ -286,47 +325,19 @@ export async function acquireLockSafe(opts: AcquireLockOptions): Promise<Acquire
 
   // First try: clean acquire.
   if (tryExclusiveCreate(lockPath, contents)) {
-    return makeReleaseHandle(lockPath, pid);
+    return makeReleaseHandle(lockPath, contents);
   }
 
   // Lock exists — inspect.
   const existing = readLockContents(lockPath);
   if (existing && pidAlive(existing.pid)) {
-    // When the recorded port is 0 (ephemeral bind), the real listening port is
-    // unknown so we cannot probe it. Fall back to PID-only check — same as the
-    // synchronous acquireLock — to avoid a false-stale takeover.
-    if (existing.port === 0) {
-      throw new ServerLockedError(
-        `server already running (pid=${existing.pid}, port=${existing.port}, started=${existing.started_at})`,
-        existing,
-      );
-    }
-    // PID appears alive, but verify the port is actually serving *a Nori
-    // server* (any build). A bare TCP/probe check is not enough: the port may
-    // be held by a different product speaking the same health envelope (e.g.
-    // upstream Kimi Code sharing the historical default port) or by a process
-    // that recycled the recorded PID on Windows. Anything not identified as
-    // Nori is treated as a stale lock and taken over.
-    const connectHost =
-      existing.host !== undefined && existing.host !== '0.0.0.0'
-        ? existing.host
-        : '127.0.0.1';
-    const identity = await classifyServerIdentity(
-      `http://${connectHost}:${existing.port}`,
-      readLocalServerToken(lockPath),
-      500,
+    throw new ServerLockedError(
+      `server already running (pid=${existing.pid}, port=${existing.port}, started=${existing.started_at})`,
+      existing,
     );
-    if (identity === 'nori') {
-      throw new ServerLockedError(
-        `server already running (pid=${existing.pid}, port=${existing.port}, started=${existing.started_at})`,
-        existing,
-      );
-    }
-    // Port not serving a Nori server → stale lock from a dead/replaced owner.
-    // Fall through to takeover.
   }
 
-  // Stale or unresponsive — takeover.
+  // Dead or unreadable owner — takeover.
   try {
     unlinkSync(lockPath);
   } catch (err) {
@@ -341,19 +352,34 @@ export async function acquireLockSafe(opts: AcquireLockOptions): Promise<Acquire
       winner ?? { pid: -1, started_at: '', port: opts.port },
     );
   }
-  return makeReleaseHandle(lockPath, pid);
+  return makeReleaseHandle(lockPath, contents);
 }
 
-function makeReleaseHandle(lockPath: string, ownerPid: number): AcquireLockResult {
+function writeLockAtomically(lockPath: string, contents: LockContents): void {
+  const tempPath = `${lockPath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(tempPath, JSON.stringify(contents), { mode: 0o600 });
+    renameSync(tempPath, lockPath);
+  } finally {
+    try {
+      unlinkSync(tempPath);
+    } catch {
+      // Renamed successfully or already cleaned up.
+    }
+  }
+}
+
+function makeReleaseHandle(lockPath: string, owner: ServerLockV2): AcquireLockResult {
   let released = false;
   return {
+    launchId: owner.launch_id,
     lockPath,
     release(): void {
       if (released) return;
       released = true;
       if (!existsSync(lockPath)) return;
       const contents = readLockContents(lockPath);
-      if (contents && contents.pid !== ownerPid) {
+      if (contents && !sameLockOwner(contents, owner)) {
         // Someone else owns the lock now — don't touch it.
         return;
       }
@@ -367,9 +393,26 @@ function makeReleaseHandle(lockPath: string, ownerPid: number): AcquireLockResul
       if (!existsSync(lockPath)) return;
       const contents = readLockContents(lockPath);
       // Only rewrite our own lock, and only when the port actually changed.
-      if (!contents || contents.pid !== ownerPid || contents.port === port) return;
+      if (!contents || !sameLockOwner(contents, owner) || contents.port === port) return;
       try {
-        writeFileSync(lockPath, JSON.stringify({ ...contents, port }));
+        writeLockAtomically(lockPath, { ...contents, port });
+      } catch {
+        // Best-effort: a concurrent release/takeover may have removed the file.
+      }
+    },
+    markReady(port: number, readyAt: string = new Date().toISOString()): void {
+      if (!existsSync(lockPath)) return;
+      const contents = readLockContents(lockPath);
+      if (!contents || !sameLockOwner(contents, owner)) return;
+      try {
+        writeLockAtomically(lockPath, {
+          ...contents,
+          schema_version: SERVER_LOCK_SCHEMA_VERSION,
+          launch_id: owner.launch_id,
+          state: 'ready',
+          ready_at: readyAt,
+          port,
+        });
       } catch {
         // Best-effort: a concurrent release/takeover may have removed the file.
       }

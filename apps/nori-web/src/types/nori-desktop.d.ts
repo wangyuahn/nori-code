@@ -82,6 +82,11 @@ export interface NoriBrowserState {
   }>;
 }
 
+export interface NoriBrowserOcclusionState {
+  occluded: boolean;
+  previewDataUrl: string | null;
+}
+
 export interface NoriDesktopAPI {
   usesCustomWindowControls?: boolean;
   getServerToken?: () => Promise<string | undefined>;
@@ -121,6 +126,7 @@ export interface NoriDesktopAPI {
     staleRef?: boolean;
   }>;
   browserSetVisible?: (visible: boolean) => Promise<NoriBrowserState>;
+  browserSetOccluded?: (occluded: boolean) => Promise<NoriBrowserOcclusionState>;
   browserResize?: (bounds: { x: number; y: number; width: number; height: number }) => void;
   onBrowserState?: (callback: (state: NoriBrowserState) => void) => () => void;
   // File system methods

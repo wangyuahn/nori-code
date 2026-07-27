@@ -59,8 +59,6 @@ export interface ParsedServerOptions {
   daemon: boolean;
   /** Internal: idle-shutdown grace in ms (daemon mode only). */
   idleGraceMs: number;
-  /** Internal: reuse-health wait in ms before replacing a wedged existing daemon. */
-  reuseHealthTimeoutMs?: number;
 }
 
 export interface ServerCliOptions {
@@ -80,8 +78,6 @@ export interface ServerCliOptions {
   daemon?: boolean;
   /** Internal flag set by the daemon spawner / tests. */
   idleGraceMs?: string;
-  /** Internal flag set by launchers that pre-checked the lock (e.g. desktop). */
-  reuseHealthTimeoutMs?: string;
 }
 
 export function parseServerOptions(opts: ServerCliOptions): ParsedServerOptions {
@@ -96,20 +92,7 @@ export function parseServerOptions(opts: ServerCliOptions): ParsedServerOptions 
     allowedHosts: parseAllowedHostArgs(opts.allowedHost),
     daemon: opts.daemon === true,
     idleGraceMs: parseIdleGraceMs(opts.idleGraceMs),
-    reuseHealthTimeoutMs: parseOptionalTimeoutMs(
-      opts.reuseHealthTimeoutMs,
-      '--reuse-health-timeout-ms',
-    ),
   };
-}
-
-function parseOptionalTimeoutMs(raw: string | undefined, label: string): number | undefined {
-  if (raw === undefined) return undefined;
-  const n = Number.parseInt(raw, 10);
-  if (!Number.isFinite(n) || n < 0) {
-    throw new Error(`error: invalid ${label} value: ${raw}`);
-  }
-  return n;
 }
 
 export function parseAllowedHostArgs(raw: readonly string[] | undefined): string[] {

@@ -13,6 +13,9 @@ import {
   type Event,
   type QuestionRequest,
   type QuestionResult,
+  type McpElicitationResult,
+  type SessionMcpElicitationComplete,
+  type SessionMcpElicitationRequest,
 } from '../../src';
 import { TestInstantiationService } from '../../src/di/test';
 
@@ -25,6 +28,7 @@ import {
   ILogService,
   ICoreProcessService,
   IQuestionService,
+  IMcpElicitationService,
 } from '../../src/services';
 
 class RecordingEventService implements IEventService {
@@ -81,6 +85,16 @@ class RecordingQuestionService implements IQuestionService {
   }
 }
 
+class RecordingMcpElicitationService implements IMcpElicitationService {
+  readonly _serviceBrand: undefined;
+
+  async request(_request: SessionMcpElicitationRequest): Promise<McpElicitationResult> {
+    return { action: 'cancel' };
+  }
+
+  complete(_notification: SessionMcpElicitationComplete): void {}
+}
+
 class NoopLogService implements ILogService {
   readonly _serviceBrand: undefined;
 
@@ -119,6 +133,7 @@ function makePeers() {
     eventService: new RecordingEventService(),
     approvalService: new RecordingApprovalService(),
     questionService: new RecordingQuestionService(),
+    mcpElicitationService: new RecordingMcpElicitationService(),
     logService: new NoopLogService(),
   };
 }
@@ -133,8 +148,14 @@ function makeEnv(homeDir: string): IEnvironmentService {
 
 describe('BridgeClientAPI', () => {
   it('routes emitEvent / requestApproval / requestQuestion / toolCall to peer services', async () => {
-    const { eventService, approvalService, questionService, logService } = makePeers();
-    const api = new BridgeClientAPI({ eventService, approvalService, questionService, logService });
+    const { eventService, approvalService, questionService, mcpElicitationService, logService } = makePeers();
+    const api = new BridgeClientAPI({
+      eventService,
+      approvalService,
+      questionService,
+      mcpElicitationService,
+      logService,
+    });
 
     const ev: Event = {
       type: 'agent_status_updated',
@@ -179,7 +200,7 @@ describe('BridgeClientAPI', () => {
 
 describe('CoreProcessService direct construction', () => {
   it('constructs, exposes a callable rpc proxy, and ready() resolves', async () => {
-    const { eventService, approvalService, questionService, logService } = makePeers();
+    const { eventService, approvalService, questionService, mcpElicitationService, logService } = makePeers();
     const core = new CoreProcessService(
       {},
       makeEnv(tmpHome),
@@ -187,6 +208,7 @@ describe('CoreProcessService direct construction', () => {
       approvalService,
       questionService,
       logService,
+      mcpElicitationService,
     );
     try {
       await expect(core.ready()).resolves.toBeUndefined();
@@ -197,7 +219,7 @@ describe('CoreProcessService direct construction', () => {
   });
 
   it('rpc round-trip through createRPC reaches KimiCore (getCoreInfo smoke)', async () => {
-    const { eventService, approvalService, questionService, logService } = makePeers();
+    const { eventService, approvalService, questionService, mcpElicitationService, logService } = makePeers();
     const core = new CoreProcessService(
       {},
       makeEnv(tmpHome),
@@ -205,6 +227,7 @@ describe('CoreProcessService direct construction', () => {
       approvalService,
       questionService,
       logService,
+      mcpElicitationService,
     );
     try {
       await core.ready();
@@ -217,7 +240,7 @@ describe('CoreProcessService direct construction', () => {
   });
 
   it('dispose is idempotent and short-circuits subsequent rpc calls', async () => {
-    const { eventService, approvalService, questionService, logService } = makePeers();
+    const { eventService, approvalService, questionService, mcpElicitationService, logService } = makePeers();
     const core = new CoreProcessService(
       {},
       makeEnv(tmpHome),
@@ -225,6 +248,7 @@ describe('CoreProcessService direct construction', () => {
       approvalService,
       questionService,
       logService,
+      mcpElicitationService,
     );
     await core.ready();
     core.dispose();
@@ -266,7 +290,7 @@ describe('CoreProcessService direct construction', () => {
 
 describe('singleton registry composition', () => {
   it('returns a CoreProcessService descriptor that composes with the DI container', async () => {
-    const { eventService, approvalService, questionService } = makePeers();
+    const { eventService, approvalService, questionService, mcpElicitationService } = makePeers();
     const moduleEntries = getSingletonServiceDescriptors();
     expect(moduleEntries.length).toBeGreaterThanOrEqual(1);
     expect(moduleEntries[0]![0]).toBe(ICoreProcessService);
@@ -279,6 +303,7 @@ describe('singleton registry composition', () => {
     ix.stub(IEventService, eventService);
     ix.stub(IApprovalService, approvalService);
     ix.stub(IQuestionService, questionService);
+    ix.stub(IMcpElicitationService, mcpElicitationService);
     ix.stub(IEnvironmentService, makeEnv(tmpHome));
     ix.stub(ILogService, new NoopLogService());
 

@@ -53,6 +53,14 @@ describe('Event public types', () => {
     expectTypeOf<EventByType<'cron.fired'>['origin']['kind']>().toEqualTypeOf<'cron_job'>();
   });
 
+  it('narrows MCP protocol events by type', () => {
+    expectTypeOf<EventByType<'mcp.server.log'>['level']>().toEqualTypeOf<
+      'debug' | 'info' | 'notice' | 'warning' | 'error' | 'critical' | 'alert' | 'emergency'
+    >();
+    expectTypeOf<EventByType<'mcp.server.progress'>['progress']>().toEqualTypeOf<number>();
+    expectTypeOf<EventByType<'mcp.resource.updated'>['uri']>().toEqualTypeOf<string>();
+  });
+
   it('exposes approval and question reverse-RPC requests', () => {
     expectTypeOf<ApprovalRequest['turnId']>().toEqualTypeOf<number | undefined>();
     expectTypeOf<ApprovalRequest['toolName']>().toEqualTypeOf<string>();
@@ -67,6 +75,7 @@ describe('Event public types', () => {
     function handle(event: Event): void {
       switch (event.type) {
         case 'agent.status.updated':
+        case 'code.change':
         case 'session.meta.updated':
         case 'event.session.created':
         case 'event.session.status_changed':
@@ -97,6 +106,10 @@ describe('Event public types', () => {
         case 'tool.result':
         case 'tool.list.updated':
         case 'mcp.server.status':
+        case 'mcp.server.list.changed':
+        case 'mcp.resource.updated':
+        case 'mcp.server.log':
+        case 'mcp.server.progress':
         case 'subagent.spawned':
         case 'subagent.started':
         case 'subagent.suspended':
@@ -107,6 +120,7 @@ describe('Event public types', () => {
         case 'compaction.cancelled':
         case 'compaction.completed':
         case 'background.task.started':
+        case 'background.task.updated':
         case 'background.task.terminated':
         case 'cron.fired':
         case 'prompt.submitted':

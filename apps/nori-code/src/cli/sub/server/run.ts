@@ -37,7 +37,11 @@ import {
   isLoopbackHost,
   splitTokenFragment,
 } from './access-urls';
-import { ensureDaemon, type EnsureDaemonResult } from './daemon';
+import {
+  daemonLaunchIdentityFromEnv,
+  ensureDaemon,
+  type EnsureDaemonResult,
+} from './daemon';
 import { pidAlive } from './kill';
 import { type NetworkAddress } from './networks';
 import {
@@ -170,12 +174,6 @@ export function buildRunCommand(cmd: Command, options: { defaultOpen: boolean })
         'Idle-shutdown grace in ms (daemon mode, internal).',
       ).hideHelp(),
     )
-    .addOption(
-      new Option(
-        '--reuse-health-timeout-ms <ms>',
-        'How long to wait for an existing version-matched daemon to answer /healthz before replacing it (internal; used by launchers that pre-checked the lock).',
-      ).hideHelp(),
-    )
     .action(async (opts: RunCliOptions) => {
       try {
         await handleRunCommand(opts);
@@ -265,7 +263,6 @@ export async function startServerBackground(
     allowRemoteTerminals: options.allowRemoteTerminals,
     allowedHosts: options.allowedHosts,
     idleGraceMs: options.idleGraceMs,
-    reuseHealthTimeoutMs: options.reuseHealthTimeoutMs,
   });
 }
 
@@ -368,10 +365,13 @@ async function runServerInProcess(
   }
 
   try {
+    const launchIdentity = mode.daemon ? daemonLaunchIdentityFromEnv() : {};
     running = await startServer({
       host: options.host,
       port: options.port,
       logLevel: options.logLevel,
+      launchId: launchIdentity.launchId,
+      startedAt: launchIdentity.startedAt,
       debugEndpoints: options.debugEndpoints,
       insecureNoTls: options.insecureNoTls,
       allowRemoteShutdown: options.allowRemoteShutdown,

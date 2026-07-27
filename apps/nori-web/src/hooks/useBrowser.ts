@@ -18,10 +18,13 @@ const EMPTY_STATE: NoriBrowserState = {
 export interface UseBrowserResult extends NoriBrowserState {
   activeTab?: NoriBrowserTabState;
   available: boolean;
+  ready: boolean;
+  occluded: boolean;
+  occlusionPreviewDataUrl: string | null;
   navigate: (url: string) => void;
-  newTab: (url?: string) => void;
+  newTab: (url?: string) => Promise<NoriBrowserState | undefined>;
   closeTab: (tabId: string) => void;
-  activateTab: (tabId: string) => void;
+  activateTab: (tabId: string) => Promise<NoriBrowserState | undefined>;
   goBack: () => void;
   goForward: () => void;
   reload: () => void;
@@ -38,11 +41,14 @@ export interface UseBrowserResult extends NoriBrowserState {
   openDownload: (id: string) => void;
   clearNetwork: (tabId?: string) => void;
   setVisible: (visible: boolean) => void;
+  setOccluded: (occluded: boolean) => void;
   setBounds: (bounds: { x: number; y: number; width: number; height: number }) => void;
 }
 
 export function useBrowser(): UseBrowserResult {
   const [state, setState] = useState<NoriBrowserState>(EMPTY_STATE);
+  const [occlusion, setOcclusion] = useState({ occluded: false, previewDataUrl: null as string | null });
+  const [ready, setReady] = useState(false);
   const mountedRef = useRef(true);
   const available = typeof window.noriDesktop?.browserGetState === 'function';
 
@@ -52,8 +58,15 @@ export function useBrowser(): UseBrowserResult {
   }, []);
 
   useEffect(() => {
-    if (!available) return;
-    const update = (next: NoriBrowserState) => { if (mountedRef.current) setState(normalizeState(next)); };
+    if (!available) {
+      setReady(true);
+      return;
+    }
+    const update = (next: NoriBrowserState) => {
+      if (!mountedRef.current) return;
+      setState(normalizeState(next));
+      setReady(true);
+    };
     const unsubscribe = window.noriDesktop?.onBrowserState?.(update);
     void window.noriDesktop?.browserGetState?.().then(update);
     return () => unsubscribe?.();
@@ -62,10 +75,16 @@ export function useBrowser(): UseBrowserResult {
   const apply = useCallback((result: Promise<NoriBrowserState> | undefined) => {
     if (result !== undefined) void result.then(next => { if (mountedRef.current) setState(normalizeState(next)); });
   }, []);
+  const applyAndReturn = useCallback(async (result: Promise<NoriBrowserState> | undefined) => {
+    if (result === undefined) return undefined;
+    const next = normalizeState(await result);
+    if (mountedRef.current) setState(next);
+    return next;
+  }, []);
   const navigate = useCallback((url: string) => apply(window.noriDesktop?.browserNavigate?.(url)), [apply]);
-  const newTab = useCallback((url?: string) => apply(window.noriDesktop?.browserNewTab?.(url)), [apply]);
+  const newTab = useCallback((url?: string) => applyAndReturn(window.noriDesktop?.browserNewTab?.(url)), [applyAndReturn]);
   const closeTab = useCallback((tabId: string) => apply(window.noriDesktop?.browserCloseTab?.(tabId)), [apply]);
-  const activateTab = useCallback((tabId: string) => apply(window.noriDesktop?.browserActivateTab?.(tabId)), [apply]);
+  const activateTab = useCallback((tabId: string) => applyAndReturn(window.noriDesktop?.browserActivateTab?.(tabId)), [applyAndReturn]);
   const goBack = useCallback(() => window.noriDesktop?.browserGoBack?.(), []);
   const goForward = useCallback(() => window.noriDesktop?.browserGoForward?.(), []);
   const reload = useCallback(() => window.noriDesktop?.browserReload?.(), []);
@@ -82,6 +101,14 @@ export function useBrowser(): UseBrowserResult {
   const openDownload = useCallback((id: string) => { void window.noriDesktop?.browserOpenDownload?.(id); }, []);
   const clearNetwork = useCallback((tabId?: string) => apply(window.noriDesktop?.browserClearNetwork?.(tabId)), [apply]);
   const setVisible = useCallback((visible: boolean) => apply(window.noriDesktop?.browserSetVisible?.(visible)), [apply]);
+  const setOccluded = useCallback((occluded: boolean) => {
+    const result = window.noriDesktop?.browserSetOccluded?.(occluded);
+    if (result !== undefined) {
+      void result.then(next => {
+        if (mountedRef.current) setOcclusion(next);
+      });
+    }
+  }, []);
   const setBounds = useCallback((bounds: { x: number; y: number; width: number; height: number }) => window.noriDesktop?.browserResize?.(bounds), []);
   const activeTab = useMemo(
     () => state.tabs.find(tab => tab.id === state.activeTabId),
@@ -92,6 +119,9 @@ export function useBrowser(): UseBrowserResult {
     ...state,
     activeTab,
     available,
+    ready,
+    occluded: occlusion.occluded,
+    occlusionPreviewDataUrl: occlusion.previewDataUrl,
     navigate,
     newTab,
     closeTab,
@@ -112,6 +142,7 @@ export function useBrowser(): UseBrowserResult {
     openDownload,
     clearNetwork,
     setVisible,
+    setOccluded,
     setBounds,
   };
 }

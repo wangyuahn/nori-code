@@ -164,8 +164,8 @@ describe('tool-result registry', () => {
     const renderer = pickResultRenderer('Edit');
     const out = joinRender(
       renderer(
-        call('Edit', { path: 'foo.ts', old_string: 'a', new_string: 'b' }),
-        result('Replaced 1 occurrence in foo.ts'),
+        call('Edit', { path: 'foo.ts', expected_tag: 'A1B2', line_ops: [{ op: 'swap', start: 1, end: 1, content: 'b' }] }),
+        result('[foo.ts#C3D4]\nApplied 1 line operation to foo.ts.'),
         ctx,
       ),
     );

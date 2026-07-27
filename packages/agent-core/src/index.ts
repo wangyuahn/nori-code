@@ -52,6 +52,14 @@ export type {
   BrowserProvider,
   ToolServices,
 } from './tools/support/services';
+export {
+  compileToolArgsValidator,
+  validateToolArgs,
+} from './tools/args-validator';
+export type {
+  JsonType,
+  ToolArgsValidator,
+} from './tools/args-validator';
 
 // Image compression — the input-stage helper each ingestion site (CLI paste,
 // server upload resolution, ACP, ReadMediaFile, MCP) calls to shrink oversized

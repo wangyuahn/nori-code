@@ -53,6 +53,39 @@ export interface QuestionRequest {
   readonly questions: readonly QuestionItem[];
 }
 
+export type McpElicitationValue = string | number | boolean | string[];
+
+export interface McpElicitationFormRequest {
+  readonly requestId: string;
+  readonly serverName: string;
+  readonly mode: 'form';
+  readonly message: string;
+  readonly requestedSchema: Record<string, unknown>;
+}
+
+export interface McpElicitationUrlRequest {
+  readonly requestId: string;
+  readonly serverName: string;
+  readonly mode: 'url';
+  readonly message: string;
+  readonly serverElicitationId: string;
+  readonly url: string;
+}
+
+export type McpElicitationRequest =
+  | McpElicitationFormRequest
+  | McpElicitationUrlRequest;
+
+export interface McpElicitationResult {
+  readonly action: 'accept' | 'decline' | 'cancel';
+  readonly content?: Record<string, McpElicitationValue>;
+}
+
+export interface McpElicitationComplete {
+  readonly serverName: string;
+  readonly serverElicitationId: string;
+}
+
 export interface ToolCallRequest {
   readonly turnId?: number | undefined;
   readonly toolCallId: string;
@@ -68,6 +101,8 @@ export interface SDKAgentAPI {
   emitEvent: (event: AgentEvent) => void;
   requestApproval: (request: ApprovalRequest) => Promise<ApprovalResponse>;
   requestQuestion: (request: QuestionRequest) => Promise<QuestionResult>;
+  requestMcpElicitation?: (request: McpElicitationRequest) => Promise<McpElicitationResult>;
+  completeMcpElicitation?: (notification: McpElicitationComplete) => void;
   toolCall: (request: ToolCallRequest) => Promise<ToolCallResponse>;
 }
 export type SDKAgentRPC = RPCMethods<SDKAgentAPI>;

@@ -35,6 +35,8 @@
 import { createDecorator } from '../../di';
 import type { McpServerInfo } from '../../rpc';
 import type {
+  McpConfigurationResponse,
+  PatchMcpConfigurationRequest,
   McpServer,
   McpServerStatus,
   McpServerTransport,
@@ -103,6 +105,12 @@ export interface IMcpService {
   /** Return all MCP servers known to the in-process KimiCore. */
   list(): Promise<readonly McpServer[]>;
 
+  /** Read the user-global MCP declarations from `<NORI_CODE_HOME>/mcp.json`. */
+  getConfig(): Promise<McpConfigurationResponse>;
+
+  /** Merge user-global MCP declarations. A null entry deletes that server. */
+  setConfig(patch: PatchMcpConfigurationRequest): Promise<McpConfigurationResponse>;
+
   /**
    * Trigger an MCP server reconnect. Returns `{ restarting: true }` on a
    * successful enqueue. Throws `McpServerNotFoundError` (→ 40408) when the
@@ -125,6 +133,13 @@ export class McpServerNotFoundError extends Error {
     super(`mcp server ${serverId} does not exist`);
     this.name = 'McpServerNotFoundError';
     this.serverId = serverId;
+  }
+}
+
+export class McpConfigInvalidError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'McpConfigInvalidError';
   }
 }
 

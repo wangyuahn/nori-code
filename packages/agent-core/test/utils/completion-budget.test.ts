@@ -50,13 +50,13 @@ describe('computeCompletionBudgetCap', () => {
     ).toBe(1);
   });
 
-  it('uses the model context window when no hard cap is set', () => {
+  it('does not use the model context window as an output-token limit', () => {
     const maxCtx = 100000;
     const cap = computeCompletionBudgetCap({
       budget: { fallback: 32000 },
       capability: makeCapability(maxCtx),
     });
-    expect(cap).toBe(maxCtx);
+    expect(cap).toBe(32000);
   });
 
   it('uses the explicit hard cap when configured', () => {
@@ -67,12 +67,12 @@ describe('computeCompletionBudgetCap', () => {
     expect(cap).toBe(32000);
   });
 
-  it('ignores fallback when the model context window is known', () => {
+  it('uses fallback when the model context window is known', () => {
     const cap = computeCompletionBudgetCap({
       budget: { fallback: 32000 },
       capability: makeCapability(10000),
     });
-    expect(cap).toBe(10000);
+    expect(cap).toBe(32000);
   });
 
   it('keeps explicit hard cap when smaller than remaining', () => {
@@ -128,7 +128,7 @@ describe('applyCompletionBudget', () => {
     expect(result).toBe(opaque);
   });
 
-  it('clones the provider with the model context window when budget is configured', () => {
+  it('clones the provider with the configured fallback when no output limit is known', () => {
     const result = applyCompletionBudget({
       provider: original,
       budget: { fallback: 32000 },
@@ -136,7 +136,7 @@ describe('applyCompletionBudget', () => {
     });
     expect(withMaxCompletionTokens).toHaveBeenCalledOnce();
     const cap = withMaxCompletionTokens.mock.calls[0]?.[0] as number;
-    expect(cap).toBe(10000);
+    expect(cap).toBe(32000);
     expect(result).not.toBe(original);
   });
 

@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('noriDesktop', {
     ? { browserExecuteActionForSmoke: (request: Record<string, unknown>) => ipcRenderer.invoke('nori:browser:execute-action-smoke', request) }
     : {}),
   browserSetVisible: (visible: boolean) => ipcRenderer.invoke('nori:browser:set-visible', visible),
+  browserSetOccluded: (occluded: boolean) => ipcRenderer.invoke('nori:browser:set-occluded', occluded),
   browserResize: (bounds: { x: number; y: number; width: number; height: number }) => ipcRenderer.send('nori:browser:resize', bounds),
   onBrowserState: (callback: (state: Record<string, unknown>) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, state: Record<string, unknown>) => callback(state);

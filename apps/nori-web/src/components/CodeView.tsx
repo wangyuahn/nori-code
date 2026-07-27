@@ -10,7 +10,7 @@ import {
 import { ChatView, type ChatViewProps } from './ChatView';
 import { WorkspaceInspector } from './WorkspaceInspector';
 import { useFilesystem } from '../hooks/useFilesystem';
-import type { ApprovalRequest, FsEntry, FsReadResponse, ModelCatalogItem, QuestionAnswer, QuestionRequest, Session, SessionAgentConfig, SessionRealtimeStatus } from '../api/client';
+import type { ApprovalRequest, FsEntry, FsReadResponse, McpElicitationRequest, McpElicitationResponse, ModelCatalogItem, QuestionAnswer, QuestionRequest, Session, SessionAgentConfig, SessionRealtimeStatus } from '../api/client';
 import type { ChatMessage, CodeChange, QueuedPrompt, TodoItem, WorkBlock } from '../hooks/useChatMessages';
 import { useI18n } from '../i18n';
 
@@ -52,6 +52,8 @@ interface CodeViewProps {
   pendingQuestions?: QuestionRequest[];
   onResolveQuestion?: (questionId: string, answers: Record<string, QuestionAnswer>) => void | Promise<void>;
   onDismissQuestion?: (questionId: string) => void | Promise<void>;
+  pendingMcpElicitations?: McpElicitationRequest[];
+  onResolveMcpElicitation?: (elicitationId: string, response: McpElicitationResponse) => void | Promise<void>;
   queuedPrompts?: QueuedPrompt[];
   todos?: TodoItem[];
   onCancelQueuedPrompt?: (promptId: string) => void | Promise<void>;
@@ -95,6 +97,8 @@ export function CodeView({
   pendingQuestions,
   onResolveQuestion,
   onDismissQuestion,
+  pendingMcpElicitations,
+  onResolveMcpElicitation,
   queuedPrompts,
   todos,
   onCancelQueuedPrompt,
@@ -246,6 +250,8 @@ export function CodeView({
         pendingQuestions={pendingQuestions}
         onResolveQuestion={onResolveQuestion}
         onDismissQuestion={onDismissQuestion}
+        pendingMcpElicitations={pendingMcpElicitations}
+        onResolveMcpElicitation={onResolveMcpElicitation}
         queuedPrompts={queuedPrompts}
         todos={todos}
         onCancelQueuedPrompt={onCancelQueuedPrompt}

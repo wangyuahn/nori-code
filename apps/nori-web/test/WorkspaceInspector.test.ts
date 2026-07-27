@@ -15,6 +15,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   delete window.noriDesktop;
   localStorage.removeItem('nori-inspector-overview-pinned');
+  localStorage.removeItem('nori-inspector-global-state-v1');
 });
 
 describe('workspace change presentation', () => {
@@ -78,6 +79,103 @@ describe('workspace change presentation', () => {
 
       expect(container.querySelector('.browser-panel')).toBeNull();
       expect(desktop.browserSetVisible).toHaveBeenLastCalledWith(false);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('binds every browser tool tab to a separate native page and overlays the tool menu on a captured preview', async () => {
+    class TestResizeObserver {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element) { this.callback([{ target } as ResizeObserverEntry], this as unknown as ResizeObserver); }
+      disconnect() {}
+      unobserve() {}
+    }
+
+    vi.stubGlobal('ResizeObserver', TestResizeObserver);
+    let listener: ((state: NoriBrowserState) => void) | undefined;
+    let browserState: NoriBrowserState = {
+      activeTabId: 'browser-1',
+      visible: false,
+      tabs: [{ id: 'browser-1', url: 'https://one.example.test', title: 'One', canGoBack: false, canGoForward: false, loading: false }],
+    };
+    const desktop: NoriDesktopAPI = {
+      browserGetState: vi.fn(async () => browserState),
+      browserSetVisible: vi.fn(async visible => (browserState = { ...browserState, visible })),
+      browserSetOccluded: vi.fn(async occluded => ({
+        occluded,
+        previewDataUrl: occluded ? 'data:image/png;base64,cHJldmlldw==' : null,
+      })),
+      browserResize: vi.fn(),
+      browserNewTab: vi.fn(async () => {
+        browserState = {
+          ...browserState,
+          activeTabId: 'browser-2',
+          tabs: [...browserState.tabs, { id: 'browser-2', url: 'about:blank', title: 'Two', canGoBack: false, canGoForward: false, loading: false }],
+        };
+        listener?.(browserState);
+        return browserState;
+      }),
+      browserActivateTab: vi.fn(async tabId => {
+        browserState = { ...browserState, activeTabId: tabId };
+        listener?.(browserState);
+        return browserState;
+      }),
+      browserCloseTab: vi.fn(async () => browserState),
+      onBrowserState: callback => { listener = callback; return () => { listener = undefined; }; },
+    };
+    window.noriDesktop = desktop;
+
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(WorkspaceInspector, {
+          sessionId: 'session-browser-tabs',
+          projectPath: '/project',
+          path: '',
+          file: null,
+          messages: [],
+          codeChanges: [],
+          gitStatus: null,
+          gitError: null,
+          gitLoading: false,
+          refreshGitStatus: vi.fn(async () => null),
+          isStreaming: false,
+          initialTab: 'browser',
+        })));
+      });
+      await vi.waitFor(() => { expect(desktop.browserSetVisible).toHaveBeenCalledWith(true); });
+      const hiddenCallsBeforeMenu = vi.mocked(desktop.browserSetVisible!).mock.calls
+        .filter(([visible]) => visible === false).length;
+
+      await act(async () => {
+        container.querySelector<HTMLButtonElement>('.inspector-add-tab')?.click();
+        await Promise.resolve();
+      });
+      await vi.waitFor(() => { expect(container.querySelector('.inspector-tool-menu')).not.toBeNull(); });
+      expect(desktop.browserSetVisible).toHaveBeenLastCalledWith(true);
+      expect(vi.mocked(desktop.browserSetVisible!).mock.calls.filter(([visible]) => visible === false)).toHaveLength(hiddenCallsBeforeMenu);
+      expect(desktop.browserSetOccluded).toHaveBeenCalledWith(true);
+
+      const browserMenuItem = [...container.querySelectorAll<HTMLButtonElement>('.inspector-tool-menu button')]
+        .find(button => button.textContent?.includes('Browser'));
+      await act(async () => {
+        browserMenuItem?.click();
+        await Promise.resolve();
+      });
+      await vi.waitFor(() => { expect(desktop.browserNewTab).toHaveBeenCalledTimes(1); });
+
+      const browserTabs = [...container.querySelectorAll<HTMLButtonElement>('.inspector-open-tab > button:first-child')]
+        .filter(button => button.textContent?.includes('Browser'));
+      expect(browserTabs).toHaveLength(2);
+      await act(async () => {
+        browserTabs[0]?.click();
+        await Promise.resolve();
+      });
+      await vi.waitFor(() => { expect(desktop.browserActivateTab).toHaveBeenCalledWith('browser-1'); });
     } finally {
       await act(async () => root.unmount());
       container.remove();
@@ -273,6 +371,59 @@ describe('workspace change presentation', () => {
     }
   });
 
+  it('restores the global tool island state after the chat view is unmounted', async () => {
+    const props = {
+      sessionId: 'session-inspector-global',
+      projectPath: '/project',
+      path: '',
+      file: null,
+      messages: [],
+      codeChanges: [],
+      gitStatus: null,
+      gitError: null,
+      gitLoading: false,
+      refreshGitStatus: vi.fn(async () => null),
+      isStreaming: false,
+      overviewFirst: true,
+    };
+    const firstContainer = document.createElement('div');
+    document.body.append(firstContainer);
+    const firstRoot = createRoot(firstContainer);
+    await act(async () => {
+      firstRoot.render(createElement(I18nProvider, null, createElement(WorkspaceInspector, props)));
+      await Promise.resolve();
+    });
+    const changesButton = [...firstContainer.querySelectorAll<HTMLButtonElement>('.inspector-tab-list > button')]
+      .find(button => button.textContent?.includes('Changes') || button.textContent?.includes('更改'))!;
+    await act(async () => {
+      changesButton.click();
+      await Promise.resolve();
+    });
+    expect(firstContainer.querySelector('.workspace-inspector')?.classList.contains('inspector-view-open')).toBe(true);
+    await act(async () => firstRoot.unmount());
+    firstContainer.remove();
+
+    const secondContainer = document.createElement('div');
+    document.body.append(secondContainer);
+    const secondRoot = createRoot(secondContainer);
+    try {
+      await act(async () => {
+        secondRoot.render(createElement(I18nProvider, null, createElement(WorkspaceInspector, {
+          ...props,
+          sessionId: 'session-inspector-other',
+        })));
+        await Promise.resolve();
+      });
+
+      expect(secondContainer.querySelector('.workspace-inspector')?.classList.contains('inspector-view-open')).toBe(true);
+      const activeTab = secondContainer.querySelector<HTMLButtonElement>('.inspector-open-tab.active [role="tab"]');
+      expect(activeTab?.textContent).toMatch(/Changes|更改/);
+    } finally {
+      await act(async () => secondRoot.unmount());
+      secondContainer.remove();
+    }
+  });
+
   it('opens a changed file in the Preview tab from its file card', async () => {
     const container = document.createElement('div');
     document.body.append(container);
@@ -400,10 +551,10 @@ describe('workspace change presentation', () => {
         name: 'Edit',
         args: {
           path: 'C:/Users/sudden/Desktop/games/stardrift.html',
-          old_string: 'background:#ff0000;',
-          new_string: 'background:#050510;',
+          expected_tag: 'A1B2',
+          line_ops: [{ op: 'swap', start: 1, end: 1, content: 'background:#050510;' }],
         },
-        result: 'Replaced 1 occurrence',
+        result: '[stardrift.html#C3D4]\nApplied 1 line operation to stardrift.html.',
       }],
     }];
 
@@ -412,7 +563,7 @@ describe('workspace change presentation', () => {
       agentId: 'main',
       operation: 'edit',
       path: 'stardrift.html',
-      diff: '-background:#ff0000;\n+background:#050510;',
+      diff: '- [original line 1 replaced]\n+background:#050510;',
       occurredAt: '2026-07-15T10:43:43.244Z',
     }]);
   });
@@ -668,8 +819,12 @@ describe('workspace change presentation', () => {
       toolCalls: [{
         id: 'edit-non-git',
         name: 'Edit',
-        args: { path: 'C:/projects/game/index.html', old_string: 'red', new_string: 'black' },
-        result: 'Replaced 1 occurrence',
+        args: {
+          path: 'C:/projects/game/index.html',
+          expected_tag: 'A1B2',
+          line_ops: [{ op: 'swap', start: 1, end: 1, content: 'black' }],
+        },
+        result: '[index.html#C3D4]\nApplied 1 line operation to index.html.',
       }],
     }];
 

@@ -11,8 +11,26 @@ export type {
   ServerLogger,
   ServerLogLevel,
 } from './services/pinoLoggerService';
-export { acquireLock, acquireLockSafe, getLiveLock, DEFAULT_LOCK_PATH, DEFAULT_LOCK_DIR } from './lock';
-export type { AcquireLockOptions, AcquireLockResult, LockContents } from './lock';
+export {
+  acquireLock,
+  acquireLockSafe,
+  getLiveLock,
+  readLockContents,
+  sameLockOwner,
+  isServerLockV2,
+  pidAlive,
+  DEFAULT_LOCK_PATH,
+  DEFAULT_LOCK_DIR,
+  SERVER_LOCK_SCHEMA_VERSION,
+} from './lock';
+export type {
+  AcquireLockOptions,
+  AcquireLockResult,
+  LockContents,
+  ServerLockV2,
+  ServerLockState,
+} from './lock';
+export * from './control';
 export { NORI_SERVER_APP_ID, probeNoriServer, classifyServerIdentity } from './identity';
 export type { ServerIdentityClass } from './identity';
 

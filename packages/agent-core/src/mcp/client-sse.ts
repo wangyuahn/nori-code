@@ -1,24 +1,12 @@
 import type { McpServerSseConfig } from '#/config/schema';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import { SSEClientTransport, SseError } from '@modelcontextprotocol/sdk/client/sse.js';
 
-import {
-  buildRequestOptions,
-  KIMI_MCP_CLIENT_NAME,
-  KIMI_MCP_CLIENT_VERSION,
-  toMcpToolDefinition,
-  toMcpToolResult,
-  type UnexpectedCloseListener,
-  type UnexpectedCloseReason,
-} from './client-shared';
+import { McpSdkClientBase, type McpSdkClientOptions } from './client-base';
+import type { UnexpectedCloseListener, UnexpectedCloseReason } from './client-shared';
 import { buildMcpRemoteHeaders } from './client-remote';
-import type { MCPClient, MCPToolDefinition, MCPToolResult } from './types';
 
-export interface SseMcpClientOptions {
-  readonly clientName?: string;
-  readonly clientVersion?: string;
-  readonly toolCallTimeoutMs?: number;
+export interface SseMcpClientOptions extends McpSdkClientOptions {
   /**
    * Reads `process.env[name]` by default. Tests can inject a deterministic
    * lookup function so they do not have to mutate global env.
@@ -41,10 +29,8 @@ export interface SseMcpClientOptions {
  * {@link MCPClient}. This exists for compatibility with older MCP servers;
  * new remote servers should prefer streamable HTTP.
  */
-export class SseMcpClient implements MCPClient {
-  private readonly client: Client;
+export class SseMcpClient extends McpSdkClientBase {
   private readonly transport: SSEClientTransport;
-  private readonly toolCallTimeoutMs?: number;
   private started = false;
   private closed = false;
   // Mirrors HttpMcpClient: handshake failures surface through connect(), while
@@ -57,6 +43,7 @@ export class SseMcpClient implements MCPClient {
   private unexpectedCloseFired = false;
 
   constructor(config: McpServerSseConfig, options: SseMcpClientOptions = {}) {
+    super(options);
     const envLookup = options.envLookup ?? ((name) => process.env[name]);
     const headers = buildMcpRemoteHeaders(config, envLookup);
 
@@ -65,11 +52,6 @@ export class SseMcpClient implements MCPClient {
       fetch: options.fetch,
       authProvider: options.oauthProvider,
     });
-    this.client = new Client({
-      name: options.clientName ?? KIMI_MCP_CLIENT_NAME,
-      version: options.clientVersion ?? KIMI_MCP_CLIENT_VERSION,
-    });
-    this.toolCallTimeoutMs = options.toolCallTimeoutMs;
   }
 
   async connect(): Promise<void> {
@@ -112,24 +94,10 @@ export class SseMcpClient implements MCPClient {
     }
   }
 
-  async listTools(): Promise<MCPToolDefinition[]> {
-    const result = await this.client.listTools();
-    return result.tools.map(toMcpToolDefinition);
-  }
-
-  async callTool(
-    name: string,
-    args: Record<string, unknown>,
-    signal?: AbortSignal,
-  ): Promise<MCPToolResult> {
-    const requestOptions = buildRequestOptions(this.toolCallTimeoutMs, signal);
-    const result = await this.client.callTool({ name, arguments: args }, undefined, requestOptions);
-    return toMcpToolResult(result);
-  }
-
   private async closeStartedClient(): Promise<void> {
     if (!this.started) return;
     this.started = false;
+    this.closeProtocol();
     await this.client.close();
   }
 

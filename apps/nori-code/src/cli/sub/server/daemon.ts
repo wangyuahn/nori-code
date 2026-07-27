@@ -1,102 +1,60 @@
-/**
- * `nori web` daemon orchestration — parent (spawner) side.
- *
- * Ensures a single background server daemon exists for this device, then
- * returns its origin so the caller can open the web UI. The flow:
- *
- *   1. Read `~/.nori-code/server/lock`. If it names a *live* daemon, reuse it
- *      (wait for it to be healthy) — never spawn a second one.
- *   2. Otherwise pick a free port (preferred port when available, else an
- *      OS-assigned one) and spawn `nori server run --daemon` as a detached
- *      child whose stdio is redirected to the server log.
- *   3. Poll the lock until *some* live daemon (ours, or a concurrent racer's
- *      that won the lock) is healthy, then return its origin.
- *
- * The child side (`startServerDaemon`) lives in `./run.ts` next to the
- * foreground runner so it can share the same bootstrap helpers.
- */
+/** `nori server run` daemon orchestration (parent/spawner side). */
 
+import { randomUUID } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync, unlinkSync } from 'node:fs';
+import { appendFileSync, closeSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { createServer } from 'node:net';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
-import { DEFAULT_LOCK_DIR, DEFAULT_LOCK_PATH, getLiveLock, type LockContents } from '@nori-code/server';
+import {
+  DEFAULT_LOCK_DIR,
+  DEFAULT_LOCK_PATH,
+  isServerLockV2,
+  pidAlive,
+  readLockContents,
+  removeLockIfOwnerDead,
+  removeLockIfOwnerMatches,
+  serverOwnerStartupDeadline,
+  waitForServerReady,
+  SERVER_STARTUP_TIMEOUT_MS,
+  type LockContents,
+} from '@nori-code/server';
+
+import { getDataDir } from '#/utils/paths';
 
 import {
   DEFAULT_SERVER_HOST,
   DEFAULT_SERVER_PORT,
   LOCAL_SERVER_HOST,
-  isServerHealthy,
-  serverOrigin,
-  waitForServerHealthy,
+  tryResolveServerToken,
 } from './shared';
 import { getVersion } from '../../version';
 
 const SERVER_LOG_FILENAME = 'server.log';
-
-/** How long to wait for an already-running daemon to answer `/healthz`. */
-const REUSE_HEALTH_TIMEOUT_MS = 15_000;
-/**
- * How long to wait for a freshly-spawned daemon to come up.
- *
- * The packaged SEA has to initialize its embedded snapshot before the daemon
- * can write its lock or answer health checks. On a cold Windows install that
- * alone can exceed 20 seconds, so the former budget killed a valid daemon
- * while it was still booting.
- */
-const SPAWN_TIMEOUT_MS = 90_000;
-/** Poll cadence while waiting for the daemon to appear in the lock + healthz. */
-const POLL_INTERVAL_MS = 200;
-/** Default log level for a daemon spawned without an explicit `--log-level`. */
 const DEFAULT_DAEMON_LOG_LEVEL = 'info';
+const LAUNCH_ID_ENV = 'NORI_CODE_SERVER_LAUNCH_ID';
+const STARTED_AT_ENV = 'NORI_CODE_SERVER_STARTED_AT';
 
 export interface EnsureDaemonOptions {
-  /** Bind host for the spawned daemon (default `127.0.0.1`). */
   host?: string;
-  /** Preferred port; on conflict a free port is chosen automatically. */
   port?: number;
-  /** Pino log level for the spawned daemon (defaults to `info`). */
   logLevel?: string;
-  /** Mount `/api/v1/debug/*` routes on the spawned daemon. */
   debugEndpoints?: boolean;
-  /** Allow a non-loopback bind without a TLS-terminating reverse proxy. */
   insecureNoTls?: boolean;
-  /** Keep `POST /api/v1/shutdown` enabled on a non-loopback bind. */
   allowRemoteShutdown?: boolean;
-  /** Keep the PTY `/api/v1/terminals/*` routes enabled on a non-loopback bind. */
   allowRemoteTerminals?: boolean;
-  /** Extra `Host` header values to allow through the DNS-rebinding check. */
   allowedHosts?: readonly string[];
-  /** Idle-shutdown grace in ms for the spawned daemon (daemon mode only). */
   idleGraceMs?: number;
-  /**
-   * Host CLI version used to decide whether an existing lock is reusable.
-   * Defaults to the current binary version.
-   */
   hostVersion?: string;
-  /**
-   * How long to wait for an already-running, version-matched daemon to answer
-   * `/healthz` before declaring it wedged and replacing it. Defaults to
-   * `REUSE_HEALTH_TIMEOUT_MS` (15s). Launchers that already did their own
-   * lock checks (e.g. the desktop app) pass a much smaller value so a wedged
-   * lock holder cannot burn most of their startup budget.
-   */
-  reuseHealthTimeoutMs?: number;
 }
 
 export interface EnsureDaemonResult {
   readonly origin: string;
-  /** True when an already-running daemon was reused (no new server started). */
   readonly reused: boolean;
-  /** Bind host the running daemon is actually listening on (from the lock). */
   readonly host: string;
-  /** Port the running daemon is actually listening on (from the lock). */
   readonly port: number;
 }
 
-/** Path of the daemon log file (shared with the OS-service log location). */
 export function daemonLogPath(): string {
   return join(DEFAULT_LOCK_DIR, SERVER_LOG_FILENAME);
 }
@@ -106,78 +64,17 @@ function appendDaemonDiagnostic(message: string): void {
     mkdirSync(dirname(daemonLogPath()), { recursive: true });
     appendFileSync(daemonLogPath(), `[${new Date().toISOString()}] ${message}\n`);
   } catch {
-    // Preserve the startup error even when the log directory is unavailable.
+    // Preserve the lifecycle error if logging is unavailable.
   }
 }
 
 function formatStartupError(error: unknown): string {
-  if (error instanceof Error) return error.stack ?? error.message;
-  return String(error);
+  return error instanceof Error ? error.stack ?? error.message : String(error);
 }
 
 export function lockConnectHost(lock: LockContents): string {
   const host = lock.host ?? LOCAL_SERVER_HOST;
   return host === '0.0.0.0' ? LOCAL_SERVER_HOST : host;
-}
-
-/** True when `host:port` is currently free to bind (nothing listening). */
-function canBind(host: string, port: number): Promise<boolean> {
-  return new Promise((resolvePromise) => {
-    const probe = createServer();
-    probe.once('error', () => resolvePromise(false));
-    probe.listen({ host, port }, () => {
-      probe.close(() => resolvePromise(true));
-    });
-  });
-}
-
-/** Ask the OS for an ephemeral free port on `host`. */
-function getFreePort(host: string): Promise<number> {
-  return new Promise((resolvePromise, reject) => {
-    const probe = createServer();
-    probe.once('error', reject);
-    probe.listen({ host, port: 0 }, () => {
-      const address = probe.address();
-      if (address === null || typeof address === 'string') {
-        probe.close(() => reject(new Error('failed to allocate a free port')));
-        return;
-      }
-      const { port } = address;
-      probe.close(() => resolvePromise(port));
-    });
-  });
-}
-
-/**
- * How many consecutive `preferred + n` ports to probe before giving up and
- * asking the OS for any free port. Mirrors `PORT_RETRY_LIMIT` in the server's
- * own bind retry so the spawner and the daemon agree on the policy.
- */
-export const DAEMON_PORT_SCAN_LIMIT = 100;
-
-/**
- * Pick a port for a new daemon: prefer `preferred` when it is free, otherwise
- * walk `preferred + 1`, `+ 2`, … upward and take the first free one. Only when
- * the whole scan window is saturated do we fall back to an OS-assigned free
- * port.
- *
- * Reusing an already-live daemon is handled by `ensureDaemon` before this runs,
- * so a busy port here is held by a third-party process — bumping by one (rather
- * than jumping to a random ephemeral port) keeps the URL predictable, matching
- * the server's own "port busy ⇒ +1" bind retry.
- */
-export async function resolveDaemonPort(
-  host: string = DEFAULT_SERVER_HOST,
-  preferred: number = DEFAULT_SERVER_PORT,
-): Promise<number> {
-  for (
-    let candidate = preferred;
-    candidate < preferred + DAEMON_PORT_SCAN_LIMIT && candidate <= 65535;
-    candidate++
-  ) {
-    if (await canBind(host, candidate)) return candidate;
-  }
-  return getFreePort(host);
 }
 
 interface NodeSeaModule {
@@ -197,7 +94,6 @@ function loadSeaModule(): NodeSeaModule | null {
   return cachedSea;
 }
 
-/** True when running as a compiled single-executable (SEA / native) binary. */
 function detectSea(): boolean {
   const sea = loadSeaModule();
   if (sea === null) return false;
@@ -208,22 +104,12 @@ function detectSea(): boolean {
   }
 }
 
-/**
- * Absolute path to the CLI entry that should be re-execed to run the daemon.
- * Mirrors `resolveSupervisorProgram` in `packages/server/src/svc/program.ts`:
- * when the CLI is a compiled single binary, `argv[1]` is the invoked command
- * name (e.g. `kimi`) or the first user argument — never a script path — so we
- * must re-exec `process.execPath` itself.
- */
 export function resolveDaemonProgram(
   argv: readonly string[] = process.argv,
   cwd: string = process.cwd(),
   execPath: string = process.execPath,
   isSea: boolean = detectSea(),
 ): string {
-  // In a SEA binary `argv[1]` is not a script path, so resolving it against
-  // `cwd` would produce a bogus path (e.g. `<cwd>/kimi`) and crash the spawn
-  // with ENOENT. Always re-exec the binary itself.
   if (isSea) return execPath;
   const candidate = argv[1] === 'server' ? execPath : (argv[1] ?? execPath);
   return isAbsolute(candidate) ? candidate : resolve(cwd, candidate);
@@ -239,6 +125,8 @@ interface SpawnDaemonChildOptions {
   allowRemoteTerminals?: boolean;
   allowedHosts?: readonly string[];
   idleGraceMs?: number;
+  launchId?: string;
+  startedAt?: string;
 }
 
 export function spawnDaemonChild(options: SpawnDaemonChildOptions): ChildProcess {
@@ -255,139 +143,128 @@ export function spawnDaemonChild(options: SpawnDaemonChildOptions): ChildProcess
     '--log-level',
     options.logLevel,
   ];
-  if (options.host !== undefined) {
-    args.push('--host', options.host);
-  }
-  if (options.debugEndpoints === true) {
-    args.push('--debug-endpoints');
-  }
-  if (options.insecureNoTls === true) {
-    args.push('--insecure-no-tls');
-  }
-  if (options.allowRemoteShutdown === true) {
-    args.push('--allow-remote-shutdown');
-  }
-  if (options.allowRemoteTerminals === true) {
-    args.push('--allow-remote-terminals');
-  }
+  if (options.host !== undefined) args.push('--host', options.host);
+  if (options.debugEndpoints === true) args.push('--debug-endpoints');
+  if (options.insecureNoTls === true) args.push('--insecure-no-tls');
+  if (options.allowRemoteShutdown === true) args.push('--allow-remote-shutdown');
+  if (options.allowRemoteTerminals === true) args.push('--allow-remote-terminals');
   if (options.idleGraceMs !== undefined) {
     args.push('--idle-grace-ms', String(options.idleGraceMs));
   }
   if (options.allowedHosts !== undefined && options.allowedHosts.length > 0) {
     args.push('--allowed-host', ...options.allowedHosts);
   }
-  // On Windows `.mjs` files are not executable PE binaries, so we must run
-  // the script through the Node binary rather than spawning it directly. In
-  // SEA mode or when re-spawning from an already-running daemon, `program` is
-  // `process.execPath` itself, so no script argument is needed.
+
   const execPath = process.execPath;
   const spawnArgs = program === execPath ? args : [program, ...args];
-
   const logFd = openSync(logPath, 'a');
   try {
     const child = spawn(execPath, spawnArgs, {
       detached: true,
-      // Run from the server log directory instead of inheriting the caller's
-      // cwd, so the long-lived daemon does not pin the directory it was
-      // launched from (notably blocking its deletion on Windows).
       cwd: logDir,
       stdio: ['ignore', logFd, logFd],
+      env: {
+        ...process.env,
+        [LAUNCH_ID_ENV]: options.launchId ?? randomUUID(),
+        [STARTED_AT_ENV]: options.startedAt ?? new Date().toISOString(),
+      },
     });
     child.once('error', (error) => {
-      // A spawn failure (e.g. ENOENT) surfaces asynchronously on the child,
-      // not as a thrown error. Without a listener Node would crash the parent
-      // with an unhandled 'error' event; record it instead and let the polling
-      // loop in `ensureDaemon` report the timeout.
-      try {
-        appendFileSync(logPath, `[spawner] failed to launch daemon: ${error.message}\n`);
-      } catch {
-        // Best-effort; the log directory may already be gone.
-      }
+      appendDaemonDiagnostic(`[spawner] failed to launch daemon: ${error.message}`);
     });
     child.unref();
     return child;
   } finally {
-    // `spawn` dups the fd into the child; the parent must not keep it open.
     closeSync(logFd);
   }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolvePromise) => {
-    setTimeout(resolvePromise, ms);
+async function stopRecordedOwner(lock: LockContents): Promise<void> {
+  const { stopServerOwner } = await import('./kill');
+  await stopServerOwner(lock);
+}
+
+async function reconcileExisting(hostVersion: string): Promise<EnsureDaemonResult | undefined> {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const lock = readLockContents(DEFAULT_LOCK_PATH);
+    if (lock === undefined) return undefined;
+    if (!pidAlive(lock.pid)) {
+      removeLockIfOwnerDead(lock, DEFAULT_LOCK_PATH);
+      continue;
+    }
+
+    if (!isServerLockV2(lock)) {
+      await stopRecordedOwner(lock);
+      continue;
+    }
+
+    const ownerDeadline = serverOwnerStartupDeadline(lock);
+    if (lock.state === 'starting' && Date.now() >= ownerDeadline) {
+      await stopRecordedOwner(lock);
+      continue;
+    }
+    const result = await waitForServerReady({
+      lockPath: DEFAULT_LOCK_PATH,
+      expectedVersion: hostVersion,
+      token: tryResolveServerToken(getDataDir()),
+      timeoutMs: lock.state === 'starting'
+        ? Math.max(1, ownerDeadline - Date.now())
+        : SERVER_STARTUP_TIMEOUT_MS,
+    });
+    if (result.status === 'ready') {
+      return {
+        origin: result.origin,
+        reused: true,
+        host: result.lock.host ?? DEFAULT_SERVER_HOST,
+        port: result.lock.port,
+      };
+    }
+    if (result.status === 'missing') continue;
+    if (result.status === 'dead') {
+      removeLockIfOwnerDead(result.lock, DEFAULT_LOCK_PATH);
+      continue;
+    }
+    if (result.status === 'foreign') {
+      removeLockIfOwnerMatches(result.lock, DEFAULT_LOCK_PATH);
+      continue;
+    }
+    await stopRecordedOwner(result.lock);
+  }
+  throw new Error('Unable to reconcile the existing Nori server owner.');
+}
+
+function childExitPromise(child: ChildProcess): Promise<never> {
+  return new Promise((_, reject) => {
+    child.once('exit', (code, signal) => {
+      appendDaemonDiagnostic(
+        `[daemon] process exited during startup: code=${String(code)}, signal=${String(signal)}`,
+      );
+      reject(new Error(formatDaemonBootFailure({ code, signal }, daemonLogPath())));
+    });
+    child.once('error', (error) => reject(error));
   });
 }
 
-/** Remove a lock only when it still belongs to the child we just stopped. */
-function removeSpawnedChildLock(pid: number | undefined): void {
-  if (pid === undefined) return;
+function stopSpawnedChild(child: ChildProcess): void {
+  if (child.pid === undefined) return;
   try {
-    const parsed = JSON.parse(readFileSync(DEFAULT_LOCK_PATH, 'utf8')) as Partial<LockContents>;
-    if (parsed.pid === pid) unlinkSync(DEFAULT_LOCK_PATH);
+    process.kill(child.pid, 'SIGTERM');
   } catch {
-    // The child normally removes its own lock. Missing, malformed and replaced
-    // locks are all safe no-ops here.
+    // Already exited.
   }
 }
 
-/**
- * Ensure a daemon is running and return its origin. Non-blocking for the
- * caller beyond the short health wait — the server itself keeps running in a
- * detached process after this returns.
- */
 export async function ensureDaemon(options: EnsureDaemonOptions = {}): Promise<EnsureDaemonResult> {
   const host = options.host ?? DEFAULT_SERVER_HOST;
-  const preferred = options.port ?? DEFAULT_SERVER_PORT;
+  const port = options.port ?? DEFAULT_SERVER_PORT;
   const logLevel = options.logLevel ?? DEFAULT_DAEMON_LOG_LEVEL;
   const hostVersion = options.hostVersion ?? getVersion();
-  const reuseHealthTimeoutMs = options.reuseHealthTimeoutMs ?? REUSE_HEALTH_TIMEOUT_MS;
 
-  // 1. Reuse an already-live daemon if one holds the lock and its version matches.
-  const existing = getLiveLock();
-  if (existing) {
-    if (existing.host_version !== undefined && existing.host_version !== hostVersion) {
-      const origin = serverOrigin(lockConnectHost(existing), existing.port);
-      appendDaemonDiagnostic(
-        `[daemon] existing server ${origin} has host version ${existing.host_version}, ` +
-          `current binary is ${hostVersion}; ignoring the stale lock and spawning a new daemon`,
-      );
-      try {
-        unlinkSync(DEFAULT_LOCK_PATH);
-      } catch {
-        // best effort cleanup
-      }
-      // Fall through and spawn a new daemon of the current version.
-    } else {
-      const origin = serverOrigin(lockConnectHost(existing), existing.port);
-      if (await waitForServerHealthy(origin, reuseHealthTimeoutMs)) {
-        return {
-          origin,
-          reused: true,
-          host: existing.host ?? DEFAULT_SERVER_HOST,
-          port: existing.port,
-        };
-      }
-      // Live pid but not responding (wedged or mid-boot failure). Clean up the
-      // stale lock so the daemon we're about to spawn can claim it.
-      try {
-        unlinkSync(DEFAULT_LOCK_PATH);
-      } catch {
-        // best effort cleanup
-      }
-      // Fall through and spawn: the stale lock is gone now, so our child can
-      // claim it via acquireLock and we reconnect below once it's healthy.
-    }
-  }
+  const reusable = await reconcileExisting(hostVersion);
+  if (reusable !== undefined) return reusable;
 
-  // 2. No reusable daemon — pick a free port and spawn one detached.
-  let port: number;
-  try {
-    port = await resolveDaemonPort(host, preferred);
-  } catch (error) {
-    appendDaemonDiagnostic(`[daemon] failed to resolve a startup port: ${formatStartupError(error)}`);
-    throw error;
-  }
-
+  const launchId = randomUUID();
+  const startedAt = new Date().toISOString();
   let child: ChildProcess;
   try {
     child = spawnDaemonChild({
@@ -400,98 +277,78 @@ export async function ensureDaemon(options: EnsureDaemonOptions = {}): Promise<E
       allowRemoteTerminals: options.allowRemoteTerminals,
       allowedHosts: options.allowedHosts,
       idleGraceMs: options.idleGraceMs,
+      launchId,
+      startedAt,
     });
   } catch (error) {
     appendDaemonDiagnostic(`[daemon] failed to spawn the server process: ${formatStartupError(error)}`);
     throw error;
   }
 
-  // Watch for an early exit so a boot failure (e.g. the non-loopback TLS gate,
-  // a config error, or a lost lock race with no other daemon to fall back to)
-  // surfaces the real error immediately instead of waiting out the full spawn
-  // timeout. The exit code/signal plus a tail of the daemon log is what tells
-  // the operator *why* it failed.
-  let childExit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
-  child.once('exit', (code, signal) => {
-    appendDaemonDiagnostic(
-      `[daemon] process exited during startup: code=${String(code)}, signal=${String(signal)}`,
-    );
-    childExit = { code, signal };
-  });
-  child.once('error', () => {
-    // Spawn failure (ENOENT etc.) is already recorded in the log by
-    // spawnDaemonChild; treat it as an early exit here.
-    childExit = { code: -1, signal: null };
-  });
-
-  // If this parent is terminated mid-wait (e.g. a launcher's startup timeout
-  // kills `server run` after it spawned the detached daemon), take the
-  // not-yet-healthy child down too — a wedged survivor would hold the lock
-  // and burn the reuse-health wait of every later launch. POSIX delivers
-  // SIGTERM/SIGINT to this handler; on Windows termination is unconditional,
-  // so the daemon child additionally guards on its parent pid (see
-  // `startServerDaemon` in ./run.ts).
-  const killSpawnedChild = (): void => {
-    if (childExit !== undefined || child.pid === undefined) return;
-    try {
-      process.kill(child.pid);
-    } catch {
-      // Best effort — the child may already be gone.
-    }
-  };
+  const controller = new AbortController();
+  const killSpawnedChild = (): void => stopSpawnedChild(child);
   const onSigterm = (): void => {
     killSpawnedChild();
-    process.exit(143); // 128 + SIGTERM
+    process.exit(143);
   };
   const onSigint = (): void => {
     killSpawnedChild();
-    process.exit(130); // 128 + SIGINT
+    process.exit(130);
   };
   process.once('SIGTERM', onSigterm);
   process.once('SIGINT', onSigint);
-
   let startupSucceeded = false;
+
   try {
-    // 3. Wait until some live daemon (ours, or a racer that won the lock) is up.
-    const deadline = Date.now() + SPAWN_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      const live = getLiveLock();
-      if (live) {
-        const origin = serverOrigin(lockConnectHost(live), live.port);
-        if (await isServerHealthy(origin, 500)) {
-          startupSucceeded = true;
-          return {
-            origin,
-            reused: false,
-            host: live.host ?? DEFAULT_SERVER_HOST,
-            port: live.port,
-          };
-        }
+    const readyPromise = waitForServerReady({
+      lockPath: DEFAULT_LOCK_PATH,
+      expectedVersion: hostVersion,
+      token: tryResolveServerToken(getDataDir()),
+      timeoutMs: SERVER_STARTUP_TIMEOUT_MS,
+      waitForLock: true,
+      signal: controller.signal,
+    });
+    let result;
+    try {
+      result = await Promise.race([readyPromise, childExitPromise(child)]);
+    } catch (error) {
+      controller.abort();
+      const winner = await reconcileExisting(hostVersion);
+      if (winner !== undefined) {
+        startupSucceeded = true;
+        return winner;
       }
-      if (childExit !== undefined && !live) {
-        // Our child exited and no other live daemon holds the lock to fall back
-        // to — this is a real boot failure, not a lost race.
-        throw new Error(formatDaemonBootFailure(childExit, daemonLogPath()));
-      }
-      await sleep(POLL_INTERVAL_MS);
+      throw error;
     }
 
-    appendDaemonDiagnostic(
-      `[daemon] startup timed out after ${String(SPAWN_TIMEOUT_MS)}ms without a healthy server`,
-    );
+    if (result.status === 'ready') {
+      const reused = result.lock.launch_id !== launchId;
+      if (reused) stopSpawnedChild(child);
+      startupSucceeded = true;
+      return {
+        origin: result.origin,
+        reused,
+        host: result.lock.host ?? DEFAULT_SERVER_HOST,
+        port: result.lock.port,
+      };
+    }
+
+    const current = readLockContents(DEFAULT_LOCK_PATH);
+    if (current !== undefined && current.launch_id === launchId) {
+      await stopRecordedOwner(current).catch(() => {});
+    }
     throw new Error(
-      `Nori server daemon failed to start within ${String(SPAWN_TIMEOUT_MS)}ms.\n\n` +
+      `Nori server daemon failed to start within ${String(SERVER_STARTUP_TIMEOUT_MS)}ms.\n\n` +
         formatLogTail(daemonLogPath()),
     );
   } finally {
+    controller.abort();
     process.removeListener('SIGTERM', onSigterm);
     process.removeListener('SIGINT', onSigint);
-    if (!startupSucceeded) {
-      killSpawnedChild();
-      // A forced Windows termination cannot run the daemon's release handler.
-      // Without this guarded cleanup the next launch sees a dead PID lock and
-      // spends another startup cycle trying to recover it.
-      removeSpawnedChildLock(child.pid);
+    if (!startupSucceeded) stopSpawnedChild(child);
+    const current = readLockContents(DEFAULT_LOCK_PATH);
+    if (current?.launch_id === launchId && !pidAlive(current.pid)) {
+      removeLockIfOwnerDead(current, DEFAULT_LOCK_PATH);
     }
   }
 }
@@ -500,27 +357,37 @@ function formatDaemonBootFailure(
   exit: { code: number | null; signal: NodeJS.Signals | null },
   logPath: string,
 ): string {
-  const reason =
-    exit.signal === null
-      ? `exited with code ${String(exit.code)}`
-      : `was terminated by signal ${exit.signal}`;
+  const reason = exit.signal === null
+    ? `exited with code ${String(exit.code)}`
+    : `was terminated by signal ${exit.signal}`;
   return `Nori server daemon ${reason} during startup.\n\n${formatLogTail(logPath)}`;
 }
 
 function formatLogTail(logPath: string): string {
   const tail = tailFile(logPath, 30);
-  if (tail.length === 0) {
-    return `Check the log for details: ${logPath}`;
-  }
-  return `Last log lines (${logPath}):\n${tail}`;
+  return tail.length === 0
+    ? `Check the log for details: ${logPath}`
+    : `Last log lines (${logPath}):\n${tail}`;
 }
 
 function tailFile(filePath: string, maxLines: number): string {
   try {
-    const content = readFileSync(filePath, 'utf8');
-    const lines = content.split('\n').filter((line) => line.length > 0);
-    return lines.slice(-maxLines).join('\n');
+    return readFileSync(filePath, 'utf8')
+      .split('\n')
+      .filter((line) => line.length > 0)
+      .slice(-maxLines)
+      .join('\n');
   } catch {
     return '';
   }
+}
+
+export function daemonLaunchIdentityFromEnv(env: NodeJS.ProcessEnv = process.env): {
+  launchId?: string;
+  startedAt?: string;
+} {
+  return {
+    launchId: env[LAUNCH_ID_ENV],
+    startedAt: env[STARTED_AT_ENV],
+  };
 }

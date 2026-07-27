@@ -1,80 +1,126 @@
 import { execFile } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-/**
- * Overall budget for the bundled `nori server run` to finish ensuring a daemon.
- * It must cover the CLI's own 90s cold SEA boot window plus launcher overhead,
- * otherwise Electron can terminate the parent while its daemon is still validly
- * starting.
- */
-// The bundled SEA can take more than a minute to cold-start on Windows before
-// its child daemon reaches healthz. This must outlive the daemon's own 90s
-// startup budget or Electron would terminate a healthy-in-progress launch.
-const RUN_TIMEOUT_MS = 120_000;
-/** Bound shutdown during application exit so the window is never held indefinitely. */
-const EXIT_STOP_TIMEOUT_MS = 12_000;
-/** How long to keep polling `/healthz` before declaring the daemon unhealthy. */
-const HEALTH_TIMEOUT_MS = 20_000;
-const HEALTH_POLL_MS = 200;
+import {
+  classifyServerIdentity,
+  isServerLockV2,
+  pidAlive,
+  readLockContents,
+  removeLockIfOwnerDead,
+  removeLockIfOwnerMatches,
+  sameLockOwner,
+  serverOriginFromLock,
+  serverOwnerStartupDeadline,
+  waitForServerOwnerExit,
+  waitForServerReady,
+  SERVER_STARTUP_TIMEOUT_MS,
+  type LockContents,
+} from '@nori-code/server/control';
 
-/** Product identity reported by a Nori server in healthz `data.app`.
- *  Mirrors `NORI_SERVER_APP_ID` in packages/server/src/identity.ts. */
-const NORI_SERVER_APP_ID = 'nori-code';
+import {
+  SERVER_WORKER_CONFIG_ENV,
+  isServerWorkerMessage,
+  type ServerWorkerConfig,
+  type ServerWorkerMessage,
+} from '../server/protocol';
 
-/** Subset of the server lock JSON we read (apps/nori-code writes the full shape). */
-interface LockContents {
-  pid: number;
-  started_at?: string;
-  host?: string;
-  port: number;
-  host_version?: string;
-  entry?: string;
+const SHUTDOWN_REQUEST_TIMEOUT_MS = 1_500;
+const SHUTDOWN_STEP_TIMEOUT_MS = 2_000;
+const FORCE_STOP_TIMEOUT_MS = 2_000;
+
+export interface UtilityProcessHandle {
+  readonly pid: number | undefined;
+  readonly stdout: NodeJS.ReadableStream | null;
+  readonly stderr: NodeJS.ReadableStream | null;
+  postMessage(message: unknown): void;
+  kill(): boolean;
+  on(event: 'message', listener: (message: unknown) => void): this;
+  on(event: 'exit', listener: (code: number) => void): this;
+  on(event: 'error', listener: (type: string, location: string, report: string) => void): this;
+  once(event: 'exit', listener: (code: number) => void): this;
+  off(event: 'message', listener: (message: unknown) => void): this;
+  off(event: 'exit', listener: (code: number) => void): this;
 }
 
-/** `<NORI_CODE_HOME>` or `~/.nori-code` — must match the server's home directory resolver. */
+export interface ForkServerWorkerOptions {
+  readonly env: NodeJS.ProcessEnv;
+  readonly cwd: string;
+  readonly stdio: 'pipe';
+  readonly serviceName: string;
+}
+
+export type ForkServerWorker = (
+  modulePath: string,
+  args: string[],
+  options: ForkServerWorkerOptions,
+) => UtilityProcessHandle;
+
+export interface EnsureServerOptions {
+  readonly workerPath: string;
+  readonly webAssetsDir: string;
+  readonly expectedVersion: string;
+  readonly forkWorker: ForkServerWorker;
+  readonly modulesDir?: string;
+  readonly host?: string;
+  readonly port?: number;
+  readonly lockPath?: string;
+  readonly startupTimeoutMs?: number;
+}
+
+export interface EnsureServerResult {
+  readonly origin: string;
+  readonly reused: boolean;
+}
+
+interface ManagedWorker {
+  readonly process: UtilityProcessHandle;
+  readonly owner: LockContents;
+  readonly lockPath: string;
+}
+
+interface WorkerStartFailureOptions {
+  readonly code: string;
+  readonly logPath: string;
+}
+
+class WorkerStartFailure extends Error {
+  override readonly name = 'WorkerStartFailure';
+  readonly code: string;
+  readonly logPath: string;
+
+  constructor(message: string, options: WorkerStartFailureOptions) {
+    super(message);
+    this.code = options.code;
+    this.logPath = options.logPath;
+  }
+}
+
+let managedWorker: ManagedWorker | undefined;
+
 export function noriHome(): string {
   const override = process.env['NORI_CODE_HOME'];
-  if (override !== undefined && override.trim().length > 0) {
-    return override;
-  }
-  return join(homedir(), '.nori-code');
+  return override !== undefined && override.trim().length > 0
+    ? override
+    : join(homedir(), '.nori-code');
 }
 
-function lockPath(): string {
+export function serverLockPath(): string {
   return join(noriHome(), 'server', 'lock');
-}
-
-function removeMatchingLock(expected: LockContents): void {
-  const current = readLock();
-  if (
-    current === null
-    || current.pid !== expected.pid
-    || current.started_at !== expected.started_at
-    || current.host !== expected.host
-    || current.port !== expected.port
-    || current.host_version !== expected.host_version
-    || current.entry !== expected.entry
-  ) {
-    return;
-  }
-  try {
-    unlinkSync(lockPath());
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  }
 }
 
 export function serverLogPath(): string {
   return join(noriHome(), 'server', 'server.log');
 }
 
-/**
- * Create the diagnostic path before launching the bundled server. A server
- * can fail before its own logger initializes; keeping an empty file here
- * prevents the startup error page from pointing at a path that does not exist.
- */
 export function ensureServerLogFile(): void {
   const logPath = serverLogPath();
   try {
@@ -92,276 +138,58 @@ function appendServerDiagnostic(message: string): void {
   try {
     appendFileSync(serverLogPath(), `[${new Date().toISOString()}] ${message}\n`);
   } catch {
-    // The original startup error is more useful than masking it with a log I/O error.
+    // Keep the original lifecycle error when logging is unavailable.
   }
 }
 
-function readServerLogTail(maxLines = 30): string {
-  try {
-    return readFileSync(serverLogPath(), 'utf-8')
-      .split(/\r?\n/)
-      .filter((line) => line.length > 0)
-      .slice(-maxLines)
-      .join('\n');
-  } catch {
-    return '';
-  }
-}
-
-function serverLogSize(): number {
-  try {
-    return statSync(serverLogPath()).size;
-  } catch {
-    return 0;
-  }
-}
-
-function readServerLogSince(offset: number): string {
-  try {
-    const bytes = readFileSync(serverLogPath());
-    if (bytes.byteLength <= offset) return '';
-    return bytes.subarray(offset).toString('utf-8');
-  } catch {
-    return '';
-  }
-}
-
-/** Read the daemon's bearer token from `<NORI_CODE_HOME>/server.token` (the server's
- *  `persistentToken.ts` writes the token at the home-dir root, not under `server/`). */
 export function readServerToken(): string | undefined {
   try {
-    const token = readFileSync(join(noriHome(), 'server.token'), 'utf-8').trim();
+    const token = readFileSync(join(noriHome(), 'server.token'), 'utf8').trim();
     return token.length > 0 ? token : undefined;
   } catch {
     return undefined;
   }
 }
 
-export function readLock(): LockContents | null {
+function signalPid(pid: number, signal: NodeJS.Signals): boolean {
   try {
-    const parsed = JSON.parse(readFileSync(lockPath(), 'utf-8')) as Partial<LockContents>;
-    if (typeof parsed.port === 'number' && typeof parsed.pid === 'number') {
-      return {
-        pid: parsed.pid,
-        started_at: typeof parsed.started_at === 'string' ? parsed.started_at : undefined,
-        port: parsed.port,
-        host: typeof parsed.host === 'string' ? parsed.host : undefined,
-        host_version: typeof parsed.host_version === 'string' ? parsed.host_version : undefined,
-        entry: typeof parsed.entry === 'string' ? parsed.entry : undefined,
-      };
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function runServerKill(
-  seaPath: string,
-  expected: LockContents,
-  timeoutMs: number = RUN_TIMEOUT_MS,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    execFile(
-      seaPath,
-      ['server', 'kill'],
-      {
-        timeout: timeoutMs,
-        env: {
-          ...process.env,
-          NORI_CODE_EXPECT_SERVER_PID: String(expected.pid),
-          NORI_CODE_EXPECT_SERVER_PORT: String(expected.port),
-          ...(expected.started_at === undefined
-            ? {}
-            : { NORI_CODE_EXPECT_SERVER_STARTED_AT: expected.started_at }),
-          ...(expected.host === undefined
-            ? {}
-            : { NORI_CODE_EXPECT_SERVER_HOST: expected.host }),
-          ...(expected.host_version === undefined
-            ? {}
-            : { NORI_CODE_EXPECT_SERVER_HOST_VERSION: expected.host_version }),
-          ...(expected.entry === undefined
-            ? {}
-            : { NORI_CODE_EXPECT_SERVER_ENTRY: expected.entry }),
-        },
-      },
-      (error, stdout, stderr) => {
-        if (error) {
-          appendServerDiagnostic(
-            [
-              '[desktop] bundled Nori server replacement could not stop the existing server',
-              `error: ${error.stack ?? error.message}`,
-              `stdout: ${stdout.trim() || '<empty>'}`,
-              `stderr: ${stderr.trim() || '<empty>'}`,
-            ].join('\n'),
-          );
-          reject(new Error(`nori server kill failed: ${error.message}\n${stderr}`.trim()));
-          return;
-        }
-        resolve();
-      },
-    );
-  });
-}
-
-export function originFromLock(lock: LockContents): string {
-  const host = lock.host !== undefined && lock.host !== '0.0.0.0' ? lock.host : '127.0.0.1';
-  return `http://${host}:${lock.port}`;
-}
-
-async function isHealthy(origin: string, timeoutMs: number): Promise<boolean> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => {
-    controller.abort();
-  }, timeoutMs);
-  try {
-    const res = await fetch(`${origin}/api/v1/healthz`, { signal: controller.signal });
-    if (!res.ok) {
-      return false;
-    }
-    const body = (await res.json()) as { code?: unknown; data?: { app?: unknown } };
-    // `code: 0` alone is not proof of a Nori server: upstream Kimi Code answers
-    // healthz with the same envelope (and historically the same default port),
-    // so only a self-identifying Nori server counts as healthy.
-    return body.code === 0 && body.data?.app === NORI_SERVER_APP_ID;
+    process.kill(pid, signal);
+    return true;
   } catch {
     return false;
-  } finally {
-    clearTimeout(timer);
   }
 }
 
-type ServerIdentity = 'nori' | 'foreign' | 'unreachable';
-
-/**
- * Identify whether any Nori build serves `origin`. Current builds
- * self-identify in healthz; legacy builds share this app's bearer token file,
- * so they answer the token-gated `/api/v1/meta` while a foreign product
- * rejects it. Destructive paths (`server kill` via the lock's recorded pid)
- * must never proceed for a positively identified foreign product; an
- * unreachable owner is handled by the guarded expected-owner recovery path.
- */
-async function probeServerIdentity(origin: string, timeoutMs: number): Promise<ServerIdentity> {
-  if (await isHealthy(origin, timeoutMs)) return 'nori';
-  const token = readServerToken();
-  if (token === undefined) return 'unreachable';
+async function requestServerShutdown(origin: string): Promise<void> {
   const controller = new AbortController();
-  const timer = setTimeout(() => {
-    controller.abort();
-  }, timeoutMs);
+  const timer = setTimeout(() => controller.abort(), SHUTDOWN_REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(`${origin}/api/v1/meta`, {
-      headers: { Authorization: `Bearer ${token}` },
+    const token = readServerToken();
+    await fetch(`${origin}/api/v1/shutdown`, {
+      method: 'POST',
+      headers: token === undefined ? undefined : { Authorization: `Bearer ${token}` },
       signal: controller.signal,
     });
-    return response.ok ? 'nori' : 'foreign';
-  } catch {
-    return 'unreachable';
   } finally {
     clearTimeout(timer);
   }
 }
 
-async function supportsRequiredRoutes(origin: string): Promise<boolean> {
-  const token = readServerToken();
-  if (token === undefined) return true;
-  try {
-    const response = await fetch(
-      `${origin}/api/v1/sessions/__nori_capability_probe__/cron`,
-      { headers: { Authorization: `Bearer ${token}` } },
-    );
-    return response.status !== 404;
-  } catch {
-    return false;
+function taskkillProcessTree(pid: number): Promise<void> {
+  if (process.platform !== 'win32') {
+    signalPid(pid, 'SIGKILL');
+    return Promise.resolve();
   }
-}
-
-/**
- * Find a compatible shared daemon that is already healthy.
- */
-async function findReusableServerOrigin(
-  expectedVersion?: string,
-  healthTimeoutMs = 1_000,
-): Promise<string | null> {
-  const lock = readLock();
-  if (lock === null) return null;
-  if (
-    expectedVersion !== undefined &&
-    lock.host_version !== expectedVersion
-  ) {
-    return null;
-  }
-  const origin = originFromLock(lock);
-  if (!await isHealthy(origin, healthTimeoutMs)) return null;
-  if (!await supportsRequiredRoutes(origin)) return null;
-  return origin;
-}
-
-class ServerRunError extends Error {
-  override readonly name = 'ServerRunError';
-
-  constructor(message: string, readonly alreadyRunning: boolean) {
-    super(message);
-  }
-}
-
-/** Run the bundled Nori SEA's `server run` command. */
-function runServerRun(seaPath: string): Promise<void> {
-  const logOffset = serverLogSize();
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     execFile(
-      seaPath,
-      // --log-level info: startup must stay diagnosable in the server log; the
-      // previous `error` level swallowed every boot milestone and left startup
-      // failures with zero evidence. --reuse-health-timeout-ms: this launcher
-      // already did its own lock checks above, so don't let a wedged lock
-      // holder burn the CLI's default 15s reuse wait inside our budget.
-      [
-        'server',
-        'run',
-        '--log-level',
-        'info',
-        '--reuse-health-timeout-ms',
-        '3000',
-      ],
-      {
-        timeout: RUN_TIMEOUT_MS,
-        env: {
-          ...process.env,
-          NORI_CODE_NODE_EXECUTABLE: process.execPath,
-          NORI_CODE_NODE_RUN_AS_NODE: '1',
-        },
-      },
-      (error, stdout, stderr) => {
-        if (error) {
-          const processError = error as NodeJS.ErrnoException & {
-            killed?: boolean;
-            signal?: NodeJS.Signals | null;
-          };
-          const invocationLog = readServerLogSince(logOffset);
-          const logTail = readServerLogTail();
+      'taskkill.exe',
+      ['/PID', String(pid), '/T', '/F'],
+      { timeout: FORCE_STOP_TIMEOUT_MS, windowsHide: true },
+      (error, _stdout, stderr) => {
+        if (error !== null && pidAlive(pid)) {
           appendServerDiagnostic(
-            [
-              '[desktop] bundled Nori server failed to start',
-              `error: ${error.stack ?? error.message}`,
-              `exitCode: ${processError.code ?? '<unknown>'}`,
-              `signal: ${processError.signal ?? '<none>'}`,
-              `killed: ${String(processError.killed ?? false)}`,
-              `stdout: ${stdout.trim() || '<empty>'}`,
-              `stderr: ${stderr.trim() || '<empty>'}`,
-              `serverLogTail: ${logTail || '<empty>'}`,
-            ].join('\n'),
+            `[desktop] taskkill failed for pid=${String(pid)}: ${stderr.trim() || error.message}`,
           );
-          const details = [
-            `nori server run failed: ${error.message}`,
-            stdout.trim(),
-            stderr.trim(),
-            logTail,
-          ].filter((part) => part.length > 0);
-          const alreadyRunning = [error.message, stdout, stderr, invocationLog]
-            .some((part) => /server already running/i.test(part));
-          reject(new ServerRunError(details.join('\n'), alreadyRunning));
-          return;
         }
         resolve();
       },
@@ -369,228 +197,277 @@ function runServerRun(seaPath: string): Promise<void> {
   });
 }
 
-function isServerAlreadyRunningError(error: unknown): boolean {
-  return error instanceof ServerRunError && error.alreadyRunning;
-}
-
-async function stopExistingServer(
-  seaPath: string,
-  lock: LockContents,
-  reason: string,
+async function stopExactOwner(
+  owner: LockContents,
+  lockPath: string,
+  worker?: UtilityProcessHandle,
 ): Promise<void> {
-  appendServerDiagnostic(
-    '[desktop] replacing server (' +
-      reason +
-      ') pid=' +
-      String(lock.pid) +
-      ' port=' +
-      String(lock.port) +
-      ' version=' +
-      (lock.host_version ?? '<unknown>'),
-  );
-  const origin = originFromLock(lock);
-  const identity = await probeServerIdentity(origin, 3_000);
+  const current = readLockContents(lockPath);
+  if (current === undefined || !sameLockOwner(current, owner)) return;
+  if (!pidAlive(owner.pid)) {
+    removeLockIfOwnerDead(owner, lockPath);
+    return;
+  }
+
+  const origin = serverOriginFromLock(owner);
+  const identity = await classifyServerIdentity(origin, readServerToken(), 750);
   if (identity === 'foreign') {
-    // A foreign HTTP responder is positive evidence that this lock no longer
-    // points at a Nori server. Do not invoke the kill command: its forced
-    // fallback signals the PID recorded in the lock. Unreachable owners still
-    // go through the expected-owner kill path below so wedged old Nori builds
-    // are actually replaced instead of surviving as detached processes.
+    removeLockIfOwnerMatches(owner, lockPath);
     appendServerDiagnostic(
-      '[desktop] discarded stale server lock without signaling pid=' +
-        String(lock.pid) +
-        ' origin=' +
-        origin +
-        ' (identity: ' +
-        identity +
-        ')',
-    );
-    removeMatchingLock(lock);
-    return;
-  }
-
-  try {
-    await runServerKill(seaPath, lock);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!/server owner changed/i.test(message)) throw error;
-    appendServerDiagnostic(
-      '[desktop] server owner changed during replacement; deferring to startup race recovery',
-    );
-    return;
-  }
-  // The kill command normally releases the lock; this guarded cleanup handles
-  // a process terminated before its release handler ran.
-  removeMatchingLock(lock);
-}
-
-/**
- * Stop the local daemon when Nori Work exits.
- *
- * The kill command validates the recorded PID, startup timestamp and endpoint
- * before it sends a signal. That keeps shutdown targeted at the server Nori
- * Work was using instead of an unrelated process that later reused the port.
- */
-export async function stopServerForDesktopExit(seaPath: string): Promise<void> {
-  if (!existsSync(seaPath)) return;
-  const lock = readLock();
-  if (lock === null) return;
-
-  appendServerDiagnostic(
-    '[desktop] stopping server for Nori Work exit pid=' +
-      String(lock.pid) +
-      ' port=' +
-      String(lock.port) +
-      ' version=' +
-      (lock.host_version ?? '<unknown>'),
-  );
-
-  const origin = originFromLock(lock);
-  const identity = await probeServerIdentity(origin, 3_000);
-  if (identity === 'foreign') {
-    // Never signal a process that is positively identified as another product.
-    // Its stale Nori lock is safe to remove, but its process must be left alone.
-    removeMatchingLock(lock);
-    appendServerDiagnostic(
-      '[desktop] did not stop foreign process recorded by stale Nori lock pid=' + String(lock.pid),
+      `[desktop] removed foreign stale lock without signaling pid=${String(owner.pid)}`,
     );
     return;
   }
 
-  try {
-    await runServerKill(seaPath, lock, EXIT_STOP_TIMEOUT_MS);
-  } finally {
-    // The server normally releases this itself. This only removes the exact
-    // lock that was validated above, never a replacement owner's lock.
-    removeMatchingLock(lock);
+  if (worker !== undefined && worker.pid === owner.pid) {
+    worker.postMessage({ type: 'shutdown' });
   }
+  const gracefulRequest = identity === 'nori'
+    ? requestServerShutdown(origin).catch(() => {})
+    : Promise.resolve();
+  const gracefulExit = waitForServerOwnerExit(owner, {
+    lockPath,
+    timeoutMs: SHUTDOWN_STEP_TIMEOUT_MS,
+  });
+  const [, exitedGracefully] = await Promise.all([gracefulRequest, gracefulExit]);
+  if (exitedGracefully) return;
+
+  const beforeTerminate = readLockContents(lockPath);
+  if (beforeTerminate === undefined || !sameLockOwner(beforeTerminate, owner)) return;
+
+  if (worker !== undefined && worker.pid === owner.pid) worker.kill();
+  else signalPid(owner.pid, 'SIGTERM');
+  if (await waitForServerOwnerExit(owner, { lockPath, timeoutMs: SHUTDOWN_STEP_TIMEOUT_MS })) {
+    return;
+  }
+
+  const beforeForce = readLockContents(lockPath);
+  if (beforeForce === undefined || !sameLockOwner(beforeForce, owner)) return;
+  await taskkillProcessTree(owner.pid);
+  removeLockIfOwnerDead(owner, lockPath);
 }
 
-export interface EnsureServerResult {
-  origin: string;
+function attachWorkerLogs(worker: UtilityProcessHandle): void {
+  const append = (chunk: unknown): void => {
+    try {
+      appendFileSync(serverLogPath(), Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+    } catch {
+      // The worker IPC still reports fatal errors when file logging is unavailable.
+    }
+  };
+  worker.stdout?.on('data', append);
+  worker.stderr?.on('data', append);
 }
 
-/**
- * Ensure the shared nori-code daemon is running and return its origin.
- *
- * The desktop app participates in the same local-server ecosystem as the CLI,
- * the browser and the TUI: it reuses a running daemon or starts one that the
- * others can reuse — never a private, app-only server.
- */
-export async function ensureServer(seaPath: string, expectedVersion?: string): Promise<EnsureServerResult> {
-  ensureServerLogFile();
-
-  // Development mode: if the SEA binary doesn't exist, don't try to start it.
-  // Instead, check if the user already has a Nori dev server running
-  // (started via `pnpm -C apps/nori-code dev:server` in another terminal).
-  if (!existsSync(seaPath)) {
-    // Check if a server is already running
-    const existingLock = readLock();
-    if (existingLock !== null) {
-      const origin = originFromLock(existingLock);
-      if (await isHealthy(origin, 3000)) {
-        process.stdout.write(`[nori-desktop] connected to existing server at ${origin}\n`);
-        return { origin };
+function waitForWorkerReady(
+  worker: UtilityProcessHandle,
+  launchId: string,
+  deadline: number,
+): Promise<Extract<ServerWorkerMessage, { type: 'ready' }>> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (callback: () => void): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      worker.off('message', onMessage);
+      worker.off('exit', onExit);
+      callback();
+    };
+    const onMessage = (value: unknown): void => {
+      if (!isServerWorkerMessage(value) || value.launchId !== launchId) return;
+      if (value.type === 'starting') {
+        appendServerDiagnostic(
+          `[desktop] worker acquired starting lock launch=${launchId} pid=${String(value.pid)}`,
+        );
+        return;
       }
-    }
-    const message =
-      `Nori server binary not found at: ${seaPath}\n` +
-      `\n` +
-      `For development, start the Nori server in another terminal first:\n` +
-      `  pnpm -C apps/nori-code dev:server\n` +
-      `\n` +
-      `Then re-run the desktop app.`;
-    appendServerDiagnostic(`[desktop] ${message}`);
-    throw new Error(message);
-  }
-
-  // Production / SEA-available path. Reuse a compatible healthy daemon
-  // before invoking the server-run command; the CLI intentionally refuses to
-  // acquire a second lock and reports "server already running".
-  const reusableOrigin = await findReusableServerOrigin(expectedVersion);
-  if (reusableOrigin !== null) {
-    process.stdout.write('[nori-desktop] connected to existing server at ' + reusableOrigin + '\n');
-    return { origin: reusableOrigin };
-  }
-
-  const existingLock = readLock();
-  if (existingLock !== null) {
-    const versionMismatch = expectedVersion !== undefined
-      && existingLock.host_version !== expectedVersion;
-    if (versionMismatch) {
-      await stopExistingServer(seaPath, existingLock, 'version mismatch');
-    } else {
-      const existingOrigin = originFromLock(existingLock);
-      const existingHealthy = await isHealthy(existingOrigin, 3_000);
-      const missingRequiredRoutes = existingHealthy
-        && !(await supportsRequiredRoutes(existingOrigin));
-      if (!existingHealthy) {
-        await stopExistingServer(seaPath, existingLock, 'same-version server is unhealthy');
-      } else if (missingRequiredRoutes) {
-        await stopExistingServer(seaPath, existingLock, 'missing required desktop routes');
+      if (value.type === 'ready') {
+        finish(() => resolve(value));
+        return;
       }
-    }
-  }
-
-  try {
-    await runServerRun(seaPath);
-  } catch (error) {
-    // A concurrent desktop/CLI startup can win the lock between the checks
-    // above and server run. Give that winner a little time to become healthy
-    // before treating the conflict as a wedged owner.
-    const racedOrigin = await findReusableServerOrigin(expectedVersion, 3_000);
-    if (racedOrigin !== null) {
-      appendServerDiagnostic('[desktop] reused a healthy server after startup race: ' + racedOrigin);
-      process.stdout.write('[nori-desktop] connected to existing server at ' + racedOrigin + '\n');
-      return { origin: racedOrigin };
-    }
-
-    if (!isServerAlreadyRunningError(error)) throw error;
-
-    const conflictingLock = readLock();
-    if (conflictingLock === null) throw error;
-    appendServerDiagnostic(
-      '[desktop] server run found an existing owner; recovering lock for pid=' +
-        String(conflictingLock.pid) +
-        ' port=' +
-        String(conflictingLock.port),
-    );
-    await stopExistingServer(seaPath, conflictingLock, 'startup lock conflict');
-    await runServerRun(seaPath);
-  }
-  const lock = readLock();
-  if (lock === null) {
-    const message = `Nori server lock not found at ${lockPath()} after starting the server.`;
-    appendServerDiagnostic(`[desktop] ${message}`);
-    throw new Error(message);
-  }
-  const origin = originFromLock(lock);
-  if (
-    expectedVersion !== undefined &&
-    lock.host_version !== expectedVersion
-  ) {
-    const message =
-      `Nori server version ${lock.host_version} is incompatible with Nori Work ${expectedVersion}.`;
-    appendServerDiagnostic(`[desktop] ${message}`);
-    throw new Error(message);
-  }
-
-  const deadline = Date.now() + HEALTH_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    if (await isHealthy(origin, 500)) {
-      if (!(await supportsRequiredRoutes(origin))) {
-        const message = 'The bundled Nori server is missing required desktop routes.';
-        appendServerDiagnostic(`[desktop] ${message}`);
-        throw new Error(message);
+      if (value.type === 'fatal') {
+        finish(() => reject(new WorkerStartFailure(value.message, {
+          code: value.code,
+          logPath: value.logPath,
+        })));
       }
-      process.stdout.write(`[nori-desktop] connected to ${origin}\n`);
-      return { origin };
+    };
+    const onExit = (code: number): void => {
+      finish(() => reject(new WorkerStartFailure(
+        `Nori server worker exited with code ${String(code)} before ready.`,
+        { code: 'WORKER_EXITED', logPath: serverLogPath() },
+      )));
+    };
+    const remaining = Math.max(0, deadline - Date.now());
+    const timer = setTimeout(() => {
+      finish(() => reject(new WorkerStartFailure(
+        `Nori server worker did not become ready within ${String(SERVER_STARTUP_TIMEOUT_MS)}ms.`,
+        { code: 'STARTUP_TIMEOUT', logPath: serverLogPath() },
+      )));
+    }, remaining);
+    worker.on('message', onMessage);
+    worker.on('exit', onExit);
+  });
+}
+
+async function reconcileExisting(
+  expectedVersion: string,
+  lockPath: string,
+  startupTimeoutMs: number,
+): Promise<string | undefined> {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const lock = readLockContents(lockPath);
+    if (lock === undefined) return undefined;
+    if (!pidAlive(lock.pid)) {
+      removeLockIfOwnerDead(lock, lockPath);
+      continue;
     }
-    await new Promise((resolve) => {
-      setTimeout(resolve, HEALTH_POLL_MS);
+
+    if (!isServerLockV2(lock)) {
+      await stopExactOwner(lock, lockPath);
+      continue;
+    }
+
+    const ownerDeadline = serverOwnerStartupDeadline(lock, startupTimeoutMs);
+    if (lock.state === 'starting' && Date.now() >= ownerDeadline) {
+      await stopExactOwner(lock, lockPath);
+      continue;
+    }
+    const result = await waitForServerReady({
+      lockPath,
+      expectedVersion,
+      token: readServerToken(),
+      timeoutMs: Math.max(1, ownerDeadline - Date.now()),
+      startupTimeoutMs,
     });
+    if (result.status === 'ready') return result.origin;
+    if (result.status === 'missing') continue;
+    if (result.status === 'dead') {
+      removeLockIfOwnerDead(result.lock, lockPath);
+      continue;
+    }
+    if (result.status === 'foreign') {
+      removeLockIfOwnerMatches(result.lock, lockPath);
+      continue;
+    }
+    await stopExactOwner(result.lock, lockPath);
   }
-  const message = `Nori server at ${origin} did not become healthy within ${HEALTH_TIMEOUT_MS}ms.`;
-  appendServerDiagnostic(`[desktop] ${message}`);
-  throw new Error(message);
+  throw new Error('Unable to reconcile the existing Nori server owner.');
+}
+
+function workerEnvironment(config: ServerWorkerConfig, modulesDir?: string): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    NORI_CODE_HOME: config.homeDir,
+    NORI_CODE_NODE_EXECUTABLE: process.execPath,
+    NORI_CODE_NODE_RUN_AS_NODE: '1',
+    NORI_CODE_BUNDLED_NODE_MODULES: modulesDir,
+    [SERVER_WORKER_CONFIG_ENV]: JSON.stringify(config),
+  };
+}
+
+export async function ensureServer(options: EnsureServerOptions): Promise<EnsureServerResult> {
+  ensureServerLogFile();
+  const lockPath = options.lockPath ?? serverLockPath();
+  const startupTimeoutMs = options.startupTimeoutMs ?? SERVER_STARTUP_TIMEOUT_MS;
+  const reusedOrigin = await reconcileExisting(
+    options.expectedVersion,
+    lockPath,
+    startupTimeoutMs,
+  );
+  if (reusedOrigin !== undefined) {
+    appendServerDiagnostic(`[desktop] reused server at ${reusedOrigin}`);
+    return { origin: reusedOrigin, reused: true };
+  }
+
+  if (!existsSync(options.workerPath)) {
+    throw new Error(`Nori server worker not found at ${options.workerPath}.`);
+  }
+
+  const launchId = randomUUID();
+  const startedAt = new Date().toISOString();
+  const deadline = Date.parse(startedAt) + startupTimeoutMs;
+  const config: ServerWorkerConfig = {
+    launchId,
+    startedAt,
+    version: options.expectedVersion,
+    homeDir: noriHome(),
+    lockPath,
+    host: options.host ?? '127.0.0.1',
+    port: options.port ?? 58771,
+    webAssetsDir: options.webAssetsDir,
+    logPath: serverLogPath(),
+    parentPid: process.pid,
+  };
+
+  appendServerDiagnostic(`[desktop] starting server worker launch=${launchId}`);
+  const worker = options.forkWorker(options.workerPath, [], {
+    env: workerEnvironment(config, options.modulesDir),
+    cwd: dirname(serverLogPath()),
+    stdio: 'pipe',
+    serviceName: 'Nori Server',
+  });
+  attachWorkerLogs(worker);
+  worker.on('error', (type, location, report) => {
+    appendServerDiagnostic(
+      `[desktop] server worker fatal runtime error type=${type} location=${location}\n${report}`,
+    );
+  });
+
+  try {
+    const ready = await waitForWorkerReady(worker, launchId, deadline);
+    const owner = readLockContents(lockPath);
+    if (
+      owner === undefined
+      || !isServerLockV2(owner)
+      || owner.state !== 'ready'
+      || owner.launch_id !== launchId
+      || owner.pid !== ready.pid
+    ) {
+      throw new WorkerStartFailure('Server worker reported ready without owning the ready lock.', {
+        code: 'READY_LOCK_MISMATCH',
+        logPath: serverLogPath(),
+      });
+    }
+    managedWorker = { process: worker, owner, lockPath };
+    worker.once('exit', () => {
+      if (managedWorker?.process === worker) managedWorker = undefined;
+    });
+    appendServerDiagnostic(`[desktop] server worker ready at ${ready.origin}`);
+    return { origin: ready.origin, reused: false };
+  } catch (error) {
+    const failedOwner = readLockContents(lockPath);
+    if (
+      failedOwner !== undefined
+      && isServerLockV2(failedOwner)
+      && failedOwner.launch_id === launchId
+    ) {
+      await stopExactOwner(failedOwner, lockPath, worker);
+    }
+    const winner = await reconcileExisting(
+      options.expectedVersion,
+      lockPath,
+      startupTimeoutMs,
+    );
+    if (winner !== undefined) {
+      appendServerDiagnostic(`[desktop] concurrent launcher won; reusing ${winner}`);
+      return { origin: winner, reused: true };
+    }
+    const owner = readLockContents(lockPath);
+    if (owner === undefined || !isServerLockV2(owner) || owner.launch_id !== launchId) {
+      worker.kill();
+    }
+    throw error;
+  }
+}
+
+export async function stopServerForDesktopExit(): Promise<void> {
+  const current = managedWorker;
+  if (current === undefined) return;
+  managedWorker = undefined;
+  appendServerDiagnostic(
+    `[desktop] stopping managed server launch=${current.owner.launch_id ?? '<legacy>'}`,
+  );
+  await stopExactOwner(current.owner, current.lockPath, current.process);
 }

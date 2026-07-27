@@ -48,6 +48,7 @@ import {
   IEnvironmentService,
   IEventService,
   ILogService,
+  IMcpElicitationService,
   IPromptService,
   IQuestionService,
   readWireTranscript,
@@ -69,6 +70,7 @@ import type {
 import { IWSBroadcastService } from '#/services/gateway';
 import type { ApprovalService } from '#/services/approval/approvalService';
 import type { QuestionService } from '#/services/question/questionService';
+import type { McpElicitationService } from '#/services/mcpElicitation';
 
 import { ISnapshotService, SnapshotNotFoundError } from './snapshot';
 import { loadSnapshotConfig, type SnapshotConfig } from './snapshotConfig';
@@ -106,6 +108,7 @@ export class SnapshotService extends Disposable implements ISnapshotService {
     @IApprovalService private readonly approvalService: IApprovalService,
     @IQuestionService private readonly questionService: IQuestionService,
     @IPromptService private readonly promptService: IPromptService,
+    @IMcpElicitationService private readonly mcpElicitationService?: IMcpElicitationService,
   ) {
     super();
     this._config = loadSnapshotConfig();
@@ -140,6 +143,9 @@ export class SnapshotService extends Disposable implements ISnapshotService {
 
     const approvals = (this.approvalService as ApprovalService).listPending(sid);
     const questions = (this.questionService as QuestionService).listPending(sid);
+    const mcpElicitations = this.mcpElicitationService === undefined
+      ? []
+      : (this.mcpElicitationService as McpElicitationService).listPending(sid);
 
     const durationMs = Date.now() - startMs;
     this.logger.info(
@@ -161,6 +167,7 @@ export class SnapshotService extends Disposable implements ISnapshotService {
       in_flight_turn: inFlightTurn,
       pending_approvals: [...approvals],
       pending_questions: [...questions],
+      pending_mcp_elicitations: [...mcpElicitations],
     };
   }
 

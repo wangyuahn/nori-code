@@ -29,6 +29,13 @@ export { OAuthManager, defaultRefreshThreshold, newInstanceId } from './oauth-ma
 export { extractApiErrorMessage, readApiErrorMessage } from './api-error';
 
 export {
+  fallbackReasoningMetadata,
+  reasoningEffortsFromRecord,
+  reasoningMetadataFromRecord,
+} from './reasoning-options';
+export type { ReasoningMetadata } from './reasoning-options';
+
+export {
   isOfficialKimiCodingEndpoint,
   OFFICIAL_KIMI_CODING_INPUT_CAPABILITIES,
 } from './provider-capabilities';
@@ -99,7 +106,6 @@ export type {
 } from './stubs';
 
 export { refreshProviderModels } from './refresh-provider-models';
-export { reasoningEffortsFromRecord } from './reasoning-options';
 export type {
   ProviderChange,
   RefreshProviderHost,

@@ -25,6 +25,7 @@ import { z } from 'zod';
 
 import { approvalRequestSchema } from '../approval';
 import { messageSchema } from '../message';
+import { mcpElicitationRequestSchema } from '../mcp-elicitation';
 import { questionRequestSchema } from '../question';
 import { sessionSchema } from '../session';
 
@@ -73,5 +74,6 @@ export const sessionSnapshotResponseSchema = z.object({
   in_flight_turn: inFlightTurnSchema.nullable(),
   pending_approvals: z.array(approvalRequestSchema),
   pending_questions: z.array(questionRequestSchema),
+  pending_mcp_elicitations: z.array(mcpElicitationRequestSchema),
 });
 export type SessionSnapshotResponse = z.infer<typeof sessionSnapshotResponseSchema>;

@@ -15,12 +15,13 @@
  */
 
 import type { Command } from 'commander';
-import { unlinkSync } from 'node:fs';
 
 import {
   classifyServerIdentity,
   DEFAULT_LOCK_PATH,
   getLiveLock,
+  removeLockIfOwnerMatches,
+  sameLockOwner,
   type LockContents,
   type ServerIdentityClass,
 } from '@nori-code/server';
@@ -50,8 +51,8 @@ export interface KillCommandDeps {
    * process that recycled the recorded PID or shares the port.
    */
   probeIdentity(origin: string, token: string | undefined): Promise<ServerIdentityClass>;
-  /** Remove the stale lock file after a foreign owner was detected. */
-  discardLock(): void;
+  /** Remove the stale lock only if it still belongs to this exact owner. */
+  discardLock(owner: LockContents): void;
   signalPid(pid: number, signal: NodeJS.Signals): boolean;
   pidAlive(pid: number): boolean;
   sleep(ms: number): Promise<void>;
@@ -60,6 +61,8 @@ export interface KillCommandDeps {
 }
 
 export interface ExpectedServerOwner {
+  readonly schema_version?: 2;
+  readonly launch_id?: string;
   readonly pid: number;
   readonly started_at?: string;
   readonly host?: string;
@@ -69,6 +72,8 @@ export interface ExpectedServerOwner {
 }
 
 const EXPECTED_OWNER_ENV = {
+  schema_version: 'NORI_CODE_EXPECT_SERVER_SCHEMA_VERSION',
+  launch_id: 'NORI_CODE_EXPECT_SERVER_LAUNCH_ID',
   pid: 'NORI_CODE_EXPECT_SERVER_PID',
   started_at: 'NORI_CODE_EXPECT_SERVER_STARTED_AT',
   host: 'NORI_CODE_EXPECT_SERVER_HOST',
@@ -105,6 +110,8 @@ export function expectedServerOwnerFromEnv(
     );
   }
   return {
+    schema_version: env[EXPECTED_OWNER_ENV.schema_version] === '2' ? 2 : undefined,
+    launch_id: env[EXPECTED_OWNER_ENV.launch_id],
     pid,
     started_at: env[EXPECTED_OWNER_ENV.started_at],
     host: env[EXPECTED_OWNER_ENV.host],
@@ -115,6 +122,15 @@ export function expectedServerOwnerFromEnv(
 }
 
 function matchesExpectedOwner(lock: LockContents, expected: ExpectedServerOwner): boolean {
+  const lockUsesV2 = lock.schema_version === 2 || lock.launch_id !== undefined;
+  const expectedUsesV2 = expected.schema_version === 2 || expected.launch_id !== undefined;
+  if (lockUsesV2 || expectedUsesV2) {
+    return lockUsesV2
+      && expectedUsesV2
+      && lock.pid === expected.pid
+      && lock.launch_id !== undefined
+      && lock.launch_id === expected.launch_id;
+  }
   return (
     lock.pid === expected.pid &&
     lock.started_at === expected.started_at &&
@@ -122,17 +138,6 @@ function matchesExpectedOwner(lock: LockContents, expected: ExpectedServerOwner)
     lock.port === expected.port &&
     lock.host_version === expected.host_version &&
     lock.entry === expected.entry
-  );
-}
-
-function sameLockOwner(left: LockContents, right: LockContents): boolean {
-  return (
-    left.pid === right.pid &&
-    left.started_at === right.started_at &&
-    left.host === right.host &&
-    left.port === right.port &&
-    left.host_version === right.host_version &&
-    left.entry === right.entry
   );
 }
 
@@ -178,7 +183,7 @@ export async function handleKillCommand(
   // is how a wedged Nori daemon recorded by this lock is recovered.
   const identity = await deps.probeIdentity(origin, token);
   if (identity === 'foreign') {
-    deps.discardLock();
+    deps.discardLock(lock);
     deps.stdout.write(
       `The port recorded in the Nori server lock is now served by a different product; ` +
         `discarded the stale lock without signaling pid ${String(pid)}.\n`,
@@ -215,7 +220,7 @@ export async function handleKillCommand(
   // wins the same port before the lock release is observed. Re-check the
   // product immediately before the first PID signal as a second safety gate.
   if (identity === 'nori' && (await deps.probeIdentity(origin, token)) === 'foreign') {
-    deps.discardLock();
+    deps.discardLock(lock);
     deps.stdout.write(
       `The port recorded in the Nori server lock is now served by a different product; ` +
         `discarded the stale lock without signaling pid ${String(pid)}.\n`,
@@ -255,6 +260,10 @@ export async function handleKillCommand(
   throw new Error(
     `Failed to stop Nori server (pid ${String(pid)}); insufficient permissions?`,
   );
+}
+
+export async function stopServerOwner(owner: LockContents): Promise<void> {
+  await handleKillCommand(DEFAULT_KILL_DEPS, owner);
 }
 
 async function waitForExit(
@@ -318,12 +327,8 @@ const DEFAULT_KILL_DEPS: KillCommandDeps = {
   requestShutdown: requestShutdownViaApi,
   resolveToken: () => tryResolveServerToken(getDataDir()),
   probeIdentity: (origin, token) => classifyServerIdentity(origin, token, API_TIMEOUT_MS),
-  discardLock: () => {
-    try {
-      unlinkSync(DEFAULT_LOCK_PATH);
-    } catch {
-      // Best effort — a concurrent release/takeover may have removed it.
-    }
+  discardLock: (owner) => {
+    removeLockIfOwnerMatches(owner, DEFAULT_LOCK_PATH);
   },
   signalPid,
   pidAlive,

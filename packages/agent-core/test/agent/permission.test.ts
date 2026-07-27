@@ -34,6 +34,14 @@ import {
 import { createFakeKaos } from '../tools/fixtures/fake-kaos';
 import { createCommandKaos, testAgent } from './harness/agent';
 
+function editArgs(path: string) {
+  return {
+    path,
+    expected_tag: 'A1B2',
+    line_ops: [{ op: 'swap' as const, start: 1, end: 1, content: 'B' }],
+  };
+}
+
 describe('Agent permission', () => {
   it('keeps readonly manual mode blocking writes but lets Bash and approved modes pass through', () => {
     const contextFor = (toolName: string) =>
@@ -476,7 +484,7 @@ describe('Permission auto mode', () => {
 
   it.each([
     ['Write', { path: '/tmp/notes.md', content: 'x' }, 'write', 'write file'],
-    ['Edit', { path: '/tmp/notes.md', old_string: 'a', new_string: 'b' }, 'edit', 'edit file'],
+    ['Edit', editArgs('/tmp/notes.md'), 'edit', 'edit file'],
   ] as const)(
     'requests approval in manual mode for %s outside the cwd',
     async (toolName, args, operation, action) => {
@@ -515,7 +523,7 @@ describe('Permission auto mode', () => {
 
   it.each([
     ['Write', { path: '/tmp/notes.md', content: 'x' }],
-    ['Edit', { path: '/tmp/notes.md', old_string: 'a', new_string: 'b' }],
+    ['Edit', editArgs('/tmp/notes.md')],
   ] as const)('approves %s outside the cwd in yolo mode', async (toolName, args) => {
     const { manager, requestApproval, telemetryTrack } = makePermissionManager(async () => ({
       decision: 'approved',
@@ -566,7 +574,7 @@ describe('Permission auto mode', () => {
     ['Read', { path: '/tmp/notes.md' }],
     ['ReadMediaFile', { path: '/tmp/image.png' }],
     ['Write', { path: '/tmp/notes.md', content: 'x' }],
-    ['Edit', { path: '/tmp/notes.md', old_string: 'a', new_string: 'b' }],
+    ['Edit', editArgs('/tmp/notes.md')],
   ] as const)('approves %s outside the cwd in auto mode', async (toolName, args) => {
     const { manager, requestApproval, telemetryTrack } = makePermissionManager(async () => ({
       decision: 'approved',
@@ -593,7 +601,7 @@ describe('Permission auto mode', () => {
     ['Read', { path: '/workspace/notes.md' }],
     ['ReadMediaFile', { path: '/workspace/image.png' }],
     ['Write', { path: '/workspace/notes.md', content: 'x' }],
-    ['Edit', { path: '/workspace/notes.md', old_string: 'a', new_string: 'b' }],
+    ['Edit', editArgs('/workspace/notes.md')],
     ['Grep', { pattern: 'TODO', path: '/workspace' }],
   ] as const)(
     'does not request approval for %s inside the workspace in yolo mode',
@@ -1152,7 +1160,7 @@ describe('Default tool approve policy', () => {
   it.each([
     ['Bash', { command: 'printf first', timeout: 60 }],
     ['Write', { path: '/workspace/a.ts', content: 'x' }],
-    ['Edit', { path: '/workspace/a.ts', old_string: 'a', new_string: 'b' }],
+    ['Edit', editArgs('/workspace/a.ts')],
     ['Custom', { value: 1 }],
   ] as const)('does not default-approve %s', async (toolName, args) => {
     const { manager, requestApproval, telemetryTrack } = makePermissionManager(async () => ({
@@ -1631,7 +1639,7 @@ describe('Plan mode tool approve policy', () => {
       const args =
         toolName === 'Write'
           ? { path: planFilePath, content: '# Plan' }
-          : { path: planFilePath, old_string: '# Draft', new_string: '# Plan' };
+          : editArgs(planFilePath);
 
       await expect(
         manager.beforeToolCall(
@@ -2783,7 +2791,7 @@ describe('Default git CWD Write/Edit permission', () => {
 
     await expect(
       manager.beforeToolCall(
-        editHook({ path: '/workspace/src/a.ts', old_string: 'A', new_string: 'B' }),
+        editHook(editArgs('/workspace/src/a.ts')),
       ),
     ).resolves.toBeUndefined();
 
@@ -2801,7 +2809,7 @@ describe('Default git CWD Write/Edit permission', () => {
 
   it.each([
     ['Write', { path: '/extra/src/a.ts', content: 'x' }],
-    ['Edit', { path: '/extra/src/a.ts', old_string: 'A', new_string: 'B' }],
+    ['Edit', editArgs('/extra/src/a.ts')],
   ] as const)('approves %s on an additionalDir path in manual mode', async (toolName, args) => {
     const { kaos } = gitKaos();
     const { manager, requestApproval, telemetryTrack } = makePermissionManager(
@@ -2860,7 +2868,7 @@ describe('Default git CWD Write/Edit permission', () => {
     ).resolves.toBeUndefined();
     await expect(
       manager.beforeToolCall(
-        editHook({ path: 'src/b.ts', old_string: 'A', new_string: 'B' }, 'call_2'),
+        editHook(editArgs('src/b.ts'), 'call_2'),
       ),
     ).resolves.toBeUndefined();
 
@@ -3692,7 +3700,7 @@ describe('Default git CWD Write/Edit permission', () => {
       manager.beforeToolCall(writeHook({ path: 'src/a.ts', content: 'x' }, 'call_1')),
     ).resolves.toBeUndefined();
     await expect(
-      manager.beforeToolCall(editHook({ path: 'src/b.ts', old_string: 'A', new_string: 'B' }, 'call_2')),
+      manager.beforeToolCall(editHook(editArgs('src/b.ts'), 'call_2')),
     ).resolves.toBeUndefined();
 
     expect(requestApproval).not.toHaveBeenCalled();

@@ -83,14 +83,12 @@ function extractFromArgs(
     };
   }
 
-  const oldString = stringField(detail, 'old_string');
-  const newString = stringField(detail, 'new_string');
-  if (oldString !== undefined && newString !== undefined) {
-    const path = stringField(detail, 'file_path') ?? stringField(detail, 'path') ?? '';
-    // Diff block carries its own `+N -M path` header — no separate
-    // file_op title row needed.
+  const editPath = stringField(detail, 'file_path') ?? stringField(detail, 'path');
+  if (toolName === 'Edit' && editPath !== undefined && Array.isArray(detail['line_ops'])) {
     return {
-      blocks: [{ type: 'diff', path, old_text: oldString, new_text: newString }],
+      blocks: [
+        { type: 'file_op', operation: 'edit', path: editPath, detail: editLineOpsDetail(detail) },
+      ],
       description: '',
     };
   }
@@ -141,6 +139,34 @@ function extractFromArgs(
   }
 
   return null;
+}
+
+function editLineOpsDetail(detail: Record<string, unknown>): string {
+  const lines: string[] = [];
+  const tag = stringField(detail, 'expected_tag');
+  if (tag !== undefined) lines.push(`Expected tag: ${tag.toUpperCase()}`);
+  for (const candidate of detail['line_ops'] as unknown[]) {
+    if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) continue;
+    const operation = candidate as Record<string, unknown>;
+    const op = operation['op'];
+    if (
+      (op === 'swap' || op === 'del') &&
+      typeof operation['start'] === 'number' &&
+      typeof operation['end'] === 'number'
+    ) {
+      lines.push(
+        `${op === 'swap' ? 'replace' : 'delete'} lines ${String(operation['start'])}-${String(operation['end'])}`,
+      );
+    } else if (
+      (op === 'insert_pre' || op === 'insert_post') &&
+      typeof operation['line'] === 'number'
+    ) {
+      lines.push(
+        `insert ${op === 'insert_pre' ? 'before' : 'after'} line ${String(operation['line'])}`,
+      );
+    }
+  }
+  return lines.join('\n');
 }
 
 function inferFileOp(toolName: string): 'read' | 'write' | 'edit' | 'glob' | 'grep' {
@@ -261,15 +287,6 @@ function adaptDisplay(display: ToolInputDisplay): DisplayBlock[] {
       // ctrl+e expand) what is about to land on disk.
       if (display.operation === 'write' && typeof display.content === 'string') {
         return [{ type: 'file_content', path, content: display.content }];
-      }
-      // Edit attaches the old_string/new_string hunk as before/after — render
-      // it as a diff block so ctrl+e expansion works on the change.
-      if (
-        display.operation === 'edit' &&
-        typeof display.before === 'string' &&
-        typeof display.after === 'string'
-      ) {
-        return [{ type: 'diff', path, old_text: display.before, new_text: display.after }];
       }
       return [
         {

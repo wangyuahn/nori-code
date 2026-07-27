@@ -25,7 +25,7 @@ import { KimiError } from '../../src/errors';
 import { ProviderManager } from '../../src/session/provider-manager';
 import { McpConnectionManager, type McpServerEntry } from '../../src/mcp/connection-manager';
 import { JsonFileStore, McpOAuthService } from '../../src/mcp/oauth';
-import type { AgentEvent, SDKSessionRPC } from '../../src/rpc';
+import type { AgentEvent, ApprovalRequest, ApprovalResponse, SDKSessionRPC } from '../../src/rpc';
 import { Session } from '../../src/session';
 import { SessionAPIImpl } from '../../src/session/rpc';
 import { createScriptedGenerate } from '../agent/harness';
@@ -37,12 +37,14 @@ const cwdStdioFixture = join(here, 'fixtures', 'cwd-stdio-server.mjs');
 const slowStdioFixture = join(here, 'fixtures', 'slow-stdio-server.mjs');
 const crashAfterConnectFixture = join(here, 'fixtures', 'crash-after-connect-stdio-server.mjs');
 const stderrThenExitFixture = join(here, 'fixtures', 'stderr-then-exit-stdio-server.mjs');
+const fullStdioFixture = join(here, 'fixtures', 'full-stdio-server.mjs');
 const MOCK_PROVIDER: ProviderConfig = {
   type: 'kimi',
   apiKey: 'test-key',
   model: 'mock-model',
 };
 type SessionRpcEvent = AgentEvent & { readonly agentId: string };
+type SessionApprovalRequest = ApprovalRequest & { readonly agentId: string };
 
 function stdioConfig(args: string[] = [stdioFixture]) {
   return {
@@ -55,13 +57,20 @@ function stdioConfig(args: string[] = [stdioFixture]) {
 function sessionRpc(options: {
   readonly events?: SessionRpcEvent[] | undefined;
   readonly onEvent?: ((event: SessionRpcEvent) => void) | undefined;
+  readonly approvals?: SessionApprovalRequest[] | undefined;
+  readonly onApproval?: (
+    request: SessionApprovalRequest,
+  ) => ApprovalResponse | Promise<ApprovalResponse>;
 } = {}): SDKSessionRPC {
   return {
     emitEvent: async (event: SessionRpcEvent) => {
       options.events?.push(event);
       options.onEvent?.(event);
     },
-    requestApproval: async () => ({ decision: 'rejected' }),
+    requestApproval: async (request: SessionApprovalRequest) => {
+      options.approvals?.push(request);
+      return options.onApproval?.(request) ?? { decision: 'rejected' };
+    },
     requestQuestion: async () => null,
     toolCall: async () => ({ output: '' }),
   } as unknown as SDKSessionRPC;
@@ -83,6 +92,62 @@ describe('McpConnectionManager', () => {
       await cm.shutdown();
     }
   }, 20000);
+
+  it('connects resource-only servers and exposes their capability snapshot', async () => {
+    const cm = new McpConnectionManager();
+    try {
+      await cm.connectAll({
+        knowledge: {
+          transport: 'stdio',
+          command: process.execPath,
+          args: [fullStdioFixture],
+          env: { NORI_TEST_MCP_RESOURCE_ONLY: '1' },
+        },
+      });
+      expect(cm.get('knowledge')).toMatchObject({
+        status: 'connected',
+        toolCount: 0,
+        serverInfo: { name: 'full-stdio', version: '1.2.3' },
+        capabilities: {
+          resources: { subscribe: true, listChanged: true },
+          prompts: { listChanged: true },
+        },
+        instructions: 'Use the fixture resources and prompts for MCP integration tests.',
+      });
+      const resolved = cm.resolved('knowledge');
+      await expect(resolved?.client.listResources()).resolves.toHaveLength(3);
+      await expect(resolved?.client.listPrompts()).resolves.toHaveLength(1);
+    } finally {
+      await cm.shutdown();
+    }
+  }, 15000);
+
+  it('refreshes tools in place when a connected server emits tools/list_changed', async () => {
+    const cm = new McpConnectionManager();
+    const events: Array<{ type: string; kind?: string; error?: string }> = [];
+    cm.onEvent((event) => events.push(event));
+    try {
+      await cm.connectAll({
+        dynamic: {
+          transport: 'stdio',
+          command: process.execPath,
+          args: [fullStdioFixture],
+        },
+      });
+      expect(cm.get('dynamic')?.toolCount).toBe(2);
+      const resolved = cm.resolved('dynamic');
+      await resolved?.client.callTool('enable_dynamic', {});
+      await waitForManager(() => cm.get('dynamic')?.toolCount === 3);
+      expect(cm.resolved('dynamic')?.tools.map((tool) => tool.name)).toContain('dynamic_tool');
+      expect(events).toContainEqual({
+        type: 'list.changed',
+        serverName: 'dynamic',
+        kind: 'tools',
+      });
+    } finally {
+      await cm.shutdown();
+    }
+  }, 15000);
 
   it('isolates failures: a bad server is marked failed without blocking the rest', async () => {
     const cm = new McpConnectionManager();
@@ -829,6 +894,166 @@ describe('Session MCP startup', () => {
     }
   }, 7000);
 
+  it('forwards MCP list, resource, logging, and progress notifications through Session RPC', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'nori-session-mcp-events-'));
+    const events: SessionRpcEvent[] = [];
+    const session = new Session({
+      id: 'test-mcp-protocol-events',
+      kaos: testKaos.withCwd(tmp),
+      homedir: join(tmp, 'session'),
+      rpc: sessionRpc({ events }),
+      mcpConfig: {
+        servers: {
+          full: {
+            transport: 'stdio',
+            command: process.execPath,
+            args: [fullStdioFixture],
+            startupTimeoutMs: 4_000,
+          },
+        },
+      },
+    });
+
+    try {
+      await session.mcp.waitForInitialLoad();
+      const resolved = session.mcp.resolved('full');
+      if (resolved === undefined) throw new Error('Full MCP fixture did not connect');
+
+      await resolved.client.subscribeResource('nori://docs/readme');
+      await resolved.client.callTool('update_resource', {});
+      await resolved.client.callTool('enable_dynamic', {});
+      await waitForManager(
+        () =>
+          events.some((event) => event.type === 'mcp.resource.updated') &&
+          events.some((event) => event.type === 'mcp.server.log') &&
+          events.some((event) => event.type === 'mcp.server.progress') &&
+          events.some((event) => event.type === 'mcp.server.list.changed'),
+      );
+
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'mcp.resource.updated',
+          serverName: 'full',
+          uri: 'nori://docs/readme',
+        }),
+      );
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'mcp.server.log',
+          serverName: 'full',
+          level: 'info',
+          logger: 'full-stdio-fixture',
+          data: { action: 'update_resource' },
+        }),
+      );
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'mcp.server.progress',
+          serverName: 'full',
+          progress: 1,
+          total: 1,
+          message: 'Resource update complete',
+        }),
+      );
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'mcp.server.list.changed',
+          serverName: 'full',
+          kind: 'tools',
+        }),
+      );
+    } finally {
+      await session.close();
+      await rm(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 10 });
+    }
+  }, 10_000);
+
+  it('runs server-initiated sampling through Session approval and the active model', async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'nori-session-mcp-sampling-'));
+    const approvals: SessionApprovalRequest[] = [];
+    const scripted = createScriptedGenerate();
+    scripted.mockNextResponse({ type: 'text', text: 'first sampled response' });
+    scripted.mockNextResponse({ type: 'text', text: 'second sampled response' });
+    const session = new Session({
+      id: 'test-mcp-sampling',
+      kaos: testKaos.withCwd(tmp),
+      homedir: join(tmp, 'session'),
+      rpc: sessionRpc({
+        approvals,
+        onApproval: () => ({ decision: 'approved', scope: 'session' }),
+      }),
+      providerManager: testProviderManager(),
+      mcpConfig: {
+        servers: {
+          sampler: {
+            transport: 'stdio',
+            command: process.execPath,
+            args: [fullStdioFixture],
+            env: { NORI_TEST_MCP_SAMPLING: '1' },
+            startupTimeoutMs: 4_000,
+          },
+        },
+      },
+    });
+
+    try {
+      const { agent } = await session.createAgent({
+        type: 'main',
+        generate: scripted.generate,
+      });
+      agent.config.update({
+        cwd: tmp,
+        modelAlias: 'mock-model',
+        systemPrompt: 'main agent system prompt',
+        thinkingEffort: 'off',
+      });
+      await session.mcp.waitForInitialLoad();
+      const resolved = session.mcp.resolved('sampler');
+      if (resolved === undefined) throw new Error('Sampling MCP fixture did not connect');
+
+      const first = await resolved.client.callTool('sample_current_model', {});
+      const second = await resolved.client.callTool('sample_current_model', {});
+      expect(JSON.parse((first.content[0] as { type: 'text'; text: string }).text)).toMatchObject({
+        content: { type: 'text', text: 'first sampled response' },
+        model: 'mock-model',
+        stopReason: 'endTurn',
+      });
+      expect(JSON.parse((second.content[0] as { type: 'text'; text: string }).text)).toMatchObject({
+        content: { type: 'text', text: 'second sampled response' },
+      });
+
+      expect(approvals).toHaveLength(1);
+      expect(approvals[0]).toMatchObject({
+        agentId: 'main',
+        toolName: 'mcp_sampling',
+        display: {
+          kind: 'generic',
+          detail: {
+            serverName: 'sampler',
+            model: 'mock-model',
+            requestedMaxTokens: 8_192,
+            maxTokens: 4_096,
+          },
+        },
+      });
+      expect(scripted.calls).toHaveLength(2);
+      expect(scripted.calls[0]).toMatchObject({
+        systemPrompt: 'Fixture sampling system prompt',
+        tools: [],
+        history: [
+          {
+            role: 'user',
+            content: [{ type: 'text', text: 'Summarize this MCP sampling request.' }],
+            toolCalls: [],
+          },
+        ],
+      });
+    } finally {
+      await session.close();
+      await rm(tmp, { recursive: true, force: true, maxRetries: 3, retryDelay: 10 });
+    }
+  }, 15_000);
+
   it('waits for initial MCP startup before the first prompt reaches the model', async () => {
     const tmp = await mkdtemp(join(tmpdir(), 'kimi-session-mcp-prompt-'));
     const events: SessionRpcEvent[] = [];
@@ -956,6 +1181,15 @@ describe('Session MCP startup', () => {
     }
   }, 10_000);
 });
+
+async function waitForManager(predicate: () => boolean, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await sleep(25);
+  }
+  throw new Error(`Condition was not met within ${timeoutMs}ms`);
+}
 
 function testProviderManager(): ProviderManager {
   return new ProviderManager({

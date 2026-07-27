@@ -9,7 +9,7 @@ import { createMcpAuthTool } from '../../mcp/auth-tool';
 import type { McpConnectionManager, McpServerEntry } from '../../mcp';
 import { mcpResultToExecutableOutput } from '../../mcp/output';
 import { isMcpToolName, qualifyMcpToolName } from '../../mcp/tool-naming';
-import type { MCPClient } from '../../mcp/types';
+import type { MCPToolClient } from '../../mcp/types';
 import { configuredSubagentProfiles, DEFAULT_AGENT_PROFILES } from '../../profile';
 import { extendWorkspaceWithSkillRoots } from '../../skill';
 import * as b from '../../tools/builtin';
@@ -266,7 +266,7 @@ export class ToolManager {
 
   registerMcpServer(
     serverName: string,
-    client: MCPClient,
+    client: MCPToolClient,
     tools: readonly Tool[],
     enabledTools?: ReadonlySet<string>,
   ): McpServerRegistrationResult {

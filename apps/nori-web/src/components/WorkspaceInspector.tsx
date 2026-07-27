@@ -3,6 +3,7 @@ import { api, type FsDiffResponse, type FsGitStatusResponse, type FsReadResponse
 import type { ChatMessage, CodeChange, TodoItem } from '../hooks/useChatMessages';
 import type { GitStatusRefreshOptions } from '../hooks/useFilesystem';
 import { useI18n } from '../i18n';
+import { editLineOperationsDiff } from '../utils/edit-line-ops';
 import { FilePreview } from './FilePreview';
 import { Icon } from './Icon';
 import { LspPanel } from './LspPanel';
@@ -13,10 +14,12 @@ const BrowserPanel = lazy(() => import('./BrowserPanel').then(module => ({ defau
 export type InspectorTab = 'preview' | 'changes' | 'browser' | 'git' | 'lsp' | 'terminal';
 const DEFAULT_INSPECTOR_TABS: InspectorTab[] = ['changes', 'preview', 'browser', 'git', 'lsp', 'terminal'];
 const INSPECTOR_PINNED_KEY = 'nori-inspector-overview-pinned';
+const INSPECTOR_STATE_KEY = 'nori-inspector-global-state-v1';
 
 interface OpenInspectorTab {
   id: string;
   tool: InspectorTab;
+  browserTabId?: string;
 }
 
 interface WorkspaceInspectorProps {
@@ -48,10 +51,15 @@ interface WorkspaceInspectorProps {
 
 export function WorkspaceInspector({ sessionId, projectPath, path, file, loading, messages, codeChanges, gitStatus, gitError, gitLoading, refreshGitStatus, refreshMessages, refreshFile, isStreaming, mainWorking = false, activeAgentCount = 0, activeAgentTokens = 0, goal = null, todos = [], onGoalControl, onSelectFilePath, initialTab, standalone = false, overviewFirst = false }: WorkspaceInspectorProps) {
   const { tr } = useI18n();
-  const initialActiveTab = standalone || !overviewFirst ? initialTab ?? 'changes' : initialTab ?? null;
-  const initialActiveTabId = initialActiveTab ? `${initialActiveTab}-initial` : null;
-  const [activeTabId, setActiveTabId] = useState<string | null>(initialActiveTabId);
-  const [openTabs, setOpenTabs] = useState<OpenInspectorTab[]>(() => initialActiveTab ? [{ id: initialActiveTabId!, tool: initialActiveTab }] : []);
+  const persistedStateRef = useRef(standalone ? undefined : loadInspectorState());
+  const fallbackActiveTab = standalone || !overviewFirst ? initialTab ?? 'changes' : initialTab ?? null;
+  const fallbackActiveTabId = fallbackActiveTab ? `${fallbackActiveTab}-initial` : null;
+  const initialOpenTabs = persistedStateRef.current?.openTabs
+    ?? (fallbackActiveTab ? [{ id: fallbackActiveTabId!, tool: fallbackActiveTab }] : []);
+  const [activeTabId, setActiveTabId] = useState<string | null>(
+    persistedStateRef.current?.activeTabId ?? fallbackActiveTabId,
+  );
+  const [openTabs, setOpenTabs] = useState<OpenInspectorTab[]>(initialOpenTabs);
   const [tabOrder, setTabOrder] = useState<InspectorTab[]>(loadInspectorTabOrder);
   const [toolPickerOpen, setToolPickerOpen] = useState(false);
   const [overviewPinned, setOverviewPinned] = useState(loadInspectorPinned);
@@ -59,13 +67,16 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
   const [diagnosticCount, setDiagnosticCount] = useState<number>();
   const [revealLine, setRevealLine] = useState<number>();
   const previewRefreshRef = useRef({ path: '', mutationKey: '' });
+  const previousPreviewPathRef = useRef(path);
   const toolPickerRef = useRef<HTMLDivElement>(null);
   const nextTabIdRef = useRef(1);
   const activeTab = openTabs.find(item => item.id === activeTabId);
   const tab = activeTab?.tool ?? null;
 
   useEffect(() => {
-    if (!path || standalone) return;
+    const previousPath = previousPreviewPathRef.current;
+    previousPreviewPathRef.current = path;
+    if (!path || standalone || path === previousPath) return;
     setOpenTabs(previous => {
       const existing = [...previous].reverse().find(item => item.tool === 'preview');
       if (existing) {
@@ -77,6 +88,11 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
       return [...previous, created];
     });
   }, [path, standalone]);
+
+  useEffect(() => {
+    if (standalone) return;
+    saveInspectorState({ activeTabId, openTabs });
+  }, [activeTabId, openTabs, standalone]);
 
   useEffect(() => {
     if (!toolPickerOpen) return;
@@ -153,9 +169,13 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
   };
   const closeTab = (tabId: string) => {
     const itemIndex = openTabs.findIndex(item => item.id === tabId);
+    const closingTab = openTabs[itemIndex];
     const nextTabs = openTabs.filter(item => item.id !== tabId);
     setOpenTabs(nextTabs);
     if (activeTabId === tabId) setActiveTabId(nextTabs[Math.min(itemIndex, nextTabs.length - 1)]?.id ?? null);
+    if (closingTab?.tool === 'browser' && closingTab.browserTabId !== undefined) {
+      void window.noriDesktop?.browserCloseTab?.(closingTab.browserTabId);
+    }
   };
   const changeCount = textChangeCount ?? (codeChanges.length > 0 ? codeChanges.length : undefined);
 
@@ -168,7 +188,12 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
     // BrowserPanel owns a native WebContentsView. CSS-hidden inspector pages remain
     // mounted, so the inactive browser page must be unmounted to detach that view.
     if (item === 'browser' && activeTabId !== tabItem.id) return null;
-    if (item === 'browser') return <Suspense fallback={<div className="inspector-empty"><span className="spinner"/></div>}><BrowserPanel /></Suspense>;
+    if (item === 'browser') return <Suspense fallback={<div className="inspector-empty"><span className="spinner"/></div>}><BrowserPanel
+      browserTabId={tabItem.browserTabId}
+      claimedTabIds={openTabs.filter(candidate => candidate.id !== tabItem.id && candidate.browserTabId !== undefined).map(candidate => candidate.browserTabId!)}
+      occluded={toolPickerOpen}
+      onBrowserTabIdChange={browserTabId => setOpenTabs(previous => previous.map(candidate => candidate.id === tabItem.id ? { ...candidate, browserTabId } : candidate))}
+    /></Suspense>;
     const terminalTabs = openTabs.filter(candidate => candidate.tool === 'terminal');
     const reuseExistingTerminal = terminalTabs[0]?.id === tabItem.id;
     return <Suspense fallback={<div className="inspector-empty"><span className="spinner"/></div>}><TerminalPanel sessionId={sessionId} reuseExisting={reuseExistingTerminal} /></Suspense>;
@@ -368,6 +393,45 @@ function loadInspectorTabOrder(): InspectorTab[] {
 
 function loadInspectorPinned(): boolean {
   try { return localStorage.getItem(INSPECTOR_PINNED_KEY) !== 'false'; } catch { return true; }
+}
+
+function loadInspectorState(): { activeTabId: string | null; openTabs: OpenInspectorTab[] } | undefined {
+  try {
+    const value = JSON.parse(localStorage.getItem(INSPECTOR_STATE_KEY) ?? 'null') as unknown;
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+    const record = value as Record<string, unknown>;
+    if (!Array.isArray(record['openTabs'])) return undefined;
+    const ids = new Set<string>();
+    const openTabs = record['openTabs'].flatMap(item => {
+      if (typeof item !== 'object' || item === null || Array.isArray(item)) return [];
+      const candidate = item as Record<string, unknown>;
+      const id = candidate['id'];
+      const tool = candidate['tool'];
+      if (typeof id !== 'string' || ids.has(id) || typeof tool !== 'string' || !DEFAULT_INSPECTOR_TABS.includes(tool as InspectorTab)) return [];
+      ids.add(id);
+      const browserTabId = candidate['browserTabId'];
+      return [{
+        id,
+        tool: tool as InspectorTab,
+        ...(typeof browserTabId === 'string' ? { browserTabId } : {}),
+      }];
+    });
+    const activeTabId = record['activeTabId'];
+    return {
+      activeTabId: typeof activeTabId === 'string' && ids.has(activeTabId) ? activeTabId : null,
+      openTabs,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function saveInspectorState(state: { activeTabId: string | null; openTabs: OpenInspectorTab[] }): void {
+  try {
+    localStorage.setItem(INSPECTOR_STATE_KEY, JSON.stringify(state));
+  } catch {
+    // Keep the current state in memory when storage is unavailable.
+  }
 }
 
 function moveInspectorTab(order: InspectorTab[], target: InspectorTab, source: InspectorTab): InspectorTab[] {
@@ -668,7 +732,7 @@ export function collectToolCodeChanges(messages: ChatMessage[], projectPath?: st
       const rawPath = typeof args['path'] === 'string' ? args['path'] : '';
       if (!rawPath) continue;
       const diff = tool.name === 'Edit'
-        ? changedTextDiff(args['old_string'], args['new_string'])
+        ? compactOperationLines(editLineOperationsDiff(args['line_ops']))
         : addedTextDiff(args['content']);
       if (!diff) continue;
       changes.push({
@@ -682,14 +746,6 @@ export function collectToolCodeChanges(messages: ChatMessage[], projectPath?: st
     }
   }
   return changes.sort((left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt));
-}
-
-function changedTextDiff(before: unknown, after: unknown): string {
-  if (typeof before !== 'string' || typeof after !== 'string') return '';
-  return compactOperationLines([
-    ...before.replaceAll('\r\n', '\n').split('\n').map(line => `-${line}`),
-    ...after.replaceAll('\r\n', '\n').split('\n').map(line => `+${line}`),
-  ]);
 }
 
 function addedTextDiff(content: unknown): string {

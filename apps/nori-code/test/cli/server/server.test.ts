@@ -610,26 +610,6 @@ async function allocateFreePort(host = '127.0.0.1'): Promise<number> {
  * Find the start of a run of `count` consecutive free ports
  * (`start`, `start + 1`, …, `start + count - 1` all bindable).
  */
-async function allocateAdjacentFreeRun(count: number, host = '127.0.0.1'): Promise<number> {
-  for (let i = 0; i < 50; i++) {
-    const start = await allocateFreePort(host);
-    if (start <= 0 || start + count - 1 > 65535) continue;
-    const held: Server[] = [];
-    let ok = true;
-    for (let offset = 1; offset < count; offset++) {
-      const probe = await listenOnce(host, start + offset).catch(() => null);
-      if (probe === null) {
-        ok = false;
-        break;
-      }
-      held.push(probe);
-    }
-    for (const server of held) await closeServer(server);
-    if (ok) return start;
-  }
-  throw new Error('could not allocate a run of adjacent free ports');
-}
-
 describe('--host threading (M6.2)', () => {
   it('passes --host through to the background daemon', async () => {
     const { handleRunCommand } = await import('#/cli/sub/server/run');
@@ -886,54 +866,6 @@ describe('ready banner reflects the bind class (M6.3)', () => {
   });
 });
 
-describe('resolveDaemonPort', () => {
-  it('returns the preferred port when it is free', async () => {
-    const { resolveDaemonPort } = await import('#/cli/sub/server/daemon');
-    const free = await allocateFreePort();
-    await expect(resolveDaemonPort('127.0.0.1', free)).resolves.toBe(free);
-  });
-
-  it('falls back to a different free port when the preferred port is busy', async () => {
-    const { resolveDaemonPort } = await import('#/cli/sub/server/daemon');
-    const busy = await allocateFreePort();
-    const holder = await listenOnce('127.0.0.1', busy);
-    try {
-      const port = await resolveDaemonPort('127.0.0.1', busy);
-      expect(port).not.toBe(busy);
-      expect(port).toBeGreaterThan(0);
-    } finally {
-      await closeServer(holder);
-    }
-  });
-
-  it('walks to preferred+1 when only the preferred port is busy', async () => {
-    const { resolveDaemonPort } = await import('#/cli/sub/server/daemon');
-    const start = await allocateAdjacentFreeRun(2);
-    const holder = await listenOnce('127.0.0.1', start);
-    try {
-      const port = await resolveDaemonPort('127.0.0.1', start);
-      expect(port).toBe(start + 1);
-    } finally {
-      await closeServer(holder);
-    }
-  });
-
-  it('skips past a run of busy ports to the first free one', async () => {
-    const { resolveDaemonPort } = await import('#/cli/sub/server/daemon');
-    const start = await allocateAdjacentFreeRun(3);
-    // Hold both `start` and `start+1`; the resolver should land on `start+2`.
-    const holderA = await listenOnce('127.0.0.1', start);
-    const holderB = await listenOnce('127.0.0.1', start + 1);
-    try {
-      const port = await resolveDaemonPort('127.0.0.1', start);
-      expect(port).toBe(start + 2);
-    } finally {
-      await closeServer(holderA);
-      await closeServer(holderB);
-    }
-  });
-});
-
 describe('resolveDaemonProgram', () => {
   it('uses the absolute script path outside SEA mode', async () => {
     const { resolveDaemonProgram } = await import('#/cli/sub/server/daemon');
@@ -1104,8 +1036,6 @@ describe('ensureDaemon surfaces boot failures via early exit', () => {
     const spawnMock = vi.mocked(spawn);
     const { ensureDaemon } = await import('#/cli/sub/server/daemon');
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
-    const nowSpy = vi.spyOn(Date, 'now');
-    let nowCalls = 0;
     const fakeChild = {
       pid: 43210,
       unref: vi.fn(),
@@ -1114,19 +1044,20 @@ describe('ensureDaemon surfaces boot failures via early exit', () => {
       }),
     };
     spawnMock.mockImplementationOnce(() => {
-      // Start the deadline clock only after port resolution and spawn have
-      // completed, then make the first loop condition expire immediately.
-      nowSpy.mockImplementation(() => nowCalls++ === 0 ? 0 : 90_001);
       return fakeChild as unknown as ChildProcess;
     });
 
     try {
-      await expect(ensureDaemon({ port: 0 })).rejects.toThrow(
-        'failed to start within 90000ms',
+      vi.useFakeTimers();
+      const startup = ensureDaemon({ port: 0 });
+      const rejection = expect(startup).rejects.toThrow(
+        'failed to start within 30000ms',
       );
-      expect(killSpy).toHaveBeenCalledWith(43210);
+      await vi.advanceTimersByTimeAsync(30_001);
+      await rejection;
+      expect(killSpy).toHaveBeenCalledWith(43210, 'SIGTERM');
     } finally {
-      nowSpy.mockRestore();
+      vi.useRealTimers();
       killSpy.mockRestore();
     }
   });
@@ -1151,7 +1082,7 @@ describe('ensureDaemon surfaces boot failures via early exit', () => {
   });
 });
 
-describe('ensureDaemon ignores mismatched host_version locks', () => {
+describe('ensureDaemon coordinates ServerLockV2 owners', () => {
   let workDir: string;
   let prevHome: string | undefined;
   let healthServer: HttpServer | undefined;
@@ -1194,7 +1125,7 @@ describe('ensureDaemon ignores mismatched host_version locks', () => {
     });
   }
 
-  it('does not reuse a live server whose host_version differs from the current binary', async () => {
+  it('waits for a live same-version starting owner instead of spawning another daemon', async () => {
     const { spawn } = await import('node:child_process');
     const spawnMock = vi.mocked(spawn);
     spawnMock.mockClear();
@@ -1202,89 +1133,31 @@ describe('ensureDaemon ignores mismatched host_version locks', () => {
     const { ensureDaemon } = await import('#/cli/sub/server/daemon');
 
     const freePort = await allocateFreePort();
-    healthServer = await startHealthServer('127.0.0.1', freePort);
-
     mkdirSync(join(workDir, 'server'), { recursive: true });
+    const starting = {
+      schema_version: 2,
+      launch_id: 'starting-owner',
+      state: 'starting',
+      pid: process.pid,
+      started_at: new Date().toISOString(),
+      port: freePort,
+      host: '127.0.0.1',
+      host_version: '1.0.0-pre.3',
+    } as const;
     writeSync(
       join(workDir, 'server', 'lock'),
-      JSON.stringify({
-        pid: process.pid,
-        started_at: new Date().toISOString(),
-        port: freePort,
-        host: '127.0.0.1',
-        host_version: '1.0.0-pre.2',
-      }),
+      JSON.stringify(starting),
     );
-
-    // Fake child that exits quickly so the promise rejects; by then the version
-    // check has already removed the stale lock and spawned a new daemon.
-    const fakeChild = {
-      unref: vi.fn(),
-      once: vi.fn((event: string, cb: (...a: unknown[]) => void) => {
-        if (event === 'exit') setTimeout(() => cb(1, null), 5);
-        return fakeChild;
-      }),
-    };
-    spawnMock.mockReturnValueOnce(fakeChild as unknown as ChildProcess);
-
-    await expect(ensureDaemon({ port: freePort, hostVersion: '1.0.0-pre.3' })).rejects.toThrow(
-      /exited with code 1/,
-    );
-
-    expect(spawnMock).toHaveBeenCalledOnce();
-    expect(existsSync(join(workDir, 'server', 'lock'))).toBe(false);
-  });
-
-  it('reuses a live server whose host_version matches the current binary', async () => {
-    const { spawn } = await import('node:child_process');
-    const spawnMock = vi.mocked(spawn);
-    spawnMock.mockClear();
-    const { mkdirSync, writeFileSync: writeSync } = await import('node:fs');
-    const { ensureDaemon } = await import('#/cli/sub/server/daemon');
-
-    const freePort = await allocateFreePort();
-    healthServer = await startHealthServer('127.0.0.1', freePort);
-
-    mkdirSync(join(workDir, 'server'), { recursive: true });
-    writeSync(
-      join(workDir, 'server', 'lock'),
-      JSON.stringify({
-        pid: process.pid,
-        started_at: new Date().toISOString(),
-        port: freePort,
-        host: '127.0.0.1',
-        host_version: '1.0.0-pre.3',
-      }),
-    );
-
-    const result = await ensureDaemon({ port: freePort, hostVersion: '1.0.0-pre.3' });
-
-    expect(result.reused).toBe(true);
-    expect(result.origin).toBe(`http://127.0.0.1:${freePort}`);
-    expect(spawnMock).not.toHaveBeenCalled();
-  });
-
-  it('reuses a live server with no host_version for backward compatibility', async () => {
-    const { spawn } = await import('node:child_process');
-    const spawnMock = vi.mocked(spawn);
-    spawnMock.mockClear();
-    const { mkdirSync, writeFileSync: writeSync } = await import('node:fs');
-    const { ensureDaemon } = await import('#/cli/sub/server/daemon');
-
-    const freePort = await allocateFreePort();
-    healthServer = await startHealthServer('127.0.0.1', freePort);
-
-    mkdirSync(join(workDir, 'server'), { recursive: true });
-    writeSync(
-      join(workDir, 'server', 'lock'),
-      JSON.stringify({
-        pid: process.pid,
-        started_at: new Date().toISOString(),
-        port: freePort,
-        host: '127.0.0.1',
-      }),
-    );
-
+    setTimeout(() => {
+      void startHealthServer('127.0.0.1', freePort).then((server) => {
+        healthServer = server;
+        writeSync(join(workDir, 'server', 'lock'), JSON.stringify({
+          ...starting,
+          state: 'ready',
+          ready_at: new Date().toISOString(),
+        }));
+      });
+    }, 10);
     const result = await ensureDaemon({ port: freePort, hostVersion: '1.0.0-pre.3' });
 
     expect(result.reused).toBe(true);
@@ -1524,6 +1397,18 @@ function makeKillDeps(overrides: Partial<KillCommandDeps> = {}): {
 
 describe('`kimi server kill`', () => {
   const liveLock = { pid: 1234, started_at: '2026-06-17T00:00:00.000Z', port: 58627 };
+  const liveV2Lock = {
+    schema_version: 2,
+    launch_id: 'launch-owner-a',
+    state: 'ready',
+    pid: 1234,
+    started_at: '2026-06-17T00:00:00.000Z',
+    ready_at: '2026-06-17T00:00:01.000Z',
+    host: '127.0.0.1',
+    port: 58627,
+    host_version: '1.0.1',
+    entry: 'nori-code-cli/1.0.1',
+  } as const;
 
   it('prints "No running Nori server." and sends no signal when no live lock exists', async () => {
     const { handleKillCommand } = await import('#/cli/sub/server/kill');
@@ -1580,6 +1465,36 @@ describe('`kimi server kill`', () => {
     expect(signals).toEqual([]);
   });
 
+  it('requires launch_id when stopping a V2 owner', async () => {
+    const { handleKillCommand } = await import('#/cli/sub/server/kill');
+    const { deps, signals, state } = makeKillDeps({ getLiveLock: () => liveV2Lock });
+
+    await expect(handleKillCommand(deps, {
+      pid: liveV2Lock.pid,
+      port: liveV2Lock.port,
+      started_at: liveV2Lock.started_at,
+      host: liveV2Lock.host,
+      host_version: liveV2Lock.host_version,
+      entry: liveV2Lock.entry,
+    })).rejects.toThrow(/owner changed/);
+
+    expect(state.shutdownCalls).toBe(0);
+    expect(signals).toEqual([]);
+  });
+
+  it('refuses a V2 owner with the same pid but a different launch_id', async () => {
+    const { handleKillCommand } = await import('#/cli/sub/server/kill');
+    const { deps, signals, state } = makeKillDeps({ getLiveLock: () => liveV2Lock });
+
+    await expect(handleKillCommand(deps, {
+      ...liveV2Lock,
+      launch_id: 'launch-owner-b',
+    })).rejects.toThrow(/owner changed/);
+
+    expect(state.shutdownCalls).toBe(0);
+    expect(signals).toEqual([]);
+  });
+
   it('treats missing expected owner fields as exact absence rather than wildcards', async () => {
     const { handleKillCommand } = await import('#/cli/sub/server/kill');
     const lockWithEntry = {
@@ -1612,6 +1527,27 @@ describe('`kimi server kill`', () => {
     });
 
     await expect(handleKillCommand(deps, liveLock)).rejects.toThrow(/owner changed/);
+
+    expect(state.shutdownCalls).toBe(1);
+    expect(signals).toEqual([]);
+  });
+
+  it('does not signal a replacement V2 owner that reused the same pid', async () => {
+    const { handleKillCommand } = await import('#/cli/sub/server/kill');
+    const replacement = {
+      ...liveV2Lock,
+      launch_id: 'launch-owner-b',
+      started_at: '2026-06-17T00:01:00.000Z',
+    };
+    let reads = 0;
+    const { deps, signals, state } = makeKillDeps({
+      getLiveLock: () => {
+        reads += 1;
+        return reads === 1 ? liveV2Lock : replacement;
+      },
+    });
+
+    await expect(handleKillCommand(deps, liveV2Lock)).rejects.toThrow(/owner changed/);
 
     expect(state.shutdownCalls).toBe(1);
     expect(signals).toEqual([]);

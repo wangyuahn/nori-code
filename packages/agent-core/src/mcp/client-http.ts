@@ -1,24 +1,12 @@
 import type { McpServerHttpConfig } from '#/config/schema';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
-import {
-  buildRequestOptions,
-  KIMI_MCP_CLIENT_NAME,
-  KIMI_MCP_CLIENT_VERSION,
-  toMcpToolDefinition,
-  toMcpToolResult,
-  type UnexpectedCloseListener,
-  type UnexpectedCloseReason,
-} from './client-shared';
+import { McpSdkClientBase, type McpSdkClientOptions } from './client-base';
+import type { UnexpectedCloseListener, UnexpectedCloseReason } from './client-shared';
 import { buildMcpRemoteHeaders } from './client-remote';
-import type { MCPClient, MCPToolDefinition, MCPToolResult } from './types';
 
-export interface HttpMcpClientOptions {
-  readonly clientName?: string;
-  readonly clientVersion?: string;
-  readonly toolCallTimeoutMs?: number;
+export interface HttpMcpClientOptions extends McpSdkClientOptions {
   /**
    * Reads `process.env[name]` by default. Tests can inject a deterministic
    * lookup function so they do not have to mutate global env.
@@ -42,10 +30,8 @@ export interface HttpMcpClientOptions {
  * Static bearer tokens are looked up from `process.env[bearerTokenEnvVar]`.
  * OAuth providers are attached separately by the connection manager.
  */
-export class HttpMcpClient implements MCPClient {
-  private readonly client: Client;
+export class HttpMcpClient extends McpSdkClientBase {
   private readonly transport: StreamableHTTPClientTransport;
-  private readonly toolCallTimeoutMs?: number;
   private started = false;
   private closed = false;
   // See StdioMcpClient.ready — distinguishes handshake-phase failures (caller
@@ -64,6 +50,7 @@ export class HttpMcpClient implements MCPClient {
   private unexpectedCloseFired = false;
 
   constructor(config: McpServerHttpConfig, options: HttpMcpClientOptions = {}) {
+    super(options);
     const envLookup = options.envLookup ?? ((name) => process.env[name]);
     const headers = buildMcpHttpHeaders(config, envLookup);
 
@@ -72,11 +59,6 @@ export class HttpMcpClient implements MCPClient {
       fetch: options.fetch,
       authProvider: options.oauthProvider,
     });
-    this.client = new Client({
-      name: options.clientName ?? KIMI_MCP_CLIENT_NAME,
-      version: options.clientVersion ?? KIMI_MCP_CLIENT_VERSION,
-    });
-    this.toolCallTimeoutMs = options.toolCallTimeoutMs;
   }
 
   async connect(): Promise<void> {
@@ -121,24 +103,10 @@ export class HttpMcpClient implements MCPClient {
     }
   }
 
-  async listTools(): Promise<MCPToolDefinition[]> {
-    const result = await this.client.listTools();
-    return result.tools.map(toMcpToolDefinition);
-  }
-
-  async callTool(
-    name: string,
-    args: Record<string, unknown>,
-    signal?: AbortSignal,
-  ): Promise<MCPToolResult> {
-    const requestOptions = buildRequestOptions(this.toolCallTimeoutMs, signal);
-    const result = await this.client.callTool({ name, arguments: args }, undefined, requestOptions);
-    return toMcpToolResult(result);
-  }
-
   private async closeStartedClient(): Promise<void> {
     if (!this.started) return;
     this.started = false;
+    this.closeProtocol();
     await this.client.close();
   }
 

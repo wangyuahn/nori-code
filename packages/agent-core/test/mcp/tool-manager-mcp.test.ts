@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Agent } from '../../src/agent';
 import { ToolManager } from '../../src/agent/tool';
-import type { MCPClient } from '../../src/mcp/types';
+import type { MCPToolClient } from '../../src/mcp/types';
 import { testAgent } from '../agent/harness/agent';
 import { executeTool } from '../tools/fixtures/execute-tool';
 
@@ -27,7 +27,7 @@ function fakeAgent(calls: unknown[] = []): Agent {
   } as unknown as Agent;
 }
 
-function fakeClient(): MCPClient {
+function fakeClient(): MCPToolClient {
   return {
     async listTools() {
       return [
@@ -60,7 +60,7 @@ function fakeClient(): MCPClient {
 // client's `listTools()` output into the kosong `Tool` shape that
 // `ToolManager.registerMcpServer` expects. Tests can hand the same client into
 // `registerMcpServer` so the wrapped `execute` flow hits a real `callTool`.
-async function discoverTools(client: MCPClient): Promise<Tool[]> {
+async function discoverTools(client: MCPToolClient): Promise<Tool[]> {
   const defs = await client.listTools();
   return defs.map((d) => ({
     name: d.name,
@@ -119,7 +119,7 @@ describe('ToolManager MCP integration', () => {
   it('reports same-server qualified-name collisions and keeps only the first tool', async () => {
     const tm = new ToolManager(fakeAgent());
     tm.setActiveTools(['mcp__*']);
-    const colliding: MCPClient = {
+    const colliding: MCPToolClient = {
       async listTools() {
         return [
           { name: 'a b', description: 'first', inputSchema: { type: 'object', properties: {} } },
@@ -151,7 +151,7 @@ describe('ToolManager MCP integration', () => {
   it('reports cross-server collisions instead of silently overwriting another server tool', async () => {
     const tm = new ToolManager(fakeAgent());
     tm.setActiveTools(['mcp__*']);
-    const firstClient: MCPClient = {
+    const firstClient: MCPToolClient = {
       async listTools() {
         return [
           { name: 'shared', description: 'first', inputSchema: { type: 'object', properties: {} } },
@@ -161,7 +161,7 @@ describe('ToolManager MCP integration', () => {
         return { content: [{ type: 'text', text: 'first' }], isError: false };
       },
     };
-    const secondClient: MCPClient = {
+    const secondClient: MCPToolClient = {
       async listTools() {
         return [
           {
@@ -197,7 +197,7 @@ describe('ToolManager MCP integration', () => {
     const tm = new ToolManager(fakeAgent());
     tm.setActiveTools(['mcp__*']);
     const firstClient = fakeClient();
-    const secondClient: MCPClient = {
+    const secondClient: MCPToolClient = {
       async listTools() {
         return [
           {
@@ -279,7 +279,7 @@ describe('ToolManager MCP integration', () => {
   it('truncates oversized MCP text output with a clear notice', async () => {
     const tm = new ToolManager(fakeAgent());
     tm.setActiveTools(['mcp__*']);
-    const client: MCPClient = {
+    const client: MCPToolClient = {
       async listTools() {
         return [
           {
@@ -316,7 +316,7 @@ describe('ToolManager MCP integration', () => {
   it('wraps modestly-sized MCP image output in mcp_tool_result companions', async () => {
     const tm = new ToolManager(fakeAgent());
     tm.setActiveTools(['mcp__*']);
-    const client: MCPClient = {
+    const client: MCPToolClient = {
       async listTools() {
         return [
           {
@@ -364,7 +364,7 @@ describe('ToolManager MCP integration', () => {
     tm.setActiveTools(['mcp__*']);
     // 14 MiB base64 ≈ 10.5 MiB raw — just above the 10 MiB per-part cap.
     const huge = 'x'.repeat(14 * 1024 * 1024);
-    const client: MCPClient = {
+    const client: MCPToolClient = {
       async listTools() {
         return [
           {
@@ -416,7 +416,7 @@ describe('ToolManager MCP integration', () => {
   it('large MCP image does not consume the text character budget', async () => {
     const tm = new ToolManager(fakeAgent());
     tm.setActiveTools(['mcp__*']);
-    const client: MCPClient = {
+    const client: MCPToolClient = {
       async listTools() {
         return [
           {
@@ -464,7 +464,7 @@ describe('ToolManager MCP integration', () => {
     const tm = new ToolManager(fakeAgent());
     tm.setActiveTools(['mcp__*']);
     const huge = 'x'.repeat(14 * 1024 * 1024);
-    const client: MCPClient = {
+    const client: MCPToolClient = {
       async listTools() {
         return [
           {
@@ -515,7 +515,7 @@ describe('ToolManager MCP integration', () => {
     const tm = new ToolManager(fakeAgent());
     tm.setActiveTools(['mcp__*']);
     let receivedSignal: AbortSignal | undefined;
-    const client: MCPClient = {
+    const client: MCPToolClient = {
       async listTools() {
         return [
           {

@@ -103,6 +103,47 @@ describe('events / display re-exports', () => {
     expect(parsed.sessionId).toBe('sess_1');
   });
 
+  it('validates MCP protocol notifications and legacy SSE status payloads', () => {
+    expect(
+      eventSchema.parse({
+        type: 'mcp.server.log',
+        agentId: 'main',
+        sessionId: 'sess_1',
+        serverName: 'docs',
+        level: 'notice',
+        logger: 'indexer',
+        data: { indexed: 3 },
+      }),
+    ).toMatchObject({ type: 'mcp.server.log', serverName: 'docs', level: 'notice' });
+
+    expect(
+      eventSchema.parse({
+        type: 'mcp.server.progress',
+        agentId: 'main',
+        sessionId: 'sess_1',
+        serverName: 'docs',
+        progressToken: 7,
+        progress: 2,
+        total: 4,
+        message: 'Indexing',
+      }),
+    ).toMatchObject({ type: 'mcp.server.progress', progress: 2, total: 4 });
+
+    expect(
+      eventSchema.parse({
+        type: 'mcp.server.status',
+        agentId: 'main',
+        sessionId: 'sess_1',
+        server: {
+          name: 'legacy',
+          transport: 'sse',
+          status: 'connected',
+          toolCount: 1,
+        },
+      }),
+    ).toMatchObject({ type: 'mcp.server.status', server: { transport: 'sse' } });
+  });
+
   it('validates prompt.submitted events', () => {
     const parsed = eventSchema.parse({
       type: 'prompt.submitted',

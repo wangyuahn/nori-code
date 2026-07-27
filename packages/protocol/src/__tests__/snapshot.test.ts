@@ -65,6 +65,7 @@ describe('rest/snapshot — session snapshot', () => {
       },
       pending_approvals: [],
       pending_questions: [],
+      pending_mcp_elicitations: [],
     });
     expect(result.success).toBe(true);
   });
@@ -78,6 +79,7 @@ describe('rest/snapshot — session snapshot', () => {
       in_flight_turn: null,
       pending_approvals: [],
       pending_questions: [],
+      pending_mcp_elicitations: [],
     });
     expect(result.success).toBe(true);
   });
@@ -97,6 +99,7 @@ describe('rest/snapshot — session snapshot', () => {
       },
       pending_approvals: [],
       pending_questions: [],
+      pending_mcp_elicitations: [],
     });
     expect(result.success).toBe(true);
     if (result.success) {
@@ -138,7 +141,7 @@ describe('events — volatile classification', () => {
     ]) {
       expect(isVolatileEventType(type)).toBe(true);
     }
-    expect(VOLATILE_EVENT_TYPES).toHaveLength(7);
+    expect(VOLATILE_EVENT_TYPES).toHaveLength(11);
   });
 
   it('keeps timeline-bearing events durable', () => {

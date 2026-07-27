@@ -45,4 +45,31 @@ describe('effectiveModelAlias', () => {
 
     expect(effectiveModelAlias(model).defaultEffort).toBe('high');
   });
+
+  it('infers reasoning metadata for a known custom model id', () => {
+    const model: ModelAlias = {
+      provider: 'custom-gateway',
+      model: 'glm-5.2',
+      maxContextSize: 1_000_000,
+      capabilities: ['tool_use'],
+    };
+
+    expect(effectiveModelAlias(model)).toMatchObject({
+      capabilities: ['tool_use', 'thinking'],
+      thinkingSupport: true,
+      supportEfforts: ['high', 'max'],
+    });
+  });
+
+  it('does not replace explicit provider reasoning metadata', () => {
+    const model: ModelAlias = {
+      provider: 'custom-gateway',
+      model: 'glm-5.2',
+      maxContextSize: 1_000_000,
+      capabilities: ['tool_use'],
+      thinkingSupport: false,
+    };
+
+    expect(effectiveModelAlias(model)).toEqual(model);
+  });
 });

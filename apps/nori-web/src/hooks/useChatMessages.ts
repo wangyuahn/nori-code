@@ -3,7 +3,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, getWebSocketProtocols, type ApprovalRequest, type GoalSnapshot, type Message, type MessageContent, type PromptAttachment, type PromptExecutionOptions, type QuestionAnswer, type QuestionRequest, type SessionRealtimeStatus, type TokenUsage } from '../api/client';
+import { api, getWebSocketProtocols, type ApprovalRequest, type GoalSnapshot, type McpElicitationRequest, type McpElicitationResponse, type Message, type MessageContent, type PromptAttachment, type PromptExecutionOptions, type QuestionAnswer, type QuestionRequest, type SessionRealtimeStatus, type TokenUsage } from '../api/client';
 import { playNotificationSound } from '../notificationSounds';
 
 export interface ToolCall {
@@ -133,6 +133,7 @@ export interface UseChatMessagesResult {
   compacting: boolean;
   pendingApprovals: ApprovalRequest[];
   pendingQuestions: QuestionRequest[];
+  pendingMcpElicitations: McpElicitationRequest[];
   queuedPrompts: QueuedPrompt[];
   todos: TodoItem[];
   activeSubagentIds: string[];
@@ -140,6 +141,7 @@ export interface UseChatMessagesResult {
   resolveApproval: (approvalId: string, decision: 'approved' | 'rejected' | 'cancelled', options?: { remember?: boolean; feedback?: string; selectedLabel?: string }) => Promise<void>;
   resolveQuestion: (questionId: string, answers: Record<string, QuestionAnswer>) => Promise<void>;
   dismissQuestion: (questionId: string) => Promise<void>;
+  resolveMcpElicitation: (elicitationId: string, response: McpElicitationResponse) => Promise<void>;
   sendMessage: (text: string, attachments?: PromptAttachment[], behavior?: 'queue' | 'steer', options?: PromptExecutionOptions) => Promise<boolean>;
   cancelQueuedPrompt: (promptId: string) => Promise<void>;
   rewindToPrompt: (count: number) => Promise<string | undefined>;
@@ -642,6 +644,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
   const [compacting, setCompacting] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
   const [pendingQuestions, setPendingQuestions] = useState<QuestionRequest[]>([]);
+  const [pendingMcpElicitations, setPendingMcpElicitations] = useState<McpElicitationRequest[]>([]);
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [activeSubagentIds, setActiveSubagentIds] = useState<string[]>([]);
@@ -710,6 +713,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     if (sessionRef.current !== targetSessionId) return false;
     setPendingApprovals(previous => preserveEqual(previous, snapshot.pending_approvals ?? []));
     setPendingQuestions(previous => preserveEqual(previous, snapshot.pending_questions ?? []));
+    setPendingMcpElicitations(previous => preserveEqual(previous, snapshot.pending_mcp_elicitations ?? []));
     const inFlight = snapshot.in_flight_turn;
     if (!inFlight) return false;
     const isSameTurn = activeTurnIdRef.current === inFlight.turn_id;
@@ -794,9 +798,11 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     sessionStatusSessionIdRef.current = null;
     setSessionStatus(null);
     setPendingQuestions([]);
+    setPendingMcpElicitations([]);
     attentionRequestIdsRef.current = new Set([
       ...pendingApprovals.map(request => `approval:${request.approval_id}`),
       ...pendingQuestions.map(request => `question:${request.question_id}`),
+      ...pendingMcpElicitations.map(request => `mcp-elicitation:${request.elicitation_id}`),
     ]);
     setQueuedPrompts([]);
     setTodos([]);
@@ -818,11 +824,12 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     const ids = [
       ...pendingApprovals.map(request => `approval:${request.approval_id}`),
       ...pendingQuestions.map(request => `question:${request.question_id}`),
+      ...pendingMcpElicitations.map(request => `mcp-elicitation:${request.elicitation_id}`),
     ];
     const hasNew = ids.some(id => !attentionRequestIdsRef.current.has(id));
     for (const id of ids) attentionRequestIdsRef.current.add(id);
     if (hasNew) playNotificationSound('attention');
-  }, [pendingApprovals, pendingQuestions]);
+  }, [pendingApprovals, pendingMcpElicitations, pendingQuestions]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -910,6 +917,17 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     }
   }, [sessionId]);
 
+  const refreshMcpElicitations = useCallback(async () => {
+    if (!sessionId) {
+      setPendingMcpElicitations([]);
+      return;
+    }
+    const result = await api.sessions.mcpElicitations.list(sessionId);
+    if (sessionRef.current === sessionId) {
+      setPendingMcpElicitations(previous => preserveEqual(previous, result.items));
+    }
+  }, [sessionId]);
+
   const refreshPromptQueue = useCallback(async () => {
     if (!sessionId) {
       setQueuedPrompts([]);
@@ -929,19 +947,22 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
   useEffect(() => {
     setPendingApprovals([]);
     setPendingQuestions([]);
+    setPendingMcpElicitations([]);
     setQueuedPrompts([]);
     setCodeChanges([]);
     if (!sessionId) return;
     void refreshApprovals().catch(() => undefined);
     void refreshQuestions().catch(() => undefined);
+    void refreshMcpElicitations().catch(() => undefined);
     void refreshPromptQueue().catch(() => undefined);
     const timer = setInterval(() => {
       void refreshApprovals().catch(() => undefined);
       void refreshQuestions().catch(() => undefined);
+      void refreshMcpElicitations().catch(() => undefined);
       void refreshPromptQueue().catch(() => undefined);
     }, 750);
     return () => clearInterval(timer);
-  }, [refreshApprovals, refreshPromptQueue, refreshQuestions, sessionId]);
+  }, [refreshApprovals, refreshMcpElicitations, refreshPromptQueue, refreshQuestions, sessionId]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -1212,6 +1233,11 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
                 ? previous
                 : { ...previous, goal: payload.snapshot ?? null });
               break;
+            case 'mcp.elicitation.requested':
+            case 'mcp.elicitation.resolved':
+            case 'mcp.elicitation.completed':
+              void refreshMcpElicitations().catch(() => undefined);
+              break;
             case 'error':
               playNotificationSound('error');
               console.error('Stream error:', payload);
@@ -1264,7 +1290,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
       wsRef.current?.close();
       wsRef.current = null;
     };
-  }, [applyGeneratedTitle, clearDraft, hydrateInFlight, refreshHistory, sessionId]);
+  }, [applyGeneratedTitle, clearDraft, hydrateInFlight, refreshHistory, refreshMcpElicitations, sessionId]);
 
   useEffect(() => {
     if (!isStreaming || !sessionId) return;
@@ -1482,6 +1508,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     clearDraft();
     setPendingApprovals([]);
     setPendingQuestions([]);
+    setPendingMcpElicitations([]);
     setQueuedPrompts([]);
     setIsStreaming(false);
     hasUserPromptRef.current = true;
@@ -1539,7 +1566,16 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     await refreshQuestions();
   }, [refreshQuestions, sessionId]);
 
-  return { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus: statusForSession(sessionStatus, sessionStatusSessionIdRef.current, sessionId), compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort };
+  const resolveMcpElicitation = useCallback(async (
+    elicitationId: string,
+    response: McpElicitationResponse,
+  ) => {
+    if (!sessionId) return;
+    await api.sessions.mcpElicitations.resolve(sessionId, elicitationId, response);
+    await refreshMcpElicitations();
+  }, [refreshMcpElicitations, sessionId]);
+
+  return { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus: statusForSession(sessionStatus, sessionStatusSessionIdRef.current, sessionId), compacting, pendingApprovals, pendingQuestions, pendingMcpElicitations, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, resolveMcpElicitation, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort };
 }
 
 export function statusForSession(

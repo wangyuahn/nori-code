@@ -42,7 +42,7 @@ describe('approval adapter', () => {
     ]);
   });
 
-  it('emits only a diff block for Edit — no separate file_op title row', () => {
+  it('emits one file operation block for Edit line operations', () => {
     const adapted = adaptApprovalRequest(
       {
         toolCallId: 'tc-edit',
@@ -53,16 +53,19 @@ describe('approval adapter', () => {
           summary: 'edit',
           detail: {
             file_path: 'src/foo.ts',
-            old_string: 'a\nb\nc',
-            new_string: 'a\nB\nc',
+            expected_tag: 'a1b2',
+            line_ops: [{ op: 'swap', start: 2, end: 2, content: 'B' }],
           },
         },
       },
     );
 
-    expect(adapted.display).toEqual([
-      { type: 'diff', path: 'src/foo.ts', old_text: 'a\nb\nc', new_text: 'a\nB\nc' },
-    ]);
+    expect(adapted.display).toEqual([{
+      type: 'file_op',
+      operation: 'edit',
+      path: 'src/foo.ts',
+      detail: 'Expected tag: A1B2\nreplace lines 2-2',
+    }]);
   });
 
   it('emits a file_content block for Write so the new file previews as code, not diff', () => {
@@ -117,9 +120,8 @@ describe('approval adapter', () => {
   });
 
   // The builtin Edit tool emits its display as file_io (operation=edit) with
-  // before/after carrying old_string/new_string, so the panel can render the
-  // hunk as a diff just like the generic-fallback path used to.
-  it('emits a diff block for file_io edit with before/after', () => {
+  // its hash-anchored operation summary alongside the path.
+  it('emits a file operation block for file_io edit metadata', () => {
     const adapted = adaptApprovalRequest({
       toolCallId: 'tc-edit-io',
       toolName: 'Edit',
@@ -128,14 +130,16 @@ describe('approval adapter', () => {
         kind: 'file_io',
         operation: 'edit',
         path: 'src/foo.ts',
-        before: 'a\nb\nc',
-        after: 'a\nB\nc',
+        detail: 'Expected tag: A1B2\nreplace lines 2-2',
       },
     });
 
-    expect(adapted.display).toEqual([
-      { type: 'diff', path: 'src/foo.ts', old_text: 'a\nb\nc', new_text: 'a\nB\nc' },
-    ]);
+    expect(adapted.display).toEqual([{
+      type: 'file_op',
+      operation: 'edit',
+      path: 'src/foo.ts',
+      detail: 'Expected tag: A1B2\nreplace lines 2-2',
+    }]);
   });
 
   // Read/Glob/Grep have no content to preview, so file_io without

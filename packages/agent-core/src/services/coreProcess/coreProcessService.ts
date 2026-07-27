@@ -13,6 +13,7 @@ import { IEnvironmentService } from '../environment/environment';
 import { IEventService } from '../event/event';
 import { ILogService } from '../logger/logger';
 import { IQuestionService } from '../question/question';
+import { IMcpElicitationService } from '../mcpElicitation/mcpElicitation';
 import {
   ICoreProcessService,
   type CoreProcessServiceOptions,
@@ -69,6 +70,7 @@ export class CoreProcessService extends Disposable implements ICoreProcessServic
     @IApprovalService approvalService: IApprovalService,
     @IQuestionService questionService: IQuestionService,
     @ILogService logService: ILogService,
+    @IMcpElicitationService mcpElicitationService: IMcpElicitationService,
   ) {
     super();
 
@@ -130,6 +132,7 @@ export class CoreProcessService extends Disposable implements ICoreProcessServic
       eventService,
       approvalService,
       questionService,
+      mcpElicitationService,
       logService,
     });
     this._coreRpcPromise = sdkRpc(clientApi);

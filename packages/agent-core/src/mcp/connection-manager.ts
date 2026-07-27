@@ -11,7 +11,18 @@ import { SseMcpClient } from './client-sse';
 import type { UnexpectedCloseReason } from './client-shared';
 import { StdioMcpClient } from './client-stdio';
 import type { McpOAuthService } from './oauth';
-import { assertMcpInputSchema, type MCPClient } from './types';
+import {
+  assertMcpInputSchema,
+  type MCPClient,
+  type MCPLogMessage,
+  type MCPImplementation,
+  type MCPListKind,
+  type MCPHost,
+  type MCPProgressUpdate,
+  type MCPServerCapabilities,
+  type MCPServerInfo,
+  type MCPTask,
+} from './types';
 
 export type McpServerStatus = 'pending' | 'connected' | 'failed' | 'disabled' | 'needs-auth';
 
@@ -20,8 +31,39 @@ export interface McpServerEntry {
   readonly transport: McpServerConfig['transport'];
   readonly status: McpServerStatus;
   readonly toolCount: number;
+  readonly serverInfo?: MCPImplementation;
+  readonly capabilities?: MCPServerCapabilities;
+  readonly instructions?: string;
   readonly error?: string;
 }
+
+export type McpServerEvent =
+  | {
+      readonly type: 'list.changed';
+      readonly serverName: string;
+      readonly kind: MCPListKind;
+      readonly error?: string;
+    }
+  | {
+      readonly type: 'resource.updated';
+      readonly serverName: string;
+      readonly uri: string;
+    }
+  | {
+      readonly type: 'log.message';
+      readonly serverName: string;
+      readonly message: MCPLogMessage;
+    }
+  | {
+      readonly type: 'progress';
+      readonly serverName: string;
+      readonly update: MCPProgressUpdate;
+    }
+  | {
+      readonly type: 'task.status';
+      readonly serverName: string;
+      readonly task: MCPTask;
+    };
 
 interface InternalEntry {
   readonly name: string;
@@ -32,9 +74,13 @@ interface InternalEntry {
   enabledNames?: ReadonlySet<string>;
   error?: string;
   client?: RuntimeMcpClient;
+  server?: MCPServerInfo;
+  toolRefreshId: number;
+  disposeProtocolEvents?: () => void;
 }
 
 export type McpStatusListener = (entry: McpServerEntry) => void;
+export type McpServerEventListener = (event: McpServerEvent) => void;
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 30_000;
 
@@ -58,6 +104,7 @@ export interface McpConnectionManagerOptions {
    * `session.log` so MCP events land in the session log too.
    */
   readonly log?: Logger;
+  readonly host?: MCPHost;
 }
 
 /**
@@ -72,6 +119,7 @@ export interface McpConnectionManagerOptions {
 export class McpConnectionManager {
   private readonly entries = new Map<string, InternalEntry>();
   private readonly listeners = new Set<McpStatusListener>();
+  private readonly eventListeners = new Set<McpServerEventListener>();
   private initialLoad: Promise<void> = Promise.resolve();
   private initialLoadAttemptId = 0;
   private initialLoadStartedAt: number | undefined;
@@ -83,10 +131,12 @@ export class McpConnectionManager {
    * `authenticate` tool.
    */
   readonly oauthService: McpOAuthService | undefined;
+  readonly host: MCPHost | undefined;
   private readonly log: Logger;
 
   constructor(private readonly options: McpConnectionManagerOptions = {}) {
     this.oauthService = options.oauthService;
+    this.host = options.host;
     this.log = options.log ?? defaultLog;
   }
 
@@ -114,6 +164,13 @@ export class McpConnectionManager {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
+    };
+  }
+
+  onEvent(listener: McpServerEventListener): () => void {
+    this.eventListeners.add(listener);
+    return () => {
+      this.eventListeners.delete(listener);
     };
   }
 
@@ -176,6 +233,7 @@ export class McpConnectionManager {
       name,
       config,
       attemptId: 0,
+      toolRefreshId: 0,
       status: disabled ? 'disabled' : 'pending',
     };
     this.entries.set(name, entry);
@@ -193,6 +251,7 @@ export class McpConnectionManager {
     entry.tools = undefined;
     entry.enabledNames = undefined;
     entry.error = undefined;
+    entry.server = undefined;
     this.emit(entry);
     this.entries.delete(name);
     return true;
@@ -218,6 +277,7 @@ export class McpConnectionManager {
         name,
         config,
         attemptId: 0,
+        toolRefreshId: 0,
         status: disabled ? 'disabled' : 'pending',
       };
       this.entries.set(name, entry);
@@ -244,6 +304,7 @@ export class McpConnectionManager {
     entry.tools = undefined;
     entry.enabledNames = undefined;
     entry.error = undefined;
+    entry.server = undefined;
     this.emit(entry);
     await this.connectOne(entry, attemptId);
   }
@@ -255,6 +316,16 @@ export class McpConnectionManager {
     await Promise.allSettled(tasks);
   }
 
+  async notifyRootsChanged(): Promise<void> {
+    const clients = Array.from(this.entries.values())
+      .filter(
+        (entry): entry is InternalEntry & { client: RuntimeMcpClient } =>
+          entry.status === 'connected' && entry.client !== undefined,
+      )
+      .map((entry) => entry.client);
+    await Promise.allSettled(clients.map((client) => client.sendRootsListChanged()));
+  }
+
   private async connectOne(entry: InternalEntry, attemptId: number): Promise<void> {
     const timeoutMs = entry.config.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS;
 
@@ -263,8 +334,8 @@ export class McpConnectionManager {
       const startupClient = this.createClient(entry.config, entry.name);
       client = startupClient;
       entry.client = startupClient;
-      const tools = await withTimeout(
-        this.connectAndDiscoverTools(startupClient),
+      const connected = await withTimeout(
+        this.connectAndDiscover(startupClient),
         timeoutMs,
         () => {
           // Best-effort cleanup if the startup promise is still racing.
@@ -275,9 +346,11 @@ export class McpConnectionManager {
         await this.closeRuntimeClient(startupClient);
         return;
       }
-      entry.tools = tools;
-      entry.enabledNames = computeEnabledNames(entry.config, tools);
+      entry.server = connected.server;
+      entry.tools = connected.tools;
+      entry.enabledNames = computeEnabledNames(entry.config, connected.tools);
       entry.status = 'connected';
+      this.watchForProtocolEvents(entry, startupClient, attemptId);
       this.watchForUnexpectedClose(entry, startupClient, attemptId);
     } catch (error) {
       if (!this.isCurrent(entry, attemptId)) {
@@ -295,6 +368,7 @@ export class McpConnectionManager {
       }
       entry.tools = undefined;
       entry.enabledNames = undefined;
+      entry.server = undefined;
       // Drop the client reference so a later reconnect builds a fresh one.
       await this.closeClient(entry);
     }
@@ -316,6 +390,9 @@ export class McpConnectionManager {
       entry.error = formatUnexpectedCloseError(entry.name, reason);
       entry.tools = undefined;
       entry.enabledNames = undefined;
+      entry.server = undefined;
+      entry.disposeProtocolEvents?.();
+      entry.disposeProtocolEvents = undefined;
       entry.client = undefined;
       // Best-effort close; the transport is already gone, but this lets the
       // SDK release timers and pending request handlers.
@@ -326,23 +403,33 @@ export class McpConnectionManager {
 
   private beginConnectAttempt(entry: InternalEntry): number {
     entry.attemptId += 1;
+    entry.toolRefreshId += 1;
     return entry.attemptId;
   }
 
   private createClient(config: McpServerConfig, name: string): RuntimeMcpClient {
     const toolCallTimeoutMs = config.toolTimeoutMs;
     if (config.transport === 'stdio') {
-      return new StdioMcpClient(config, { toolCallTimeoutMs, defaultCwd: this.options.stdioCwd });
+      return new StdioMcpClient(config, {
+        serverName: name,
+        toolCallTimeoutMs,
+        defaultCwd: this.options.stdioCwd,
+        host: this.options.host,
+      });
     }
     if (config.transport === 'sse') {
       return new SseMcpClient(config, {
+        serverName: name,
         toolCallTimeoutMs,
+        host: this.options.host,
         envLookup: this.options.envLookup,
         oauthProvider: this.resolveOAuthProvider(config, name),
       });
     }
     return new HttpMcpClient(config, {
+      serverName: name,
       toolCallTimeoutMs,
+      host: this.options.host,
       envLookup: this.options.envLookup,
       oauthProvider: this.resolveOAuthProvider(config, name),
     });
@@ -376,17 +463,107 @@ export class McpConnectionManager {
     return isUnauthorizedLikeError(error);
   }
 
-  private async connectAndDiscoverTools(client: RuntimeMcpClient): Promise<Tool[]> {
+  private async connectAndDiscover(
+    client: RuntimeMcpClient,
+  ): Promise<{ server: MCPServerInfo; tools: Tool[] }> {
     await client.connect();
+    const server = client.getServerInfo();
+    if (server.capabilities.tools === undefined) {
+      return { server, tools: [] };
+    }
     const mcpTools = await client.listTools();
-    return mcpTools.map((mcpTool) => ({
-      name: mcpTool.name,
-      description: mcpTool.description,
-      parameters: assertMcpInputSchema(mcpTool.name, mcpTool.inputSchema),
-    }));
+    return { server, tools: toKosongTools(mcpTools) };
+  }
+
+  private watchForProtocolEvents(
+    entry: InternalEntry,
+    client: RuntimeMcpClient,
+    attemptId: number,
+  ): void {
+    const stopListChanged = client.onListChanged((kind) => {
+      if (!this.isLiveClient(entry, client, attemptId)) return;
+      if (kind === 'tools') {
+        void this.refreshTools(entry, client, attemptId);
+        return;
+      }
+      this.emitEvent({ type: 'list.changed', serverName: entry.name, kind });
+    });
+    const stopResourceUpdated = client.onResourceUpdated((uri) => {
+      if (!this.isLiveClient(entry, client, attemptId)) return;
+      this.emitEvent({ type: 'resource.updated', serverName: entry.name, uri });
+    });
+    const stopLogMessage = client.onLogMessage((message) => {
+      if (!this.isLiveClient(entry, client, attemptId)) return;
+      this.writeServerLog(entry.name, message);
+      this.emitEvent({ type: 'log.message', serverName: entry.name, message });
+    });
+    const stopProgress = client.onProgress((update) => {
+      if (!this.isLiveClient(entry, client, attemptId)) return;
+      this.emitEvent({ type: 'progress', serverName: entry.name, update });
+    });
+    const stopTaskStatus = client.onTaskStatus((task) => {
+      if (!this.isLiveClient(entry, client, attemptId)) return;
+      this.emitEvent({ type: 'task.status', serverName: entry.name, task });
+    });
+    entry.disposeProtocolEvents = () => {
+      stopListChanged();
+      stopResourceUpdated();
+      stopLogMessage();
+      stopProgress();
+      stopTaskStatus();
+    };
+  }
+
+  private writeServerLog(serverName: string, message: MCPLogMessage): void {
+    const text = message.logger === undefined ? 'mcp server log' : `mcp server log: ${message.logger}`;
+    const payload = { server: serverName, mcpLevel: message.level, data: message.data };
+    switch (message.level) {
+      case 'debug':
+        this.log.debug(text, payload);
+        return;
+      case 'info':
+      case 'notice':
+        this.log.info(text, payload);
+        return;
+      case 'warning':
+        this.log.warn(text, payload);
+        return;
+      default:
+        this.log.error(text, payload);
+    }
+  }
+
+  private async refreshTools(
+    entry: InternalEntry,
+    client: RuntimeMcpClient,
+    attemptId: number,
+  ): Promise<void> {
+    const refreshId = ++entry.toolRefreshId;
+    try {
+      const tools = toKosongTools(await client.listTools());
+      if (!this.isLiveClient(entry, client, attemptId)) return;
+      if (entry.toolRefreshId !== refreshId) return;
+      entry.tools = tools;
+      entry.enabledNames = computeEnabledNames(entry.config, tools);
+      this.emit(entry);
+      this.emitEvent({ type: 'list.changed', serverName: entry.name, kind: 'tools' });
+    } catch (error) {
+      if (!this.isLiveClient(entry, client, attemptId)) return;
+      if (entry.toolRefreshId !== refreshId) return;
+      const message = error instanceof Error ? error.message : String(error);
+      this.log.warn('mcp tool list refresh failed', { server: entry.name, error: message });
+      this.emitEvent({
+        type: 'list.changed',
+        serverName: entry.name,
+        kind: 'tools',
+        error: message,
+      });
+    }
   }
 
   private async closeClient(entry: InternalEntry): Promise<void> {
+    entry.disposeProtocolEvents?.();
+    entry.disposeProtocolEvents = undefined;
     if (entry.client === undefined) return;
     const client = entry.client;
     entry.client = undefined;
@@ -404,6 +581,18 @@ export class McpConnectionManager {
 
   private isCurrent(entry: InternalEntry, attemptId: number): boolean {
     return this.entries.get(entry.name) === entry && entry.attemptId === attemptId;
+  }
+
+  private isLiveClient(
+    entry: InternalEntry,
+    client: RuntimeMcpClient,
+    attemptId: number,
+  ): boolean {
+    return (
+      this.isCurrent(entry, attemptId) &&
+      entry.client === client &&
+      entry.status === 'connected'
+    );
   }
 
   private emit(entry: InternalEntry): void {
@@ -424,6 +613,16 @@ export class McpConnectionManager {
       }
     }
   }
+
+  private emitEvent(event: McpServerEvent): void {
+    for (const listener of this.eventListeners) {
+      try {
+        listener(event);
+      } catch {
+        // Event listener faults must not break MCP protocol handling.
+      }
+    }
+  }
 }
 
 function toPublicEntry(entry: InternalEntry): McpServerEntry {
@@ -435,8 +634,21 @@ function toPublicEntry(entry: InternalEntry): McpServerEntry {
       entry.status === 'connected' && entry.enabledNames !== undefined
         ? entry.enabledNames.size
         : 0,
+    serverInfo: entry.server?.serverInfo,
+    capabilities: entry.server?.capabilities,
+    instructions: entry.server?.instructions,
     error: entry.error,
   };
+}
+
+function toKosongTools(
+  tools: Awaited<ReturnType<MCPClient['listTools']>>,
+): Tool[] {
+  return tools.map((mcpTool) => ({
+    name: mcpTool.name,
+    description: mcpTool.description,
+    parameters: assertMcpInputSchema(mcpTool.name, mcpTool.inputSchema),
+  }));
 }
 
 function computeEnabledNames(config: McpServerConfig, tools: readonly Tool[]): Set<string> {

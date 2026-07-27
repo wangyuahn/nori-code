@@ -2,12 +2,17 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   isSuccessfulTerminalAttachAck,
   shouldAutoFocusTerminal,
+  terminalOptions,
 } from '../src/components/TerminalPanel';
 
 vi.mock('@xterm/xterm', () => ({ Terminal: vi.fn() }));
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: vi.fn() }));
 
 describe('TerminalPanel focus handling', () => {
+  it('uses Consolas for the xterm canvas independently of the application theme', () => {
+    expect(terminalOptions().fontFamily).toBe('Consolas, monospace');
+  });
+
   it('only treats the matching successful attach acknowledgement as attached', () => {
     expect(isSuccessfulTerminalAttachAck({ type: 'ack', id: 'terminal-attach-1', code: 0 }, 'terminal-attach-1')).toBe(true);
     expect(isSuccessfulTerminalAttachAck({ type: 'ack', id: 'terminal-resize-2', code: 0 }, 'terminal-attach-1')).toBe(false);

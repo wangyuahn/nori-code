@@ -76,6 +76,7 @@ export function ApprovalPanel({ requests, onResolve, onPermissionChange, browser
     const display = asDisplay(request.tool_input_display);
     const kind = display?.kind;
     const selectedLabel = selectedLabels[request.approval_id];
+    const choices = kind === 'plan_review' ? planOptions(display) : [];
     const requestFeedback = feedback[request.approval_id] ?? '';
     const remember = remembered.has(request.approval_id);
     const resolve = (decision: 'approved' | 'rejected' | 'cancelled', options: ApprovalOptions = {}) => onResolve?.(request.approval_id, decision, { remember, feedback: requestFeedback, ...options });
@@ -86,7 +87,7 @@ export function ApprovalPanel({ requests, onResolve, onPermissionChange, browser
       <div className="approval-action-label">{request.action}</div>
       <ApprovalDisplay display={display} fallback={request.tool_input_display}/>
 
-      {kind === 'plan_review' && <div className="approval-choice-list">{planOptions(display).map(option => <button type="button" key={option.label} className={selectedLabel === option.label ? 'selected' : ''} onClick={() => setSelectedLabels(previous => ({ ...previous, [request.approval_id]: option.label }))}><span className="question-radio">{selectedLabel === option.label && <Icon name="check" size={12}/>}</span><span><strong>{option.label}</strong>{option.description && <small>{option.description}</small>}</span></button>)}</div>}
+      {kind === 'plan_review' && choices.length > 0 && <div className="approval-choice-list">{choices.map(option => <button type="button" key={option.label} className={selectedLabel === option.label ? 'selected' : ''} onClick={() => setSelectedLabels(previous => ({ ...previous, [request.approval_id]: option.label }))}><span className="question-radio">{selectedLabel === option.label && <Icon name="check" size={12}/>}</span><span><strong>{option.label}</strong>{option.description && <small>{option.description}</small>}</span></button>)}</div>}
 
       {(kind === 'plan_review' || kind === 'generic') && <textarea className="approval-feedback" value={requestFeedback} onChange={event => setFeedback(previous => ({ ...previous, [request.approval_id]: event.target.value }))} placeholder={tr('Optional feedback', '可选反馈')}/>} 
 
@@ -94,7 +95,7 @@ export function ApprovalPanel({ requests, onResolve, onPermissionChange, browser
 
       <div className="approval-actions">
         {kind === 'goal_start' ? <GoalApprovalActions display={display} onSelect={(decision, label) => resolve(decision, { selectedLabel: label })} tr={tr}/>
-          : kind === 'plan_review' ? <><button className="approval-btn approval-btn--approve" disabled={!selectedLabel} onClick={() => resolve('approved', { selectedLabel })}>{tr('Approve choice', '批准所选方案')}</button><button className="approval-btn approval-btn--decline" disabled={!requestFeedback.trim()} onClick={() => resolve('rejected', { selectedLabel: 'Revise' })}>{tr('Revise', '要求修改')}</button><button className="approval-btn approval-btn--decline" onClick={() => resolve('rejected', { selectedLabel: 'Reject' })}>{tr('Reject', '拒绝')}</button></>
+          : kind === 'plan_review' ? <><button className="approval-btn approval-btn--approve" disabled={choices.length > 0 && !selectedLabel} onClick={() => resolve('approved', { selectedLabel: selectedLabel ?? 'Approve' })}>{choices.length > 0 ? tr('Approve choice', '批准所选方案') : tr('Allow plan', '允许执行')}</button><button className="approval-btn approval-btn--decline" disabled={!requestFeedback.trim()} onClick={() => resolve('rejected', { selectedLabel: 'Revise' })}>{tr('Revise', '要求修改')}</button><button className="approval-btn approval-btn--decline" onClick={() => resolve('rejected', { selectedLabel: 'Reject' })}>{tr('Reject', '拒绝')}</button></>
           : <><button className="approval-btn approval-btn--approve" disabled={Boolean(activeModeSwitch)} onClick={() => resolve('approved')}>{tr('Approve', '允许')}</button>{onPermissionChange && <><button className="approval-btn approval-btn--auto" disabled={Boolean(activeModeSwitch)} onClick={() => void switchModeAndResolve(request.approval_id, 'auto', () => resolve('approved'))}>{activeModeSwitch === 'auto' ? tr('Switching…', '切换中…') : tr('Switch to AUTO and approve', '切换为 AUTO 并允许')}</button><button className="approval-btn approval-btn--yolo" disabled={Boolean(activeModeSwitch)} onClick={() => void switchModeAndResolve(request.approval_id, 'yolo', () => resolve('approved'))}>{activeModeSwitch === 'yolo' ? tr('Switching…', '切换中…') : tr('Switch to YOLO and approve', '切换为 YOLO 并允许')}</button></>}<button className="approval-btn approval-btn--decline" disabled={Boolean(activeModeSwitch)} onClick={() => resolve('rejected')}>{tr('Decline', '拒绝')}</button><label className="approval-always-allow"><input type="checkbox" checked={remember} disabled={Boolean(activeModeSwitch)} onChange={event => setRemembered(previous => { const next = new Set(previous); if (event.target.checked) next.add(request.approval_id); else next.delete(request.approval_id); return next; })}/>{tr('Always allow this tool in this session', '本会话始终允许此工具')}</label></>}
       </div>
     </div>;
@@ -129,7 +130,7 @@ export function ApprovalPanel({ requests, onResolve, onPermissionChange, browser
 }
 
 function ApprovalDisplay({ display, fallback }: { display: DisplayData | null; fallback: unknown }) {
-  if (display?.kind === 'plan_review' && typeof display.plan === 'string') return <div className="approval-plan"><MarkdownView content={display.plan}/></div>;
+  if (display?.kind === 'plan_review') return typeof display.path === 'string' ? <pre className="approval-args">{display.path}</pre> : null;
   if (display?.kind === 'goal_start') return <div className="approval-goal"><strong>{String(display.objective ?? '')}</strong>{typeof display.completionCriterion === 'string' && <span>{display.completionCriterion}</span>}</div>;
   if (display?.kind === 'command') return <pre className="approval-args">{String(display.command ?? '')}</pre>;
   if (display?.kind === 'file_io' || display?.kind === 'diff') return <pre className="approval-args">{String(display.path ?? '')}{typeof display.detail === 'string' ? `\n${display.detail}` : ''}</pre>;
@@ -151,6 +152,6 @@ function asDisplay(value: unknown): DisplayData | null {
 }
 
 function planOptions(display: DisplayData | null): Array<{ label: string; description?: string }> {
-  if (!Array.isArray(display?.options) || display.options.length < 2) return [{ label: 'Approve' }];
+  if (!Array.isArray(display?.options) || display.options.length < 2) return [];
   return display.options.flatMap(option => option !== null && typeof option === 'object' && typeof (option as { label?: unknown }).label === 'string' ? [{ label: (option as { label: string }).label, description: typeof (option as { description?: unknown }).description === 'string' ? (option as { description: string }).description : undefined }] : []);
 }

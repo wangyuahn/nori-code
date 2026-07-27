@@ -1,16 +1,43 @@
+import { resolve } from 'node:path';
+
 import { defineConfig } from 'tsdown';
 
-// The Electron main process is loaded as CommonJS (`out/main.cjs`). All sources
-// under src/main are bundled into a single file; `electron` stays external
-// (provided by the Electron runtime) and Node built-ins are external by default.
-export default defineConfig({
-  entry: { main: 'src/main/index.ts', preload: 'src/preload/index.ts' },
-  format: ['cjs'],
-  platform: 'node',
+import { rawTextPlugin } from '../../build/raw-text-plugin.mjs';
+
+const appRoot = import.meta.dirname;
+const common = {
+  format: ['cjs'] as const,
+  platform: 'node' as const,
   target: 'node20',
   outDir: 'out',
-  clean: true,
   dts: false,
   fixedExtension: true,
-  deps: { neverBundle: ['electron'] },
-});
+  alias: {
+    '@': resolve(appRoot, 'src'),
+  },
+};
+
+export default defineConfig([
+  {
+    ...common,
+    entry: { main: 'src/main/index.ts', preload: 'src/preload/index.ts' },
+    clean: true,
+    deps: {
+      alwaysBundle: [/^@nori-code\/server(?:\/.*)?$/],
+      neverBundle: ['electron'],
+    },
+  },
+  {
+    ...common,
+    entry: { 'server-worker': 'src/server/worker.ts' },
+    clean: false,
+    plugins: [rawTextPlugin()],
+    deps: {
+      alwaysBundle: [/.*/],
+      neverBundle: ['electron', 'node-pty'],
+    },
+    outputOptions: {
+      codeSplitting: false,
+    },
+  },
+]);

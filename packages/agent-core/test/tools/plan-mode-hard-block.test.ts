@@ -14,6 +14,14 @@ import type { ToolExecutionHookContext } from '../../src/loop';
 
 const signal = new AbortController().signal;
 
+function editArgs(path: string) {
+  return {
+    path,
+    expected_tag: 'A1B2',
+    line_ops: [{ op: 'swap' as const, start: 1, end: 1, content: 'B' }],
+  };
+}
+
 async function activePlanAgent(): Promise<{ agent: Agent; planMode: PlanMode }> {
   const agent = {
     homedir: '/tmp/kimi-plan-test',
@@ -90,11 +98,7 @@ describe('Plan mode permission policy', () => {
       evaluatePlanPolicy(
         agent,
         'Edit',
-        {
-          path: planPath,
-          old_string: 'A',
-          new_string: 'B',
-        },
+        editArgs(planPath),
       ),
     ).toBeUndefined();
   });
@@ -106,11 +110,7 @@ describe('Plan mode permission policy', () => {
       path: '/workspace/src/main.ts',
       content: 'x',
     });
-    const edit = evaluatePlanPolicy(agent, 'Edit', {
-      path: '/workspace/src/main.ts',
-      old_string: 'A',
-      new_string: 'B',
-    });
+    const edit = evaluatePlanPolicy(agent, 'Edit', editArgs('/workspace/src/main.ts'));
 
     const writeDeny = expectDeny(write);
     expect(writeDeny.message ?? '').toContain('current plan file');
@@ -123,11 +123,7 @@ describe('Plan mode permission policy', () => {
     const { agent, planMode } = await activePlanAgent();
     (planMode as unknown as { _planFilePath: string | null })._planFilePath = null;
 
-    const result = evaluatePlanPolicy(agent, 'Edit', {
-      path: '/workspace/src/other.ts',
-      old_string: 'A',
-      new_string: 'B',
-    });
+    const result = evaluatePlanPolicy(agent, 'Edit', editArgs('/workspace/src/other.ts'));
 
     const deny = expectDeny(result);
     expect(deny.message ?? '').toContain('(no plan file selected yet)');
@@ -157,7 +153,7 @@ describe('Plan mode permission policy', () => {
     const edit = new PlanModeGuardDenyPermissionPolicy(agent).evaluate(
       policyContext(
         'Edit',
-        { old_string: 'A', new_string: 'B' },
+        editArgs('/workspace/unused.ts'),
         'manual',
         ToolAccesses.none(),
       ),
@@ -195,7 +191,7 @@ describe('Plan mode permission policy', () => {
     const result = new PlanModeGuardDenyPermissionPolicy(agent).evaluate(
       policyContext(
         'Edit',
-        { path: planPath, old_string: 'A', new_string: 'B' },
+        editArgs(planPath),
         'manual',
         [
           { kind: 'file', operation: 'readwrite', path: planPath },

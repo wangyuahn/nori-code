@@ -3,10 +3,11 @@ import { useState } from 'react';
 import { useI18n } from '../i18n';
 import { Icon } from './Icon';
 import { SettingsPanel } from './SettingsPanel';
+import { McpSettings } from './McpSettings';
 import { ProviderSettings } from './ProviderSettings';
 import { VaultBrowser } from './VaultBrowser';
 
-type AccountTab = 'settings' | 'providers' | 'memory';
+type AccountTab = 'settings' | 'providers' | 'mcp' | 'memory';
 type MemoryMode = 'list' | 'graph';
 
 export function AccountCenter() {
@@ -26,12 +27,15 @@ export function AccountCenter() {
       <button type="button" className={tab === 'providers' ? 'active' : ''} onClick={() => {
         setTab('providers');
       }}><Icon name="shield" size={15}/>{tr('Providers', '供应商')}</button>
+      <button type="button" className={tab === 'mcp' ? 'active' : ''} onClick={() => {
+        setTab('mcp');
+      }}><Icon name="swarm" size={15}/>MCP</button>
       <button type="button" className={tab === 'memory' ? 'active' : ''} onClick={() => {
         setTab('memory');
       }}><Icon name="vault" size={15}/>{tr('Memory', '记忆库')}</button>
     </nav>
     <div className="account-content">
-      {tab === 'settings' ? <SettingsPanel /> : tab === 'providers' ? <ProviderSettings /> : <>
+      {tab === 'settings' ? <SettingsPanel /> : tab === 'providers' ? <ProviderSettings /> : tab === 'mcp' ? <McpSettings /> : <>
         <div className="account-memory-toolbar">
           <div><strong>{tr('Nori memory', 'Nori 记忆')}</strong><span>{tr('Notes remain compatible with the vault and linked graph.', '笔记继续兼容知识库与双向链接图。')}</span></div>
           <div className="account-memory-modes" role="group" aria-label={tr('Memory view', '记忆视图')}>

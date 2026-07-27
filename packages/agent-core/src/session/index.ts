@@ -3,6 +3,8 @@ import { homedir } from 'node:os';
 import * as path from 'node:path';
 import { load as loadYaml } from 'js-yaml';
 import { join } from 'pathe';
+import { basename } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { Kaos } from '@nori-code/kaos';
 import type { SessionWarning } from '@nori-code/protocol';
 
@@ -38,6 +40,8 @@ import { makeErrorPayload } from '../errors';
 import {
   McpConnectionManager,
   McpOAuthService,
+  type MCPRoot,
+  type McpServerEvent,
   type McpServerEntry,
   type SessionMcpConfig,
 } from '../mcp';
@@ -64,6 +68,8 @@ import type { BrowserProvider, ToolServices } from '../tools/support/services';
 import { FlagResolver, type ExperimentalFlagResolver } from '../flags';
 import { abortError } from '../utils/abort';
 import { loadNoriYamlConfig, createNoriProvidersFromConfig } from "./nori-providers";
+import { SessionMcpSamplingHost } from './mcp-sampling';
+import { SessionMcpElicitationHost } from './mcp-elicitation';
 
 export interface SessionOptions {
   readonly kaos: Kaos;
@@ -179,6 +185,8 @@ export class Session {
   private readonly logHandle: SessionLogHandle | undefined;
   readonly hookEngine: HookEngine;
   readonly experimentalFlags: ExperimentalFlagResolver;
+  private readonly mcpSamplingHost: SessionMcpSamplingHost;
+  private readonly mcpElicitationHost: SessionMcpElicitationHost;
   private toolKaos: Kaos;
   private persistenceKaos: Kaos;
   private additionalDirs: readonly string[];
@@ -224,13 +232,34 @@ export class Session {
     this.skills = new SessionSkillRegistry({
       sessionId: options.id,
     });
+    this.mcpSamplingHost = new SessionMcpSamplingHost({
+      getMainAgent: () => this.getReadyAgent('main'),
+      rpc: this.rpc,
+    });
+    this.mcpElicitationHost = new SessionMcpElicitationHost({ rpc: this.rpc });
     this.mcp = new McpConnectionManager({
       oauthService: new McpOAuthService({ kimiHomeDir: options.kimiHomeDir }),
       log: this.log,
       stdioCwd: options.kaos.getcwd(),
+      host: {
+        roots: {
+          list: () => this.mcpRoots(),
+        },
+        sampling: {
+          createMessage: this.mcpSamplingHost.createMessage,
+        },
+        elicitation: {
+          create: this.mcpElicitationHost.create,
+          complete: this.mcpElicitationHost.complete,
+          supportsUrl: true,
+        },
+      },
     });
     this.mcp.onStatusChange((entry) => {
       this.onMcpServerStatusChange(entry);
+    });
+    this.mcp.onEvent((event) => {
+      this.onMcpServerEvent(event);
     });
     this.skillsReady = this.loadSkills()
       .catch((error: unknown) => {
@@ -251,6 +280,7 @@ export class Session {
       agent.setKaos(kaos.withCwd(agent.config.cwd));
     }
     this.refreshAgentBuiltinTools();
+    void this.mcp.notifyRootsChanged();
   }
 
   getAdditionalDirs(): readonly string[] {
@@ -262,6 +292,16 @@ export class Session {
     for (const agent of this.readyAgents()) {
       agent.setAdditionalDirs(this.additionalDirs);
     }
+    await this.mcp.notifyRootsChanged();
+  }
+
+  private mcpRoots(): MCPRoot[] {
+    const paths = [this.toolKaos.getcwd(), ...this.additionalDirs];
+    const unique = [...new Set(paths)];
+    return unique.map((root) => ({
+      uri: pathToFileURL(root).href,
+      name: basename(root),
+    }));
   }
 
   async updateCustomAgents(customAgents: KimiConfig['customAgents']): Promise<void> {
@@ -797,6 +837,43 @@ export class Session {
         error: entry.error,
       },
     });
+  }
+
+  private onMcpServerEvent(event: McpServerEvent): void {
+    switch (event.type) {
+      case 'list.changed':
+        void this.rpc.emitEvent({
+          type: 'mcp.server.list.changed',
+          agentId: 'main',
+          serverName: event.serverName,
+          kind: event.kind,
+          error: event.error,
+        });
+        return;
+      case 'resource.updated':
+        void this.rpc.emitEvent({
+          type: 'mcp.resource.updated',
+          agentId: 'main',
+          serverName: event.serverName,
+          uri: event.uri,
+        });
+        return;
+      case 'log.message':
+        void this.rpc.emitEvent({
+          type: 'mcp.server.log',
+          agentId: 'main',
+          serverName: event.serverName,
+          ...event.message,
+        });
+        return;
+      case 'progress':
+        void this.rpc.emitEvent({
+          type: 'mcp.server.progress',
+          agentId: 'main',
+          serverName: event.serverName,
+          ...event.update,
+        });
+    }
   }
 
   private refreshAgentBuiltinTools(): void {

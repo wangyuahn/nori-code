@@ -118,7 +118,7 @@ export function App() {
     refresh: refreshSessions,
   } = useSessions();
   const activeSession: Session | null = sessions.find(session => session.id === sessionId) ?? null;
-  const backgroundTasks = useBackgroundTasks(sessionId);
+  const backgroundTasks = useBackgroundTasks(sessions.map(session => session.id));
   useEffect(() => {
     const requestId = ++cronCountRequestRef.current;
     if (!sessionId) {
@@ -138,10 +138,8 @@ export function App() {
     const interval = window.setInterval(() => { void refresh(); }, 30_000);
     return () => { window.clearInterval(interval); };
   }, [sessionId]);
-  const sessionSwarmRuns = Array.from(swarm.swarmStatuses.values()).filter(status =>
-    status.session_id === sessionId,
-  );
-  const activeSwarmRuns = sessionSwarmRuns.filter(status => {
+  const allSwarmRuns = Array.from(swarm.swarmStatuses.values());
+  const activeSwarmRuns = allSwarmRuns.filter(status => {
     const progress = swarmRunProgress(status);
     return progress.running || progress.status === 'paused';
   });
@@ -161,9 +159,9 @@ export function App() {
     sessions: tr('Sessions', '会话'),
     files: tr('Files', '文件'),
   };
-  const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort } = useChatMessages(sessionId, activeSession?.title);
-  const activeAgentCount = countActiveAgents(activeSubagentIds, sessionSwarmRuns, backgroundTasks.tasks);
-  const hasSwarmActivity = activeSwarmRuns.length > 0;
+  const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, compacting, pendingApprovals, pendingQuestions, pendingMcpElicitations, queuedPrompts, todos, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, resolveMcpElicitation, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort } = useChatMessages(sessionId, activeSession?.title);
+  const activeAgentCount = countActiveAgents([], allSwarmRuns, backgroundTasks.tasks);
+  const hasSwarmActivity = activeSwarmRuns.length > 0 || activeAgentCount > 0;
 
   useEffect(() => {
     const onLimitChanged = (event: Event) => {
@@ -185,8 +183,29 @@ export function App() {
     setModelsLoading(true);
     setModelError(null);
     try {
-      const result = await api.models.list();
+      const [result, config] = await Promise.all([api.models.list(), api.getConfig()]);
       setModels(result.items);
+      setDraftAgentConfig(previous => {
+        const selected = result.items.find(item => item.model === previous.model);
+        if (selected !== undefined) {
+          const options = modelThinkingOptions(selected);
+          const thinking = options.choices.some(choice => choice.value === previous.thinking)
+            ? previous.thinking
+            : options.defaultValue;
+          return thinking === previous.thinking ? previous : { ...previous, thinking };
+        }
+
+        const configuredDefault = typeof config.default_model === 'string'
+          ? result.items.find(item => item.model === config.default_model)
+          : undefined;
+        const fallback = configuredDefault ?? result.items[0];
+        if (fallback === undefined) return previous;
+        return {
+          ...previous,
+          model: fallback.model,
+          thinking: modelThinkingOptions(fallback).defaultValue,
+        };
+      });
     } catch (error) {
       setModelError(error instanceof Error ? error.message : tr('Failed to load models', '加载模型失败'));
     } finally {
@@ -404,6 +423,8 @@ export function App() {
             pendingQuestions={pendingQuestions}
             onResolveQuestion={resolveQuestion}
             onDismissQuestion={dismissQuestion}
+            pendingMcpElicitations={pendingMcpElicitations}
+            onResolveMcpElicitation={resolveMcpElicitation}
             queuedPrompts={queuedPrompts}
             todos={todos}
             onCancelQueuedPrompt={cancelQueuedPrompt}

@@ -14,6 +14,7 @@ import { IConnectionRegistry } from '#/services/gateway/connectionRegistry';
 import { ConnectionRegistry } from '#/services/gateway/connectionRegistryService';
 import { PinoLogger as PinoLoggerAdapter } from './pinoLoggerService';
 import { QuestionService } from '#/services/question/questionService';
+import { McpElicitationService } from '#/services/mcpElicitation';
 import { IRestGateway } from '#/services/gateway/restGateway';
 import { FastifyRestGateway } from '#/services/gateway/restGatewayService';
 import { ISessionClientsService } from '#/services/gateway/sessionClients';
@@ -54,6 +55,7 @@ export function createServerServiceCollection(
     [IModelCatalogRefreshScheduler, new SyncDescriptor(ModelCatalogRefreshScheduler, [], false)],
     [Services.IApprovalService, new SyncDescriptor(ApprovalService, [], false)],
     [Services.IQuestionService, new SyncDescriptor(QuestionService, [], false)],
+    [Services.IMcpElicitationService, new SyncDescriptor(McpElicitationService, [], false)],
     [IBrowserAutomationService, browserAutomation],
   );
 

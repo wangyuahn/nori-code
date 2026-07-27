@@ -1569,23 +1569,20 @@ describe('ToolCallComponent', () => {
   it('renders a stable Edit progress placeholder during the streaming delta window', () => {
     vi.useFakeTimers();
     vi.setSystemTime(4000);
-    const oldLines: string[] = [];
     const newLines: string[] = [];
     for (let i = 1; i <= 20; i++) {
-      oldLines.push(`old${String(i)}`);
       newLines.push(`new${String(i)}`);
     }
-    const oldEscaped = oldLines.join('\\n');
     const newEscaped = newLines.join('\\n');
-    const streaming = `{"file_path":"foo.ts","old_string":"${oldEscaped}","new_string":"${newEscaped}`;
+    const streaming = `{"file_path":"foo.ts","expected_tag":"A1B2","line_ops":[{"op":"swap","start":1,"end":20,"content":"${newEscaped}`;
     const component = new ToolCallComponent(
       {
         id: 'call_edit_stream',
         name: 'Edit',
         args: {
           file_path: 'foo.ts',
-          old_string: oldLines.join('\n'),
-          new_string: newLines.join('\n'),
+          expected_tag: 'A1B2',
+          line_ops: [{ op: 'swap', start: 1, end: 20, content: newLines.join('\n') }],
         },
         streamingArguments: streaming,
         streamingStartedAtMs: 0,
@@ -1599,7 +1596,6 @@ describe('ToolCallComponent', () => {
     expect(out).toContain('Preparing changes for foo.ts...');
     expect(out).toContain('4s elapsed');
     expect(out).toMatch(/\d+(?:\.\d+)? (?:B|KB|MB)/);
-    expect(out).not.toContain('old20');
     expect(out).not.toContain('new20');
     expect(out).not.toMatch(/^\s*\d+\s+[+-]\s/m);
     expect(out).not.toContain('ctrl+o to expand');
@@ -1712,13 +1708,13 @@ describe('ToolCallComponent', () => {
     expect(out).toMatch(/^\s*2\s+b\s*$/m);
   });
 
-  it('builds the Edit diff when finalized args arrive after streaming', () => {
+  it('builds the Edit line-operation preview when finalized args arrive after streaming', () => {
     const component = new ToolCallComponent(
       {
         id: 'call_edit_seq',
         name: 'Edit',
         args: { file_path: 'foo.ts' },
-        streamingArguments: '{"file_path":"foo.ts","old_string":"a\\nb","new_string":"a\\nB',
+        streamingArguments: '{"file_path":"foo.ts","expected_tag":"A1B2","line_ops":[{"op":"swap","start":2,"end":2,"content":"B',
         streamingStartedAtMs: Date.now(),
       },
       undefined,
@@ -1729,12 +1725,16 @@ describe('ToolCallComponent', () => {
     component.updateToolCall({
       id: 'call_edit_seq',
       name: 'Edit',
-      args: { file_path: 'foo.ts', old_string: 'a\nb', new_string: 'a\nB' },
+      args: {
+        file_path: 'foo.ts',
+        expected_tag: 'A1B2',
+        line_ops: [{ op: 'swap', start: 2, end: 2, content: 'B' }],
+      },
     });
     const out = strip(component.render(100).join('\n'));
     expect(out).toContain('foo.ts');
-    expect(out).toMatch(/^\s*2\s+- b\s*$/m);
-    expect(out).toMatch(/^\s*2\s+\+ B\s*$/m);
+    expect(out).toContain('replace lines 2-2');
+    expect(out).toMatch(/^\s*\+ B\s*$/m);
   });
 
   it('refreshes and stops the Edit streaming progress timer', () => {
@@ -1746,7 +1746,7 @@ describe('ToolCallComponent', () => {
         id: 'call_edit_timer',
         name: 'Edit',
         args: { file_path: 'foo.ts' },
-        streamingArguments: '{"file_path":"foo.ts","old_string":"a',
+        streamingArguments: '{"file_path":"foo.ts","expected_tag":"A1B2","line_ops":[{"op":"swap","start":1,"end":1,"content":"a',
         streamingStartedAtMs: 0,
       },
       undefined,
@@ -1772,7 +1772,7 @@ describe('ToolCallComponent', () => {
         id: 'call_edit_dispose',
         name: 'Edit',
         args: { file_path: 'bar.ts' },
-        streamingArguments: '{"file_path":"bar.ts","old_string":"a',
+        streamingArguments: '{"file_path":"bar.ts","expected_tag":"A1B2","line_ops":[{"op":"swap","start":1,"end":1,"content":"a',
         streamingStartedAtMs: 0,
       },
       undefined,

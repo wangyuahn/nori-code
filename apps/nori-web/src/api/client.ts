@@ -339,6 +339,49 @@ export interface ProviderRefreshResult {
   failed: Array<{ provider: string; reason: string }>;
 }
 
+export interface McpServerStatus {
+  id: string;
+  name: string;
+  transport: 'stdio' | 'http' | 'sse';
+  status: 'connected' | 'connecting' | 'disconnected' | 'error';
+  last_error?: string;
+  tool_count: number;
+}
+
+export interface McpServerCommonConfig {
+  enabled?: boolean;
+  startupTimeoutMs?: number;
+  toolTimeoutMs?: number;
+  enabledTools?: string[];
+  disabledTools?: string[];
+}
+
+export type McpServerConfig = McpServerCommonConfig & (
+  | {
+      transport: 'stdio';
+      command: string;
+      args?: string[];
+      env?: Record<string, string>;
+      cwd?: string;
+      executor?: 'local' | 'kaos';
+    }
+  | {
+      transport: 'http' | 'sse';
+      url: string;
+      headers?: Record<string, string>;
+      bearerTokenEnvVar?: string;
+    }
+);
+
+export interface McpConfigurationResponse {
+  path: string;
+  mcp_servers: Record<string, McpServerConfig>;
+}
+
+export interface PatchMcpConfigurationRequest {
+  mcp_servers: Record<string, McpServerConfig | null>;
+}
+
 export interface Snapshot {
   as_of_seq: number;
   epoch: string;
@@ -353,6 +396,7 @@ export interface Snapshot {
   } | null;
   pending_approvals?: ApprovalRequest[];
   pending_questions?: QuestionRequest[];
+  pending_mcp_elicitations?: McpElicitationRequest[];
   [key: string]: unknown;
 }
 
@@ -522,6 +566,60 @@ export type QuestionAnswer =
   | { kind: 'other'; text: string }
   | { kind: 'multi_with_other'; option_ids: string[]; other_text: string }
   | { kind: 'skipped' };
+
+export interface McpElicitationField {
+  type: 'boolean' | 'string' | 'number' | 'integer' | 'array';
+  title?: string;
+  description?: string;
+  default?: string | number | boolean | string[];
+  minLength?: number;
+  maxLength?: number;
+  format?: 'email' | 'uri' | 'date' | 'date-time';
+  minimum?: number;
+  maximum?: number;
+  enum?: string[];
+  enumNames?: string[];
+  oneOf?: Array<{ const: string; title: string }>;
+  minItems?: number;
+  maxItems?: number;
+  items?: {
+    type?: 'string';
+    enum?: string[];
+    anyOf?: Array<{ const: string; title: string }>;
+  };
+}
+
+interface McpElicitationRequestBase {
+  elicitation_id: string;
+  session_id: string;
+  request_id: string;
+  server_name: string;
+  message: string;
+  status: 'pending' | 'awaiting_completion';
+  created_at: string;
+}
+
+export type McpElicitationRequest =
+  | McpElicitationRequestBase & {
+      mode: 'form';
+      requested_schema: {
+        type: 'object';
+        properties: Record<string, McpElicitationField>;
+        required?: string[];
+      };
+    }
+  | McpElicitationRequestBase & {
+      mode: 'url';
+      server_elicitation_id: string;
+      url: string;
+    };
+
+export type McpElicitationValue = string | number | boolean | string[];
+
+export interface McpElicitationResponse {
+  action: 'accept' | 'decline' | 'cancel';
+  content?: Record<string, McpElicitationValue>;
+}
 
 /** Alias for ConfigResponse — used by hook code that expects this name. */
 export type ConfigData = ConfigResponse;
@@ -963,6 +1061,22 @@ export function createClient(
         ),
       },
 
+      mcpElicitations: {
+        list: (id: string) => request<{ items: McpElicitationRequest[] }>(
+          `/sessions/${encodeURIComponent(id)}/mcp-elicitations`,
+          { status: 'pending' },
+        ),
+        resolve: (
+          id: string,
+          elicitationId: string,
+          response: McpElicitationResponse,
+        ) => request<{ resolved: true; status: 'resolved' | 'awaiting_completion'; resolved_at: string }>(
+          `/sessions/${encodeURIComponent(id)}/mcp-elicitations/${encodeURIComponent(elicitationId)}`,
+          undefined,
+          { method: 'POST', body: response },
+        ),
+      },
+
       prompts: {
         list: (id: string) => request<PromptListResponse>(`/sessions/${encodeURIComponent(id)}/prompts`),
         steer: (id: string, promptIds: string[]) => request<{ steered: true; prompt_ids: string[] }>(
@@ -1069,6 +1183,21 @@ export function createClient(
         '/providers:refresh',
         undefined,
         { method: 'POST' },
+      ),
+    },
+
+    mcp: {
+      listServers: () => request<{ servers: McpServerStatus[] }>('/mcp/servers'),
+      getConfig: () => request<McpConfigurationResponse>('/mcp/config'),
+      updateConfig: (patch: PatchMcpConfigurationRequest) => request<McpConfigurationResponse>(
+        '/mcp/config',
+        undefined,
+        { method: 'POST', body: patch },
+      ),
+      restartServer: (id: string) => request<{ restarting: true }>(
+        `/mcp/servers/${encodeURIComponent(id)}:restart`,
+        undefined,
+        { method: 'POST', body: {} },
       ),
     },
 

@@ -12,6 +12,7 @@ import {
   swarmRunTokens,
   swarmTaskIdsForRuns,
   SwarmPanel,
+  useBackgroundTasks,
 } from '../src/components/SwarmPanel';
 import { I18nProvider } from '../src/i18n';
 
@@ -46,6 +47,113 @@ describe('SwarmPanel projections', () => {
       expect(container.textContent).toContain('Agents and background tasks');
       expect(container.textContent).not.toContain('No agent activity');
       expect(container.querySelector('.swarm-project-group')).not.toBeNull();
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('loads and keeps background tasks from every requested conversation', async () => {
+    vi.spyOn(api.sessions.tasks, 'list').mockImplementation(async sessionId => ({
+      items: [{
+        id: `task-${sessionId}`,
+        session_id: sessionId,
+        kind: 'subagent',
+        description: `Agent from ${sessionId}`,
+        status: sessionId === 'session-a' ? 'running' : 'completed',
+        created_at: '2026-07-16T00:00:00.000Z',
+      }],
+    }));
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    function Probe() {
+      const state = useBackgroundTasks(['session-a', 'session-b']);
+      return createElement('div', null, state.tasks.map(task => task.description).join('|'));
+    }
+    try {
+      await act(async () => { root.render(createElement(Probe)); });
+      await vi.waitFor(() => expect(container.textContent).toContain('Agent from session-a'));
+      await vi.waitFor(() => expect(container.textContent).toContain('Agent from session-b'));
+      expect(api.sessions.tasks.list).toHaveBeenCalledWith('session-a');
+      expect(api.sessions.tasks.list).toHaveBeenCalledWith('session-b');
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('shows completed tasks from another conversation in the global activity tree', async () => {
+    vi.spyOn(api, 'getConfig').mockResolvedValue({ custom_agents: {} });
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(SwarmPanel, {
+          swarm: { swarmStatuses: new Map(), connected: true, error: null },
+          sessionId: 'session-a',
+          sessions: [
+            session('session-a', 'Current conversation', 'C:\\work\\alpha'),
+            session('session-b', 'Background conversation', 'C:\\work\\beta'),
+          ],
+          backgroundState: {
+            tasks: [{
+              id: 'completed-agent-b',
+              session_id: 'session-b',
+              kind: 'subagent',
+              description: 'Finished in the other conversation',
+              status: 'completed',
+              created_at: '2026-07-16T00:00:00.000Z',
+            }],
+            loading: false,
+            error: null,
+            markCancelled: vi.fn(),
+          },
+        })));
+        await Promise.resolve();
+      });
+
+      expect(container.textContent).toContain('Background conversation');
+      expect(container.textContent).toContain('Finished in the other conversation');
+      expect(container.querySelectorAll('.swarm-session-group')).toHaveLength(1);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('uses actual rendered agents for tree counts instead of planned task_count', async () => {
+    vi.spyOn(api, 'getConfig').mockResolvedValue({ custom_agents: {} });
+    const runWithQueuedSlots: SwarmStatus = {
+      ...run('swarm-visible-count', 1),
+      session_id: 'session-a',
+      task_count: 5,
+      tasks: [
+        { id: 'agent-1', label: 'Visible one', status: 'running' },
+        { id: 'agent-2', label: 'Visible two', status: 'running' },
+      ],
+    };
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(SwarmPanel, {
+          swarm: { swarmStatuses: new Map([[runWithQueuedSlots.swarm_id, runWithQueuedSlots]]), connected: true, error: null },
+          sessionId: 'session-a',
+          sessions: [session('session-a', 'Visible agents', 'C:\\work\\alpha')],
+          backgroundState: { tasks: [], loading: false, error: null, markCancelled: vi.fn() },
+        })));
+        await Promise.resolve();
+      });
+
+      expect(container.querySelector('.swarm-session-meta')?.textContent).toContain('2 agents');
+      expect(container.querySelector('.swarm-round-copy small')?.textContent).toContain('0/2 agents finished');
+      expect(container.textContent).not.toContain('0/5 agents finished');
     } finally {
       await act(async () => root.unmount());
       container.remove();
