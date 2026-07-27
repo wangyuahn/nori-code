@@ -5,33 +5,37 @@
    ========================================================================== */
 
 :root {
-  /* Chrome accent — Linear lavender-indigo (#5e6ad2) */
-  --nori-cyan: #5e6ad2;
-  --nori-cyan-dim: rgba(94, 106, 210, 0.14);
-  --nori-thinking: #8b8b8b;
-  --nori-accent: #5e6ad2;
-  --nori-accent-dim: rgba(94, 106, 210, 0.14);
-  --nori-accent-edge: rgba(94, 106, 210, 0.38);
-  --nori-accent-soft: rgba(94, 106, 210, 0.07);
-  --nori-accent-hover: #6f7ae0;
-  --nori-accent-focus: #5e69d1;
+  /* Reference: Cursor / deep-violet UI — bright lavender accent on purple-tinted surfaces */
+  --nori-accent: #8b7cf8;
+  --nori-accent-bright: #a78bfa;
+  --nori-accent-focus: #9f8cff;
+  --nori-accent-hover: #9d8df9;
+  --nori-cyan: #8b7cf8;
+  --nori-cyan-dim: rgba(139, 124, 248, 0.16);
+  --nori-thinking: #9b8ec8;
+  --nori-accent-dim: rgba(139, 124, 248, 0.16);
+  --nori-accent-edge: rgba(167, 139, 250, 0.42);
+  --nori-accent-soft: rgba(139, 124, 248, 0.1);
+  --nori-accent-glow: rgba(139, 124, 248, 0.22);
+  --nori-rim-top: rgba(167, 139, 250, 0.24);
+  --nori-rim-side: rgba(167, 139, 250, 0.1);
   --nori-shell-gradient:
-    radial-gradient(ellipse 140% 90% at 0% -10%, rgba(94, 106, 210, 0.08), transparent 52%),
-    radial-gradient(ellipse 100% 80% at 100% 110%, rgba(130, 143, 255, 0.05), transparent 48%);
+    radial-gradient(ellipse 130% 85% at 0% -5%, rgba(139, 124, 248, 0.14), transparent 54%),
+    radial-gradient(ellipse 95% 75% at 100% 105%, rgba(167, 139, 250, 0.1), transparent 50%);
 
-  /* Neutral dark palette — purple only via gradients above */
-  --nori-bg: #090909;
-  --nori-surface: #0f0f0f;
-  --nori-surface-raised: #141414;
-  --nori-surface-hover: #1a1a1a;
-  --nori-bg-elevated: #141414;
-  --nori-border: #262626;
-  --nori-border-strong: #333333;
-  --nori-border-active: #525252;
-  --nori-text: #ededed;
-  --nori-text-secondary: #8b8b8b;
-  --nori-text-muted: #5c5c5c;
-  --nori-text-subtle: #454545;
+  /* Purple-tinted dark surfaces (not neutral gray) */
+  --nori-bg: #0c0c10;
+  --nori-surface: #12121a;
+  --nori-surface-raised: #16161f;
+  --nori-surface-hover: #1c1c28;
+  --nori-bg-elevated: #16161f;
+  --nori-border: #2a2a38;
+  --nori-border-strong: #36364a;
+  --nori-border-active: #4a4a62;
+  --nori-text: #f0f0f5;
+  --nori-text-secondary: #9b9bb0;
+  --nori-text-muted: #6b6b82;
+  --nori-text-subtle: #52526a;
 
   /* Primary action — Linear uses light buttons on dark bg */
   --nori-primary-bg: #e8e8e8;
@@ -48,13 +52,13 @@
   --nori-shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.24);
 
   /* Shell tokens */
-  --nori-shell: #090909;
-  --nori-sidebar-bg: #090909;
-  --nori-topbar: #090909;
-  --nori-statusbar: #0f0f0f;
-  --nori-control: #141414;
-  --nori-control-hover: #1a1a1a;
-  --nori-control-active: #222222;
+  --nori-shell: #0c0c10;
+  --nori-sidebar-bg: #0c0c10;
+  --nori-topbar: #0c0c10;
+  --nori-statusbar: #101018;
+  --nori-control: #16161f;
+  --nori-control-hover: #1c1c28;
+  --nori-control-active: #242432;
 
   /* Spacing scale */
   --nori-space-1: 4px;
@@ -804,13 +808,6 @@ textarea.input:focus {
 }
 
 .initial-usage {
-  border-color: color-mix(in srgb, var(--nori-accent) 18%, var(--nori-border-strong));
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--nori-accent) 4%, transparent), transparent 32%),
-    color-mix(in srgb, var(--nori-surface-raised) 86%, transparent);
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, var(--nori-accent) 10%, transparent),
-    0 14px 38px rgba(0, 0, 0, 0.2);
   backdrop-filter: none;
 }
 
@@ -857,6 +854,117 @@ textarea.input:focus {
 }
 
 .cron-job-icon {
-  color: color-mix(in srgb, var(--nori-accent) 78%, var(--nori-text-secondary));
-  background: color-mix(in srgb, var(--nori-accent) 12%, var(--nori-control));
+  color: var(--nori-accent-bright);
+  background: color-mix(in srgb, var(--nori-accent) 14%, var(--nori-control));
+}
+
+/* ── Reference match: high-specificity shell overrides ───────────────────── */
+/* nori-theme.css ships later .codex-layout rules — these must win. */
+
+.codex-layout .chat-welcome .welcome-mark,
+.chat-welcome .welcome-mark {
+  color: var(--nori-accent-bright);
+  border: 1px solid color-mix(in srgb, var(--nori-accent-bright) 42%, var(--nori-border));
+  background:
+    linear-gradient(145deg, rgba(139, 124, 248, 0.24), rgba(139, 124, 248, 0.06)),
+    var(--nori-control);
+  box-shadow:
+    0 0 36px var(--nori-accent-glow),
+    inset 0 1px 0 var(--nori-rim-top);
+}
+
+.starter-card svg {
+  color: var(--nori-accent-bright);
+}
+
+.starter-card {
+  border-color: color-mix(in srgb, var(--nori-accent) 16%, var(--nori-border));
+  background: linear-gradient(180deg, rgba(139, 124, 248, 0.04), transparent 40%), var(--nori-surface);
+  box-shadow: inset 0 1px 0 var(--nori-rim-top);
+}
+
+.codex-layout .sidebar-nav-item.active,
+.codex-layout .sidebar-tab.active,
+.codex-layout .sidebar-item.active {
+  color: var(--nori-text);
+  background: rgba(139, 124, 248, 0.14);
+  box-shadow:
+    inset 0 0 0 1px rgba(167, 139, 250, 0.28),
+    inset 0 1px 0 rgba(167, 139, 250, 0.12);
+}
+
+.codex-layout .sidebar-workspace-switch .sidebar-tab.active {
+  background: rgba(139, 124, 248, 0.16);
+  border-color: rgba(167, 139, 250, 0.32);
+  box-shadow: inset 0 1px 0 var(--nori-rim-top);
+}
+
+.codex-layout .chat-input-area {
+  border: 1px solid color-mix(in srgb, var(--nori-accent) 22%, var(--nori-border-strong));
+  background: linear-gradient(180deg, rgba(139, 124, 248, 0.05), transparent 36%), var(--nori-control);
+  box-shadow:
+    inset 0 1px 0 var(--nori-rim-top),
+    0 14px 38px rgba(0, 0, 0, 0.22);
+  backdrop-filter: none;
+}
+
+.codex-layout .chat-input-area:focus-within {
+  border-color: color-mix(in srgb, var(--nori-accent-bright) 58%, var(--nori-border-strong));
+  box-shadow:
+    inset 0 1px 0 var(--nori-rim-top),
+    0 0 0 1px rgba(139, 124, 248, 0.2),
+    0 0 32px var(--nori-accent-glow),
+    0 16px 42px rgba(0, 0, 0, 0.24);
+}
+
+.initial-usage {
+  border: 1px solid color-mix(in srgb, var(--nori-accent-bright) 34%, var(--nori-border-strong));
+  background:
+    linear-gradient(180deg, rgba(139, 124, 248, 0.1), transparent 38%),
+    color-mix(in srgb, var(--nori-surface-raised) 92%, transparent);
+  box-shadow:
+    inset 0 1px 0 var(--nori-rim-top),
+    0 0 40px rgba(139, 124, 248, 0.1),
+    0 14px 38px rgba(0, 0, 0, 0.22);
+}
+
+.initial-usage-metrics > div {
+  border-color: color-mix(in srgb, var(--nori-accent) 14%, var(--nori-border));
+  background: linear-gradient(180deg, rgba(139, 124, 248, 0.04), transparent), var(--nori-control);
+  box-shadow: inset 0 1px 0 rgba(167, 139, 250, 0.08);
+}
+
+.inspector-stage.open {
+  border-color: color-mix(in srgb, var(--nori-accent-bright) 28%, var(--nori-border));
+  box-shadow:
+    inset 0 1px 0 var(--nori-rim-top),
+    0 0 36px rgba(139, 124, 248, 0.08);
+}
+
+.inspector-navigation.compact {
+  border-color: color-mix(in srgb, var(--nori-accent) 24%, var(--nori-border));
+  box-shadow:
+    inset 0 1px 0 var(--nori-rim-top),
+    0 0 28px rgba(139, 124, 248, 0.1);
+}
+
+.inspector-navigation.compact button.active {
+  color: var(--nori-accent-bright);
+  background: rgba(139, 124, 248, 0.2);
+  box-shadow:
+    inset 0 0 0 1px rgba(167, 139, 250, 0.36),
+    0 0 18px rgba(139, 124, 248, 0.14);
+}
+
+.codex-layout .inspector-open-tab.active {
+  color: var(--nori-text);
+  box-shadow: inset 0 -2px var(--nori-accent-bright);
+}
+
+.inspector-open-tab.active {
+  box-shadow: inset 0 -2px var(--nori-accent-bright);
+}
+
+.inspector-content {
+  background: var(--nori-bg);
 }
