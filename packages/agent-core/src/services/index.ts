@@ -123,6 +123,7 @@ export {
   IModelCatalogService,
   ModelNotFoundError,
   ProviderNotFoundError,
+  configuredApiKeyLength,
   modelIdsForProvider,
   toProtocolModel,
   toProtocolProvider,

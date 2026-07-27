@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 
 import { api, type ProviderCatalogItem, type ProviderPreset, type ProviderRefreshResult, type ProviderTestResponse } from '../api/client';
 import { useI18n } from '../i18n';
@@ -14,8 +14,12 @@ const API_FORMATS: Array<{ value: ProviderType; label: string }> = [
   { value: 'vertexai', label: 'Vertex AI' },
 ];
 
-const MASKED_API_KEY = '••••••••';
 const CUSTOM_PRESET_ID = 'custom';
+
+function maskApiKey(length: number | undefined): string {
+  if (length === undefined || length <= 0) return '';
+  return '•'.repeat(length);
+}
 
 interface ProviderDraft {
   originalId: string | null;
@@ -28,6 +32,7 @@ interface ProviderDraft {
   customModels: string;
   disabled: boolean;
   hasStoredKey: boolean;
+  storedKeyLength?: number;
 }
 
 const EMPTY_DRAFT: ProviderDraft = {
@@ -41,6 +46,7 @@ const EMPTY_DRAFT: ProviderDraft = {
   customModels: '',
   disabled: false,
   hasStoredKey: false,
+  storedKeyLength: undefined,
 };
 
 export function ProviderSettings() {
@@ -98,6 +104,7 @@ export function ProviderSettings() {
       customModels: (provider.custom_models ?? []).join('\n'),
       disabled: provider.disabled === true,
       hasStoredKey: provider.has_api_key === true,
+      storedKeyLength: provider.api_key_length,
     });
     setPresetId(matchingPresetId(provider, presets));
     setShowApiKey(false);
@@ -143,11 +150,9 @@ export function ProviderSettings() {
     });
   };
 
-  const beginApiKeyEdit = () => {
-    if (apiKeyTouched || secretLoaded) return;
-    if (!draft?.hasStoredKey) return;
+  const beginApiKeyEdit = (value: string) => {
     setApiKeyTouched(true);
-    updateDraft('apiKey', '');
+    updateDraft('apiKey', value);
   };
 
   const changeApiKey = (value: string) => {
@@ -329,7 +334,25 @@ export function ProviderSettings() {
 
   const displayedApiKey = secretLoaded || apiKeyTouched
     ? (draft?.apiKey ?? '')
-    : (draft?.hasStoredKey ? MASKED_API_KEY : '');
+    : (draft?.hasStoredKey ? maskApiKey(draft.storedKeyLength) : '');
+  const isMaskedReadonly = Boolean(
+    draft?.hasStoredKey && !secretLoaded && !apiKeyTouched,
+  );
+
+  const handleApiKeyKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (!isMaskedReadonly) return;
+    if (event.key.length !== 1 || event.ctrlKey || event.metaKey || event.altKey) return;
+    event.preventDefault();
+    beginApiKeyEdit(event.key);
+  };
+
+  const handleApiKeyPaste = (event: ClipboardEvent<HTMLInputElement>) => {
+    if (!isMaskedReadonly) return;
+    const pasted = event.clipboardData.getData('text');
+    if (!pasted) return;
+    event.preventDefault();
+    beginApiKeyEdit(pasted);
+  };
 
   return <div className="provider-settings">
     <header className="provider-settings-heading">
@@ -340,8 +363,8 @@ export function ProviderSettings() {
     {loading ? <div className="provider-empty"><span className="spinner"/></div> : providers.length === 0 && expandedId === null ? <div className="provider-empty"><Icon name="shield" size={22}/><strong>{tr('No providers configured', '还没有配置供应商')}</strong><span>{tr('Add a provider to make models available in chat.', '新增供应商后，模型才会出现在对话选择器中。')}</span></div> : <div className="provider-list">
       {providers.map(provider => <ProviderCard key={provider.id} provider={provider} expanded={expandedId === provider.id} busy={busyId === provider.id} onOpen={() => openProvider(provider)} onTest={() => void testProvider(provider)} onToggle={() => void toggleDisabled(provider)} onDelete={() => void deleteProvider(provider)} />)}
     </div>}
-    {expandedId === '__new__' && draft && <ProviderEditor draft={draft} saving={saving} isNew presets={presets} presetId={presetId} presetWarning={presetWarning} displayedApiKey={displayedApiKey} showApiKey={showApiKey} onApplyPreset={applyPreset} onChange={updateDraft} onBeginApiKeyEdit={beginApiKeyEdit} onChangeApiKey={changeApiKey} onToggleApiKeyVisibility={() => void toggleApiKeyVisibility()} onCopyApiKey={() => void copyApiKey()} onSave={() => void saveProvider()} onCancel={closeEditor} tr={tr} />}
-    {expandedId !== null && expandedId !== '__new__' && draft && <ProviderEditor draft={draft} saving={saving} presets={presets} presetId={presetId} presetWarning={presetWarning} displayedApiKey={displayedApiKey} showApiKey={showApiKey} onApplyPreset={applyPreset} onChange={updateDraft} onBeginApiKeyEdit={beginApiKeyEdit} onChangeApiKey={changeApiKey} onToggleApiKeyVisibility={() => void toggleApiKeyVisibility()} onCopyApiKey={() => void copyApiKey()} onSave={() => void saveProvider()} onCancel={closeEditor} tr={tr} />}
+    {expandedId === '__new__' && draft && <ProviderEditor draft={draft} saving={saving} isNew presets={presets} presetId={presetId} presetWarning={presetWarning} displayedApiKey={displayedApiKey} showApiKey={showApiKey} isMaskedReadonly={isMaskedReadonly} onApplyPreset={applyPreset} onChange={updateDraft} onChangeApiKey={changeApiKey} onApiKeyKeyDown={handleApiKeyKeyDown} onApiKeyPaste={handleApiKeyPaste} onToggleApiKeyVisibility={() => void toggleApiKeyVisibility()} onCopyApiKey={() => void copyApiKey()} onSave={() => void saveProvider()} onCancel={closeEditor} tr={tr} />}
+    {expandedId !== null && expandedId !== '__new__' && draft && <ProviderEditor draft={draft} saving={saving} presets={presets} presetId={presetId} presetWarning={presetWarning} displayedApiKey={displayedApiKey} showApiKey={showApiKey} isMaskedReadonly={isMaskedReadonly} onApplyPreset={applyPreset} onChange={updateDraft} onChangeApiKey={changeApiKey} onApiKeyKeyDown={handleApiKeyKeyDown} onApiKeyPaste={handleApiKeyPaste} onToggleApiKeyVisibility={() => void toggleApiKeyVisibility()} onCopyApiKey={() => void copyApiKey()} onSave={() => void saveProvider()} onCancel={closeEditor} tr={tr} />}
   </div>;
 }
 
@@ -372,10 +395,12 @@ function ProviderEditor({
   presetWarning,
   displayedApiKey,
   showApiKey,
+  isMaskedReadonly,
   onApplyPreset,
   onChange,
-  onBeginApiKeyEdit,
   onChangeApiKey,
+  onApiKeyKeyDown,
+  onApiKeyPaste,
   onToggleApiKeyVisibility,
   onCopyApiKey,
   onSave,
@@ -390,10 +415,12 @@ function ProviderEditor({
   presetWarning: string;
   displayedApiKey: string;
   showApiKey: boolean;
+  isMaskedReadonly: boolean;
   onApplyPreset: (id: string) => void;
   onChange: <K extends keyof ProviderDraft>(key: K, value: ProviderDraft[K]) => void;
-  onBeginApiKeyEdit: () => void;
   onChangeApiKey: (value: string) => void;
+  onApiKeyKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
+  onApiKeyPaste: (event: ClipboardEvent<HTMLInputElement>) => void;
   onToggleApiKeyVisibility: () => void;
   onCopyApiKey: () => void;
   onSave: () => void;
@@ -409,7 +436,7 @@ function ProviderEditor({
       <label><span>Provider ID</span><input aria-label="Provider ID" value={draft.id} onChange={event => onChange('id', event.target.value.trim())} placeholder="openrouter" /></label>
       <label><span>{tr('API format', 'API 格式')}</span><select value={draft.type} onChange={event => onChange('type', event.target.value as ProviderType)}>{API_FORMATS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
       <label className="provider-form-wide"><span>Base URL</span><input value={draft.baseUrl} onChange={event => onChange('baseUrl', event.target.value)} placeholder="https://api.example.com/v1" /></label>
-      <label className="provider-form-wide"><span>API Key</span><div className="provider-secret-input"><input aria-label="API Key" type={showApiKey ? 'text' : 'password'} value={displayedApiKey} onFocus={onBeginApiKeyEdit} onChange={event => onChangeApiKey(event.target.value)} placeholder={draft.hasStoredKey ? tr('Enter a new key to replace the stored one', '输入新密钥以替换已保存的密钥') : 'sk-...'}/><button type="button" onClick={onToggleApiKeyVisibility} title={showApiKey ? tr('Hide API key', '隐藏 API Key') : tr('Show API key', '显示 API Key')} aria-label={showApiKey ? tr('Hide API key', '隐藏 API Key') : tr('Show API key', '显示 API Key')}><Icon name="eye" size={14}/></button><button type="button" onClick={onCopyApiKey} title={tr('Copy API key', '复制 API Key')} aria-label={tr('Copy API key', '复制 API Key')}><Icon name="copy" size={14}/></button></div></label>
+      <label className="provider-form-wide"><span>API Key</span><div className="provider-secret-input"><input aria-label="API Key" type={showApiKey ? 'text' : 'password'} value={displayedApiKey} readOnly={isMaskedReadonly} onKeyDown={onApiKeyKeyDown} onPaste={onApiKeyPaste} onChange={event => onChangeApiKey(event.target.value)} placeholder={draft.hasStoredKey && isMaskedReadonly && !displayedApiKey ? tr('Saved API key', '已保存 API Key') : draft.hasStoredKey ? tr('Enter a new key to replace the stored one', '输入新密钥以替换已保存的密钥') : 'sk-...'}/><button type="button" onClick={onToggleApiKeyVisibility} title={showApiKey ? tr('Hide API key', '隐藏 API Key') : tr('Show API key', '显示 API Key')} aria-label={showApiKey ? tr('Hide API key', '隐藏 API Key') : tr('Show API key', '显示 API Key')}><Icon name="eye" size={14}/></button><button type="button" onClick={onCopyApiKey} title={tr('Copy API key', '复制 API Key')} aria-label={tr('Copy API key', '复制 API Key')}><Icon name="copy" size={14}/></button></div></label>
       <label className="provider-switch"><input type="checkbox" checked={draft.autoDiscover} onChange={event => onChange('autoDiscover', event.target.checked)}/><span><strong>{tr('Automatically fetch models', '自动获取模型')}</strong><small>{tr('When off, only custom model IDs are shown.', '关闭后只显示自定义模型 ID。')}</small></span></label>
       <label className="provider-switch"><input type="checkbox" checked={draft.disabled} onChange={event => onChange('disabled', event.target.checked)}/><span><strong>{tr('Disabled', '禁用')}</strong><small>{tr('Disabled providers disappear from model selection.', '禁用后不会出现在模型选择器中。')}</small></span></label>
       {!draft.autoDiscover && <label className="provider-form-wide"><span>{tr('Custom model IDs', '自定义模型 ID')}</span><textarea value={draft.customModels} onChange={event => onChange('customModels', event.target.value)} placeholder={'gpt-4o\nclaude-3-5-sonnet'} rows={4}/></label>}

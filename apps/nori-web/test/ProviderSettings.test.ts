@@ -15,6 +15,7 @@ const PROVIDER: ProviderCatalogItem = {
   type: 'openai',
   base_url: 'https://openrouter.ai/api/v1',
   has_api_key: true,
+  api_key_length: 22,
   status: 'connected',
   auto_discover: true,
   custom_models: [],
@@ -95,19 +96,20 @@ describe('ProviderSettings', () => {
       .toBe('https://api.anthropic.com');
   });
 
-  it('keeps a fixed mask until the eye reveals the real key', async () => {
+  it('keeps a length-matched mask until the eye reveals the real key', async () => {
     const { container } = await renderProviders();
     await openEditor(container);
     const key = apiKeyInput(container);
 
-    expect(key.value).toBe('••••••••');
+    expect(key.value).toBe('•'.repeat(22));
     expect(key.type).toBe('password');
+    expect(key.readOnly).toBe(true);
 
     await act(async () => {
       key.focus();
       await Promise.resolve();
     });
-    expect(key.value).toBe('');
+    expect(key.value).toBe('•'.repeat(22));
     expect(vi.mocked(api.providers.secret)).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -119,6 +121,7 @@ describe('ProviderSettings', () => {
     });
     expect(key.value).toBe('sk-live-secret-key-12345');
     expect(key.type).toBe('text');
+    expect(key.readOnly).toBe(false);
 
     await act(async () => {
       showKeyButton(container).click();

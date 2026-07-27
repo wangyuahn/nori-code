@@ -15,6 +15,7 @@ import {
   ModelCatalogService,
   ModelNotFoundError,
   ProviderNotFoundError,
+  configuredApiKeyLength,
   toProtocolModel,
   toProtocolProvider,
 } from '../../src/services';
@@ -178,9 +179,19 @@ describe('model catalog adapters', () => {
       base_url: 'https://api.example.test/v1',
       default_model: 'k2',
       has_api_key: true,
+      api_key_length: 7,
       status: 'connected',
       models: ['k2', 'turbo'],
     });
+  });
+
+  it('reports configured API key length from inline and env values', () => {
+    expect(configuredApiKeyLength({ type: 'openai', apiKey: 'sk-test' })).toBe(7);
+    expect(configuredApiKeyLength({
+      type: 'openai',
+      env: { OPENAI_API_KEY: 'env-key' },
+    })).toBe(7);
+    expect(configuredApiKeyLength({ type: 'openai' })).toBeUndefined();
   });
 });
 
