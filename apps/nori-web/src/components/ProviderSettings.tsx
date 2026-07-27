@@ -14,6 +14,9 @@ const API_FORMATS: Array<{ value: ProviderType; label: string }> = [
   { value: 'vertexai', label: 'Vertex AI' },
 ];
 
+const MASKED_API_KEY = '••••••••';
+const CUSTOM_PRESET_ID = 'custom';
+
 interface ProviderDraft {
   originalId: string | null;
   id: string;
@@ -24,6 +27,7 @@ interface ProviderDraft {
   autoDiscover: boolean;
   customModels: string;
   disabled: boolean;
+  hasStoredKey: boolean;
 }
 
 const EMPTY_DRAFT: ProviderDraft = {
@@ -36,11 +40,16 @@ const EMPTY_DRAFT: ProviderDraft = {
   autoDiscover: true,
   customModels: '',
   disabled: false,
+  hasStoredKey: false,
 };
 
 export function ProviderSettings() {
   const { tr } = useI18n();
   const [providers, setProviders] = useState<ProviderCatalogItem[]>([]);
+  const [presets, setPresets] = useState<ProviderPreset[]>([]);
+  const [presetSource, setPresetSource] = useState('https://models.dev/api.json');
+  const [presetWarning, setPresetWarning] = useState('');
+  const [presetId, setPresetId] = useState(CUSTOM_PRESET_ID);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ProviderDraft | null>(null);
   const [loading, setLoading] = useState(true);
@@ -48,13 +57,20 @@ export function ProviderSettings() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
   const [secretLoaded, setSecretLoaded] = useState(false);
+  const [apiKeyTouched, setApiKeyTouched] = useState(false);
   const [notice, setNotice] = useState<{ text: string; error?: boolean } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await api.providers.list();
-      setProviders(result.items);
+      const [providerResult, presetResult] = await Promise.all([
+        api.providers.list(),
+        api.providerPresets.list(),
+      ]);
+      setProviders(providerResult.items);
+      setPresets(presetResult.items);
+      setPresetSource(presetResult.source);
+      setPresetWarning(presetResult.warning ?? '');
     } catch (error) {
       setNotice({ text: error instanceof Error ? error.message : tr('Failed to load providers', '加载 Provider 失败'), error: true });
     } finally {
@@ -63,6 +79,11 @@ export function ProviderSettings() {
   }, [tr]);
 
   useEffect(() => { void load(); }, [load]);
+
+  const matchingPresetId = (provider: Pick<ProviderCatalogItem, 'id' | 'base_url'>, catalog: ProviderPreset[]) => {
+    const match = catalog.find(item => item.id === provider.id && (item.base_url ?? '') === (provider.base_url ?? ''));
+    return match?.id ?? CUSTOM_PRESET_ID;
+  };
 
   const openProvider = (provider: ProviderCatalogItem) => {
     setExpandedId(provider.id);
@@ -76,33 +97,73 @@ export function ProviderSettings() {
       autoDiscover: provider.auto_discover !== false,
       customModels: (provider.custom_models ?? []).join('\n'),
       disabled: provider.disabled === true,
+      hasStoredKey: provider.has_api_key === true,
     });
+    setPresetId(matchingPresetId(provider, presets));
     setShowApiKey(false);
     setSecretLoaded(false);
+    setApiKeyTouched(false);
     setNotice(null);
   };
 
   const openNewProvider = () => {
     setExpandedId('__new__');
     setDraft({ ...EMPTY_DRAFT });
+    setPresetId(CUSTOM_PRESET_ID);
     setShowApiKey(false);
     setSecretLoaded(false);
+    setApiKeyTouched(false);
     setNotice(null);
   };
 
   const closeEditor = () => {
     setExpandedId(null);
     setDraft(null);
+    setPresetId(CUSTOM_PRESET_ID);
     setShowApiKey(false);
     setSecretLoaded(false);
+    setApiKeyTouched(false);
   };
 
   const updateDraft = <K extends keyof ProviderDraft>(key: K, value: ProviderDraft[K]) => {
     setDraft(previous => previous === null ? previous : { ...previous, [key]: value });
   };
 
-  const revealApiKey = async () => {
-    if (!draft || draft.originalId === null || secretLoaded) {
+  const applyPreset = (id: string) => {
+    setPresetId(id);
+    if (id === CUSTOM_PRESET_ID) return;
+    const preset = presets.find(item => item.id === id);
+    if (!preset || !draft) return;
+    setDraft({
+      ...draft,
+      id: preset.id,
+      name: draft.name.trim() ? draft.name : preset.name,
+      type: preset.type,
+      baseUrl: preset.base_url ?? '',
+    });
+  };
+
+  const beginApiKeyEdit = () => {
+    if (apiKeyTouched || secretLoaded) return;
+    if (!draft?.hasStoredKey) return;
+    setApiKeyTouched(true);
+    updateDraft('apiKey', '');
+  };
+
+  const changeApiKey = (value: string) => {
+    setApiKeyTouched(true);
+    // Once the user edits, the controlled value must stay on draft.apiKey.
+    // Falling back to a mask when the field becomes empty makes deletion impossible.
+    updateDraft('apiKey', value);
+  };
+
+  const toggleApiKeyVisibility = async () => {
+    if (!draft) return;
+    if (secretLoaded) {
+      setShowApiKey(previous => !previous);
+      return;
+    }
+    if (draft.originalId === null || !draft.hasStoredKey) {
       setShowApiKey(previous => !previous);
       return;
     }
@@ -110,6 +171,7 @@ export function ProviderSettings() {
       const result = await api.providers.secret(draft.originalId);
       updateDraft('apiKey', result.api_key);
       setSecretLoaded(true);
+      setApiKeyTouched(true);
       setShowApiKey(true);
     } catch (error) {
       setNotice({ text: error instanceof Error ? error.message : tr('Failed to read API key', '读取 API Key 失败'), error: true });
@@ -118,11 +180,12 @@ export function ProviderSettings() {
 
   const copyApiKey = async () => {
     if (!draft) return;
-    if (!secretLoaded && draft.originalId !== null) {
+    if (!secretLoaded && draft.originalId !== null && draft.hasStoredKey) {
       try {
         const result = await api.providers.secret(draft.originalId);
         updateDraft('apiKey', result.api_key);
         setSecretLoaded(true);
+        setApiKeyTouched(true);
         await navigator.clipboard.writeText(result.api_key);
         setNotice({ text: tr('API key copied', 'API Key 已复制') });
         return;
@@ -151,6 +214,7 @@ export function ProviderSettings() {
     setSaving(true);
     setNotice(null);
     try {
+      const selectedPreset = presets.find(item => item.id === presetId);
       const providerPatch: Record<string, unknown> = {
         type: draft.type,
         name: draft.name.trim() || id,
@@ -160,8 +224,11 @@ export function ProviderSettings() {
         // A null value clears a previous manual model list. Sending an empty
         // array here would leave auto-discovery with an explicit empty list.
         custom_models: draft.autoDiscover ? null : customModels,
+        source: selectedPreset === undefined
+          ? { kind: 'custom' }
+          : { kind: 'modelsDev', url: presetSource, catalog_id: selectedPreset.id },
       };
-      if (draft.apiKey.trim()) providerPatch.api_key = draft.apiKey.trim();
+      if (apiKeyTouched && draft.apiKey.trim()) providerPatch.api_key = draft.apiKey.trim();
 
       const models: Record<string, unknown> = {};
       const currentConfig = await api.getConfig();
@@ -198,9 +265,16 @@ export function ProviderSettings() {
       await load();
       window.dispatchEvent(new CustomEvent('nori:model-catalog-changed'));
       setExpandedId(id);
-      setDraft(previous => previous ? { ...previous, originalId: id, apiKey: '', customModels: customModels.join('\n') } : previous);
+      setDraft(previous => previous ? {
+        ...previous,
+        originalId: id,
+        apiKey: '',
+        customModels: customModels.join('\n'),
+        hasStoredKey: previous.hasStoredKey || (apiKeyTouched && Boolean(previous.apiKey.trim())),
+      } : previous);
       setSecretLoaded(false);
       setShowApiKey(false);
+      setApiKeyTouched(false);
     } catch (error) {
       setNotice({ text: error instanceof Error ? error.message : tr('Failed to save provider', '保存 Provider 失败'), error: true });
     } finally {
@@ -253,6 +327,10 @@ export function ProviderSettings() {
     }
   };
 
+  const displayedApiKey = secretLoaded || apiKeyTouched
+    ? (draft?.apiKey ?? '')
+    : (draft?.hasStoredKey ? MASKED_API_KEY : '');
+
   return <div className="provider-settings">
     <header className="provider-settings-heading">
       <div><span>Provider</span><h2>{tr('Model providers', '模型供应商')}</h2><p>{tr('Manage API connections, discovery, custom models, and credentials in one place.', '统一管理 API 连接、模型获取、自定义模型和凭据。')}</p></div>
@@ -262,8 +340,8 @@ export function ProviderSettings() {
     {loading ? <div className="provider-empty"><span className="spinner"/></div> : providers.length === 0 && expandedId === null ? <div className="provider-empty"><Icon name="shield" size={22}/><strong>{tr('No providers configured', '还没有配置供应商')}</strong><span>{tr('Add a provider to make models available in chat.', '新增供应商后，模型才会出现在对话选择器中。')}</span></div> : <div className="provider-list">
       {providers.map(provider => <ProviderCard key={provider.id} provider={provider} expanded={expandedId === provider.id} busy={busyId === provider.id} onOpen={() => openProvider(provider)} onTest={() => void testProvider(provider)} onToggle={() => void toggleDisabled(provider)} onDelete={() => void deleteProvider(provider)} />)}
     </div>}
-    {expandedId === '__new__' && draft && <ProviderEditor draft={draft} saving={saving} isNew onChange={updateDraft} onSave={() => void saveProvider()} onCancel={closeEditor} showApiKey={showApiKey} onRevealApiKey={() => void revealApiKey()} onCopyApiKey={() => void copyApiKey()} tr={tr} />}
-    {expandedId !== null && expandedId !== '__new__' && draft && <ProviderEditor draft={draft} saving={saving} onChange={updateDraft} onSave={() => void saveProvider()} onCancel={closeEditor} showApiKey={showApiKey} onRevealApiKey={() => void revealApiKey()} onCopyApiKey={() => void copyApiKey()} tr={tr} />}
+    {expandedId === '__new__' && draft && <ProviderEditor draft={draft} saving={saving} isNew presets={presets} presetId={presetId} presetWarning={presetWarning} displayedApiKey={displayedApiKey} showApiKey={showApiKey} onApplyPreset={applyPreset} onChange={updateDraft} onBeginApiKeyEdit={beginApiKeyEdit} onChangeApiKey={changeApiKey} onToggleApiKeyVisibility={() => void toggleApiKeyVisibility()} onCopyApiKey={() => void copyApiKey()} onSave={() => void saveProvider()} onCancel={closeEditor} tr={tr} />}
+    {expandedId !== null && expandedId !== '__new__' && draft && <ProviderEditor draft={draft} saving={saving} presets={presets} presetId={presetId} presetWarning={presetWarning} displayedApiKey={displayedApiKey} showApiKey={showApiKey} onApplyPreset={applyPreset} onChange={updateDraft} onBeginApiKeyEdit={beginApiKeyEdit} onChangeApiKey={changeApiKey} onToggleApiKeyVisibility={() => void toggleApiKeyVisibility()} onCopyApiKey={() => void copyApiKey()} onSave={() => void saveProvider()} onCancel={closeEditor} tr={tr} />}
   </div>;
 }
 
@@ -285,15 +363,53 @@ function ProviderCard({ provider, expanded, busy, onOpen, onTest, onToggle, onDe
   </article>;
 }
 
-function ProviderEditor({ draft, saving, isNew = false, onChange, onSave, onCancel, showApiKey, onRevealApiKey, onCopyApiKey, tr }: { draft: ProviderDraft; saving: boolean; isNew?: boolean; onChange: <K extends keyof ProviderDraft>(key: K, value: ProviderDraft[K]) => void; onSave: () => void; onCancel: () => void; showApiKey: boolean; onRevealApiKey: () => void; onCopyApiKey: () => void; tr: (english: string, chinese: string) => string }) {
+function ProviderEditor({
+  draft,
+  saving,
+  isNew = false,
+  presets,
+  presetId,
+  presetWarning,
+  displayedApiKey,
+  showApiKey,
+  onApplyPreset,
+  onChange,
+  onBeginApiKeyEdit,
+  onChangeApiKey,
+  onToggleApiKeyVisibility,
+  onCopyApiKey,
+  onSave,
+  onCancel,
+  tr,
+}: {
+  draft: ProviderDraft;
+  saving: boolean;
+  isNew?: boolean;
+  presets: ProviderPreset[];
+  presetId: string;
+  presetWarning: string;
+  displayedApiKey: string;
+  showApiKey: boolean;
+  onApplyPreset: (id: string) => void;
+  onChange: <K extends keyof ProviderDraft>(key: K, value: ProviderDraft[K]) => void;
+  onBeginApiKeyEdit: () => void;
+  onChangeApiKey: (value: string) => void;
+  onToggleApiKeyVisibility: () => void;
+  onCopyApiKey: () => void;
+  onSave: () => void;
+  onCancel: () => void;
+  tr: (english: string, chinese: string) => string;
+}) {
   return <section className="provider-editor">
     <div className="provider-editor-heading"><div><span>{isNew ? tr('New provider', '新增供应商') : tr('Provider settings', '供应商设置')}</span><strong>{draft.name || draft.id || tr('Unnamed provider', '未命名供应商')}</strong></div><button type="button" className="icon-button" onClick={onCancel} title={tr('Close editor', '关闭编辑')} aria-label={tr('Close editor', '关闭编辑')}><Icon name="close" size={15}/></button></div>
     <div className="provider-form-grid">
+      <label className="provider-form-wide"><span>{tr('Online preset', '在线预设')}</span><select aria-label={tr('Online preset', '在线预设')} value={presetId} onChange={event => onApplyPreset(event.target.value)}><option value={CUSTOM_PRESET_ID}>{tr('Custom / manual', '自定义 / 手动')}</option>{presets.map(preset => <option key={preset.id} value={preset.id}>{preset.name} ({preset.model_count})</option>)}</select></label>
+      {presetWarning ? <div className="provider-warning provider-form-wide">{tr('Online presets unavailable; manual configuration still works.', '在线预设暂不可用，仍可手动配置。')} {presetWarning}</div> : null}
       <label><span>{tr('Display name', '显示名称')}</span><input value={draft.name} onChange={event => onChange('name', event.target.value)} placeholder={tr('e.g. Work OpenAI', '例如：工作 OpenAI')} /></label>
-      <label><span>Provider ID</span><input value={draft.id} onChange={event => onChange('id', event.target.value.trim())} placeholder="openrouter" /></label>
+      <label><span>Provider ID</span><input aria-label="Provider ID" value={draft.id} onChange={event => onChange('id', event.target.value.trim())} placeholder="openrouter" /></label>
       <label><span>{tr('API format', 'API 格式')}</span><select value={draft.type} onChange={event => onChange('type', event.target.value as ProviderType)}>{API_FORMATS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
       <label className="provider-form-wide"><span>Base URL</span><input value={draft.baseUrl} onChange={event => onChange('baseUrl', event.target.value)} placeholder="https://api.example.com/v1" /></label>
-      <label className="provider-form-wide"><span>API Key</span><div className="provider-secret-input"><input type={showApiKey ? 'text' : 'password'} value={draft.apiKey || (draft.originalId ? '••••••••' : '')} onFocus={event => { if (event.currentTarget.value === '••••••••') onRevealApiKey(); }} onChange={event => onChange('apiKey', event.target.value)} placeholder="sk-..."/><button type="button" onClick={onRevealApiKey} title={showApiKey ? tr('Hide API key', '隐藏 API Key') : tr('Show API key', '显示 API Key')} aria-label={showApiKey ? tr('Hide API key', '隐藏 API Key') : tr('Show API key', '显示 API Key')}><Icon name="eye" size={14}/></button><button type="button" onClick={onCopyApiKey} title={tr('Copy API key', '复制 API Key')} aria-label={tr('Copy API key', '复制 API Key')}><Icon name="copy" size={14}/></button></div></label>
+      <label className="provider-form-wide"><span>API Key</span><div className="provider-secret-input"><input aria-label="API Key" type={showApiKey ? 'text' : 'password'} value={displayedApiKey} onFocus={onBeginApiKeyEdit} onChange={event => onChangeApiKey(event.target.value)} placeholder={draft.hasStoredKey ? tr('Enter a new key to replace the stored one', '输入新密钥以替换已保存的密钥') : 'sk-...'}/><button type="button" onClick={onToggleApiKeyVisibility} title={showApiKey ? tr('Hide API key', '隐藏 API Key') : tr('Show API key', '显示 API Key')} aria-label={showApiKey ? tr('Hide API key', '隐藏 API Key') : tr('Show API key', '显示 API Key')}><Icon name="eye" size={14}/></button><button type="button" onClick={onCopyApiKey} title={tr('Copy API key', '复制 API Key')} aria-label={tr('Copy API key', '复制 API Key')}><Icon name="copy" size={14}/></button></div></label>
       <label className="provider-switch"><input type="checkbox" checked={draft.autoDiscover} onChange={event => onChange('autoDiscover', event.target.checked)}/><span><strong>{tr('Automatically fetch models', '自动获取模型')}</strong><small>{tr('When off, only custom model IDs are shown.', '关闭后只显示自定义模型 ID。')}</small></span></label>
       <label className="provider-switch"><input type="checkbox" checked={draft.disabled} onChange={event => onChange('disabled', event.target.checked)}/><span><strong>{tr('Disabled', '禁用')}</strong><small>{tr('Disabled providers disappear from model selection.', '禁用后不会出现在模型选择器中。')}</small></span></label>
       {!draft.autoDiscover && <label className="provider-form-wide"><span>{tr('Custom model IDs', '自定义模型 ID')}</span><textarea value={draft.customModels} onChange={event => onChange('customModels', event.target.value)} placeholder={'gpt-4o\nclaude-3-5-sonnet'} rows={4}/></label>}
