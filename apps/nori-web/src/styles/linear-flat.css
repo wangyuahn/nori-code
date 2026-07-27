@@ -5,17 +5,19 @@
    ========================================================================== */
 
 :root {
-  /* Chrome accent — deeper indigo for edges & highlights */
-  --nori-cyan: #484dc4;
-  --nori-cyan-dim: rgba(72, 77, 196, 0.16);
+  /* Chrome accent — Linear lavender-indigo (#5e6ad2) */
+  --nori-cyan: #5e6ad2;
+  --nori-cyan-dim: rgba(94, 106, 210, 0.14);
   --nori-thinking: #8b8b8b;
-  --nori-accent: #484dc4;
-  --nori-accent-dim: rgba(72, 77, 196, 0.16);
-  --nori-accent-edge: rgba(72, 77, 196, 0.42);
-  --nori-accent-soft: rgba(72, 77, 196, 0.09);
+  --nori-accent: #5e6ad2;
+  --nori-accent-dim: rgba(94, 106, 210, 0.14);
+  --nori-accent-edge: rgba(94, 106, 210, 0.38);
+  --nori-accent-soft: rgba(94, 106, 210, 0.07);
+  --nori-accent-hover: #6f7ae0;
+  --nori-accent-focus: #5e69d1;
   --nori-shell-gradient:
-    radial-gradient(ellipse 140% 90% at 0% -10%, rgba(72, 77, 196, 0.1), transparent 52%),
-    radial-gradient(ellipse 100% 80% at 100% 110%, rgba(92, 72, 196, 0.07), transparent 48%);
+    radial-gradient(ellipse 140% 90% at 0% -10%, rgba(94, 106, 210, 0.08), transparent 52%),
+    radial-gradient(ellipse 100% 80% at 100% 110%, rgba(130, 143, 255, 0.05), transparent 48%);
 
   /* Neutral dark palette — purple only via gradients above */
   --nori-bg: #090909;
@@ -66,16 +68,18 @@
 }
 
 [data-theme="light"] {
-  --nori-cyan: #454ab8;
-  --nori-cyan-dim: rgba(69, 74, 184, 0.12);
-  --nori-accent: #454ab8;
-  --nori-accent-dim: rgba(69, 74, 184, 0.12);
-  --nori-accent-edge: rgba(69, 74, 184, 0.34);
-  --nori-accent-soft: rgba(69, 74, 184, 0.07);
+  --nori-cyan: #5e6ad2;
+  --nori-cyan-dim: rgba(94, 106, 210, 0.1);
+  --nori-accent: #5e6ad2;
+  --nori-accent-dim: rgba(94, 106, 210, 0.1);
+  --nori-accent-edge: rgba(94, 106, 210, 0.3);
+  --nori-accent-soft: rgba(94, 106, 210, 0.05);
+  --nori-accent-hover: #828fff;
+  --nori-accent-focus: #5e69d1;
   --nori-shell-gradient:
-    radial-gradient(ellipse 120% 80% at 0% 0%, rgba(69, 74, 184, 0.07), transparent 50%),
-    radial-gradient(ellipse 90% 70% at 100% 100%, rgba(92, 72, 196, 0.05), transparent 45%);
-  --nori-link: #3f44a8;
+    radial-gradient(ellipse 120% 80% at 0% 0%, rgba(94, 106, 210, 0.06), transparent 50%),
+    radial-gradient(ellipse 90% 70% at 100% 100%, rgba(130, 143, 255, 0.04), transparent 45%);
+  --nori-link: #5e6ad2;
   --nori-bg: #f9f9fb;
   --nori-surface: #ffffff;
   --nori-surface-raised: #f4f4f6;
@@ -107,7 +111,7 @@
 /* ── Focus & selection ─────────────────────────────────────────────────── */
 
 :focus-visible {
-  outline: 1px solid color-mix(in srgb, var(--nori-accent) 55%, var(--nori-border-active));
+  outline: 1px solid var(--nori-accent-focus);
   outline-offset: 1px;
 }
 

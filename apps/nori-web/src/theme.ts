@@ -3,8 +3,8 @@ export type ThemeMode = 'dark' | 'light';
 const THEME_KEY = 'nori-theme-color';
 const THEME_MODE_KEY = 'nori-theme';
 const UI_SCALE_KEY = 'nori-ui-scale';
-export const DEFAULT_ACCENT = '#484dc4';
-const LEGACY_ACCENTS = new Set(['#00bcd4', '#6dd6c7', '#9be8b0', '#5e6ad2', '#4f57c7', '#6b72d6', '#8b8b8b', '#8b8d98']);
+export const DEFAULT_ACCENT = '#5e6ad2';
+const LEGACY_ACCENTS = new Set(['#00bcd4', '#6dd6c7', '#9be8b0', '#4f57c7', '#484dc4', '#6b72d6', '#8b8b8b', '#8b8d98']);
 
 export type UiScale = 'compact' | 'default' | 'large';
 
