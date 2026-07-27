@@ -149,7 +149,7 @@ jobs:
           KIMI_DESKTOP_NOTARIZE: ${{ (runner.os == 'macOS' && inputs.sign-macos) && 'true' || 'false' }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_NOTARIZATION_ISSUER_ID }}
-        run: pnpm --filter @nori-code/nori-work run dist
+        run: pnpm --filter @nori-code/nori-work run dist -- --publish never
 
       - name: Cleanup macOS keychain
         if: always() && runner.os == 'macOS' && inputs.sign-macos
