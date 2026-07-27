@@ -12,6 +12,9 @@ name: desktop-build
 #   - workflow_dispatch: manual ad-hoc builds from the Actions tab.
 #   - workflow_call:     called by release.yml to attach installers to a release.
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       sign-macos:
@@ -155,8 +158,8 @@ jobs:
       - name: Upload installers
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ inputs.upload-artifact-prefix }}-${{ matrix.target }}
-          retention-days: ${{ inputs.retention-days }}
+          name: ${{ inputs.upload-artifact-prefix || 'nori-work' }}-${{ matrix.target }}
+          retention-days: ${{ inputs.retention-days || 7 }}
           path: |
             apps/nori-desktop/dist-app/*.dmg
             apps/nori-desktop/dist-app/*.zip
