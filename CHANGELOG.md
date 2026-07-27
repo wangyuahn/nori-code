@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.0.1-pre.0 (2026-07-27)
+
+### Features
+
+- Web chat work process: expand tool calls to inspect inputs, Edit/Write diffs, Bash command output, Browser actions, and failure messages.
+- Edit tool rows show real line diffs from recorded code changes instead of placeholder markers.
+- Refresh the bundled web UI with a flatter Linear-inspired visual style: neutral dark surfaces, subtle indigo edge highlights, and restrained purple gradients.
+- MCP elicitation and sampling flow through agent-core, protocol, server, and Nori Work UI.
+- Desktop embedded server worker packaging for a more reliable bundled daemon lifecycle.
+
+### Fixes
+
+- Restore provider preset loading and API key mask/reveal behavior in web provider settings.
+
+### Verification
+
+- Nori-web tests cover tool call detail assembly, Edit diff rendering, and chat expansion behavior.
+- Desktop server lifecycle tests cover the packaged worker startup path.
+
 ## v1.0.0-pre.5 (2026-07-22)
 
 ### Fixes

@@ -1,17 +1,17 @@
 {
-  "changelog": ["@changesets/changelog-github", { "repo": "MoonshotAI/nori-code", "disableThanks": true }],
+  "changelog": ["@changesets/changelog-github", { "repo": "wangyuahn/nori-code", "disableThanks": true }],
   "commit": false,
   "fixed": [],
   "linked": [],
   "access": "public",
-  "baseBranch": "main",
+  "baseBranch": "master",
   "updateInternalDependencies": "patch",
   "ignore": [
-    "@moonshot-ai/server-e2e",
-    "@moonshot-ai/vis",
-    "@moonshot-ai/vis-server",
-    "@moonshot-ai/vis-web",
-    "kimi-migration-legacy"
+    "@nori-code/server-e2e",
+    "@nori-code/vis",
+    "@nori-code/vis-server",
+    "@nori-code/vis-web",
+    "@nori-code/migration-legacy"
   ],
   "snapshot": {
     "useCalculatedVersion": true,

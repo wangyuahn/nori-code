@@ -1,5 +1,15 @@
 # @nori-code/kimi-code
 
+## 1.0.1
+
+### Patch Changes
+
+- [#5](https://github.com/wangyuahn/nori-code/pull/5) [`7ae97c3`](https://github.com/wangyuahn/nori-code/commit/7ae97c33d0210e5ac9d690ba142f8b2d2b2db917) - Add expandable tool call details in the web chat work process: view inputs, diffs for edits and writes, command output, and failure messages by expanding a tool row.
+
+- [#2](https://github.com/wangyuahn/nori-code/pull/2) [`e550144`](https://github.com/wangyuahn/nori-code/commit/e550144d6f993c395d666a08b4562a128961fb4f) - Fix provider preset loading and API key mask/reveal behavior in the web provider settings.
+
+- [#3](https://github.com/wangyuahn/nori-code/pull/3) [`fb001cc`](https://github.com/wangyuahn/nori-code/commit/fb001cc8188e2a0fa02797e94db5ec0d7f13de9e) - Refresh the bundled web UI with a flatter, Linear-inspired visual style: neutral dark surfaces, subtle indigo edge highlights, and restrained purple gradients on shell chrome, navigation, and panels.
+
 ## 0.22.0
 
 ### Minor Changes
