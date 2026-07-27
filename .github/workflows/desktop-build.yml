@@ -62,7 +62,7 @@ on:
         required: false
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   desktop:
@@ -141,6 +141,7 @@ jobs:
       - name: Build & package desktop app
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           # macOS signing is driven by env: when sign-macos, electron-builder
           # signs with the keychain's Developer ID and notarizes via the notary
           # API key; otherwise it builds unsigned.
@@ -149,7 +150,7 @@ jobs:
           KIMI_DESKTOP_NOTARIZE: ${{ (runner.os == 'macOS' && inputs.sign-macos) && 'true' || 'false' }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_NOTARIZATION_ISSUER_ID }}
-        run: pnpm --filter @nori-code/nori-work run dist -- --publish never
+        run: pnpm --filter @nori-code/nori-work run dist
 
       - name: Cleanup macOS keychain
         if: always() && runner.os == 'macOS' && inputs.sign-macos
