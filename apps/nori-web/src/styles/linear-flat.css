@@ -40,6 +40,7 @@
 
   /* Shell tokens */
   --nori-shell: #0a0a0b;
+  --nori-sidebar-bg: #0c0c0e;
   --nori-topbar: #0a0a0b;
   --nori-statusbar: #101012;
   --nori-control: #16161a;
@@ -79,6 +80,7 @@
   --nori-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08);
   --nori-shadow-popover: 0 4px 16px rgba(0, 0, 0, 0.06);
   --nori-shell: #f9f9fb;
+  --nori-sidebar-bg: #f4f4f6;
   --nori-topbar: #ffffff;
   --nori-statusbar: #f4f4f6;
   --nori-control: #f4f4f6;
@@ -166,14 +168,39 @@
 
 /* ── Shell layout ──────────────────────────────────────────────────────── */
 
+.codex-layout .sidebar,
 .sidebar {
-  background: var(--nori-shell);
+  background: var(--nori-sidebar-bg);
   backdrop-filter: none;
   border-right: 1px solid var(--nori-border);
 }
 
+[data-theme="light"] .codex-layout .sidebar,
 [data-theme="light"] .sidebar {
-  background: var(--nori-shell);
+  background: var(--nori-sidebar-bg);
+}
+
+.sidebar-footer-nav {
+  border-top: 1px solid var(--nori-border);
+}
+
+.codex-layout .sidebar-workspace-switch {
+  border-radius: var(--nori-radius-sm);
+  background: var(--nori-control);
+  border-color: var(--nori-border);
+}
+
+.codex-layout .sidebar-nav-item.active,
+.codex-layout .sidebar-tab.active,
+.sidebar-nav-item.active {
+  background: var(--nori-control-active);
+  color: var(--nori-text);
+}
+
+.codex-layout .sidebar-nav-item,
+.codex-layout .sidebar-tab,
+.sidebar-nav-item {
+  border-radius: var(--nori-radius-sm);
 }
 
 .top-bar {
