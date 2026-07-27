@@ -407,7 +407,139 @@ textarea.input:focus {
   box-shadow: none;
 }
 
-/* ── Inspector panels ──────────────────────────────────────────────────── */
+/* ── Sidebar — neutral active states (no accent tint) ──────────────────── */
+
+.sidebar-tab.active,
+.codex-layout .sidebar-tab.active {
+  background: var(--nori-control-active);
+  color: var(--nori-text);
+}
+
+.sidebar-tab.active svg,
+.codex-layout .sidebar-tab.active svg,
+.sidebar-nav-item.active svg,
+.codex-layout .sidebar-nav-item.active svg {
+  color: var(--nori-text);
+}
+
+.sidebar-item.active,
+.codex-layout .sidebar-item.active {
+  border-color: transparent;
+  background: var(--nori-control-hover);
+  color: var(--nori-text);
+}
+
+.codex-layout .sidebar-workspace-switch .sidebar-tab.active {
+  border-color: var(--nori-border-strong);
+  background: var(--nori-control-active);
+  box-shadow: none;
+}
+
+.codex-layout .sidebar-workspace-switch .sidebar-tab.active svg {
+  color: var(--nori-text);
+}
+
+.sidebar-empty svg {
+  color: var(--nori-text-muted);
+}
+
+/* ── Inspector — flat docked panel (no floating island) ────────────────── */
+
+.workspace-inspector,
+.codex-layout .inspector-pane {
+  border-left: none;
+}
+
+.inspector-navigation {
+  border: 1px solid var(--nori-border);
+  border-radius: var(--nori-radius);
+  background: var(--nori-surface);
+  box-shadow: none;
+}
+
+.inspector-navigation.compact {
+  border-radius: var(--nori-radius);
+  box-shadow: none;
+}
+
+.inspector-stage {
+  border: 1px solid var(--nori-border);
+  border-radius: var(--nori-radius);
+  background: var(--nori-surface);
+  box-shadow: none;
+}
+
+.inspector-stage.open {
+  transform: none;
+}
+
+.inspector-overview-open .inspector-tab-list > button:hover {
+  transform: none;
+}
+
+.inspector-nav-icon {
+  border-radius: var(--nori-radius-sm);
+  background: var(--nori-control);
+}
+
+.inspector-tab-list > button:hover .inspector-nav-icon,
+.inspector-tab-list > button.active .inspector-nav-icon {
+  color: var(--nori-text);
+  background: var(--nori-control-hover);
+  transform: none;
+}
+
+.inspector-navigation.compact button:hover,
+.inspector-navigation.compact .inspector-collapse-button:hover {
+  transform: none;
+}
+
+.inspector-navigation.compact button.active {
+  color: var(--nori-text);
+  background: var(--nori-control-active);
+}
+
+.inspector-navigation.compact .inspector-tab-list em {
+  background: var(--nori-control-active);
+  color: var(--nori-text-secondary);
+}
+
+.inspector-pin-button.active {
+  color: var(--nori-text);
+  background: var(--nori-control-hover);
+}
+
+.inspector-activity-icon,
+.inspector-activity-highlight strong,
+.inspector-activity-line.active strong {
+  color: var(--nori-text-secondary);
+}
+
+.inspector-open-tab.active {
+  box-shadow: inset 0 -1px var(--nori-border-strong);
+}
+
+.inspector-tool-menu {
+  border-radius: var(--nori-radius-sm);
+  box-shadow: var(--nori-shadow-popover);
+}
+
+.inspector-collapse-button:hover {
+  transform: none;
+}
+
+/* Auto-hide peek: no border artifact on the edge */
+.workspace-chat-layout .workspace-inspector.inspector-overview-auto-hide:not(.standalone) {
+  transform: translateX(calc(100% - 8px));
+  border: none;
+}
+
+.workspace-chat-layout .workspace-inspector.inspector-overview-auto-hide:not(.standalone):hover,
+.workspace-chat-layout .workspace-inspector.inspector-overview-auto-hide:not(.standalone):focus-within {
+  transform: translateX(0);
+}
+
+/* ── Inspector panels (legacy class names) ───────────────────────────────── */
 
 .inspector-tabs button {
   border-radius: var(--nori-radius-sm);
@@ -415,10 +547,6 @@ textarea.input:focus {
 
 .inspector-tabs button.active {
   box-shadow: none;
-}
-
-.codex-layout .inspector-pane {
-  border-left: 1px solid var(--nori-border);
 }
 
 /* ── Reduce motion on decorative transforms ────────────────────────────── */
@@ -454,10 +582,6 @@ textarea.input:focus {
 
 .inspector-pin-button:hover {
   transform: none;
-}
-
-.workspace-inspector {
-  border-left: 1px solid var(--nori-border);
 }
 
 /* ── File tree ───────────────────────────────────────────────────────────── */
