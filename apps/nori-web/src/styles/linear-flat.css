@@ -23,9 +23,9 @@
   --nori-border-strong: #333333;
   --nori-border-active: #525252;
   --nori-text: #ededed;
-  --nori-text-secondary: #8b8b8b;
-  --nori-text-muted: #5c5c5c;
-  --nori-text-subtle: #454545;
+  --nori-text-secondary: #b0b0b0;
+  --nori-text-muted: #8f8f8f;
+  --nori-text-subtle: #757575;
 
   /* Primary action — Linear uses light buttons on dark bg */
   --nori-primary-bg: #e8e8e8;
