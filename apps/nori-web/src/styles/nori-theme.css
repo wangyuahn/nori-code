@@ -23,8 +23,8 @@
 
   /* text */
   --nori-text: #ededed;
-  --nori-text-secondary: #8b8b8b;
-  --nori-text-muted: #5c5c5c;
+  --nori-text-secondary: #b0b0b0;
+  --nori-text-muted: #8f8f8f;
 
   /* semantic */
   --nori-success: #22c55e;
@@ -1510,9 +1510,9 @@ select.input option {
   --nori-border-strong: #333333;
   --nori-border-active: #525252;
   --nori-text: #ededed;
-  --nori-text-secondary: #8b8b8b;
-  --nori-text-muted: #5c5c5c;
-  --nori-text-subtle: #454545;
+  --nori-text-secondary: #b0b0b0;
+  --nori-text-muted: #8f8f8f;
+  --nori-text-subtle: #757575;
   --nori-cyan: #8b8b8b;
   --nori-cyan-dim: rgba(255, 255, 255, 0.06);
   --nori-radius: 6px;
@@ -1825,13 +1825,13 @@ kbd {
 .message-body { min-width: 0; padding-top: 3px; }
 .chat-message-role { margin-bottom: 7px; color: var(--nori-text); font-size: calc(11px * var(--nori-ui-font-scale)); font-weight: 650; }
 .chat-message-role span { margin-left: 5px; color: var(--nori-cyan); font-size: calc(9px * var(--nori-ui-font-scale)); font-weight: 500; }
-.chat-message-content { color: var(--nori-text-secondary); font-size: calc(13px * var(--nori-ui-font-scale)); line-height: 1.72; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-message-content { color: var(--nori-text); font-size: calc(13px * var(--nori-ui-font-scale)); line-height: 1.72; white-space: pre-wrap; overflow-wrap: anywhere; }
 .chat-message-content .markdown-view { white-space: normal; }
 .chat-message-user .chat-message-content { color: var(--nori-text); }
 .chat-message-system .chat-message-content { color: var(--nori-danger); }
 .chat-message-time { display: block; margin-top: 7px; color: var(--nori-text-muted); font-size: calc(9px * var(--nori-ui-font-scale)); }
 .message-token-usage { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; color: var(--nori-text-muted); font-size: calc(9px * var(--nori-ui-font-scale)); }
-.message-token-usage span { color: var(--nori-text-subtle); }
+.message-token-usage span { color: var(--nori-text-muted); }
 .agent-token-usage { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--nori-border); color: var(--nori-text-secondary); font-size: calc(10px * var(--nori-ui-font-scale)); }
 .agent-token-usage small { color: var(--nori-text-muted); font-size: calc(9px * var(--nori-ui-font-scale)); }
 .chat-message-thinking, .tool-call { margin: 8px 0; border: 1px solid var(--nori-border); border-radius: 8px; background: var(--nori-surface); }
@@ -3125,7 +3125,7 @@ kbd {
 .file-preview-image { display: flex; min-height: 0; flex: 1; align-items: center; justify-content: center; padding: 18px; overflow: auto; }
 .file-preview-image img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .markdown-preview-scroll { min-height: 0; flex: 1; padding: 22px clamp(18px, 4vw, 48px); overflow: auto; }
-.markdown-view { max-width: 860px; color: var(--nori-text-secondary); font-size: calc(13px * var(--nori-ui-font-scale)); line-height: 1.72; overflow-wrap: anywhere; }
+.markdown-view { max-width: 860px; color: var(--nori-text); font-size: calc(13px * var(--nori-ui-font-scale)); line-height: 1.72; overflow-wrap: anywhere; }
 .markdown-view > :first-child { margin-top: 0; }
 .markdown-view > :last-child { margin-bottom: 0; }
 .markdown-view h1,
@@ -3156,7 +3156,7 @@ kbd {
 .markdown-code-copy { position: absolute; top: 7px; right: 7px; min-width: 54px; height: 25px; padding: 0 9px; border: 1px solid var(--nori-border); border-radius: 4px; color: var(--nori-text-muted); background: var(--nori-control); font: calc(11px * var(--nori-ui-font-scale))/1 var(--nori-font-sans); cursor: pointer; }
 .markdown-code-copy:hover { color: var(--nori-text); border-color: var(--nori-border-active); }
 .markdown-code-copy.copied { color: var(--nori-success); border-color: color-mix(in srgb, var(--nori-success) 55%, var(--nori-border)); }
-.markdown-view blockquote { padding-left: 14px; border-left: 3px solid var(--nori-border-active); color: var(--nori-text-muted); }
+.markdown-view blockquote { padding-left: 14px; border-left: 3px solid var(--nori-border-active); color: var(--nori-text-secondary); }
 .markdown-view table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
 .markdown-view th,
 .markdown-view td { padding: 7px 10px; border: 1px solid var(--nori-border); text-align: left; }
@@ -3540,7 +3540,7 @@ kbd {
 .inspector-activity-todos li > span:last-child { min-width: 0; overflow-wrap: anywhere; }
 .inspector-activity-todos li.todo-in_progress { color: var(--nori-warning); }
 .inspector-activity-todos li.todo-in_progress .inspector-todo-status { border-color: var(--nori-warning); color: var(--nori-warning); }
-.inspector-activity-todos li.todo-done { color: var(--nori-text-muted); text-decoration: line-through; }
+.inspector-activity-todos li.todo-done { color: var(--nori-text-secondary); text-decoration: line-through; }
 .inspector-activity-todos li.todo-done .inspector-todo-status { border-color: var(--nori-success); color: var(--nori-success); }
 .inspector-activity-summary.goal-blocked .inspector-activity-highlight strong { color: var(--nori-danger); }
 .inspector-activity-actions { display: flex; justify-content: flex-end; gap: 5px; padding: 7px 10px 9px; border-top: 1px solid color-mix(in srgb, var(--nori-border) 58%, transparent); }
@@ -4374,7 +4374,7 @@ kbd {
 .tool-call-detail-heading { display: flex; align-items: center; gap: 6px; color: var(--nori-text-muted); font-size: calc(9px * var(--nori-ui-font-scale)); }
 .tool-call-detail-heading > strong { color: var(--nori-text-secondary); font-weight: 650; }
 .exit-plan-markdown { max-height: min(52vh, 720px); margin: 4px 0 6px 27px; padding: 12px 14px; overflow: auto; border: 1px solid var(--nori-border); border-radius: 5px; background: var(--nori-bg); }
-.exit-plan-markdown .markdown-view { max-width: none; color: var(--nori-text-secondary); font-size: calc(11px * var(--nori-ui-font-scale)); line-height: 1.65; }
+.exit-plan-markdown .markdown-view { max-width: none; color: var(--nori-text); font-size: calc(11px * var(--nori-ui-font-scale)); line-height: 1.65; }
 .exit-plan-markdown .markdown-view h1 { font-size: calc(17px * var(--nori-ui-font-scale)); }
 .exit-plan-markdown .markdown-view h2 { font-size: calc(15px * var(--nori-ui-font-scale)); }
 .exit-plan-markdown .markdown-view h3 { font-size: calc(13px * var(--nori-ui-font-scale)); }
