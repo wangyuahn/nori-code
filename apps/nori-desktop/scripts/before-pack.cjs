@@ -1,21 +1,30 @@
 'use strict';
 
-// electron-builder `beforePack` hook.
-//
-// Each electron-builder run targets one (platform, arch). We stage the matching
-// prebuilt Nori SEA backend into `resources-stage/bin/<target>/` so that the
-// `extraResources` rule copies exactly that one binary into the packaged app's
-// resources. sea-path.ts resolves `<resources>/bin/<target>/nori[.exe]` at
-// runtime, where <target> is `${process.platform}-${process.arch}`.
-//
-// We also stage the built nori-web assets into `resources-stage/nori-web/dist`
-// so the packaged app contains `<resources>/nori-web/dist/index.html`.
+const { createHash } = require('node:crypto');
+const { createRequire } = require('node:module');
+const {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  statSync,
+} = require('node:fs');
+const { dirname, join, resolve } = require('node:path');
 
-const { existsSync, rmSync, mkdirSync, cpSync, readdirSync, statSync, readFileSync } = require('node:fs');
-const { join, resolve } = require('node:path');
-
-// electron-builder Arch enum -> Node `process.arch` name.
-const ARCH_NAMES = { 0: 'ia32', 1: 'x64', 2: 'armv7l', 3: 'arm64', 4: 'universal' };
+const RUNTIME_PACKAGES = [
+  'node-pty',
+  'pyright',
+  'typescript-language-server',
+  'typescript',
+  'vscode-langservers-extracted',
+  'yaml-language-server',
+  'bash-language-server',
+  '@vue/language-server',
+  'svelte-language-server',
+];
 
 function newestMtime(paths) {
   let newest = 0;
@@ -43,72 +52,154 @@ function assertFreshArtifact(artifact, inputs, buildCommand) {
   }
 }
 
-exports.default = async function beforePack(context) {
-  const platform = context.electronPlatformName; // 'darwin' | 'win32' | 'linux'
-  const archName = ARCH_NAMES[context.arch];
-  if (archName === undefined) {
-    throw new Error(`Unsupported arch for packaging: ${String(context.arch)}`);
-  }
-  const target = `${platform}-${archName}`;
-  const exe = platform === 'win32' ? 'nori.exe' : 'nori';
+function sha256(path) {
+  return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
 
+function packageTarget(root, packageName) {
+  return resolve(root, 'node_modules', ...packageName.split('/'));
+}
+
+function resolvePackageJson(requireFrom, packageName) {
+  for (const searchPath of requireFrom.resolve.paths(packageName) ?? []) {
+    const candidate = resolve(searchPath, ...packageName.split('/'), 'package.json');
+    if (existsSync(candidate)) return candidate;
+  }
+  try {
+    return requireFrom.resolve(`${packageName}/package.json`);
+  } catch (packageJsonError) {
+    let directory;
+    try {
+      directory = dirname(requireFrom.resolve(packageName));
+    } catch {
+      throw packageJsonError;
+    }
+    for (let depth = 0; depth < 12; depth++) {
+      const candidate = resolve(directory, 'package.json');
+      if (existsSync(candidate)) {
+        const packageJson = JSON.parse(readFileSync(candidate, 'utf8'));
+        if (packageJson.name === packageName) return candidate;
+      }
+      const parent = dirname(directory);
+      if (parent === directory) break;
+      directory = parent;
+    }
+    throw packageJsonError;
+  }
+}
+
+function stagePackageTree(
+  packageName,
+  requireFrom,
+  modulesStageDir,
+  staged,
+  ancestors = new Map(),
+) {
+  let packageJsonPath;
+  try {
+    packageJsonPath = resolvePackageJson(requireFrom, packageName);
+  } catch (error) {
+    throw new Error(`Unable to resolve server runtime package ${packageName}: ${error.message}`);
+  }
+  packageJsonPath = realpathSync(packageJsonPath);
+  const packageRoot = dirname(packageJsonPath);
+  const target = packageTarget(modulesStageDir, packageName);
+  const existingRoot = staged.get(target);
+  if (existingRoot !== undefined) {
+    if (existingRoot !== packageRoot) {
+      throw new Error(
+        `Conflicting server runtime package versions for ${packageName}: ` +
+          `${existingRoot} and ${packageRoot}.`,
+      );
+    }
+    return;
+  }
+  staged.set(target, packageRoot);
+
+  mkdirSync(dirname(target), { recursive: true });
+  cpSync(packageRoot, target, { recursive: true });
+
+  const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
+  const packageRequire = createRequire(packageJsonPath);
+  const dependencies = {
+    ...packageJson.dependencies,
+    ...packageJson.optionalDependencies,
+  };
+  const nextAncestors = new Map(ancestors);
+  nextAncestors.set(packageName, packageRoot);
+  const childModulesDir = resolve(target, 'node_modules');
+  for (const dependency of Object.keys(dependencies).sort()) {
+    if (nextAncestors.get(dependency) === packageRoot) continue;
+    try {
+      stagePackageTree(
+        dependency,
+        packageRequire,
+        childModulesDir,
+        staged,
+        nextAncestors,
+      );
+    } catch (error) {
+      if (packageJson.optionalDependencies?.[dependency] !== undefined) continue;
+      throw error;
+    }
+  }
+}
+
+exports.default = async function beforePack(context) {
   const desktopRoot = resolve(__dirname, '..');
   const workspaceRoot = resolve(desktopRoot, '..', '..');
   const stageRoot = resolve(desktopRoot, 'resources-stage');
+  const runtimeStageDir = resolve(stageRoot, 'server-runtime');
+  const workerPath = resolve(desktopRoot, 'out', 'server-worker.cjs');
+  const manifestPath = resolve(desktopRoot, 'out', 'server-worker.manifest.json');
+  const desktopPackage = JSON.parse(readFileSync(resolve(desktopRoot, 'package.json'), 'utf8'));
 
-  // Stage SEA binary.
-  const seaDir = resolve(desktopRoot, '..', 'nori-code', 'dist-native', 'bin', target);
-  const seaExe = join(seaDir, exe);
-  if (!existsSync(seaExe)) {
+  if (!existsSync(workerPath) || !existsSync(manifestPath)) {
+    throw new Error('Built server worker is missing. Run `pnpm -C apps/nori-desktop build` first.');
+  }
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  if (manifest.schemaVersion !== 1 || manifest.version !== desktopPackage.version) {
     throw new Error(
-      `Bundled Nori server not found for ${target} at ${seaExe}. ` +
-        `Build it for this platform first: \`pnpm -C apps/nori-code build:native:sea\` ` +
-        `(CI builds the SEA on each platform runner before packaging).`,
+      `Server worker version ${String(manifest.version)} does not match ` +
+        `Nori Work ${desktopPackage.version}.`,
     );
   }
-  const desktopPackage = JSON.parse(readFileSync(resolve(desktopRoot, 'package.json'), 'utf-8'));
-  const nativeVersionPath = `${seaExe}.version`;
-  if (!existsSync(nativeVersionPath)) {
-    throw new Error(
-      `Native version marker not found at ${nativeVersionPath}. ` +
-        'Rebuild the native SEA before packaging.',
-    );
+  if (manifest.sha256 !== sha256(workerPath)) {
+    throw new Error('Server worker hash does not match its build manifest. Rebuild Nori Work.');
   }
-  const nativeVersion = readFileSync(nativeVersionPath, 'utf-8').trim();
-  if (nativeVersion !== desktopPackage.version) {
-    throw new Error(
-      `Native SEA version ${nativeVersion} does not match Nori Work ${desktopPackage.version}. ` +
-        'Rebuild the native SEA and desktop app from the same checkout.',
-    );
-  }
-  const packageInputs = readdirSync(resolve(workspaceRoot, 'packages'), { withFileTypes: true })
-    .filter(entry => entry.isDirectory())
-    .flatMap(entry => [
-      resolve(workspaceRoot, 'packages', entry.name, 'package.json'),
-      resolve(workspaceRoot, 'packages', entry.name, 'src'),
-    ]);
-  assertFreshArtifact(seaExe, [
+  assertFreshArtifact(workerPath, [
     resolve(workspaceRoot, 'package.json'),
     resolve(workspaceRoot, 'pnpm-lock.yaml'),
-    resolve(workspaceRoot, 'apps', 'nori-code', 'package.json'),
-    resolve(workspaceRoot, 'apps', 'nori-code', 'src'),
-    resolve(workspaceRoot, 'apps', 'nori-code', 'scripts', 'native'),
-    ...packageInputs,
-  ], 'pnpm -C apps/nori-code build:native:sea');
+    resolve(workspaceRoot, 'apps', 'nori-desktop', 'package.json'),
+    resolve(workspaceRoot, 'apps', 'nori-desktop', 'src'),
+    resolve(workspaceRoot, 'packages', 'server', 'src'),
+    resolve(workspaceRoot, 'packages', 'agent-core', 'src'),
+  ], 'pnpm -C apps/nori-desktop build');
 
-  const binStageDir = resolve(stageRoot, 'bin', target);
-  rmSync(binStageDir, { recursive: true, force: true });
-  mkdirSync(binStageDir, { recursive: true });
-  cpSync(seaDir, binStageDir, { recursive: true });
-  console.log(`[before-pack] staged Nori server (${target}) -> ${binStageDir}`);
+  rmSync(resolve(stageRoot, 'bin'), { recursive: true, force: true });
+  rmSync(runtimeStageDir, { recursive: true, force: true });
+  mkdirSync(runtimeStageDir, { recursive: true });
+  cpSync(workerPath, resolve(runtimeStageDir, 'server-worker.cjs'));
+  cpSync(manifestPath, resolve(runtimeStageDir, 'server-worker.manifest.json'));
 
-  // Stage nori-web dist assets.
+  const requireFromAgentCore = createRequire(
+    resolve(workspaceRoot, 'packages', 'agent-core', 'package.json'),
+  );
+  const staged = new Map();
+  for (const packageName of RUNTIME_PACKAGES) {
+    stagePackageTree(packageName, requireFromAgentCore, runtimeStageDir, staged);
+  }
+  console.log(
+    `[before-pack] staged server worker ${desktopPackage.version} with ` +
+      `${String(staged.size)} runtime packages -> ${runtimeStageDir}`,
+  );
+
   const webSourceDir = resolve(desktopRoot, '..', 'nori-web', 'dist');
   const webStageDir = resolve(stageRoot, 'nori-web', 'dist');
   if (!existsSync(webSourceDir)) {
     throw new Error(
       `Built nori-web assets not found at ${webSourceDir}. ` +
-        `Build them first: \`pnpm -C apps/nori-web build\`.`,
+        'Build them first: `pnpm -C apps/nori-web build`.',
     );
   }
   assertFreshArtifact(resolve(webSourceDir, 'index.html'), [
@@ -121,4 +212,6 @@ exports.default = async function beforePack(context) {
   mkdirSync(webStageDir, { recursive: true });
   cpSync(webSourceDir, webStageDir, { recursive: true });
   console.log(`[before-pack] staged nori-web assets -> ${webStageDir}`);
+
+  void context;
 };

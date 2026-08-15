@@ -22,6 +22,8 @@
     "#/services/gateway": "./src/services/gateway/index.ts",
     "#/services/gateway/*": "./src/services/gateway/*.ts",
     "#/services/guiStore/*": "./src/services/guiStore/*.ts",
+    "#/services/mcpElicitation": "./src/services/mcpElicitation/index.ts",
+    "#/services/mcpElicitation/*": "./src/services/mcpElicitation/*.ts",
     "#/services/question": "./src/services/question/index.ts",
     "#/services/question/*": "./src/services/question/*.ts",
     "#/services/snapshot": "./src/services/snapshot/index.ts",
@@ -32,6 +34,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./control": {
+      "types": "./src/control.ts",
+      "default": "./src/control.ts"
     }
   },
   "scripts": {

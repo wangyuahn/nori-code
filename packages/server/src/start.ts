@@ -60,6 +60,18 @@ export interface ServerStartOptions {
 
   lockPath?: string;
 
+  /** Stable nonce supplied by the process coordinator for this launch. */
+  launchId?: string;
+
+  /** Absolute launch timestamp used for the shared 30-second startup budget. */
+  startedAt?: string;
+
+  /** Human-readable owner entry recorded in the server lock. */
+  lockEntry?: string;
+
+  /** Fires immediately after this process atomically acquires the starting lock. */
+  onStarting?: (info: ServerStartingInfo) => void;
+
   coreProcessOptions?: CoreProcessServiceOptions;
 
   wsGatewayOptions?: WSGatewayOptions;
@@ -114,6 +126,12 @@ export interface ServerStartOptions {
   serviceOverrides?: ReadonlyArray<readonly [ServiceIdentifier<unknown>, unknown]>;
 }
 
+export interface ServerStartingInfo {
+  readonly launchId: string;
+  readonly pid: number;
+  readonly startedAt: string;
+}
+
 export interface RunningServer {
 
   readonly address: string;
@@ -138,7 +156,14 @@ export async function startServer(opts: ServerStartOptions): Promise<RunningServ
     // Record the host build identity so `nori server status` can detect a
     // build-mismatched server.
     hostVersion: opts.coreProcessOptions?.identity?.version,
-    entry: process.argv[1],
+    entry: opts.lockEntry ?? process.argv[1],
+    launchId: opts.launchId,
+    nowIso: opts.startedAt,
+  });
+  opts.onStarting?.({
+    launchId: lockHandle.launchId,
+    pid: process.pid,
+    startedAt: opts.startedAt ?? new Date().toISOString(),
   });
 
   const app = Fastify({
@@ -616,9 +641,7 @@ export async function startServer(opts: ServerStartOptions): Promise<RunningServ
   }
   // If we retried onto a different port, advertise the real one in the lock so
   // `nori server status` / `kill` / `ps` can find this daemon.
-  if (boundPort !== opts.port) {
-    lockHandle.updatePort(boundPort);
-  }
+  lockHandle.markReady(boundPort);
   pinoLogger.info(
     { address, port: boundPort, lockPath: lockHandle.lockPath },
     'server listening',
@@ -693,7 +716,7 @@ export async function startServer(opts: ServerStartOptions): Promise<RunningServ
 /**
  * Maximum consecutive `EADDRINUSE` retries when the requested port is busy.
  * Caps the `port + 1` walk so a permanently-saturated range cannot loop
- * forever; 100 matches the daemon spawner's own scan window in `resolveDaemonPort`.
+ * forever without duplicating port selection in an outer launcher.
  */
 export const PORT_RETRY_LIMIT = 100;
 
@@ -725,7 +748,11 @@ export async function listenWithPortRetry(
   // Ephemeral bind: the OS chooses a free port, so there is nothing to retry.
   if (opts.port === 0) {
     const address = await opts.gateway.listen(opts.host, 0);
-    return { address, port: 0 };
+    const port = Number(new URL(address).port);
+    if (!Number.isSafeInteger(port) || port <= 0 || port > 65535) {
+      throw new Error(`Gateway returned an invalid listen address: ${address}`);
+    }
+    return { address, port };
   }
 
   const maxRetries = opts.maxRetries ?? PORT_RETRY_LIMIT;

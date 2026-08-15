@@ -1,7 +1,16 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { app, BrowserWindow, globalShortcut, Menu, screen, session, shell } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  globalShortcut,
+  Menu,
+  screen,
+  session,
+  shell,
+  utilityProcess,
+} from 'electron';
 
 import {
   ensureServer,
@@ -11,7 +20,11 @@ import {
 } from './ensure-server';
 import { registerIpcHandlers } from './ipc-handlers';
 import { registerUpdateHandlers } from './updater';
-import { resolveSeaPath } from './sea-path';
+import {
+  resolveServerModulesDir,
+  resolveServerWebAssetsDir,
+  resolveServerWorkerPath,
+} from './server-runtime-path';
 import { createTray } from './tray';
 import { browserManagerFor, registerBrowserIpc } from './browser-view';
 import { startBrowserBridge, type BrowserBridgeHandle } from './browser-bridge';
@@ -158,7 +171,15 @@ function errorHtml(message: string): string {
 async function connect(win: BrowserWindow): Promise<void> {
   await win.loadURL(dataUrl(loadingHtml()));
   try {
-    const { origin } = await ensureServer(resolveSeaPath(), app.getVersion());
+    const webAssetsDir = resolveServerWebAssetsDir();
+    const { origin } = await ensureServer({
+      workerPath: resolveServerWorkerPath(),
+      webAssetsDir,
+      expectedVersion: app.getVersion(),
+      modulesDir: resolveServerModulesDir(),
+      forkWorker: (modulePath, args, options) =>
+        utilityProcess.fork(modulePath, args, options),
+    });
     connectedToServer = true;
     process.stdout.write(`[nori-desktop] connected to ${origin}\n`);
     if (!win.isDestroyed()) {
@@ -172,9 +193,7 @@ async function connect(win: BrowserWindow): Promise<void> {
         ]);
       }
       // Resolve nori-web dist path (packaged vs dev)
-      const noriWebDist = app.isPackaged
-        ? join(process.resourcesPath, 'nori-web', 'dist', 'index.html')
-        : join(app.getAppPath(), '..', 'nori-web', 'dist', 'index.html');
+      const noriWebDist = join(webAssetsDir, 'index.html');
 
       // Pass only the server origin via hash fragment; the token is fetched
       // securely through the preload bridge instead of the URL.
@@ -316,7 +335,7 @@ function main(): void {
     if (quitCleanupStarted) return;
     quitCleanupStarted = true;
 
-    void stopServerForDesktopExit(resolveSeaPath())
+    void stopServerForDesktopExit()
       .catch((error) => {
         const message = error instanceof Error ? error.message : String(error);
         process.stderr.write(`[nori-desktop] failed to stop local server during exit: ${message}\n`);

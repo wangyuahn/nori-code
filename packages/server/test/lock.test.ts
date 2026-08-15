@@ -20,8 +20,13 @@ import {
   acquireLock,
   acquireLockSafe,
   getLiveLock,
+  sameLockOwner,
   type LockContents,
 } from '../src/lock';
+import {
+  removeLockIfOwnerDead,
+  waitForServerReady,
+} from '../src/control';
 
 let tmpDir: string;
 let lockPath: string;
@@ -41,12 +46,16 @@ describe('acquireLock — basic acquire / release', () => {
       lockPath,
       port: 58627,
       nowIso: '2026-06-05T00:00:00.000Z',
+      launchId: 'launch-test',
     });
     expect(handle.lockPath).toBe(lockPath);
     expect(existsSync(lockPath)).toBe(true);
 
     const stored = JSON.parse(readFileSync(lockPath, 'utf8')) as LockContents;
     expect(stored).toEqual({
+      schema_version: 2,
+      launch_id: 'launch-test',
+      state: 'starting',
       pid: process.pid,
       started_at: '2026-06-05T00:00:00.000Z',
       port: 58627,
@@ -178,12 +187,16 @@ describe('acquireLock — updatePort', () => {
       hostVersion: '1.2.3',
       entry: '/usr/local/bin/kimi',
       nowIso: '2026-06-05T00:00:00.000Z',
+      launchId: 'launch-test',
     });
 
     handle.updatePort(7880);
 
     const stored = JSON.parse(readFileSync(lockPath, 'utf8')) as LockContents;
     expect(stored).toEqual({
+      schema_version: 2,
+      launch_id: 'launch-test',
+      state: 'starting',
       pid: process.pid,
       started_at: '2026-06-05T00:00:00.000Z',
       host: '127.0.0.1',
@@ -232,7 +245,7 @@ describe('acquireLock — updatePort', () => {
 });
 
 describe('acquireLockSafe - product identity', () => {
-  it('reads the legacy token from the home that owns a custom lock path', async () => {
+  it('never probes or takes over a lock owned by a live pid', async () => {
     const customLockPath = join(tmpDir, 'server', 'lock');
     mkdirSync(join(tmpDir, 'server'), { recursive: true });
     writeFileSync(join(tmpDir, 'server.token'), 'legacy-token\n');
@@ -246,12 +259,7 @@ describe('acquireLockSafe - product identity', () => {
       } satisfies LockContents),
     );
 
-    const fetchMock = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(new Response(JSON.stringify({ code: 0 }), { status: 200 }))
-      .mockImplementationOnce(async (_input, init) => {
-        expect(new Headers(init?.headers).get('authorization')).toBe('Bearer legacy-token');
-        return new Response(JSON.stringify({ code: 0 }), { status: 200 });
-      });
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
 
     try {
       await expect(
@@ -260,11 +268,50 @@ describe('acquireLockSafe - product identity', () => {
           port: 58771,
         }),
       ).rejects.toBeInstanceOf(ServerLockedError);
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).not.toHaveBeenCalled();
       expect(readFileSync(customLockPath, 'utf8')).toContain('"port":58627');
     } finally {
       fetchMock.mockRestore();
     }
+  });
+});
+
+describe('acquireLock - ready transition', () => {
+  it('publishes the actual port and ready timestamp atomically', () => {
+    const handle = acquireLock({
+      lockPath,
+      port: 58771,
+      launchId: 'launch-ready',
+      nowIso: '2026-07-25T00:00:00.000Z',
+    });
+
+    handle.markReady(58772, '2026-07-25T00:00:01.000Z');
+
+    expect(JSON.parse(readFileSync(lockPath, 'utf8'))).toMatchObject({
+      schema_version: 2,
+      launch_id: 'launch-ready',
+      state: 'ready',
+      port: 58772,
+      ready_at: '2026-07-25T00:00:01.000Z',
+    });
+    handle.release();
+  });
+
+  it('does not publish ready after another launch takes ownership', () => {
+    const handle = acquireLock({ lockPath, port: 58771, launchId: 'launch-old' });
+    const replacement = {
+      schema_version: 2,
+      launch_id: 'launch-new',
+      state: 'starting',
+      pid: process.pid,
+      started_at: '2026-07-25T00:00:00.000Z',
+      port: 58771,
+    } satisfies LockContents;
+    writeFileSync(lockPath, JSON.stringify(replacement));
+
+    handle.markReady(58772);
+
+    expect(JSON.parse(readFileSync(lockPath, 'utf8'))).toEqual(replacement);
   });
 });
 
@@ -304,5 +351,110 @@ describe('getLiveLock', () => {
     };
     writeFileSync(lockPath, JSON.stringify(live));
     expect(getLiveLock(lockPath)).toEqual(live);
+  });
+});
+
+describe('server control', () => {
+  it('never treats a V2 owner as the same owner as a legacy-shaped lock', () => {
+    const v2 = {
+      schema_version: 2,
+      launch_id: 'launch-v2',
+      state: 'starting',
+      pid: process.pid,
+      started_at: '2026-07-25T00:00:00.000Z',
+      host: '127.0.0.1',
+      port: 58771,
+      host_version: '1.0.1',
+    } satisfies LockContents;
+    const legacy = {
+      pid: v2.pid,
+      started_at: v2.started_at,
+      host: v2.host,
+      port: v2.port,
+      host_version: v2.host_version,
+    } satisfies LockContents;
+
+    expect(sameLockOwner(v2, legacy)).toBe(false);
+    expect(sameLockOwner(legacy, v2)).toBe(false);
+  });
+
+  it('uses launch_id to distinguish owners that reuse the same pid', () => {
+    const owner = {
+      schema_version: 2,
+      launch_id: 'launch-old',
+      state: 'ready',
+      pid: process.pid,
+      started_at: '2026-07-25T00:00:00.000Z',
+      port: 58771,
+    } satisfies LockContents;
+
+    expect(sameLockOwner(owner, { ...owner, launch_id: 'launch-new' })).toBe(false);
+  });
+
+  it('waits for a live starting owner instead of deleting its lock', async () => {
+    const starting = {
+      schema_version: 2,
+      launch_id: 'launch-starting',
+      state: 'starting',
+      pid: process.pid,
+      started_at: new Date().toISOString(),
+      host: '127.0.0.1',
+      port: 58771,
+      host_version: '1.0.0',
+    } satisfies LockContents;
+    writeFileSync(lockPath, JSON.stringify(starting));
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ code: 0, data: { app: 'nori-code' } }), { status: 200 }),
+    );
+    setTimeout(() => {
+      writeFileSync(lockPath, JSON.stringify({
+        ...starting,
+        state: 'ready',
+        ready_at: new Date().toISOString(),
+      }));
+    }, 10);
+
+    const result = await waitForServerReady({
+      lockPath,
+      expectedVersion: '1.0.0',
+      timeoutMs: 250,
+      pollMs: 5,
+    });
+
+    expect(result.status).toBe('ready');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fetchMock.mockRestore();
+  });
+
+  it('reports a timed-out live starting owner without removing it', async () => {
+    const starting = {
+      schema_version: 2,
+      launch_id: 'launch-stuck',
+      state: 'starting',
+      pid: process.pid,
+      started_at: '2020-01-01T00:00:00.000Z',
+      port: 58771,
+      host_version: '1.0.0',
+    } satisfies LockContents;
+    writeFileSync(lockPath, JSON.stringify(starting));
+
+    await expect(waitForServerReady({ lockPath, expectedVersion: '1.0.0' }))
+      .resolves.toMatchObject({ status: 'timed_out', lock: starting });
+    expect(JSON.parse(readFileSync(lockPath, 'utf8'))).toEqual(starting);
+  });
+
+  it('only removes a lock after its exact owner pid is dead', () => {
+    const dead = {
+      schema_version: 2,
+      launch_id: 'launch-dead',
+      state: 'starting',
+      pid: 0x7fffffff,
+      started_at: '2026-07-25T00:00:00.000Z',
+      port: 58771,
+    } satisfies LockContents;
+    writeFileSync(lockPath, JSON.stringify(dead));
+
+    expect(removeLockIfOwnerDead(dead, lockPath)).toBe(true);
+    expect(existsSync(lockPath)).toBe(false);
   });
 });

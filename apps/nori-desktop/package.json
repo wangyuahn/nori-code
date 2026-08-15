@@ -1,6 +1,6 @@
 {
     "name": "@nori-code/nori-work",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "private": true,
     "license": "MIT",
     "description": "Nori Work — an independent desktop workspace for Nori Code.",
@@ -11,17 +11,21 @@
     "scripts": {
         "check:brand": "node ../../scripts/check-nori-brand.mjs",
         "prebuild": "pnpm run check:brand",
-        "build": "tsdown",
+        "build": "tsdown && node scripts/write-worker-manifest.cjs",
         "start": "electron .",
         "dev": "tsdown && electron .",
         "typecheck": "tsc --noEmit",
         "test:browser-smoke": "node scripts/browser-smoke.mjs",
-        "predist": "pnpm run check:brand && pnpm -C ../nori-code run build:web-assets && pnpm -C ../nori-code build:native:sea",
-        "dist": "tsdown && electron-builder --config electron-builder.config.cjs"
+        "test:packaged-runtime": "node scripts/verify-packaged-runtime.cjs",
+        "test:server-worker-smoke": "electron scripts/server-worker-smoke.cjs",
+        "predist": "pnpm run check:brand && pnpm -C ../nori-code run build:web-assets",
+        "dist": "pnpm run build && electron-builder --config electron-builder.config.cjs"
     },
     "devDependencies": {
+        "@nori-code/server": "workspace:^",
         "electron": "33.4.11",
         "electron-builder": "25.1.8",
+        "node-pty": "^1.1.0",
         "tsdown": "0.22.0",
         "typescript": "6.0.2"
     },

@@ -143,9 +143,9 @@ describe('startServer — lock + healthz smoke', () => {
     const stored = JSON.parse(readFileSync(lockPath, 'utf8')) as LockContents;
     expect(stored.pid).toBe(process.pid);
     expect(stored.host).toBe('127.0.0.1');
-    expect(stored.port).toBe(0);
 
     expect(r.address).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    expect(stored.port).toBe(Number(new URL(r.address).port));
 
     await r.close();
     expect(existsSync(lockPath)).toBe(false);
@@ -304,8 +304,20 @@ describe('listenWithPortRetry', () => {
       logger: silentLogger(),
     });
 
-    expect(result.port).toBe(0);
+    expect(result.port).toBe(54321);
+    expect(result.address).toBe('http://127.0.0.1:54321');
     expect(attempts).toEqual([0]);
+  });
+
+  it('rejects an ephemeral bind address that does not expose the selected port', async () => {
+    const gateway = fakeGateway(async () => 'http://127.0.0.1');
+
+    await expect(listenWithPortRetry({
+      gateway,
+      host: '127.0.0.1',
+      port: 0,
+      logger: silentLogger(),
+    })).rejects.toThrow(/invalid listen address/);
   });
 });
 

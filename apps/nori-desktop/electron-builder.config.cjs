@@ -13,10 +13,15 @@ module.exports = {
   directories: { output: 'dist-app' },
   npmRebuild: false,
   asar: true,
-  files: ['out/**', 'package.json'],
+  files: [
+    'out/**',
+    '!out/server-worker.cjs',
+    '!out/server-worker.manifest.json',
+    'package.json',
+  ],
   beforePack: './scripts/before-pack.cjs',
   extraResources: [
-    { from: 'resources-stage/bin', to: 'bin' },
+    { from: 'resources-stage/server-runtime', to: 'server-runtime' },
     { from: 'resources-stage/nori-web', to: 'nori-web' },
     { from: 'build/icon.png', to: 'icon.png' },
   ],
