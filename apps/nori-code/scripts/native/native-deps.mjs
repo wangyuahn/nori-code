@@ -59,6 +59,9 @@ const nodePtyRuntimeFilesByTarget = Object.freeze(
           ],
         ];
       }
+      if (target.startsWith('linux-')) {
+        return [target, ['build/Release/pty.node', 'build/Release/spawn-helper']];
+      }
       return [target, [`${prebuildRoot}/pty.node`, `${prebuildRoot}/spawn-helper`]];
     }),
   ),
@@ -66,10 +69,11 @@ const nodePtyRuntimeFilesByTarget = Object.freeze(
 
 const nodePtyExecutableFilesByTarget = Object.freeze(
   Object.fromEntries(
-    SUPPORTED_TARGETS.map((target) => [
-      target,
-      target.startsWith('win32-') ? [] : [`prebuilds/${target}/spawn-helper`],
-    ]),
+    SUPPORTED_TARGETS.map((target) => {
+      if (target.startsWith('win32-')) return [target, []];
+      if (target.startsWith('linux-')) return [target, ['build/Release/spawn-helper']];
+      return [target, [`prebuilds/${target}/spawn-helper`]];
+    }),
   ),
 );
 
