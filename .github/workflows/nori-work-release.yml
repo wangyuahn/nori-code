@@ -84,9 +84,10 @@ jobs:
             "Nori-Work-${version}-x64.dmg"
             "Nori-Work-${version}-x64.zip"
             "Nori-Work-${version}-x64.exe"
-            "Nori-Work-${version}-x64.AppImage"
-            "Nori-Work-${version}-x64.deb"
+            "Nori-Work-${version}-x86_64.AppImage"
+            "Nori-Work-${version}-amd64.deb"
           )
+          find release-artifacts -maxdepth 1 -type f -printf '%f\n' | sort
           for asset in "${expected_assets[@]}"; do
             test -s "release-artifacts/$asset"
           done
