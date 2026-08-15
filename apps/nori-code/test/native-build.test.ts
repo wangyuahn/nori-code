@@ -38,11 +38,8 @@ describe('native node-pty assets', () => {
       );
       expect(dep?.executableFileRelatives).toEqual([]);
     } else if (target.startsWith('linux-')) {
-      expect(dep?.runtimeFileRelatives).toEqual([
-        'build/Release/pty.node',
-        'build/Release/spawn-helper',
-      ]);
-      expect(dep?.executableFileRelatives).toEqual(['build/Release/spawn-helper']);
+      expect(dep?.runtimeFileRelatives).toEqual(['build/Release/pty.node']);
+      expect(dep?.executableFileRelatives).toEqual([]);
     } else {
       expect(dep?.runtimeFileRelatives).toEqual([
         `prebuilds/${target}/pty.node`,
