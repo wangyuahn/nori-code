@@ -101,6 +101,7 @@ jobs:
         run: |
           set -euo pipefail
           gh release create "$RELEASE_TAG" release-artifacts/* \
+            --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --title "Nori Work ${RELEASE_TAG#nori-work-v}" \
             --generate-notes
