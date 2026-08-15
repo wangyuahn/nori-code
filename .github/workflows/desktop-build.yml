@@ -105,7 +105,7 @@ jobs:
       - name: Build native executable (local profile)
         # The Electron app signs the SEA itself (electron-builder, inside-out),
         # so the native build stays unsigned here.
-        run: pnpm --filter @moonshot-ai/nori-code run build:native:sea
+        run: pnpm --filter nori-code run build:native:sea
 
       - name: Setup macOS keychain (Developer ID)
         if: runner.os == 'macOS' && inputs.sign-macos
@@ -146,7 +146,7 @@ jobs:
           KIMI_DESKTOP_NOTARIZE: ${{ (runner.os == 'macOS' && inputs.sign-macos) && 'true' || 'false' }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_NOTARIZATION_ISSUER_ID }}
-        run: pnpm --filter @nori-code/nori-work run dist
+        run: pnpm --filter @nori-code/nori-work run dist --publish=never
 
       - name: Cleanup macOS keychain
         if: always() && runner.os == 'macOS' && inputs.sign-macos
@@ -163,4 +163,4 @@ jobs:
             apps/nori-desktop/dist-app/*.exe
             apps/nori-desktop/dist-app/*.AppImage
             apps/nori-desktop/dist-app/*.deb
-          if-no-files-found: ignore
+          if-no-files-found: error

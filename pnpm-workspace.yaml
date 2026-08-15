@@ -11,8 +11,9 @@ overrides:
   "ssh2@1.17.0>cpu-features": "-"
   "ssh2@1.17.0>nan": "-"
 
-# Allow Electron's postinstall to extract its prebuilt binary (needed by
-# apps/nori-desktop). Other native deps stay unbuilt and rely on their own
-# prebuilds, matching the prior default.
+# Allow Electron's postinstall to extract its prebuilt binary and node-pty's
+# install script to fetch or build the host-native terminal binding required by
+# the Nori Work desktop release.
 onlyBuiltDependencies:
   - electron
+  - node-pty
