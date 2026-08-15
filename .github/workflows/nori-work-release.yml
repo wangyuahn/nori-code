@@ -1,0 +1,105 @@
+name: Nori Work Release
+
+on:
+  push:
+    tags:
+      - 'nori-work-v*'
+
+concurrency:
+  group: nori-work-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  validate-release:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v6
+
+      - name: Validate tag and package versions
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#nori-work-v}"
+          semver_pattern='^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$'
+          if [[ "$version" == "$tag" || ! "$version" =~ $semver_pattern ]]; then
+            echo "Release tag must use nori-work-v<semver>; got $tag" >&2
+            exit 1
+          fi
+          package_version="$(node -p "require('./apps/nori-desktop/package.json').version")"
+          if [[ "$package_version" != "$version" ]]; then
+            echo "Tag version $version does not match apps/nori-desktop/package.json version $package_version" >&2
+            exit 1
+          fi
+          native_version="$(node -p "require('./apps/nori-code/package.json').version")"
+          if [[ "$native_version" != "$version" ]]; then
+            echo "Tag version $version does not match apps/nori-code/package.json version $native_version" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  desktop-artifacts:
+    name: Build desktop installers
+    needs: validate-release
+    uses: ./.github/workflows/desktop-build.yml
+    with:
+      upload-artifact-prefix: nori-work-release
+      retention-days: 14
+      sign-macos: false
+
+  publish-release:
+    name: Publish GitHub Release
+    needs:
+      - validate-release
+      - desktop-artifacts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download desktop installers
+        uses: actions/download-artifact@v8
+        with:
+          pattern: nori-work-release-*
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Verify release assets
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.validate-release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#nori-work-v}"
+          expected_assets=(
+            "Nori-Work-${version}-arm64.dmg"
+            "Nori-Work-${version}-arm64.zip"
+            "Nori-Work-${version}-x64.dmg"
+            "Nori-Work-${version}-x64.zip"
+            "Nori-Work-${version}-x64.exe"
+            "Nori-Work-${version}-x64.AppImage"
+            "Nori-Work-${version}-x64.deb"
+          )
+          for asset in "${expected_assets[@]}"; do
+            test -s "release-artifacts/$asset"
+          done
+          printf '%s\n' "${expected_assets[@]}"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.validate-release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" release-artifacts/* \
+            --verify-tag \
+            --title "Nori Work ${RELEASE_TAG#nori-work-v}" \
+            --generate-notes
