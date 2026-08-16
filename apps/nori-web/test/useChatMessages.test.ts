@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../src/api/client';
-import { apiMessageToChat, canApplyGeneratedSessionTitle, fallbackSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, mergeHistory, mergeInFlightWorkBlocks, promptForRewind, RealtimeSubscriptionGate, removeTerminatedAgent, shouldIgnoreTranscriptEvent, statusForSession, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
+import { apiMessageToChat, canApplyGeneratedSessionTitle, fallbackSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, liveAssistantMessage, mergeHistory, mergeInFlightWorkBlocks, promptForRewind, RealtimeSubscriptionGate, removeTerminatedAgent, shouldFinishAbortedPrompt, shouldIgnoreTranscriptEvent, statusForSession, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
 
 describe('agent activity events', () => {
   it('removes a manually terminated agent from the live activity set', () => {
@@ -158,9 +158,47 @@ describe('main transcript projection', () => {
   it('ignores subagent transcript events but keeps shared code changes', () => {
     expect(shouldIgnoreTranscriptEvent('assistant.delta', 'agent-2')).toBe(true);
     expect(shouldIgnoreTranscriptEvent('turn.ended', 'agent-2')).toBe(true);
+    expect(shouldIgnoreTranscriptEvent('prompt.aborted', 'agent-2')).toBe(true);
     expect(shouldIgnoreTranscriptEvent('code.change', 'agent-2')).toBe(false);
     expect(shouldIgnoreTranscriptEvent('subagent.started', 'agent-2')).toBe(false);
     expect(shouldIgnoreTranscriptEvent('assistant.delta', 'main')).toBe(false);
+  });
+
+  it('turns a stopped live draft into a retained assistant message', () => {
+    const stopped = liveAssistantMessage({
+      sessionId: 'session-stop',
+      text: 'This part was already streamed.',
+      thinking: 'Partial reasoning',
+      workBlocks: [
+        { id: 'progress-1', type: 'progress', text: 'Inspecting the parser.' },
+        { id: 'tool-1', type: 'tool', tool: { id: 'tool-1', name: 'Read', args: { path: 'src/parser.ts' }, result: 'contents' } },
+      ],
+      usage: { input_other: 10, output: 4, input_cache_read: 0, input_cache_creation: 0 },
+      createdAt: '2026-08-16T04:00:00.000Z',
+    });
+
+    expect(stopped).toMatchObject({
+      id: 'live-session-stop-1786852800000',
+      role: 'assistant',
+      text: 'This part was already streamed.',
+      thinking: 'Partial reasoning',
+      toolCalls: [{ id: 'tool-1', name: 'Read', result: 'contents' }],
+      usage: { input_other: 10, output: 4 },
+      createdAt: '2026-08-16T04:00:00.000Z',
+    });
+    expect(liveAssistantMessage({
+      sessionId: 'session-stop',
+      text: '',
+      thinking: '',
+      workBlocks: [],
+    })).toBeNull();
+  });
+
+  it('only finalizes the active prompt when an abort event arrives', () => {
+    expect(shouldFinishAbortedPrompt('prompt-active', 'prompt-active')).toBe(true);
+    expect(shouldFinishAbortedPrompt('prompt-active', 'prompt-queued')).toBe(false);
+    expect(shouldFinishAbortedPrompt(null, 'prompt-queued')).toBe(false);
+    expect(shouldFinishAbortedPrompt('prompt-active', undefined)).toBe(true);
   });
 
   it('turns every hidden trigger into an assistant turn boundary', () => {

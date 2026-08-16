@@ -25,6 +25,8 @@ describe('prompt execution options', () => {
     const client = createClient('http://localhost:3000');
 
     await client.sendPrompt('session-1', 'ship the release', [], {
+      model: 'provider/model-a',
+      thinking: 'high',
       goalObjective: 'ship the release',
       swarmMode: true,
       loopMode: true,
@@ -33,11 +35,33 @@ describe('prompt execution options', () => {
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(typeof init.body).toBe('string');
     expect(JSON.parse(init.body as string)).toEqual({
+      model: 'provider/model-a',
+      thinking: 'high',
       goal_objective: 'ship the release',
       swarm_mode: true,
       loop_mode: true,
       content: [{ type: 'text', text: 'ship the release' }],
     });
+  });
+
+  it('sets the selected model as the global default', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      code: 0,
+      msg: 'ok',
+      data: {
+        default_model: 'provider/model-a',
+        model: { provider: 'provider', model: 'provider/model-a', max_context_size: 128000 },
+      },
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createClient('http://localhost:3000');
+
+    await client.models.setDefault('provider/model-a');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      'http://localhost:3000/api/v1/models/provider%2Fmodel-a:set_default',
+    );
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).method).toBe('POST');
   });
 
   it('uses the collection steer endpoint for queued guidance', async () => {

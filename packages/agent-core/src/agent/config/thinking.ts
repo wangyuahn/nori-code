@@ -35,9 +35,24 @@ export function defaultThinkingEffortFor(model: ModelAlias | undefined): Thinkin
   if (!supportsThinking(effective)) return 'off';
   const efforts = effective?.supportEfforts;
   if (efforts !== undefined && efforts.length > 0) {
-    return effective?.defaultEffort ?? middleOf(efforts);
+    const declaredDefault = effective?.defaultEffort;
+    return declaredDefault !== undefined && efforts.includes(declaredDefault)
+      ? declaredDefault
+      : middleOf(efforts);
   }
   return 'on';
+}
+
+function normalizeThinkingEffortForModel(
+  effort: ThinkingEffort,
+  model: ModelAlias | undefined,
+): ThinkingEffort {
+  if (!supportsThinking(model)) return 'off';
+  const efforts = model?.supportEfforts;
+  if (efforts !== undefined && efforts.length > 0) {
+    return efforts.includes(effort) ? effort : defaultThinkingEffortFor(model);
+  }
+  return effort === 'off' ? 'off' : 'on';
 }
 
 /**
@@ -60,11 +75,13 @@ export function resolveThinkingEffort(
   const effectiveModel = model === undefined ? undefined : effectiveModelAlias(model);
   let effort: ThinkingEffort;
   if (requested !== undefined) {
-    effort = requested;
+    effort = normalizeThinkingEffortForModel(requested, effectiveModel);
   } else if (config?.enabled === false) {
     effort = 'off';
   } else {
-    effort = config?.effort ?? defaultThinkingEffortFor(effectiveModel);
+    effort = config?.effort === undefined
+      ? defaultThinkingEffortFor(effectiveModel)
+      : normalizeThinkingEffortForModel(config.effort, effectiveModel);
   }
 
   if (effort === 'off' && effectiveModel?.capabilities?.includes('always_thinking') === true) {
@@ -72,7 +89,12 @@ export function resolveThinkingEffort(
     // is still honored — `enabled = false` only expresses the intent to
     // disable, it should not also discard a chosen effort. Fall back to the
     // model default only when no effort is configured.
-    effort = config?.effort ?? defaultThinkingEffortFor(effectiveModel);
+    const configuredEffort = config?.effort === undefined
+      ? defaultThinkingEffortFor(effectiveModel)
+      : normalizeThinkingEffortForModel(config.effort, effectiveModel);
+    effort = configuredEffort === 'off'
+      ? defaultThinkingEffortFor(effectiveModel)
+      : configuredEffort;
   }
 
   return effort;

@@ -127,7 +127,7 @@ function isGpt5(id: string): boolean {
 }
 
 function openAICompatibleGpt5Efforts(id: string): string[] {
-  const version = Number(/(?:^|\/)gpt-5[.-](\d+)(?:[.-]|$)/.exec(id)?.[1]) || undefined;
+  const version = Number(/(?:^|\/)gpt-5[.-](\d+)(?=[^0-9]|$)/.exec(id)?.[1]) || undefined;
   if (id.includes('-chat')) return version === undefined ? [] : ['medium'];
   if (/(?:^|\/)gpt-5[.-]?pro(?:[.-]|$)/.test(id)) return ['high'];
   if (/(?:^|\/)gpt-5[.-]\d+[.-]pro(?:[.-]|$)/.test(id)) return ['medium', 'high', 'xhigh'];

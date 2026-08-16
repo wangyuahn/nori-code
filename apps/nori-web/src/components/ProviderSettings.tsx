@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { api, type ProviderCatalogItem, type ProviderPreset, type ProviderRefreshResult, type ProviderTestResponse } from '../api/client';
+import { api, type ModelCatalogItem, type ProviderCatalogItem, type ProviderPreset, type ProviderRefreshResult, type ProviderTestResponse } from '../api/client';
 import { useI18n } from '../i18n';
 import { Icon } from './Icon';
 
@@ -157,9 +157,7 @@ export function ProviderSettings() {
         base_url: draft.baseUrl.trim(),
         disabled: draft.disabled,
         auto_discover: draft.autoDiscover,
-        // A null value clears a previous manual model list. Sending an empty
-        // array here would leave auto-discovery with an explicit empty list.
-        custom_models: draft.autoDiscover ? null : customModels,
+        custom_models: providerCustomModelsForPatch(draft.autoDiscover, customModels),
       };
       if (draft.apiKey.trim()) providerPatch.api_key = draft.apiKey.trim();
 
@@ -180,7 +178,7 @@ export function ProviderSettings() {
           display_name: model,
         };
       }
-      await api.updateConfig({ providers: { [id]: providerPatch }, ...(Object.keys(models).length > 0 ? { models } : {}) });
+      const updatedConfig = await api.updateConfig({ providers: { [id]: providerPatch }, ...(Object.keys(models).length > 0 ? { models } : {}) });
       if (draft.originalId !== null && draft.originalId !== id) await api.providers.remove(draft.originalId);
       if (draft.autoDiscover && !draft.disabled) {
         const result = await api.providers.refresh(id);
@@ -195,6 +193,9 @@ export function ProviderSettings() {
       } else {
         setNotice({ text: tr('Provider saved', 'Provider 已保存') });
       }
+      const modelCatalog = await api.models.list();
+      const fallbackDefault = defaultModelAfterProviderSave(updatedConfig.default_model, modelCatalog.items, id);
+      if (fallbackDefault !== undefined) await api.models.setDefault(fallbackDefault);
       await load();
       window.dispatchEvent(new CustomEvent('nori:model-catalog-changed'));
       setExpandedId(id);
@@ -269,7 +270,7 @@ export function ProviderSettings() {
 
 function ProviderCard({ provider, expanded, busy, onOpen, onTest, onToggle, onDelete }: { provider: ProviderCatalogItem; expanded: boolean; busy: boolean; onOpen: () => void; onTest: () => void; onToggle: () => void; onDelete: () => void }) {
   const { tr } = useI18n();
-  const modelCount = provider.custom_models?.length ?? provider.models?.length ?? 0;
+  const modelCount = providerModelCount(provider);
   return <article className={`provider-card${expanded ? ' expanded' : ''}${provider.disabled ? ' disabled' : ''}`}>
     <button type="button" className="provider-card-main" onClick={onOpen} aria-expanded={expanded}>
       <span className="provider-card-mark"><Icon name="shield" size={17}/></span>
@@ -304,6 +305,26 @@ function ProviderEditor({ draft, saving, isNew = false, onChange, onSave, onCanc
 
 function uniqueLines(value: string): string[] {
   return [...new Set(value.split(/[\n,]+/).map(item => item.trim()).filter(Boolean))];
+}
+
+export function providerCustomModelsForPatch(autoDiscover: boolean, customModels: string[]): string[] {
+  return autoDiscover ? [] : customModels;
+}
+
+export function defaultModelAfterProviderSave(
+  currentDefault: string | undefined,
+  models: readonly ModelCatalogItem[],
+  preferredProviderId: string,
+): string | undefined {
+  const normalizedDefault = currentDefault?.trim();
+  if (normalizedDefault && models.some(model => model.model === normalizedDefault)) return undefined;
+  return models.find(model => model.provider === preferredProviderId)?.model ?? models[0]?.model;
+}
+
+export function providerModelCount(provider: ProviderCatalogItem): number {
+  const customModelCount = provider.custom_models?.length ?? 0;
+  if (provider.auto_discover === false || customModelCount > 0) return customModelCount;
+  return provider.models?.length ?? 0;
 }
 
 function isProviderType(value: string): value is ProviderType {

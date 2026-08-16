@@ -331,13 +331,12 @@ describe('thinkingEffortToReasoningEffort', () => {
   it('maps xhigh -> "xhigh"', () => {
     expect(thinkingEffortToReasoningEffort('xhigh')).toBe('xhigh');
   });
-  it('maps max -> "xhigh"', () => {
-    expect(thinkingEffortToReasoningEffort('max')).toBe('xhigh');
+  it('preserves max', () => {
+    expect(thinkingEffortToReasoningEffort('max')).toBe('max');
   });
-  it('normalizes unknown effort to undefined', () => {
-    // Unknown / model-declared efforts (including 'on') are tolerated: the
-    // provider omits reasoning_effort and lets the model use its own default.
-    expect(thinkingEffortToReasoningEffort('extreme' as never)).toBeUndefined();
+  it('omits boolean on and preserves custom model-declared efforts', () => {
+    expect(thinkingEffortToReasoningEffort('on')).toBeUndefined();
+    expect(thinkingEffortToReasoningEffort('extreme')).toBe('extreme');
   });
 });
 describe('reasoningEffortToThinkingEffort', () => {
@@ -348,8 +347,8 @@ describe('reasoningEffortToThinkingEffort', () => {
   it('maps "low" -> low', () => {
     expect(reasoningEffortToThinkingEffort('low')).toBe('low');
   });
-  it('maps "minimal" -> low (alias)', () => {
-    expect(reasoningEffortToThinkingEffort('minimal')).toBe('low');
+  it('preserves "minimal"', () => {
+    expect(reasoningEffortToThinkingEffort('minimal')).toBe('minimal');
   });
   it('maps "medium" -> medium', () => {
     expect(reasoningEffortToThinkingEffort('medium')).toBe('medium');
@@ -360,14 +359,14 @@ describe('reasoningEffortToThinkingEffort', () => {
   it('maps "xhigh" -> xhigh', () => {
     expect(reasoningEffortToThinkingEffort('xhigh')).toBe('xhigh');
   });
-  it('maps "max" -> xhigh (alias)', () => {
-    expect(reasoningEffortToThinkingEffort('max')).toBe('xhigh');
+  it('preserves "max"', () => {
+    expect(reasoningEffortToThinkingEffort('max')).toBe('max');
   });
-  it('maps "none" -> off', () => {
-    expect(reasoningEffortToThinkingEffort('none')).toBe('off');
+  it('preserves "none"', () => {
+    expect(reasoningEffortToThinkingEffort('none')).toBe('none');
   });
-  it('unknown values fall back to off', () => {
-    expect(reasoningEffortToThinkingEffort('ultra')).toBe('off');
+  it('preserves custom model-declared values', () => {
+    expect(reasoningEffortToThinkingEffort('ultra')).toBe('ultra');
   });
 });
 describe('convertOpenAIError: non-Error values', () => {

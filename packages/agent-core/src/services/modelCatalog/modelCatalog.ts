@@ -121,8 +121,11 @@ export function modelIdsForProvider(
   config: KimiConfig,
   providerId: string,
 ): string[] {
-  const customModels = config.providers?.[providerId]?.customModels;
-  if (customModels !== undefined) return [...customModels];
+  const provider = config.providers?.[providerId];
+  const customModels = provider?.customModels;
+  if (customModels !== undefined && (provider?.autoDiscover === false || customModels.length > 0)) {
+    return [...customModels];
+  }
   const models = config.models ?? {};
   return Object.entries(models)
     .filter(([, alias]) => alias.provider === providerId)

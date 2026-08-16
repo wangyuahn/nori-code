@@ -108,7 +108,9 @@ describe('refreshProviderModels', () => {
   });
 
   it('infers OpenCode-compatible GPT-5 efforts when a manual provider only returns model IDs', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ data: [{ id: 'gpt-5.4' }] })));
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      data: [{ id: 'gpt-5.4' }, { id: 'gpt-5.4(auto)' }],
+    })));
     const harness = makeHost({
       providers: {
         gateway: {
@@ -125,6 +127,13 @@ describe('refreshProviderModels', () => {
 
     expect(result.failed).toEqual([]);
     expect(harness.config().models?.['gateway/gpt-5.4']).toEqual(
+      expect.objectContaining({
+        thinkingSupport: true,
+        capabilities: expect.arrayContaining(['thinking']),
+        supportEfforts: ['none', 'low', 'medium', 'high', 'xhigh'],
+      }),
+    );
+    expect(harness.config().models?.['gateway/gpt-5.4(auto)']).toEqual(
       expect.objectContaining({
         thinkingSupport: true,
         capabilities: expect.arrayContaining(['thinking']),

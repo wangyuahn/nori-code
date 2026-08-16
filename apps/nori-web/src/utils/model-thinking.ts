@@ -28,41 +28,32 @@ export function modelThinkingOptions(
   if (declaredEfforts.length > 0) {
     const choices = declaredEfforts.map(value => ({
       value,
-      kind: value === 'off' || value === 'none' ? 'fast' as const : 'effort' as const,
+      kind: value === 'off' || value === 'none'
+        ? 'fast' as const
+        : value === 'on' ? 'think' as const : 'effort' as const,
     }));
-    const hasDisabledChoice = choices.some(choice => choice.value === 'off' || choice.value === 'none');
-    if (!alwaysThinking && !hasDisabledChoice) {
-      choices.unshift({ value: 'off', kind: 'fast' });
-    }
-    const selectableEfforts = choices.filter(choice => choice.value !== 'off' && choice.value !== 'none');
     const declaredDefault = model.default_effort;
     const defaultValue = declaredDefault !== undefined
       && choices.some(choice => choice.value === declaredDefault)
       ? declaredDefault
-      : selectableEfforts[Math.floor(selectableEfforts.length / 2)]?.value ?? 'off';
+      : choices[Math.floor(choices.length / 2)]?.value ?? 'off';
     return { choices, defaultValue };
   }
 
   if (supportsThinking === true) {
-    const thinkValue = model.default_effort !== undefined && model.default_effort !== 'off'
+    const defaultValue = model.default_effort === 'off' || model.default_effort === 'on'
       ? model.default_effort
-      : 'medium';
+      : 'on';
     return {
       choices: [
         ...(!alwaysThinking ? [{ value: 'off', kind: 'fast' as const }] : []),
-        { value: thinkValue, kind: 'think' },
+        { value: 'on', kind: 'think' },
       ],
-      defaultValue: thinkValue,
+      defaultValue: alwaysThinking && defaultValue === 'off' ? 'on' : defaultValue,
     };
   }
 
-  return {
-    choices: [
-      { value: 'off', kind: 'fast' },
-      { value: 'medium', kind: 'think' },
-    ],
-    defaultValue: 'off',
-  };
+  return { choices: [], defaultValue: 'off' };
 }
 
 function uniqueNonEmpty(values: readonly string[]): string[] {

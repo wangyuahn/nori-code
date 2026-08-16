@@ -38,7 +38,7 @@ export interface ChatViewProps {
   onThinkingChange: (effort: string) => void | Promise<void>;
   onPermissionChange: (mode: 'auto' | 'yolo' | 'manual') => void | Promise<void>;
   onTaskModeChange: (mode: 'plan' | 'code') => void | Promise<void>;
-  onRunSlashCommand: (command: ChatSlashCommandName, args: string) => boolean | void | Promise<boolean | void>;
+  onRunSlashCommand: (command: ChatSlashCommandName, args: string, options?: PromptExecutionOptions) => boolean | void | Promise<boolean | void>;
   onMainWriteChange: (enabled: boolean) => void | Promise<void>;
   onGoalControl?: (action: 'pause' | 'resume' | 'cancel') => void | Promise<void>;
   pendingApprovals?: ApprovalRequest[];
@@ -121,19 +121,6 @@ function imageUnsupportedMessage(
   return hasSelectedModel
     ? tr('The selected model does not support image input. Choose a multimodal model to attach images.', '所选模型不支持图片输入，请选择多模态模型后再添加图片。')
     : tr('Select a multimodal model before attaching images.', '请先选择支持图片输入的多模态模型。');
-}
-
-function thinkingChoiceLabel(choice: { value: string; kind: 'fast' | 'think' | 'effort' }, tr: (english: string, chinese: string) => string): string {
-  if (choice.kind === 'fast') return tr('Fast', '快速');
-  if (choice.kind === 'think') return tr('Think', '思考');
-  const labels: Record<string, string> = {
-    minimal: tr('Minimal', '极低'),
-    low: tr('Low', '低'),
-    medium: tr('Medium', '中'),
-    high: tr('High', '高'),
-    xhigh: tr('Extra high', '极高'),
-  };
-  return labels[choice.value] ?? choice.value;
 }
 
 interface ComposerSettingChoice {
@@ -220,7 +207,7 @@ export function ChatView(props: ChatViewProps) {
   const selectedModelId = activeModelOverride ?? runtimeModelId ?? session?.agent_config?.model ?? draftAgentConfig?.model ?? '';
   const selectedModel = models.find(model => model.model === selectedModelId);
   const thinkingOptions = modelThinkingOptions(selectedModel);
-  const selectedThinking = session?.agent_config?.thinking ?? draftAgentConfig?.thinking ?? thinkingOptions.defaultValue;
+  const requestedThinking = session?.agent_config?.thinking ?? draftAgentConfig?.thinking ?? thinkingOptions.defaultValue;
   const selectedPermission = session?.agent_config?.permission_mode ?? draftAgentConfig?.permission_mode ?? 'manual';
   const persistedTaskMode = (sessionStatus?.plan_mode ?? session?.agent_config?.plan_mode ?? draftAgentConfig?.plan_mode) ? 'plan' : 'code';
   const selectedTaskMode = activeTaskModeOverride ?? persistedTaskMode;
@@ -229,8 +216,11 @@ export function ChatView(props: ChatViewProps) {
   const selectedModelLabel = selectedModel
     ? `${selectedModel.display_name || selectedModel.model} · ${selectedModel.provider_name || selectedModel.provider}`
     : selectedModelId || tr('Select model', '选择模型');
-  const selectedThinkingChoice = thinkingOptions.choices.find(choice => choice.value === selectedThinking) ?? thinkingOptions.choices[0];
-  const selectedThinkingLabel = selectedThinkingChoice ? thinkingChoiceLabel(selectedThinkingChoice, tr) : '';
+  const selectedThinkingChoice = thinkingOptions.choices.find(choice => choice.value === requestedThinking)
+    ?? thinkingOptions.choices.find(choice => choice.value === thinkingOptions.defaultValue)
+    ?? thinkingOptions.choices[0];
+  const selectedThinking = selectedThinkingChoice?.value ?? requestedThinking;
+  const selectedThinkingLabel = selectedThinkingChoice?.value ?? '';
   const selectedPermissionLabel = selectedPermission === 'auto' ? 'AUTO' : selectedPermission === 'yolo' ? 'YOLO' : tr('Manual', '手动');
   const modelChoices: ComposerSettingChoice[] = [
     { value: '', label: modelsLoading ? tr('Loading models…', '正在加载模型…') : tr('Select model', '选择模型'), disabled: true },
@@ -240,7 +230,7 @@ export function ChatView(props: ChatViewProps) {
       label: `${model.display_name || model.model} · ${model.provider_name || model.provider}`,
     })),
   ];
-  const thinkingChoices: ComposerSettingChoice[] = thinkingOptions.choices.map(choice => ({ value: choice.value, label: thinkingChoiceLabel(choice, tr) }));
+  const thinkingChoices: ComposerSettingChoice[] = thinkingOptions.choices.map(choice => ({ value: choice.value, label: choice.value }));
   const commandSuggestions = chatSlashCommandSuggestions(input);
   const commandMenuOpen = !commandMenuDismissed && commandSuggestions.length > 0;
   const imageCapable = modelSupportsImageInput(selectedModel);
@@ -528,9 +518,12 @@ export function ChatView(props: ChatViewProps) {
     if (behavior === 'steer') setSteering(true);
     try {
       const promptAttachments = attachments.map(item => item.attachment);
-      const accepted = loopEnabled
-        ? await onSendMessage(text, promptAttachments, behavior, { loopMode: true })
-        : await onSendMessage(text, promptAttachments, behavior);
+      const executionOptions: PromptExecutionOptions = {
+        model: selectedModelId,
+        thinking: selectedThinking,
+        loopMode: loopEnabled ? true : undefined,
+      };
+      const accepted = await onSendMessage(text, promptAttachments, behavior, executionOptions);
       if (accepted !== false) {
         setInput('');
         setAttachments([]);
@@ -542,7 +535,7 @@ export function ChatView(props: ChatViewProps) {
     } finally {
       if (behavior === 'steer') setSteering(false);
     }
-  }, [attachments, attachmentsLoading, imageCapable, input, loopEnabled, onSendMessage, selectedModelId, steering, tr]);
+  }, [attachments, attachmentsLoading, imageCapable, input, loopEnabled, onSendMessage, selectedModelId, selectedThinking, steering, tr]);
 
   useEffect(() => {
     try {
@@ -599,7 +592,19 @@ export function ChatView(props: ChatViewProps) {
     setCommandRunning(true);
     setCommandNotice(null);
     try {
-      const accepted = await onRunSlashCommand(resolution.value.command.name, resolution.value.args);
+      const slashOptions: PromptExecutionOptions | undefined = resolution.value.command.name === 'compact'
+        ? undefined
+        : {
+            model: selectedModelId,
+            thinking: selectedThinking,
+            goalObjective: resolution.value.command.name === 'goal' ? resolution.value.args : undefined,
+            swarmMode: resolution.value.command.name === 'swarm' ? true : undefined,
+          };
+      const accepted = await onRunSlashCommand(
+        resolution.value.command.name,
+        resolution.value.args,
+        slashOptions,
+      );
       if (accepted === false) return;
       setInput('');
       setCommandMenuDismissed(false);

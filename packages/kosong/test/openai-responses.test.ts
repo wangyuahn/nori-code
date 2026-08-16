@@ -969,9 +969,7 @@ describe('OpenAIResponsesChatProvider', () => {
       expect(body['reasoning']).toEqual({ effort: 'xhigh', summary: 'auto' });
     });
 
-    it('with_thinking("max") on gpt-5.1-codex-max clamps up to xhigh on the wire', async () => {
-      // Regression guard: "max" used to fall back to "high"; for OpenAI it
-      // must clamp up to their highest supported effort, xhigh.
+    it('with_thinking("max") preserves max on the wire', async () => {
       const provider = new OpenAIResponsesChatProvider({
         model: 'gpt-5.1-codex-max',
         apiKey: 'test-key',
@@ -981,7 +979,7 @@ describe('OpenAIResponsesChatProvider', () => {
       ];
       const body = await captureRequestBody(provider, '', [], history);
 
-      expect((body['reasoning'] as Record<string, unknown>)['effort']).toBe('xhigh');
+      expect((body['reasoning'] as Record<string, unknown>)['effort']).toBe('max');
     });
   });
 

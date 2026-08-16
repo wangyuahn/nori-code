@@ -357,6 +357,9 @@ export interface Snapshot {
 }
 
 export interface ConfigResponse {
+  providers?: Record<string, unknown>;
+  default_model?: string;
+  models?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -462,6 +465,8 @@ export interface PromptResponse {
 }
 
 export interface PromptExecutionOptions {
+  model?: string;
+  thinking?: string;
   goalObjective?: string;
   swarmMode?: boolean;
   loopMode?: boolean;
@@ -780,6 +785,8 @@ export function createClient(
             method: 'POST',
             signal,
             body: {
+              model: options.model,
+              thinking: options.thinking,
               goal_objective: options.goalObjective,
               swarm_mode: options.swarmMode,
               loop_mode: options.loopMode,
@@ -1043,6 +1050,11 @@ export function createClient(
     // --- Model catalog and providers ---
     models: {
       list: () => request<{ items: ModelCatalogItem[] }>('/models'),
+      setDefault: (modelId: string) => request<{ default_model: string; model: ModelCatalogItem }>(
+        `/models/${encodeURIComponent(modelId)}:set_default`,
+        undefined,
+        { method: 'POST', body: {} },
+      ),
     },
 
     providers: {
@@ -1123,6 +1135,8 @@ export function createClient(
           method: 'POST',
           signal,
           body: {
+            model: options.model,
+            thinking: options.thinking,
             goal_objective: options.goalObjective,
             swarm_mode: options.swarmMode,
             loop_mode: options.loopMode,

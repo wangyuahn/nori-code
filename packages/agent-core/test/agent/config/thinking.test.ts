@@ -48,8 +48,8 @@ describe('defaultThinkingEffortFor', () => {
     }))).toBe('on');
   });
 
-  it('returns the declared defaultEffort for effort-capable models', () => {
-    expect(defaultThinkingEffortFor(effortModelWithDefault)).toBe('max');
+  it('ignores a declared defaultEffort that is not in supportEfforts', () => {
+    expect(defaultThinkingEffortFor(effortModelWithDefault)).toBe('high');
   });
 
   it('falls back to the middle supportEfforts entry when defaultEffort is absent', () => {
@@ -72,10 +72,16 @@ describe('defaultThinkingEffortFor', () => {
 });
 
 describe('resolveThinkingEffort', () => {
-  it('returns the requested effort verbatim when one is provided', () => {
+  it('returns a valid requested effort when one is provided', () => {
     expect(resolveThinkingEffort('low', undefined, effortModel)).toBe('low');
     expect(resolveThinkingEffort('on', { enabled: false }, booleanModel)).toBe('on');
     expect(resolveThinkingEffort('off', undefined, booleanModel)).toBe('off');
+  });
+
+  it('normalizes requested efforts against the selected model metadata', () => {
+    expect(resolveThinkingEffort('max', undefined, effortModel)).toBe('medium');
+    expect(resolveThinkingEffort('medium', undefined, booleanModel)).toBe('on');
+    expect(resolveThinkingEffort('high', undefined, nonThinkingModel)).toBe('off');
   });
 
   it('returns off when config.enabled is false and no effort is requested', () => {
@@ -90,6 +96,12 @@ describe('resolveThinkingEffort', () => {
     expect(resolveThinkingEffort(undefined, { enabled: true, effort: 'low' }, effortModel)).toBe(
       'low',
     );
+  });
+
+  it('normalizes a stale configured effort against the selected model metadata', () => {
+    expect(resolveThinkingEffort(undefined, { effort: 'max' }, effortModel)).toBe('medium');
+    expect(resolveThinkingEffort(undefined, { effort: 'medium' }, booleanModel)).toBe('on');
+    expect(resolveThinkingEffort(undefined, { effort: 'high' }, nonThinkingModel)).toBe('off');
   });
 
   it('falls back to defaultThinkingEffortFor(model) when no effort is configured', () => {

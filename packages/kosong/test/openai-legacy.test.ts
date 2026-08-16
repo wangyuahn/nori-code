@@ -882,7 +882,7 @@ describe('OpenAILegacyChatProvider', () => {
       },
     );
 
-    it('.withThinking("max") maps to xhigh without model-specific clamping', async () => {
+    it('.withThinking("max") preserves max without model-specific clamping', async () => {
       const history: Message[] = [
         { role: 'user', content: [{ type: 'text', text: 'Think' }], toolCalls: [] },
       ];
@@ -906,9 +906,9 @@ describe('OpenAILegacyChatProvider', () => {
         history,
       );
 
-      expect(openAIChatModel['reasoning_effort']).toBe('xhigh');
-      expect(openAIProModel['reasoning_effort']).toBe('xhigh');
-      expect(deepSeekModel['reasoning_effort']).toBe('xhigh');
+      expect(openAIChatModel['reasoning_effort']).toBe('max');
+      expect(openAIProModel['reasoning_effort']).toBe('max');
+      expect(deepSeekModel['reasoning_effort']).toBe('max');
     });
   });
 
@@ -952,6 +952,31 @@ describe('OpenAILegacyChatProvider', () => {
       const body = await captureRequestBody(provider, '', [], history);
 
       expect(body['reasoning_effort']).toBeUndefined();
+    });
+
+    it('does not re-enable reasoning from ThinkPart history after explicit off', async () => {
+      const provider = createProvider({
+        model: 'some-model',
+        reasoningKey: 'reasoning_content',
+      }).withThinking('off');
+      const history: Message[] = [
+        { role: 'user', content: [{ type: 'text', text: 'Hello' }], toolCalls: [] },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'think', think: 'Earlier reasoning' },
+            { type: 'text', text: 'Earlier answer' },
+          ],
+          toolCalls: [],
+        },
+        { role: 'user', content: [{ type: 'text', text: 'Continue' }], toolCalls: [] },
+      ];
+      const body = await captureRequestBody(provider, '', [], history);
+
+      expect(provider.thinkingEffort).toBe('off');
+      expect(body['reasoning_effort']).toBeUndefined();
+      expect((body['messages'] as Record<string, unknown>[])[1]!['reasoning_content'])
+        .toBe('Earlier reasoning');
     });
 
     it('auto-injects reasoning_effort when history has ThinkPart even without explicit reasoningKey', async () => {

@@ -162,6 +162,7 @@ interface WsPayload {
   nonce?: string;
   accepted?: string[];
   accepted_subscriptions?: string[];
+  promptId?: string;
   reason?: string;
   error?: { message?: string; code?: string; [key: string]: unknown };
   agentId?: string;
@@ -631,6 +632,36 @@ export function promptForRewind(messages: ChatMessage[], count: number): string 
   return undefined;
 }
 
+export function liveAssistantMessage(input: {
+  sessionId: string;
+  text: string;
+  thinking: string;
+  workBlocks: WorkBlock[];
+  usage?: TokenUsage;
+  createdAt?: string;
+}): ChatMessage | null {
+  if (!input.text && !input.thinking && input.workBlocks.length === 0) return null;
+  const createdAt = input.createdAt ?? new Date().toISOString();
+  const toolCalls = input.workBlocks.flatMap(block => block.type === 'tool' ? [block.tool] : []);
+  return {
+    id: `live-${input.sessionId}-${Date.parse(createdAt) || Date.now()}`,
+    role: 'assistant',
+    text: input.text,
+    thinking: input.thinking || undefined,
+    workBlocks: input.workBlocks.length > 0 ? input.workBlocks : undefined,
+    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    usage: input.usage,
+    createdAt,
+  };
+}
+
+export function shouldFinishAbortedPrompt(
+  activePromptId: string | null,
+  abortedPromptId: string | undefined,
+): boolean {
+  return abortedPromptId === undefined || abortedPromptId === activePromptId;
+}
+
 export function useChatMessages(sessionId: string | null, sessionTitle?: string): UseChatMessagesResult {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
@@ -704,6 +735,35 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     liveWorkBlocksRef.current = [];
     setCurrentWorkBlocks([]);
   }, []);
+
+  const finishLiveTurn = useCallback((turnId?: number) => {
+    if (turnId !== undefined) {
+      if (completedTurnIdsRef.current.has(turnId)) return;
+      completedTurnIdsRef.current.add(turnId);
+      if (completedTurnIdsRef.current.size > 32) {
+        const oldest = completedTurnIdsRef.current.values().next().value;
+        if (oldest !== undefined) completedTurnIdsRef.current.delete(oldest);
+      }
+    }
+
+    applyGeneratedTitle(assistantRawRef.current, titlePromptRef.current ?? undefined);
+    if (sessionId) {
+      const completed = liveAssistantMessage({
+        sessionId,
+        text: stripGeneratedSessionTitle(streamingRef.current),
+        thinking: thinkingRef.current,
+        workBlocks: liveWorkBlocksRef.current,
+        usage: turnUsageRef.current,
+      });
+      if (completed) setMessages(previous => mergeHistory(previous, [completed]));
+    }
+
+    setIsStreaming(false);
+    activeTurnIdRef.current = null;
+    promptIdRef.current = null;
+    turnUsageRef.current = undefined;
+    clearDraft();
+  }, [applyGeneratedTitle, clearDraft, sessionId]);
 
   const hydrateInFlight = useCallback(async (targetSessionId: string) => {
     const snapshot = await api.sessions.getSnapshot(targetSessionId);
@@ -961,40 +1021,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     };
 
     const finishTurn = (turnId?: number, refresh = false) => {
-      if (turnId !== undefined) {
-        if (completedTurnIdsRef.current.has(turnId)) {
-          if (refresh) scheduleHistoryRefresh();
-          return;
-        }
-        completedTurnIdsRef.current.add(turnId);
-        if (completedTurnIdsRef.current.size > 32) {
-          const oldest = completedTurnIdsRef.current.values().next().value;
-          if (oldest !== undefined) completedTurnIdsRef.current.delete(oldest);
-        }
-      }
-      applyGeneratedTitle(assistantRawRef.current, titlePromptRef.current ?? undefined);
-      const text = stripGeneratedSessionTitle(streamingRef.current);
-      const thinking = thinkingRef.current;
-      const toolCalls = liveWorkBlocksRef.current.flatMap(block => block.type === 'tool' ? [block.tool] : []);
-      if (text || thinking || liveWorkBlocksRef.current.length > 0) {
-        const completed: ChatMessage = {
-          id: `live-${sessionId}-${Date.now()}`,
-          role: 'assistant',
-          text,
-          thinking: thinking || undefined,
-          workBlocks: liveWorkBlocksRef.current.length > 0 ? liveWorkBlocksRef.current : undefined,
-          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-          usage: turnUsageRef.current,
-          createdAt: new Date().toISOString(),
-        };
-        setMessages(previous => mergeHistory(previous, [completed]));
-      }
-      setIsStreaming(false);
-      activeTurnIdRef.current = null;
-      promptIdRef.current = null;
-      turnUsageRef.current = undefined;
-      clearDraft();
-
+      finishLiveTurn(turnId);
       if (refresh) scheduleHistoryRefresh();
     };
 
@@ -1130,6 +1157,14 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
               }
               else setIsStreaming(false);
               break;
+            case 'prompt.aborted':
+              if (payload.promptId) {
+                setQueuedPrompts(previous => previous.filter(item => item.id !== payload.promptId));
+              }
+              if (shouldFinishAbortedPrompt(promptIdRef.current, payload.promptId)) {
+                finishTurn(activeTurnIdRef.current ?? undefined);
+              }
+              break;
             case 'tool.call.started':
               lastStreamActivityAtRef.current = Date.now();
               if (payload.toolCallId && payload.name) {
@@ -1264,7 +1299,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
       wsRef.current?.close();
       wsRef.current = null;
     };
-  }, [applyGeneratedTitle, clearDraft, hydrateInFlight, refreshHistory, sessionId]);
+  }, [clearDraft, finishLiveTurn, hydrateInFlight, refreshHistory, sessionId]);
 
   useEffect(() => {
     if (!isStreaming || !sessionId) return;
@@ -1459,9 +1494,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
       await abortRequest;
       const stillRunning = await hydrateInFlight(sessionId).catch(() => true);
       if (!stillRunning) {
-        promptIdRef.current = null;
-        setIsStreaming(false);
-        clearDraft();
+        finishLiveTurn(activeTurnIdRef.current ?? undefined);
       }
       return true;
     } catch (error) {
@@ -1473,7 +1506,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
       }]);
       return false;
     }
-  }, [clearDraft, hydrateInFlight, sessionId]);
+  }, [finishLiveTurn, hydrateInFlight, sessionId]);
 
   const rewindToPrompt = useCallback(async (count: number) => {
     if (!sessionId || isStreaming) return undefined;
@@ -1583,5 +1616,6 @@ function isMainTranscriptEvent(type: string): boolean {
     || type === 'tool.progress'
     || type === 'tool.result'
     || type === 'prompt.completed'
+    || type === 'prompt.aborted'
     || type === 'error';
 }

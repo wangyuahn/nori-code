@@ -162,6 +162,7 @@ describe('chat image attachments', () => {
         source: expect.objectContaining({ kind: 'base64', media_type: 'image/png' }),
       })],
       'queue',
+      { model: 'multimodal-model', thinking: 'off', loopMode: undefined },
     );
   });
 
@@ -359,7 +360,16 @@ describe('model thinking options', () => {
     const onModelChange = vi.fn();
     const onThinkingChange = vi.fn();
     const { container } = await renderChat({
-      models: [model('multimodal-model', ['tool_use', 'image_in']), model('second-model', ['tool_use'])],
+      models: [
+        {
+          ...model('multimodal-model', ['tool_use', 'image_in', 'thinking']),
+          support_efforts: ['low', 'medium', 'high'],
+        },
+        {
+          ...model('second-model', ['tool_use', 'thinking']),
+          support_efforts: ['low', 'medium', 'high'],
+        },
+      ],
       onModelChange,
       onThinkingChange,
     });
@@ -402,12 +412,9 @@ describe('model thinking options', () => {
     expect(container.querySelector('.composer-model-popover')?.getAttribute('aria-hidden')).toBe('false');
   });
 
-  it('offers Fast and Think when a third-party model omits reasoning metadata', () => {
+  it('hides reasoning choices when a third-party model omits reasoning metadata', () => {
     expect(modelThinkingOptions(model('gateway-model', ['tool_use']))).toEqual({
-      choices: [
-        { value: 'off', kind: 'fast' },
-        { value: 'medium', kind: 'think' },
-      ],
+      choices: [],
       defaultValue: 'off',
     });
   });
@@ -419,7 +426,6 @@ describe('model thinking options', () => {
       default_effort: 'high',
     })).toEqual({
       choices: [
-        { value: 'off', kind: 'fast' },
         { value: 'minimal', kind: 'effort' },
         { value: 'high', kind: 'effort' },
       ],
@@ -451,10 +457,55 @@ describe('model thinking options', () => {
     })).toEqual({
       choices: [
         { value: 'off', kind: 'fast' },
-        { value: 'medium', kind: 'think' },
+        { value: 'on', kind: 'think' },
       ],
-      defaultValue: 'medium',
+      defaultValue: 'on',
     });
+  });
+
+  it('shows only on for an always-thinking boolean model', () => {
+    expect(modelThinkingOptions({
+      ...model('always-thinking-model', ['tool_use', 'thinking', 'always_thinking']),
+      supports_thinking: true,
+    })).toEqual({
+      choices: [{ value: 'on', kind: 'think' }],
+      defaultValue: 'on',
+    });
+  });
+
+  it('renders catalog effort values verbatim in the Chinese interface', async () => {
+    localStorage.setItem('nori-ui-language', 'zh-CN');
+    const reasoningModel = {
+      ...model('reasoning-model', ['tool_use', 'thinking']),
+      support_efforts: ['none', 'low', 'medium', 'high', 'xhigh'],
+    };
+    const { container } = await renderChat({
+      session: session(reasoningModel.model),
+      models: [reasoningModel],
+    });
+
+    expect(
+      [...container.querySelectorAll<HTMLOptionElement>('.thinking-select option')]
+        .map(option => option.textContent),
+    ).toEqual(['none', 'low', 'medium', 'high', 'xhigh']);
+    expect(container.querySelector('[data-composer-setting="thinking"] .composer-setting-trigger strong')?.textContent)
+      .toBe('medium');
+  });
+
+  it('falls back to the model default when the persisted effort is no longer supported', async () => {
+    const reasoningModel = {
+      ...model('reasoning-model', ['tool_use', 'thinking']),
+      support_efforts: ['low', 'medium', 'high'],
+      default_effort: 'medium',
+    };
+    const staleSession = session(reasoningModel.model);
+    staleSession.agent_config.thinking = 'xhigh';
+    const { container } = await renderChat({ session: staleSession, models: [reasoningModel] });
+
+    expect(container.querySelector<HTMLSelectElement>('.thinking-select')?.value).toBe('medium');
+    expect(container.querySelector('.composer-model-trigger em')?.textContent).toBe('medium');
+    expect(container.querySelector('[data-composer-setting="thinking"] .composer-setting-trigger strong')?.textContent)
+      .toBe('medium');
   });
 
   it('hides the control when catalog metadata explicitly marks thinking unsupported', () => {
@@ -732,7 +783,12 @@ describe('live response controls', () => {
 
     await act(async () => container.querySelector<HTMLButtonElement>('.chat-send-btn')!.click());
 
-    expect(onSendMessage).toHaveBeenCalledWith('Focus on the parser race', [], 'steer');
+    expect(onSendMessage).toHaveBeenCalledWith(
+      'Focus on the parser race',
+      [],
+      'steer',
+      { model: 'multimodal-model', thinking: 'off', loopMode: undefined },
+    );
     expect(container.querySelector<HTMLButtonElement>('.chat-send-btn')!.disabled).toBe(true);
     expect(input.value).toBe('Focus on the parser race');
 
@@ -777,7 +833,7 @@ describe('chat slash commands and task-mode shortcut', () => {
       'Implement the parser fix',
       [],
       'queue',
-      { loopMode: true },
+      { model: 'multimodal-model', thinking: 'off', loopMode: true },
     );
     expect(localStorage.getItem('nori-composer-loop-mode')).toBe('true');
   });
@@ -899,8 +955,37 @@ describe('chat slash commands and task-mode shortcut', () => {
 
     await pressKey(input, 'Enter');
 
-    expect(onRunSlashCommand).toHaveBeenCalledWith('goal', 'ship the release');
+    expect(onRunSlashCommand).toHaveBeenCalledWith(
+      'goal',
+      'ship the release',
+      {
+        model: 'multimodal-model',
+        thinking: 'off',
+        goalObjective: 'ship the release',
+        swarmMode: undefined,
+      },
+    );
     expect(input.value).toBe('');
+  });
+
+  it('executes a swarm command with the selected model and thinking options', async () => {
+    const onRunSlashCommand = vi.fn(async () => true);
+    const { container } = await renderChat({ onRunSlashCommand });
+    const input = container.querySelector<HTMLTextAreaElement>('.chat-input')!;
+    await enterText(input, '/swarm inspect the parser');
+
+    await pressKey(input, 'Enter');
+
+    expect(onRunSlashCommand).toHaveBeenCalledWith(
+      'swarm',
+      'inspect the parser',
+      {
+        model: 'multimodal-model',
+        thinking: 'off',
+        goalObjective: undefined,
+        swarmMode: true,
+      },
+    );
   });
 
   it('rejects /plan instead of sending it as a normal prompt', async () => {

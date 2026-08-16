@@ -452,6 +452,7 @@ export class OpenAILegacyChatProvider implements ChatProvider {
   private _defaultHeaders: Record<string, string> | undefined;
   private _reasoningKey: string | undefined;
   private _reasoningEffort: string | undefined;
+  private _thinkingExplicitlyDisabled: boolean;
   private _generationKwargs: OpenAILegacyGenerationKwargs;
   private _toolMessageConversion: ToolMessageConversion;
   private _client: OpenAI | undefined;
@@ -475,6 +476,7 @@ export class OpenAILegacyChatProvider implements ChatProvider {
         ? normalizedReasoningKey
         : undefined;
     this._reasoningEffort = undefined;
+    this._thinkingExplicitlyDisabled = false;
     this._generationKwargs =
       options.maxTokens !== undefined ? completionTokenKwargs(this._model, options.maxTokens) : {};
     this._toolMessageConversion = options.toolMessageConversion ?? null;
@@ -489,6 +491,7 @@ export class OpenAILegacyChatProvider implements ChatProvider {
   }
 
   get thinkingEffort(): ThinkingEffort | null {
+    if (this._thinkingExplicitlyDisabled) return 'off';
     return reasoningEffortToThinkingEffort(this._reasoningEffort);
   }
 
@@ -532,7 +535,11 @@ export class OpenAILegacyChatProvider implements ChatProvider {
     // Skip when the caller already pinned reasoning_effort via withGenerationKwargs —
     // their value would otherwise be silently overwritten below.
     // See: https://github.com/MoonshotAI/kimi-code/issues/1616
-    if (reasoningEffort === undefined && kwargs['reasoning_effort'] === undefined) {
+    if (
+      !this._thinkingExplicitlyDisabled
+      && reasoningEffort === undefined
+      && kwargs['reasoning_effort'] === undefined
+    ) {
       const hasThinkPart = history.some((message) =>
         message.content.some((part) => part.type === 'think'),
       );
@@ -586,6 +593,7 @@ export class OpenAILegacyChatProvider implements ChatProvider {
     const reasoningEffort = thinkingEffortToReasoningEffort(effort);
     const clone = this._clone();
     clone._reasoningEffort = reasoningEffort;
+    clone._thinkingExplicitlyDisabled = effort === 'off';
     return clone;
   }
 

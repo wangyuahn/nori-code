@@ -4193,6 +4193,19 @@ kbd {
   .chat-work-process > summary small { display: none; }
 }
 
+@media (max-width: 560px) {
+  .composer-model-popover {
+    position: fixed;
+    right: 12px;
+    bottom: 72px;
+    left: 12px;
+    width: auto;
+    max-height: calc(100dvh - 96px);
+    overflow-y: auto;
+    transform-origin: bottom center;
+  }
+}
+
 /*
  * UI size is a local density setting. Keep the app shell, grid tracks, fixed
  * sidebars, and overlay coordinates unchanged; only text and controls adapt.

@@ -149,28 +149,8 @@ export function isFunctionToolCall<T extends { type: string }>(
  * Map kosong `ThinkingEffort` to OpenAI `reasoning_effort` string.
  */
 export function thinkingEffortToReasoningEffort(effort: ThinkingEffort): string | undefined {
-  switch (effort) {
-    case 'off':
-      return undefined;
-    case 'none':
-      return 'none';
-    case 'minimal':
-      return 'minimal';
-    case 'low':
-      return 'low';
-    case 'medium':
-      return 'medium';
-    case 'high':
-      return 'high';
-    case 'xhigh':
-    case 'max':
-      return 'xhigh';
-    default:
-      // 'on' (boolean models) or any model-declared effort OpenAI does not
-      // recognize: send no reasoning_effort and let the model use its own
-      // default, rather than throwing on a value the model itself advertised.
-      return undefined;
-  }
+  if (effort === 'off' || effort === 'on') return undefined;
+  return effort;
 }
 
 /**
@@ -182,22 +162,7 @@ export function reasoningEffortToThinkingEffort(
   if (reasoning === undefined || reasoning === null) {
     return null;
   }
-  switch (reasoning) {
-    case 'low':
-    case 'minimal':
-      return 'low';
-    case 'medium':
-      return 'medium';
-    case 'high':
-      return 'high';
-    case 'xhigh':
-    case 'max':
-      return 'xhigh';
-    case 'none':
-      return 'off';
-    default:
-      return 'off';
-  }
+  return reasoning;
 }
 /**
  * Extract `TokenUsage` from an OpenAI-compatible usage object.

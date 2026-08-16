@@ -182,6 +182,38 @@ describe('model catalog adapters', () => {
       models: ['k2', 'turbo'],
     });
   });
+
+  it('uses discovered aliases when auto discovery stores an empty custom-model compatibility array', () => {
+    const config = catalogConfig();
+    config.providers['kimi'] = {
+      ...config.providers['kimi']!,
+      autoDiscover: true,
+      customModels: [],
+    };
+
+    expect(
+      toProtocolProvider('kimi', config.providers['kimi']!, config, {
+        hasApiKey: true,
+        hasOAuthToken: false,
+      }).models,
+    ).toEqual(['k2', 'turbo']);
+  });
+
+  it('keeps an explicit empty model list when automatic discovery is disabled', () => {
+    const config = catalogConfig();
+    config.providers['kimi'] = {
+      ...config.providers['kimi']!,
+      autoDiscover: false,
+      customModels: [],
+    };
+
+    expect(
+      toProtocolProvider('kimi', config.providers['kimi']!, config, {
+        hasApiKey: true,
+        hasOAuthToken: false,
+      }).models,
+    ).toEqual([]);
+  });
 });
 
 describe('ModelCatalogService', () => {

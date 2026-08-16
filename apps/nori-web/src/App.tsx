@@ -204,6 +204,7 @@ export function App() {
   const changeModel = async (modelId: string) => {
     const model = models.find(item => item.model === modelId);
     const effort = modelThinkingOptions(model).defaultValue;
+    await api.models.setDefault(modelId);
     if (!activeSession) {
       setDraftAgentConfig(previous => ({ ...previous, model: modelId, thinking: effort }));
       return;
@@ -255,7 +256,7 @@ export function App() {
       cwd,
       smart_title: true,
       agent_config: {
-        model: draftAgentConfig.model,
+        model: draftAgentConfig.model?.trim() || undefined,
         thinking: draftAgentConfig.thinking,
         permission_mode: draftAgentConfig.permission_mode,
         plan_mode: draftAgentConfig.plan_mode,
@@ -299,16 +300,13 @@ export function App() {
     return chooseProject(firstMessage);
   };
 
-  const handleRunSlashCommand = async (command: ChatSlashCommandName, args: string) => {
+  const handleRunSlashCommand = async (command: ChatSlashCommandName, args: string, options?: PromptExecutionOptions) => {
     if (!activeSession) return false;
     if (command === 'compact') {
       await api.sessions.compact(activeSession.id, args);
       return true;
     }
-    if (command === 'goal') {
-      return sendMessage(args, [], 'queue', { goalObjective: args });
-    }
-    return sendMessage(args, [], 'queue', { swarmMode: true });
+    return sendMessage(args, [], 'queue', options);
   };
 
   useEffect(() => {
