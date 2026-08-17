@@ -225,7 +225,12 @@ export function ChatView(props: ChatViewProps) {
   const activeMainWriteOverride = mainWriteOverrideSessionRef.current === currentSessionId ? mainWriteOverride : null;
   const runtimeModelValue = sessionStatus?.model?.trim();
   const runtimeModelId = runtimeModelValue === '' ? undefined : runtimeModelValue;
-  const selectedModelId = activeModelOverride ?? runtimeModelId ?? session?.agent_config?.model ?? draftAgentConfig?.model ?? '';
+  const selectedModelId = configuredModelId(
+    activeModelOverride,
+    runtimeModelId,
+    session?.agent_config?.model,
+    draftAgentConfig?.model,
+  );
   const selectedModel = models.find(model => model.model === selectedModelId);
   const thinkingOptions = modelThinkingOptions(selectedModel);
   const selectedThinking = session?.agent_config?.thinking ?? draftAgentConfig?.thinking ?? thinkingOptions.defaultValue;
@@ -550,9 +555,10 @@ export function ChatView(props: ChatViewProps) {
     if (behavior === 'steer') setSteering(true);
     try {
       const promptAttachments = attachments.map(item => item.attachment);
-      const accepted = loopEnabled
-        ? await onSendMessage(text, promptAttachments, behavior, { loopMode: true })
-        : await onSendMessage(text, promptAttachments, behavior);
+      const accepted = await onSendMessage(text, promptAttachments, behavior, {
+        loopMode: loopEnabled ? true : undefined,
+        model: selectedModelId,
+      });
       if (accepted !== false) {
         setInput('');
         setAttachments([]);
@@ -1156,6 +1162,14 @@ function summarizeToolCall(tool: ToolCall, tr: (english: string, chinese: string
 
 function firstString(...values: unknown[]): string | undefined {
   return values.find((value): value is string => typeof value === 'string' && value.length > 0);
+}
+
+function configuredModelId(...values: Array<string | null | undefined>): string {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) return trimmed;
+  }
+  return '';
 }
 
 async function readImageAttachment(file: File): Promise<ComposerAttachment> {

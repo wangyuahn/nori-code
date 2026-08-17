@@ -107,6 +107,55 @@ describe('refreshProviderModels', () => {
     expect(harness.config().defaultModel).toBe('custom/gpt-new');
   });
 
+  it('sets defaultModel to the first discovered alias when none is configured', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ data: [{ id: 'gpt-new' }, { id: 'gpt-other' }] })));
+    const harness = makeHost({
+      providers: {
+        custom: {
+          type: 'openai',
+          baseUrl: 'https://gateway.example/v1',
+          apiKey: 'secret',
+        },
+      },
+      models: {},
+    });
+
+    const result = await refreshProviderModels(harness.host, { providerId: 'custom' });
+
+    expect(result.failed).toEqual([]);
+    expect(harness.config().defaultModel).toBe('custom/gpt-new');
+  });
+
+  it('keeps an unrelated defaultModel when discovering another provider', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ data: [{ id: 'gpt-new' }] })));
+    const harness = makeHost({
+      providers: {
+        custom: {
+          type: 'openai',
+          baseUrl: 'https://gateway.example/v1',
+          apiKey: 'secret',
+        },
+        other: {
+          type: 'openai',
+          baseUrl: 'https://other.example/v1',
+          apiKey: 'secret',
+        },
+      },
+      models: {
+        'other/keep-me': {
+          provider: 'other',
+          model: 'keep-me',
+          maxContextSize: 8192,
+        },
+      },
+      defaultModel: 'other/keep-me',
+    });
+
+    await refreshProviderModels(harness.host, { providerId: 'custom' });
+
+    expect(harness.config().defaultModel).toBe('other/keep-me');
+  });
+
   it('infers OpenCode-compatible GPT-5 efforts when a manual provider only returns model IDs', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ data: [{ id: 'gpt-5.4' }] })));
     const harness = makeHost({

@@ -162,6 +162,7 @@ describe('chat image attachments', () => {
         source: expect.objectContaining({ kind: 'base64', media_type: 'image/png' }),
       })],
       'queue',
+      expect.objectContaining({ model: 'multimodal-model' }),
     );
   });
 
@@ -400,6 +401,17 @@ describe('model thinking options', () => {
     });
 
     expect(container.querySelector('.composer-model-popover')?.getAttribute('aria-hidden')).toBe('false');
+  });
+
+  it('falls back to the draft model when the session model is an empty string', async () => {
+    const { container } = await renderChat({
+      session: session(''),
+      draftAgentConfig: { model: 'multimodal-model' },
+      models: [model('multimodal-model', ['tool_use', 'image_in'])],
+    });
+    const trigger = container.querySelector<HTMLButtonElement>('.composer-model-trigger');
+    expect(trigger?.classList.contains('invalid')).toBe(false);
+    expect(trigger?.textContent).toContain('multimodal-model');
   });
 
   it('offers Fast and Think when a third-party model omits reasoning metadata', () => {
@@ -894,7 +906,12 @@ describe('live response controls', () => {
 
     await act(async () => container.querySelector<HTMLButtonElement>('.chat-send-btn')!.click());
 
-    expect(onSendMessage).toHaveBeenCalledWith('Focus on the parser race', [], 'steer');
+    expect(onSendMessage).toHaveBeenCalledWith(
+      'Focus on the parser race',
+      [],
+      'steer',
+      expect.objectContaining({ model: 'multimodal-model' }),
+    );
     expect(container.querySelector<HTMLButtonElement>('.chat-send-btn')!.disabled).toBe(true);
     expect(input.value).toBe('Focus on the parser race');
 
@@ -939,7 +956,7 @@ describe('chat slash commands and task-mode shortcut', () => {
       'Implement the parser fix',
       [],
       'queue',
-      { loopMode: true },
+      expect.objectContaining({ loopMode: true, model: 'multimodal-model' }),
     );
     expect(localStorage.getItem('nori-composer-loop-mode')).toBe('true');
   });

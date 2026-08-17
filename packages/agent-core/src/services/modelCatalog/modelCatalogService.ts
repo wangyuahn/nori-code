@@ -64,7 +64,14 @@ export class ModelCatalogService
     for (const [modelId, alias] of Object.entries(config.models ?? {})) {
       const provider = config.providers[alias.provider];
       if (provider === undefined || provider.disabled) continue;
-      if (provider.customModels !== undefined && provider.customModels.length > 0 && !provider.customModels.includes(alias.model)) continue;
+      // Manual allow-lists only apply when automatic discovery is off.
+      // Leftover customModels must not hide aliases written by refresh.
+      if (
+        provider.autoDiscover === false
+        && provider.customModels !== undefined
+        && provider.customModels.length > 0
+        && !provider.customModels.includes(alias.model)
+      ) continue;
       models.push(toProtocolModel(modelId, alias, provider));
     }
     return models;

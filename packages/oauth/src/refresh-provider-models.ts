@@ -407,11 +407,13 @@ export async function refreshProviderModels(
       const added = [...nextIds].filter((id) => !oldIds.has(id)).length;
       const removed = [...oldIds].filter((id) => !nextIds.has(id)).length;
       const firstDiscovered = discovered[0];
-      const nextDefault = config.defaultModel && nextModels[config.defaultModel]
-        ? config.defaultModel
-        : (config.defaultModel?.startsWith(providerId + '/') && firstDiscovered !== undefined
-          ? providerId + '/' + firstDiscovered.id
-          : config.defaultModel);
+      const firstAlias = firstDiscovered === undefined ? undefined : providerId + '/' + firstDiscovered.id;
+      const existingDefault = config.defaultModel;
+      const nextDefault = existingDefault && nextModels[existingDefault]
+        ? existingDefault
+        : (existingDefault?.startsWith(providerId + '/') && firstAlias !== undefined
+          ? firstAlias
+          : (existingDefault ?? firstAlias));
 
       await host.removeProvider(providerId);
       config = await host.setConfig({
