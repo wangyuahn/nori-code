@@ -125,6 +125,23 @@ interface GoalState {
   terminalReason?: string;
 }
 
+export type GoalRewindSnapshot = null | {
+  readonly goalId: string;
+  readonly objective: string;
+  readonly completionCriterion?: string;
+  readonly status: GoalStatus;
+  readonly turnsUsed: number;
+  readonly tokensUsed: number;
+  readonly wallClockMs: number;
+  readonly budgetLimits: GoalBudgetLimits;
+  readonly terminalReason?: string;
+};
+
+interface GoalRewindCheckpoint {
+  readonly snapshot: GoalRewindSnapshot;
+  readonly replayCheckpoint: number;
+}
+
 /** Computed budget view exposed through snapshots and tools. */
 export interface GoalBudgetReport {
   readonly tokenBudget: number | null;
@@ -217,6 +234,9 @@ interface GoalReasonInput {
  */
 export class GoalMode {
   private state: GoalState | undefined;
+  private rewindCheckpoints: GoalRewindCheckpoint[] = [];
+  private rewindCheckpointPrepared = false;
+  private legacyRewindCheckpoint: GoalRewindCheckpoint | undefined;
 
   constructor(private readonly agent: Agent) {
   }
@@ -251,6 +271,119 @@ export class GoalMode {
     }
 
     // `paused` and `blocked` goals are left intact (both resumable).
+  }
+
+  prepareRewindCheckpoint(): void {
+    if (this.rewindCheckpointPrepared) return;
+    const snapshot = this.rewindSnapshot();
+    this.agent.records.logRecord({ type: 'goal.rewind_checkpoint', snapshot });
+    this.rewindCheckpoints.push({
+      snapshot,
+      replayCheckpoint: this.agent.replayBuilder.checkpoint(),
+    });
+    this.rewindCheckpointPrepared = true;
+  }
+
+  prepareLegacyRewindCheckpoint(): void {
+    if (this.rewindCheckpointPrepared || this.legacyRewindCheckpoint !== undefined) return;
+    this.legacyRewindCheckpoint = {
+      snapshot: this.rewindSnapshot(),
+      replayCheckpoint: this.agent.replayBuilder.checkpoint(),
+    };
+  }
+
+  discardLegacyRewindCheckpoint(): void {
+    this.legacyRewindCheckpoint = undefined;
+  }
+
+  beginRewindablePrompt(useLegacyCheckpoint = false): void {
+    if (!this.rewindCheckpointPrepared) {
+      const checkpoint = useLegacyCheckpoint ? this.legacyRewindCheckpoint : undefined;
+      const nextCheckpoint = checkpoint ?? {
+        snapshot: this.rewindSnapshot(),
+        replayCheckpoint: this.agent.replayBuilder.checkpoint(),
+      };
+      this.agent.records.logRecord({
+        type: 'goal.rewind_checkpoint',
+        snapshot: nextCheckpoint.snapshot,
+      });
+      this.rewindCheckpoints.push(nextCheckpoint);
+    }
+    this.legacyRewindCheckpoint = undefined;
+    this.rewindCheckpointPrepared = false;
+  }
+
+  discardRewindCheckpoint(): void {
+    if (!this.rewindCheckpointPrepared) return;
+    const checkpoint = this.rewindCheckpoints.at(-1);
+    if (checkpoint === undefined) {
+      this.rewindCheckpointPrepared = false;
+      return;
+    }
+    this.agent.records.logRecord({ type: 'goal.rewind_checkpoint_discard' });
+    this.rewindCheckpoints.pop();
+    this.state = stateFromRewindSnapshot(checkpoint.snapshot);
+    this.agent.replayBuilder.truncate(checkpoint.replayCheckpoint);
+    this.legacyRewindCheckpoint = undefined;
+    this.rewindCheckpointPrepared = false;
+    this.agent.emitEvent({ type: 'goal.updated', snapshot: this.getGoal().goal });
+    this.agent.emitStatusUpdated();
+  }
+
+  restoreRewindCheckpoint(record: AgentRecordOf<'goal.rewind_checkpoint'>): void {
+    if (this.rewindCheckpointPrepared) this.restoreRewindCheckpointDiscard();
+    this.rewindCheckpoints.push({
+      snapshot: cloneRewindSnapshot(record.snapshot),
+      replayCheckpoint: this.agent.replayBuilder.checkpoint(),
+    });
+    this.rewindCheckpointPrepared = true;
+  }
+
+  restoreRewindCheckpointDiscard(): void {
+    const checkpoint = this.rewindCheckpoints.pop();
+    if (checkpoint !== undefined) {
+      this.state = stateFromRewindSnapshot(checkpoint.snapshot);
+      this.agent.replayBuilder.truncate(checkpoint.replayCheckpoint);
+    }
+    this.legacyRewindCheckpoint = undefined;
+    this.rewindCheckpointPrepared = false;
+  }
+
+  finishReplay(): void {
+    this.legacyRewindCheckpoint = undefined;
+    if (this.rewindCheckpointPrepared) this.restoreRewindCheckpointDiscard();
+  }
+
+  rewind(count: number): void {
+    const targetIndex = this.rewindCheckpoints.length - count;
+    if (count <= 0 || targetIndex < 0) return;
+    const checkpoint = this.rewindCheckpoints[targetIndex];
+    if (checkpoint === undefined) return;
+
+    this.state = stateFromRewindSnapshot(checkpoint.snapshot);
+    this.agent.replayBuilder.truncate(checkpoint.replayCheckpoint);
+    this.rewindCheckpoints = this.rewindCheckpoints.slice(0, targetIndex);
+    this.legacyRewindCheckpoint = undefined;
+    this.rewindCheckpointPrepared = false;
+
+    this.agent.emitEvent({ type: 'goal.updated', snapshot: this.getGoal().goal });
+    this.agent.emitStatusUpdated();
+  }
+
+  private rewindSnapshot(): GoalRewindSnapshot {
+    const state = this.state;
+    if (state === undefined) return null;
+    return {
+      goalId: state.goalId,
+      objective: state.objective,
+      completionCriterion: state.completionCriterion,
+      status: state.status,
+      turnsUsed: state.turnsUsed,
+      tokensUsed: state.tokensUsed,
+      wallClockMs: liveWallClockMs(state),
+      budgetLimits: { ...state.budgetLimits },
+      terminalReason: state.terminalReason,
+    };
   }
 
   restoreCreate(record: AgentRecordOf<'goal.create'>): void {
@@ -318,6 +451,9 @@ export class GoalMode {
   restoreForked(_record: AgentRecordOf<'forked'>): void {
     const hadGoal = this.state !== undefined;
     this.state = undefined;
+    this.rewindCheckpoints = [];
+    this.legacyRewindCheckpoint = undefined;
+    this.rewindCheckpointPrepared = false;
     if (!hadGoal) return;
     this.agent.context.appendSystemReminder(GOAL_FORK_CLEARED_REMINDER, {
       kind: 'system_trigger',
@@ -725,6 +861,21 @@ function liveWallClockMs(state: GoalState, now: number = Date.now()): number {
     return state.wallClockMs + Math.max(0, now - state.wallClockResumedAt);
   }
   return state.wallClockMs;
+}
+
+function cloneRewindSnapshot(snapshot: GoalRewindSnapshot): GoalRewindSnapshot {
+  return snapshot === null
+    ? null
+    : { ...snapshot, budgetLimits: { ...snapshot.budgetLimits } };
+}
+
+function stateFromRewindSnapshot(snapshot: GoalRewindSnapshot): GoalState | undefined {
+  if (snapshot === null) return undefined;
+  return {
+    ...snapshot,
+    budgetLimits: { ...snapshot.budgetLimits },
+    wallClockResumedAt: snapshot.status === 'active' ? Date.now() : undefined,
+  };
 }
 
 function computeBudgetReport(

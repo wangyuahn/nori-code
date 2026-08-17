@@ -45,7 +45,12 @@ function makeGoalMode() {
       push: (record: AgentReplayRecord) => {
         replay.push(record);
       },
+      checkpoint: () => replay.length,
+      truncate: (checkpoint: number) => {
+        replay.splice(checkpoint);
+      },
     },
+    emitStatusUpdated: () => undefined,
   } as unknown as Agent;
 
   return {
@@ -252,6 +257,58 @@ describe('GoalMode accounting and budgets', () => {
 });
 
 describe('GoalMode records', () => {
+  it('restores the goal snapshot from before the rewound prompt', async () => {
+    const { goals, events, records } = makeGoalMode();
+
+    goals.prepareRewindCheckpoint();
+    await goals.createGoal({ objective: 'created by the prompt' });
+    goals.beginRewindablePrompt();
+
+    goals.rewind(1);
+
+    expect(goals.getGoal().goal).toBeNull();
+    expect(events.at(-1)).toMatchObject({ type: 'goal.updated', snapshot: null });
+    expect(records.map(record => record.type)).toEqual([
+      'goal.rewind_checkpoint',
+      'goal.create',
+    ]);
+  });
+
+  it('restores goal progress that existed before later prompts', async () => {
+    const { goals } = makeGoalMode();
+    await goals.createGoal({ objective: 'keep the earlier goal' });
+    await goals.recordTokenUsage(5);
+
+    goals.prepareRewindCheckpoint();
+    await goals.recordTokenUsage(7);
+    await goals.markBlocked({ reason: 'later turn blocked' });
+    goals.beginRewindablePrompt();
+
+    goals.rewind(1);
+
+    expect(goals.getGoal().goal).toMatchObject({
+      objective: 'keep the earlier goal',
+      status: 'active',
+      tokensUsed: 5,
+    });
+  });
+
+  it('rolls back goal changes when a prepared prompt checkpoint is discarded', async () => {
+    const { goals, events, records } = makeGoalMode();
+
+    goals.prepareRewindCheckpoint();
+    await goals.createGoal({ objective: 'must not survive a failed prompt' });
+    goals.discardRewindCheckpoint();
+
+    expect(goals.getGoal().goal).toBeNull();
+    expect(events.at(-1)).toMatchObject({ type: 'goal.updated', snapshot: null });
+    expect(records.map(record => record.type)).toEqual([
+      'goal.rewind_checkpoint',
+      'goal.create',
+      'goal.rewind_checkpoint_discard',
+    ]);
+  });
+
   it('records only replay-relevant create/update/clear fields', async () => {
     const { goals, records } = makeGoalMode();
 

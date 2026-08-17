@@ -141,6 +141,14 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
     return (await this.getAgent(agentId)).undoHistory(payload);
   }
 
+  async captureRewindCheckpoint({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {
+    return (await this.getAgent(agentId)).captureRewindCheckpoint(payload);
+  }
+
+  async discardRewindCheckpoint({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {
+    return (await this.getAgent(agentId)).discardRewindCheckpoint(payload);
+  }
+
   async setModel({ agentId, ...payload }: AgentScopedPayload<SetModelPayload>) {
     return (await this.getAgent(agentId)).setModel(payload);
   }

@@ -407,6 +407,8 @@ export interface AgentAPI {
   steer: (payload: SteerPayload) => void;
   cancel: (payload: CancelPayload) => void;
   undoHistory: (payload: UndoHistoryPayload) => void;
+  captureRewindCheckpoint: (payload: EmptyPayload) => void;
+  discardRewindCheckpoint: (payload: EmptyPayload) => void;
   setThinking: (payload: SetThinkingPayload) => void;
   setPermission: (payload: SetPermissionPayload) => void;
   setNoriRuntimeSettings: (payload: SetNoriRuntimeSettingsPayload) => NoriRuntimeSettings;

@@ -657,6 +657,12 @@ describe('chat rewind', () => {
 
     await act(async () => {
       container.querySelector<HTMLButtonElement>('.message-rewind-btn')!.click();
+    });
+    expect(onRewind).not.toHaveBeenCalled();
+    expect(container.querySelector('.rewind-dialog')).not.toBeNull();
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('.rewind-dialog button.primary')!.click();
       await Promise.resolve();
       await new Promise<void>(resolve => setTimeout(resolve, 0));
       await new Promise<void>(resolve => requestAnimationFrame(() => { resolve(); }));
@@ -675,31 +681,85 @@ describe('chat rewind', () => {
       .toBe('prompt restored from history with a new instruction');
   });
 
-  it('keeps the rewind composer recoverable when the renderer regains focus later', async () => {
-    const onRewind = vi.fn(async () => 'prompt restored after native dialog');
-    const originalFocus = HTMLTextAreaElement.prototype.focus;
-    let windowReady = false;
-    vi.spyOn(HTMLTextAreaElement.prototype, 'focus').mockImplementation(function (this: HTMLTextAreaElement, options) {
-      if (!windowReady) return;
-      originalFocus.call(this, options);
-    });
+  it('shows progress and blocks duplicate rewind requests while the first is running', async () => {
+    let resolveRewind!: (prompt: string) => void;
+    const onRewind = vi.fn(() => new Promise<string>(resolve => { resolveRewind = resolve; }));
     const { container } = await renderChat({ onRewind });
 
     await act(async () => {
       container.querySelector<HTMLButtonElement>('.message-rewind-btn')!.click();
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('.rewind-dialog button.primary')!.click();
       await Promise.resolve();
     });
 
-    windowReady = true;
+    expect(container.querySelector('.chat-rewind-status')?.textContent).toContain('Rewinding conversation and workspace');
+    expect(container.querySelector<HTMLButtonElement>('.message-rewind-btn')?.disabled).toBe(true);
+    container.querySelector<HTMLButtonElement>('.message-rewind-btn')!.click();
+    expect(onRewind).toHaveBeenCalledTimes(1);
+
     await act(async () => {
-      window.dispatchEvent(new Event('focus'));
+      resolveRewind('prompt restored once');
+      await Promise.resolve();
       await new Promise<void>(resolve => requestAnimationFrame(() => { resolve(); }));
     });
 
+    expect(container.querySelector('.chat-rewind-status')).toBeNull();
+    expect(container.querySelector<HTMLTextAreaElement>('.chat-input')?.value).toBe('prompt restored once');
+  });
+
+  it('shows an error and leaves the composer editable when rewind fails', async () => {
+    const onRewind = vi.fn(async () => { throw new Error('checkpoint restore failed'); });
+    const { container } = await renderChat({ onRewind });
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('.message-rewind-btn')!.click();
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('.rewind-dialog button.primary')!.click();
+      await Promise.resolve();
+      await new Promise<void>(resolve => requestAnimationFrame(() => { resolve(); }));
+    });
+
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('checkpoint restore failed');
     const input = container.querySelector<HTMLTextAreaElement>('.chat-input')!;
     expect(document.activeElement).toBe(input);
-    await enterText(input, `${input.value} and continue`);
-    expect(input.value).toBe('prompt restored after native dialog and continue');
+    await enterText(input, 'still editable after failure');
+    expect(input.value).toBe('still editable after failure');
+  });
+
+  it('does not apply a stale rewind result after switching sessions', async () => {
+    let resolveRewind!: (prompt: string) => void;
+    const onRewind = vi.fn(() => new Promise<string>(resolve => { resolveRewind = resolve; }));
+    const { container, props, root } = await renderChat({ onRewind });
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('.message-rewind-btn')!.click();
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('.rewind-dialog button.primary')!.click();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      root.render(createElement(I18nProvider, null, createElement(ChatView, {
+        ...props,
+        session: { ...props.session!, id: 'session-2', title: 'Second conversation' },
+      })));
+    });
+    const nextSessionInput = container.querySelector<HTMLTextAreaElement>('.chat-input')!;
+    await enterText(nextSessionInput, 'new session draft');
+
+    await act(async () => {
+      resolveRewind('stale prompt from session one');
+      await Promise.resolve();
+      await new Promise<void>(resolve => requestAnimationFrame(() => { resolve(); }));
+    });
+
+    expect(nextSessionInput.value).toBe('new session draft');
+    expect(container.querySelector('.chat-rewind-status')).toBeNull();
+    expect(container.querySelector('[role="alert"]')).toBeNull();
   });
 });
 

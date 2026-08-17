@@ -36,6 +36,15 @@ export class ReplayBuilder {
     }
   }
 
+  checkpoint(): number {
+    return this.records.length;
+  }
+
+  truncate(checkpoint: number): void {
+    if (this.frozen) return;
+    this.records.splice(Math.max(0, checkpoint));
+  }
+
   patchLast<T extends AgentReplayRecord['type']>(
     type: T,
     patch: Partial<Extract<AgentReplayRecord, { type: T }>>,

@@ -170,6 +170,9 @@ export function ChatView(props: ChatViewProps) {
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [steering, setSteering] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [rewindRequest, setRewindRequest] = useState<number | null>(null);
+  const [rewinding, setRewinding] = useState(false);
+  const [rewindError, setRewindError] = useState<string | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
   const [commandMenuDismissed, setCommandMenuDismissed] = useState(false);
@@ -195,10 +198,12 @@ export function ChatView(props: ChatViewProps) {
   const turnSyncFrameRef = useRef(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const rewindCaretRef = useRef<number | null>(null);
+  const rewindSessionIdRef = useRef<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const permissionMenuRef = useRef<HTMLDivElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const currentSessionId = session?.id ?? null;
+  rewindSessionIdRef.current = currentSessionId;
   const activeModelOverride = modelOverrideSessionRef.current === currentSessionId ? modelOverride : null;
   const activeTaskModeOverride = taskModeOverrideSessionRef.current === currentSessionId ? taskModeOverride : null;
   const activeMainWriteOverride = mainWriteOverrideSessionRef.current === currentSessionId ? mainWriteOverride : null;
@@ -406,9 +411,8 @@ export function ChatView(props: ChatViewProps) {
       timer = window.setTimeout(restoreFocus, 0);
     };
 
-    // A native confirm can leave Electron's renderer unfocused for longer
-    // than one animation frame. Keep the request alive until the window is
-    // focused/visible again instead of dropping it after a short retry burst.
+    // Keep the caret restoration alive across renderer focus/visibility changes
+    // instead of dropping it after a single animation frame.
     window.addEventListener('focus', retryOnWindowReady);
     window.addEventListener('pageshow', retryOnWindowReady);
     document.addEventListener('visibilitychange', retryOnWindowReady);
@@ -425,6 +429,19 @@ export function ChatView(props: ChatViewProps) {
   useEffect(() => { setTaskModeOverride(null); }, [session?.id]);
   useEffect(() => { setModelOverride(null); }, [session?.id]);
   useEffect(() => { setMainWriteOverride(null); }, [session?.id]);
+  useEffect(() => {
+    setRewindRequest(null);
+    setRewinding(false);
+    setRewindError(null);
+  }, [session?.id]);
+  useEffect(() => {
+    if (rewindRequest === null) return;
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') setRewindRequest(null);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [rewindRequest]);
   useEffect(() => {
     setPermissionMenuOpen(false);
     setModelMenuOpen(false);
@@ -711,17 +728,39 @@ export function ChatView(props: ChatViewProps) {
     }
   };
 
-  const handleRewind = useCallback(async (count: number) => {
-    if (!onRewind) return;
-    const prompt = await onRewind(count);
-    if (prompt === undefined) return;
-    setInput(prompt);
-    setCommandMenuDismissed(true);
-    setCommandSelection(0);
-    setCommandNotice(null);
-    rewindCaretRef.current = prompt.length;
-    setComposerRevision(current => current + 1);
-  }, [onRewind]);
+  const requestRewind = useCallback((count: number) => {
+    if (!onRewind || rewinding) return;
+    setRewindError(null);
+    setRewindRequest(count);
+  }, [onRewind, rewinding]);
+
+  const confirmRewind = useCallback(async () => {
+    const count = rewindRequest;
+    if (!onRewind || count === null || rewinding) return;
+    const rewindSessionId = rewindSessionIdRef.current;
+    setRewindRequest(null);
+    setRewindError(null);
+    setRewinding(true);
+    try {
+      const prompt = await onRewind(count);
+      if (rewindSessionIdRef.current !== rewindSessionId) return;
+      if (prompt === undefined) {
+        throw new Error(tr('Rewind is unavailable while this conversation is busy.', '当前会话繁忙，暂时无法回溯。'));
+      }
+      setInput(prompt);
+      setCommandMenuDismissed(true);
+      setCommandSelection(0);
+      setCommandNotice(null);
+      rewindCaretRef.current = prompt.length;
+      setComposerRevision(current => current + 1);
+    } catch (error) {
+      if (rewindSessionIdRef.current !== rewindSessionId) return;
+      setRewindError(error instanceof Error ? error.message : tr('Rewind failed.', '回溯失败。'));
+      requestAnimationFrame(() => inputRef.current?.focus({ preventScroll: true }));
+    } finally {
+      if (rewindSessionIdRef.current === rewindSessionId) setRewinding(false);
+    }
+  }, [onRewind, rewindRequest, rewinding, tr]);
 
   const handleMessagesScroll = (event: UIEvent<HTMLDivElement>) => {
     const element = event.currentTarget;
@@ -761,7 +800,7 @@ export function ChatView(props: ChatViewProps) {
   return <section className="chat-view" aria-label={tr('Conversation', '对话')}>
     <div className="chat-messages-shell">
     <div className="chat-messages" ref={messagesScrollRef} onScroll={handleMessagesScroll}>
-      {messagesLoading ? <div className="chat-history-loading" role="status"><span className="spinner"/><strong>{tr('Loading conversation…', '正在加载会话…')}</strong></div> : messages.length === 0 ? <div className="chat-welcome"><div className="welcome-mark"><Icon name="sparkles" size={27}/></div><span className="eyebrow">{tr('Your thoughtful coding partner', '你的智能编程伙伴')}</span><h2>{session ? tr('What should we make better?', '我们要改进什么？') : tr('What would you like to work on?', '你想从哪里开始？')}</h2><p>{session ? tr('Ask Nori to inspect code, plan a feature, fix a bug, or validate an API integration.', '让 Nori 检查代码、规划功能、修复缺陷或验证 API 集成。') : tr('Choose a project folder to start a new task, or open an existing conversation from the sidebar. You can also type below now.', '选择一个项目文件夹开始新任务，或从左侧打开已有对话。你也可以直接在下方输入。')}</p><UsageOverview sessions={allSessions} models={models}/><div className="starter-grid">{STARTERS.map(item => <button key={item.title} className="starter-card" onClick={() => void handleSend(tr(item.prompt, item.promptZh))}><Icon name="sparkles" size={16}/><span><strong>{tr(item.title, item.titleZh)}</strong><small>{tr(item.prompt, item.promptZh)}</small></span></button>)}</div></div> : presentedMessages.map(({ message, workStartedAt }, index) => <MessageBubble key={message.id} message={message} workStartedAt={workStartedAt} rewindCount={rewindCounts.get(message.id)} onRewind={handleRewind} live={isStreaming && index === presentedMessages.length - 1 && message.role === 'assistant' ? { streaming, thinking, workBlocks, stopping, onAbort: handleAbort } : undefined}/>) }
+      {messagesLoading ? <div className="chat-history-loading" role="status"><span className="spinner"/><strong>{tr('Loading conversation…', '正在加载会话…')}</strong></div> : messages.length === 0 ? <div className="chat-welcome"><div className="welcome-mark"><Icon name="sparkles" size={27}/></div><span className="eyebrow">{tr('Your thoughtful coding partner', '你的智能编程伙伴')}</span><h2>{session ? tr('What should we make better?', '我们要改进什么？') : tr('What would you like to work on?', '你想从哪里开始？')}</h2><p>{session ? tr('Ask Nori to inspect code, plan a feature, fix a bug, or validate an API integration.', '让 Nori 检查代码、规划功能、修复缺陷或验证 API 集成。') : tr('Choose a project folder to start a new task, or open an existing conversation from the sidebar. You can also type below now.', '选择一个项目文件夹开始新任务，或从左侧打开已有对话。你也可以直接在下方输入。')}</p><UsageOverview sessions={allSessions} models={models}/><div className="starter-grid">{STARTERS.map(item => <button key={item.title} className="starter-card" onClick={() => void handleSend(tr(item.prompt, item.promptZh))}><Icon name="sparkles" size={16}/><span><strong>{tr(item.title, item.titleZh)}</strong><small>{tr(item.prompt, item.promptZh)}</small></span></button>)}</div></div> : presentedMessages.map(({ message, workStartedAt }, index) => <MessageBubble key={message.id} message={message} workStartedAt={workStartedAt} rewindCount={rewindCounts.get(message.id)} rewindDisabled={isStreaming || rewinding} onRewind={requestRewind} live={isStreaming && index === presentedMessages.length - 1 && message.role === 'assistant' ? { streaming, thinking, workBlocks, stopping, onAbort: handleAbort } : undefined}/>) }
 
       {isStreaming && !streamingContinuesAssistant && <div className="chat-message chat-message-assistant chat-message-streaming"><div className="message-body"><div className="chat-message-role">Nori <span>{pendingApprovals.length > 0 || browserPermissions.pending.length > 0 ? tr('waiting for permission', '等待授权') : tr('working', '工作中')}</span></div>{standaloneLiveBlocks.length > 0 ? <LiveWorkStream blocks={standaloneLiveBlocks} activeProgressId={standaloneLiveProgressId} startedAt={latestUserStartedAt}/> : <div className="chat-message-content"><span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span><span className="streaming-cursor"/></div>}{streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(streaming))} tokens</div>}<button className="chat-abort-btn" onClick={() => void handleAbort()} disabled={stopping}><Icon name="stop" size={13}/> {stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button></div></div>}
       <div ref={messagesEndRef}/>
@@ -791,6 +830,8 @@ export function ChatView(props: ChatViewProps) {
         browserPermissions={browserPermissions.pending}
         onResolveBrowserPermission={browserPermissions.resolvePermission}
       />}
+      {rewinding && <div className="chat-rewind-status" role="status" aria-live="polite"><span className="spinner spinner-small"/><span>{tr('Rewinding conversation and workspace…', '正在回溯对话和工作区…')}</span></div>}
+      {rewindError && <div className="chat-rewind-status error" role="alert"><Icon name="alert" size={14}/><span>{rewindError}</span><button type="button" onClick={() => setRewindError(null)} aria-label={tr('Dismiss rewind error', '关闭回溯错误')}><Icon name="close" size={12}/></button></div>}
       <div className={'chat-input-area' + (input || attachments.length > 0 ? ' has-value' : '') + (modelNotice ? ' missing-model' : '')}>
       {queuedPrompts.length > 0 && <div className="composer-queue"><span>{tr('Queued', '排队中')} {queuedPrompts.length}</span>{queuedPrompts.map(prompt => <div key={prompt.id} title={prompt.text}><span>{prompt.text}</span>{onCancelQueuedPrompt && <button type="button" onClick={() => void onCancelQueuedPrompt(prompt.id)} title={tr('Remove queued prompt', '移除排队消息')} aria-label={tr('Remove queued prompt', '移除排队消息')}><Icon name="close" size={11}/></button>}</div>)}</div>}
       {(attachments.length > 0 || attachmentsLoading) && <div className="composer-attachments">{attachments.map(item => <div className={`composer-attachment attachment-${item.attachment.kind}`} key={item.id}>{item.preview ? <img src={item.preview} alt={item.name}/> : <span className="composer-file-icon"><Icon name="files" size={19}/></span>}<span title={item.name}>{item.name}</span><button type="button" onClick={() => removeAttachment(item)} aria-label={tr('Remove file', '移除文件')}><Icon name="close" size={12}/></button></div>)}{attachmentsLoading && <div className="composer-attachment composer-attachment-loading"><span className="composer-file-icon"><span className="spinner spinner-small"/></span><span>{tr('Uploading…', '正在上传…')}</span></div>}</div>}
@@ -847,12 +888,18 @@ export function ChatView(props: ChatViewProps) {
             </div>
             {selectedTaskMode === 'code' && <label className={`main-write-icon-toggle${selectedMainWrite ? ' active' : ''}`} title={tr('Allow the main model to use Edit and Write directly.', '允许主模型直接使用 Edit 和 Write。')}><input type="checkbox" aria-label={tr('Main edits', '主模型编辑')} checked={selectedMainWrite} disabled={isStreaming} onChange={event => void handleMainWriteChange(event.target.checked)}/><Icon name="edit" size={15}/></label>}
           </div>
-          <div className="composer-submit-actions"><button className={`chat-send-btn${isStreaming ? ' chat-guide-btn' : ''}`} onClick={() => input.trim().startsWith('/') ? void runSlashCommand() : void handleSend(undefined, isStreaming ? 'steer' : 'queue')} disabled={commandRunning || steering || attachmentsLoading || (!input.trim() && attachments.length === 0)} title={isStreaming ? tr('Insert guidance into the current task', '插入引导到当前任务') : tr('Send message', '发送消息')} aria-label={isStreaming ? tr('Guide current task', '引导当前任务') : tr('Send message', '发送消息')}><Icon name={isStreaming ? 'sparkles' : 'send'} size={18}/>{isStreaming && <span>{tr('Guide', '引导')}</span>}</button></div>
+          <div className="composer-submit-actions"><button className={`chat-send-btn${isStreaming ? ' chat-guide-btn' : ''}`} onClick={() => input.trim().startsWith('/') ? void runSlashCommand() : void handleSend(undefined, isStreaming ? 'steer' : 'queue')} disabled={rewinding || commandRunning || steering || attachmentsLoading || (!input.trim() && attachments.length === 0)} title={isStreaming ? tr('Insert guidance into the current task', '插入引导到当前任务') : tr('Send message', '发送消息')} aria-label={isStreaming ? tr('Guide current task', '引导当前任务') : tr('Send message', '发送消息')}><Icon name={isStreaming ? 'sparkles' : 'send'} size={18}/>{isStreaming && <span>{tr('Guide', '引导')}</span>}</button></div>
         </div>
       </div>
       {(modelNotice || modelError || attachmentError) && <div className="composer-error" role="status">{modelNotice ? tr('Select a model before sending.', '请先选择模型') : attachmentError ?? modelError}</div>}
       {commandNotice && <div className="composer-command-notice" role="status">{commandNotice}</div>}
     </div></div>
+    {rewindRequest !== null && <div className="rewind-dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setRewindRequest(null); }}>
+      <section className="rewind-dialog" role="dialog" aria-modal="true" aria-labelledby="rewind-dialog-title" aria-describedby="rewind-dialog-description">
+        <header><span className="rewind-dialog-icon"><Icon name="refresh" size={16}/></span><div><h2 id="rewind-dialog-title">{tr('Rewind conversation?', '确认回溯？')}</h2><p id="rewind-dialog-description">{tr('Messages, Goal, Todo List, and workspace files after this prompt will return to their earlier state.', '此提问之后的消息、Goal、Todo List 和工作区文件将恢复到当时状态。')}</p></div></header>
+        <footer><button type="button" onClick={() => setRewindRequest(null)}>{tr('Cancel', '取消')}</button><button type="button" className="primary" autoFocus onClick={() => void confirmRewind()}>{tr('Rewind', '回溯')}</button></footer>
+      </section>
+    </div>}
   </section>;
 }
 
@@ -880,7 +927,7 @@ function formatElapsedDuration(durationMs: number): string {
   return `${hours}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
 }
 
-function MessageBubble({ message, workStartedAt, rewindCount, onRewind, live }: { message: ChatMessage; workStartedAt?: number; rewindCount?: number; onRewind?: (count: number) => void | Promise<void>; live?: LiveAssistantContinuation }) {
+function MessageBubble({ message, workStartedAt, rewindCount, rewindDisabled = false, onRewind, live }: { message: ChatMessage; workStartedAt?: number; rewindCount?: number; rewindDisabled?: boolean; onRewind?: (count: number) => void | Promise<void>; live?: LiveAssistantContinuation }) {
   const { tr } = useI18n();
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
@@ -912,10 +959,7 @@ function MessageBubble({ message, workStartedAt, rewindCount, onRewind, live }: 
     ? Math.max(0, completedAt - workStartedAt)
     : undefined;
   return <article data-chat-turn-id={isUser ? message.id : undefined} className={'chat-message ' + (isUser ? 'chat-message-user' : isSystem ? 'chat-message-system' : 'chat-message-assistant') + (live ? ' chat-message-streaming' : '')}>
-    {isSystem && <div className="message-avatar"><span>!</span></div>}<div className="message-body">{(!isUser || (rewindCount !== undefined && onRewind !== undefined)) && <div className="chat-message-role">{!isUser && (isSystem ? tr('System', '系统') : 'Nori')}{live && <span>{tr('working', '工作中')}</span>}{isUser && rewindCount && onRewind && <button className="message-rewind-btn" onClick={() => {
-      if (!window.confirm(tr('Rewind the conversation and workspace to before this prompt?', '将对话和代码回溯到此提问之前？'))) return;
-      void onRewind(rewindCount);
-    }} title={tr('Rewind to before this prompt', '回溯到此提问之前')}><Icon name="refresh" size={12}/>{tr('Rewind', '回溯')}</button>}</div>}
+    {isSystem && <div className="message-avatar"><span>!</span></div>}<div className="message-body">{(!isUser || (rewindCount !== undefined && onRewind !== undefined)) && <div className="chat-message-role">{!isUser && (isSystem ? tr('System', '系统') : 'Nori')}{live && <span>{tr('working', '工作中')}</span>}{isUser && rewindCount && onRewind && <button className="message-rewind-btn" disabled={rewindDisabled} onClick={() => { void onRewind(rewindCount); }} title={tr('Rewind to before this prompt', '回溯到此提问之前')}><Icon name="refresh" size={12}/>{tr('Rewind', '回溯')}</button>}</div>}
       {live !== undefined
         ? hasLiveTranscript
           ? <LiveWorkStream blocks={liveTranscriptBlocks} activeProgressId={liveProgressId} startedAt={workStartedAt}/>

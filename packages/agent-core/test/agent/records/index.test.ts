@@ -240,6 +240,210 @@ describe('AgentRecords persistence metadata', () => {
     ]);
   });
 
+  it('replays context undo with the goal checkpoint from before the target prompt', async () => {
+    const persistence = new InMemoryAgentRecordPersistence([
+      { type: 'metadata', protocol_version: AGENT_WIRE_PROTOCOL_VERSION, created_at: 1 },
+      { type: 'goal.rewind_checkpoint', snapshot: null },
+      {
+        type: 'goal.create',
+        goalId: 'goal-from-prompt',
+        objective: 'created by target prompt',
+      },
+      {
+        type: 'turn.prompt',
+        input: [{ type: 'text', text: 'start a goal' }],
+        origin: { kind: 'user' },
+      },
+      {
+        type: 'context.append_message',
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: 'start a goal' }],
+          toolCalls: [],
+          origin: { kind: 'user' },
+        },
+      },
+      { type: 'context.undo', count: 1 },
+    ]);
+    const { agent } = testAgent({ persistence });
+
+    await agent.records.replay();
+
+    expect(agent.context.history).toEqual([]);
+    expect(agent.goal.getGoal().goal).toBeNull();
+    expect(agent.replayBuilder.buildResult()).toEqual([]);
+  });
+
+  it('rewinds a prompt-owned Goal from sessions created before explicit checkpoints', async () => {
+    const persistence = new InMemoryAgentRecordPersistence([
+      { type: 'metadata', protocol_version: AGENT_WIRE_PROTOCOL_VERSION, created_at: 1 },
+      {
+        type: 'goal.create',
+        goalId: 'legacy-prompt-goal',
+        objective: 'created immediately before the prompt',
+      },
+      {
+        type: 'turn.prompt',
+        input: [{ type: 'text', text: 'start legacy goal' }],
+        origin: { kind: 'user' },
+      },
+      {
+        type: 'context.append_message',
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: 'start legacy goal' }],
+          toolCalls: [],
+          origin: { kind: 'user' },
+        },
+      },
+      { type: 'context.undo', count: 1 },
+    ]);
+    const { agent } = testAgent({ persistence });
+
+    await agent.records.replay();
+
+    expect(agent.context.history).toEqual([]);
+    expect(agent.goal.getGoal().goal).toBeNull();
+    expect(agent.replayBuilder.buildResult()).toEqual([]);
+  });
+
+  it('keeps an independently changed Goal when it is not adjacent to the prompt', async () => {
+    const persistence = new InMemoryAgentRecordPersistence([
+      { type: 'metadata', protocol_version: AGENT_WIRE_PROTOCOL_VERSION, created_at: 1 },
+      {
+        type: 'goal.create',
+        goalId: 'independent-goal',
+        objective: 'keep this goal',
+      },
+      { type: 'permission.set_mode', mode: 'manual' },
+      {
+        type: 'turn.prompt',
+        input: [{ type: 'text', text: 'continue' }],
+        origin: { kind: 'user' },
+      },
+      {
+        type: 'context.append_message',
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: 'continue' }],
+          toolCalls: [],
+          origin: { kind: 'user' },
+        },
+      },
+      { type: 'context.undo', count: 1 },
+    ]);
+    const { agent } = testAgent({ persistence });
+
+    await agent.records.replay();
+
+    expect(agent.goal.getGoal().goal).toMatchObject({
+      goalId: 'independent-goal',
+      objective: 'keep this goal',
+    });
+    expect(agent.replayBuilder.buildResult()).toContainEqual(
+      expect.objectContaining({ type: 'goal_updated' }),
+    );
+  });
+
+  it('replays a discarded prompt checkpoint as a Goal rollback', async () => {
+    const persistence = new InMemoryAgentRecordPersistence([
+      { type: 'metadata', protocol_version: AGENT_WIRE_PROTOCOL_VERSION, created_at: 1 },
+      { type: 'goal.rewind_checkpoint', snapshot: null },
+      {
+        type: 'goal.create',
+        goalId: 'failed-prompt-goal',
+        objective: 'must be rolled back',
+      },
+      { type: 'goal.rewind_checkpoint_discard' },
+    ]);
+    const { agent } = testAgent({ persistence });
+
+    await agent.records.replay();
+
+    expect(agent.goal.getGoal().goal).toBeNull();
+    expect(agent.replayBuilder.buildResult()).toEqual([]);
+  });
+
+  it('rolls back a dangling checkpoint left by a crash before the prompt started', async () => {
+    const persistence = new InMemoryAgentRecordPersistence([
+      { type: 'metadata', protocol_version: AGENT_WIRE_PROTOCOL_VERSION, created_at: 1 },
+      {
+        type: 'goal.create',
+        goalId: 'base-goal',
+        objective: 'keep the pre-prompt goal',
+      },
+      {
+        type: 'goal.rewind_checkpoint',
+        snapshot: {
+          goalId: 'base-goal',
+          objective: 'keep the pre-prompt goal',
+          status: 'active',
+          turnsUsed: 0,
+          tokensUsed: 0,
+          wallClockMs: 0,
+          budgetLimits: {},
+        },
+      },
+      { type: 'goal.update', status: 'paused', actor: 'user' },
+    ]);
+    const { agent } = testAgent({ persistence });
+
+    await agent.records.replay();
+
+    expect(agent.goal.getGoal().goal).toMatchObject({
+      goalId: 'base-goal',
+      status: 'active',
+    });
+    expect(agent.replayBuilder.buildResult()).toEqual([
+      expect.objectContaining({
+        type: 'goal_updated',
+        snapshot: expect.objectContaining({ goalId: 'base-goal', status: 'active' }),
+      }),
+    ]);
+
+    agent.goal.prepareRewindCheckpoint();
+    expect(persistence.records.filter(record => record.type === 'goal.rewind_checkpoint')).toHaveLength(2);
+  });
+
+  it('drops stale Goal replay events when a later checkpoint follows a crashed prompt', async () => {
+    const persistence = new InMemoryAgentRecordPersistence([
+      { type: 'metadata', protocol_version: AGENT_WIRE_PROTOCOL_VERSION, created_at: 1 },
+      { type: 'goal.rewind_checkpoint', snapshot: null },
+      {
+        type: 'goal.create',
+        goalId: 'stale-crashed-goal',
+        objective: 'must not survive',
+      },
+      { type: 'goal.rewind_checkpoint', snapshot: null },
+      {
+        type: 'goal.create',
+        goalId: 'next-prompt-goal',
+        objective: 'belongs to the next prompt',
+      },
+      {
+        type: 'turn.prompt',
+        input: [{ type: 'text', text: 'next prompt' }],
+        origin: { kind: 'user' },
+      },
+      {
+        type: 'context.append_message',
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: 'next prompt' }],
+          toolCalls: [],
+          origin: { kind: 'user' },
+        },
+      },
+      { type: 'context.undo', count: 1 },
+    ]);
+    const { agent } = testAgent({ persistence });
+
+    await agent.records.replay();
+
+    expect(agent.goal.getGoal().goal).toBeNull();
+    expect(agent.replayBuilder.buildResult()).toEqual([]);
+  });
+
   it('restores forked records as fork boundaries that clear copied goals', async () => {
     const persistence = new InMemoryAgentRecordPersistence([
       { type: 'metadata', protocol_version: AGENT_WIRE_PROTOCOL_VERSION, created_at: 1 },
@@ -263,6 +467,41 @@ describe('AgentRecords persistence metadata', () => {
     const reminder = agent.context.history.at(-1);
     expect(reminder?.origin).toEqual({ kind: 'system_trigger', name: 'goal_fork_cleared' });
     expect(JSON.stringify(reminder?.content)).toContain('This fork does not have a current goal.');
+  });
+
+  it('does not restore a copied goal when undo crosses the fork boundary', async () => {
+    const persistence = new InMemoryAgentRecordPersistence([
+      { type: 'metadata', protocol_version: AGENT_WIRE_PROTOCOL_VERSION, created_at: 1 },
+      {
+        type: 'goal.create',
+        goalId: 'source-goal',
+        objective: 'source work',
+      },
+      {
+        type: 'turn.prompt',
+        input: [{ type: 'text', text: 'parent prompt' }],
+        origin: { kind: 'user' },
+      },
+      {
+        type: 'context.append_message',
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: 'parent prompt' }],
+          toolCalls: [],
+          origin: { kind: 'user' },
+        },
+      },
+      { type: 'forked', time: 2 },
+      { type: 'context.undo', count: 1 },
+    ]);
+    const { agent } = testAgent({ persistence });
+
+    await expect(agent.records.replay()).resolves.toEqual({ warning: undefined });
+
+    expect(agent.goal.getGoal().goal).toBeNull();
+    expect(agent.context.history.some(message =>
+      JSON.stringify(message.content).includes('parent prompt'),
+    )).toBe(false);
   });
 
   it('keeps goals created after the forked boundary', async () => {

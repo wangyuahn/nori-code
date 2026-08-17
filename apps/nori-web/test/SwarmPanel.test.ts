@@ -230,17 +230,18 @@ describe('SwarmPanel projections', () => {
     })).toBe(19);
   });
 
-  it('counts running agents without inflating the badge with queued work', () => {
+  it('counts running and paused agents without inflating the badge with queued work', () => {
     const activity = runningSwarmAgents([{
       ...run('swarm-1', 1),
       task_count: 20,
       tasks: [
         { id: 'running-1', label: 'One', status: 'running' },
         { id: 'running-2', label: 'Two', status: 'running' },
+        { id: 'paused-1', label: 'Paused', status: 'paused' },
         { id: 'queued-1', label: 'Queued', status: 'pending' },
       ],
     }]);
-    expect([...activity.ids].sort()).toEqual(['running-1', 'running-2']);
+    expect([...activity.ids].sort()).toEqual(['paused-1', 'running-1', 'running-2']);
     expect(activity.untracked).toBe(0);
 
     const stopped = runningSwarmAgents([{

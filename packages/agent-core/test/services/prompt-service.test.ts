@@ -170,6 +170,8 @@ function makeBridge(
       return id === undefined ? sessions : sessions.filter((s) => s.id === id);
     }),
     resumeSession: vi.fn().mockResolvedValue(undefined as unknown as never),
+    captureRewindCheckpoint: vi.fn().mockResolvedValue(undefined),
+    discardRewindCheckpoint: vi.fn().mockResolvedValue(undefined),
     prompt: vi.fn().mockImplementation(async (payload) => {
       record.promptCalls.push(payload);
       await opts.onPrompt?.(payload);
@@ -616,8 +618,49 @@ describe('PromptService.submit', () => {
     const { bus } = makeBus();
     const impl = newSvc(bridge, bus);
     await expect(impl.submit(SID, mkBody())).rejects.toThrowError(/boom/);
+    expect(bridge.rpc.discardRewindCheckpoint).toHaveBeenCalledTimes(1);
+    expect(bridge.rpc.discardRewindCheckpoint).toHaveBeenCalledWith({
+      sessionId: SID,
+      agentId: 'main',
+    });
     // A second submit must succeed (state was cleared).
     await impl.submit(SID, mkBody());
+  });
+
+  it('captures a rewind checkpoint before applying prompt state overrides', async () => {
+    const { bridge } = makeBridge({ config: { modelAlias: 'kimi-code/k2' } });
+    const { bus } = makeBus();
+    const impl = newSvc(bridge, bus);
+
+    await impl.submit(SID, mkBody({ model: 'kimi-code/k1' }));
+
+    const captureMock = bridge.rpc.captureRewindCheckpoint as ReturnType<typeof vi.fn>;
+    const setModelMock = bridge.rpc.setModel as ReturnType<typeof vi.fn>;
+    const promptMock = bridge.rpc.prompt as ReturnType<typeof vi.fn>;
+    expect(captureMock).toHaveBeenCalledWith({ sessionId: SID, agentId: 'main' });
+    expect(captureMock.mock.invocationCallOrder[0]).toBeLessThan(
+      setModelMock.mock.invocationCallOrder[0]!,
+    );
+    expect(setModelMock.mock.invocationCallOrder[0]).toBeLessThan(
+      promptMock.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('discards the rewind checkpoint when a prompt state override fails', async () => {
+    const { bridge } = makeBridge({ config: { modelAlias: 'kimi-code/k2' } });
+    vi.mocked(bridge.rpc.setModel).mockRejectedValueOnce(new Error('model failed'));
+    const { bus } = makeBus();
+    const impl = newSvc(bridge, bus);
+
+    await expect(impl.submit(SID, mkBody({ model: 'kimi-code/k1' }))).rejects.toThrow(
+      'model failed',
+    );
+
+    expect(bridge.rpc.prompt).not.toHaveBeenCalled();
+    expect(bridge.rpc.discardRewindCheckpoint).toHaveBeenCalledWith({
+      sessionId: SID,
+      agentId: 'main',
+    });
   });
 
   it('calls resumeSession before prompt so cross-restart sessions resolve', async () => {
@@ -1091,6 +1134,19 @@ describe('PromptService queue steer', () => {
     expect((await impl.list(SID)).queued.map((prompt) => prompt.prompt_id)).toEqual([
       queued.prompt_id,
     ]);
+    expect(bridge.rpc.discardRewindCheckpoint).toHaveBeenCalledWith({
+      sessionId: SID,
+      agentId: 'main',
+    });
+    const captureMock = bridge.rpc.captureRewindCheckpoint as ReturnType<typeof vi.fn>;
+    const steerMock = bridge.rpc.steer as ReturnType<typeof vi.fn>;
+    const discardMock = bridge.rpc.discardRewindCheckpoint as ReturnType<typeof vi.fn>;
+    expect(captureMock.mock.invocationCallOrder.at(-1)).toBeLessThan(
+      steerMock.mock.invocationCallOrder[0]!,
+    );
+    expect(steerMock.mock.invocationCallOrder[0]).toBeLessThan(
+      discardMock.mock.invocationCallOrder[0]!,
+    );
   });
 
   it('throws PromptNotFoundError when steering a prompt that is not queued', async () => {

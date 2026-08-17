@@ -395,6 +395,10 @@ export class PromptService
     this._replaceQueue(sid, MAIN_AGENT_ID, remaining);
 
     try {
+      await this.core.rpc.captureRewindCheckpoint({
+        sessionId: sid,
+        agentId: MAIN_AGENT_ID,
+      });
       await this.core.rpc.steer({
         sessionId: sid,
         agentId: MAIN_AGENT_ID,
@@ -402,6 +406,10 @@ export class PromptService
         ...(selected.some((item) => item.body.loop_mode === true) ? { goalIntake: true } : {}),
       });
     } catch (error) {
+      await this.core.rpc.discardRewindCheckpoint({
+        sessionId: sid,
+        agentId: MAIN_AGENT_ID,
+      }).catch(() => undefined);
       this._restoreSteeredQueueItems(sid, selected);
       throw error;
     }
@@ -424,22 +432,23 @@ export class PromptService
     state: PromptState,
     onStarted?: () => void,
   ): Promise<void> {
-    const overridePatch = state.agentId === MAIN_AGENT_ID ? pickAgentStatePatch(state.body) : undefined;
-    if (overridePatch !== undefined) {
-      await this._ensureAgentStateBootstrapped(sid);
-      await this._applyAgentStateInternal(sid, overridePatch, 'prompt', state.promptId);
-    }
-
+    await this.core.rpc.captureRewindCheckpoint({ sessionId: sid, agentId: state.agentId });
     const key = promptKey(sid, state.agentId);
-    this._active.set(key, state);
-    const input = contentToCoreParts(state.body.content);
-    onStarted?.();
 
     // Fire-and-forget. agent-core streams events via the SDK side of the
     // RPC pair which lands on `BridgeClientAPI.emitEvent → IEventService.publish`.
     // The submit RPC returns synchronously (PromptPayload → void); errors
     // would manifest as later `error` events, not as a rejection here.
     try {
+      const overridePatch = state.agentId === MAIN_AGENT_ID ? pickAgentStatePatch(state.body) : undefined;
+      if (overridePatch !== undefined) {
+        await this._ensureAgentStateBootstrapped(sid);
+        await this._applyAgentStateInternal(sid, overridePatch, 'prompt', state.promptId);
+      }
+
+      this._active.set(key, state);
+      const input = contentToCoreParts(state.body.content);
+      onStarted?.();
       this._logger.debug(
         { sid, promptId: state.promptId, agentId: state.agentId, partCount: input.length },
         '[DBG prompt-service.submit] -> core.rpc.prompt(...)',
@@ -460,6 +469,10 @@ export class PromptService
       if (this._active.get(key)?.promptId === state.promptId) {
         this._active.delete(key);
       }
+      await this.core.rpc.discardRewindCheckpoint({
+        sessionId: sid,
+        agentId: state.agentId,
+      }).catch(() => undefined);
       this._logger.debug(
         { sid, promptId: state.promptId, err: (error as Error)?.message ?? error },
         '[DBG prompt-service.submit] core.rpc.prompt(...) threw',

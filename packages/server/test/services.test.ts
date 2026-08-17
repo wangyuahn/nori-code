@@ -796,6 +796,69 @@ describe('WSBroadcastService (WS transport pump)', () => {
     bus.dispose();
   });
 
+  it('projects regular background agents into the global collaboration status store', () => {
+    const bus = new EventService();
+    const broadcast = new WSBroadcastService(
+      bus,
+      testLogger,
+      new FakeSessionClients(),
+      new FakeConnectionRegistry(),
+      makeEnv(),
+    );
+    const sessionId = 'sid_regular_agent_status';
+    const taskId = 'task-regular-agent';
+    const agentId = 'agent-regular-agent';
+
+    bus.publish({
+      type: 'background.task.started', sessionId, agentId: 'main',
+      info: {
+        taskId,
+        agentId,
+        description: 'Review the current changes',
+        status: 'running',
+        detached: true,
+        startedAt: Date.now(),
+        endedAt: null,
+        kind: 'agent',
+        subagentType: 'reviewer',
+        paused: false,
+      },
+    } as unknown as Event);
+
+    expect(getSwarmStatus(taskId)).toMatchObject({
+      status: 'running',
+      session_id: sessionId,
+      task_count: 1,
+      tasks: [{ id: taskId, agent_id: agentId, profile: 'reviewer', status: 'running' }],
+    });
+
+    bus.publish({
+      type: 'background.task.terminated', sessionId, agentId: 'main',
+      info: {
+        taskId,
+        agentId,
+        description: 'Review the current changes',
+        status: 'completed',
+        detached: true,
+        startedAt: Date.now(),
+        endedAt: Date.now(),
+        kind: 'agent',
+        subagentType: 'reviewer',
+        paused: false,
+      },
+    } as unknown as Event);
+
+    expect(getSwarmStatus(taskId)).toMatchObject({
+      status: 'done',
+      completed_count: 1,
+      tasks: [{ status: 'completed' }],
+    });
+
+    clearSwarmStatus(taskId);
+    broadcast.dispose();
+    bus.dispose();
+  });
+
   it('keeps swarms launched by child agents in their parent round', () => {
     const bus = new EventService();
     const broadcast = new WSBroadcastService(

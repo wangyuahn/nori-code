@@ -554,7 +554,7 @@ function todosFromToolArgs(args: unknown): TodoItem[] | undefined {
   });
 }
 
-function latestTodos(messages: ChatMessage[]): TodoItem[] {
+export function latestTodos(messages: ChatMessage[]): TodoItem[] {
   let latest: TodoItem[] | undefined;
   for (const message of messages) {
     for (const tool of message.toolCalls ?? []) {
@@ -568,6 +568,23 @@ function latestTodos(messages: ChatMessage[]): TodoItem[] {
 function messageTime(message: ChatMessage): number {
   const parsed = Date.parse(message.createdAt ?? '');
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export function confirmOptimisticUserMessage(
+  messages: ChatMessage[],
+  localId: string,
+  serverId: string,
+  createdAt: string,
+): ChatMessage[] {
+  if (localId === serverId) {
+    return messages.map(message => message.id === localId ? { ...message, createdAt } : message);
+  }
+  if (messages.some(message => message.id === serverId)) {
+    return messages.filter(message => message.id !== localId);
+  }
+  return messages.map(message => message.id === localId
+    ? { ...message, id: serverId, createdAt }
+    : message);
 }
 
 export function mergeHistory(previous: ChatMessage[], remote: ChatMessage[]): ChatMessage[] {
@@ -808,10 +825,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     return true;
   }, []);
 
-  const refreshHistory = useCallback(async (targetSessionId = sessionId, replace = false) => {
-    if (!targetSessionId) return [] as ChatMessage[];
-    const data = await api.getMessages(targetSessionId, { page_size: 100 });
-    const items = data?.items ?? [];
+  const applyHistoryItems = useCallback((items: Message[], targetSessionId: string, replace: boolean) => {
     for (const message of items) {
       if (message.role !== 'assistant') continue;
       const rawText = Array.isArray(message.content)
@@ -833,7 +847,13 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
       });
     }
     return history;
-  }, [applyGeneratedTitle, sessionId]);
+  }, [applyGeneratedTitle]);
+
+  const refreshHistory = useCallback(async (targetSessionId = sessionId, replace = false) => {
+    if (!targetSessionId) return [] as ChatMessage[];
+    const data = await api.getMessages(targetSessionId, { page_size: 100 });
+    return applyHistoryItems(data?.items ?? [], targetSessionId, replace);
+  }, [applyHistoryItems, sessionId]);
 
   useEffect(() => {
     setMessages([]);
@@ -1355,6 +1375,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
       : []);
     const localMessageId = `local-user-${Date.now()}`;
     const optimisticSteer = activeBeforeSubmit && behavior === 'steer';
+    const insertedOptimisticMessage = !activeBeforeSubmit || optimisticSteer;
     if (!activeBeforeSubmit) {
       clearDraft();
       setMessages(previous => [...previous, {
@@ -1436,17 +1457,10 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
             throw error;
           }
           setQueuedPrompts(previous => previous.filter(item => item.id !== response.prompt_id));
-          if (optimisticSteer) {
-            setMessages(previous => previous.map(message => message.id === localMessageId
-              ? { ...message, id: response.user_message_id, createdAt: response.created_at }
-              : message));
-          } else {
-            setMessages(previous => [...previous, { id: response.user_message_id, role: 'user', text: visibleText, images: visibleImages.length > 0 ? visibleImages : undefined, createdAt: response.created_at }]);
-          }
         }
       } else {
         promptIdRef.current = response.prompt_id;
-        if (activeBeforeSubmit && !optimisticSteer) {
+        if (!insertedOptimisticMessage) {
           setMessages(previous => mergeHistory(previous, [{
             id: response.user_message_id,
             role: 'user',
@@ -1456,11 +1470,19 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
           }]));
         }
       }
+      if (insertedOptimisticMessage) {
+        setMessages(previous => confirmOptimisticUserMessage(
+          previous,
+          localMessageId,
+          response.user_message_id,
+          response.created_at,
+        ));
+      }
       return true;
     } catch (error) {
       if (controller.signal.aborted) return false;
       if (shouldGenerateTitle) hasUserPromptRef.current = false;
-      if (!activeBeforeSubmit || optimisticSteer) {
+      if (insertedOptimisticMessage) {
         setMessages(previous => previous.filter(message => message.id !== localMessageId));
       }
       setMessages(previous => [...previous, {
@@ -1511,16 +1533,21 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
   const rewindToPrompt = useCallback(async (count: number) => {
     if (!sessionId || isStreaming) return undefined;
     const prompt = promptForRewind(messages, count);
-    await api.sessions.undo(sessionId, count);
+    const result = await api.sessions.undo(sessionId, count);
+    if (sessionRef.current !== sessionId) return undefined;
     clearDraft();
     setPendingApprovals([]);
     setPendingQuestions([]);
     setQueuedPrompts([]);
     setIsStreaming(false);
     hasUserPromptRef.current = true;
-    await refreshHistory(sessionId, true);
+    applyHistoryItems(result.messages.items, sessionId, true);
+    if (sessionRef.current === sessionId) {
+      sessionStatusSessionIdRef.current = sessionId;
+      setSessionStatus(previous => preserveEqual(previous, result.status));
+    }
     return prompt;
-  }, [clearDraft, isStreaming, messages, refreshHistory, sessionId]);
+  }, [applyHistoryItems, clearDraft, isStreaming, messages, sessionId]);
 
   const refreshMessages = useCallback(async () => {
     if (!sessionId) return;

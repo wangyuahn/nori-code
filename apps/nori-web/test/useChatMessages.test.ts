@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../src/api/client';
-import { apiMessageToChat, canApplyGeneratedSessionTitle, fallbackSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, liveAssistantMessage, mergeHistory, mergeInFlightWorkBlocks, promptForRewind, RealtimeSubscriptionGate, removeTerminatedAgent, shouldFinishAbortedPrompt, shouldIgnoreTranscriptEvent, statusForSession, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
+import { apiMessageToChat, canApplyGeneratedSessionTitle, confirmOptimisticUserMessage, fallbackSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, latestTodos, liveAssistantMessage, mergeHistory, mergeInFlightWorkBlocks, promptForRewind, RealtimeSubscriptionGate, removeTerminatedAgent, shouldFinishAbortedPrompt, shouldIgnoreTranscriptEvent, statusForSession, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
 
 describe('agent activity events', () => {
   it('removes a manually terminated agent from the live activity set', () => {
@@ -153,6 +153,61 @@ describe('main transcript projection', () => {
       { src: 'data:image/png;base64,aGVsbG8=', alt: 'Attached image 1' },
       { src: 'https://example.com/image.png', alt: 'Attached image 2' },
     ]);
+  });
+
+  it('confirms an optimistic user message with the authoritative server identity', () => {
+    const confirmed = confirmOptimisticUserMessage([
+      {
+        id: 'local-user-1',
+        role: 'user',
+        text: 'Only show this once.',
+        createdAt: '2026-07-15T00:00:00.000Z',
+      },
+    ], 'local-user-1', 'server-user-1', '2026-07-15T00:00:30.000Z');
+
+    expect(confirmed).toEqual([{
+      id: 'server-user-1',
+      role: 'user',
+      text: 'Only show this once.',
+      createdAt: '2026-07-15T00:00:30.000Z',
+    }]);
+  });
+
+  it('removes the optimistic duplicate when server history arrives first', () => {
+    const confirmed = confirmOptimisticUserMessage([
+      {
+        id: 'server-user-1',
+        role: 'user',
+        text: 'Only show this once.',
+        createdAt: '2026-07-15T00:00:30.000Z',
+      },
+      {
+        id: 'local-user-1',
+        role: 'user',
+        text: 'Only show this once.',
+        createdAt: '2026-07-15T00:00:00.000Z',
+      },
+    ], 'local-user-1', 'server-user-1', '2026-07-15T00:00:30.000Z');
+
+    expect(confirmed).toHaveLength(1);
+    expect(confirmed[0]?.id).toBe('server-user-1');
+  });
+
+  it('preserves local image data when confirming an optimistic message', () => {
+    const confirmed = confirmOptimisticUserMessage([
+      {
+        id: 'local-user-image',
+        role: 'user',
+        text: '[image.png]',
+        images: [{ src: 'data:image/png;base64,aGVsbG8=', alt: 'image.png' }],
+        createdAt: '2026-07-15T00:00:00.000Z',
+      },
+    ], 'local-user-image', 'server-user-image', '2026-07-15T00:00:01.000Z');
+
+    expect(confirmed[0]).toMatchObject({
+      id: 'server-user-image',
+      images: [{ src: 'data:image/png;base64,aGVsbG8=', alt: 'image.png' }],
+    });
   });
 
   it('ignores subagent transcript events but keeps shared code changes', () => {
@@ -347,6 +402,30 @@ describe('conversation rewind prompt', () => {
     expect(promptForRewind(messages, 2)).toBe('first prompt');
     expect(promptForRewind(messages, 0)).toBeUndefined();
     expect(promptForRewind(messages, 3)).toBeUndefined();
+  });
+
+  it('restores the Todo List from the retained history after later tool calls are removed', () => {
+    const earlier = {
+      id: 'assistant-1',
+      role: 'assistant' as const,
+      text: '',
+      toolCalls: [{
+        name: 'TodoList',
+        args: { todos: [{ title: 'Keep this task', status: 'in_progress' }] },
+      }],
+    };
+    const later = {
+      id: 'assistant-2',
+      role: 'assistant' as const,
+      text: '',
+      toolCalls: [{
+        name: 'TodoList',
+        args: { todos: [{ title: 'Later task', status: 'done' }] },
+      }],
+    };
+
+    expect(latestTodos([earlier, later])).toEqual([{ title: 'Later task', status: 'done' }]);
+    expect(latestTodos([earlier])).toEqual([{ title: 'Keep this task', status: 'in_progress' }]);
   });
 });
 

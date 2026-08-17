@@ -138,7 +138,8 @@ export function App() {
     const interval = window.setInterval(() => { void refresh(); }, 30_000);
     return () => { window.clearInterval(interval); };
   }, [sessionId]);
-  const sessionSwarmRuns = Array.from(swarm.swarmStatuses.values()).filter(status =>
+  const allAgentRuns = Array.from(swarm.swarmStatuses.values());
+  const sessionSwarmRuns = allAgentRuns.filter(status =>
     status.session_id === sessionId,
   );
   const activeSwarmRuns = sessionSwarmRuns.filter(status => {
@@ -162,8 +163,12 @@ export function App() {
     files: tr('Files', '文件'),
   };
   const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort } = useChatMessages(sessionId, activeSession?.title);
-  const activeAgentCount = countActiveAgents(activeSubagentIds, sessionSwarmRuns, backgroundTasks.tasks);
-  const hasSwarmActivity = activeSwarmRuns.length > 0;
+  const sessionActiveAgentCount = countActiveAgents(activeSubagentIds, sessionSwarmRuns, backgroundTasks.tasks);
+  const globalActiveAgentCount = countActiveAgents(activeSubagentIds, allAgentRuns, backgroundTasks.tasks);
+  const hasSwarmActivity = allAgentRuns.some(status => {
+    const progress = swarmRunProgress(status);
+    return progress.running || progress.status === 'paused';
+  });
 
   useEffect(() => {
     const onLimitChanged = (event: Event) => {
@@ -380,7 +385,7 @@ export function App() {
             thinking={currentThinking}
             workBlocks={currentWorkBlocks}
             isStreaming={isStreaming}
-            activeAgentCount={activeAgentCount}
+            activeAgentCount={sessionActiveAgentCount}
             activeAgentTokens={activeAgentTokens}
             sessionStatus={sessionStatus}
             compacting={compacting}
@@ -436,7 +441,8 @@ export function App() {
         {sidebarTab === 'sessions' && <PrimaryNavigation
           activeView={activeView}
           labels={viewLabels}
-          activeAgentCount={activeAgentCount}
+          activeAgentCount={globalActiveAgentCount}
+          hasSwarmActivity={hasSwarmActivity}
           cronJobCount={cronJobCount}
           onSelect={itemKey => {
             setActiveView(itemKey);
@@ -490,7 +496,7 @@ export function App() {
           <WindowControls />
         </header>
         <main className={`content-area content-area-${activeView}`}>{renderContent()}</main>
-        <StatusBar sending={isStreaming} activeAgentCount={activeAgentCount} hasSwarmActivity={hasSwarmActivity} />
+        <StatusBar sending={isStreaming} activeAgentCount={globalActiveAgentCount} hasSwarmActivity={hasSwarmActivity} />
       </div>
       <ProjectFolderPicker
         open={folderPickerOpen}
@@ -512,16 +518,17 @@ export function App() {
   );
 }
 
-export function PrimaryNavigation({ activeView, labels, activeAgentCount, cronJobCount, onSelect }: {
+export function PrimaryNavigation({ activeView, labels, activeAgentCount, hasSwarmActivity, cronJobCount, onSelect }: {
   activeView: View;
   labels: Record<View, string>;
   activeAgentCount: number;
+  hasSwarmActivity: boolean;
   cronJobCount: number;
   onSelect: (view: View) => void;
 }) {
   return <nav className="sidebar-primary-nav" aria-label="Primary navigation">
     {NAV_ITEMS.map(item => {
-      const swarmActive = item.key === 'swarm' && activeAgentCount > 0;
+      const swarmActive = item.key === 'swarm' && (hasSwarmActivity || activeAgentCount > 0);
       const cronActive = item.key === 'cron' && cronJobCount > 0;
       const count = item.key === 'swarm' ? activeAgentCount : item.key === 'cron' ? cronJobCount : 0;
       return <button
@@ -569,17 +576,17 @@ export function WindowControls() {
 
 export function countActiveAgents(
   activeSubagentIds: readonly string[],
-  sessionSwarmRuns: readonly SwarmStatus[],
+  agentRuns: readonly SwarmStatus[],
   backgroundTasks: readonly BackgroundTask[],
 ): number {
-  const knownSwarmAgentIds = new Set(sessionSwarmRuns.flatMap(run =>
+  const knownSwarmAgentIds = new Set(agentRuns.flatMap(run =>
     run.tasks?.flatMap(task => [task.id, ...(task.agent_id ? [task.agent_id] : [])]) ?? [],
   ));
   const liveNonSwarmCount = new Set(activeSubagentIds.filter(id => !knownSwarmAgentIds.has(id))).size;
   const polledNonSwarmCount = backgroundTasks.filter(task =>
     task.kind === 'subagent' && task.status === 'running' && !knownSwarmAgentIds.has(task.id),
   ).length;
-  const activeSwarmRuns = sessionSwarmRuns.filter(run => {
+  const activeSwarmRuns = agentRuns.filter(run => {
     const progress = swarmRunProgress(run);
     return progress.running || progress.status === 'paused';
   });

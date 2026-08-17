@@ -209,7 +209,56 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
       || event.type === 'background.task.terminated'
     ) {
       const { info } = event;
-      if (info.kind !== 'agent' || !info.subagentType?.startsWith('swarm')) return;
+      if (info.kind !== 'agent') return;
+
+      if (!info.subagentType?.startsWith('swarm')) {
+        const prior = getSwarmStatus(info.taskId);
+        const terminal = event.type === 'background.task.terminated';
+        const status = event.type === 'background.task.updated'
+          ? info.paused === true ? 'paused' as const : 'running' as const
+          : !terminal
+            ? 'running' as const
+            : info.status === 'completed'
+              ? 'done' as const
+              : info.status === 'killed'
+                ? 'stopped' as const
+                : 'failed' as const;
+        const agentId = info.agentId ?? info.taskId;
+        const priorTask = prior?.tasks?.find(task => task.id === info.taskId || task.agent_id === agentId);
+        const task: SwarmTaskStatusEntry = {
+          ...priorTask,
+          id: info.taskId,
+          agent_id: agentId,
+          parent_agent_id: event.agentId,
+          profile: info.subagentType,
+          label: info.description,
+          status: info.paused === true
+            ? 'paused'
+            : !terminal
+              ? 'running'
+              : info.status === 'completed'
+                ? 'completed'
+                : info.status === 'killed'
+                  ? 'cancelled'
+                  : 'failed',
+        };
+        setSwarmStatus(reconcileSwarmStatus({
+          ...prior,
+          swarm_id: info.taskId,
+          status,
+          task_count: 1,
+          completed_count: terminal ? 1 : 0,
+          session_id: sid,
+          task_id: info.taskId,
+          description: info.description,
+          owner_agent_id: event.agentId,
+          round: prior?.round ?? nextSwarmRound(sid),
+          started_at: prior?.started_at ?? new Date(info.startedAt).toISOString(),
+          tasks: [task],
+          usage: task.usage,
+        }, status));
+        return;
+      }
 
       const prior = getSwarmStatus(info.taskId);
       const parsedCount = Number.parseInt(info.subagentType.split(':')[1] ?? '', 10);

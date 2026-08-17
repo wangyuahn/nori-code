@@ -1,7 +1,7 @@
 import type { ContentPart, TokenUsage } from '@nori-code/kosong';
 
 import type { LoopRecordedEvent } from '../../loop';
-import type { GoalActor, GoalBudgetLimits, GoalStatus } from '../goal';
+import type { GoalActor, GoalBudgetLimits, GoalRewindSnapshot, GoalStatus } from '../goal';
 import type { ToolStoreUpdate } from '../../tools/store';
 import type { CompactionBeginData, CompactionResult } from '../compaction';
 import type { AgentConfigUpdateData } from '../config';
@@ -80,6 +80,9 @@ export interface AgentRecordEvents {
   'context.clear': {};
   'context.apply_compaction': CompactionResult;
   'context.undo': { count: number };
+
+  'goal.rewind_checkpoint': { snapshot: GoalRewindSnapshot };
+  'goal.rewind_checkpoint_discard': {};
 
   'tools.update_store': ToolStoreUpdate;
 

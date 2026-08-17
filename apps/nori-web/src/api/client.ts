@@ -479,7 +479,7 @@ export interface PromptListResponse {
 
 export interface UndoSessionResponse {
   messages: { items: Message[]; has_more?: boolean; next_cursor?: string };
-  status: { status?: string; [key: string]: unknown };
+  status: SessionRealtimeStatus;
 }
 
 export interface ApprovalRequest {

@@ -9,6 +9,12 @@ import {
 } from './migration';
 import type { AgentRecord, AgentRecordPersistence } from './types';
 
+const LEGACY_PROMPT_GOAL_RECORD_TYPES = new Set<AgentRecord['type']>([
+  'goal.create',
+  'goal.update',
+  'goal.clear',
+]);
+
 export * from './types';
 export { AGENT_WIRE_PROTOCOL_VERSION } from './migration';
 export {
@@ -29,7 +35,11 @@ export type { BlobStoreOptions } from './blobref';
 // not by assigning modeOverride here. records.logRecord, emitEvent, and
 // emitStatusUpdated already gate on records.restoring, so those calls are safe
 // during resume.
-function restoreAgentRecord(agent: Agent, input: AgentRecord): void {
+function restoreAgentRecord(
+  agent: Agent,
+  input: AgentRecord,
+  useLegacyGoalCheckpoint = false,
+): void {
   switch (input.type) {
     case 'metadata':
       return;
@@ -37,9 +47,15 @@ function restoreAgentRecord(agent: Agent, input: AgentRecord): void {
       agent.goal.restoreForked(input);
       return;
     case 'turn.prompt':
+      if (input.origin.kind === 'user') {
+        agent.goal.beginRewindablePrompt(useLegacyGoalCheckpoint);
+      }
       agent.turn.restorePrompt();
       return;
     case 'turn.steer':
+      if (input.origin.kind === 'user') {
+        agent.goal.beginRewindablePrompt(useLegacyGoalCheckpoint);
+      }
       agent.turn.restoreSteer(input.input, input.origin);
       return;
     case 'turn.cancel':
@@ -107,6 +123,7 @@ function restoreAgentRecord(agent: Agent, input: AgentRecord): void {
       return;
     case 'context.undo':
       agent.context.undo(input.count);
+      agent.goal.rewind(input.count);
       return;
     case 'tools.register_user_tool':
       agent.tools.registerUserTool(input);
@@ -129,6 +146,12 @@ function restoreAgentRecord(agent: Agent, input: AgentRecord): void {
     case 'goal.clear':
       agent.goal.restoreClear(input);
       return;
+    case 'goal.rewind_checkpoint':
+      agent.goal.restoreRewindCheckpoint(input);
+      return;
+    case 'goal.rewind_checkpoint_discard':
+      agent.goal.restoreRewindCheckpointDiscard();
+      return;
   }
 }
 
@@ -143,6 +166,7 @@ export interface AgentRecordsReplayOptions {
 export class AgentRecords {
   private _restoring: RestoringContext | null = null;
   private metadataInitialized = false;
+  private previousRestoredRecordType: AgentRecord['type'] | undefined;
 
   constructor(
     private readonly agent: Agent,
@@ -178,7 +202,21 @@ export class AgentRecords {
   restore(record: AgentRecord): boolean {
     this._restoring = { time: record.time ?? Date.now() };
     try {
-      restoreAgentRecord(this.agent, record);
+      const previousWasLegacyGoalRecord = this.previousRestoredRecordType !== undefined
+        && LEGACY_PROMPT_GOAL_RECORD_TYPES.has(this.previousRestoredRecordType);
+      const isLegacyGoalRecord = LEGACY_PROMPT_GOAL_RECORD_TYPES.has(record.type);
+      const isUserPrompt = (record.type === 'turn.prompt' || record.type === 'turn.steer')
+        && record.origin.kind === 'user';
+
+      if (isLegacyGoalRecord) {
+        if (!previousWasLegacyGoalRecord) this.agent.goal.discardLegacyRewindCheckpoint();
+        this.agent.goal.prepareLegacyRewindCheckpoint();
+      } else if (!isUserPrompt || !previousWasLegacyGoalRecord) {
+        this.agent.goal.discardLegacyRewindCheckpoint();
+      }
+
+      restoreAgentRecord(this.agent, record, isUserPrompt && previousWasLegacyGoalRecord);
+      this.previousRestoredRecordType = record.type;
       return this.agent.replayBuilder.finishRestoringRecord(record.type);
     } finally {
       this._restoring = null;
@@ -187,6 +225,7 @@ export class AgentRecords {
 
   async replay(options: AgentRecordsReplayOptions = {}): Promise<{ warning?: string }> {
     if (!this.persistence) throw new Error('No persistence provided for AgentRecords');
+    this.previousRestoredRecordType = undefined;
     const rewriteMigratedRecords = options.rewriteMigratedRecords ?? true;
     let migrations: readonly WireMigration[] = [];
     let hasMetadata = false;
@@ -226,6 +265,7 @@ export class AgentRecords {
         break;
       }
     }
+    if (completed) this.agent.goal.finishReplay();
     if (completed && shouldRewrite && replayedRecords !== undefined) {
       this.persistence.rewrite(replayedRecords);
       await this.persistence.flush();

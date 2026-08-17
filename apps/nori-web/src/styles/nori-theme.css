@@ -2921,6 +2921,11 @@ kbd {
 .chat-message-user:hover .message-rewind-btn,
 .message-rewind-btn:focus-visible { opacity: 1; }
 .message-rewind-btn:hover { color: var(--nori-text); background: var(--nori-control-hover); }
+.message-rewind-btn:disabled { opacity: .42; cursor: default; }
+.chat-rewind-status { display: flex; min-height: 30px; align-items: center; gap: 8px; padding: 6px 9px; border: 1px solid var(--nori-border); border-radius: 6px; color: var(--nori-text-secondary); background: var(--nori-control); font-size: calc(9px * var(--nori-ui-font-scale)); }
+.chat-rewind-status.error { border-color: color-mix(in srgb, var(--nori-danger) 48%, var(--nori-border)); color: var(--nori-danger); }
+.chat-rewind-status > span:nth-child(2) { min-width: 0; flex: 1; }
+.chat-rewind-status > button { display: grid; width: 24px; height: 24px; place-items: center; padding: 0; border: 0; border-radius: 4px; color: currentColor; background: transparent; cursor: pointer; }
 .settings-number-input { width: 88px; }
 
 .file-explorer,
@@ -3822,6 +3827,15 @@ kbd {
 .session-action-dialog footer button { min-width: 72px; min-height: 31px; padding: 6px 11px; border: 1px solid var(--nori-border); border-radius: 6px; color: var(--nori-text-secondary); background: var(--nori-control); cursor: pointer; }
 .session-action-dialog footer button.primary { border-color: transparent; color: #102019; background: var(--nori-cyan); }
 .session-action-dialog .error { color: var(--nori-danger); font-size: calc(10px * var(--nori-ui-font-scale)); }
+.rewind-dialog-backdrop { position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: 20px; background: rgba(0, 0, 0, .56); backdrop-filter: blur(4px); }
+.rewind-dialog { display: grid; width: min(440px, calc(100vw - 32px)); gap: 18px; padding: 18px; border: 1px solid var(--nori-border-strong); border-radius: 8px; color: var(--nori-text); background: var(--nori-surface-raised); box-shadow: 0 24px 70px rgba(0, 0, 0, .42); }
+.rewind-dialog header { display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: start; gap: 11px; }
+.rewind-dialog-icon { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid color-mix(in srgb, var(--nori-warning) 52%, var(--nori-border)); border-radius: 6px; color: var(--nori-warning); background: color-mix(in srgb, var(--nori-warning) 9%, var(--nori-control)); }
+.rewind-dialog h2 { margin: 0; color: var(--nori-text); font-size: calc(15px * var(--nori-ui-font-scale)); letter-spacing: 0; }
+.rewind-dialog p { margin: 6px 0 0; color: var(--nori-text-secondary); font-size: calc(10px * var(--nori-ui-font-scale)); line-height: 1.55; }
+.rewind-dialog footer { display: flex; justify-content: flex-end; gap: 8px; }
+.rewind-dialog footer button { min-width: 76px; min-height: 32px; padding: 6px 11px; border: 1px solid var(--nori-border); border-radius: 6px; color: var(--nori-text-secondary); background: var(--nori-control); cursor: pointer; }
+.rewind-dialog footer button.primary { border-color: color-mix(in srgb, var(--nori-warning) 72%, var(--nori-border)); color: var(--nori-text); background: color-mix(in srgb, var(--nori-warning) 18%, var(--nori-control)); }
 .session-action-notice { position: fixed; z-index: 1200; top: 68px; right: 18px; display: flex; max-width: min(420px, calc(100vw - 36px)); align-items: center; gap: 8px; padding: 10px 13px; border: 1px solid color-mix(in srgb, var(--nori-cyan) 55%, var(--nori-border)); border-radius: 8px; color: var(--nori-text); background: var(--nori-surface-raised); box-shadow: 0 14px 34px rgba(0, 0, 0, .3); font-size: calc(10px * var(--nori-ui-font-scale)); animation: session-toast-in 180ms ease-out both; pointer-events: none; }
 .session-action-notice.success > svg { color: var(--nori-cyan); }
 .session-action-notice.error { border-color: color-mix(in srgb, var(--nori-danger) 45%, var(--nori-border)); color: var(--nori-danger); }

@@ -28,6 +28,7 @@ describe('PrimaryNavigation', () => {
           account: 'My profile',
         },
         activeAgentCount: 0,
+        hasSwarmActivity: false,
         cronJobCount: 3,
         onSelect: () => undefined,
       }));
@@ -52,6 +53,7 @@ describe('PrimaryNavigation', () => {
           account: 'My profile',
         },
         activeAgentCount: 0,
+        hasSwarmActivity: false,
         cronJobCount: 0,
         onSelect: () => undefined,
       }));
@@ -76,6 +78,7 @@ describe('PrimaryNavigation', () => {
           account: 'My profile',
         },
         activeAgentCount: 2,
+        hasSwarmActivity: false,
         cronJobCount: 0,
         onSelect: () => undefined,
       }));
@@ -84,6 +87,31 @@ describe('PrimaryNavigation', () => {
     const swarmButton = container.querySelector<HTMLButtonElement>('button[title="Swarm"]');
     expect(swarmButton?.classList.contains('activity-pending')).toBe(true);
     expect(swarmButton?.querySelector('.sidebar-activity-count')?.textContent).toBe('2');
+
+    await act(async () => { root.unmount(); });
+  });
+
+  it('keeps Swarm yellow for global queued activity before an agent count exists', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(createElement(PrimaryNavigation, {
+        activeView: 'chat',
+        labels: {
+          chat: 'Chat', dashboard: 'Dashboard', swarm: 'Swarm', cron: 'Cron Job',
+          account: 'My profile',
+        },
+        activeAgentCount: 0,
+        hasSwarmActivity: true,
+        cronJobCount: 0,
+        onSelect: () => undefined,
+      }));
+    });
+
+    const swarmButton = container.querySelector<HTMLButtonElement>('button[title="Swarm"]');
+    expect(swarmButton?.classList.contains('activity-pending')).toBe(true);
+    expect(swarmButton?.querySelector('.sidebar-activity-count')).toBeNull();
 
     await act(async () => { root.unmount(); });
   });
@@ -138,6 +166,43 @@ describe('PrimaryNavigation', () => {
     };
 
     expect(countActiveAgents(['agent-stopped'], [stopped], [])).toBe(0);
+  });
+
+  it('counts collaboration activity from every session', () => {
+    const runs: SwarmStatus[] = [
+      {
+        swarm_id: 'agent-session-a',
+        session_id: 'session-a',
+        status: 'running',
+        task_count: 1,
+        completed_count: 0,
+        tasks: [{ id: 'task-a', agent_id: 'agent-a', label: 'Review A', status: 'running' }],
+      },
+      {
+        swarm_id: 'agent-session-b',
+        session_id: 'session-b',
+        status: 'running',
+        task_count: 1,
+        completed_count: 0,
+        tasks: [{ id: 'task-b', agent_id: 'agent-b', label: 'Review B', status: 'running' }],
+      },
+    ];
+
+    expect(countActiveAgents([], runs.filter(run => run.session_id === 'session-a'), [])).toBe(1);
+    expect(countActiveAgents([], runs, [])).toBe(2);
+  });
+
+  it('keeps paused collaboration visible when it belongs to another session', () => {
+    const paused: SwarmStatus = {
+      swarm_id: 'agent-session-b-paused',
+      session_id: 'session-b',
+      status: 'paused',
+      task_count: 1,
+      completed_count: 0,
+      tasks: [{ id: 'task-paused', agent_id: 'agent-paused', label: 'Paused review', status: 'paused' }],
+    };
+
+    expect(countActiveAgents([], [paused], [])).toBe(1);
   });
 });
 

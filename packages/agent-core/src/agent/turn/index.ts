@@ -156,6 +156,7 @@ export class TurnFlow {
 
   // Returns the new turnId, or null if the turn was marked as resuming.
   prompt(input: readonly ContentPart[], origin: PromptOrigin = USER_PROMPT_ORIGIN): number | null {
+    if (origin.kind === 'user') this.agent.goal.beginRewindablePrompt();
     this.agent.records.logRecord({
       type: 'turn.prompt',
       input,
@@ -167,6 +168,7 @@ export class TurnFlow {
   // Returns the new turnId, or null if the input was buffered as a steer
   // message or the turn was marked as resuming.
   steer(input: readonly ContentPart[], origin: PromptOrigin = USER_PROMPT_ORIGIN): number | null {
+    if (origin.kind === 'user') this.agent.goal.beginRewindablePrompt();
     this.agent.records.logRecord({
       type: 'turn.steer',
       input,

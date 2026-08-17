@@ -661,6 +661,14 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     return this.sessionApi(sessionId).undoHistory(payload);
   }
 
+  captureRewindCheckpoint({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
+    return this.sessionApi(sessionId).captureRewindCheckpoint(payload);
+  }
+
+  discardRewindCheckpoint({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
+    return this.sessionApi(sessionId).discardRewindCheckpoint(payload);
+  }
+
   async setModel({
     sessionId,
     ...payload

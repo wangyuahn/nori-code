@@ -34,7 +34,7 @@ describe('usage overview aggregation', () => {
     expect(summarizeUsage(sessions, '7d', now)).toMatchObject({ sessions: 1, messages: 3, tokens: 15 });
   });
 
-  it('ignores unknown models when choosing the most frequently used real model', () => {
+  it('ignores unknown models when choosing the real model with the highest token usage', () => {
     const now = new Date(2026, 6, 15, 12);
     const sessions = [
       session('unknown-a', new Date(2026, 6, 15, 8), 0, '', [0, 0, 0, 0]),
@@ -45,8 +45,8 @@ describe('usage overview aggregation', () => {
     ];
 
     const summary = summarizeUsage(sessions, 'all', now);
-    expect(summary.favoriteModel).toBe('model-a');
-    expect(summary.models.map(model => model.model)).toEqual(['model-a', 'model-b']);
+    expect(summary.favoriteModel).toBe('model-b');
+    expect(summary.models.map(model => model.model)).toEqual(['model-b', 'model-a']);
   });
 });
 

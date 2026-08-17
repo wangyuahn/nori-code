@@ -92,7 +92,7 @@ export function summarizeUsage(sessions: Session[], range: UsageRange, now = new
   const streaks = calculateStreaks(activeDayKeys, now);
   const models = [...byModel.entries()]
     .map(([model, value]) => ({ model, ...value }))
-    .sort((left, right) => right.sessions - left.sessions || right.messages - left.messages || right.tokens - left.tokens);
+    .sort((left, right) => right.tokens - left.tokens || right.messages - left.messages || right.sessions - left.sessions);
   const peakHour = [...activityByHour.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] ?? null;
 
   return {
