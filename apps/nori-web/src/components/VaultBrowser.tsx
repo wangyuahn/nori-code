@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type Note } from '../api/client';
 import { useVaultNotes } from '../hooks/useApi';
-import { useI18n } from '../i18n';
+import { useI18n, type Locale } from '../i18n';
 import { Icon } from './Icon';
 import { VaultGraph } from './VaultGraph';
 import { MarkdownView } from './MarkdownView';
@@ -16,21 +16,29 @@ const TYPE_COLORS: Record<string, { bg: string; color: string }> = {
 const FOLDERS = ['all', 'analysis', 'decision', 'review', 'task'] as const;
 
 export function VaultBrowser({ mode = 'list' }: { mode?: 'list' | 'graph' }) {
-  const { tr } = useI18n();
+  const { locale, tr } = useI18n();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFolder, setSelectedFolder] = useState<string>('all');
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const { notes, loading, error, refresh } = useVaultNotes();
 
   useEffect(() => {
     setSelectedNote(null);
     setDetailError(null);
+    setEditing(false);
+    setSaveError(null);
   }, [selectedFolder]);
 
   const openNote = useCallback(async (note: Note) => {
     setSelectedNote(note);
+    setEditing(false);
+    setSaveError(null);
     setDetailLoading(true);
     setDetailError(null);
     try {
@@ -44,6 +52,30 @@ export function VaultBrowser({ mode = 'list' }: { mode?: 'list' | 'graph' }) {
     }
   }, [tr]);
 
+  const startEditing = useCallback(() => {
+    if (!selectedNote) return;
+    setDraft(selectedNote.content ?? selectedNote.preview);
+    setSaveError(null);
+    setEditing(true);
+  }, [selectedNote]);
+
+  const saveNote = useCallback(async () => {
+    if (!selectedNote) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const updated = await api.vault.update(selectedNote.path || selectedNote.title, draft);
+      if (!updated) throw new Error(tr('The note no longer exists.', '这篇笔记已不存在。'));
+      setSelectedNote(updated);
+      setEditing(false);
+      await refresh();
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : tr('Failed to save note.', '保存笔记失败。'));
+    } finally {
+      setSaving(false);
+    }
+  }, [draft, refresh, selectedNote, tr]);
+
   const filteredNotes = notes.filter(note => {
     const query = searchQuery.toLowerCase();
     return (selectedFolder === 'all' || note.folder === selectedFolder) &&
@@ -56,15 +88,28 @@ export function VaultBrowser({ mode = 'list' }: { mode?: 'list' | 'graph' }) {
     return (
       <div className="card vault-note-detail">
         <div className="vault-note-toolbar">
-          <button className="btn" onClick={() => setSelectedNote(null)}><Icon name="chevron-left" size={14} /> {tr('Back', '返回')}</button>
+          <button className="btn" onClick={() => { setEditing(false); setSelectedNote(null); }}><Icon name="chevron-left" size={14} /> {tr('Back', '返回')}</button>
+          {!detailLoading && !detailError && (editing
+            ? <span className="vault-note-actions">
+              <button className="btn" onClick={() => setEditing(false)} disabled={saving}>{tr('Cancel', '取消')}</button>
+              <button className="btn btn-primary" onClick={() => void saveNote()} disabled={saving || draft.trim().length === 0}>
+                {saving ? tr('Saving…', '正在保存…') : tr('Save', '保存')}
+              </button>
+            </span>
+            : <button className="btn" onClick={startEditing}>{tr('Edit', '编辑')}</button>)}
         </div>
         <span className="vault-note-type" style={{ background: typeColors.bg, color: typeColors.color }}>{selectedNote.type}</span>
         <h2>{selectedNote.title}</h2>
-        <div className="vault-note-date">{selectedNote.date}</div>
+        <div className="vault-note-date">{formatVaultTimestamp(selectedNote.date, locale)}</div>
         {detailLoading ? (
           <div className="vault-note-state"><span className="spinner spinner-small" /> {tr('Loading full note', '正在加载完整笔记')}</div>
         ) : detailError ? (
           <div className="vault-note-state error">{detailError}</div>
+        ) : editing ? (
+          <>
+            <textarea className="vault-note-editor" value={draft} onChange={event => setDraft(event.target.value)} spellCheck={false} />
+            {saveError && <div className="vault-note-state error">{saveError}</div>}
+          </>
         ) : (
           <MarkdownView className="vault-note-content" content={noteBodyWithoutDuplicateTitle(selectedNote)} />
         )}
@@ -103,7 +148,7 @@ export function VaultBrowser({ mode = 'list' }: { mode?: 'list' | 'graph' }) {
               <button key={note.path || `${note.type}-${note.title}-${index}`} className="card vault-note-card" onClick={() => void openNote(note)}>
                 <span className="vault-note-card-heading"><strong>{note.title}</strong><span className="vault-note-type" style={{ background: typeColors.bg, color: typeColors.color }}>{note.type}</span></span>
                 <span className="vault-note-preview">{note.preview}</span>
-                <time>{note.date}</time>
+                <time dateTime={note.date}>{formatVaultTimestamp(note.date, locale)}</time>
               </button>
             );
           })}
@@ -155,6 +200,15 @@ function normalizeVaultLink(value: string): string {
     .replace(/^\.\//, '')
     .replace(/\.md$/i, '')
     .toLowerCase();
+}
+
+export function formatVaultTimestamp(value: string, locale: Locale): string {
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return value;
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(parsed));
 }
 
 function noteBodyWithoutDuplicateTitle(note: Note): string {

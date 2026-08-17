@@ -360,6 +360,39 @@ describe('PromptService.submit', () => {
     expect(result.user_message_id).toMatch(/^msg_sess_01PT_pending_prompt_/);
   });
 
+  it('passes the prompt model to ensureReady', async () => {
+    const { bridge } = makeBridge();
+    const { bus } = makeBus();
+    const auth = makeAuth();
+    const impl = newSvc(bridge, bus, auth);
+    await impl.submit(SID, mkBody({ model: 'openai/gpt-4o' }));
+    expect(auth.ensureReady).toHaveBeenCalledWith('openai/gpt-4o');
+  });
+
+  it('passes the session shadow model to ensureReady when the body has none', async () => {
+    const { bridge } = makeBridge({ config: { modelAlias: 'kimi-code/k2' } });
+    const { bus } = makeBus();
+    const auth = makeAuth();
+    const impl = newSvc(bridge, bus, auth);
+    await impl.applyAgentState(SID, { model: 'kimi-code/k9' }, 'meta');
+    await impl.submit(SID, mkBodyMinimal());
+    expect(auth.ensureReady).toHaveBeenCalledWith('kimi-code/k9');
+  });
+
+  it('passes the session profile model to ensureReady when shadow is empty', async () => {
+    const { bridge } = makeBridge();
+    const { bus } = makeBus();
+    const auth = makeAuth();
+    const { sessionService } = makeSessionService();
+    sessionService.get = vi.fn().mockResolvedValue({
+      id: SID,
+      agent_config: { model: 'provider/chat' },
+    } as Session);
+    const impl = newSvc(bridge, bus, auth, sessionService);
+    await impl.submit(SID, mkBodyMinimal());
+    expect(auth.ensureReady).toHaveBeenCalledWith('provider/chat');
+  });
+
   it('translates text + image content to kosong ContentParts', async () => {
     const { bridge, record } = makeBridge();
     const { bus } = makeBus();

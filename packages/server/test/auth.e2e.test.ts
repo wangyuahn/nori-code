@@ -6,8 +6,12 @@
  *                                    submit blocked with `40110`.
  *   2. **Manual provider, no key** → ready=false (key gate not met);
  *                                    prompt submit blocked with `40111`.
- *   3. **Provider, no default**    → ready=false (no default_model);
+ *   3. **Provider, no default, no prompt/session model**
+ *                                    → GET ready=false (no default_model);
  *                                    prompt submit blocked with `40113`.
+ *   3b. **Provider, no default, prompt or session model set**
+ *                                    → GET still ready=false; prompt submit
+ *                                    passes the gate using that model.
  *   4. **Provider + key + model**  → ready=true; prompt submit gets past the
  *                                    gate (and may fail downstream — that's
  *                                    out of scope here).
@@ -309,7 +313,6 @@ describe('POST /api/v1/sessions/{sid}/prompts — readiness gate (P2.1 D1)', () 
       url: `/api/v1/sessions/${sid}/prompts`,
       payload: {
         content: [{ type: 'text', text: 'hello' }],
-        model: 'x',
         thinking: 'off',
         permission_mode: 'manual',
         plan_mode: false,
@@ -342,7 +345,6 @@ describe('POST /api/v1/sessions/{sid}/prompts — readiness gate (P2.1 D1)', () 
       url: `/api/v1/sessions/${sid}/prompts`,
       payload: {
         content: [{ type: 'text', text: 'hello' }],
-        model: 'x',
         thinking: 'off',
         permission_mode: 'manual',
         plan_mode: false,
@@ -353,6 +355,73 @@ describe('POST /api/v1/sessions/{sid}/prompts — readiness gate (P2.1 D1)', () 
     // No model_id in details when default is simply unset — clients should
     // route to "select a model" UX rather than "this alias is broken".
     expect(env.details).toBeNull();
+  });
+
+  it('passes the readiness gate when the prompt model resolves without default_model', async () => {
+    seedConfig(
+      [
+        '[providers.x]',
+        'type = "kimi"',
+        'api_key = "sk-test"',
+        '',
+        '[models.x]',
+        'provider = "x"',
+        'model = "x"',
+        'max_context_size = 1000',
+        '',
+      ].join('\n'),
+    );
+    const r = await bootDaemon();
+    const sid = await createSession(r);
+    const res = await appOf(r).inject({
+      method: 'POST',
+      url: `/api/v1/sessions/${sid}/prompts`,
+      payload: {
+        content: [{ type: 'text', text: 'hello' }],
+        model: 'x',
+        thinking: 'off',
+        permission_mode: 'manual',
+        plan_mode: false,
+      },
+    });
+    const env = envelopeOf<unknown>(res.json());
+    expect([40110, 40111, 40112, 40113]).not.toContain(env.code);
+  });
+
+  it('passes the readiness gate when the session model is set without default_model', async () => {
+    seedConfig(
+      [
+        '[providers.x]',
+        'type = "kimi"',
+        'api_key = "sk-test"',
+        '',
+        '[models.x]',
+        'provider = "x"',
+        'model = "x"',
+        'max_context_size = 1000',
+        '',
+      ].join('\n'),
+    );
+    const r = await bootDaemon();
+    const sid = await createSession(r);
+    const profile = await appOf(r).inject({
+      method: 'POST',
+      url: `/api/v1/sessions/${sid}/profile`,
+      payload: { agent_config: { model: 'x' } },
+    });
+    expect(envelopeOf(profile.json()).code).toBe(0);
+    const res = await appOf(r).inject({
+      method: 'POST',
+      url: `/api/v1/sessions/${sid}/prompts`,
+      payload: {
+        content: [{ type: 'text', text: 'hello' }],
+        thinking: 'off',
+        permission_mode: 'manual',
+        plan_mode: false,
+      },
+    });
+    const env = envelopeOf<unknown>(res.json());
+    expect([40110, 40111, 40112, 40113]).not.toContain(env.code);
   });
 
   it('passes the readiness gate when provider + key + default_model are all set', async () => {

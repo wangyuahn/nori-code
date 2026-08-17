@@ -118,6 +118,11 @@ function toPromptItem(state: PromptState, status: 'running' | 'queued'): PromptI
   };
 }
 
+function nonEmptyString(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed === '' ? undefined : trimmed;
+}
+
 function contentToCoreParts(content: PromptSubmission['content']): CorePromptPart[] {
   const input: CorePromptPart[] = [];
   for (const part of content) {
@@ -338,7 +343,9 @@ export class PromptService
     // Readiness gate. Throws AuthProvisioningRequired /
     // AuthTokenMissing / AuthModelNotResolved before we mint a prompt_id and
     // hand off to agent-core. Daemon route layer maps to 40110/40111/40113.
-    await this.auth.ensureReady();
+    // Prefer the prompt / session model over the global default so a
+    // configured conversation is not blocked by a missing default_model.
+    await this.auth.ensureReady(await this._modelForReadiness(sid, body.model));
 
     const promptId = `prompt_${ulid()}`;
     const state = this._createPromptState(sid, promptId, body);
@@ -365,7 +372,7 @@ export class PromptService
   async startBtw(sid: string): Promise<string> {
     await this._requireSession(sid);
     await this.core.rpc.resumeSession({ sessionId: sid });
-    await this.auth.ensureReady();
+    await this.auth.ensureReady(await this._modelForReadiness(sid));
     return this.core.rpc.startBtw({ sessionId: sid, agentId: MAIN_AGENT_ID });
   }
 
@@ -992,6 +999,26 @@ export class PromptService
     const matches = await this.core.rpc.listSessions({ sessionId: sid });
     if (matches.length === 0) {
       throw new SessionNotFoundError(sid);
+    }
+  }
+
+  /**
+   * Model id the auth gate should resolve: prompt override, then the
+   * already-bootstrapped session shadow, then the session profile.
+   * Falls through to `config.defaultModel` when this returns undefined.
+   */
+  private async _modelForReadiness(sid: string, bodyModel?: string): Promise<string | undefined> {
+    const fromBody = nonEmptyString(bodyModel);
+    if (fromBody !== undefined) return fromBody;
+
+    const fromShadow = nonEmptyString(this._agentState.get(sid)?.model);
+    if (fromShadow !== undefined) return fromShadow;
+
+    try {
+      const session = await this.sessionService.get(sid);
+      return nonEmptyString(session?.agent_config?.model);
+    } catch {
+      return undefined;
     }
   }
 

@@ -1,5 +1,6 @@
 export * from './nori-memory-search';
 export * from './nori-memory-write';
+export * from './nori-memory-edit';
 export * from './nori-memory-remove';
 export * from './nori-plan-write';
 export * from './nori-ask-parent';

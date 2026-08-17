@@ -132,8 +132,10 @@ export function formatNoriMemoryChainResult(result: NoriMemoryChainResult): stri
     }
     for (const note of hop.results) {
       const score = note.score === undefined ? 'N/A' : note.score.toFixed(2);
+      const written = note.written_at === undefined ? undefined : `written: ${note.written_at}`;
+      const meta = written === undefined ? `score: ${score}` : `score: ${score}, ${written}`;
       const body = truncateText(note.excerpt ?? note.content ?? '', 700);
-      lines.push(`- **${note.title}** (${note.path}) [score: ${score}]`);
+      lines.push(`- **${note.title}** (${note.path}) [${meta}]`);
       if (body.length > 0) lines.push(`  ${body}`);
     }
   }

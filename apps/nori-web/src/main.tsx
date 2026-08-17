@@ -7,6 +7,7 @@ import { InspectorPopout } from './components/InspectorPopout';
 import type { InspectorTab } from './components/WorkspaceInspector';
 import { ExitPlanModeMockPage } from './components/dev/ExitPlanModeMockPage';
 import { ToolCallDetailMockPage } from './components/dev/ToolCallDetailMockPage';
+import { EditStatsMockPage } from './components/dev/EditStatsMockPage';
 import './styles/nori-theme.css';
 import './styles/linear-flat.css';
 
@@ -18,6 +19,8 @@ const content = import.meta.env.DEV && mockScenario === 'exit-plan-mode'
   ? <ExitPlanModeMockPage />
   : import.meta.env.DEV && mockScenario === 'tool-call-detail'
     ? <ToolCallDetailMockPage />
+  : import.meta.env.DEV && mockScenario === 'edit-stats'
+    ? <EditStatsMockPage />
   : inspector && ['preview', 'changes', 'browser', 'git', 'lsp', 'terminal'].includes(inspector)
   ? <InspectorPopout tab={inspector} sessionId={hashParams.get('session')} path={hashParams.get('path') ?? ''}/>
   : <App />;
