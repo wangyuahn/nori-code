@@ -1,5 +1,12 @@
 import type { ToolCall } from '../hooks/useChatMessages';
-import { editLineOperationsDiff, isChangedDiffLine, isPlaceholderDiffLine, parseEditLineOperations } from './edit-line-ops';
+import {
+  diffLineStats,
+  editLineOperationStats,
+  editLineOperationsDiff,
+  isChangedDiffLine,
+  isPlaceholderDiffLine,
+  parseEditLineOperations,
+} from './edit-line-ops';
 
 export interface ToolCallDetailOptions {
   readonly recordedDiff?: string | undefined;
@@ -122,6 +129,23 @@ function usableRecordedDiff(diff: string | undefined): string | undefined {
     .join('\n')
     .trim();
   return hasTextDiff(cleaned) ? cleaned : undefined;
+}
+
+export function toolCallChangeStats(
+  tool: ToolCall,
+  recordedDiff?: string,
+): { additions: number; deletions: number } | undefined {
+  const normalized = normalizeToolName(tool.name);
+  if (normalized !== 'edit' && normalized !== 'write') return undefined;
+
+  const recorded = diffLineStats(recordedDiff);
+  if (recorded !== undefined) return recorded;
+
+  const args = asRecord(tool.args);
+  if (normalized === 'write') return diffLineStats(writeContentDiff(args['content']));
+
+  const operationCounts = editLineOperationStats(args['line_ops']);
+  return operationCounts.additions > 0 || operationCounts.deletions > 0 ? operationCounts : undefined;
 }
 
 export function buildToolCallChangeDiff(tool: ToolCall, options?: ToolCallDetailOptions): string | undefined {

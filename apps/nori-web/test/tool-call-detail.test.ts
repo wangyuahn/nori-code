@@ -4,6 +4,7 @@ import {
   buildToolCallChangeDiff,
   buildToolCallDetailSections,
   isToolCallFailed,
+  toolCallChangeStats,
 } from '../src/utils/tool-call-detail';
 
 describe('tool-call-detail', () => {
@@ -221,5 +222,39 @@ describe('tool-call-detail', () => {
     });
     expect(sections.filter(section => section.label === 'Result')).toHaveLength(0);
     expect(sections.some(section => section.kind === 'diff')).toBe(true);
+  });
+
+  it('counts Edit +added -removed from the recorded diff rather than line_ops ranges', () => {
+    const tool = {
+      name: 'Edit',
+      args: {
+        path: 'src/a.ts',
+        line_ops: [{ op: 'swap', start: 42, end: 46, content: 'a\nb\nc\nd\ne' }],
+      },
+      result: '[src/a.ts#ABCD]\nApplied 1 line operation to src/a.ts.',
+    };
+    expect(toolCallChangeStats(tool)).toEqual({ additions: 5, deletions: 5 });
+    expect(toolCallChangeStats(tool, '-old a\n-old b\n+new a\n+new b\n+new c')).toEqual({
+      additions: 3,
+      deletions: 2,
+    });
+  });
+
+  it('counts placeholder replacement diffs as +1 -1', () => {
+    expect(toolCallChangeStats({
+      name: 'Edit',
+      args: { path: 'src/a.ts', line_ops: [{ op: 'swap', start: 1, end: 1, content: 'next' }] },
+    }, '- [original line 1 replaced]\n+next')).toEqual({ additions: 1, deletions: 1 });
+  });
+
+  it('counts insert and delete Edit operations', () => {
+    expect(toolCallChangeStats({
+      name: 'Edit',
+      args: { line_ops: [{ op: 'insert_post', line: 8, content: 'one\ntwo\nthree' }] },
+    })).toEqual({ additions: 3, deletions: 0 });
+    expect(toolCallChangeStats({
+      name: 'Edit',
+      args: { line_ops: [{ op: 'del', start: 10, end: 12 }] },
+    })).toEqual({ additions: 0, deletions: 3 });
   });
 });

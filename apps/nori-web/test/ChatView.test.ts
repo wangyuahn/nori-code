@@ -1408,6 +1408,66 @@ describe('conversation presentation', () => {
     expect(editDetails.open).toBe(true);
     expect(editDetails.textContent).toContain('+background:#050510;');
     expect(editDetails.textContent).not.toContain('[original line');
+    expect(editDetails.querySelector('.compact-tool-diff-stats b')?.textContent).toBe('+1');
+    expect(editDetails.querySelector('.compact-tool-diff-stats i')?.textContent).toBe('-1');
+  });
+
+  it('shows Edit +added -removed from the recorded diff instead of inflated line_ops ranges', async () => {
+    const blocks = [{
+      id: 'tool-edit-1',
+      type: 'tool' as const,
+      tool: {
+        id: 'tool-edit-1',
+        name: 'Edit',
+        args: {
+          path: 'apps/nori-web/src/components/ChatView.tsx',
+          line_ops: [{ op: 'swap', start: 42, end: 46, content: 'a\nb\nc\nd\ne' }],
+        },
+        result: '[ChatView.tsx#ABCD]\nApplied 1 line operation to ChatView.tsx.',
+      },
+    }];
+    const { container } = await renderChat({
+      messages: [{ id: 'assistant-1', role: 'assistant', text: 'Done.', workBlocks: blocks }],
+      codeChanges: [{
+        operationId: 'tool-edit-1',
+        agentId: 'main',
+        operation: 'edit',
+        path: 'apps/nori-web/src/components/ChatView.tsx',
+        diff: '-old a\n-old b\n+new a\n+new b\n+new c',
+        occurredAt: '2026-08-17T00:00:00.000Z',
+      }],
+      isStreaming: false,
+    });
+
+    const stats = container.querySelector('.compact-tool-diff-stats');
+    expect(stats?.getAttribute('aria-label')).toBe('+3 -2');
+    expect(stats?.querySelector('b')?.textContent).toBe('+3');
+    expect(stats?.querySelector('i')?.textContent).toBe('-2');
+    expect(container.querySelector('.compact-tool-copy')?.textContent).toContain('ChatView.tsx');
+  });
+
+  it('falls back to line_ops counts when Edit has no recorded diff', async () => {
+    const blocks = [{
+      id: 'tool-edit-1',
+      type: 'tool' as const,
+      tool: {
+        id: 'tool-edit-1',
+        name: 'Edit',
+        args: {
+          path: 'src/utils/format.ts',
+          line_ops: [{ op: 'swap', start: 4, end: 4, content: 'one\ntwo' }],
+        },
+        result: '[src/utils/format.ts#88BB]\nApplied 1 line operation to src/utils/format.ts.',
+      },
+    }];
+    const { container } = await renderChat({
+      messages: [{ id: 'assistant-1', role: 'assistant', text: 'Done.', workBlocks: blocks }],
+      isStreaming: false,
+    });
+
+    const stats = container.querySelector('.compact-tool-diff-stats');
+    expect(stats?.querySelector('b')?.textContent).toBe('+2');
+    expect(stats?.querySelector('i')?.textContent).toBe('-1');
   });
 
   it('lets any tool call expand even when there is no extra payload yet', async () => {

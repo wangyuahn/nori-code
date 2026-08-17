@@ -16,8 +16,7 @@ import { SkillPicker } from './SkillPicker';
 import { UsageOverview } from './UsageOverview';
 import { detectImageMime, isLikelyImageFile } from '../utils/image-mime';
 import { ToolCallDetailBody } from './ToolCallDetailBody';
-import { editLineOperationStats } from '../utils/edit-line-ops';
-import { buildToolCallDetailSections, isToolCallFailed } from '../utils/tool-call-detail';
+import { buildToolCallDetailSections, isToolCallFailed, toolCallChangeStats } from '../utils/tool-call-detail';
 
 export interface ChatViewProps {
   session: Session | null;
@@ -1035,6 +1034,7 @@ function CompactToolCall({ tool, approvalRequest, codeChanges = [] }: { tool: To
   const recordedDiff = tool.id ? codeChanges.find(change => change.operationId === tool.id)?.diff : undefined;
   const detailOptions = recordedDiff !== undefined ? { recordedDiff } : undefined;
   const summary = summarizeToolCall(tool, tr);
+  const changeStats = toolCallChangeStats(tool, recordedDiff);
   const failed = isToolCallFailed(tool.name, tool.result);
   const hasDetails = buildToolCallDetailSections(tool, detailOptions).length > 0;
   const statusLabel = tool.result === undefined
@@ -1048,6 +1048,7 @@ function CompactToolCall({ tool, approvalRequest, codeChanges = [] }: { tool: To
     <summary>
       <span className="compact-tool-icon"><Icon name={toolCallIcon(tool.name)} size={12}/></span>
       <span className="compact-tool-copy"><strong>{tool.name}</strong>{summary && <span>{summary}</span>}</span>
+      {changeStats !== undefined && <span className="compact-tool-diff-stats" aria-label={`+${String(changeStats.additions)} -${String(changeStats.deletions)}`}><b>+{changeStats.additions}</b><i>-{changeStats.deletions}</i></span>}
       <small className={statusClass}>{statusLabel}</small>
       <Icon className="tool-call-chevron" name="chevron-right" size={11}/>
     </summary>
@@ -1142,13 +1143,7 @@ function summarizeToolCall(tool: ToolCall, tr: (english: string, chinese: string
     return firstString(args.title) ?? '';
   }
   if (normalized === 'edit' || normalized === 'write') {
-    const resultCounts = diffCounts(tool.result);
-    const operationCounts = normalized === 'edit'
-      ? editLineOperationStats(args.line_ops)
-      : { additions: countLines(firstString(args.content) ?? ''), deletions: 0 };
-    const additions = resultCounts?.additions ?? operationCounts.additions;
-    const deletions = resultCounts?.deletions ?? operationCounts.deletions;
-    return [path, `+${additions} -${deletions}`].filter(Boolean).join(' · ');
+    return path ?? '';
   }
   if (normalized === 'agentswarm' || normalized === 'agent_swarm') {
     const tasks = Array.isArray(args.tasks) ? args.tasks : Array.isArray(args.items) ? args.items : [];
@@ -1161,22 +1156,6 @@ function summarizeToolCall(tool: ToolCall, tr: (english: string, chinese: string
 
 function firstString(...values: unknown[]): string | undefined {
   return values.find((value): value is string => typeof value === 'string' && value.length > 0);
-}
-
-function countLines(value: string): number {
-  if (!value) return 0;
-  return value.split(/\r?\n/).length;
-}
-
-function diffCounts(value: string | undefined): { additions: number; deletions: number } | undefined {
-  if (!value?.includes('\n')) return undefined;
-  let additions = 0;
-  let deletions = 0;
-  for (const line of value.split(/\r?\n/)) {
-    if (line.startsWith('+') && !line.startsWith('+++')) additions++;
-    if (line.startsWith('-') && !line.startsWith('---')) deletions++;
-  }
-  return additions > 0 || deletions > 0 ? { additions, deletions } : undefined;
 }
 
 async function readImageAttachment(file: File): Promise<ComposerAttachment> {
