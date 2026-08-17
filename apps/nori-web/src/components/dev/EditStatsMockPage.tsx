@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useLayoutEffect } from 'react';
 import type { ModelCatalogItem, Session } from '../../api/client';
 import type { ChatMessage, CodeChange, WorkBlock } from '../../hooks/useChatMessages';
 import { ChatView } from '../ChatView';
@@ -185,14 +185,13 @@ const CODE_CHANGES: CodeChange[] = [
 ];
 
 export function EditStatsMockPage() {
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      for (const element of document.querySelectorAll('.chat-work-process')) {
-        if (element instanceof HTMLDetailsElement) element.open = true;
+  useLayoutEffect(() => {
+    for (const element of document.querySelectorAll('.chat-work-process')) {
+      if (element instanceof HTMLDetailsElement && !element.open) {
+        element.querySelector('summary')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       }
-    }, 80);
-    return () => window.clearTimeout(timer);
-  }, []);
+    }
+  });
 
   return <div className="tool-call-detail-mock-page">
     <header className="exit-plan-mock-header">
