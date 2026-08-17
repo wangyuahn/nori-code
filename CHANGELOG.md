@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.0.4-pre.0 (2026-08-17)
+
+### Features
+
+- Add `nori_memory_edit` to update a vault note in place, and show each matching note's write time in memory search.
+- Let the web memory vault show note write times and edit existing notes from the note detail view.
+- Expand every web chat tool call to show its full input and output. Edit diffs omit original-line placeholders.
+- Add a vault note update API so existing memory notes can be saved from the web UI.
+
+### Fixes
+
+- Show spawned and resumed swarm agents as running instead of waiting.
+- Count paused swarm agents in the web collaboration badge, without treating queued work as active.
+- Use the conversation's selected model when sending if no global default is set, and pick a default after adding a provider.
+- Show Edit tool +added -removed counts from the recorded diff, pinned next to the file path.
+- Improve dark-mode text contrast in the bundled web UI.
+- Fix provider settings API key masking so hidden dots match the saved key length.
+
 ## v1.0.1-pre.0 (2026-07-27)
 
 ### Features

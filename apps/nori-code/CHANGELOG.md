@@ -1,5 +1,31 @@
 # @nori-code/kimi-code
 
+## 1.0.4-pre.0
+
+### Minor Changes
+
+- [#10](https://github.com/wangyuahn/nori-code/pull/10) [`a91688c`](https://github.com/wangyuahn/nori-code/commit/a91688c85811d18827880b7361269f0271240cb3) - Add nori_memory_edit to update a vault note in place, and show each matching note's write time in memory search.
+
+### Patch Changes
+
+- [#10](https://github.com/wangyuahn/nori-code/pull/10) [`a91688c`](https://github.com/wangyuahn/nori-code/commit/a91688c85811d18827880b7361269f0271240cb3) - Let the web memory vault show note write times and edit existing notes from the note detail view.
+
+- [#10](https://github.com/wangyuahn/nori-code/pull/10) [`a91688c`](https://github.com/wangyuahn/nori-code/commit/a91688c85811d18827880b7361269f0271240cb3) - Expand every web chat tool call to show its full input and output. Edit diffs omit original-line placeholders.
+
+- [#10](https://github.com/wangyuahn/nori-code/pull/10) [`a91688c`](https://github.com/wangyuahn/nori-code/commit/a91688c85811d18827880b7361269f0271240cb3) - Add a vault note update API so existing memory notes can be saved from the web UI.
+
+- [#10](https://github.com/wangyuahn/nori-code/pull/10) [`a91688c`](https://github.com/wangyuahn/nori-code/commit/a91688c85811d18827880b7361269f0271240cb3) - Show spawned and resumed swarm agents as running instead of waiting.
+
+- [#10](https://github.com/wangyuahn/nori-code/pull/10) [`a91688c`](https://github.com/wangyuahn/nori-code/commit/a91688c85811d18827880b7361269f0271240cb3) - Count paused swarm agents in the web collaboration badge, without treating queued work as active.
+
+- [#10](https://github.com/wangyuahn/nori-code/pull/10) [`a91688c`](https://github.com/wangyuahn/nori-code/commit/a91688c85811d18827880b7361269f0271240cb3) - Use the conversation's selected model when sending if no global default is set, and pick a default after adding a provider.
+
+- [#10](https://github.com/wangyuahn/nori-code/pull/10) [`a91688c`](https://github.com/wangyuahn/nori-code/commit/a91688c85811d18827880b7361269f0271240cb3) - Show Edit tool +added -removed counts from the recorded diff, pinned next to the file path.
+
+- [#9](https://github.com/wangyuahn/nori-code/pull/9) [`11659fc`](https://github.com/wangyuahn/nori-code/commit/11659fc480412e6fc16cffc79be77ad3deace6fd) - Improve dark-mode text contrast in the bundled web UI so chat content, markdown, and metadata are easier to read.
+
+- [#6](https://github.com/wangyuahn/nori-code/pull/6) [`8978dfe`](https://github.com/wangyuahn/nori-code/commit/8978dfe3caddd72baed7811d439e32f5eb878855) - Fix provider settings API key masking so hidden dots match the saved key length and clicking the field no longer clears it before you edit or reveal the key.
+
 ## 1.0.1
 
 ### Patch Changes

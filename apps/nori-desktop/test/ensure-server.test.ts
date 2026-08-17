@@ -98,7 +98,7 @@ function baseOptions(forkWorker: ForkServerWorker) {
   return {
     workerPath,
     webAssetsDir,
-    expectedVersion: '1.0.1-pre.0',
+    expectedVersion: '1.0.4-pre.0',
     forkWorker,
     lockPath: serverLockPath(),
     startupTimeoutMs: 250,
@@ -154,7 +154,7 @@ describe('desktop server coordinator', () => {
       ready_at: new Date().toISOString(),
       host: '127.0.0.1',
       port: 58771,
-      host_version: '1.0.1-pre.0',
+      host_version: '1.0.4-pre.0',
     }));
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ code: 0, data: { app: 'nori-code' } }), { status: 200 }),
@@ -179,7 +179,7 @@ describe('desktop server coordinator', () => {
       started_at: new Date().toISOString(),
       host: '127.0.0.1',
       port: 58771,
-      host_version: '1.0.1-pre.0',
+      host_version: '1.0.4-pre.0',
     } as const;
     mkdirSync(join(homeDir, 'server'), { recursive: true });
     writeFileSync(lockPath, JSON.stringify(starting));

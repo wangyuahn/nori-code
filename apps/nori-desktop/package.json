@@ -1,6 +1,6 @@
 {
     "name": "@nori-code/nori-work",
-    "version": "1.0.1-pre.0",
+    "version": "1.0.4-pre.0",
     "private": true,
     "license": "MIT",
     "description": "Nori Work — an independent desktop workspace for Nori Code.",
@@ -16,6 +16,7 @@
         "dev": "tsdown && electron .",
         "typecheck": "tsc --noEmit",
         "test:browser-smoke": "node scripts/browser-smoke.mjs",
+        "test:packaged-runtime": "node scripts/verify-packaged-runtime.cjs",
         "test:server-worker-smoke": "electron scripts/server-worker-smoke.cjs",
         "predist": "pnpm run check:brand && pnpm -C ../nori-code run build:web-assets",
         "dist": "pnpm run build && electron-builder --config electron-builder.config.cjs"
