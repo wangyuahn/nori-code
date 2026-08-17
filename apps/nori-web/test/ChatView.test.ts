@@ -1245,6 +1245,134 @@ describe('conversation presentation', () => {
     expect(bashDetails.textContent).toContain('Command failed with exit code: 1.');
   });
 
+  it('expands Read, Grep, Agent, MCP, Write, Glob, FetchURL, Browser, and TodoList tool details with full payloads', async () => {
+    const prompt = `Inspect the ${'login '.repeat(40)}flow and list every auth entry point.`;
+    const writeBody = '# Auth\n\nLogin issues a token for the given user.\n';
+    const blocks = [
+      {
+        id: 'tool-read-1',
+        type: 'tool' as const,
+        tool: {
+          id: 'tool-read-1',
+          name: 'Read',
+          args: { path: 'src/auth.ts' },
+          result: 'export function login() {\n  return token;\n}\n',
+        },
+      },
+      {
+        id: 'tool-grep-1',
+        type: 'tool' as const,
+        tool: {
+          id: 'tool-grep-1',
+          name: 'Grep',
+          args: { pattern: 'countActiveAgents', path: 'apps/nori-web' },
+          result: 'apps/nori-web/src/App.tsx:593:export function countActiveAgents(',
+        },
+      },
+      {
+        id: 'tool-agent-1',
+        type: 'tool' as const,
+        tool: {
+          id: 'tool-agent-1',
+          name: 'Agent',
+          args: { subagent_type: 'explore', prompt },
+          result: 'Auth lives in src/auth.ts.',
+        },
+      },
+      {
+        id: 'tool-mcp-1',
+        type: 'tool' as const,
+        tool: {
+          id: 'tool-mcp-1',
+          name: 'mcp__github__create_issue',
+          args: { title: 'Fix badge', body: 'Wrong session.\nCount paused agents.' },
+          result: 'Created issue #12',
+        },
+      },
+      {
+        id: 'tool-write-1',
+        type: 'tool' as const,
+        tool: {
+          id: 'tool-write-1',
+          name: 'Write',
+          args: { path: 'notes/auth.md', content: writeBody },
+          result: 'Wrote notes/auth.md',
+        },
+      },
+      {
+        id: 'tool-glob-1',
+        type: 'tool' as const,
+        tool: {
+          id: 'tool-glob-1',
+          name: 'Glob',
+          args: { pattern: '**/*.test.ts', path: 'apps/nori-web' },
+          result: 'apps/nori-web/test/ChatView.test.ts',
+        },
+      },
+      {
+        id: 'tool-fetch-1',
+        type: 'tool' as const,
+        tool: {
+          id: 'tool-fetch-1',
+          name: 'FetchURL',
+          args: { url: 'https://example.com/docs/api' },
+          result: '# API Reference\n\nGET /v1/sessions returns the session list.',
+        },
+      },
+      {
+        id: 'tool-browser-1',
+        type: 'tool' as const,
+        tool: {
+          id: 'tool-browser-1',
+          name: 'Browser',
+          args: { action: 'navigate', url: 'https://example.com/docs/api' },
+          result: 'Navigated to https://example.com/docs/api\nTitle: API Reference',
+        },
+      },
+      {
+        id: 'tool-todo-1',
+        type: 'tool' as const,
+        tool: {
+          id: 'tool-todo-1',
+          name: 'TodoList',
+          args: { todos: [{ title: 'Show tool details', status: 'in_progress' }] },
+          result: 'Current todo list:\n  [in_progress] Show tool details',
+        },
+      },
+    ];
+    const { container } = await renderChat({
+      messages: [{ id: 'assistant-1', role: 'assistant', text: 'Done.', workBlocks: blocks }],
+      isStreaming: false,
+    });
+
+    const toolCalls = container.querySelectorAll<HTMLDetailsElement>('.expandable-tool-call');
+    expect(toolCalls).toHaveLength(9);
+
+    const expectations = [
+      ['src/auth.ts', 'export function login()'],
+      ['countActiveAgents', 'App.tsx'],
+      [prompt, 'src/auth.ts'],
+      ['Fix badge', 'Count paused agents.', 'Created issue #12'],
+      ['notes/auth.md', 'Login issues a token', 'Wrote notes/auth.md'],
+      ['**/*.test.ts', 'ChatView.test.ts'],
+      ['https://example.com/docs/api', 'GET /v1/sessions'],
+      ['navigate', 'API Reference'],
+      ['Show tool details', '[in_progress]'],
+    ] as const;
+
+    for (const [index, snippets] of expectations.entries()) {
+      const details = toolCalls[index]!;
+      await act(async () => {
+        details.querySelector('summary')?.click();
+        await Promise.resolve();
+      });
+      expect(details.open).toBe(true);
+      for (const snippet of snippets) {
+        expect(details.textContent).toContain(snippet);
+      }
+    }
+  });
+
   it('expands Edit details without original-line placeholders from recorded diffs', async () => {
     const blocks = [{
       id: 'tool-edit-1',

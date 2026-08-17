@@ -2,4 +2,4 @@
 "nori-code": patch
 ---
 
-Let web chat tool calls expand to show details, and render Edit diffs without original-line placeholders.
+Expand every web chat tool call to show its full input and output. Edit diffs omit original-line placeholders.
