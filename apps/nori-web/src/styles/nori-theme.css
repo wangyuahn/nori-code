@@ -2746,7 +2746,19 @@ kbd {
 }
 .vault-note-card time, .vault-note-date { color: var(--nori-text-muted); font-size: calc(9px * var(--nori-ui-font-scale)); }
 .vault-note-detail { display: grid; gap: 12px; width: 100%; padding: 18px; }
-.vault-note-toolbar { display: flex; align-items: center; }
+.vault-note-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.vault-note-actions { display: flex; align-items: center; gap: 8px; }
+.vault-note-editor {
+  min-height: 320px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--nori-border);
+  border-radius: 8px;
+  background: var(--nori-surface);
+  color: var(--nori-text);
+  font: calc(12px * var(--nori-ui-font-scale))/1.6 var(--nori-font-mono);
+  resize: vertical;
+}
 .vault-note-detail h2 { color: var(--nori-text); font-size: calc(19px * var(--nori-ui-font-scale)); }
 .vault-note-content {
   min-height: 240px;

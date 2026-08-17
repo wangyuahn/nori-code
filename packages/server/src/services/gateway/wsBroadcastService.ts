@@ -19,6 +19,7 @@ import { buildEventEnvelope, type EventEnvelope } from '#/ws/protocol';
 import {
   countSettledSwarmTasks,
   findSwarmByAgent,
+  findActiveSwarmByOwner,
   findSwarmByToolCall,
   getSwarmStatus,
   nextSwarmRound,
@@ -256,7 +257,8 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
 
     if (event.type === 'subagent.spawned') {
       const ownerAgentId = event.parentAgentId ?? event.agentId;
-      const swarm = findSwarmByToolCall(sid, ownerAgentId, event.parentToolCallId);
+      const swarm = findSwarmByToolCall(sid, ownerAgentId, event.parentToolCallId)
+        ?? findActiveSwarmByOwner(sid, ownerAgentId);
       if (swarm === undefined) return;
       const task: SwarmTaskStatusEntry = {
         id: event.subagentId,
@@ -264,7 +266,7 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
         parent_agent_id: ownerAgentId,
         profile: event.subagentName,
         label: event.description ?? `Agent ${String((event.swarmIndex ?? 0) + 1)}`,
-        status: 'pending',
+        status: 'running',
       };
       updateSwarmStatus(swarm.swarm_id, current => {
         const tasks = upsertSwarmTask(current.tasks, task);

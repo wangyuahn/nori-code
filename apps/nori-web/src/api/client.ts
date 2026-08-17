@@ -805,6 +805,12 @@ export function createClient(
           undefined,
           { signal },
         ),
+      update: (noteId: string, content: string) =>
+        request<Note & { content: string } | null>(
+          `/vault/notes/${encodeURIComponent(noteId)}`,
+          undefined,
+          { method: 'POST', body: { content } },
+        ),
     },
 
     // --- Swarm ---

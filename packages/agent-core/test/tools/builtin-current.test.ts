@@ -53,6 +53,7 @@ import {
   NoriMemorySearchInputSchema,
   NoriMemorySearchTool,
 } from '../../src/tools/builtin/nori/nori-memory-search';
+import { NoriMemoryEditTool } from '../../src/tools/builtin/nori/nori-memory-edit';
 import { NoriPlanWriteTool } from '../../src/tools/builtin/nori/nori-plan-write';
 import type { NoriMemoryProvider } from '../../src/tools/builtin/nori/types';
 
@@ -1252,6 +1253,7 @@ describe('current builtin collaboration tools', () => {
         return [];
       }),
       writeNote: vi.fn(),
+      editNote: vi.fn(),
       removeNote: vi.fn(async () => false),
     };
     const tool = new NoriMemorySearchTool(memory);
@@ -1282,6 +1284,49 @@ describe('current builtin collaboration tools', () => {
     expect(result.output).toContain('Found 2 unique note(s)');
     expect(result.output).toContain('## Hop 1');
     expect(result.output).toContain('Permission Rules');
+  });
+
+  it('nori_memory_edit updates a note in place by exact title', async () => {
+    const memory: NoriMemoryProvider = {
+      multiRetrieve: vi.fn(async () => []),
+      writeNote: vi.fn(),
+      editNote: vi.fn(async () => ({ path: 'analysis/architecture.md' })),
+      removeNote: vi.fn(async () => false),
+    };
+    const tool = new NoriMemoryEditTool(memory);
+    const result = await executeTool(
+      tool,
+      context({
+        title: 'Architecture choice',
+        content: 'Updated body',
+        links: ['None'],
+      }),
+    );
+
+    expect(memory.editNote).toHaveBeenCalledWith({
+      title: 'Architecture choice',
+      content: 'Updated body\n\n## Related\n\n_None_',
+      tags: undefined,
+      links: [],
+    });
+    expect(result.output).toContain('Note edited: analysis/architecture.md');
+  });
+
+  it('nori_memory_edit reports a missing note without creating one', async () => {
+    const memory: NoriMemoryProvider = {
+      multiRetrieve: vi.fn(async () => []),
+      writeNote: vi.fn(),
+      editNote: vi.fn(async () => undefined),
+      removeNote: vi.fn(async () => false),
+    };
+    const tool = new NoriMemoryEditTool(memory);
+    const result = await executeTool(
+      tool,
+      context({ title: 'Missing', content: 'body' }),
+    );
+
+    expect(result.output).toContain('Note not found: "Missing"');
+    expect(memory.writeNote).not.toHaveBeenCalled();
   });
 
   it('nori_plan_write writes to the active session plan file during plan mode', async () => {

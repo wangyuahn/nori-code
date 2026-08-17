@@ -1,5 +1,5 @@
 import type { CodeChange, ToolCall } from '../hooks/useChatMessages';
-import { editLineOperationsDiff, parseEditLineOperations } from './edit-line-ops';
+import { editLineOperationsDiff, isChangedDiffLine, isPlaceholderDiffLine, parseEditLineOperations } from './edit-line-ops';
 
 export interface ToolCallDetailOptions {
   readonly recordedDiff?: string | undefined;
@@ -50,30 +50,33 @@ function writeContentDiff(content: unknown): string {
 
 function compactDiffLines(diff: string): string[] {
   const lines = diff.split('\n').filter(line =>
-    line.startsWith('@@')
-    || ((line.startsWith('+') && !line.startsWith('+++'))
-    || (line.startsWith('-') && !line.startsWith('---'))),
+    line.startsWith('@@') || isChangedDiffLine(line),
   );
   if (lines.length <= MAX_DIFF_LINES) return lines;
   return [...lines.slice(0, MAX_DIFF_LINES), `... ${String(lines.length - MAX_DIFF_LINES)} more changed lines`];
 }
 
 function hasTextDiff(diff: string): boolean {
-  return diff.split('\n').some(line =>
-    (line.startsWith('+') && !line.startsWith('+++'))
-    || (line.startsWith('-') && !line.startsWith('---')),
-  );
+  return diff.split('\n').some(line => isChangedDiffLine(line));
+}
+
+function usableRecordedDiff(diff: string | undefined): string | undefined {
+  if (diff === undefined || diff.length === 0) return undefined;
+  const cleaned = diff
+    .split('\n')
+    .filter(line => !isPlaceholderDiffLine(line))
+    .join('\n')
+    .trim();
+  return hasTextDiff(cleaned) ? cleaned : undefined;
 }
 
 export function buildToolCallChangeDiff(tool: ToolCall, options?: ToolCallDetailOptions): string | undefined {
   const args = asRecord(tool.args);
   const normalized = normalizeToolName(tool.name);
-  const recordedDiff = options?.recordedDiff?.trim();
+  const recordedDiff = usableRecordedDiff(options?.recordedDiff?.trim());
 
   if (normalized === 'edit') {
-    if (recordedDiff !== undefined && recordedDiff.length > 0 && hasTextDiff(recordedDiff)) {
-      return recordedDiff;
-    }
+    if (recordedDiff !== undefined) return recordedDiff;
     const diff = editLineOperationsDiff(args['line_ops']).join('\n');
     return diff.length > 0 ? diff : undefined;
   }
@@ -135,12 +138,25 @@ export function buildToolCallDetailSections(tool: ToolCall, options?: ToolCallDe
 
   const excludeArgKeys = new Set<string>();
   if (normalized === 'write') excludeArgKeys.add('content');
-  if (normalized === 'edit') excludeArgKeys.add('line_ops');
+  if (normalized === 'edit') {
+    excludeArgKeys.add('line_ops');
+    excludeArgKeys.add('expected_tag');
+  }
   if (normalized === 'bash') excludeArgKeys.add('command');
+  if (normalized === 'norimemorywrite' || normalized === 'norimemoryedit') {
+    excludeArgKeys.add('content');
+  }
 
   const argsSummary = formatArgsSummary(tool, excludeArgKeys);
   if (argsSummary !== undefined) {
     sections.push({ kind: 'pre', label: 'Input', text: argsSummary });
+  }
+
+  if (normalized === 'norimemorywrite' || normalized === 'norimemoryedit') {
+    const content = firstString(args['content']);
+    if (content !== undefined) {
+      sections.push({ kind: 'pre', label: 'Content', text: truncatePre(content) });
+    }
   }
 
   if (normalized === 'bash') {
@@ -181,5 +197,25 @@ export function buildToolCallDetailSections(tool: ToolCall, options?: ToolCallDe
     }
   }
 
+  if (sections.length === 0) {
+    const fallback = serializeUnknown(tool.args);
+    if (fallback !== undefined) {
+      sections.push({ kind: 'pre', label: 'Input', text: fallback });
+    }
+  }
+
   return sections;
+}
+
+function serializeUnknown(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === 'string') return value.length > 0 ? truncatePre(value) : undefined;
+  try {
+    const serialized = JSON.stringify(value, null, 2);
+    return serialized === undefined || serialized === '{}' || serialized === '[]'
+      ? undefined
+      : truncatePre(serialized);
+  } catch {
+    return undefined;
+  }
 }

@@ -12,6 +12,7 @@ Every nori tool exposed in your tool list is a callable API. You can call any of
 |------|---------------|---------------|
 | nori_memory_search | hybrid phase start (retrieval gate) | ✅ Yes |
 | nori_memory_write | (none) | ✅ Yes |
+| nori_memory_edit | (none) | ✅ Yes |
 | nori_memory_remove | (none) | ✅ Yes |
 | nori_plan_write | (none) | ✅ Yes |
 | AgentSwarm | implementation delegation | ✅ Yes — preferred |
@@ -25,7 +26,8 @@ Every nori tool exposed in your tool list is a callable API. You can call any of
 ### Memory
 - **nori_memory_search** `{ keywords: string[], note_types?: string[], top_k?: number, include_linked?: boolean, link_depth?: number, chain_depth?: number, follow_up_keywords?: string[][] }` — Search Obsidian vault. Returns notes ranked by embedding+BM25+[[link graph]]. Use before making design decisions and call again whenever you discover better keywords. Keywords should be concrete: function names, error messages, concept labels. NOT generic terms. Use `chain_depth: 1` or `2` plus `follow_up_keywords` for chained memory retrieval.
 - **nori_memory_write** `{ note_type: "analysis"|"decision"|"task"|"review", title: string, content: string, tags?: string[], links?: string[] }` — Write to vault. Use [[wiki-links]] in content for bidirectional linking.
-- **nori_memory_remove** `{ title: string }` — Delete a note from the vault by exact title. Use sparingly; prefer nori_memory_write for corrections.
+- **nori_memory_edit** `{ title: string, content: string, tags?: string[], links?: string[] }` — Update an existing note in place by exact title. Does not create a new file. Omit `links` to keep current wiki-links; pass `["None"]` or `[]` to clear them.
+- **nori_memory_remove** `{ title: string }` — Delete a note from the vault by exact title. Use sparingly; prefer nori_memory_edit for corrections.
 - **nori_plan_write** `{ title: string, content: string }` — Write plan documents, design specs, and analysis files. In plan mode it writes the current session plan file; outside plan mode it writes project-local docs/plans/specs. NOT blocked by read-only mode. Use for writing plans, NOT for source code.
 
 ### Swarm

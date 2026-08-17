@@ -6,6 +6,7 @@ export interface NoriMemoryNote {
   score?: number;
   excerpt?: string;
   content?: string;
+  written_at?: string;
 }
 
 export interface NoriMemoryProvider {
@@ -25,6 +26,12 @@ export interface NoriMemoryProvider {
     links?: string[];
     tags?: string[];
   }): Promise<{ path: string }>;
+  editNote(params: {
+    title: string;
+    content: string;
+    links?: string[];
+    tags?: string[];
+  }): Promise<{ path: string } | undefined>;
   removeNote(title: string): Promise<boolean>;
 }
 

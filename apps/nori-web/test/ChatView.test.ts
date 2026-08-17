@@ -1233,6 +1233,7 @@ describe('conversation presentation', () => {
     });
     expect(editDetails.open).toBe(true);
     expect(editDetails.textContent).toContain('+updated');
+    expect(editDetails.textContent).not.toContain('[original line');
 
     const bashDetails = toolCalls[1]!;
     expect(bashDetails.textContent).toContain('Failed');
@@ -1242,6 +1243,64 @@ describe('conversation presentation', () => {
     });
     expect(bashDetails.textContent).toContain('npm test');
     expect(bashDetails.textContent).toContain('Command failed with exit code: 1.');
+  });
+
+  it('expands Edit details without original-line placeholders from recorded diffs', async () => {
+    const blocks = [{
+      id: 'tool-edit-1',
+      type: 'tool' as const,
+      tool: {
+        id: 'tool-edit-1',
+        name: 'Edit',
+        args: {
+          path: 'src/a.ts',
+          line_ops: [{ op: 'swap', start: 1, end: 1, content: 'background:#050510;' }],
+        },
+        result: 'Updated src/a.ts',
+      },
+    }];
+    const { container } = await renderChat({
+      messages: [{ id: 'assistant-1', role: 'assistant', text: 'Done.', workBlocks: blocks }],
+      codeChanges: [{
+        operationId: 'tool-edit-1',
+        agentId: 'main',
+        operation: 'edit',
+        path: 'src/a.ts',
+        diff: '- [original line 1 replaced]\n+background:#050510;',
+        occurredAt: '2026-08-17T00:00:00.000Z',
+      }],
+      isStreaming: false,
+    });
+
+    const editDetails = container.querySelector<HTMLDetailsElement>('.expandable-tool-call.tool-edit')!;
+    await act(async () => {
+      editDetails.querySelector('summary')?.click();
+      await Promise.resolve();
+    });
+    expect(editDetails.open).toBe(true);
+    expect(editDetails.textContent).toContain('+background:#050510;');
+    expect(editDetails.textContent).not.toContain('[original line');
+  });
+
+  it('lets any tool call expand even when there is no extra payload yet', async () => {
+    const { container } = await renderChat({
+      messages: [{ id: 'assistant-1', role: 'assistant', text: '' }],
+      workBlocks: [{
+        id: 'tool-1',
+        type: 'tool',
+        tool: { id: 'tool-1', name: 'TodoList', args: {} },
+      }],
+      isStreaming: true,
+    });
+
+    const toolCall = container.querySelector<HTMLDetailsElement>('.expandable-tool-call')!;
+    expect(toolCall.querySelector('.tool-call-chevron')).not.toBeNull();
+    await act(async () => {
+      toolCall.querySelector('summary')?.click();
+      await Promise.resolve();
+    });
+    expect(toolCall.open).toBe(true);
+    expect(toolCall.textContent).toContain('Waiting for this tool to finish');
   });
 
   it('renders ordinary live text as normal assistant output while work is active', async () => {

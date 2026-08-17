@@ -159,8 +159,8 @@ export function App() {
     sessions: tr('Sessions', '会话'),
     files: tr('Files', '文件'),
   };
-  const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, compacting, pendingApprovals, pendingQuestions, pendingMcpElicitations, queuedPrompts, todos, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, resolveMcpElicitation, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort } = useChatMessages(sessionId, activeSession?.title);
-  const activeAgentCount = countActiveAgents([], allSwarmRuns, backgroundTasks.tasks);
+  const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, compacting, pendingApprovals, pendingQuestions, pendingMcpElicitations, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, resolveMcpElicitation, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort } = useChatMessages(sessionId, activeSession?.title);
+  const activeAgentCount = countActiveAgents(activeSubagentIds, allSwarmRuns, backgroundTasks.tasks);
   const hasSwarmActivity = activeSwarmRuns.length > 0 || activeAgentCount > 0;
 
   useEffect(() => {

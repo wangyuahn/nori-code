@@ -39,6 +39,48 @@ describe('tool-call-detail', () => {
     expect(diff).toBe('-old line\n+new line');
   });
 
+  it('strips original-line placeholders from recorded Edit diffs', () => {
+    const diff = buildToolCallChangeDiff({
+      id: 'edit-1',
+      name: 'Edit',
+      args: {
+        path: 'src/a.ts',
+        line_ops: [{ op: 'swap', start: 1, end: 1, content: 'background:#050510;' }],
+      },
+    }, {
+      recordedDiff: '- [original line 1 replaced]\n+background:#050510;',
+    });
+    expect(diff).toBe('+background:#050510;');
+    expect(diff).not.toContain('[original line');
+  });
+
+  it('falls back to line_ops when recorded Edit diffs are only placeholders', () => {
+    const diff = buildToolCallChangeDiff({
+      name: 'Edit',
+      args: {
+        path: 'src/a.ts',
+        line_ops: [{ op: 'swap', start: 1, end: 1, content: 'updated' }],
+      },
+    }, {
+      recordedDiff: '- [original line 1 replaced]\n- [original line 2 deleted]',
+    });
+    expect(diff).toContain('@@ replace lines 1-1 @@');
+    expect(diff).toContain('+updated');
+    expect(diff).not.toContain('[original line');
+  });
+
+  it('shows memory edit content without truncating it in Input', () => {
+    const body = 'A'.repeat(300);
+    const sections = buildToolCallDetailSections({
+      name: 'nori_memory_edit',
+      args: { title: 'Architecture choice', content: body },
+      result: 'Note edited: analysis/architecture.md',
+    });
+    expect(sections.some(section => section.label === 'Input' && section.text?.includes('Architecture choice'))).toBe(true);
+    expect(sections.some(section => section.label === 'Content' && section.text === body)).toBe(true);
+    expect(sections.some(section => section.label === 'Input' && section.text?.includes(body))).toBe(false);
+  });
+
   it('builds write diff from content', () => {
     const diff = buildToolCallChangeDiff({
       name: 'Write',

@@ -1049,9 +1049,11 @@ function CompactToolCall({ tool, approvalRequest, codeChanges = [] }: { tool: To
       <span className="compact-tool-icon"><Icon name={toolCallIcon(tool.name)} size={12}/></span>
       <span className="compact-tool-copy"><strong>{tool.name}</strong>{summary && <span>{summary}</span>}</span>
       <small className={statusClass}>{statusLabel}</small>
-      {hasDetails && <Icon className="tool-call-chevron" name="chevron-right" size={11}/>}
+      <Icon className="tool-call-chevron" name="chevron-right" size={11}/>
     </summary>
-    {hasDetails && <ToolCallDetailBody tool={tool} recordedDiff={recordedDiff}/>}
+    {hasDetails
+      ? <ToolCallDetailBody tool={tool} recordedDiff={recordedDiff}/>
+      : <div className="tool-call-detail-body"><section className="tool-call-detail-section tool-call-detail-pre"><pre>{tool.result === undefined ? tr('Waiting for this tool to finish…', '正在等待此工具完成…') : tr('No extra detail for this call.', '这次调用没有更多详情。')}</pre></section></div>}
   </details>;
 }
 
@@ -1136,6 +1138,9 @@ function summarizeToolCall(tool: ToolCall, tr: (english: string, chinese: string
   const args = typeof tool.args === 'object' && tool.args !== null ? tool.args as Record<string, unknown> : {};
   const normalized = tool.name.toLowerCase();
   const path = firstString(args.path, args.file_path, args.filename, args.file);
+  if (normalized === 'nori_memory_edit' || normalized === 'nori_memory_write') {
+    return firstString(args.title) ?? '';
+  }
   if (normalized === 'edit' || normalized === 'write') {
     const resultCounts = diffCounts(tool.result);
     const operationCounts = normalized === 'edit'
