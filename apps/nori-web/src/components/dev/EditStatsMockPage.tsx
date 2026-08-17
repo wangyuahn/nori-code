@@ -186,7 +186,7 @@ const CODE_CHANGES: CodeChange[] = [
 
 export function EditStatsMockPage() {
   useLayoutEffect(() => {
-    for (const element of document.querySelectorAll('.chat-work-process')) {
+    for (const element of document.querySelectorAll('.chat-work-process, .expandable-tool-call')) {
       if (element instanceof HTMLDetailsElement && !element.open) {
         element.querySelector('summary')?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       }
