@@ -448,12 +448,11 @@ export function runningSwarmAgents(runs: readonly SwarmStatus[]): { ids: Set<str
   let untracked = 0;
   for (const run of runs) {
     if (!run.tasks) {
-      const progress = swarmRunProgress(run);
-      if (progress.running || progress.status === 'paused') untracked++;
+      if (swarmRunProgress(run).running) untracked++;
       continue;
     }
     for (const task of run.tasks) {
-      if (task.status === 'running' || task.status === 'paused') ids.add(task.agent_id ?? task.id);
+      if (task.status === 'running') ids.add(task.agent_id ?? task.id);
     }
   }
   return { ids, untracked };

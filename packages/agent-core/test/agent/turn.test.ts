@@ -187,7 +187,6 @@ describe('Agent turn flow', () => {
         },
       ]),
       writeNote: vi.fn(),
-      editNote: vi.fn(),
       removeNote: vi.fn(async () => false),
     };
     const ctx = testAgent();

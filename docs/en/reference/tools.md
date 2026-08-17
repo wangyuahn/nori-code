@@ -107,21 +107,15 @@ Nori-specific tools extend the built-in tool set with shared memory, documentati
 | --- | --- | --- |
 | `nori_memory_search` | Follows permission rules | Search the Obsidian shared memory vault |
 | `nori_memory_write` | Follows permission rules | Write analysis, decision, task, or review notes to the vault |
-| `nori_memory_edit` | Follows permission rules | Update an existing vault note in place by exact title |
-| `nori_memory_remove` | Follows permission rules | Delete a vault note by exact title |
 | `nori_plan_write` | Follows permission rules; not blocked by read-only mode | Write plan, design, or analysis documents in approved workspace directories |
 | `nori_swarm_launch` | Follows permission rules | Launch a configured DAG swarm template |
 | `nori_swarm_status` | Follows permission rules | Check a configured swarm's status |
 | `nori_swarm_result` | Follows permission rules | Retrieve a configured swarm's result |
 | `nori_ask_parent` | Subagent only | Let a subagent ask its parent Agent for guidance |
 
-**`nori_memory_search`** accepts concrete `keywords`, optional `note_types`, `top_k`, `include_linked`, `link_depth`, `chain_depth`, and `follow_up_keywords`. Use chained retrieval (`chain_depth: 1` or `2`) when the first results reveal better terms or linked notes. Matching notes include a write timestamp when the vault stores one.
+**`nori_memory_search`** accepts concrete `keywords`, optional `note_types`, `top_k`, `include_linked`, `link_depth`, `chain_depth`, and `follow_up_keywords`. Use chained retrieval (`chain_depth: 1` or `2`) when the first results reveal better terms or linked notes.
 
 **`nori_memory_write`** records structured notes in the shared vault. Use it for durable task progress, architecture analysis, review findings, and decisions that future turns or subagents should retrieve.
-
-**`nori_memory_edit`** updates an existing note in place by exact title and does not create a new file. Omit `links` to keep the current wiki-links; pass `["None"]` or `[]` to clear them. Prefer this over `nori_memory_remove` when correcting a note.
-
-**`nori_memory_remove`** deletes a note by exact title. Use it only for notes that are obsolete.
 
 **`nori_plan_write`** writes only documentation-like files under approved directories such as `docs/`, `plans/`, `.nori-code/`, `design/`, or `specs/`, with extensions such as `.md`, `.txt`, `.yaml`, `.json`, and `.toml`. It is meant for plans and design documents, not source-code edits.
 

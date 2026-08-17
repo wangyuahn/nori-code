@@ -563,7 +563,7 @@ describe('workspace change presentation', () => {
       agentId: 'main',
       operation: 'edit',
       path: 'stardrift.html',
-      diff: '@@ replace lines 1-1 @@\n+background:#050510;',
+      diff: '- [original line 1 replaced]\n+background:#050510;',
       occurredAt: '2026-07-15T10:43:43.244Z',
     }]);
   });

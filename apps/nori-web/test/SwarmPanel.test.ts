@@ -351,24 +351,6 @@ describe('SwarmPanel projections', () => {
     expect([...activity.ids].sort()).toEqual(['running-1', 'running-2']);
     expect(activity.untracked).toBe(0);
 
-    const paused = runningSwarmAgents([{
-      ...run('swarm-paused', 1),
-      status: 'paused',
-      tasks: [
-        { id: 'paused-1', label: 'Paused', status: 'paused' },
-        { id: 'queued-1', label: 'Queued', status: 'pending' },
-      ],
-    }]);
-    expect([...paused.ids]).toEqual(['paused-1']);
-    expect(paused.untracked).toBe(0);
-
-    const untrackedPaused = runningSwarmAgents([{
-      ...run('swarm-untracked', 1),
-      status: 'paused',
-    }]);
-    expect(untrackedPaused.ids.size).toBe(0);
-    expect(untrackedPaused.untracked).toBe(1);
-
     const stopped = runningSwarmAgents([{
       ...run('swarm-stopped', 1),
       status: 'stopped',

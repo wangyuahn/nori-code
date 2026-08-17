@@ -2,7 +2,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Note } from '../src/api/client';
-import { collectRelatedNotes, formatVaultTimestamp, resolveVaultNote } from '../src/components/VaultBrowser';
+import { collectRelatedNotes, resolveVaultNote } from '../src/components/VaultBrowser';
 import { forceSameType, VaultGraph } from '../src/components/VaultGraph';
 import { I18nProvider } from '../src/i18n';
 
@@ -78,14 +78,6 @@ describe('vault related-note projection', () => {
       { note: decision, direction: 'outgoing' },
       { note: review, direction: 'backlink' },
     ]);
-  });
-});
-
-describe('vault timestamps', () => {
-  it('formats ISO write times and leaves invalid values unchanged', () => {
-    expect(formatVaultTimestamp('not-a-date', 'en')).toBe('not-a-date');
-    expect(formatVaultTimestamp('2026-08-17T01:02:03.000Z', 'en')).not.toBe('2026-08-17T01:02:03.000Z');
-    expect(formatVaultTimestamp('2026-08-17T01:02:03.000Z', 'en')).toMatch(/2026/);
   });
 });
 

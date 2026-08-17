@@ -139,28 +139,6 @@ describe('PrimaryNavigation', () => {
 
     expect(countActiveAgents(['agent-stopped'], [stopped], [])).toBe(0);
   });
-
-  it('counts swarm agents from status snapshots without live ids', () => {
-    const run: SwarmStatus = {
-      swarm_id: 'swarm-other',
-      status: 'running',
-      task_count: 1,
-      completed_count: 0,
-      tasks: [{
-        id: 'agent-other',
-        agent_id: 'agent-other',
-        profile: 'coder',
-        label: 'Implement',
-        status: 'running',
-      }],
-    };
-    expect(countActiveAgents([], [run], [])).toBe(1);
-    expect(countActiveAgents([], [{
-      ...run,
-      status: 'paused',
-      tasks: [{ ...run.tasks![0]!, status: 'paused' }],
-    }], [])).toBe(1);
-  });
 });
 
 describe('WindowControls', () => {

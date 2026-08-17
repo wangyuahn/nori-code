@@ -162,7 +162,6 @@ describe('chat image attachments', () => {
         source: expect.objectContaining({ kind: 'base64', media_type: 'image/png' }),
       })],
       'queue',
-      expect.objectContaining({ model: 'multimodal-model' }),
     );
   });
 
@@ -401,17 +400,6 @@ describe('model thinking options', () => {
     });
 
     expect(container.querySelector('.composer-model-popover')?.getAttribute('aria-hidden')).toBe('false');
-  });
-
-  it('falls back to the draft model when the session model is an empty string', async () => {
-    const { container } = await renderChat({
-      session: session(''),
-      draftAgentConfig: { model: 'multimodal-model' },
-      models: [model('multimodal-model', ['tool_use', 'image_in'])],
-    });
-    const trigger = container.querySelector<HTMLButtonElement>('.composer-model-trigger');
-    expect(trigger?.classList.contains('invalid')).toBe(false);
-    expect(trigger?.textContent).toContain('multimodal-model');
   });
 
   it('offers Fast and Think when a third-party model omits reasoning metadata', () => {
@@ -906,12 +894,7 @@ describe('live response controls', () => {
 
     await act(async () => container.querySelector<HTMLButtonElement>('.chat-send-btn')!.click());
 
-    expect(onSendMessage).toHaveBeenCalledWith(
-      'Focus on the parser race',
-      [],
-      'steer',
-      expect.objectContaining({ model: 'multimodal-model' }),
-    );
+    expect(onSendMessage).toHaveBeenCalledWith('Focus on the parser race', [], 'steer');
     expect(container.querySelector<HTMLButtonElement>('.chat-send-btn')!.disabled).toBe(true);
     expect(input.value).toBe('Focus on the parser race');
 
@@ -956,7 +939,7 @@ describe('chat slash commands and task-mode shortcut', () => {
       'Implement the parser fix',
       [],
       'queue',
-      expect.objectContaining({ loopMode: true, model: 'multimodal-model' }),
+      { loopMode: true },
     );
     expect(localStorage.getItem('nori-composer-loop-mode')).toBe('true');
   });
@@ -1250,7 +1233,6 @@ describe('conversation presentation', () => {
     });
     expect(editDetails.open).toBe(true);
     expect(editDetails.textContent).toContain('+updated');
-    expect(editDetails.textContent).not.toContain('[original line');
 
     const bashDetails = toolCalls[1]!;
     expect(bashDetails.textContent).toContain('Failed');
@@ -1260,252 +1242,6 @@ describe('conversation presentation', () => {
     });
     expect(bashDetails.textContent).toContain('npm test');
     expect(bashDetails.textContent).toContain('Command failed with exit code: 1.');
-  });
-
-  it('expands Read, Grep, Agent, MCP, Write, Glob, FetchURL, Browser, and TodoList tool details with full payloads', async () => {
-    const prompt = `Inspect the ${'login '.repeat(40)}flow and list every auth entry point.`;
-    const writeBody = '# Auth\n\nLogin issues a token for the given user.\n';
-    const blocks = [
-      {
-        id: 'tool-read-1',
-        type: 'tool' as const,
-        tool: {
-          id: 'tool-read-1',
-          name: 'Read',
-          args: { path: 'src/auth.ts' },
-          result: 'export function login() {\n  return token;\n}\n',
-        },
-      },
-      {
-        id: 'tool-grep-1',
-        type: 'tool' as const,
-        tool: {
-          id: 'tool-grep-1',
-          name: 'Grep',
-          args: { pattern: 'countActiveAgents', path: 'apps/nori-web' },
-          result: 'apps/nori-web/src/App.tsx:593:export function countActiveAgents(',
-        },
-      },
-      {
-        id: 'tool-agent-1',
-        type: 'tool' as const,
-        tool: {
-          id: 'tool-agent-1',
-          name: 'Agent',
-          args: { subagent_type: 'explore', prompt },
-          result: 'Auth lives in src/auth.ts.',
-        },
-      },
-      {
-        id: 'tool-mcp-1',
-        type: 'tool' as const,
-        tool: {
-          id: 'tool-mcp-1',
-          name: 'mcp__github__create_issue',
-          args: { title: 'Fix badge', body: 'Wrong session.\nCount paused agents.' },
-          result: 'Created issue #12',
-        },
-      },
-      {
-        id: 'tool-write-1',
-        type: 'tool' as const,
-        tool: {
-          id: 'tool-write-1',
-          name: 'Write',
-          args: { path: 'notes/auth.md', content: writeBody },
-          result: 'Wrote notes/auth.md',
-        },
-      },
-      {
-        id: 'tool-glob-1',
-        type: 'tool' as const,
-        tool: {
-          id: 'tool-glob-1',
-          name: 'Glob',
-          args: { pattern: '**/*.test.ts', path: 'apps/nori-web' },
-          result: 'apps/nori-web/test/ChatView.test.ts',
-        },
-      },
-      {
-        id: 'tool-fetch-1',
-        type: 'tool' as const,
-        tool: {
-          id: 'tool-fetch-1',
-          name: 'FetchURL',
-          args: { url: 'https://example.com/docs/api' },
-          result: '# API Reference\n\nGET /v1/sessions returns the session list.',
-        },
-      },
-      {
-        id: 'tool-browser-1',
-        type: 'tool' as const,
-        tool: {
-          id: 'tool-browser-1',
-          name: 'Browser',
-          args: { action: 'navigate', url: 'https://example.com/docs/api' },
-          result: 'Navigated to https://example.com/docs/api\nTitle: API Reference',
-        },
-      },
-      {
-        id: 'tool-todo-1',
-        type: 'tool' as const,
-        tool: {
-          id: 'tool-todo-1',
-          name: 'TodoList',
-          args: { todos: [{ title: 'Show tool details', status: 'in_progress' }] },
-          result: 'Current todo list:\n  [in_progress] Show tool details',
-        },
-      },
-    ];
-    const { container } = await renderChat({
-      messages: [{ id: 'assistant-1', role: 'assistant', text: 'Done.', workBlocks: blocks }],
-      isStreaming: false,
-    });
-
-    const toolCalls = container.querySelectorAll<HTMLDetailsElement>('.expandable-tool-call');
-    expect(toolCalls).toHaveLength(9);
-
-    const expectations = [
-      ['src/auth.ts', 'export function login()'],
-      ['countActiveAgents', 'App.tsx'],
-      [prompt, 'src/auth.ts'],
-      ['Fix badge', 'Count paused agents.', 'Created issue #12'],
-      ['notes/auth.md', 'Login issues a token', 'Wrote notes/auth.md'],
-      ['**/*.test.ts', 'ChatView.test.ts'],
-      ['https://example.com/docs/api', 'GET /v1/sessions'],
-      ['navigate', 'API Reference'],
-      ['Show tool details', '[in_progress]'],
-    ] as const;
-
-    for (const [index, snippets] of expectations.entries()) {
-      const details = toolCalls[index]!;
-      await act(async () => {
-        details.querySelector('summary')?.click();
-        await Promise.resolve();
-      });
-      expect(details.open).toBe(true);
-      for (const snippet of snippets) {
-        expect(details.textContent).toContain(snippet);
-      }
-    }
-  });
-
-  it('expands Edit details without original-line placeholders from recorded diffs', async () => {
-    const blocks = [{
-      id: 'tool-edit-1',
-      type: 'tool' as const,
-      tool: {
-        id: 'tool-edit-1',
-        name: 'Edit',
-        args: {
-          path: 'src/a.ts',
-          line_ops: [{ op: 'swap', start: 1, end: 1, content: 'background:#050510;' }],
-        },
-        result: 'Updated src/a.ts',
-      },
-    }];
-    const { container } = await renderChat({
-      messages: [{ id: 'assistant-1', role: 'assistant', text: 'Done.', workBlocks: blocks }],
-      codeChanges: [{
-        operationId: 'tool-edit-1',
-        agentId: 'main',
-        operation: 'edit',
-        path: 'src/a.ts',
-        diff: '- [original line 1 replaced]\n+background:#050510;',
-        occurredAt: '2026-08-17T00:00:00.000Z',
-      }],
-      isStreaming: false,
-    });
-
-    const editDetails = container.querySelector<HTMLDetailsElement>('.expandable-tool-call.tool-edit')!;
-    await act(async () => {
-      editDetails.querySelector('summary')?.click();
-      await Promise.resolve();
-    });
-    expect(editDetails.open).toBe(true);
-    expect(editDetails.textContent).toContain('+background:#050510;');
-    expect(editDetails.textContent).not.toContain('[original line');
-    expect(editDetails.querySelector('.compact-tool-diff-stats b')?.textContent).toBe('+1');
-    expect(editDetails.querySelector('.compact-tool-diff-stats i')?.textContent).toBe('-1');
-  });
-
-  it('shows Edit +added -removed from the recorded diff instead of inflated line_ops ranges', async () => {
-    const blocks = [{
-      id: 'tool-edit-1',
-      type: 'tool' as const,
-      tool: {
-        id: 'tool-edit-1',
-        name: 'Edit',
-        args: {
-          path: 'apps/nori-web/src/components/ChatView.tsx',
-          line_ops: [{ op: 'swap', start: 42, end: 46, content: 'a\nb\nc\nd\ne' }],
-        },
-        result: '[ChatView.tsx#ABCD]\nApplied 1 line operation to ChatView.tsx.',
-      },
-    }];
-    const { container } = await renderChat({
-      messages: [{ id: 'assistant-1', role: 'assistant', text: 'Done.', workBlocks: blocks }],
-      codeChanges: [{
-        operationId: 'tool-edit-1',
-        agentId: 'main',
-        operation: 'edit',
-        path: 'apps/nori-web/src/components/ChatView.tsx',
-        diff: '-old a\n-old b\n+new a\n+new b\n+new c',
-        occurredAt: '2026-08-17T00:00:00.000Z',
-      }],
-      isStreaming: false,
-    });
-
-    const stats = container.querySelector('.compact-tool-diff-stats');
-    expect(stats?.getAttribute('aria-label')).toBe('+3 -2');
-    expect(stats?.querySelector('b')?.textContent).toBe('+3');
-    expect(stats?.querySelector('i')?.textContent).toBe('-2');
-    expect(container.querySelector('.compact-tool-copy')?.textContent).toContain('ChatView.tsx');
-  });
-
-  it('falls back to line_ops counts when Edit has no recorded diff', async () => {
-    const blocks = [{
-      id: 'tool-edit-1',
-      type: 'tool' as const,
-      tool: {
-        id: 'tool-edit-1',
-        name: 'Edit',
-        args: {
-          path: 'src/utils/format.ts',
-          line_ops: [{ op: 'swap', start: 4, end: 4, content: 'one\ntwo' }],
-        },
-        result: '[src/utils/format.ts#88BB]\nApplied 1 line operation to src/utils/format.ts.',
-      },
-    }];
-    const { container } = await renderChat({
-      messages: [{ id: 'assistant-1', role: 'assistant', text: 'Done.', workBlocks: blocks }],
-      isStreaming: false,
-    });
-
-    const stats = container.querySelector('.compact-tool-diff-stats');
-    expect(stats?.querySelector('b')?.textContent).toBe('+2');
-    expect(stats?.querySelector('i')?.textContent).toBe('-1');
-  });
-
-  it('lets any tool call expand even when there is no extra payload yet', async () => {
-    const { container } = await renderChat({
-      messages: [{ id: 'assistant-1', role: 'assistant', text: '' }],
-      workBlocks: [{
-        id: 'tool-1',
-        type: 'tool',
-        tool: { id: 'tool-1', name: 'TodoList', args: {} },
-      }],
-      isStreaming: true,
-    });
-
-    const toolCall = container.querySelector<HTMLDetailsElement>('.expandable-tool-call')!;
-    expect(toolCall.querySelector('.tool-call-chevron')).not.toBeNull();
-    await act(async () => {
-      toolCall.querySelector('summary')?.click();
-      await Promise.resolve();
-    });
-    expect(toolCall.open).toBe(true);
-    expect(toolCall.textContent).toContain('Waiting for this tool to finish');
   });
 
   it('renders ordinary live text as normal assistant output while work is active', async () => {

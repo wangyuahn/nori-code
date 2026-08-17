@@ -40,29 +40,6 @@ describe('vault note scanning', () => {
     ]);
   });
 
-  it('prefers frontmatter written_at as a full ISO timestamp', async () => {
-    const vault = await mkdtemp(join(tmpdir(), 'nori-vault-'));
-    tempDirs.push(vault);
-    await mkdir(join(vault, 'analysis'), { recursive: true });
-    await writeFile(join(vault, 'analysis', 'timed.md'), [
-      '---',
-      'title: Timed note',
-      'type: analysis',
-      'date: 2026-01-02',
-      'written_at: "2026-08-17T01:02:03.000Z"',
-      '---',
-      '',
-      'Body.',
-    ].join('\n'), 'utf8');
-
-    expect(scanVault(vault)).toEqual([
-      expect.objectContaining({
-        title: 'Timed note',
-        date: '2026-08-17T01:02:03.000Z',
-      }),
-    ]);
-  });
-
   it('reads notes from the legacy analyses folder without changing their canonical type', async () => {
     const vault = await mkdtemp(join(tmpdir(), 'nori-vault-'));
     tempDirs.push(vault);

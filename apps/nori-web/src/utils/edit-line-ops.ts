@@ -69,30 +69,6 @@ export function editOperationLabel(operation: EditLineOperation): string {
   }
 }
 
-const PLACEHOLDER_DIFF_LINE = /^[-+]?\s*\[original line \d+ (?:replaced|deleted)\]\s*$/;
-
-export function isPlaceholderDiffLine(line: string): boolean {
-  return PLACEHOLDER_DIFF_LINE.test(line);
-}
-
-export function isChangedDiffLine(line: string): boolean {
-  if (isPlaceholderDiffLine(line)) return false;
-  return (line.startsWith('+') && !line.startsWith('+++'))
-    || (line.startsWith('-') && !line.startsWith('---'));
-}
-
-export function diffLineStats(diff: string | undefined): { additions: number; deletions: number } | undefined {
-  if (diff === undefined || diff.length === 0) return undefined;
-  let additions = 0;
-  let deletions = 0;
-  for (const line of diff.split(/\r?\n/)) {
-    if (line.startsWith('+++') || line.startsWith('---')) continue;
-    if (line.startsWith('+')) additions += 1;
-    else if (line.startsWith('-')) deletions += 1;
-  }
-  return additions > 0 || deletions > 0 ? { additions, deletions } : undefined;
-}
-
 export function editLineOperationsDiff(value: unknown): string[] {
   const lines: string[] = [];
   for (const operation of parseEditLineOperations(value)) {

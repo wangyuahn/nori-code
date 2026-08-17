@@ -3,8 +3,8 @@
  * Reads markdown files directly from the filesystem.
  */
 
-import { readFileSync, readdirSync, existsSync, statSync, writeFileSync, type Dirent } from 'node:fs';
-import { join, basename, relative, resolve } from 'node:path';
+import { readFileSync, readdirSync, existsSync, statSync, type Dirent } from 'node:fs';
+import { join, basename, relative } from 'node:path';
 import { z } from 'zod';
 import { parse as parseYaml } from 'yaml';
 import { okEnvelope } from '../envelope';
@@ -17,14 +17,6 @@ interface RouteHost {
     options: { schema?: Record<string, unknown> },
     handler: (
       req: { id: string; query: Record<string, unknown>; params: Record<string, unknown> },
-      reply: { send(payload: unknown): void },
-    ) => Promise<void> | void,
-  ): unknown;
-  post(
-    path: string,
-    options: { schema?: Record<string, unknown> },
-    handler: (
-      req: { id: string; params: Record<string, unknown>; body: { content: string } },
       reply: { send(payload: unknown): void },
     ) => Promise<void> | void,
   ): unknown;
@@ -58,10 +50,6 @@ const listQuerySchema = z.object({
 const noteIdParamsSchema = z.object({
   note_id: z.string(),
 });
-
-const updateNoteBodySchema = z.object({
-  content: z.string().min(1),
-}).strict();
 
 export type NoteEntry = z.infer<typeof noteSchema>;
 
@@ -105,10 +93,10 @@ export function scanVault(vaultPath: string): NoteEntry[] {
       let content: string;
       try { content = readFileSync(filePath, 'utf-8'); } catch { continue; }
 
-      // Prefer frontmatter write time, then file mtime as a full ISO timestamp.
+      // Get file modification time
       let mtime = '';
       try {
-        mtime = statSync(filePath).mtime.toISOString();
+        mtime = statSync(filePath).mtime.toISOString().slice(0, 10);
       } catch { mtime = ''; }
 
       const frontmatter = parseFrontmatter(content);
@@ -147,7 +135,7 @@ export function scanVault(vaultPath: string): NoteEntry[] {
         type: noteType,
         folder: noteType,
         preview,
-        date: noteTimestamp(frontmatter, mtime),
+        date: mtime,
         path: notePath,
         links,
       });
@@ -228,44 +216,6 @@ function findNote(notes: NoteEntry[], noteId: string): NoteEntry | null {
   }) ?? null;
 }
 
-function noteTimestamp(frontmatter: Record<string, unknown>, mtimeIso: string): string {
-  for (const key of ['written_at', 'updated', 'date'] as const) {
-    const iso = toIsoTimestamp(frontmatter[key]);
-    if (iso !== undefined) return iso;
-  }
-  return mtimeIso;
-}
-
-function toIsoTimestamp(value: unknown): string | undefined {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
-  if (typeof value === 'string' && value.trim() !== '') {
-    const parsed = Date.parse(value.trim());
-    if (!Number.isNaN(parsed)) return new Date(parsed).toISOString();
-  }
-  return undefined;
-}
-
-function resolveVaultFile(vaultPath: string, notePath: string): string | undefined {
-  const root = resolve(vaultPath);
-  const target = resolve(root, notePath);
-  const rel = relative(root, target);
-  if (rel === '' || rel.startsWith('..')) return undefined;
-  return target;
-}
-
-function stampWrittenAt(content: string, writtenAt: string): string {
-  const normalized = content.replaceAll('\r\n', '\n');
-  const match = /^---\n([\s\S]*?)\n---(\n[\s\S]*)?$/.exec(normalized);
-  if (!match) return content;
-  const frontmatter = match[1] ?? '';
-  const body = match[2] ?? '\n';
-  const line = `written_at: ${JSON.stringify(writtenAt)}`;
-  const nextFrontmatter = /^written_at:\s*.+$/m.test(frontmatter)
-    ? frontmatter.replace(/^written_at:\s*.+$/m, line)
-    : `${frontmatter}\n${line}`;
-  return `---\n${nextFrontmatter}\n---${body.startsWith('\n') ? body : `\n${body}`}`;
-}
-
 export function registerVaultRoutes(app: RouteHost, _ix: IInstantiationService): void {
   const vaultPath = resolveVaultPath();
 
@@ -334,36 +284,4 @@ export function registerVaultRoutes(app: RouteHost, _ix: IInstantiationService):
     },
   );
   app.get(noteRoute.path, noteRoute.options, noteRoute.handler as Parameters<RouteHost['get']>[2]);
-
-  const updateRoute = defineRoute(
-    {
-      method: 'POST',
-      path: '/vault/notes/{note_id}',
-      params: noteIdParamsSchema,
-      body: updateNoteBodySchema,
-      success: { data: noteDetailSchema.nullable() },
-      description: 'Update a vault note by encoded title or path',
-      tags: ['vault'],
-    },
-    async (req, reply) => {
-      const noteId = req.params['note_id'];
-      const note = findNote(scanVault(vaultPath), noteId);
-      if (!note) {
-        reply.send(okEnvelope(null, req.id));
-        return;
-      }
-      const target = resolveVaultFile(vaultPath, note.path);
-      if (target === undefined) {
-        reply.send(okEnvelope(null, req.id));
-        return;
-      }
-      const stamped = stampWrittenAt(req.body.content, new Date().toISOString());
-      writeFileSync(target, stamped, 'utf-8');
-      const updated = findNote(scanVault(vaultPath), note.path);
-      let content = stamped;
-      try { content = readFileSync(target, 'utf-8'); } catch { /* keep stamped content */ }
-      reply.send(okEnvelope(updated ? { ...updated, content } : { ...note, content }, req.id));
-    },
-  );
-  app.post(updateRoute.path, updateRoute.options, updateRoute.handler as Parameters<RouteHost['post']>[2]);
 }

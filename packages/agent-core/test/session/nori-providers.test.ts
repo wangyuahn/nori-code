@@ -55,60 +55,6 @@ describe('Nori filesystem memory provider', () => {
     expect(content).toContain('## Related\n- [[decision/architecture|Architecture choice]]');
   });
 
-  it('records ISO written_at on write and returns it from search', async () => {
-    const root = await tempRoot();
-    const providers = createNoriProvidersFromConfig(
-      { obsidian: { vault_path: './nori-vault' } },
-      SIMPLE_CONFIG,
-      root,
-    );
-    if (providers === null) throw new Error('expected providers');
-
-    const written = await providers.memory.writeNote({
-      note_type: 'analysis',
-      title: 'Write timestamp note',
-      content: 'Remember the write time.',
-    });
-    const content = await readFile(join(root, 'nori-vault', written.path), 'utf-8');
-    const writtenAt = content.match(/^written_at:\s*"([^"]+)"$/m)?.[1];
-    expect(writtenAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-
-    const results = await providers.memory.multiRetrieve(['Write timestamp note']);
-    expect(results[0]?.written_at).toBe(writtenAt);
-  });
-
-  it('edits an existing note in place without creating a new file', async () => {
-    const root = await tempRoot();
-    const vault = join(root, 'nori-vault');
-    const providers = createNoriProvidersFromConfig(
-      { obsidian: { vault_path: './nori-vault' } },
-      SIMPLE_CONFIG,
-      root,
-    );
-    if (providers === null) throw new Error('expected providers');
-
-    const written = await providers.memory.writeNote({
-      note_type: 'analysis',
-      title: 'Editable note',
-      content: 'Original body.',
-      tags: ['keep'],
-    });
-    const edited = await providers.memory.editNote({
-      title: 'Editable note',
-      content: 'Replacement body.',
-    });
-    expect(edited?.path).toBe(written.path);
-    const content = await readFile(join(vault, written.path), 'utf-8');
-    expect(content).toContain('Replacement body.');
-    expect(content).not.toContain('Original body.');
-    expect(content).toContain('title: "Editable note"');
-    expect(content).toContain('- "keep"');
-    expect(await providers.memory.editNote({
-      title: 'Missing note',
-      content: 'nope',
-    })).toBeUndefined();
-  });
-
   it('does not make embedding requests in simple mode', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

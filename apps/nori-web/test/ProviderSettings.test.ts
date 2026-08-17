@@ -186,51 +186,6 @@ describe('ProviderSettings', () => {
     const secondPatch = updateConfig.mock.calls[0]?.[0] as { providers?: Record<string, Record<string, unknown>> };
     expect(secondPatch.providers?.openrouter?.api_key).toBe('sk-replacement');
   });
-
-  it('does not wipe discovered aliases or write leftover custom IDs when auto-discovery is on', async () => {
-    vi.mocked(api.providers.list).mockResolvedValue({
-      items: [{ ...PROVIDER, custom_models: ['leftover-id'] }],
-    });
-    vi.mocked(api.getConfig).mockResolvedValue({
-      models: {
-        'openrouter/existing': { provider: 'openrouter', model: 'existing' },
-      },
-      default_model: 'openrouter/existing',
-    });
-    const updateConfig = vi.mocked(api.updateConfig);
-    const { container } = await renderProviders();
-    await openEditor(container);
-    await act(async () => {
-      saveButton(container).click();
-      await Promise.resolve();
-    });
-    await vi.waitFor(() => {
-      expect(updateConfig).toHaveBeenCalled();
-    });
-    const firstPatch = updateConfig.mock.calls[0]?.[0] as { models?: Record<string, unknown> };
-    expect(firstPatch.models).toBeUndefined();
-  });
-
-  it('sets default_model after a successful refresh when none is configured', async () => {
-    const updateConfig = vi.mocked(api.updateConfig);
-    vi.mocked(api.getConfig)
-      .mockResolvedValueOnce({ models: {} })
-      .mockResolvedValueOnce({
-        models: { 'openrouter/gpt-4o': { provider: 'openrouter', model: 'gpt-4o' } },
-      });
-    const { container } = await renderProviders();
-    await openEditor(container);
-    await act(async () => {
-      saveButton(container).click();
-      await Promise.resolve();
-    });
-    await vi.waitFor(() => {
-      expect(updateConfig.mock.calls.some(call => {
-        const patch = call[0] as { default_model?: string };
-        return patch.default_model === 'openrouter/gpt-4o';
-      })).toBe(true);
-    });
-  });
 });
 
 async function renderProviders() {

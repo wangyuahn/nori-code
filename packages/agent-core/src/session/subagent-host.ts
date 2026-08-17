@@ -513,7 +513,6 @@ export class SessionSubagentHost {
     options: RunSubagentOptions,
   ): Promise<SubagentCompletion> {
     options.signal.throwIfAborted();
-    this.emitSubagentStarted(parent, childId);
     await this.triggerSubagentStart(parent, profileName, options.prompt, options.signal);
     options.signal.throwIfAborted();
 
@@ -525,6 +524,8 @@ export class SessionSubagentHost {
 
     const retrievedContext = await this.tryBuildNoriRetrievedContext(child, childPrompt, options.signal);
     if (retrievedContext !== undefined) childPrompt = `${retrievedContext}\n\n${childPrompt}`;
+
+    this.emitSubagentStarted(parent, childId);
     const turnId = child.turn.prompt([{ type: 'text', text: childPrompt }], SUBAGENT_PROMPT_ORIGIN);
     if (turnId === null) {
       throw new Error(`Agent instance "${childId}" could not start a turn`);
@@ -915,11 +916,8 @@ function renderNoriRetrievedContext(result: NoriMemoryChainResult): string {
       if (renderedPaths.has(note.path)) continue;
       renderedPaths.add(note.path);
       const score = note.score === undefined ? '' : ` score="${escapeXmlAttribute(note.score.toFixed(3))}"`;
-      const written = note.written_at === undefined
-        ? ''
-        : ` written_at="${escapeXmlAttribute(note.written_at)}"`;
       lines.push(
-        `<note path="${escapeXmlAttribute(note.path)}"${score}${written}>`,
+        `<note path="${escapeXmlAttribute(note.path)}"${score}>`,
         `<title>${escapeXmlText(note.title)}</title>`,
         `<content>${escapeXmlText(truncateForRetrievedContext(note.excerpt ?? note.content ?? ''))}</content>`,
         '</note>',

@@ -40,32 +40,6 @@ describe('prompt execution options', () => {
     });
   });
 
-  it('includes the selected model on prompt submit', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      code: 0,
-      msg: 'ok',
-      data: {
-        prompt_id: 'prompt-1',
-        user_message_id: 'msg-1',
-        status: 'running',
-        content: [{ type: 'text', text: 'ship the release' }],
-        created_at: '2026-07-15T00:00:00.000Z',
-      },
-    }), { status: 200 }));
-    vi.stubGlobal('fetch', fetchMock);
-    const client = createClient('http://localhost:3000');
-
-    await client.sendPrompt('session-1', 'ship the release', [], {
-      model: 'openrouter/gpt-4o',
-    });
-
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(JSON.parse(init.body as string)).toEqual({
-      model: 'openrouter/gpt-4o',
-      content: [{ type: 'text', text: 'ship the release' }],
-    });
-  });
-
   it('uses the collection steer endpoint for queued guidance', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       code: 0,

@@ -173,7 +173,7 @@ export function synchronizeSwarmTasks(
       return task.status === 'running' ? { ...task, status: 'paused' } : task;
     }
     if (status === 'running') {
-      return task.status === 'paused' ? { ...task, status: 'running' } : task;
+      return task.status === 'paused' ? { ...task, status: 'pending' } : task;
     }
     if (status === 'done') return { ...task, status: 'completed' };
     if (status === 'stopped') return { ...task, status: 'cancelled' };
@@ -257,18 +257,6 @@ export function findSwarmByToolCall(
     && entry.owner_agent_id === ownerAgentId
     && entry.tool_call_id === toolCallId,
   );
-}
-
-export function findActiveSwarmByOwner(
-  sessionId: string,
-  ownerAgentId: string,
-): SwarmStatusEntry | undefined {
-  const matches = [...swarmState.values()].filter(entry =>
-    entry.session_id === sessionId
-    && entry.owner_agent_id === ownerAgentId
-    && (entry.status === 'running' || entry.status === 'pending' || entry.status === 'paused'),
-  );
-  return matches.at(-1);
 }
 
 export function findSwarmByAgent(sessionId: string, agentId: string): SwarmStatusEntry | undefined {

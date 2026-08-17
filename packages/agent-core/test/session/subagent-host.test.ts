@@ -991,7 +991,6 @@ describe('SessionSubagentHost', () => {
         },
       ]),
       writeNote: vi.fn(async () => ({ path: 'analysis/unused.md' })),
-      editNote: vi.fn(async () => ({ path: 'analysis/unused.md' })),
       removeNote: vi.fn(async () => false),
     };
     const summary =

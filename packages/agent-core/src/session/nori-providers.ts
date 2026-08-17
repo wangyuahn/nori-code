@@ -42,7 +42,6 @@ interface MemoryNoteInfo {
   links: string[];
   mtimeMs: number;
   size: number;
-  writtenAt: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -57,7 +56,7 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
     }
   }
 
-  async multiRetrieve(keywords: string[], options?: MemoryRetrieveOptions): Promise<Array<{ title: string; path: string; score?: number; excerpt?: string; content?: string; written_at?: string }>> {
+  async multiRetrieve(keywords: string[], options?: MemoryRetrieveOptions): Promise<Array<{ title: string; path: string; score?: number; excerpt?: string; content?: string }>> {
     const topK = options?.top_k ?? 10;
     const notes = this.scoreNotes(keywords, options);
     return notes
@@ -67,7 +66,6 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
         score: note.fulltextScore > 0 ? note.fulltextScore : note.graphScore,
         excerpt: excerpt(note.body),
         content: note.body,
-        written_at: note.writtenAt,
       }))
       .filter((note) => note.score > 0)
       .toSorted((a, b) => b.score - a.score)
@@ -153,7 +151,7 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
           if (seenFiles.has(fp)) continue;
           seenFiles.add(fp);
           const raw = readFileSync(fp, 'utf-8');
-          const { title, body, fields } = this.parseFrontmatter(raw);
+          const { title, body } = this.parseFrontmatter(raw);
           const notePath = relative(this.vaultPath, fp).replaceAll('\\', '/');
           const wikiLinks: string[] = [];
           const linkRegex = /\[\[([^\]]+)\]\]/g;
@@ -184,7 +182,6 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
             links: wikiLinks,
             mtimeMs: stat.mtimeMs,
             size: stat.size,
-            writtenAt: resolveWrittenAt(fields, stat.mtimeMs),
           });
         }
       } catch { /* skip inaccessible dirs */ }
@@ -197,63 +194,25 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
   }): Promise<{ path: string }> {
     const dir = path.join(this.vaultPath, params.note_type);
     mkdirSync(dir, { recursive: true });
-    const now = new Date();
-    const dateStr = now.toISOString().split('T')[0] ?? now.toISOString().slice(0, 10);
+    const dateStr = new Date().toISOString().split('T')[0];
     const safeName = params.title
       .replaceAll(/[<>:"/\\|?*]/g, '-').replaceAll(/\s+/g, '-').toLowerCase().slice(0, 80);
     const fileName = dateStr + '-' + safeName + '.md';
     const fp = path.join(dir, fileName);
 
     const related = this.resolveRelatedLinks(params.links);
-    const fm = buildMemoryFrontmatter({
-      title: params.title,
-      type: params.note_type,
-      date: dateStr,
-      writtenAt: now.toISOString(),
-      tags: params.tags,
-      related,
-    });
+    const fm = [
+      '---', `title: ${JSON.stringify(params.title)}`, `type: ${params.note_type}`,
+      'date: ' + dateStr,
+      ...(params.tags?.length ? ['tags:', ...params.tags.map(tag => `  - ${JSON.stringify(tag)}`)] : []),
+      ...(related.length > 0 ? ['related:', ...related.map(link => `  - ${JSON.stringify(link)}`)] : []),
+      '---',
+    ].filter(l => l.length > 0).join('\n');
 
     const relatedSection = related.length > 0
       ? `\n\n## Related\n${related.map(link => `- ${link}`).join('\n')}`
       : '';
     writeFileSync(fp, `${fm}\n\n${params.content.trimEnd()}${relatedSection}\n`, 'utf-8');
-    return { path: relative(this.vaultPath, fp).replaceAll('\\', '/') };
-  }
-
-  async editNote(params: {
-    title: string; content: string; links?: string[]; tags?: string[];
-  }): Promise<{ path: string } | undefined> {
-    const fp = this.findNotePathByTitle(params.title);
-    if (fp === undefined) return undefined;
-    const raw = readFileSync(fp, 'utf-8');
-    const parsed = this.parseFrontmatter(raw);
-    const now = new Date();
-    const related = params.links === undefined
-      ? yamlStringList(parsed.fields['related'])
-      : this.resolveRelatedLinks(params.links);
-    const tags = params.tags ?? yamlStringList(parsed.fields['tags']);
-    const noteType = typeof parsed.fields['type'] === 'string' && parsed.fields['type'].trim() !== ''
-      ? parsed.fields['type'].trim()
-      : (relative(this.vaultPath, fp).replaceAll('\\', '/').split('/')[0] ?? 'analysis');
-    const fm = buildMemoryFrontmatter({
-      title: parsed.title,
-      type: noteType,
-      date: yamlDateOnly(parsed.fields['date'], now.toISOString().slice(0, 10)),
-      writtenAt: now.toISOString(),
-      tags,
-      related,
-    });
-    let body = params.content.trimEnd();
-    if (!/^## Related\b/m.test(body)) {
-      if (params.links === undefined) {
-        const previousRelated = extractRelatedSection(parsed.body);
-        if (previousRelated !== undefined) body = `${body}\n\n${previousRelated}`;
-      } else if (related.length > 0) {
-        body = `${body}\n\n## Related\n${related.map(link => `- ${link}`).join('\n')}`;
-      }
-    }
-    writeFileSync(fp, `${fm}\n\n${body}\n`, 'utf-8');
     return { path: relative(this.vaultPath, fp).replaceAll('\\', '/') };
   }
 
@@ -290,29 +249,26 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
   }
 
   async removeNote(title: string): Promise<boolean> {
-    const fp = this.findNotePathByTitle(title);
-    if (fp === undefined) return false;
-    const trashDir = path.join(this.vaultPath, '.trash');
-    try {
-      mkdirSync(trashDir, { recursive: true });
-      renameSync(fp, this.availableTrashPath(trashDir, path.basename(fp)));
-    } catch {
-      return false;
-    }
-    return true;
-  }
-
-  private findNotePathByTitle(title: string): string | undefined {
     const normalizedTitle = title.trim();
-    if (normalizedTitle.length === 0) return undefined;
+    if (normalizedTitle.length === 0) return false;
+    const trashDir = path.join(this.vaultPath, '.trash');
     for (const fp of this.markdownFiles(this.vaultPath)) {
       try {
         const raw = readFileSync(fp, 'utf-8');
         const { title: noteTitle } = this.parseFrontmatter(raw);
-        if (noteTitle === normalizedTitle) return fp;
+        if (noteTitle === normalizedTitle) {
+          try {
+            mkdirSync(trashDir, { recursive: true });
+            const dest = this.availableTrashPath(trashDir, path.basename(fp));
+            renameSync(fp, dest);
+          } catch {
+            return false;
+          }
+          return true;
+        }
       } catch { /* skip unreadable files */ }
     }
-    return undefined;
+    return false;
   }
 
   private availableTrashPath(trashDir: string, fileName: string): string {
@@ -349,23 +305,14 @@ class SimpleMemoryProvider implements NoriMemoryProvider {
     return files;
   }
 
-  protected parseFrontmatter(content: string): {
-    title: string;
-    frontmatter: string;
-    body: string;
-    fields: Record<string, unknown>;
-  } {
+  protected parseFrontmatter(content: string): { title: string; frontmatter: string; body: string } {
     const normalized = content.replace(/^\uFEFF/, '').replaceAll('\r\n', '\n');
     const m = normalized.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
-    if (!m) return { title: 'Untitled', frontmatter: '', body: normalized, fields: {} };
+    if (!m) return { title: 'Untitled', frontmatter: '', body: normalized };
     const frontmatter = m[1] ?? '';
     const body = m[2] ?? '';
-    const fields = parseYamlMapping(frontmatter);
     const tm = frontmatter.match(/^title:\s*['"]?(.+?)['"]?\s*$/m);
-    const title = typeof fields['title'] === 'string' && fields['title'].trim() !== ''
-      ? fields['title'].trim()
-      : tm?.[1] ?? 'Untitled';
-    return { title, frontmatter, body, fields };
+    return { title: tm?.[1] ?? 'Untitled', frontmatter, body };
   }
 }
 
@@ -385,7 +332,7 @@ class VectorMemoryProvider extends SimpleMemoryProvider {
   override async multiRetrieve(
     keywords: string[],
     options?: MemoryRetrieveOptions,
-  ): Promise<Array<{ title: string; path: string; score?: number; excerpt?: string; content?: string; written_at?: string }>> {
+  ): Promise<Array<{ title: string; path: string; score?: number; excerpt?: string; content?: string }>> {
     const endpoint = this.embeddingEndpoint();
     const apiKey = requiredConfig(this.config.apiKey, 'api_key');
     const model = requiredConfig(this.config.model, 'model');
@@ -451,7 +398,6 @@ class VectorMemoryProvider extends SimpleMemoryProvider {
           score,
           excerpt: excerpt(note.body),
           content: note.body,
-          written_at: note.writtenAt,
         };
       })
       .filter((note) => note.score > 0)
@@ -515,77 +461,6 @@ class VectorMemoryProvider extends SimpleMemoryProvider {
 
 function excerpt(body: string): string {
   return body.length > 500 ? `${body.slice(0, 500)}...` : body;
-}
-
-function parseYamlMapping(source: string): Record<string, unknown> {
-  if (source.trim() === '') return {};
-  try {
-    const parsed = loadYaml(source);
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {};
-  } catch {
-    return {};
-  }
-}
-
-function resolveWrittenAt(fields: Record<string, unknown>, mtimeMs: number): string {
-  for (const key of ['written_at', 'updated', 'date'] as const) {
-    const iso = toIsoTimestamp(fields[key]);
-    if (iso !== undefined) return iso;
-  }
-  return new Date(mtimeMs).toISOString();
-}
-
-function toIsoTimestamp(value: unknown): string | undefined {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    const ms = value < 1e12 ? value * 1000 : value;
-    const date = new Date(ms);
-    return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
-  }
-  if (typeof value === 'string' && value.trim() !== '') {
-    const parsed = Date.parse(value.trim());
-    if (!Number.isNaN(parsed)) return new Date(parsed).toISOString();
-  }
-  return undefined;
-}
-
-function yamlStringList(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value.filter((item): item is string => typeof item === 'string' && item.trim() !== '');
-}
-
-function yamlDateOnly(value: unknown, fallback: string): string {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
-  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value.trim())) return value.trim().slice(0, 10);
-  return fallback;
-}
-
-function extractRelatedSection(body: string): string | undefined {
-  const match = /\n## Related\b[\s\S]*$/.exec(`\n${body}`);
-  const section = match?.[0]?.trim();
-  return section === undefined || section.length === 0 ? undefined : section;
-}
-
-function buildMemoryFrontmatter(params: {
-  title: string;
-  type: string;
-  date: string;
-  writtenAt: string;
-  tags?: string[];
-  related?: string[];
-}): string {
-  return [
-    '---',
-    `title: ${JSON.stringify(params.title)}`,
-    `type: ${params.type}`,
-    `date: ${params.date}`,
-    `written_at: ${JSON.stringify(params.writtenAt)}`,
-    ...(params.tags?.length ? ['tags:', ...params.tags.map(tag => `  - ${JSON.stringify(tag)}`)] : []),
-    ...(params.related?.length ? ['related:', ...params.related.map(link => `  - ${JSON.stringify(link)}`)] : []),
-    '---',
-  ].join('\n');
 }
 
 function requiredConfig<T>(value: T | undefined, name: string): T {

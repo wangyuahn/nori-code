@@ -67,11 +67,9 @@ export class ToolManager {
     if (this.agent.obsidianMemory) {
       const memSearch = new b.NoriMemorySearchTool(this.agent.obsidianMemory) as any;
       const memWrite = new b.NoriMemoryWriteTool(this.agent.obsidianMemory) as any;
-      const memEdit = new b.NoriMemoryEditTool(this.agent.obsidianMemory) as any;
       const memRemove = new b.NoriMemoryRemoveTool(this.agent.obsidianMemory) as any;
       this.builtinTools.set(memSearch.name, memSearch);
       this.builtinTools.set(memWrite.name, memWrite);
-      this.builtinTools.set(memEdit.name, memEdit);
       this.builtinTools.set(memRemove.name, memRemove);
     }
     if (this.agent.swarmManager) {
@@ -568,8 +566,6 @@ export class ToolManager {
           new b.NoriMemorySearchTool(this.agent.obsidianMemory),
         this.agent.obsidianMemory &&
           new b.NoriMemoryWriteTool(this.agent.obsidianMemory),
-        this.agent.obsidianMemory &&
-          new b.NoriMemoryEditTool(this.agent.obsidianMemory),
         this.agent.obsidianMemory &&
           new b.NoriMemoryRemoveTool(this.agent.obsidianMemory),
         this.agent.swarmManager &&

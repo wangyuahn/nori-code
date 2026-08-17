@@ -238,30 +238,22 @@ export function ProviderSettings() {
       const models: Record<string, unknown> = {};
       const currentConfig = await api.getConfig();
       const previousProviderId = draft.originalId ?? id;
-      const renamed = draft.originalId !== null && draft.originalId !== id;
-      // Auto-discovery replaces aliases on refresh. Wiping them first leaves
-      // an empty catalog if refresh fails, and leftover custom IDs from a
-      // hidden textarea must not be written back as aliases.
-      if (!draft.autoDiscover || renamed) {
-        for (const [modelId, alias] of Object.entries(currentConfig.models ?? {})) {
-          if (isModelAliasRecord(alias) && alias.provider === previousProviderId) {
-            models[modelId] = null;
-          }
+      for (const [modelId, alias] of Object.entries(currentConfig.models ?? {})) {
+        if (isModelAliasRecord(alias) && alias.provider === previousProviderId) {
+          models[modelId] = null;
         }
       }
-      if (!draft.autoDiscover) {
-        for (const model of customModels) {
-          models[`${id}/${model}`] = {
-            provider: id,
-            model,
-            max_context_size: 128000,
-            capabilities: ['tool_use'],
-            display_name: model,
-          };
-        }
+      for (const model of customModels) {
+        models[`${id}/${model}`] = {
+          provider: id,
+          model,
+          max_context_size: 128000,
+          capabilities: ['tool_use'],
+          display_name: model,
+        };
       }
       await api.updateConfig({ providers: { [id]: providerPatch }, ...(Object.keys(models).length > 0 ? { models } : {}) });
-      if (renamed) await api.providers.remove(previousProviderId);
+      if (draft.originalId !== null && draft.originalId !== id) await api.providers.remove(draft.originalId);
       if (draft.autoDiscover && !draft.disabled) {
         const result = await api.providers.refresh(id);
         const failures = refreshFailures(result);
@@ -275,7 +267,6 @@ export function ProviderSettings() {
       } else {
         setNotice({ text: tr('Provider saved', 'Provider 已保存') });
       }
-      await ensureDefaultModel(id);
       await load();
       window.dispatchEvent(new CustomEvent('nori:model-catalog-changed'));
       setExpandedId(id);
@@ -464,23 +455,6 @@ function isProviderType(value: string): value is ProviderType {
 
 function isModelAliasRecord(value: unknown): value is { provider?: unknown } {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-async function ensureDefaultModel(providerId: string): Promise<void> {
-  const latest = await api.getConfig();
-  const currentDefault = typeof latest.default_model === 'string' ? latest.default_model.trim() : '';
-  if (currentDefault !== '') return;
-  const firstAlias = firstModelAliasForProvider(latest.models, providerId);
-  if (firstAlias === undefined) return;
-  await api.updateConfig({ default_model: firstAlias });
-}
-
-function firstModelAliasForProvider(models: unknown, providerId: string): string | undefined {
-  if (models === null || typeof models !== 'object' || Array.isArray(models)) return undefined;
-  for (const [modelId, alias] of Object.entries(models as Record<string, unknown>)) {
-    if (isModelAliasRecord(alias) && alias.provider === providerId) return modelId;
-  }
-  return undefined;
 }
 
 function isProviderTestResponse(value: unknown): value is ProviderTestResponse {

@@ -12,7 +12,7 @@ Matches the note by exact title. If a note with the given title exists, it is
 permanently deleted. Returns whether the note was found and removed.
 
 Use this sparingly — only for notes that are genuinely obsolete or incorrect.
-Prefer nori_memory_edit to correct an existing note in place.`;
+Prefer nori_memory_write with updated content for corrections.`;
 
 const NoriMemoryRemoveInputSchema = z.object({
   title: z.string().min(1).max(200),

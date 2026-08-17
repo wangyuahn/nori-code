@@ -107,21 +107,15 @@ Nori 专用工具在内置工具集上增加共享记忆、文档写入和已配
 | --- | --- | --- |
 | `nori_memory_search` | 按权限规则处理 | 搜索 Obsidian 共享记忆库 |
 | `nori_memory_write` | 按权限规则处理 | 向记忆库写入 analysis、decision、task 或 review 笔记 |
-| `nori_memory_edit` | 按权限规则处理 | 按精确标题原地更新已有笔记 |
-| `nori_memory_remove` | 按权限规则处理 | 按精确标题删除笔记 |
 | `nori_plan_write` | 按权限规则处理；不受只读模式拦截 | 在允许的工作区目录写入计划、设计或分析文档 |
 | `nori_swarm_launch` | 按权限规则处理 | 启动已配置的 DAG swarm 模板 |
 | `nori_swarm_status` | 按权限规则处理 | 查询已配置 swarm 的状态 |
 | `nori_swarm_result` | 按权限规则处理 | 获取已配置 swarm 的结果 |
 | `nori_ask_parent` | 仅子 Agent 可用 | 让子 Agent 向父 Agent 请求指导 |
 
-**`nori_memory_search`** 接受具体的 `keywords`，以及可选的 `note_types`、`top_k`、`include_linked`、`link_depth`、`chain_depth` 和 `follow_up_keywords`。当第一轮结果暴露出更好的关键词或链接笔记时，使用链式检索（`chain_depth: 1` 或 `2`）。匹配笔记会带上写入时间（如果记忆库中有记录）。
+**`nori_memory_search`** 接受具体的 `keywords`，以及可选的 `note_types`、`top_k`、`include_linked`、`link_depth`、`chain_depth` 和 `follow_up_keywords`。当第一轮结果暴露出更好的关键词或链接笔记时，使用链式检索（`chain_depth: 1` 或 `2`）。
 
 **`nori_memory_write`** 把结构化笔记写入共享记忆库。适合记录任务进度、架构分析、审阅发现，以及未来轮次或子 Agent 需要检索的决策。
-
-**`nori_memory_edit`** 按精确标题原地更新已有笔记，不会新建文件。省略 `links` 会保留当前 wiki-links；传入 `["None"]` 或 `[]` 可清空链接。修正笔记时优先使用此工具，而不是 `nori_memory_remove`。
-
-**`nori_memory_remove`** 按精确标题删除笔记。只用于确实过时的笔记。
 
 **`nori_plan_write`** 只写入 `docs/`、`plans/`、`.nori-code/`、`design/`、`specs/` 等允许目录下的文档类文件，扩展名包括 `.md`、`.txt`、`.yaml`、`.json` 和 `.toml`。它用于计划和设计文档，不用于源码编辑。
 

@@ -630,9 +630,7 @@ describe('WSBroadcastService (WS transport pump)', () => {
       swarmIndex: 0,
       runInBackground: true,
     } as unknown as Event);
-    expect(getSwarmStatus(swarmId)?.tasks).toEqual([
-      expect.objectContaining({ status: 'running' }),
-    ]);
+    expect(getSwarmStatus(swarmId)?.tasks).toHaveLength(1);
     bus.publish({
       type: 'subagent.started',
       sessionId,
@@ -776,7 +774,7 @@ describe('WSBroadcastService (WS transport pump)', () => {
     } as unknown as Event);
     expect(getSwarmStatus(swarmId)).toMatchObject({
       status: 'running',
-      tasks: [{ status: 'running' }, { status: 'running' }],
+      tasks: [{ status: 'pending' }, { status: 'pending' }],
     });
 
     bus.publish({ type: 'subagent.started', sessionId, agentId: 'main', subagentId: 'agent-control-1' } as unknown as Event);

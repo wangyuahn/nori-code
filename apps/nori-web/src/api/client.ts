@@ -510,7 +510,6 @@ export interface PromptExecutionOptions {
   goalObjective?: string;
   swarmMode?: boolean;
   loopMode?: boolean;
-  model?: string;
 }
 
 export interface PromptListResponse {
@@ -806,12 +805,6 @@ export function createClient(
           undefined,
           { signal },
         ),
-      update: (noteId: string, content: string) =>
-        request<Note & { content: string } | null>(
-          `/vault/notes/${encodeURIComponent(noteId)}`,
-          undefined,
-          { method: 'POST', body: { content } },
-        ),
     },
 
     // --- Swarm ---
@@ -889,7 +882,6 @@ export function createClient(
               goal_objective: options.goalObjective,
               swarm_mode: options.swarmMode,
               loop_mode: options.loopMode,
-              model: options.model,
               content: [
                 ...(text ? [{ type: 'text' as const, text }] : []),
                 ...attachments.map(attachment => attachment.kind === 'image'
@@ -1264,7 +1256,6 @@ export function createClient(
             goal_objective: options.goalObjective,
             swarm_mode: options.swarmMode,
             loop_mode: options.loopMode,
-            model: options.model,
             content: [
               ...(text ? [{ type: 'text' as const, text }] : []),
               ...attachments.map(attachment => attachment.kind === 'image'

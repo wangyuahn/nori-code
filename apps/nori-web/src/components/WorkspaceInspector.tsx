@@ -3,7 +3,7 @@ import { api, type FsDiffResponse, type FsGitStatusResponse, type FsReadResponse
 import type { ChatMessage, CodeChange, TodoItem } from '../hooks/useChatMessages';
 import type { GitStatusRefreshOptions } from '../hooks/useFilesystem';
 import { useI18n } from '../i18n';
-import { editLineOperationsDiff, isChangedDiffLine } from '../utils/edit-line-ops';
+import { editLineOperationsDiff } from '../utils/edit-line-ops';
 import { FilePreview } from './FilePreview';
 import { Icon } from './Icon';
 import { LspPanel } from './LspPanel';
@@ -969,16 +969,15 @@ function GitPanel({ sessionId, projectPath, status, error, loading, onRefresh }:
 }
 
 function compactChangedLines(diff: string): string[] {
-  return diff.split('\n').filter(line => isChangedDiffLine(line)).slice(0, 40);
+  return diff.split('\n').filter(line => (line.startsWith('+') && !line.startsWith('+++')) || (line.startsWith('-') && !line.startsWith('---'))).slice(0, 40);
 }
 
 export function changedLineStats(diff: string): { additions: number; deletions: number } {
   let additions = 0;
   let deletions = 0;
   for (const line of diff.split('\n')) {
-    if (!isChangedDiffLine(line)) continue;
-    if (line.startsWith('+')) additions++;
-    else if (line.startsWith('-')) deletions++;
+    if (line.startsWith('+') && !line.startsWith('+++')) additions++;
+    else if (line.startsWith('-') && !line.startsWith('---')) deletions++;
   }
   return { additions, deletions };
 }
