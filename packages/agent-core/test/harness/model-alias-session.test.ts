@@ -368,6 +368,9 @@ max_context_size = 1000000
           provider: 'openai',
           model: 'gpt-runtime',
           maxContextSize: 200000,
+          capabilities: ['thinking'],
+          supportEfforts: ['low', 'medium', 'high'],
+          defaultEffort: 'high',
         },
       },
     });
@@ -386,7 +389,14 @@ max_context_size = 1000000
     const resumeRecords: TelemetryContextRecord[] = [];
     const resumeRpc = await createTestRpc({ telemetry: recordingContextTelemetry(resumeRecords) });
     await resumeRpc.resumeSession({ sessionId: created.id });
+    await expect(resumeRpc.getConfig({ sessionId: created.id, agentId: 'main' })).resolves.toMatchObject({
+      modelAlias: 'gpt-alias',
+      thinkingEffort: 'high',
+    });
     await resumeRpc.setThinking({ sessionId: created.id, agentId: 'main', effort: 'off' });
+    await expect(resumeRpc.getConfig({ sessionId: created.id, agentId: 'main' })).resolves.toMatchObject({
+      thinkingEffort: 'off',
+    });
 
     expect(resumeRecords).toContainEqual({
       event: 'thinking_toggle',

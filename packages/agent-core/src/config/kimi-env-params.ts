@@ -9,6 +9,10 @@ import { parseFloatEnv } from '#/config/resolve';
 
 type Env = Readonly<Record<string, string | undefined>>;
 
+function noriEnv(env: Env, name: string): string | undefined {
+  return env[name] ?? env[name.replace(/^NORI_/, 'KIMI_')];
+}
+
 /**
  * Apply Kimi sampling params (`NORI_MODEL_TEMPERATURE`, `NORI_MODEL_TOP_P`) from
  * the environment to a chat provider. Applied at provider construction
@@ -28,9 +32,9 @@ export function applyKimiEnvSamplingParams(
   if (!(provider instanceof KimiChatProvider)) return provider;
 
   const kwargs: GenerationKwargs = {};
-  const temperature = parseFloatEnv(env['NORI_MODEL_TEMPERATURE'], 'NORI_MODEL_TEMPERATURE');
+  const temperature = parseFloatEnv(noriEnv(env, 'NORI_MODEL_TEMPERATURE'), 'NORI_MODEL_TEMPERATURE');
   if (temperature !== undefined) kwargs.temperature = temperature;
-  const topP = parseFloatEnv(env['NORI_MODEL_TOP_P'], 'NORI_MODEL_TOP_P');
+  const topP = parseFloatEnv(noriEnv(env, 'NORI_MODEL_TOP_P'), 'NORI_MODEL_TOP_P');
   if (topP !== undefined) kwargs.top_p = topP;
 
   return Object.keys(kwargs).length > 0 ? provider.withGenerationKwargs(kwargs) : provider;
@@ -52,7 +56,7 @@ export function applyKimiEnvThinkingEffort(
   env: Env = process.env,
 ): ChatProvider {
   if (!(provider instanceof KimiChatProvider)) return provider;
-  const effort = env['NORI_MODEL_THINKING_EFFORT']?.trim();
+  const effort = noriEnv(env, 'NORI_MODEL_THINKING_EFFORT')?.trim();
   if (effort === undefined || effort.length === 0 || thinkingEffort === 'off') return provider;
   return provider.withExtraBody({ thinking: { effort } });
 }
@@ -72,7 +76,7 @@ export function applyKimiEnvThinkingKeep(
   env: Env = process.env,
 ): ChatProvider {
   if (!(provider instanceof KimiChatProvider)) return provider;
-  const keep = env['NORI_MODEL_THINKING_KEEP']?.trim();
+  const keep = noriEnv(env, 'NORI_MODEL_THINKING_KEEP')?.trim();
   if (keep === undefined || keep.length === 0 || thinkingEffort === 'off') return provider;
   return provider.withExtraBody({ thinking: { keep } });
 }

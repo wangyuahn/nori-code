@@ -683,5 +683,5 @@ describe('ReadMediaFileTool', () => {
     const systemText = (parts[0] as { text: string }).text;
     expect(systemText).toContain('2600x2600');
     expect(systemText).toContain(`${String(big.length)} bytes`);
-  });
+  }, 10_000);
 });

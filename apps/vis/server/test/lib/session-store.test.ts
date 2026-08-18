@@ -234,21 +234,21 @@ describe('session-store', () => {
     expect(sub.parentAgentId).toBe('main');
   });
 
-  it('surfaces swarmItem from state.json onto AgentInfo (null when absent)', async () => {
+  it('surfaces subagentTask from state.json onto AgentInfo (null when absent)', async () => {
     const { home, sessionDir, cleanup: c } = await buildSessionFixture('sample-main');
     cleanup = c;
     const { readFile, writeFile } = await import('node:fs/promises');
     const { join } = await import('node:path');
     const statePath = join(sessionDir, 'state.json');
     const state = JSON.parse(await readFile(statePath, 'utf8'));
-    state.agents['agent-0'].swarmItem = 'task A';
+    state.agents['agent-0'].subagentTask = 'task A';
     await writeFile(statePath, JSON.stringify(state));
     const d = await readSessionDetail(home, 'session_fixture');
     expect(d).not.toBeNull();
     const sub = d!.agents.find((a) => a.agentId === 'agent-0')!;
-    expect(sub.swarmItem).toBe('task A');
-    // main has no swarmItem in state.json → null, not undefined.
+    expect(sub.subagentTask).toBe('task A');
+    // main has no subagentTask in state.json → null, not undefined.
     const main = d!.agents.find((a) => a.agentId === 'main')!;
-    expect(main.swarmItem).toBeNull();
+    expect(main.subagentTask).toBeNull();
   });
 });

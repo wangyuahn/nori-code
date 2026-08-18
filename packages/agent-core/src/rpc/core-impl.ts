@@ -55,7 +55,7 @@ import type {
   DeleteSessionPayload,
   BeginCompactionPayload,
   CancelPayload,
-  CancelPlanPayload,
+  CancelDiscussPayload,
   CancelShellCommandPayload,
   CloseSessionPayload,
   ConfigDiagnostics,
@@ -67,7 +67,6 @@ import type {
   DetachBackgroundPayload,
   ClientTelemetryInfo,
   EmptyPayload,
-  EnterSwarmPayload,
   GoalSnapshot,
   GoalToolResult,
   ExportSessionPayload,
@@ -324,10 +323,10 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       if (permissionMode !== undefined) {
         mainAgent.permission.setMode(permissionMode);
       }
-      // Honor config.defaultPlanMode for fresh sessions. Resumed sessions
-      // restore their own plan state from records and never re-apply this.
-      if (config.defaultPlanMode === true) {
-        await mainAgent.planMode.enter();
+      // New sessions start in Discuss unless the user explicitly disabled it.
+      // Resumed sessions restore their own state and never re-apply this.
+      if (options.discussMode ?? config.defaultDiscussMode ?? true) {
+        await mainAgent.discussMode.enter();
       }
       await session.writeMetadata();
       await session.flushMetadata();
@@ -700,28 +699,16 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     return this.sessionApi(sessionId).getModel(payload);
   }
 
-  enterPlan({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
-    return this.sessionApi(sessionId).enterPlan(payload);
+  enterDiscuss({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
+    return this.sessionApi(sessionId).enterDiscuss(payload);
   }
 
-  cancelPlan({ sessionId, ...payload }: SessionAgentPayload<CancelPlanPayload>) {
-    return this.sessionApi(sessionId).cancelPlan(payload);
+  cancelDiscuss({ sessionId, ...payload }: SessionAgentPayload<CancelDiscussPayload>) {
+    return this.sessionApi(sessionId).cancelDiscuss(payload);
   }
 
-  clearPlan({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
-    return this.sessionApi(sessionId).clearPlan(payload);
-  }
-
-  enterSwarm({ sessionId, ...payload }: SessionAgentPayload<EnterSwarmPayload>) {
-    return this.sessionApi(sessionId).enterSwarm(payload);
-  }
-
-  exitSwarm({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
-    return this.sessionApi(sessionId).exitSwarm(payload);
-  }
-
-  getSwarmMode({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
-    return this.sessionApi(sessionId).getSwarmMode(payload);
+  getDiscussMode({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
+    return this.sessionApi(sessionId).getDiscussMode(payload);
   }
 
   beginCompaction({ sessionId, ...payload }: SessionAgentPayload<BeginCompactionPayload>) {
@@ -796,10 +783,6 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
 
   getPermission({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
     return this.sessionApi(sessionId).getPermission(payload);
-  }
-
-  getPlan({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
-    return this.sessionApi(sessionId).getPlan(payload);
   }
 
   getUsage({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
@@ -1246,8 +1229,7 @@ async function resumeSessionResult(
     const config = await api.getConfig({ agentId });
     const context = await api.getContext({ agentId });
     const permission = await api.getPermission({ agentId });
-    const plan = await api.getPlan({ agentId });
-    const swarmMode = await api.getSwarmMode({ agentId });
+    const discussMode = await api.getDiscussMode({ agentId });
     const usage = await api.getUsage({ agentId });
     agents[agentId] = {
       type: agent.type,
@@ -1255,8 +1237,7 @@ async function resumeSessionResult(
       context,
       replay: agent.replayBuilder.buildResult(),
       permission,
-      plan,
-      swarmMode,
+      discussMode,
       usage,
       tools: await api.getTools({ agentId }),
       toolStore: agent.tools.storeData(),

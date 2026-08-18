@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   BackgroundTaskPersistence,
-  SwarmBackgroundTask,
+  SubagentBackgroundTask,
   type BackgroundTaskInfo,
 } from '../../../src/agent/background';
 import {
@@ -236,7 +236,7 @@ describe('BackgroundManager — event emission', () => {
       addGuidance: vi.fn(),
       resume: vi.fn(() => { paused = false; }),
     };
-    const taskId = manager.registerTask(new SwarmBackgroundTask(
+    const taskId = manager.registerTask(new SubagentBackgroundTask(
       'review changes',
       signal => new Promise<string>((_resolve, reject) => {
         signal.addEventListener('abort', () => reject(signal.reason), { once: true });
@@ -325,6 +325,11 @@ describe('BackgroundManager — notification delivery', () => {
       taskId,
       status: 'completed',
       notificationId: `task:${taskId}:completed`,
+      speaker: {
+        from: 'sub',
+        speakerId: 'agent-child',
+        speakerName: 'SubAgent agent-child',
+      },
     });
     const text = (content as Array<{ text: string }>)[0]!.text;
     expect(text).toMatch(/^<system-reminder>\n<notification[\s\S]*<\/notification>\n<\/system-reminder>$/);
@@ -416,6 +421,11 @@ describe('BackgroundManager — notification delivery', () => {
         taskId: 'agent-done0000',
         status: 'completed',
         notificationId: 'task:agent-done0000:completed',
+        speaker: {
+          from: 'sub',
+          speakerId: 'agent-session-id',
+          speakerName: 'SubAgent agent-session-id',
+        },
       });
       const text = (content as Array<{ text: string }>)[0]!.text;
       expect(text).toContain('Background agent completed');
@@ -535,15 +545,20 @@ describe('BackgroundManager — notification delivery', () => {
       await manager.reconcile();
 
       await vi.waitFor(() => {
-        expect(agent.context.appendUserMessage).toHaveBeenCalledTimes(1);
+        expect(agent.turn.steer).toHaveBeenCalledTimes(1);
       });
-      expect(agent.turn.steer).not.toHaveBeenCalled();
-      const [content, origin] = agent.context.appendUserMessage.mock.calls[0]!;
+      expect(agent.context.appendUserMessage).not.toHaveBeenCalled();
+      const [content, origin] = agent.turn.steer.mock.calls[0]!;
       expect(origin).toEqual({
         kind: 'background_task',
         taskId: 'agent-run00000',
         status: 'lost',
         notificationId: 'task:agent-run00000:lost',
+        speaker: {
+          from: 'sub',
+          speakerId: 'agent-session-id',
+          speakerName: 'SubAgent agent-session-id',
+        },
       });
       expect((content as Array<{ text: string }>)[0]!.text).toContain(
         'Background agent lost',
@@ -636,7 +651,7 @@ describe('BackgroundManager — notification delivery', () => {
 });
 
 describe('BackgroundManager — agent recovery notification bodies', () => {
-  it('failed agent task body includes resume instructions with the correct agent_id', async () => {
+  it('failed temporary agent task body does not offer a resume handle', async () => {
     const { agent, manager } = createBackgroundManager();
     const taskId = manager.registerTask(
       agentTask(
@@ -654,8 +669,7 @@ describe('BackgroundManager — agent recovery notification bodies', () => {
     const [content] = agent.turn.steer.mock.calls[0]!;
     const text = (content as Array<{ text: string }>)[0]!.text;
     expect(text).toContain('agent_id="agent-7"');
-    expect(text).toMatch(/Agent\(resume="agent-7"/);
-    expect(text).toMatch(/agent_id.*NOT source_id|source_id.*NOT agent_id/);
+    expect(text).not.toMatch(/Agent\(resume=/);
   });
 
   it('completed agent task body does not add resume instructions', async () => {

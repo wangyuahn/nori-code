@@ -107,10 +107,6 @@ describe('Session.prompt input normalization', () => {
     await rpc.withInteractiveAgent('agent-btw', async () => {
       await Promise.resolve();
       await session.prompt('side question');
-      await session.setPlanMode(true);
-      await session.getPlan();
-      await session.clearPlan();
-      await session.setPlanMode(false);
       expect(rpc.interactiveAgentId).toBe('agent-btw');
     });
 

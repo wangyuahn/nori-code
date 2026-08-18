@@ -19,7 +19,7 @@ Nori orchestrates multiple AI agents to plan, implement, review, and persist kno
 - Browser tools remain registered while the desktop bridge reconnects, and independent heartbeats prevent long-running actions from making the bridge appear offline.
 - Local `.html` and `.htm` files open in the embedded browser without granting arbitrary `file://` access.
 - Desktop packaging rejects stale Web/SEA artifacts, and startup recovers from stale or incompatible local-server locks instead of silently connecting to an old backend.
-- Regular Agent and AgentSwarm work is visible by project and session with nested ownership, output, correct completion counts, and completed/failed states.
+- Regular Agent and SubAgent work is visible by project and session with nested ownership, output, correct completion counts, and completed/failed states.
 - Opening **Chat** reliably returns to the conversation view and session list.
 - The vault no longer creates empty legacy plural folders; Related links use Obsidian-compatible paths and include both outgoing links and backlinks.
 - Built-in LSP discovery covers common language servers instead of reporting "No language server is configured" when a supported server is available.
@@ -51,7 +51,7 @@ Most AI coding tools are **single-agent chat shells**: one model, one context, o
 ## Key Features
 
 ### 🧠 Multi-Agent DAG Orchestration
-AgentSwarm splits a task into parallel sub-agents with explicit dependency chaining. A multi-file refactor dispatches `{ plan, implement-1, implement-2, verify, review }` concurrently — no manual turn-by-turn handholding.
+SubAgent splits a task into parallel sub-agents with explicit dependency chaining. A multi-file refactor dispatches `{ plan, implement-1, implement-2, verify, review }` concurrently — no manual turn-by-turn handholding.
 
 ### 📚 Persistent Project Memory
 Every decision, review, and pattern lands in an Obsidian-compatible vault with `[[wiki-links]]`. The planner searches it automatically before each implementation phase. Cross-session knowledge means Nori gets smarter about *your project* over time.
@@ -73,7 +73,7 @@ Bring any OpenAI-compatible provider — local (Ollama, LM Studio) or cloud. Eac
 ### 🖥️ Nori Work Engineering Workspace
 Nori Work keeps the conversation, project files, live code changes, Git operations, LSP results, a persistent PTY terminal, and a multi-tab embedded browser in one resizable desktop layout. Inspector tools can be reordered or opened in standalone windows. Custom Agent roles define their own instructions and explicit read, write, terminal, web, and delegation permissions.
 
-Agent and AgentSwarm work always runs in the background. The main model can inspect, pause, guide, resume, or stop a swarm while the collaboration view shows its project/session tree, status, output, and token usage.
+Agent and SubAgent work always runs in the background. The main model can inspect, pause, guide, resume, or stop a SubAgent while the collaboration view shows its project/session tree, status, output, and token usage.
 
 ### 🌐 Agent-Controlled Browser
 The embedded browser is available to the main Agent through a structured Browser tool: navigate, snapshot stable element references, click, type, upload files, capture screenshots, inspect console/network activity, and work with page annotations. It supports web URLs and local `.html`/`.htm` files while blocking privileged URLs and arbitrary local files. User takeover can pause automation at any time, and actions fail immediately with actionable feedback when no page is open.
@@ -137,7 +137,7 @@ pnpm dev:desktop   # Desktop workbench
 | `apps/nori-code` | CLI/TUI entry point |
 | `apps/nori-web` | Web UI (loaded by desktop) |
 | `apps/nori-desktop` | Electron desktop workbench |
-| `packages/agent-core` | Agent, session, swarm, tool, workflow engine |
+| `packages/agent-core` | Agent, session, Team/SubAgent, tool, workflow engine |
 | `packages/server` | REST/WebSocket server |
 | `packages/kosong` | Model/provider abstraction |
 | `packages/kaos` | File, process, environment abstractions |

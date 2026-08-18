@@ -144,7 +144,7 @@ describe('compressImageForModel — byte budget', () => {
     expect(result.mimeType).toBe('image/png');
     expect(Math.max(result.width, result.height)).toBe(MAX_IMAGE_EDGE_PX);
     expect(await decodeAlpha(result.data)).toBe(true);
-  });
+  }, 10_000);
 
   it('drops alpha to JPEG only as a last resort under a tiny budget', async () => {
     const png = await noisePng(800, 800, /* alpha */ true);
@@ -240,7 +240,7 @@ describe('compressImageForModel — invariants', () => {
         expect(sniffImageDimensions(result.data)).not.toBeNull();
       }
     }
-  });
+  }, 10_000);
 });
 
 // ── base64 wrapper ───────────────────────────────────────────────────

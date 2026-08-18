@@ -192,10 +192,8 @@ function createInitialAppState(input: KimiTUIStartupInput): AppState {
     additionalDirs: [...(input.additionalDirs ?? [])],
     sessionId: '',
     permissionMode: startupPermission,
-    planMode: input.cliOptions.plan,
+    discussMode: input.cliOptions.discuss,
     inputMode: 'prompt',
-    swarmDepth: 0,
-    maxSwarmDepth: 3,
     coderWriteEnabled: false,
     toolsReadonly: true,
     thinkingEffort: 'off',
@@ -309,7 +307,7 @@ export class KimiTUI {
         sessionFlag: startupInput.cliOptions.session,
         continueLast: startupInput.cliOptions.continue,
         permission: startupInput.cliOptions.permission,
-        plan: startupInput.cliOptions.plan,
+        discuss: startupInput.cliOptions.discuss,
         model: startupInput.cliOptions.model,
         startupNotice: startupInput.startupNotice,
       },
@@ -598,7 +596,7 @@ export class KimiTUI {
     }
     if (shouldReplayHistory) {
       await this.sessionReplay.hydrateFromReplay(this.requireSession());
-      this.applyStartupPermissionAndPlanToAppState();
+      this.applyStartupPermissionAndDiscussToAppState();
     }
     const resumeState = this.session?.getResumeState();
     if (resumeState?.warning !== undefined) {
@@ -649,7 +647,7 @@ export class KimiTUI {
       workDir,
       model: startup.model,
       permission: startup.permission,
-      planMode: startup.plan ? true : undefined,
+      discussMode: startup.discuss ? true : undefined,
     };
     if (this.state.appState.additionalDirs.length > 0) {
       createSessionOptions.additionalDirs = [...this.state.appState.additionalDirs];
@@ -726,7 +724,7 @@ export class KimiTUI {
     }
     await this.setSession(session);
     await this.syncRuntimeState(session);
-    this.applyStartupPermissionAndPlanToAppState();
+    this.applyStartupPermissionAndDiscussToAppState();
     this.state.startupState = 'ready';
     return shouldReplayHistory;
   }
@@ -878,8 +876,8 @@ export class KimiTUI {
   // Input Dispatch
   // =========================================================================
 
-  handlePlanToggle(next: boolean): void {
-    void slashCommands.handlePlanCommand(this, next ? 'on' : 'off');
+  handleDiscussToggle(next: boolean): void {
+    void slashCommands.handleDiscussCommand(this, next ? 'on' : 'off');
   }
 
   handleInputModeChange(mode: 'prompt' | 'bash'): void {
@@ -1339,7 +1337,7 @@ export class KimiTUI {
       !sameStringArrays(this.state.appState.additionalDirs, patch.additionalDirs ?? []);
     const busyChanged = 'streamingPhase' in patch || 'isCompacting' in patch;
     Object.assign(this.state.appState, patch);
-    if ('planMode' in patch) this.updateEditorBorderHighlight();
+    if ('discussMode' in patch) this.updateEditorBorderHighlight();
     this.state.footer.setState(this.state.appState);
     this.updateActivityPane();
     if (busyChanged) {
@@ -1390,7 +1388,7 @@ export class KimiTUI {
       model,
       thinking: this.session === undefined ? undefined : this.state.appState.thinkingEffort,
       permission: this.state.appState.permissionMode,
-      planMode: this.state.appState.planMode ? true : undefined,
+      discussMode: this.state.appState.discussMode ? true : undefined,
     };
     if (this.state.appState.additionalDirs.length > 0) {
       options.additionalDirs = [...this.state.appState.additionalDirs];
@@ -1414,9 +1412,7 @@ export class KimiTUI {
       model: status.model ?? '',
       thinkingEffort: status.thinkingEffort,
       permissionMode: status.permission,
-      planMode: status.planMode,
-      swarmDepth: status.swarmMode ? 1 : 0,
-      maxSwarmDepth: status.maxSwarmDepth,
+      discussMode: status.discussMode,
       coderWriteEnabled: status.coderWriteEnabled,
       toolsReadonly: status.toolsReadonly,
       contextTokens: status.contextTokens,
@@ -1428,19 +1424,17 @@ export class KimiTUI {
     this.syncAdditionalDirs(session);
   }
 
-  // Apply --permission/--plan startup flags to a resumed session. The resumed
-  // session may already be in plan mode from its persisted records, and
-  // re-entering plan mode throws, so only enable it when it is not active yet.
+  // Apply --permission/--discuss startup flags to a resumed session.
   // setPermission is idempotent and needs no such guard.
   private async applyStartupModesToResumedSession(session: Session): Promise<void> {
     const { startup } = this.options;
     if (startup.permission) {
       await session.setPermission(startup.permission);
     }
-    if (startup.plan) {
+    if (startup.discuss) {
       const status = await session.getStatus();
-      if (!status.planMode) {
-        await session.setPlanMode(true);
+      if (!status.discussMode) {
+        await session.setDiscussMode(true);
       }
     }
   }
@@ -1448,17 +1442,17 @@ export class KimiTUI {
   // Re-apply startup flags that the user explicitly passed on the command line.
   // syncRuntimeState and session-replay hydration can both read stale persisted
   // values, so this guarantees the footer reflects the CLI intent.
-  private applyStartupPermissionAndPlanToAppState(): void {
+  private applyStartupPermissionAndDiscussToAppState(): void {
     const { startup } = this.options;
     if (startup.permission) {
       this.setAppState({ permissionMode: startup.permission });
     }
-    if (startup.plan) {
-      this.setAppState({ planMode: true });
+    if (startup.discuss) {
+      this.setAppState({ discussMode: true });
     }
   }
 
-  // Plan mode is set by createSession — do not re-enter it here.
+  // Discuss mode is set by createSession — do not re-enter it here.
   private async activateRuntime(): Promise<void> {
     const session = this.requireSession();
     await session.setPermission(this.state.appState.permissionMode);
@@ -1480,7 +1474,6 @@ export class KimiTUI {
     this.approvalController.cancelAll(reason);
     this.questionController.cancelAll(reason);
     this.session = undefined;
-    this.state.swarmModeEntry = undefined;
     this.harness.setTelemetryContext({ sessionId: null });
     this.setAppState({ goal: null });
     return previous;
@@ -1532,7 +1525,6 @@ export class KimiTUI {
     this.aborted = false;
     this.streamingUI.discardPending();
     this.state.queuedMessages = [];
-    this.state.swarmModeEntry = undefined;
     this.streamingUI.resetToolCallState();
     this.streamingUI.resetToolUi();
     this.sessionEventHandler.resetRuntimeState();
@@ -1803,8 +1795,7 @@ export class KimiTUI {
     response: ApprovalResponse,
   ): void {
     if (
-      request.toolName === 'ExitPlanMode' ||
-      request.display.kind === 'plan_review' ||
+      request.toolName === 'ExitDiscussMode' ||
       request.display.kind === 'goal_start'
     )
       return;
@@ -2177,15 +2168,15 @@ export class KimiTUI {
       };
     }
     this.syncTerminalProgress(this.shouldShowTerminalProgress(effectiveMode));
-    const placeSpinnerInAgentSwarm = this.shouldPlaceActivitySpinnerInAgentSwarm(effectiveMode);
-    const activityModeKey = `${effectiveMode}:${placeSpinnerInAgentSwarm ? 'swarm' : 'pane'}`;
+    const placeSpinnerInSubAgent = this.shouldPlaceActivitySpinnerInSubAgent(effectiveMode);
+    const activityModeKey = `${effectiveMode}:${placeSpinnerInSubAgent ? 'subagent' : 'pane'}`;
 
     if (
       activityModeKey === this.lastActivityMode &&
       (effectiveMode === 'waiting' || effectiveMode === 'thinking' || effectiveMode === 'tool')
     ) {
-      if (placeSpinnerInAgentSwarm) {
-        this.syncAgentSwarmActivitySpinner(this.state.activitySpinner?.instance);
+      if (placeSpinnerInSubAgent) {
+        this.syncSubAgentActivitySpinner(this.state.activitySpinner?.instance);
       }
       return;
     }
@@ -2196,13 +2187,13 @@ export class KimiTUI {
     switch (effectiveMode) {
       case 'hidden':
         this.stopActivitySpinner();
-        this.syncAgentSwarmActivitySpinner(undefined);
+        this.syncSubAgentActivitySpinner(undefined);
         this.state.ui.requestRender();
         return;
       case 'waiting': {
         const spinner = this.ensureActivitySpinner('moon');
-        this.syncAgentSwarmActivitySpinner(placeSpinnerInAgentSwarm ? spinner : undefined);
-        if (placeSpinnerInAgentSwarm) break;
+        this.syncSubAgentActivitySpinner(placeSpinnerInSubAgent ? spinner : undefined);
+        if (placeSpinnerInSubAgent) break;
         this.state.activityContainer.addChild(
           new ActivityPaneComponent({
             mode: 'waiting',
@@ -2214,14 +2205,14 @@ export class KimiTUI {
       }
       case 'thinking': {
         this.stopActivitySpinner();
-        this.syncAgentSwarmActivitySpinner(undefined);
+        this.syncSubAgentActivitySpinner(undefined);
         break;
       }
       case 'composing': {
         const spinner = this.ensureActivitySpinner('braille', 'working...', (s) =>
           currentTheme.fg('primary', s),
         );
-        this.syncAgentSwarmActivitySpinner(undefined);
+        this.syncSubAgentActivitySpinner(undefined);
         this.state.activityContainer.addChild(
           new ActivityPaneComponent({
             mode: 'composing',
@@ -2233,8 +2224,8 @@ export class KimiTUI {
       }
       case 'tool': {
         const spinner = this.ensureActivitySpinner('moon');
-        this.syncAgentSwarmActivitySpinner(placeSpinnerInAgentSwarm ? spinner : undefined);
-        if (placeSpinnerInAgentSwarm) break;
+        this.syncSubAgentActivitySpinner(placeSpinnerInSubAgent ? spinner : undefined);
+        if (placeSpinnerInSubAgent) break;
         this.state.activityContainer.addChild(
           new ActivityPaneComponent({
             mode: 'tool',
@@ -2247,7 +2238,7 @@ export class KimiTUI {
       case 'idle':
       case 'session': {
         this.stopActivitySpinner();
-        this.syncAgentSwarmActivitySpinner(undefined);
+        this.syncSubAgentActivitySpinner(undefined);
         // Keep a placeholder row so the activity area does not fully shrink
         // when the spinner is removed at the end of streaming; combined with
         // pi-tui's clamp, this avoids a destructive full redraw (viewport jump).
@@ -2436,9 +2427,9 @@ export class KimiTUI {
   updateEditorBorderHighlight(text?: string): void {
     const trimmed = (text ?? this.state.editor.getText()).trimStart();
     const isBash = this.state.appState.inputMode === 'bash';
-    const highlighted = this.state.appState.planMode || isBash || trimmed.startsWith('/');
+    const highlighted = this.state.appState.discussMode || isBash || trimmed.startsWith('/');
     this.state.editor.borderHighlighted = highlighted;
-    // Shell mode gets its own hue; plan-mode and slash context stay primary.
+    // Shell mode gets its own hue; Discuss and slash context stay primary.
     const borderToken = isBash ? 'shellMode' : highlighted ? 'primary' : 'border';
     this.state.editor.borderColor = (s: string) => currentTheme.fg(borderToken, s);
     this.state.ui.requestRender();
@@ -2491,17 +2482,17 @@ export class KimiTUI {
     );
   }
 
-  private shouldPlaceActivitySpinnerInAgentSwarm(
+  private shouldPlaceActivitySpinnerInSubAgent(
     effectiveMode: EffectiveActivityPaneMode,
   ): boolean {
     return (
-      this.sessionEventHandler.hasActiveAgentSwarmToolCall() &&
+      this.sessionEventHandler.hasActiveSubAgentToolCall() &&
       (effectiveMode === 'waiting' || effectiveMode === 'tool')
     );
   }
 
-  private syncAgentSwarmActivitySpinner(spinner: MoonLoader | undefined): void {
-    this.sessionEventHandler.syncAgentSwarmActivitySpinner(spinner);
+  private syncSubAgentActivitySpinner(spinner: MoonLoader | undefined): void {
+    this.sessionEventHandler.syncSubAgentActivitySpinner(spinner);
   }
 
   private syncTerminalProgress(active: boolean): void {
@@ -2677,7 +2668,7 @@ export class KimiTUI {
     readonly onCtrlC?: () => void;
     readonly onCtrlD?: () => void;
     readonly initialSelectedSessionId?: string;
-    // CLI mode flags (--permission/--plan) target the session picked at
+    // CLI mode flags (--permission/--discuss) target the session picked at
     // startup (bare --session); later /sessions switches keep the picked
     // session's own persisted modes.
     readonly applyStartupModes?: boolean;
@@ -2722,7 +2713,7 @@ export class KimiTUI {
     if (!switched) return;
     if (applyStartupModes) {
       await this.applyStartupModesToResumedSession(this.requireSession());
-      this.applyStartupPermissionAndPlanToAppState();
+      this.applyStartupPermissionAndDiscussToAppState();
     }
     this.hideSessionPicker();
   }

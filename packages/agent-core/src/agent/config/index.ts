@@ -27,6 +27,7 @@ export class ConfigState {
   private _modelAlias: string | undefined;
   private _profileName: string | undefined;
   private _thinkingEffort: ThinkingEffort = 'off';
+  private _requestedThinkingEffort: ThinkingEffort = 'off';
   private _systemPrompt: string = '';
 
   constructor(protected readonly agent: Agent) {
@@ -56,12 +57,13 @@ export class ConfigState {
       this._profileName = changed.profileName;
     }
     if (changed.thinkingEffort !== undefined) {
+      this._requestedThinkingEffort = changed.thinkingEffort;
       // Resolve through the single source of truth so the always_thinking
       // clamp and any future normalization apply uniformly — whether the
       // level comes from createSession, setThinking RPC, or subagent
       // inheritance.
       this._thinkingEffort = resolveThinkingEffort(
-        changed.thinkingEffort,
+        this._requestedThinkingEffort,
         this.agent.kimiConfig?.thinking,
         this.currentModel,
       );
@@ -69,7 +71,7 @@ export class ConfigState {
       // Re-apply the always_thinking clamp against the new model so a stale
       // 'off' cannot survive a switch onto an always-thinking alias.
       this._thinkingEffort = resolveThinkingEffort(
-        this._thinkingEffort,
+        this._requestedThinkingEffort,
         this.agent.kimiConfig?.thinking,
         this.currentModel,
       );
@@ -149,7 +151,9 @@ export class ConfigState {
   private get currentModel(): ModelAlias | undefined {
     const alias = this._modelAlias;
     if (alias === undefined) return undefined;
-    return this.agent.kimiConfig?.models?.[alias];
+    // ProviderManager can observe a reloadable model catalog. Keep thinking
+    // normalization on that same live snapshot as provider construction.
+    return this.tryResolvedProviderConfig()?.modelAlias ?? this.agent.kimiConfig?.models?.[alias];
   }
 
   get profileName(): string | undefined {

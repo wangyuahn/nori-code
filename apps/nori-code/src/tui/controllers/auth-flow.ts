@@ -77,7 +77,7 @@ export class AuthFlowController {
       model,
       thinking: effort,
       permission: host.options.startup.permission,
-      planMode: host.state.appState.planMode ? true : undefined,
+      discussMode: host.state.appState.discussMode ? true : undefined,
     };
     if (host.state.appState.additionalDirs.length > 0) {
       options.additionalDirs = [...host.state.appState.additionalDirs];

@@ -487,7 +487,7 @@ export const WIRE_RENDERERS: RendererMap = {
     }),
   },
 
-  'plan_mode.enter': {
+  'discuss_mode.enter': {
     tone: 'lifecycle',
     label: 'plan↻',
     headline: (r) => ({
@@ -502,7 +502,7 @@ export const WIRE_RENDERERS: RendererMap = {
     }),
   },
 
-  'plan_mode.cancel': {
+  'discuss_mode.cancel': {
     tone: 'warning',
     label: 'plan×',
     headline: (r) => ({
@@ -517,7 +517,7 @@ export const WIRE_RENDERERS: RendererMap = {
     }),
   },
 
-  'plan_mode.exit': {
+  'discuss_mode.exit': {
     tone: 'success',
     label: 'plan✓',
     headline: (r) => ({
@@ -530,27 +530,6 @@ export const WIRE_RENDERERS: RendererMap = {
         </span>
       ),
     }),
-  },
-
-  'swarm_mode.enter': {
-    tone: 'subagent',
-    label: 'swarm↻',
-    headline: (r) => ({
-      main: (
-        <span className="flex items-center gap-2">
-          <Pill tone="subagent" variant="soft">
-            enter
-          </Pill>
-          <Mono>{r.trigger}</Mono>
-        </span>
-      ),
-    }),
-  },
-
-  'swarm_mode.exit': {
-    tone: 'subagent',
-    label: 'swarm✓',
-    headline: () => ({ main: <Dim>swarm mode exited</Dim> }),
   },
 
   'goal.create': {

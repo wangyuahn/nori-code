@@ -6,15 +6,15 @@ Kimi Code CLI 中的每次会话都由一个**主 Agent** 驱动。主 Agent 理
 
 ## 主 Agent 与只读模式
 
-主 Agent 会保留核心项目检查工具：`Read`、`Grep`、`Glob` 和 `Bash`。在 Nori 默认的只读姿态下，直接 `Write` 和 `Edit` 会被拦截，但 `Bash` 按非只读状态下相同的普通权限规则处理。这意味着主 Agent 可以检查文件、搜索代码库、运行有边界的验证命令，同时仍把源码改动委派给 `AgentSwarm`。
+主 Agent 会保留核心项目检查工具：`Read`、`Grep`、`Glob` 和 `Bash`。在 Nori 默认的只读姿态下，直接 `Write` 和 `Edit` 会被拦截，但 `Bash` 按非只读状态下相同的普通权限规则处理。这意味着主 Agent 可以检查文件、搜索代码库、运行有边界的验证命令，同时仍把源码改动委派给 `SubAgent`。
 
-如果希望主 Agent 在审批后直接编辑文件，可使用 `/setting readonly off`。如果希望编码子 Agent 直接写文件，可使用 `/setting coder write on`；否则推荐保持主 Agent 作为协调者，由 `AgentSwarm` 执行实现循环。
+如果希望主 Agent 在审批后直接编辑文件，可使用 `/setting readonly off`。如果希望编码子 Agent 直接写文件，可使用 `/setting coder write on`；否则推荐保持主 Agent 作为协调者，由 `SubAgent` 执行实现循环。
 
 ## 内置子 Agent
 
 Kimi Code CLI 内置四种子 Agent，开箱即用，分别面向不同任务形态：
 
-- **`nori-coder`**：默认子 Agent，只读编程协调者，负责规划、拆解并通过 Swarm 将实现委派给子 Agent。它分析代码库并协调工作，但自己不直接写代码。
+- **`nori-coder`**：默认子 Agent，只读编程协调者，负责规划、拆解并通过 SubAgent 将实现委派给子 Agent。它分析代码库并协调工作，但自己不直接写代码。
 - **`coder`**：通用软件工程助手，可以读写文件、执行命令、搜索代码并落地具体改动。新工作推荐优先使用 `nori-coder`。
 - **`explore`**：代码库探索专用，只做只读操作，不修改任何文件。适合在不改动文件的前提下快速搜索、阅读和总结仓库。
 - **`plan`**：实现规划与架构设计专用，连 Shell 命令都不提供，专注于"想清楚怎么做"而不是"动手做"。
@@ -25,7 +25,7 @@ Kimi Code CLI 内置四种子 Agent，开箱即用，分别面向不同任务形
 
 每次派发都会在终端以审批请求的形式呈现（除非命中 allow 规则或处于 YOLO 模式），方便你审视任务描述。你也可以在对话中直接指示主 Agent 使用特定子 Agent，例如"先用 explore 把相关文件梳理一遍再动手"。
 
-子 Agent 支持在后台运行：完成后结果自动回到主 Agent，无需手动轮询。也可以唤回已有的子 Agent 实例继续推进同一任务。多部分实现工作优先使用 `AgentSwarm.tasks`，这样主 Agent 可以在一次调用中表达独立任务、依赖链、验证任务和审阅任务。
+子 Agent 支持在后台运行：完成后结果自动回到主 Agent，无需手动轮询。也可以唤回已有的子 Agent 实例继续推进同一任务。多部分实现工作优先使用 `SubAgent.tasks`，这样主 Agent 可以在一次调用中表达独立任务、依赖链、验证任务和审阅任务。
 
 ## 上下文隔离与资源开销
 
@@ -36,11 +36,11 @@ Kimi Code CLI 内置四种子 Agent，开箱即用，分别面向不同任务形
 - **主 Agent 上下文保持精炼**，长会话中不会被大量探索性日志撑满。
 - **多个子 Agent 可以并行运行**，互不干扰。
 
-需要注意的是，每个子 Agent 都会独立消耗模型 token。简单任务没有必要派发子 Agent，主 Agent 直接处理更经济。只有当 profile 暴露 swarm 工具且未达到配置的嵌套深度上限时，子 Agent 才能继续启动下一级 swarm。
+需要注意的是，每个子 Agent 都会独立消耗模型 token。简单任务没有必要派发子 Agent，主 Agent 直接处理更经济。只有当 profile 暴露 SubAgent 工具且未达到配置的嵌套深度上限时，子 Agent 才能继续启动下一级 SubAgent。
 
 ## 权限继承
 
-子 Agent 的权限规则继承自主 Agent：主 Agent 通过 `/permission` 或在审批中接受的"始终允许"规则，会自动覆盖到它派发出的所有子 Agent，子 Agent 不需要重新审批同类工具调用。`Agent` 工具本身默认放行，因此主 Agent 可以在不打断用户的前提下完成多次委派。
+子 Agent 的权限规则继承自主 Agent：主 Agent 通过 `/permission` 或在审批中接受的"始终允许"规则，会自动覆盖到它派发出的所有子 Agent，子 Agent 不需要重新审批同类工具调用。`SubAgent` 工具本身默认需要审批，因此主 Agent 的临时委派仍走权限策略。
 
 会话级只读设置与 `default_permission_mode` 分开处理。只读开启时，主 Agent 的直接 `Write` 与 `Edit` 会被拒绝，`Bash` 仍按当前权限模式处理。这样项目检查和验证能力不会失效，同时主 Agent 也不会变成主要写代码的 worker。
 

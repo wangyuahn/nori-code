@@ -7,29 +7,36 @@
 
 import { Readable, type Writable } from 'node:stream';
 
-import type { Kaos, KaosProcess } from '@nori-code/kaos';
+import { computeContentTag, type Kaos, type KaosProcess } from '@nori-code/kaos';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Agent } from '../../src/agent';
-import { SwarmBackgroundTask } from '../../src/agent/background';
-import type { SwarmMode } from '../../src/agent/swarm';
 import { FLAG_DEFINITIONS, FlagResolver } from '../../src/flags';
 import {
   type QueuedSubagentRunResult,
   type QueuedSubagentTask,
   SessionSubagentHost,
 } from '../../src/session/subagent-host';
-import type { Session } from '../../src/session';
 import { SessionSkillRegistry } from '../../src/skill';
 import { TaskListInputSchema } from '../../src/tools/background/task-list';
 import { TaskOutputInputSchema } from '../../src/tools/background/task-output';
 import { TaskStopInputSchema } from '../../src/tools/background/task-stop';
-import { AgentTool, AgentToolInputSchema } from '../../src/tools/builtin/collaboration/agent';
 import {
   AskUserQuestionInputSchema,
   AskUserQuestionTool,
 } from '../../src/tools/builtin/collaboration/ask-user';
 import { SkillTool, SkillToolInputSchema } from '../../src/tools/builtin/collaboration/skill-tool';
+import {
+  TeamAssignInputSchema,
+  TeamAssignTool,
+  TeamCreateInputSchema,
+  TeamCreateTool,
+  TeamDecideInputSchema,
+  TeamDecideTool,
+  TeamSpeakInputSchema,
+  TeamSpeakTool,
+} from '../../src/tools/builtin/collaboration/team';
+import { compileToolArgsValidator, validateToolArgs } from '../../src/tools/args-validator';
 import { EditInputSchema, EditTool } from '../../src/tools/builtin/file/edit';
 import { GlobInputSchema, GlobTool } from '../../src/tools/builtin/file/glob';
 import { GrepInputSchema, GrepTool } from '../../src/tools/builtin/file/grep';
@@ -41,10 +48,9 @@ import { createFakeKaos } from './fixtures/fake-kaos';
 import { executeTool } from './fixtures/execute-tool';
 import { createBackgroundManager } from '../agent/background/helpers';
 import {
-  AgentSwarmTool,
-  AgentSwarmToolInputSchema,
-} from '../../src/tools/builtin/collaboration/agent-swarm';
-import { AgentSwarmControlTool } from '../../src/tools/builtin/collaboration/agent-swarm-control';
+  SubAgentTool,
+  SubAgentToolInputSchema,
+} from '../../src/tools/builtin/collaboration/subagent';
 import {
   NoriAskParentInputSchema,
   NoriAskParentTool,
@@ -53,7 +59,6 @@ import {
   NoriMemorySearchInputSchema,
   NoriMemorySearchTool,
 } from '../../src/tools/builtin/nori/nori-memory-search';
-import { NoriPlanWriteTool } from '../../src/tools/builtin/nori/nori-plan-write';
 import type { NoriMemoryProvider } from '../../src/tools/builtin/nori/types';
 
 vi.mock('../../src/tools/support/rg-locator', () => ({
@@ -92,23 +97,15 @@ function mockSubagentHost<T extends Partial<SessionSubagentHost>>(
     spawn: vi.fn(),
     resume: vi.fn(),
     runQueued: vi.fn(),
-    getSwarmItem: vi.fn(),
+    getSubagentItem: vi.fn(),
     ...host,
   } as unknown as T & SessionSubagentHost;
 }
 
-function agentTool(host: SessionSubagentHost): AgentTool {
-  return new AgentTool(host, createBackgroundManager().manager);
-}
-
-function mockSwarmMode(): SwarmMode {
-  return { enter: vi.fn() } as unknown as SwarmMode;
-}
-
 /** Preserve result-oriented assertions while exercising the detached runtime contract. */
-function settledSwarmTool(host: SessionSubagentHost, swarmMode: SwarmMode): AgentSwarmTool {
+function settledSubAgentTool(host: SessionSubagentHost): SubAgentTool {
   const background = createBackgroundManager().manager;
-  const tool = new AgentSwarmTool(host, swarmMode, background);
+  const tool = new SubAgentTool(host, background);
   const resolveExecution = tool.resolveExecution.bind(tool);
   return {
     name: tool.name,
@@ -122,16 +119,16 @@ function settledSwarmTool(host: SessionSubagentHost, swarmMode: SwarmMode): Agen
         execute: async (ctx) => {
           const launched = await execution.execute(ctx);
           if (launched.isError === true || typeof launched.output !== 'string') return launched;
-          const taskId = launched.output.match(/task_id: (swarm-[0-9a-z]{8})/)?.[1];
+          const taskId = launched.output.match(/task_id: (subagent-[0-9a-z]{8})/)?.[1];
           if (taskId === undefined) return launched;
           await background.wait(taskId);
           const output = await background.readOutput(taskId);
-          const finalResultStart = output.lastIndexOf('<agent_swarm_result>');
+          const finalResultStart = output.lastIndexOf('<subagent_result>');
           return { output: finalResultStart < 0 ? output : output.slice(finalResultStart) };
         },
       };
     },
-  } as AgentSwarmTool;
+  } as SubAgentTool;
 }
 
 function processWithOutput(stdout: string, exitCode = 0): KaosProcess {
@@ -179,6 +176,7 @@ describe('current builtin file and shell tools', () => {
     const result = await executeTool(tool, context({ path: '/workspace/a.txt' }));
     expect(result.output).toBe(
       [
+        `[/workspace/a.txt#${computeContentTag(content)}]`,
         '1\talpha',
         '2\tbeta',
         '<system>2 lines read from file starting from line 1. Total lines in file: 2. End of file reached.</system>',
@@ -206,29 +204,28 @@ describe('current builtin file and shell tools', () => {
     expect(result.output).toContain('Wrote 5 bytes');
   });
 
-  it('Edit exposes parameters and errors when old_string is missing', async () => {
+  it('Edit exposes hash-anchored line operation parameters and writes through kaos', async () => {
+    const original = 'alpha\nbeta\n';
+    const writeText = vi.fn().mockResolvedValue(12);
     const tool = new EditTool(
-      createFakeKaos({ readText: vi.fn().mockResolvedValue('alpha\nbeta\n') }),
+      createFakeKaos({ readText: vi.fn().mockResolvedValue(original), writeText }),
       workspace,
     );
 
-    expect(
-      EditInputSchema.safeParse({
-        path: '/workspace/a.txt',
-        old_string: 'gamma',
-        new_string: 'delta',
-      }).success,
-    ).toBe(true);
+    const args = {
+      path: '/workspace/a.txt',
+      expected_tag: computeContentTag(original),
+      line_ops: [{ op: 'swap' as const, start: 2, end: 2, content: 'delta' }],
+    };
+    expect(EditInputSchema.safeParse(args).success).toBe(true);
     expect(tool.parameters).toMatchObject({
       type: 'object',
-      properties: { old_string: { type: 'string' } },
+      properties: { expected_tag: { type: 'string' }, line_ops: { type: 'array' } },
     });
 
-    const result = await executeTool(tool,
-      context({ path: '/workspace/a.txt', old_string: 'gamma', new_string: 'delta' }),
-    );
-    expect(result).toMatchObject({ isError: true });
-    expect(result.output).toContain('old_string not found');
+    const result = await executeTool(tool, context(args));
+    expect(result.isError).toBeFalsy();
+    expect(writeText).toHaveBeenCalledWith('/workspace/a.txt', 'alpha\ndelta\n');
   });
 
   it('Glob exposes parameters and walks pure-wildcard patterns capped at MAX_MATCHES', async () => {
@@ -295,113 +292,85 @@ describe('current builtin file and shell tools', () => {
 });
 
 describe('current builtin collaboration tools', () => {
-  it('AgentSwarmControl delegates session-wide tasks and preserves standalone fallback', async () => {
-    const running = {
-      taskId: 'swarm-nested',
-      description: 'Nested review',
-      status: 'running' as const,
-      startedAt: 1,
-      endedAt: null,
-      kind: 'agent' as const,
-      subagentType: 'swarm:2',
-    };
-    const paused = { ...running, paused: true };
-    const listAgentSwarms = vi.fn(async () => [
-      { ownerAgentId: 'agent-nested', task: running },
-    ]);
-    const controlAgentSwarm = vi.fn(async () => paused);
-    const host = mockSubagentHost({ listAgentSwarms, controlAgentSwarm });
-    const sessionFixture = createBackgroundManager();
-    (sessionFixture.agent as typeof sessionFixture.agent & {
-      subagentHost: SessionSubagentHost;
-    }).subagentHost = host;
-    const sessionTool = new AgentSwarmControlTool(sessionFixture.manager);
-
-    const listed = await executeTool(sessionTool, context({ action: 'list' as const }));
-    const pausedResult = await executeTool(
-      sessionTool,
-      context({ action: 'pause' as const, task_id: 'swarm-nested', prompt: 'hold' }),
-    );
-
-    expect(listed.output).toContain('task_id=swarm-nested status=running');
-    expect(pausedResult.output).toContain('task_id=swarm-nested status=paused');
-    expect(controlAgentSwarm).toHaveBeenCalledWith('swarm-nested', 'pause', 'hold');
-
-    const standalone = createBackgroundManager().manager;
-    vi.spyOn(standalone, 'getTask').mockReturnValue(running);
-    const stop = vi.spyOn(standalone, 'stop').mockResolvedValue({
-      ...running,
-      status: 'killed',
-      endedAt: 2,
-    });
-    const standaloneTool = new AgentSwarmControlTool(standalone);
-    const stopped = await executeTool(
-      standaloneTool,
-      context({ action: 'stop' as const, task_id: 'swarm-nested' }),
-    );
-
-    expect(stopped.output).toContain('task_id=swarm-nested status=killed');
-    expect(stop).toHaveBeenCalledWith('swarm-nested', 'Stopped by the main agent.');
-  });
-
-  it('AgentSwarmControl pauses, guides, and resumes a real session swarm', async () => {
-    const main = createBackgroundManager();
-    const owner = createBackgroundManager();
-    let paused = false;
-    const control = {
-      get paused() { return paused; },
-      pause: vi.fn(() => { paused = true; }),
-      addGuidance: vi.fn(),
-      resume: vi.fn(() => { paused = false; }),
-    };
-    const taskId = owner.manager.registerTask(new SwarmBackgroundTask(
-      'Nested implementation',
-      taskSignal => new Promise<string>((_resolve, reject) => {
-        taskSignal.addEventListener('abort', () => reject(taskSignal.reason), { once: true });
-      }),
-      2,
-      control,
-    ));
-    const session = {
-      metadata: {
-        agents: {
-          main: { homedir: '/main', type: 'main', parentAgentId: null },
-          'agent-owner': { homedir: '/owner', type: 'sub', parentAgentId: 'main' },
-        },
+  it('Team tools validate durable identities, require complete assignments, and publish explicit statements', async () => {
+    const createTeam = vi.fn(async () => [{
+      agentId: 'agent-review',
+      identity: {
+        name: 'Reviewer',
+        title: 'Risk reviewer',
+        intro: 'Checks regressions.',
+        mandate: 'Review behavior.',
+        role: 'reviewer',
       },
-      ensureAgentResumed: vi.fn(async (agentId: string) => ({
-        background: agentId === 'agent-owner' ? owner.manager : main.manager,
-      })),
-    } as unknown as Session;
-    const host = new SessionSubagentHost(session, 'main');
-    (main.agent as typeof main.agent & { subagentHost: SessionSubagentHost }).subagentHost = host;
-    const tool = new AgentSwarmControlTool(main.manager);
+    }]);
+    const assignTeam = vi.fn(async () => [{ agentId: 'agent-review', task: 'Review tests.', turnId: 7 }]);
+    const speakInDiscussion = vi.fn(async () => ({ discussionAgentId: 'agent-discussion', entryId: 4 }));
+    const host = mockSubagentHost({ createTeam, assignTeam, speakInDiscussion });
 
-    const pausedResult = await executeTool(tool, context({
-      action: 'pause' as const,
-      task_id: taskId,
-      prompt: 'Hold before changing files',
-    }));
-    const guidedResult = await executeTool(tool, context({
-      action: 'guide' as const,
-      task_id: taskId,
-      prompt: 'Also verify the parser',
-    }));
-    const resumedResult = await executeTool(tool, context({
-      action: 'resume' as const,
-      task_id: taskId,
-      prompt: 'Continue with the new constraint',
-    }));
+    const create = new TeamCreateTool(host);
+    const assign = new TeamAssignTool(host);
+    const speak = new TeamSpeakTool(host);
+    const members = [{
+      name: 'Reviewer',
+      title: 'Risk reviewer',
+      intro: 'Checks regressions.',
+      mandate: 'Review behavior.',
+      role: 'reviewer',
+    }];
+    expect(TeamCreateInputSchema.safeParse({ members }).success).toBe(true);
+    expect(TeamCreateInputSchema.safeParse({ members: [{ ...members[0], intro: '' }] }).success).toBe(false);
+    expect(TeamDecideInputSchema.safeParse({
+      action: 'start',
+      topic: 'Review the cache path',
+      statement: 'The cache key must stay stable.',
+    }).success).toBe(true);
+    expect(TeamDecideInputSchema.safeParse({ action: 'start', statement: 'Lead first.' }).success).toBe(false);
+    expect(TeamDecideInputSchema.safeParse({
+      action: 'start',
+      topic: '',
+      statement: 'Lead first.',
+    }).success).toBe(false);
+    expect(TeamDecideInputSchema.safeParse({
+      action: 'start',
+      topic: '   ',
+      statement: 'Lead first.',
+    }).success).toBe(false);
+    expect(TeamDecideInputSchema.safeParse({ action: 'continue', statement: 'Round two.' }).success).toBe(true);
+    expect(TeamDecideInputSchema.safeParse({ action: 'continue' }).success).toBe(false);
+    expect(TeamDecideInputSchema.safeParse({ action: 'vote' }).success).toBe(true);
+    const decide = new TeamDecideTool(host);
+    const decideArgs = compileToolArgsValidator(decide.parameters);
+    expect(validateToolArgs(decideArgs, {
+      action: 'start',
+      topic: 'Review the cache path',
+      statement: 'The cache key must stay stable.',
+    })).toBeNull();
+    expect(validateToolArgs(decideArgs, { action: 'start', statement: 'Lead first.' })).toContain('topic');
+    expect(validateToolArgs(decideArgs, {
+      action: 'start',
+      topic: '',
+      statement: 'Lead first.',
+    })).toMatch(/topic|fewer than 1|minLength|must NOT/i);
+    expect(validateToolArgs(decideArgs, { action: 'vote' })).toBeNull();
+    expect(TeamAssignInputSchema.safeParse({
+      assignments: [{ agent_id: 'agent-review', task: 'Review tests.' }],
+    }).success).toBe(true);
+    expect(TeamSpeakInputSchema.safeParse({ message: 'The cache key is stable.' }).success).toBe(true);
 
-    expect(pausedResult.output).toContain('status=paused');
-    expect(guidedResult.output).toContain('status=paused');
-    expect(resumedResult.output).toContain('status=running');
-    expect(control.pause).toHaveBeenCalledWith('Hold before changing files');
-    expect(control.addGuidance).toHaveBeenCalledWith('Also verify the parser');
-    expect(control.resume).toHaveBeenCalledWith('Continue with the new constraint');
-    expect(owner.agent.emittedEvents.filter(event => event.type === 'background.task.updated')).toHaveLength(3);
+    const created = await executeTool(create, context({ members }));
+    const assigned = await executeTool(assign, context({
+      assignments: [{ agent_id: 'agent-review', task: 'Review tests.' }],
+    }));
+    const spoken = await executeTool(speak, context({ message: 'The cache key is stable.' }));
 
-    await owner.manager.stop(taskId, 'test cleanup');
+    expect(created.output).toContain('agent-review');
+    expect(assigned.output).toContain('turnId');
+    expect(assignTeam).toHaveBeenCalledWith(
+      [{ agentId: 'agent-review', task: 'Review tests.' }],
+      signal,
+    );
+    expect(spoken.output).toBe('Statement published.');
+    expect(speakInDiscussion).toHaveBeenCalledWith('The cache key is stable.');
   });
 
   it('AskUserQuestion exposes parameters and asks through rpc in yolo mode', async () => {
@@ -446,40 +415,7 @@ describe('current builtin collaboration tools', () => {
     expect(description).toContain('dismiss');
   });
 
-  it('Agent exposes parameters and launches a detached subagent', async () => {
-    const host = mockSubagentHost({
-      spawn: vi.fn().mockResolvedValue({
-        agentId: 'agent-child',
-        profileName: 'orchestrator',
-        resumed: false,
-        completion: Promise.resolve({ result: 'child result' }),
-      }),
-    });
-    const tool = agentTool(host);
-
-    const input = { prompt: 'Investigate', description: 'Find cause' };
-    expect(AgentToolInputSchema.safeParse(input).success).toBe(true);
-    expect(tool.parameters).toMatchObject({
-      type: 'object',
-      properties: { prompt: { type: 'string' } },
-    });
-
-    const result = await executeTool(tool, context(input, 'call_agent'));
-    expect(host.spawn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        profileName: 'orchestrator',
-        parentToolCallId: 'call_agent',
-        prompt: 'Investigate',
-        description: 'Find cause',
-        runInBackground: true,
-        signal: expect.any(AbortSignal),
-      }),
-    );
-    expect(result.output).toContain('status: running');
-    expect(result.output).not.toContain('child result');
-  });
-
-  it('AgentSwarm returns before child completion and arms no timeout', async () => {
+  it('SubAgent returns before temporary workers complete and arms no timeout', async () => {
     let queued: readonly QueuedSubagentTask<unknown>[] = [];
     let resolveBatch: (results: QueuedSubagentRunResult<unknown>[]) => void = () => {};
     const runQueued = (<T>(tasks: readonly QueuedSubagentTask<T>[]) => {
@@ -490,23 +426,23 @@ describe('current builtin collaboration tools', () => {
     }) satisfies SessionSubagentHost['runQueued'];
     const host = mockSubagentHost({ runQueued });
     const background = createBackgroundManager().manager;
-    const tool = new AgentSwarmTool(host, mockSwarmMode(), background);
+    const tool = new SubAgentTool(host, background);
     const input = {
       description: 'Review files',
       prompt_template: 'Review {{item}}',
       items: ['src/a.ts', 'src/b.ts'],
     };
 
-    const launched = await executeTool(tool, context(input, 'call_swarm'));
+    const launched = await executeTool(tool, context(input, 'call_subagent'));
 
     expect(launched.output).toContain('status: running');
-    const taskId = String(launched.output).match(/task_id: (swarm-[0-9a-z]{8})/)?.[1];
+    const taskId = String(launched.output).match(/task_id: (subagent-[0-9a-z]{8})/)?.[1];
     expect(taskId).toBeDefined();
     expect(background.getTask(taskId!)).toMatchObject({
       detached: true,
       status: 'running',
       timeoutMs: undefined,
-      subagentType: 'swarm:2',
+      subagentType: 'subagent:2',
     });
     expect(queued).toHaveLength(2);
     expect(queued.every((task) => task.runInBackground && task.timeout === undefined)).toBe(true);
@@ -521,7 +457,7 @@ describe('current builtin collaboration tools', () => {
     await expect(background.readOutput(taskId!)).resolves.toContain('result 2');
   });
 
-  it('AgentSwarm applies one subagent_type across templated subagents', async () => {
+  it('SubAgent applies one subagent_type across templated temporary workers', async () => {
     const host = mockSubagentHost({
       runQueued: vi.fn().mockResolvedValue([
         {
@@ -529,7 +465,7 @@ describe('current builtin collaboration tools', () => {
             kind: 'spawn',
             data: { kind: 'spawn', index: 1, item: 'src/a.ts', prompt: 'Review src/a.ts' },
             profileName: 'explore',
-            parentToolCallId: 'call_swarm',
+            parentToolCallId: 'call_subagent',
             prompt: 'Review src/a.ts',
             description: 'Review files #1 (explore)',
         runInBackground: true,
@@ -543,7 +479,7 @@ describe('current builtin collaboration tools', () => {
             kind: 'spawn',
             data: { kind: 'spawn', index: 2, item: 'src/b.ts', prompt: 'Review src/b.ts' },
             profileName: 'explore',
-            parentToolCallId: 'call_swarm',
+            parentToolCallId: 'call_subagent',
             prompt: 'Review src/b.ts',
             description: 'Review files #2 (explore)',
         runInBackground: true,
@@ -554,8 +490,7 @@ describe('current builtin collaboration tools', () => {
         },
       ]),
     });
-    const swarmMode = mockSwarmMode();
-    const tool = settledSwarmTool(host, swarmMode);
+    const tool = settledSubAgentTool(host);
     const input = {
       description: 'Review files',
       prompt_template: 'Review {{item}}',
@@ -563,15 +498,15 @@ describe('current builtin collaboration tools', () => {
       subagent_type: 'explore',
     };
 
-    expect(AgentSwarmToolInputSchema.safeParse(input).success).toBe(true);
+    expect(SubAgentToolInputSchema.safeParse(input).success).toBe(true);
     expect(
-      AgentSwarmToolInputSchema.safeParse({
+      SubAgentToolInputSchema.safeParse({
         ...input,
         items: Array.from({ length: 128 }, (_, index) => `src/${String(index + 1)}.ts`),
       }).success,
     ).toBe(true);
     expect(
-      AgentSwarmToolInputSchema.safeParse({
+      SubAgentToolInputSchema.safeParse({
         ...input,
         items: Array.from({ length: 129 }, (_, index) => `src/${String(index + 1)}.ts`),
       }).success,
@@ -582,13 +517,11 @@ describe('current builtin collaboration tools', () => {
         subagent_type: { type: 'string' },
       },
     });
-    expect(Object.keys(tool.parameters['properties'] as Record<string, unknown>).at(-1)).toBe(
-      'resume_agent_ids',
-    );
+    expect(tool.parameters).not.toMatchObject({
+      properties: { resume_agent_ids: expect.anything() },
+    });
 
-    const result = await executeTool(tool, context(input, 'call_swarm'));
-
-    expect(swarmMode.enter).toHaveBeenCalledWith('tool');
+    const result = await executeTool(tool, context(input, 'call_subagent'));
     expect(host.runQueued).toHaveBeenCalledTimes(1);
     expect(host.runQueued).toHaveBeenCalledWith(
       [
@@ -596,11 +529,11 @@ describe('current builtin collaboration tools', () => {
           kind: 'spawn',
           data: { kind: 'spawn', index: 1, item: 'src/a.ts', prompt: 'Review src/a.ts' },
           profileName: 'explore',
-          parentToolCallId: 'call_swarm',
+          parentToolCallId: 'call_subagent',
           prompt: 'Review src/a.ts',
           description: 'Review files #1 (explore)',
-          swarmIndex: 1,
-          swarmItem: 'src/a.ts',
+          subagentIndex: 1,
+          subagentItem: 'src/a.ts',
         runInBackground: true,
           signal: expect.any(AbortSignal),
         },
@@ -608,50 +541,50 @@ describe('current builtin collaboration tools', () => {
           kind: 'spawn',
           data: { kind: 'spawn', index: 2, item: 'src/b.ts', prompt: 'Review src/b.ts' },
           profileName: 'explore',
-          parentToolCallId: 'call_swarm',
+          parentToolCallId: 'call_subagent',
           prompt: 'Review src/b.ts',
           description: 'Review files #2 (explore)',
-          swarmIndex: 2,
-          swarmItem: 'src/b.ts',
+          subagentIndex: 2,
+          subagentItem: 'src/b.ts',
         runInBackground: true,
           signal: expect.any(AbortSignal),
         },
       ],
     );
     expect(result.output).toBe([
-      '<agent_swarm_result>',
+      '<subagent_result>',
       '<summary>completed: 2</summary>',
-      '<subagent agent_id="agent-explore-1" item="src/a.ts" outcome="completed">explore result a</subagent>',
-      '<subagent agent_id="agent-explore-2" item="src/b.ts" outcome="completed">explore result b</subagent>',
-      '</agent_swarm_result>',
+      '<subagent item="src/a.ts" outcome="completed">explore result a</subagent>',
+      '<subagent item="src/b.ts" outcome="completed">explore result b</subagent>',
+      '</subagent_result>',
     ].join('\n'));
     expect(result.isError).toBeUndefined();
   });
 
-  it('AgentSwarm does not expose permission rule argument matching', () => {
-    const tool = new AgentSwarmTool(mockSubagentHost({}), mockSwarmMode());
+  it('SubAgent does not expose permission rule argument matching', () => {
+    const tool = new SubAgentTool(mockSubagentHost({}));
     const execution = tool.resolveExecution({
       description: 'Review files',
       prompt_template: 'Review {{item}}',
       items: ['src/a.ts', 'src/b.ts'],
     });
-    if (execution.isError === true) throw new Error('AgentSwarm resolveExecution returned an error');
+    if (execution.isError === true) throw new Error('SubAgent resolveExecution returned an error');
 
-    expect(execution.approvalRule).toBe('AgentSwarm');
+    expect(execution.approvalRule).toBe('SubAgent');
     expect(execution.matchesRule).toBeUndefined();
   });
 
-  it('AgentSwarm description states the enforced input requirements', () => {
-    const description = new AgentSwarmTool(mockSubagentHost({}), mockSwarmMode()).description;
-    // Mirrors the throws in createAgentSwarmSpecs (agent-swarm.ts): min-1-unless-resume,
+  it('SubAgent description states the enforced input requirements', () => {
+    const description = new SubAgentTool(mockSubagentHost({})).description;
+    // Mirrors the throws in createSubAgentSpecs (subagent.ts): min-1,
     // prompt_template required + must contain {{item}}, distinct resulting prompts.
-    expect(description).toContain('at least 1');
+    expect(description).toContain('at least one');
     expect(description).toContain('depends_on');
     expect(description).toContain('{{item}}');
     expect(description.toLowerCase()).toContain('distinct');
   });
 
-  it('AgentSwarm runs heterogeneous task DAGs by dependency layer', async () => {
+  it('SubAgent runs heterogeneous task DAGs by dependency layer', async () => {
     const runQueued = vi.fn(
       async <T>(
         tasks: readonly QueuedSubagentTask<T>[],
@@ -671,8 +604,7 @@ describe('current builtin collaboration tools', () => {
     const host = mockSubagentHost({
       runQueued: runQueued as unknown as SessionSubagentHost['runQueued'],
     });
-    const swarmMode = mockSwarmMode();
-    const tool = settledSwarmTool(host, swarmMode);
+    const tool = settledSubAgentTool(host);
     const input = {
       description: 'Ship feature',
       tasks: [
@@ -699,9 +631,9 @@ describe('current builtin collaboration tools', () => {
       ],
     };
 
-    expect(AgentSwarmToolInputSchema.safeParse(input).success).toBe(true);
+    expect(SubAgentToolInputSchema.safeParse(input).success).toBe(true);
 
-    const result = await executeTool(tool, context(input, 'call_swarm'));
+    const result = await executeTool(tool, context(input, 'call_subagent'));
 
     expect(runQueued).toHaveBeenCalledTimes(3);
     expect(runQueued.mock.calls[0]?.[0]).toEqual([
@@ -710,7 +642,7 @@ describe('current builtin collaboration tools', () => {
         profileName: 'explore',
         prompt: 'Inspect the code and produce an implementation plan.',
         description: 'Ship feature #1 (explore): Plan the change',
-        swarmItem: 'plan',
+        subagentItem: 'plan',
       }),
     ]);
     expect((runQueued.mock.calls[1]?.[0] as readonly QueuedSubagentTask[])[0]?.prompt).toContain(
@@ -720,17 +652,17 @@ describe('current builtin collaboration tools', () => {
       '<dependency task_id="implement" outcome="completed">done implement</dependency>',
     );
     expect(result.output).toBe([
-      '<agent_swarm_result>',
+      '<subagent_result>',
       '<summary>completed: 3</summary>',
-      '<subagent agent_id="agent-plan" task_id="plan" outcome="completed">done plan</subagent>',
-      '<subagent agent_id="agent-implement" task_id="implement" outcome="completed">done implement</subagent>',
-      '<subagent agent_id="agent-review" task_id="review" outcome="completed">done review</subagent>',
-      '</agent_swarm_result>',
+      '<subagent task_id="plan" outcome="completed">done plan</subagent>',
+      '<subagent task_id="implement" outcome="completed">done implement</subagent>',
+      '<subagent task_id="review" outcome="completed">done review</subagent>',
+      '</subagent_result>',
     ].join('\n'));
     expect(result.isError).toBeUndefined();
   });
 
-  it('AgentSwarm reports downstream DAG tasks as not started when a dependency fails', async () => {
+  it('SubAgent reports downstream DAG tasks as not started when a dependency fails', async () => {
     const runQueued = vi.fn(
       async <T>(
         tasks: readonly QueuedSubagentTask<T>[],
@@ -746,8 +678,7 @@ describe('current builtin collaboration tools', () => {
     const host = mockSubagentHost({
       runQueued: runQueued as unknown as SessionSubagentHost['runQueued'],
     });
-    const swarmMode = mockSwarmMode();
-    const tool = settledSwarmTool(host, swarmMode);
+    const tool = settledSubAgentTool(host);
 
     const result = await executeTool(
       tool,
@@ -759,26 +690,24 @@ describe('current builtin collaboration tools', () => {
             { id: 'implement', depends_on: ['plan'], prompt: 'Implement the plan.' },
           ],
         },
-        'call_swarm',
+        'call_subagent',
       ),
     );
 
     expect(runQueued).toHaveBeenCalledTimes(1);
     expect(result.output).toBe([
-      '<agent_swarm_result>',
+      '<subagent_result>',
       '<summary>failed: 2</summary>',
-      '<resume_hint>Call AgentSwarm with resume_agent_ids using the agent_id values in this result to continue unfinished work.</resume_hint>',
-      '<subagent agent_id="agent-plan" task_id="plan" outcome="failed">plan failed</subagent>',
+      '<subagent task_id="plan" outcome="failed">plan failed</subagent>',
       '<subagent task_id="implement" state="not_started" outcome="failed">Dependency "plan" did not complete successfully.</subagent>',
-      '</agent_swarm_result>',
+      '</subagent_result>',
     ].join('\n'));
     expect(result.isError).toBeUndefined();
   });
 
-  it('AgentSwarm rejects more than 128 subagents at execution time', async () => {
+  it('SubAgent rejects more than 128 temporary workers at execution time', async () => {
     const host = mockSubagentHost({ runQueued: vi.fn() });
-    const swarmMode = mockSwarmMode();
-    const tool = settledSwarmTool(host, swarmMode);
+    const tool = settledSubAgentTool(host);
 
     const result = await executeTool(
       tool,
@@ -789,7 +718,7 @@ describe('current builtin collaboration tools', () => {
       }),
     );
 
-    expect(result.output).toBe('AgentSwarm supports at most 128 subagents.');
+    expect(result.output).toBe('SubAgent supports at most 128 subagents.');
     expect(result.isError).toBe(true);
     expect(host.runQueued).not.toHaveBeenCalled();
   });
@@ -812,10 +741,9 @@ describe('current builtin collaboration tools', () => {
       },
       output: 'prompt_template must include the {{item}} placeholder.',
     },
-  ])('AgentSwarm rejects $name at execution time', async ({ input, output }) => {
+  ])('SubAgent rejects $name at execution time', async ({ input, output }) => {
     const host = mockSubagentHost({ runQueued: vi.fn() });
-    const swarmMode = mockSwarmMode();
-    const tool = settledSwarmTool(host, swarmMode);
+    const tool = settledSubAgentTool(host);
 
     const result = await executeTool(tool, context(input));
 
@@ -824,196 +752,16 @@ describe('current builtin collaboration tools', () => {
     expect(host.runQueued).not.toHaveBeenCalled();
   });
 
-  it('AgentSwarm resumes mapped agents before spawning item subagents', async () => {
-    const runQueued = vi.fn(
-      async <T>(
-        tasks: readonly QueuedSubagentTask<T>[],
-      ): Promise<Array<QueuedSubagentRunResult<T>>> => {
-        return tasks.map((task, index) => ({
-          task,
-          agentId: task.kind === 'resume' ? task.resumeAgentId : `agent-new-${String(index + 1)}`,
-          status: 'completed' as const,
-          result: `result ${String(index + 1)}`,
-        }));
-      },
-    );
-    const persistedItems: Record<string, string> = {
-      'agent-old-1': 'src/old-a.ts',
-      'agent-old-2': 'src/old-b.ts',
-    };
-    const host = mockSubagentHost({
-      getSwarmItem: vi.fn((agentId: string) => persistedItems[agentId]),
-      runQueued: runQueued as unknown as SessionSubagentHost['runQueued'],
-    });
-    const swarmMode = mockSwarmMode();
-    const tool = settledSwarmTool(host, swarmMode);
-    const input = {
-      description: 'Finish review',
-      subagent_type: 'explore',
-      prompt_template: 'Review {{item}}',
-      items: ['src/new.ts'],
-      resume_agent_ids: {
-        'agent-old-1': 'Continue previous review A',
-        'agent-old-2': 'Continue previous review B',
-      },
-    };
-
-    expect(AgentSwarmToolInputSchema.safeParse(input).success).toBe(true);
+  it('SubAgent rejects legacy resume_agent_ids instead of reviving a temporary worker', () => {
     expect(
-      AgentSwarmToolInputSchema.safeParse({
-        description: 'Resume two agents',
-        resume_agent_ids: {
-          'agent-old-1': 'Continue previous review A',
-          'agent-old-2': 'Continue previous review B',
-        },
+      SubAgentToolInputSchema.safeParse({
+        description: 'Resume old work',
+        resume_agent_ids: { 'agent-old-1': 'Continue previous review A' },
       }).success,
-    ).toBe(true);
-    expect(
-      AgentSwarmToolInputSchema.safeParse({
-        description: 'Resume one agent',
-        resume_agent_ids: {
-          'agent-old-1': 'Continue previous review A',
-        },
-      }).success,
-    ).toBe(true);
-
-    const result = await executeTool(tool, context(input, 'call_swarm'));
-
-    expect(host.runQueued).toHaveBeenCalledTimes(1);
-    expect(host.runQueued).toHaveBeenCalledWith(
-      [
-        {
-          kind: 'resume',
-          data: {
-            kind: 'resume',
-            index: 1,
-            agentId: 'agent-old-1',
-            item: 'src/old-a.ts',
-            prompt: 'Continue previous review A',
-          },
-          profileName: 'subagent',
-          parentToolCallId: 'call_swarm',
-          prompt: 'Continue previous review A',
-          description: 'Finish review #1 (resume)',
-          swarmIndex: 1,
-          swarmItem: 'src/old-a.ts',
-        runInBackground: true,
-          resumeAgentId: 'agent-old-1',
-          signal: expect.any(AbortSignal),
-        },
-        {
-          kind: 'resume',
-          data: {
-            kind: 'resume',
-            index: 2,
-            agentId: 'agent-old-2',
-            item: 'src/old-b.ts',
-            prompt: 'Continue previous review B',
-          },
-          profileName: 'subagent',
-          parentToolCallId: 'call_swarm',
-          prompt: 'Continue previous review B',
-          description: 'Finish review #2 (resume)',
-          swarmIndex: 2,
-          swarmItem: 'src/old-b.ts',
-        runInBackground: true,
-          resumeAgentId: 'agent-old-2',
-          signal: expect.any(AbortSignal),
-        },
-        {
-          kind: 'spawn',
-          data: {
-            kind: 'spawn',
-            index: 3,
-            item: 'src/new.ts',
-            prompt: 'Review src/new.ts',
-          },
-          profileName: 'explore',
-          parentToolCallId: 'call_swarm',
-          prompt: 'Review src/new.ts',
-          description: 'Finish review #3 (explore)',
-          swarmIndex: 3,
-          swarmItem: 'src/new.ts',
-        runInBackground: true,
-          signal: expect.any(AbortSignal),
-        },
-      ],
-    );
-    expect(result.output).toBe([
-      '<agent_swarm_result>',
-      '<summary>completed: 3</summary>',
-      '<subagent mode="resume" agent_id="agent-old-1" item="src/old-a.ts" outcome="completed">result 1</subagent>',
-      '<subagent mode="resume" agent_id="agent-old-2" item="src/old-b.ts" outcome="completed">result 2</subagent>',
-      '<subagent agent_id="agent-new-3" item="src/new.ts" outcome="completed">result 3</subagent>',
-      '</agent_swarm_result>',
-    ].join('\n'));
-    expect(result.isError).toBeUndefined();
+    ).toBe(false);
   });
 
-  it('AgentSwarm allows a single resumed subagent without item subagents', async () => {
-    const runQueued = vi.fn(
-      async <T>(
-        tasks: readonly QueuedSubagentTask<T>[],
-      ): Promise<Array<QueuedSubagentRunResult<T>>> => {
-        return tasks.map((task) => ({
-          task,
-          agentId: task.kind === 'resume' ? task.resumeAgentId : 'agent-new',
-          status: 'completed' as const,
-          result: 'resumed result',
-        }));
-      },
-    );
-    const host = mockSubagentHost({
-      getSwarmItem: vi.fn((agentId: string) =>
-        agentId === 'agent-old-1' ? 'src/old-a.ts' : undefined,
-      ),
-      runQueued: runQueued as unknown as SessionSubagentHost['runQueued'],
-    });
-    const swarmMode = mockSwarmMode();
-    const tool = settledSwarmTool(host, swarmMode);
-    const input = {
-      description: 'Resume review',
-      resume_agent_ids: {
-        'agent-old-1': 'Continue previous review A',
-      },
-    };
-
-    expect(AgentSwarmToolInputSchema.safeParse(input).success).toBe(true);
-
-    const result = await executeTool(tool, context(input, 'call_swarm'));
-
-    expect(host.runQueued).toHaveBeenCalledTimes(1);
-    expect(host.runQueued).toHaveBeenCalledWith([
-      {
-        kind: 'resume',
-        data: {
-          kind: 'resume',
-          index: 1,
-          agentId: 'agent-old-1',
-          item: 'src/old-a.ts',
-          prompt: 'Continue previous review A',
-        },
-        profileName: 'subagent',
-        parentToolCallId: 'call_swarm',
-        prompt: 'Continue previous review A',
-        description: 'Resume review #1 (resume)',
-        swarmIndex: 1,
-        swarmItem: 'src/old-a.ts',
-        runInBackground: true,
-        resumeAgentId: 'agent-old-1',
-        signal: expect.any(AbortSignal),
-      },
-    ]);
-    expect(result.output).toBe([
-      '<agent_swarm_result>',
-      '<summary>completed: 1</summary>',
-      '<subagent mode="resume" agent_id="agent-old-1" item="src/old-a.ts" outcome="completed">resumed result</subagent>',
-      '</agent_swarm_result>',
-    ].join('\n'));
-    expect(result.isError).toBeUndefined();
-  });
-
-  it('AgentSwarm reports failed subagents inside the XML result without failing the tool', async () => {
+  it('SubAgent reports failed temporary workers inside the XML result without failing the tool', async () => {
     const host = mockSubagentHost({
       runQueued: vi.fn().mockResolvedValue([
         {
@@ -1021,7 +769,7 @@ describe('current builtin collaboration tools', () => {
             kind: 'spawn',
             data: { kind: 'spawn', index: 1, item: 'src/a.ts', prompt: 'Review src/a.ts' },
             profileName: 'coder',
-            parentToolCallId: 'call_swarm',
+            parentToolCallId: 'call_subagent',
             prompt: 'Review src/a.ts',
             description: 'Review files #1 (coder)',
         runInBackground: true,
@@ -1035,7 +783,7 @@ describe('current builtin collaboration tools', () => {
             kind: 'spawn',
             data: { kind: 'spawn', index: 2, item: 'src/b.ts', prompt: 'Review src/b.ts' },
             profileName: 'coder',
-            parentToolCallId: 'call_swarm',
+            parentToolCallId: 'call_subagent',
             prompt: 'Review src/b.ts',
             description: 'Review files #2 (coder)',
         runInBackground: true,
@@ -1046,8 +794,7 @@ describe('current builtin collaboration tools', () => {
         },
       ]),
     });
-    const swarmMode = mockSwarmMode();
-    const tool = settledSwarmTool(host, swarmMode);
+    const tool = settledSubAgentTool(host);
 
     const result = await executeTool(
       tool,
@@ -1057,23 +804,21 @@ describe('current builtin collaboration tools', () => {
           prompt_template: 'Review {{item}}',
           items: ['src/a.ts', 'src/b.ts'],
         },
-        'call_swarm',
+        'call_subagent',
       ),
     );
 
     expect(result.output).toBe([
-      '<agent_swarm_result>',
+      '<subagent_result>',
       '<summary>completed: 1, failed: 1</summary>',
-      '<resume_hint>Call AgentSwarm with resume_agent_ids using the agent_id values in this result to continue unfinished work.</resume_hint>',
-      '<subagent agent_id="agent-coder-1" item="src/a.ts" outcome="completed">imports are stable</subagent>',
-      '<subagent agent_id="agent-coder-2" item="src/b.ts" outcome="failed">Agent timed out after 30s.</subagent>',
-      '</agent_swarm_result>',
+      '<subagent item="src/a.ts" outcome="completed">imports are stable</subagent>',
+      '<subagent item="src/b.ts" outcome="failed">Agent timed out after 30s.</subagent>',
+      '</subagent_result>',
     ].join('\n'));
-    expect(swarmMode.enter).toHaveBeenCalledWith('tool');
     expect(result.isError).toBeUndefined();
   });
 
-  it('AgentSwarm omits resume hint when incomplete subagents have no agent ids', async () => {
+  it('SubAgent never exposes a resumable temporary worker identifier', async () => {
     const host = mockSubagentHost({
       runQueued: vi.fn().mockResolvedValue([
         {
@@ -1081,7 +826,7 @@ describe('current builtin collaboration tools', () => {
             kind: 'spawn',
             data: { kind: 'spawn', index: 1, item: 'src/a.ts', prompt: 'Review src/a.ts' },
             profileName: 'coder',
-            parentToolCallId: 'call_swarm',
+            parentToolCallId: 'call_subagent',
             prompt: 'Review src/a.ts',
             description: 'Review files #1 (coder)',
         runInBackground: true,
@@ -1094,7 +839,7 @@ describe('current builtin collaboration tools', () => {
             kind: 'spawn',
             data: { kind: 'spawn', index: 2, item: 'src/b.ts', prompt: 'Review src/b.ts' },
             profileName: 'coder',
-            parentToolCallId: 'call_swarm',
+            parentToolCallId: 'call_subagent',
             prompt: 'Review src/b.ts',
             description: 'Review files #2 (coder)',
         runInBackground: true,
@@ -1104,8 +849,7 @@ describe('current builtin collaboration tools', () => {
         },
       ]),
     });
-    const swarmMode = mockSwarmMode();
-    const tool = settledSwarmTool(host, swarmMode);
+    const tool = settledSubAgentTool(host);
 
     const result = await executeTool(
       tool,
@@ -1115,21 +859,21 @@ describe('current builtin collaboration tools', () => {
           prompt_template: 'Review {{item}}',
           items: ['src/a.ts', 'src/b.ts'],
         },
-        'call_swarm',
+        'call_subagent',
       ),
     );
 
     expect(result.output).toBe([
-      '<agent_swarm_result>',
+      '<subagent_result>',
       '<summary>failed: 2</summary>',
       '<subagent item="src/a.ts" outcome="failed">Agent did not start.</subagent>',
       '<subagent item="src/b.ts" outcome="failed">Agent also did not start.</subagent>',
-      '</agent_swarm_result>',
+      '</subagent_result>',
     ].join('\n'));
     expect(result.isError).toBeUndefined();
   });
 
-  it('AgentSwarm reports partial aborted subagents inside the XML result', async () => {
+  it('SubAgent reports partial aborted temporary workers inside the XML result', async () => {
     const host = mockSubagentHost({
       runQueued: vi.fn().mockResolvedValue([
         {
@@ -1137,7 +881,7 @@ describe('current builtin collaboration tools', () => {
             kind: 'spawn',
             data: { kind: 'spawn', index: 1, item: 'src/a.ts', prompt: 'Review src/a.ts' },
             profileName: 'coder',
-            parentToolCallId: 'call_swarm',
+            parentToolCallId: 'call_subagent',
             prompt: 'Review src/a.ts',
             description: 'Review files #1 (coder)',
         runInBackground: true,
@@ -1151,7 +895,7 @@ describe('current builtin collaboration tools', () => {
             kind: 'spawn',
             data: { kind: 'spawn', index: 2, item: 'src/b.ts', prompt: 'Review src/b.ts' },
             profileName: 'coder',
-            parentToolCallId: 'call_swarm',
+            parentToolCallId: 'call_subagent',
             prompt: 'Review src/b.ts',
             description: 'Review files #2 (coder)',
         runInBackground: true,
@@ -1166,7 +910,7 @@ describe('current builtin collaboration tools', () => {
             kind: 'spawn',
             data: { kind: 'spawn', index: 3, item: 'src/c.ts', prompt: 'Review src/c.ts' },
             profileName: 'coder',
-            parentToolCallId: 'call_swarm',
+            parentToolCallId: 'call_subagent',
             prompt: 'Review src/c.ts',
             description: 'Review files #3 (coder)',
         runInBackground: true,
@@ -1177,8 +921,7 @@ describe('current builtin collaboration tools', () => {
         },
       ]),
     });
-    const swarmMode = mockSwarmMode();
-    const tool = settledSwarmTool(host, swarmMode);
+    const tool = settledSubAgentTool(host);
 
     const result = await executeTool(
       tool,
@@ -1188,18 +931,17 @@ describe('current builtin collaboration tools', () => {
           prompt_template: 'Review {{item}}',
           items: ['src/a.ts', 'src/b.ts', 'src/c.ts'],
         },
-        'call_swarm',
+        'call_subagent',
       ),
     );
 
     expect(result.output).toBe([
-      '<agent_swarm_result>',
+      '<subagent_result>',
       '<summary>completed: 1, aborted: 2</summary>',
-      '<resume_hint>Call AgentSwarm with resume_agent_ids using the agent_id values in this result to continue unfinished work.</resume_hint>',
-      '<subagent agent_id="agent-coder-1" item="src/a.ts" outcome="completed">imports are stable</subagent>',
-      '<subagent agent_id="agent-coder-2" item="src/b.ts" state="started" outcome="aborted">The user manually interrupted this subagent batch before this subagent finished.</subagent>',
+      '<subagent item="src/a.ts" outcome="completed">imports are stable</subagent>',
+      '<subagent item="src/b.ts" state="started" outcome="aborted">The user manually interrupted this subagent batch before this subagent finished.</subagent>',
       '<subagent item="src/c.ts" state="not_started" outcome="aborted">The user manually interrupted this subagent batch before this subagent was started.</subagent>',
-      '</agent_swarm_result>',
+      '</subagent_result>',
     ].join('\n'));
     expect(result.isError).toBeUndefined();
   });
@@ -1229,13 +971,13 @@ describe('current builtin collaboration tools', () => {
   it('nori_memory_search exposes and executes chained retrieval', async () => {
     const memory: NoriMemoryProvider = {
       multiRetrieve: vi.fn(async (keywords: string[]) => {
-        if (keywords.includes('AgentSwarm')) {
+        if (keywords.includes('SubAgent')) {
           return [
             {
-              title: 'AgentSwarm ADR',
-              path: 'decisions/agent-swarm.md',
+              title: 'SubAgent ADR',
+              path: 'decisions/subagent.md',
               score: 3,
-              excerpt: 'AgentSwarm delegates work. See [[Permission Rules]].',
+              excerpt: 'SubAgent delegates work. See [[Permission Rules]].',
             },
           ];
         }
@@ -1261,7 +1003,7 @@ describe('current builtin collaboration tools', () => {
     expect(properties).toHaveProperty('follow_up_keywords');
     expect(
       NoriMemorySearchInputSchema.safeParse({
-        keywords: ['AgentSwarm'],
+        keywords: ['SubAgent'],
         include_linked: true,
         link_depth: 1,
         chain_depth: 1,
@@ -1271,7 +1013,7 @@ describe('current builtin collaboration tools', () => {
     const result = await executeTool(
       tool,
       context({
-        keywords: ['AgentSwarm'],
+        keywords: ['SubAgent'],
         include_linked: true,
         link_depth: 1,
         chain_depth: 1,
@@ -1282,88 +1024,6 @@ describe('current builtin collaboration tools', () => {
     expect(result.output).toContain('Found 2 unique note(s)');
     expect(result.output).toContain('## Hop 1');
     expect(result.output).toContain('Permission Rules');
-  });
-
-  it('nori_plan_write writes to the active session plan file during plan mode', async () => {
-    const mkdir = vi.fn<Kaos['mkdir']>().mockResolvedValue(undefined);
-    const writeText = vi.fn<Kaos['writeText']>().mockResolvedValue(21);
-    const planFilePath = '/session/agents/main/plans/current-plan.md';
-    const tool = new NoriPlanWriteTool({
-      config: { cwd: '/workspace' },
-      kaos: createFakeKaos({ mkdir, writeText }),
-      planMode: {
-        isActive: true,
-        planFilePath,
-      },
-    } as unknown as Agent);
-
-    const result = await executeTool(
-      tool,
-      context({
-        file_path: 'plans/huntress-hulkling-orphan.md',
-        content: '# Plan\n\nFix the bug.',
-      }),
-    );
-
-    expect(result.isError).toBeUndefined();
-    expect(mkdir).toHaveBeenCalledWith('/session/agents/main/plans', {
-      parents: true,
-      existOk: true,
-    });
-    expect(writeText).toHaveBeenCalledWith(planFilePath, '# Plan\n\nFix the bug.');
-    expect(result.output).toContain(`Plan written to ${planFilePath}`);
-    expect(result.output).toContain('active plan file');
-  });
-
-  it('nori_plan_write fails in plan mode when the host has no active plan file path', async () => {
-    const mkdir = vi.fn<Kaos['mkdir']>().mockResolvedValue(undefined);
-    const writeText = vi.fn<Kaos['writeText']>().mockResolvedValue(21);
-    const tool = new NoriPlanWriteTool({
-      config: { cwd: '/workspace' },
-      kaos: createFakeKaos({ mkdir, writeText }),
-      planMode: {
-        isActive: true,
-        planFilePath: null,
-      },
-    } as unknown as Agent);
-
-    const result = await executeTool(
-      tool,
-      context({
-        file_path: 'plans/fallback.md',
-        content: '# Plan',
-      }),
-    );
-
-    expect(result).toMatchObject({ isError: true });
-    expect(result.output).toContain('no current plan file path is available');
-    expect(mkdir).not.toHaveBeenCalled();
-    expect(writeText).not.toHaveBeenCalled();
-  });
-
-  it('nori_plan_write treats file_path as a label while plan mode is active', async () => {
-    const mkdir = vi.fn<Kaos['mkdir']>().mockResolvedValue(undefined);
-    const writeText = vi.fn<Kaos['writeText']>().mockResolvedValue(21);
-    const planFilePath = '/session/agents/main/plans/current-plan.md';
-    const tool = new NoriPlanWriteTool({
-      config: { cwd: '/workspace' },
-      kaos: createFakeKaos({ mkdir, writeText }),
-      planMode: {
-        isActive: true,
-        planFilePath,
-      },
-    } as unknown as Agent);
-
-    const result = await executeTool(
-      tool,
-      context({
-        file_path: 'current-plan',
-        content: '# Plan',
-      }),
-    );
-
-    expect(result.isError).toBeUndefined();
-    expect(writeText).toHaveBeenCalledWith(planFilePath, '# Plan');
   });
 
   it('nori_ask_parent routes subagent questions through the parent channel', async () => {

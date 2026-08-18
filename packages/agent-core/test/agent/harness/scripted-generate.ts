@@ -135,7 +135,7 @@ function normalizeMessagesForTokenEstimates(messages: Message[]): Message[] {
       part.type === 'text'
         ? {
             ...part,
-            text: part.text.replaceAll(/^Plan file: .+$/gm, 'Plan file: <plan-file>'),
+            text: part.text,
           }
         : part,
     ),

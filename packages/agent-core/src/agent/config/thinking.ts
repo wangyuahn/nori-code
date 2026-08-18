@@ -48,11 +48,12 @@ function normalizeThinkingEffortForModel(
   model: ModelAlias | undefined,
 ): ThinkingEffort {
   if (!supportsThinking(model)) return 'off';
+  if (effort === 'off') return 'off';
   const efforts = model?.supportEfforts;
   if (efforts !== undefined && efforts.length > 0) {
     return efforts.includes(effort) ? effort : defaultThinkingEffortFor(model);
   }
-  return effort === 'off' ? 'off' : 'on';
+  return 'on';
 }
 
 /**

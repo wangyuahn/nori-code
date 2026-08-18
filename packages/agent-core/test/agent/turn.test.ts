@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'pathe';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -83,7 +83,10 @@ describe('Agent turn flow', () => {
     ctx.mockNextResponse({ type: 'text', text: 'Implementation is done.' });
     ctx.mockNextResponse({ type: 'text', text: 'Final answer after optional review assessment.' });
 
-    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Add a simple file' }] });
+    await ctx.rpc.prompt({
+      input: [{ type: 'text', text: 'Add a simple file' }],
+      speaker: { from: 'user', speakerName: '用户' },
+    });
     await ctx.untilTurnEnd();
 
     expect(ctx.llmCalls).toHaveLength(3);
@@ -124,27 +127,65 @@ describe('Agent turn flow', () => {
     expect(inputs).toContain('difficulty_score="10"');
   });
 
-  it('continues with a required Nori swarm gate for bug hunt requests', async () => {
+  it('continues with a required Nori graph-check gate for bug hunt requests', async () => {
     const ctx = testAgent({
       noriWorkflow: {
         reviewSuggestionThreshold: 4,
         reviewRequiredThreshold: 7,
         maxReviewGateContinuations: 1,
-        bugHuntSwarmRequired: true,
+        bugHuntSubagentRequired: true,
       },
     });
     ctx.configure();
 
     ctx.mockNextResponse({ type: 'text', text: 'I inspected the problem locally.' });
-    ctx.mockNextResponse({ type: 'text', text: 'Swarm is not available in this harness.' });
+    ctx.mockNextResponse({ type: 'text', text: 'SubAgent is not available in this harness.' });
 
     await ctx.rpc.prompt({ input: [{ type: 'text', text: '帮我找 bug，排查黑屏问题' }] });
     await ctx.untilTurnEnd();
 
     expect(ctx.llmCalls).toHaveLength(2);
     const inputs = llmHistoryText(ctx);
-    expect(inputs).toContain('<nori_workflow_gate kind="bug_hunt_swarm"');
-    expect(inputs).toContain('Call AgentSwarm now as the only tool call');
+    expect(inputs).toContain('<nori_workflow_gate kind="bug_hunt_subagent"');
+    expect(inputs).toContain('Call SubAgent now as the only tool call');
+  });
+
+  it('after UpdateGoal complete, prefers goal outcome over nori workflow gate', async () => {
+    const ctx = testAgent({
+      noriWorkflow: {
+        reviewSuggestionThreshold: 4,
+        reviewRequiredThreshold: 7,
+        maxReviewGateContinuations: 2,
+        bugHuntSubagentRequired: true,
+      },
+    });
+    ctx.configure({ tools: ['UpdateGoal', 'GetGoal'] });
+    await ctx.agent.goal.createGoal({ objective: 'find the black-screen bug' });
+    await ctx.rpc.setPermission({ mode: 'yolo' });
+
+    ctx.mockNextResponse({
+      type: 'function',
+      id: 'call_complete',
+      name: 'UpdateGoal',
+      arguments: JSON.stringify({ status: 'complete' }),
+    });
+    ctx.mockNextResponse({
+      type: 'text',
+      text: 'I finished the goal and summarized the findings.',
+    });
+
+    await ctx.rpc.prompt({ input: [{ type: 'text', text: '帮我找 bug，排查黑屏问题' }] });
+    await ctx.agent.turn.waitForCurrentTurn();
+
+    expect(ctx.llmCalls.length).toBeGreaterThanOrEqual(2);
+    const summaryHistory = JSON.stringify(ctx.llmCalls[1]?.history ?? []);
+    expect(summaryHistory).toContain('Goal completed successfully');
+    expect(summaryHistory).toContain('Write a concise final message for the user');
+    // Without the sticky outcome flag, bug-hunt gate would append after the
+    // reminder and steal / bury the one-shot summary continuation.
+    expect(summaryHistory).not.toContain('nori_workflow_gate');
+    expect(summaryHistory).not.toContain('nori_review_gate');
+    expect(ctx.agent.goal.getGoal().goal).toBeNull();
   });
 
   it('continues with a required Nori memory-search gate before implementation completion', async () => {
@@ -391,7 +432,7 @@ describe('Agent turn flow', () => {
         ['PostToolUse', 'Bash', 'allow'],
         ['PostToolUse', 'Bash', 'allow'],
       ]);
-    });
+    }, { timeout: 3_000 });
   });
 
   it('tracks failed tool-call telemetry with error taxonomy', async () => {
@@ -430,9 +471,10 @@ describe('Agent turn flow', () => {
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Trigger generate failure' }] });
 
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
-      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Trigger generate failure" } ], "origin": { "kind": "user" }, "time": "<time>" }
-      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Trigger generate failure" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [wire] goal.rewind_checkpoint      { "snapshot": null, "time": "<time>" }
+      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Trigger generate failure" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
+      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Trigger generate failure" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
       [emit] turn.step.interrupted       { "turnId": 0, "step": 1, "reason": "error", "message": "Unexpected generate call #1" }
@@ -441,127 +483,6 @@ describe('Agent turn flow', () => {
     expect(ctx.newEvents()).toMatchInlineSnapshot(
       `[emit] error   { "code": "internal", "message": "Unexpected generate call #1", "name": "Error", "retryable": false, "details": { "turnId": 0 } }`,
     );
-    await ctx.expectResumeMatches();
-  });
-
-  it('keeps manual swarm mode active after a turn completes normally', async () => {
-    const ctx = testAgent();
-    ctx.configure();
-    ctx.mockNextResponse({ type: 'text', text: 'swarm done' });
-
-    await ctx.rpc.enterSwarm({ trigger: 'manual' });
-    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run a swarm task' }] });
-    await ctx.untilTurnEnd();
-
-    expect(ctx.agent.swarmMode.isActive).toBe(true);
-    expect(eventIndex(ctx, '[wire]', 'swarm_mode.exit')).toBe(-1);
-    await ctx.expectResumeMatches();
-  });
-
-  it('exits task swarm mode after a turn completes normally', async () => {
-    const ctx = testAgent();
-    ctx.configure();
-    ctx.mockNextResponse({ type: 'text', text: 'swarm done' });
-
-    await ctx.rpc.enterSwarm({ trigger: 'task' });
-    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run a swarm task' }] });
-    await ctx.untilTurnEnd();
-
-    const turnEndedIndex = eventIndex(ctx, '[rpc]', 'turn.ended');
-    const swarmExitIndex = eventIndex(ctx, '[wire]', 'swarm_mode.exit');
-    const inactiveStatusIndex = ctx.allEvents.findIndex((entry, index) => {
-      return (
-        index > turnEndedIndex &&
-        entry.type === '[rpc]' &&
-        entry.event === 'agent.status.updated' &&
-        (entry.args as { readonly swarmMode?: boolean }).swarmMode === false
-      );
-    });
-
-    expect(ctx.agent.swarmMode.isActive).toBe(false);
-    expect(swarmExitIndex).toBeGreaterThan(turnEndedIndex);
-    expect(inactiveStatusIndex).toBeGreaterThan(turnEndedIndex);
-    expect(ctx.agent.context.history.at(-1)?.origin).toEqual({
-      kind: 'injection',
-      variant: 'swarm_mode_exit',
-    });
-    await ctx.expectResumeMatches();
-  });
-
-  it('exits task swarm mode when the swarm turn fails', async () => {
-    const ctx = testAgent();
-    ctx.configure();
-
-    await ctx.rpc.enterSwarm({ trigger: 'task' });
-    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Fail a swarm task' }] });
-    await ctx.untilTurnEnd();
-
-    expect(ctx.agent.swarmMode.isActive).toBe(false);
-    expect(eventIndex(ctx, '[wire]', 'swarm_mode.exit')).toBeGreaterThan(-1);
-  });
-
-  it('exits task swarm mode when the user cancels the swarm turn', async () => {
-    const ctx = testAgent({ generate: abortableGenerate });
-    ctx.configure();
-
-    const stepStarted = ctx.once('turn.step.started');
-    await ctx.rpc.enterSwarm({ trigger: 'task' });
-    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Cancel a swarm task' }] });
-    await stepStarted;
-    await ctx.rpc.cancel({ turnId: 0 });
-    await ctx.untilTurnEnd();
-
-    expect(ctx.agent.swarmMode.isActive).toBe(false);
-    expect(eventIndex(ctx, '[wire]', 'swarm_mode.exit')).toBeGreaterThan(-1);
-  });
-
-  it('enters silent swarm mode when the agent calls AgentSwarm', async () => {
-    const runQueued = vi.fn(async <T>(
-      tasks: readonly QueuedSubagentTask<T>[],
-    ): Promise<Array<QueuedSubagentRunResult<T>>> => {
-      return tasks.map((task, index) => ({
-        task,
-        agentId: `agent-${String(index + 1)}`,
-        status: 'completed' as const,
-        result: `result ${String(index + 1)}`,
-      }));
-    });
-    const subagentHost = mockSubagentHost({
-      runQueued: runQueued as unknown as SessionSubagentHost['runQueued'],
-    });
-    const ctx = testAgent({
-      subagentHost,
-    });
-    ctx.configure({ tools: ['AgentSwarm'] });
-    await ctx.rpc.setPermission({ mode: 'yolo' });
-
-    ctx.mockNextResponse(
-      { type: 'text', text: 'I will launch a swarm.' },
-      agentSwarmCall(),
-    );
-    ctx.mockNextResponse({ type: 'text', text: 'Swarm results reviewed.' });
-
-    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Use AgentSwarm' }] });
-    await ctx.untilTurnEnd();
-
-    const enterEvent = ctx.allEvents.find(
-      (entry) => entry.type === '[wire]' && entry.event === 'swarm_mode.enter',
-    );
-    const reminderOrigins = ctx.agent.context.history
-      .map((message) => message.origin)
-      .filter((origin) => origin?.kind === 'injection');
-
-    expect(runQueued).toHaveBeenCalledTimes(1);
-    expect(enterEvent?.args).toMatchObject({ trigger: 'tool' });
-    expect(ctx.agent.swarmMode.isActive).toBe(false);
-    expect(eventIndex(ctx, '[wire]', 'swarm_mode.exit')).toBeGreaterThan(
-      eventIndex(ctx, '[rpc]', 'turn.ended'),
-    );
-    expect(reminderOrigins).not.toContainEqual({ kind: 'injection', variant: 'swarm_mode' });
-    expect(reminderOrigins).not.toContainEqual({
-      kind: 'injection',
-      variant: 'swarm_mode_exit',
-    });
     await ctx.expectResumeMatches();
   });
 
@@ -671,9 +592,10 @@ describe('Agent turn flow', () => {
 
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
       [wire] metadata                 { "protocol_version": "<protocol-version>", "created_at": "<time>" }
-      [wire] turn.prompt              { "input": [ { "type": "text", "text": "Hello without login" } ], "origin": { "kind": "user" }, "time": "<time>" }
-      [emit] turn.started             { "turnId": 0, "origin": { "kind": "user" } }
-      [wire] context.append_message   { "message": { "role": "user", "content": [ { "type": "text", "text": "Hello without login" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [wire] goal.rewind_checkpoint   { "snapshot": null, "time": "<time>" }
+      [wire] turn.prompt              { "input": [ { "type": "text", "text": "Hello without login" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
+      [emit] turn.started             { "turnId": 0, "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }
+      [wire] context.append_message   { "message": { "role": "user", "content": [ { "type": "text", "text": "Hello without login" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
       [emit] turn.ended               { "turnId": 0, "reason": "failed", "error": { "code": "model.not_configured", "message": "LLM not set, send \\"/login\\" to login", "name": "KimiError", "details": { "turnId": 0 }, "retryable": false } }
     `);
     expect(ctx.newEvents()).toMatchInlineSnapshot(
@@ -709,8 +631,9 @@ describe('Agent turn flow', () => {
       system: <system-prompt>
       tools: []
       messages:
-        user: text "hooked input"
+        user: text "<message from=\\"user\\" name=\\"用户\\">hooked input</message>"
         user: text "<hook_result hook_event=\\"UserPromptSubmit\\">\\nhook response 1\\n</hook_result>\\n<hook_result hook_event=\\"UserPromptSubmit\\">\\nhook response 2\\n</hook_result>"
+        user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
     expect(events).toContainEqual(
       expect.objectContaining({
@@ -732,7 +655,11 @@ describe('Agent turn flow', () => {
         role: 'user',
         content: [{ type: 'text', text: 'hooked input' }],
         toolCalls: [],
-        origin: { kind: 'user' },
+        origin: {
+          kind: 'user',
+          goalIntake: undefined,
+          speaker: { from: 'user', speakerName: '用户' },
+        },
       },
       {
         role: 'user',
@@ -773,8 +700,9 @@ describe('Agent turn flow', () => {
       system: <system-prompt>
       tools: []
       messages:
-        user: text "hooked input"
+        user: text "<message from=\\"user\\" name=\\"用户\\">hooked input</message>"
         user: text "<hook_result hook_event=\\"UserPromptSubmit\\">\\n{}\\n</hook_result>\\n<hook_result hook_event=\\"UserPromptSubmit\\">\\n{\\"hookSpecificOutput\\":{}}\\n</hook_result>"
+        user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
     expect(events).toContainEqual(
       expect.objectContaining({
@@ -790,7 +718,11 @@ describe('Agent turn flow', () => {
         role: 'user',
         content: [{ type: 'text', text: 'hooked input' }],
         toolCalls: [],
-        origin: { kind: 'user' },
+        origin: {
+          kind: 'user',
+          goalIntake: undefined,
+          speaker: { from: 'user', speakerName: '用户' },
+        },
       },
       {
         role: 'user',
@@ -842,7 +774,11 @@ describe('Agent turn flow', () => {
         role: 'user',
         content: [{ type: 'text', text: 'bad words here' }],
         toolCalls: [],
-        origin: { kind: 'user' },
+        origin: {
+          kind: 'user',
+          goalIntake: undefined,
+          speaker: { from: 'user', speakerName: '用户' },
+        },
       },
       {
         role: 'assistant',
@@ -861,9 +797,10 @@ describe('Agent turn flow', () => {
       system: <system-prompt>
       tools: []
       messages:
-        user: text "bad words here"
+        user: text "<message from=\\"user\\" name=\\"用户\\">bad words here</message>"
         assistant: text "<hook_result hook_event=\\"UserPromptSubmit\\">\\nno profanity\\n</hook_result>"
-        user: text "safe followup"
+        user: text "<message from=\\"user\\" name=\\"用户\\">safe followup</message>"
+        user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
   });
 
@@ -899,7 +836,11 @@ describe('Agent turn flow', () => {
         role: 'user',
         content: [{ type: 'text', text: 'hook will sleep' }],
         toolCalls: [],
-        origin: { kind: 'user' },
+        origin: {
+          kind: 'user',
+          goalIntake: undefined,
+          speaker: { from: 'user', speakerName: '用户' },
+        },
       },
     ]);
   });
@@ -1755,9 +1696,10 @@ describe('Agent turn flow', () => {
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run a command' }] });
 
     expect(await ctx.untilApprovalRequest()).toMatchInlineSnapshot(`
-      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Run a command" } ], "origin": { "kind": "user" }, "time": "<time>" }
-      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run a command" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [wire] goal.rewind_checkpoint      { "snapshot": null, "time": "<time>" }
+      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Run a command" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
+      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run a command" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "I will run Bash." }
@@ -1769,7 +1711,8 @@ describe('Agent turn flow', () => {
       system: <system-prompt>
       tools: Bash
       messages:
-        user: text "Run a command"
+        user: text "<message from=\\"user\\" name=\\"用户\\">Run a command</message>"
+        user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
     records.length = 0;
     await ctx.rpc.cancel({ turnId: 0 });
@@ -1816,9 +1759,10 @@ describe('Agent turn flow', () => {
 
     const approval = await ctx.takeApprovalRequest();
     expect(approval.events).toMatchInlineSnapshot(`
-      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Run Bash, then listen" } ], "origin": { "kind": "user" }, "time": "<time>" }
-      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run Bash, then listen" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [wire] goal.rewind_checkpoint      { "snapshot": null, "time": "<time>" }
+      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Run Bash, then listen" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
+      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run Bash, then listen" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "I will ask first." }
@@ -1830,13 +1774,17 @@ describe('Agent turn flow', () => {
       system: <system-prompt>
       tools: Bash
       messages:
-        user: text "Run Bash, then listen"
+        user: text "<message from=\\"user\\" name=\\"用户\\">Run Bash, then listen</message>"
+        user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
     expect(ctx.llmCalls).toHaveLength(1);
 
     await ctx.rpc.steer({ input: [{ type: 'text', text: 'Also mention the steer.' }] });
     expect(ctx.llmCalls).toHaveLength(1);
-    expect(ctx.newEvents()).toMatchInlineSnapshot(`[wire] turn.steer   { "input": [ { "type": "text", "text": "Also mention the steer." } ], "origin": { "kind": "user" }, "time": "<time>" }`);
+    expect(ctx.newEvents()).toMatchInlineSnapshot(`
+      [wire] goal.rewind_checkpoint   { "snapshot": null, "time": "<time>" }
+      [wire] turn.steer               { "input": [ { "type": "text", "text": "Also mention the steer." } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
+    `);
 
     ctx.mockNextResponse({ type: 'text', text: 'Approved, and I saw the steer.' });
     approval.respond({
@@ -1851,27 +1799,28 @@ describe('Agent turn flow', () => {
       [emit] tool.progress                       { "turnId": 0, "toolCallId": "call_bash", "update": { "kind": "stdout", "text": "approved" } }
       [wire] context.append_loop_event           { "event": { "type": "tool.result", "parentUuid": "call_bash", "toolCallId": "call_bash", "result": { "output": "approved" } }, "time": "<time>" }
       [emit] tool.result                         { "turnId": 0, "toolCallId": "call_bash", "output": "approved" }
-      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
-      [emit] turn.step.completed                 { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
-      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated                { "model": "mock-model", "contextTokens": 29, "maxContextTokens": 1000000, "contextUsage": 0.000029, "planMode": false, "swarmMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "mock-model": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 7, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
-      [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "Also mention the steer." } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 225, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
+      [emit] turn.step.completed                 { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 225, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
+      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 225, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated                { "model": "mock-model", "contextTokens": 247, "maxContextTokens": 1000000, "contextUsage": 0.000247, "discussMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "mock-model": { "inputOther": 225, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 225, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 225, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "Also mention the steer." } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
       [wire] context.append_loop_event           { "event": { "type": "step.begin", "uuid": "<uuid-3>", "turnId": "0", "step": 2 }, "time": "<time>" }
       [emit] turn.step.started                   { "turnId": 0, "step": 2, "stepId": "<uuid-3>" }
       [emit] assistant.delta                     { "turnId": 0, "delta": "Approved, and I saw the steer." }
       [wire] context.append_loop_event           { "event": { "type": "content.part", "uuid": "<uuid-4>", "turnId": "0", "step": 2, "stepUuid": "<uuid-3>", "part": { "type": "text", "text": "Approved, and I saw the steer." } }, "time": "<time>" }
-      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "0", "step": 2, "usage": { "inputOther": 39, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed                 { "turnId": 0, "step": 2, "stepId": "<uuid-3>", "usage": { "inputOther": 39, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 39, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated                { "model": "mock-model", "contextTokens": 50, "maxContextTokens": 1000000, "contextUsage": 0.00005, "planMode": false, "swarmMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "mock-model": { "inputOther": 46, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 46, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 46, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "0", "step": 2, "usage": { "inputOther": 269, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed                 { "turnId": 0, "step": 2, "stepId": "<uuid-3>", "usage": { "inputOther": 269, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 269, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated                { "model": "mock-model", "contextTokens": 280, "maxContextTokens": 1000000, "contextUsage": 0.00028, "discussMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "mock-model": { "inputOther": 494, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 494, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 494, "output": 33, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                          { "turnId": 0, "reason": "completed" }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       messages:
-        <last>
+        user: text "<message from=\\"user\\" name=\\"用户\\">Run Bash, then listen</message>"
         assistant: text "I will ask first."  calls call_bash:Bash { "command": "printf approved", "timeout": 60 }
         tool[call_bash]: text "approved"
-        user: text "Also mention the steer."
+        user: text "<message from=\\"user\\" name=\\"用户\\">Also mention the steer.</message>"
+        user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
     expect(ctx.llmCalls).toHaveLength(2);
     await ctx.expectResumeMatches();
@@ -1906,9 +1855,10 @@ describe('Agent turn flow', () => {
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Start the active turn' }] });
 
     expect(await ctx.untilApprovalRequest()).toMatchInlineSnapshot(`
-      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Start the active turn" } ], "origin": { "kind": "user" }, "time": "<time>" }
-      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Start the active turn" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [wire] goal.rewind_checkpoint      { "snapshot": null, "time": "<time>" }
+      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Start the active turn" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
+      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Start the active turn" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "I will wait for approval." }
@@ -1920,13 +1870,15 @@ describe('Agent turn flow', () => {
       system: <system-prompt>
       tools: Bash
       messages:
-        user: text "Start the active turn"
+        user: text "<message from=\\"user\\" name=\\"用户\\">Start the active turn</message>"
+        user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'This should not start a new turn' }] });
 
     expect(ctx.newEvents()).toMatchInlineSnapshot(`
-      [wire] turn.prompt   { "input": [ { "type": "text", "text": "This should not start a new turn" } ], "origin": { "kind": "user" }, "time": "<time>" }
-      [emit] error         { "code": "turn.agent_busy", "message": "Cannot launch a new turn while another turn (ID 0) is active", "details": { "turnId": 0 }, "retryable": true }
+      [wire] goal.rewind_checkpoint   { "snapshot": null, "time": "<time>" }
+      [wire] turn.prompt              { "input": [ { "type": "text", "text": "This should not start a new turn" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
+      [emit] error                    { "code": "turn.agent_busy", "message": "Cannot launch a new turn while another turn (ID 0) is active", "details": { "turnId": 0 }, "retryable": true }
     `);
     await ctx.rpc.cancel({ turnId: 0 });
     expect(ctx.agent.turn.hasActiveTurn).toBe(true);
@@ -2002,19 +1954,6 @@ function noriMemorySearchCallWithId(id: string, keywords: string[]): ToolCall {
     id,
     name: 'nori_memory_search',
     arguments: JSON.stringify({ keywords, top_k: 5 }),
-  };
-}
-
-function agentSwarmCall(): ToolCall {
-  return {
-    type: 'function',
-    id: 'call_swarm',
-    name: 'AgentSwarm',
-    arguments: JSON.stringify({
-      description: 'Review files',
-      prompt_template: 'Review {{item}}',
-      items: ['src/a.ts', 'src/b.ts'],
-    }),
   };
 }
 

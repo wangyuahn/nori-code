@@ -50,14 +50,28 @@ describe('default agent profiles', () => {
     }
   });
 
-  it('exposes real swarm controls to every main-agent profile', () => {
+  it('exposes the SubAgent tool to every main-agent profile', () => {
     for (const name of ['agent', 'nori-agent']) {
       const profile = DEFAULT_AGENT_PROFILES[name];
-      expect(profile?.tools).toContain('AgentSwarmControl');
-      expect(profile?.systemPrompt(promptContext)).toContain('AgentSwarmControl');
+      expect(profile?.tools).toContain('SubAgent');
+      expect(profile?.systemPrompt(promptContext)).toContain('SubAgent');
     }
-    expect(DEFAULT_AGENT_PROFILES['nori-agent']?.systemPrompt(promptContext)).toContain('preserves unfinished agent contexts');
+    expect(DEFAULT_AGENT_PROFILES['nori-agent']?.systemPrompt(promptContext)).toContain('Completed SubAgents are archived');
     expect(DEFAULT_AGENT_PROFILES['nori-agent']?.systemPrompt(promptContext)).toContain('failure notifications arrive automatically');
+  });
+
+  it('exposes Discuss names to default model profiles', () => {
+    for (const name of ['agent', 'nori-agent', 'nori-coder']) {
+      const tools = DEFAULT_AGENT_PROFILES[name]?.tools ?? [];
+      expect(tools).toContain('EnterDiscussMode');
+      expect(tools).toContain('TeamCreate');
+      expect(tools).toContain('TeamDecide');
+      expect(tools).toContain('TeamAssign');
+      expect(tools).toContain('TeamSpeak');
+      expect(tools).not.toContain('ExitDiscussMode');
+      expect(DEFAULT_AGENT_PROFILES[name]?.systemPrompt(promptContext)).toContain('TeamCreate');
+      expect(DEFAULT_AGENT_PROFILES[name]?.systemPrompt(promptContext)).toContain('TeamDecide');
+    }
   });
 
   it('fails loudly when an embedded system prompt source is missing', () => {
@@ -92,16 +106,16 @@ describe('default agent profiles', () => {
     // {% if %} reconstruction of availability). This holds for the root `agent` too, not
     // just subagents. The cross-tool secret-file guard — built on the always-present
     // Read/Grep/Glob — stays shared.
-    for (const name of ['agent', 'coder', 'explore', 'plan']) {
+    for (const name of ['agent', 'coder', 'explore']) {
       const prompt = DEFAULT_AGENT_PROFILES[name]?.systemPrompt(promptContext) ?? '';
       expect(prompt).not.toContain('Launch multiple explore agents concurrently'); // Agent → agent.md + explore whenToUse
       expect(prompt).not.toContain('long-running shell commands as background tasks'); // background → bash.md
       expect(prompt).not.toContain('maintain a `TodoList`'); // TodoList → todo-list.md
-      expect(prompt).not.toContain('prefer entering plan mode first'); // EnterPlanMode → enter-plan-mode.md
+      expect(prompt).not.toContain('prefer entering Discuss mode first');
       expect(prompt).not.toContain('call `TaskList` to re-enumerate'); // compaction recovery → task-list.md
       // The dedicated-tool routing must name only universally-present tools (Read/Glob/Grep).
-      // Write/Edit/Bash are absent from read-only profiles (plan has no Bash/Write/Edit;
-      // explore no Write/Edit), so naming them in the shared routing sentence would dangle —
+      // Write/Edit/Bash are absent from read-only profiles, so naming them in the shared
+      // routing sentence would dangle —
       // that routing lives in bash.md (echo>file→Write, sed→Edit, etc.), which ships with Bash.
       expect(prompt).not.toContain('`Write` / `Edit` to change files');
       expect(prompt).not.toContain('Keep `Bash` for genuine shell work');
@@ -113,18 +127,27 @@ describe('default agent profiles', () => {
   it('renders blast-radius and concrete-example guidance for root and subagents alike', () => {
     // These additions live in shared, ungated sections, so the root agent AND every
     // subagent that renders the coding guidelines must carry them verbatim.
-    for (const name of ['agent', 'coder', 'explore', 'plan']) {
+    for (const name of ['agent', 'coder', 'explore']) {
       const prompt = DEFAULT_AGENT_PROFILES[name]?.systemPrompt(promptContext) ?? '';
       // Reversibility / blast-radius principle generalized beyond the git rule.
       expect(prompt).toContain('reversibility and blast radius');
       expect(prompt).toContain('A one-time approval covers that one action');
-      // The "do local work freely" clause is role-scoped: read-only subagents (explore/plan)
+      // The "do local work freely" clause is role-scoped: read-only subagents (explore)
       // render this same paragraph, so it must not tell them editing files is free.
       expect(prompt).toContain('Local, reversible work your role permits');
       // Concrete one-line examples anchoring high-frequency abstract rules.
       expect(prompt).toContain('locate the method in the code'); // ambiguous instruction -> edit code, not echo text
       expect(prompt).toContain('update the related tests'); // preamble phrasing example
       expect(prompt).toContain('premature abstraction'); // MINIMAL-changes counterexample
+    }
+  });
+
+  it('renders current collaboration wording without a session-file workflow', () => {
+    for (const name of ['agent', 'nori-agent', 'nori-coder']) {
+      const prompt = DEFAULT_AGENT_PROFILES[name]?.systemPrompt(promptContext) ?? '';
+      expect(prompt).toContain('SubAgent');
+      expect(prompt).toContain('Discuss');
+      expect(prompt).toContain('Do not write a session file');
     }
   });
 });

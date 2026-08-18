@@ -1,7 +1,7 @@
 /**
  * ACP session-mode taxonomy.
  *
- * The 4 modes (`default`, `plan`, `auto`, `yolo`) are the locked
+ * The 4 modes (`default`, `discuss`, `auto`, `yolo`) are the canonical
  * decision in PLAN D9 (`PLAN.md` §D9). Every `session/new` and
  * `session/load` response advertises {@link ACP_MODES} as the
  * `availableModes` plus {@link DEFAULT_MODE_ID} as `currentModeId`,
@@ -19,7 +19,7 @@ import type { SessionMode } from '@agentclientprotocol/sdk';
 import type { PermissionMode } from '@nori-code/sdk';
 
 /**
- * Canonical 4-mode taxonomy (PLAN D9). Order matters: the array
+ * Canonical 4-mode taxonomy. Order matters: the array
  * is rendered as-is by the client, so `default` must appear first
  * and `yolo` last. `as const satisfies` pins both the literal
  * shape and the SDK contract so a future SDK type change surfaces
@@ -32,9 +32,9 @@ export const ACP_MODES = [
     description: 'Manual approvals; tools execute normally.',
   },
   {
-    id: 'plan',
-    name: 'Plan',
-    description: 'Read-only planning; no tool execution.',
+    id: 'discuss',
+    name: 'Discuss',
+    description: 'Read-only team discussion; no tool execution.',
   },
   {
     id: 'auto',
@@ -56,7 +56,7 @@ export const DEFAULT_MODE_ID = 'default' as const;
  * this union in lock-step with {@link ACP_MODES} — Phase 12.2's
  * dispatch table assumes the only valid ids are these four.
  */
-export type AcpModeId = 'default' | 'plan' | 'auto' | 'yolo';
+export type AcpModeId = 'default' | 'discuss' | 'auto' | 'yolo';
 
 /**
  * Narrow an unknown wire string to {@link AcpModeId}. Used by Phase
@@ -66,19 +66,19 @@ export type AcpModeId = 'default' | 'plan' | 'auto' | 'yolo';
  */
 export function isAcpModeId(value: unknown): value is AcpModeId {
   return (
-    value === 'default' || value === 'plan' || value === 'auto' || value === 'yolo'
+    value === 'default' || value === 'discuss' || value === 'auto' || value === 'yolo'
   );
 }
 
 /**
- * The two underlying SDK toggles each ACP mode maps to. `plan` is the
- * argument to `Session.setPlanMode` and `permission` is the argument to
+ * The two underlying SDK toggles each ACP mode maps to. `discuss` is the
+ * argument to `Session.setDiscussMode` and `permission` is the argument to
  * `Session.setPermission`. Returned as a pure value so the dispatcher
  * in {@link AcpSession.setMode} can stay branch-free and the table is
  * co-located with the {@link ACP_MODES} registry it derives from.
  */
 export interface AcpModeToggles {
-  readonly plan: boolean;
+  readonly discuss: boolean;
   readonly permission: PermissionMode;
 }
 
@@ -93,13 +93,13 @@ export interface AcpModeToggles {
 export function acpModeToToggles(id: AcpModeId): AcpModeToggles {
   switch (id) {
     case 'default':
-      return { plan: false, permission: 'manual' };
-    case 'plan':
-      return { plan: true, permission: 'manual' };
+      return { discuss: true, permission: 'manual' };
+    case 'discuss':
+      return { discuss: true, permission: 'manual' };
     case 'auto':
-      return { plan: false, permission: 'auto' };
+      return { discuss: false, permission: 'auto' };
     case 'yolo':
-      return { plan: false, permission: 'yolo' };
+      return { discuss: false, permission: 'yolo' };
     default: {
       const _exhaustive: never = id;
       throw new Error(`Unhandled AcpModeId: ${String(_exhaustive)}`);

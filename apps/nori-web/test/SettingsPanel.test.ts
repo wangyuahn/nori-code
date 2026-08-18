@@ -23,6 +23,62 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
+describe('SettingsPanel Loop / Goal settings', () => {
+  it('loads and saves goal_background_idle_minutes with default 5', async () => {
+    const updateConfig = vi.mocked(api.updateConfig);
+    const { container } = await renderSettings({
+      loop_control: { max_steps_per_turn: 10, goal_max_turns: 3 },
+    });
+
+    const idle = container.querySelector<HTMLInputElement>(
+      '[aria-label="Goal background idle minutes"]',
+    );
+    expect(idle).not.toBeNull();
+    expect(idle?.value).toBe('5');
+
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(idle, '8');
+      idle?.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    await act(async () => {
+      saveButton(container).click();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => { expect(updateConfig).toHaveBeenCalled(); });
+    expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({
+      loop_control: expect.objectContaining({
+        max_steps_per_turn: 10,
+        goal_max_turns: 3,
+        goal_background_idle_minutes: 8,
+      }),
+    }));
+  });
+
+  it('persists 0 as disable-timeout for goal background idle', async () => {
+    const updateConfig = vi.mocked(api.updateConfig);
+    const { container } = await renderSettings({
+      loop_control: { goal_background_idle_minutes: 0 },
+    });
+    const idle = container.querySelector<HTMLInputElement>(
+      '[aria-label="Goal background idle minutes"]',
+    );
+    expect(idle?.value).toBe('0');
+
+    await act(async () => {
+      saveButton(container).click();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => { expect(updateConfig).toHaveBeenCalled(); });
+    expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({
+      loop_control: expect.objectContaining({
+        goal_background_idle_minutes: 0,
+      }),
+    }));
+  });
+});
+
 describe('SettingsPanel Memory settings', () => {
   it('loads the independent Memory provider and masked key state', async () => {
     const { container } = await renderSettings({

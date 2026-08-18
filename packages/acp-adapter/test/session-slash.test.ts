@@ -340,7 +340,7 @@ describe('AcpSession slash routing', () => {
       model: 'mock-model',
       thinkingEffort: 'low',
       permission: 'ask',
-      planMode: false,
+      discussMode: false,
       contextTokens: 1234,
       maxContextTokens: 200_000,
       contextUsage: 0.00617,

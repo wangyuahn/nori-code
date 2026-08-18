@@ -39,6 +39,12 @@ import { abortable, isUserCancellation, userCancellationReason } from '../../uti
 import { USER_PROMPT_ORIGIN, type PromptOrigin } from '../context';
 import { renderUserPromptHookBlockResult, renderUserPromptHookResult } from '../../session/hooks';
 import { canonicalTelemetryArgs, isPlainRecord } from './canonical-args';
+import {
+  GOAL_BACKGROUND_IDLE_WAKE_ORIGIN_NAME,
+  GOAL_BACKGROUND_IDLE_WAKE_PROMPT,
+  resolveGoalBackgroundIdleMinutes,
+  shouldSuppressGoalContinuationForBackground,
+} from './goal-background-idle';
 import { ToolCallDeduplicator } from './tool-dedup';
 import { budgetToolResultForModel } from './tool-result-budget';
 import {
@@ -115,7 +121,7 @@ export class TurnFlow {
   private readonly toolCallStartedAt = new Map<string, { name: string; startedAt: number }>();
   private readonly toolCallDupType = new Map<string, 'normal' | 'cross_step'>();
   private readonly stepToolCallKeys = new Map<number, Set<string>>();
-  private readonly telemetryModeByTurn = new Map<number, 'agent' | 'plan'>();
+  private readonly telemetryModeByTurn = new Map<number, 'agent' | 'discuss'>();
   private readonly currentStepByTurn = new Map<number, number>();
   private readonly interruptedTelemetryTurnIds = new Set<number>();
   private readonly stepFailureByTurn = new Map<number, LoopTurnInterruptedEvent>();
@@ -137,17 +143,41 @@ export class TurnFlow {
   private turnTestFilesCreated = 0;
   private turnShellCommandCount = 0;
   private turnVerificationCommandCount = 0;
-  private turnAgentSwarmCount = 0;
-  private turnSwarmReviewCount = 0;
   private turnMemorySearchCount = 0;
   private turnMemoryWriteCount = 0;
-  private turnSwarmLaunchCount = 0;
-  private turnSwarmResultCheckCount = 0;
+  private turnSubagentCount = 0;
   private turnUserPromptText = '';
   private pendingNoriWorkflowGateContinuation = false;
   private noriWorkflowGateContinuationCounts = new Map<string, number>();
+  /**
+   * Set when UpdateGoal appends a goal_completion / goal_blocked reminder.
+   * Sticky across steer flush / workflow-gate inserts so `history.at(-1)` alone
+   * cannot drop the one-shot user-facing outcome continuation.
+   */
+  private pendingGoalOutcomeContinuation = false;
+  /**
+   * When goal mode exits the drive loop to wait on unfinished background work,
+   * an idle timer may force-wake the main agent after N minutes without
+   * background reaction (`started` / `updated` / `terminated`).
+   */
+  private goalBackgroundIdleArmed = false;
+  private goalBackgroundIdleTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(protected readonly agent: Agent) {}
+
+  /** Called by UpdateGoal after it appends a terminal outcome reminder. */
+  notePendingGoalOutcomeContinuation(): void {
+    this.pendingGoalOutcomeContinuation = true;
+  }
+
+  /**
+   * Called by BackgroundManager on task started / updated / terminated.
+   * Resets the goal background-idle countdown while we are waiting.
+   */
+  noteBackgroundActivity(): void {
+    if (!this.goalBackgroundIdleArmed) return;
+    this.rescheduleGoalBackgroundIdleWake();
+  }
 
   /** Best-effort agent id (main / generated id) derived from the agent homedir. */
   private get agentId(): string {
@@ -213,6 +243,9 @@ export class TurnFlow {
       this.steerBuffer.push({ input, origin });
       return null;
     }
+
+    // Any real launch means we are no longer idle-waiting on background work.
+    this.clearGoalBackgroundIdleWake();
 
     // Per-turn setup (telemetry, usage window, `turn.started`, appending the
     // prompt) now lives in `runOneTurn`, so a goal-driven run emits a clean
@@ -466,18 +499,22 @@ export class TurnFlow {
 
       if (end.event.reason === 'cancelled') {
         await this.agent.goal.pauseOnInterrupt({ reason: 'Paused after interruption' });
+        this.clearGoalBackgroundIdleWake();
         return end;
       }
       if (end.event.reason === 'failed') {
         await this.agent.goal.pauseActiveGoal({ reason: goalFailurePauseReason(end.event.error) });
+        this.clearGoalBackgroundIdleWake();
         return end;
       }
       if (end.event.reason === 'filtered') {
         await this.agent.goal.pauseActiveGoal({ reason: GOAL_PROVIDER_FILTERED_PAUSE_REASON });
+        this.clearGoalBackgroundIdleWake();
         return end;
       }
       if (end.blockedByUserPromptHook === true) {
         await this.agent.goal.markBlocked({ reason: 'Blocked by UserPromptSubmit hook' });
+        this.clearGoalBackgroundIdleWake();
         return end;
       }
 
@@ -486,19 +523,86 @@ export class TurnFlow {
       // `active` goal continues to another turn.
       const goal = this.agent.goal.getGoal().goal;
       if (goal === null || goal.status !== 'active') {
+        this.clearGoalBackgroundIdleWake();
         return end;
       }
       // Hard budgets (turn / token / wall-clock, set via the SDK) are a
       // deterministic ceiling: block when reached. `blocked` is resumable.
       if (goal.budget.overBudget) {
         await this.agent.goal.markBlocked({ reason: 'A configured budget was reached' });
+        this.clearGoalBackgroundIdleWake();
         return end;
       }
+
+      // Unfinished background agents/tasks: do not immediately force another
+      // goal continuation turn (wastes tokens while the model intends to wait).
+      // Background completion already steers via notifyBackgroundTask; an idle
+      // timeout may force-wake later per loop_control.goal_background_idle_minutes.
+      if (
+        shouldSuppressGoalContinuationForBackground(this.agent.background.list(true))
+      ) {
+        this.armGoalBackgroundIdleWake();
+        return end;
+      }
+      this.clearGoalBackgroundIdleWake();
 
       turnId = this.allocateTurnId();
       turnInput = [{ type: 'text', text: GOAL_CONTINUATION_PROMPT }];
       turnOrigin = GOAL_CONTINUATION_ORIGIN;
     }
+  }
+
+  private armGoalBackgroundIdleWake(): void {
+    this.goalBackgroundIdleArmed = true;
+    this.rescheduleGoalBackgroundIdleWake();
+  }
+
+  private clearGoalBackgroundIdleWake(): void {
+    this.goalBackgroundIdleArmed = false;
+    if (this.goalBackgroundIdleTimer !== null) {
+      clearTimeout(this.goalBackgroundIdleTimer);
+      this.goalBackgroundIdleTimer = null;
+    }
+  }
+
+  private rescheduleGoalBackgroundIdleWake(): void {
+    if (this.goalBackgroundIdleTimer !== null) {
+      clearTimeout(this.goalBackgroundIdleTimer);
+      this.goalBackgroundIdleTimer = null;
+    }
+    if (!this.goalBackgroundIdleArmed) return;
+    const minutes = resolveGoalBackgroundIdleMinutes(
+      this.agent.kimiConfig?.loopControl?.goalBackgroundIdleMinutes,
+    );
+    // 0 = suppress immediate continuation only; never force-wake on idle.
+    if (minutes <= 0) return;
+    this.goalBackgroundIdleTimer = setTimeout(() => {
+      this.goalBackgroundIdleTimer = null;
+      this.fireGoalBackgroundIdleWake();
+    }, minutes * 60_000);
+  }
+
+  private fireGoalBackgroundIdleWake(): void {
+    if (!this.goalBackgroundIdleArmed) return;
+    const goal = this.agent.goal.getGoal().goal;
+    if (goal === null || goal.status !== 'active') {
+      this.clearGoalBackgroundIdleWake();
+      return;
+    }
+    if (!shouldSuppressGoalContinuationForBackground(this.agent.background.list(true))) {
+      this.clearGoalBackgroundIdleWake();
+      return;
+    }
+    // Busy: keep waiting and retry after the same idle window.
+    if (this.activeTurn !== null) {
+      this.rescheduleGoalBackgroundIdleWake();
+      return;
+    }
+    this.clearGoalBackgroundIdleWake();
+    this.steer([{ type: 'text', text: GOAL_BACKGROUND_IDLE_WAKE_PROMPT }], {
+      kind: 'system_trigger',
+      name: GOAL_BACKGROUND_IDLE_WAKE_ORIGIN_NAME,
+    });
   }
 
   private async endGoalTurnWithoutModel(
@@ -543,17 +647,14 @@ export class TurnFlow {
     this.turnTestFilesCreated = 0;
     this.turnShellCommandCount = 0;
     this.turnVerificationCommandCount = 0;
-    this.turnAgentSwarmCount = 0;
-    this.turnSwarmReviewCount = 0;
     this.turnMemorySearchCount = 0;
     this.turnMemoryWriteCount = 0;
-    this.turnSwarmLaunchCount = 0;
-    this.turnSwarmResultCheckCount = 0;
+    this.turnSubagentCount = 0;
     this.turnUserPromptText = contentPartsText(input);
     this.pendingNoriWorkflowGateContinuation = false;
     this.noriWorkflowGateContinuationCounts = new Map<string, number>();
-    if (this.agent.noriWorkflow !== undefined && origin === USER_PROMPT_ORIGIN) {
-      this.noriLastPhase = 'plan';
+    if (this.agent.noriWorkflow !== undefined && origin.kind === 'user') {
+      this.noriLastPhase = 'discuss';
       this.noriNotesThisPhase.clear();
     }
     const telemetryMode = this.telemetryMode();
@@ -662,9 +763,6 @@ export class TurnFlow {
       this.activeTurn = null;
       this.launchBufferedSteerIfIdle();
     }
-    if (this.agent.swarmMode.shouldAutoExit) {
-      this.agent.swarmMode.exit();
-    }
     if (errorEvent !== undefined) {
       this.agent.emitEvent(errorEvent);
     }
@@ -735,6 +833,7 @@ export class TurnFlow {
   private async runStepLoop(turnId: number, signal: AbortSignal): Promise<LoopTurnStopReason> {
     let stopHookContinuationUsed = false;
     let goalOutcomeMessageContinuationUsed = false;
+    this.pendingGoalOutcomeContinuation = false;
     const deduper = new ToolCallDeduplicator({ telemetry: this.agent.telemetry });
     await this.agent.mcp?.waitForInitialLoad(signal);
     // Surface the active goal at the start of the turn (append-only; no-op when
@@ -841,7 +940,14 @@ export class TurnFlow {
               // for review orchestration. This replaces the old passive
               // SuggestionEngine path, which appended suggestions but never
               // continued the loop, so the model could not act on them.
-              if (stopReason !== 'tool_use' && !stopForGoalBudget) {
+              // Skip when a goal outcome summary is pending — UpdateGoal already
+              // asked for a final user-facing message; a review gate must not
+              // bury or replace that one-shot continuation.
+              if (
+                stopReason !== 'tool_use' &&
+                !stopForGoalBudget &&
+                !this.pendingGoalOutcomeContinuation
+              ) {
                 const workflowGatePrompt = this.buildNoriWorkflowGatePrompt();
                 if (workflowGatePrompt !== undefined) {
                   this.agent.context.appendUserMessage(
@@ -882,11 +988,32 @@ export class TurnFlow {
             // oxlint-disable-next-line no-loop-func -- stop hook continuation state is scoped to this turn.
             shouldContinueAfterStop: async (ctx) => {
               const { signal } = ctx;
-              // 1. Flush any steered user messages.
-              if (this.flushSteerBuffer()) return { continue: true };
+              // 1. Flush steered messages into context so the next model step can
+              //    see them, but do not short-circuit when a goal outcome (or
+              //    workflow gate) continuation is already pending — those must
+              //    win so `history.at(-1)` races cannot drop the outcome pass.
+              const flushedSteer = this.flushSteerBuffer();
               signal.throwIfAborted();
 
-              // 2. Continue once when the Nori workflow gate injected a review
+              // 2. After UpdateGoal marks a goal terminal, ask the model for one
+              //    final user-facing outcome message before the turn ends.
+              //    Prefer this over the workflow gate: complete/blocked already
+              //    cleared or parked the goal.
+              if (
+                !goalOutcomeMessageContinuationUsed &&
+                (this.pendingGoalOutcomeContinuation ||
+                  isGoalOutcomeReminderOrigin(this.agent.context.history.at(-1)?.origin))
+              ) {
+                goalOutcomeMessageContinuationUsed = true;
+                this.pendingGoalOutcomeContinuation = false;
+                if (!hasStepBudgetRemaining(loopControl?.maxStepsPerTurn, ctx.stepNumber)) {
+                  this.agent.context.popMatchedMessage(isGoalOutcomeReminderOrigin);
+                  return { continue: false };
+                }
+                return { continue: true };
+              }
+
+              // 3. Continue once when the Nori workflow gate injected a review
               //    instruction at terminal stop.
               if (this.pendingNoriWorkflowGateContinuation) {
                 this.pendingNoriWorkflowGateContinuation = false;
@@ -897,21 +1024,11 @@ export class TurnFlow {
                 return { continue: true };
               }
 
-              // 3. After UpdateGoal marks a goal terminal, ask the model for one
-              //    final user-facing outcome message before the turn ends.
-              if (
-                !goalOutcomeMessageContinuationUsed &&
-                isGoalOutcomeReminderOrigin(this.agent.context.history.at(-1)?.origin)
-              ) {
-                goalOutcomeMessageContinuationUsed = true;
-                if (!hasStepBudgetRemaining(loopControl?.maxStepsPerTurn, ctx.stepNumber)) {
-                  this.agent.context.popMatchedMessage(isGoalOutcomeReminderOrigin);
-                  return { continue: false };
-                }
-                return { continue: true };
-              }
+              // 4. Steers that were only buffered (no goal/gate pending) still
+              //    need one model pass.
+              if (flushedSteer) return { continue: true };
 
-              // 4. The external Stop hook gets exactly one continuation; the cap
+              // 5. The external Stop hook gets exactly one continuation; the cap
               //    is intentionally separate from (and does not cap) goal mode.
               if (!stopHookContinuationUsed) {
                 const stopBlock = await this.agent.hooks?.triggerBlock('Stop', {
@@ -932,7 +1049,7 @@ export class TurnFlow {
                 }
               }
 
-              // 5. Otherwise stop. Goal continuation is no longer driven here:
+              // 6. Otherwise stop. Goal continuation is no longer driven here:
               //    each goal turn is an ordinary turn, and the goal driver decides
               //    whether to run another after this one ends.
               return { continue: false };
@@ -955,22 +1072,6 @@ export class TurnFlow {
                 if (typeof a?.['note_type'] === 'string') {
                   this.noriNotesThisPhase.add(a['note_type'] as string);
                 }
-              }
-
-              // pre_swarm_doc_required: block nori_swarm_launch unless a
-              // nori_memory_write has been done this turn.
-              if (
-                ctx.toolCall.name === 'nori_swarm_launch' &&
-                this.agent.noriWorkflow?.preSwarmDocRequired === true &&
-                this.turnMemoryWriteCount <= 0
-              ) {
-                return {
-                  syntheticResult: {
-                    output:
-                      'Pre-swarm documentation is required. Call nori_memory_write first to document your plan/analysis, then retry nori_swarm_launch.',
-                    isError: true,
-                  },
-                };
               }
 
               return undefined;
@@ -1116,27 +1217,15 @@ export class TurnFlow {
       this.turnToolNames.push(event.name);
       if (event.name === 'nori_memory_search') {
         this.turnMemorySearchCount++;
-        if (this.noriLastPhase === 'plan') {
+        if (this.noriLastPhase === 'discuss') {
           this.noriLastPhase = 'implement';
         }
       }
       if (event.name === 'nori_memory_write') {
         this.turnMemoryWriteCount++;
       }
-      if (event.name === 'nori_swarm_launch') {
-        this.turnSwarmLaunchCount++;
-        if (isReviewLikeArgs(event.name, event.args)) {
-          this.turnSwarmReviewCount++;
-        }
-      }
-      if (event.name === 'nori_swarm_result' || event.name === 'nori_swarm_status') {
-        this.turnSwarmResultCheckCount++;
-      }
-      if (event.name === 'AgentSwarm') {
-        this.turnAgentSwarmCount++;
-        if (isReviewLikeArgs(event.name, event.args)) {
-          this.turnSwarmReviewCount++;
-        }
+      if (event.name === 'SubAgent') {
+        this.turnSubagentCount++;
       }
       if (event.name === 'Bash') {
         this.turnShellCommandCount++;
@@ -1257,10 +1346,7 @@ export class TurnFlow {
       testFilesCreated: this.turnTestFilesCreated,
       shellCommandCount: this.turnShellCommandCount,
       verificationCommandCount: this.turnVerificationCommandCount,
-      agentSwarmCount: this.turnAgentSwarmCount,
-      noriSwarmLaunchCount: this.turnSwarmLaunchCount,
-      noriSwarmResultCheckCount: this.turnSwarmResultCheckCount,
-      swarmReviewCount: this.turnSwarmReviewCount,
+      subagentCount: this.turnSubagentCount,
     };
   }
 
@@ -1273,25 +1359,26 @@ export class TurnFlow {
     const requiredToolAttribute = decision.requiredTool === undefined
       ? ''
       : ` required_tool="${decision.requiredTool}"`;
+    const visibleKind = decision.kind;
     const lines = [
-      `<nori_workflow_gate kind="${decision.kind}" phase="${decision.phase}" mode="${decision.mode}"${requiredToolAttribute}>`,
+      `<nori_workflow_gate kind="${visibleKind}" phase="${decision.phase}" mode="${decision.mode}"${requiredToolAttribute}>`,
       `Reason: ${decision.reason}.`,
-      `Observed work: memory_searches=${activity.memorySearchCount}, memory_writes=${activity.memoryWriteCount}, created_files=${activity.filesCreated}, modified_files=${activity.filesModified}, agent_swarm_calls=${activity.agentSwarmCount}, nori_swarm_launches=${activity.noriSwarmLaunchCount}.`,
+      `Observed work: memory_searches=${activity.memorySearchCount}, memory_writes=${activity.memoryWriteCount}, created_files=${activity.filesCreated}, modified_files=${activity.filesModified}, subagent_calls=${activity.subagentCount}.`,
       '',
     ];
 
-    if (decision.kind === 'bug_hunt_swarm') {
+    if (decision.kind === 'bug_hunt_subagent') {
       lines.push(
         'The current task is bug hunting, failure diagnosis, review, audit, regression investigation, or broad problem finding. Do not finish from a single main-agent pass.',
-        'Call AgentSwarm now as the only tool call if it is available. Split the investigation into concrete parallel tracks such as type/build, tests, runtime/rendering/UI, permissions/config/settings, persistence/memory/session, and dead/duplicate code.',
-        'If AgentSwarm is unavailable but nori_swarm_launch is available, call nori_swarm_launch and then check nori_swarm_result or nori_swarm_status before final response.',
-        'If neither swarm API is available, state that exact blocker and continue with the narrowest local verification you can run.',
+        'Call SubAgent now as the only tool call if it is available. Split the investigation into concrete parallel tracks such as type/build, tests, runtime/rendering/UI, permissions/config/settings, persistence/memory/session, and dead/duplicate code.',
+        'If SubAgent is unavailable but a configured graph-check launcher is available, use it and then check the graph-check result/status before final response.',
+        'If neither SubAgent nor the configured DAG launcher is available, state that exact blocker and continue with the narrowest local verification you can run.',
       );
     } else {
       lines.push(
         'The configured Nori workflow requires memory retrieval before implementation work can be treated as complete.',
         'Call nori_memory_search now with concrete keywords from the user task, touched files, errors, and relevant symbols. Use chain_depth 1-2 when linked decisions or prior reviews may matter.',
-        'After reading the retrieved context, compare it with the current implementation and continue only if the plan still holds.',
+        'After reading the retrieved context, compare it with the current implementation and continue only if the approach still holds.',
       );
     }
 
@@ -1306,13 +1393,13 @@ export class TurnFlow {
       `Reason: ${decision.reason}.`,
       '',
       'Before final response, make a forward difficulty assessment of this project/task using the observed work in this turn.',
-      `Observed work: created_files=${activity.filesCreated}, modified_files=${activity.filesModified}, shell_commands=${activity.shellCommandCount}, verification_commands=${activity.verificationCommandCount}, agent_swarm_calls=${activity.agentSwarmCount}, nori_swarm_launches=${activity.noriSwarmLaunchCount}, nori_swarm_result_checks=${activity.noriSwarmResultCheckCount}.`,
+      `Observed work: created_files=${activity.filesCreated}, modified_files=${activity.filesModified}, shell_commands=${activity.shellCommandCount}, verification_commands=${activity.verificationCommandCount}, subagent_calls=${activity.subagentCount}.`,
     ];
 
     if (decision.mode === 'required') {
       lines.push(
         '',
-        'Review is mandatory now. Use concurrent review/verification before final response: prefer AgentSwarm with concrete tasks for type/lint/test/regression/diff review when AgentSwarm is available. If nori_swarm_launch was used, check nori_swarm_result or nori_swarm_status and incorporate the result.',
+        'Review is mandatory now. Use concurrent review/verification before final response: prefer SubAgent with concrete tasks for type/lint/test/regression/diff review when SubAgent is available. If a configured graph-check launcher was used, check its result/status and incorporate the result.',
         'Do not merely summarize the implementation. Stop only after the review/verification result has been considered, or after reporting the exact blocker that prevents review.',
       );
     } else {
@@ -1336,8 +1423,8 @@ export class TurnFlow {
     });
   }
 
-  private telemetryMode(): 'agent' | 'plan' {
-    return this.agent.planMode.isActive ? 'plan' : 'agent';
+  private telemetryMode(): 'agent' | 'discuss' {
+    return this.agent.discussMode.isActive ? 'discuss' : 'agent';
   }
 
   /**

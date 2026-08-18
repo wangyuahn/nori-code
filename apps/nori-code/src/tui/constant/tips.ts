@@ -45,6 +45,6 @@ export const ALL_TIPS: readonly ToolbarTip[] = [
   { text: '/help: show commands' },
   { text: '/compact compresses context when it gets long', priority: 2 },
   { text: 'ctrl-o to hide or reveal tool output switching between a clean chat view and full execution details', priority: 2 },
-  { text: 'shift-tab to Plan mode to review the approach before Nori edits files.', priority: 2 },
+  { text: 'shift-tab to Discuss for a read-only team meeting before Nori edits files.', priority: 2 },
   { text: '/model: switch model', priority: 2 },
 ];

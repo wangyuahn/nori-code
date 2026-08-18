@@ -1,7 +1,6 @@
 import { visibleWidth } from '@nori-code/pi-tui';
 import { describe, expect, it } from 'vitest';
 
-import { SwarmModeMarkerComponent } from '#/tui/components/messages/swarm-markers';
 import { buildGoalMarker, GoalMarkerComponent } from '#/tui/components/messages/goal-markers';
 import type { GoalChange } from '@nori-code/sdk';
 
@@ -87,7 +86,6 @@ describe('buildGoalMarker', () => {
     ).toBeNull();
   });
 });
-
 describe('GoalMarkerComponent', () => {
   it('hides the reason until expanded, with a ctrl+o hint', () => {
     const marker = new GoalMarkerComponent('Goal: no progress', 'still spinning', 'warning');
@@ -106,17 +104,5 @@ describe('GoalMarkerComponent', () => {
     const marker = new GoalMarkerComponent('Goal paused', undefined, 'textDim');
     expect(marker.render(80)).toHaveLength(1);
     expect(strip(marker.render(80))).not.toContain('(ctrl+o)');
-  });
-});
-
-describe('SwarmModeMarkerComponent', () => {
-  it('keeps marker lines within very narrow widths', () => {
-    const marker = new SwarmModeMarkerComponent('active');
-
-    for (const width of [1, 2, 10, 39]) {
-      for (const line of marker.render(width)) {
-        expect(visibleWidth(line)).toBeLessThanOrEqual(width);
-      }
-    }
   });
 });

@@ -61,9 +61,6 @@ export class ToolManager {
 
   /** Register nori tools unconditionally, also called from initializeBuiltinTools. */
   private registerNoriTools(): void {
-    const planWrite = new b.NoriPlanWriteTool(this.agent) as any;
-    if (this.builtinTools.has(planWrite.name)) return; // already registered
-    this.builtinTools.set(planWrite.name, planWrite);
     if (this.agent.obsidianMemory) {
       const memSearch = new b.NoriMemorySearchTool(this.agent.obsidianMemory) as any;
       const memWrite = new b.NoriMemoryWriteTool(this.agent.obsidianMemory) as any;
@@ -71,19 +68,6 @@ export class ToolManager {
       this.builtinTools.set(memSearch.name, memSearch);
       this.builtinTools.set(memWrite.name, memWrite);
       this.builtinTools.set(memRemove.name, memRemove);
-    }
-    if (this.agent.swarmManager) {
-      const swarmLaunch = new b.NoriSwarmLaunchTool(
-        this.agent.swarmManager,
-        this.agent.noriSwarmMaxDepth,
-        this.agent.noriSwarmDepth,
-        this.agent.background,
-      ) as any;
-      const swarmStatus = new b.NoriSwarmStatusTool(this.agent.swarmManager) as any;
-      const swarmResult = new b.NoriSwarmResultTool(this.agent.swarmManager) as any;
-      this.builtinTools.set(swarmLaunch.name, swarmLaunch);
-      this.builtinTools.set(swarmStatus.name, swarmStatus);
-      this.builtinTools.set(swarmResult.name, swarmResult);
     }
   }
 
@@ -444,6 +428,16 @@ export class ToolManager {
     this.mcpAccessPatterns = names.filter((name) => isMcpToolName(name));
   }
 
+  /**
+   * Returns the profile-selected names without depending on builtin-tool
+   * registration. Session bootstrap can run before the model provider has
+   * registered every builtin, so deriving this from `data()` would lose valid
+   * profile entries such as the goal tools.
+   */
+  activeToolNames(): readonly string[] {
+    return [...this.enabledTools, ...this.mcpAccessPatterns];
+  }
+
   copyLoopToolsFrom(source: ToolManager): void {
     this.loopToolsOverride = source.loopTools;
   }
@@ -522,8 +516,7 @@ export class ToolManager {
           allowBackground,
         }),
         new b.ReadMediaFileTool(kaos, workspace, modelCapabilities, videoUploader),
-        new b.EnterPlanModeTool(this.agent),
-        new b.ExitPlanModeTool(this.agent),
+        new b.EnterDiscussModeTool(this.agent),
         // Goal tools are main-agent-only.
         goalToolsEnabled && new b.CreateGoalTool(this.agent),
         goalToolsEnabled && new b.GetGoalTool(this.agent),
@@ -540,45 +533,28 @@ export class ToolManager {
         this.agent.skills?.registry.listInvocableSkills().length &&
           new b.SkillTool(this.agent),
         this.agent.subagentHost &&
-          new b.AgentTool(
-            this.agent.subagentHost,
-            background,
-            subagentProfiles,
-            {
-              allowBackground,
-              log: this.agent.log,
-              noriSwarmMaxDepth: this.agent.noriSwarmMaxDepth,
-              noriSwarmDepth: this.agent.noriSwarmDepth,
-            },
-          ),
-        this.agent.subagentHost &&
-          new b.AgentSwarmTool(this.agent.subagentHost, this.agent.swarmMode, background, subagentProfiles),
-        this.agent.subagentHost && new b.AgentSwarmControlTool(background),
+          new b.SubAgentTool(this.agent.subagentHost, background, subagentProfiles),
         this.agent.subagentHost &&
           new b.NoriAskParentTool(this.agent),
+        this.agent.subagentHost && new b.TeamCreateTool(this.agent.subagentHost),
+        this.agent.subagentHost && new b.TeamDismissTool(this.agent.subagentHost),
+        this.agent.subagentHost && new b.TeamAssignTool(this.agent.subagentHost),
+        this.agent.subagentHost && new b.TeamBroadcastTool(this.agent.subagentHost),
+        this.agent.subagentHost && new b.TeamDMTool(this.agent.subagentHost),
+        this.agent.subagentHost && new b.TeamDiscussInviteTool(this.agent.subagentHost),
+        this.agent.subagentHost && new b.TeamDiscussKickTool(this.agent.subagentHost),
+        this.agent.subagentHost && new b.TeamDecideTool(this.agent.subagentHost),
+        this.agent.subagentHost && new b.TeamSpeakTool(this.agent.subagentHost),
         new b.WebSearchTool(toolServices?.webSearcher),
         toolServices?.urlFetcher && new b.FetchURLTool(toolServices.urlFetcher),
         toolServices?.browser && new b.BrowserTool(toolServices.browser, modelCapabilities.image_in),
         // Nori tools - registered when the corresponding providers are injected.
-        // Plan-write is always available because it does not need an external provider.
-        new b.NoriPlanWriteTool(this.agent),
         this.agent.obsidianMemory &&
           new b.NoriMemorySearchTool(this.agent.obsidianMemory),
         this.agent.obsidianMemory &&
           new b.NoriMemoryWriteTool(this.agent.obsidianMemory),
         this.agent.obsidianMemory &&
           new b.NoriMemoryRemoveTool(this.agent.obsidianMemory),
-        this.agent.swarmManager &&
-          new b.NoriSwarmLaunchTool(
-            this.agent.swarmManager,
-            this.agent.noriSwarmMaxDepth,
-            this.agent.noriSwarmDepth,
-            background,
-          ),
-        this.agent.swarmManager &&
-          new b.NoriSwarmStatusTool(this.agent.swarmManager),
-        this.agent.swarmManager &&
-          new b.NoriSwarmResultTool(this.agent.swarmManager),
       ]
         .filter((tool) => !!tool)
         .map((tool) => [tool.name, tool] as const),

@@ -53,15 +53,21 @@ describe('DefaultToolApprovePermissionPolicy', () => {
     expect(policy.evaluate(policyContext('CronDelete', { id: 'job_1' }))).toBeUndefined();
   });
 
-  it('does not approve AgentSwarm', () => {
+  it('does not approve SubAgent', () => {
     expect(
       policy.evaluate(
-        policyContext('AgentSwarm', {
+        policyContext('SubAgent', {
           description: 'Check files',
           prompt_template: 'Check {{item}}',
           items: ['a.ts', 'b.ts'],
         }),
       ),
     ).toBeUndefined();
+  });
+
+  it('auto-approves TeamDecide', () => {
+    expect(
+      policy.evaluate(policyContext('TeamDecide', { action: 'start', topic: 'Cache', statement: 'Lead first.' })),
+    ).toEqual({ kind: 'approve' });
   });
 });

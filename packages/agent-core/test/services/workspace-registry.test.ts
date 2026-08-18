@@ -170,12 +170,19 @@ describe('WorkspaceRegistryService', () => {
     expect(list.map((w) => w.root)).toContain(root);
   });
 
-  it('registers a derived workspace under the symlink bucket key, not the realpath', async () => {
+  it('registers a derived workspace under the symlink bucket key, not the realpath', async (testContext) => {
     const realDir = await makeProjectRoot('real');
     const linkParent = await mkdtemp(join(tmpdir(), 'kimi-ws-link-'));
     tempRoots.push(linkParent);
     const linkDir = join(linkParent, 'link');
-    await symlink(realDir, linkDir);
+    try {
+      await symlink(realDir, linkDir);
+    } catch (error) {
+      if (isWindowsSymlinkPrivilegeError(error)) {
+        return testContext.skip('Windows symlink privilege is unavailable');
+      }
+      throw error;
+    }
 
     // Seed a session bucket keyed by the SYMLINK path (resolve, not realpath),
     // matching how SessionStore keys cwd-only sessions created from a symlinked cwd.
@@ -255,3 +262,11 @@ describe('WorkspaceRegistryService', () => {
     expect(matches[0]?.session_count).toBe(1);
   });
 });
+
+function isWindowsSymlinkPrivilegeError(error: unknown): boolean {
+  return process.platform === 'win32'
+    && typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && error.code === 'EPERM';
+}

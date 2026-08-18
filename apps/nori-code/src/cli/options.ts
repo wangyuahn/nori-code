@@ -6,7 +6,7 @@ export interface CLIOptions {
   session: string | undefined;
   continue: boolean;
   permission?: CLIPermissionMode;
-  plan: boolean;
+  discuss: boolean;
   model: string | undefined;
   outputFormat: PromptOutputFormat | undefined;
   prompt: string | undefined;
@@ -41,8 +41,8 @@ export function validateOptions(opts: CLIOptions): ValidatedOptions {
   if (promptMode && opts.permission !== undefined) {
     throw new OptionConflictError('Cannot combine --prompt with --permission.');
   }
-  if (promptMode && opts.plan) {
-    throw new OptionConflictError('Cannot combine --prompt with --plan.');
+  if (promptMode && opts.discuss) {
+    throw new OptionConflictError('Cannot combine --prompt with --discuss.');
   }
   if (promptMode && opts.session === '') {
     throw new OptionConflictError('Cannot use --session without an id in prompt mode.');

@@ -26,6 +26,13 @@ export interface ReasoningMetadata {
   readonly efforts: string[] | undefined;
 }
 
+export function defaultEffortFromList(efforts: readonly string[] | undefined): string | undefined {
+  if (efforts === undefined || efforts.length === 0) return undefined;
+  if (efforts.includes('medium')) return 'medium';
+  if (efforts.includes('high')) return 'high';
+  return efforts[Math.floor(efforts.length / 2)];
+}
+
 /**
  * Resolves adjustable reasoning metadata using the same precedence as OpenCode:
  * explicit catalog options win, while provider/model-family variants are only
@@ -108,6 +115,7 @@ function isKnownReasoningModel(id: string): boolean {
     || id.includes('reason')
     || id.includes('thinking')
     || id.includes('claude-3-7')
+    || /claude-(?:sonnet|opus|haiku)-[4-9]/.test(id)
     || id.includes('claude-4')
     || id.includes('claude-fable-5')
     || id.includes('gemini-2.5')

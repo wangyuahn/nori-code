@@ -53,6 +53,66 @@ describe('Nori filesystem memory provider', () => {
 
     expect(content).toContain('related:\n  - "[[decision/architecture|Architecture choice]]"');
     expect(content).toContain('## Related\n- [[decision/architecture|Architecture choice]]');
+    expect(content).toMatch(/created_at: "\d{4}-\d{2}-\d{2}T/);
+    expect(content).toMatch(/updated_at: "\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('returns created_at from frontmatter and preserves it on overwrite', async () => {
+    const root = await tempRoot();
+    const vault = join(root, 'nori-vault');
+    await mkdir(join(vault, 'analysis'), { recursive: true });
+    await writeFile(
+      join(vault, 'analysis', 'legacy-timestamped.md'),
+      [
+        '---',
+        'title: "Timestamped note"',
+        'type: analysis',
+        'date: 2026-08-10',
+        'created_at: "2026-08-10T04:15:00.000Z"',
+        'updated_at: "2026-08-10T04:15:00.000Z"',
+        '---',
+        '',
+        'Original body with keyword alpha.',
+      ].join('\n'),
+      'utf-8',
+    );
+    const providers = createNoriProvidersFromConfig(
+      { obsidian: { vault_path: './nori-vault' } },
+      SIMPLE_CONFIG,
+      root,
+    );
+    if (providers === null) throw new Error('expected providers');
+
+    const found = await providers.memory.multiRetrieve(['alpha']);
+    expect(found).toEqual([
+      expect.objectContaining({
+        title: 'Timestamped note',
+        created_at: '2026-08-10T04:15:00.000Z',
+        updated_at: '2026-08-10T04:15:00.000Z',
+        date: '2026-08-10',
+      }),
+    ]);
+
+    const firstWrite = await providers.memory.writeNote({
+      note_type: 'analysis',
+      title: 'Overwrite target',
+      content: 'First body with keyword beta.',
+    });
+    const firstRaw = await readFile(join(vault, firstWrite.path), 'utf-8');
+    const createdMatch = /created_at: "([^"]+)"/.exec(firstRaw);
+    expect(createdMatch?.[1]).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+
+    await new Promise(resolve => setTimeout(resolve, 5));
+    const rewritten = await providers.memory.writeNote({
+      note_type: 'analysis',
+      title: 'Overwrite target',
+      content: 'Rewritten body with keyword beta.',
+    });
+    expect(rewritten.path).toBe(firstWrite.path);
+    const content = await readFile(join(vault, rewritten.path), 'utf-8');
+    expect(content).toContain(`created_at: "${createdMatch![1]!}"`);
+    expect(content).toMatch(/updated_at: "\d{4}-\d{2}-\d{2}T/);
+    expect(content).not.toContain(`updated_at: "${createdMatch![1]!}"`);
   });
 
   it('does not make embedding requests in simple mode', async () => {

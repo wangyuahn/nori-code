@@ -131,6 +131,7 @@ describe('refreshProviderModels', () => {
         thinkingSupport: true,
         capabilities: expect.arrayContaining(['thinking']),
         supportEfforts: ['none', 'low', 'medium', 'high', 'xhigh'],
+        defaultEffort: 'medium',
       }),
     );
     expect(harness.config().models?.['gateway/gpt-5.4(auto)']).toEqual(
@@ -274,6 +275,13 @@ describe('refreshProviderModels', () => {
           'x-api-key': 'anthropic-key',
           'anthropic-version': '2023-06-01',
         }),
+      }),
+    );
+    expect(harness.config().models?.['anthropic/claude-sonnet-4']).toEqual(
+      expect.objectContaining({
+        thinkingSupport: true,
+        supportEfforts: ['high', 'max'],
+        defaultEffort: 'high',
       }),
     );
   });

@@ -130,6 +130,13 @@ export type PermissionConfig = z.infer<typeof PermissionConfigSchema>;
 export const LoopControlSchema = z.object({
   maxStepsPerTurn: z.number().int().min(0).optional(),
   goalMaxTurns: z.number().int().min(0).optional(),
+  /**
+   * Minutes of no background-task reaction before goal mode force-wakes the
+   * main agent while unfinished background work exists. Unset defaults to 5 at
+   * runtime. `0` disables the timeout wake but still suppresses immediate
+   * goal continuation while background tasks are unfinished.
+   */
+  goalBackgroundIdleMinutes: z.number().int().min(0).optional(),
   maxRetriesPerStep: z.number().int().min(0).optional(),
   maxRalphIterations: z.number().int().min(-1).optional(),
   reservedContextSize: z.number().int().min(0).optional(),
@@ -141,7 +148,7 @@ export type LoopControl = z.infer<typeof LoopControlSchema>;
 export const CustomAgentConfigSchema = z.object({
   description: z.string().min(1),
   role: z.string().min(1),
-  baseProfile: z.enum(['orchestrator', 'nori-coder', 'coder', 'explore', 'plan']).default('coder'),
+  baseProfile: z.enum(['orchestrator', 'nori-coder', 'coder', 'explore']).default('coder'),
   model: z.string().trim().min(1).optional(),
   enabled: z.boolean().default(true),
   permissions: z.object({
@@ -274,10 +281,10 @@ export const KimiConfigSchema = z.object({
   defaultModel: z.string().optional(),
   models: z.record(z.string(), ModelAliasSchema).optional(),
   thinking: ThinkingConfigSchema.optional(),
-  planMode: z.boolean().optional(),
+  discussMode: z.boolean().optional(),
   yolo: z.boolean().optional(),
   defaultPermissionMode: PermissionModeSchema.optional(),
-  defaultPlanMode: z.boolean().optional(),
+  defaultDiscussMode: z.boolean().optional(),
   permission: PermissionConfigSchema.optional(),
   hooks: z.array(HookDefSchema).optional(),
   services: ServicesConfigSchema.optional(),
@@ -302,7 +309,16 @@ const ProviderConfigPatchSchema = ProviderConfigSchema.partial().extend({
     .union([ProviderConfigSchema.shape.customModels, z.null()])
     .optional(),
 });
-const ModelAliasPatchSchema = z.union([ModelAliasSchema.partial(), z.null()]);
+const ModelAliasPatchSchema = z.union([
+  ModelAliasSchema.partial().extend({
+    // `null` deletes previously persisted thinking metadata when a custom
+    // model is switched to toggle/unsupported. Omission would deep-merge and
+    // keep the old `supportEfforts` / `defaultEffort`.
+    supportEfforts: z.union([z.array(z.string()), z.null()]).optional(),
+    defaultEffort: z.union([z.string(), z.null()]).optional(),
+  }),
+  z.null(),
+]);
 const ThinkingConfigPatchSchema = ThinkingConfigSchema.partial();
 const PermissionConfigPatchSchema = PermissionConfigSchema.partial();
 const LoopControlPatchSchema = LoopControlSchema.partial();
@@ -324,10 +340,10 @@ export const KimiConfigPatchSchema = z
     defaultModel: z.string().optional(),
     models: z.record(z.string(), ModelAliasPatchSchema).optional(),
     thinking: ThinkingConfigPatchSchema.optional(),
-    planMode: z.boolean().optional(),
+    discussMode: z.boolean().optional(),
     yolo: z.boolean().optional(),
     defaultPermissionMode: PermissionModeSchema.optional(),
-    defaultPlanMode: z.boolean().optional(),
+    defaultDiscussMode: z.boolean().optional(),
     permission: PermissionConfigPatchSchema.optional(),
     hooks: z.array(HookDefSchema).optional(),
     services: ServicesConfigPatchSchema.optional(),

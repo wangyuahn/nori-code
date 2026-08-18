@@ -71,7 +71,7 @@ function makeFakeSession(sessionId: string): Session {
     cancel: async () => undefined,
     onEvent: (_fn: (event: Event) => void) => () => undefined,
     setApprovalHandler: (_handler: ApprovalHandler | undefined) => undefined,
-    setPlanMode: async () => undefined,
+    setDiscussMode: async () => undefined,
     setPermission: async (_mode: PermissionMode) => undefined,
     setModel: async () => undefined,
     setThinking: async () => undefined,
@@ -150,13 +150,13 @@ describe('config_option_update wire-shape funnel', () => {
     const { client, capturing, sessionId } = await openSession(harness);
     capturing.notifications.length = 0;
 
-    await client.setSessionMode({ sessionId, modeId: 'plan' });
+    await client.setSessionMode({ sessionId, modeId: 'discuss' });
 
     const update = extractSingleConfigOptionUpdate(capturing, sessionId);
     if (update.sessionUpdate !== 'config_option_update') throw new Error('unreachable');
     const modeOpt = update.configOptions.find((o) => o.id === 'mode');
     if (modeOpt && modeOpt.type === 'select') {
-      expect(modeOpt.currentValue).toBe('plan');
+      expect(modeOpt.currentValue).toBe('discuss');
     }
   });
 
@@ -240,7 +240,7 @@ describe('config_option_update wire-shape funnel', () => {
       c.unstable_setSessionModel({ sessionId: sid, modelId: 'kimi-v2' }),
     );
     const viaMode = await envelopeFromPath((c, sid) =>
-      c.setSessionMode({ sessionId: sid, modeId: 'plan' }),
+      c.setSessionMode({ sessionId: sid, modeId: 'discuss' }),
     );
     const viaConfigOption = await envelopeFromPath((c, sid) =>
       c.setSessionConfigOption({ sessionId: sid, configId: 'mode', value: 'yolo' }),

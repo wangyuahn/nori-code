@@ -6,15 +6,15 @@ A sub-agent receives a task description from the main Agent, works in its own is
 
 ## Main Agent and read-only mode
 
-The main Agent keeps the core project-inspection tools available: `Read`, `Grep`, `Glob`, and `Bash`. In Nori's default read-only posture, direct `Write` and `Edit` calls are blocked, but `Bash` follows the same normal permission rules used outside read-only mode. This means the main Agent can inspect files, search the codebase, and run bounded verification commands while still delegating source-code changes to `AgentSwarm`.
+The main Agent keeps the core project-inspection tools available: `Read`, `Grep`, `Glob`, and `Bash`. In Nori's default read-only posture, direct `Write` and `Edit` calls are blocked, but `Bash` follows the same normal permission rules used outside read-only mode. This means the main Agent can inspect files, search the codebase, and run bounded verification commands while still delegating source-code changes to `SubAgent`.
 
-Use `/setting readonly off` when you want the main Agent to perform direct file edits after approval. Use `/setting coder write on` when you want coding subagents to write directly; otherwise the preferred path is to keep the main Agent as the coordinator and let `AgentSwarm` run the implementation loop.
+Use `/setting readonly off` when you want the main Agent to perform direct file edits after approval. Use `/setting coder write on` when you want coding subagents to write directly; otherwise the preferred path is to keep the main Agent as the coordinator and let `SubAgent` run the implementation loop.
 
 ## Built-in Sub-Agents
 
 Kimi Code CLI includes four built-in sub-agents, ready to use out of the box, each aimed at a different task shape:
 
-- **`nori-coder`**: The default sub-agent — a read-only coding orchestrator that plans, decomposes, and delegates implementation to swarm sub-agents. It analyzes the codebase and coordinates work but does NOT write code directly.
+- **`nori-coder`**: The default sub-agent — a read-only coding orchestrator that plans, decomposes, and delegates implementation to SubAgent children. It analyzes the codebase and coordinates work but does NOT write code directly.
 - **`coder`**: A general-purpose software engineering assistant that can read and write files, execute commands, search code, and land concrete changes. Prefer `nori-coder` for new work.
 - **`explore`**: Dedicated to codebase exploration; performs read-only operations only and does not modify any files. Ideal for quickly searching, reading, and summarizing a repository without touching files.
 - **`plan`**: Dedicated to implementation planning and architecture design; even shell commands are not available, keeping the focus on "figuring out how to do something" rather than "actually doing it."
@@ -25,7 +25,7 @@ Sub-agents are scheduled automatically by the main Agent — based on task compl
 
 Each dispatch is presented in the terminal as an approval request (unless it matches an allow rule or YOLO mode is active), giving you a chance to review the task description. You can also instruct the main Agent directly in conversation to use a specific sub-agent, for example: "Use explore to map out the relevant files before making any changes."
 
-Sub-agents support running in the background: results are automatically returned to the main Agent upon completion, with no manual polling needed. You can also call back an existing sub-agent instance to continue the same task. For multi-part implementation work, prefer `AgentSwarm.tasks` so the main Agent can express independent tasks, dependency chains, verification tasks, and review tasks in one call.
+Sub-agents support running in the background: results are automatically returned to the main Agent upon completion, with no manual polling needed. You can also call back an existing sub-agent instance to continue the same task. For multi-part implementation work, prefer `SubAgent.tasks` so the main Agent can express independent tasks, dependency chains, verification tasks, and review tasks in one call.
 
 ## Context Isolation and Resource Cost
 
@@ -36,11 +36,11 @@ This isolation provides two benefits:
 - **The main Agent's context stays lean** and is not filled with large volumes of exploratory logs during long sessions.
 - **Multiple sub-agents can run in parallel** without interfering with each other.
 
-Note that each sub-agent independently consumes model tokens. For simple tasks, there is no need to dispatch a sub-agent — the main Agent handles them more economically. Sub-agents can launch further swarms only when their profile exposes the swarm tools and the configured nesting depth has not been reached.
+Note that each sub-agent independently consumes model tokens. For simple tasks, there is no need to dispatch a sub-agent — the main Agent handles them more economically. Sub-agents can launch further SubAgents only when their profile exposes the SubAgent tool and the configured nesting depth has not been reached.
 
 ## Permission Inheritance
 
-Sub-agent permission rules are inherited from the main Agent: "always allow" rules that the main Agent has accepted via `/permission` or through an approval dialog automatically propagate to all sub-agents it dispatches, so sub-agents do not need to re-approve the same types of tool calls. The `Agent` tool itself is allowed by default, enabling the main Agent to delegate multiple times without interrupting the user.
+Sub-agent permission rules are inherited from the main Agent: "always allow" rules that the main Agent has accepted via `/permission` or through an approval dialog automatically propagate to all sub-agents it dispatches, so sub-agents do not need to re-approve the same types of tool calls. The `SubAgent` tool itself is not auto-approved, so temporary delegation still follows the permission policy.
 
 The session read-only setting is separate from `default_permission_mode`. When read-only is on, direct `Write` and `Edit` calls are denied for the main Agent, while `Bash` still follows the current permission mode. This keeps project inspection and verification usable without turning the main Agent into the primary code-writing worker.
 

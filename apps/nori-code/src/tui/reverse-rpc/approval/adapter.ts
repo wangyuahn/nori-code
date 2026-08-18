@@ -11,11 +11,6 @@ const DEFAULT_APPROVAL_CHOICES: ApprovalPanelChoice[] = [
   { label: 'Reject with feedback', response: 'rejected', requires_feedback: true },
 ];
 
-const PLAN_REJECT_CHOICES: ApprovalPanelChoice[] = [
-  { label: 'Reject', response: 'rejected', selected_label: 'Reject' },
-  { label: 'Revise', response: 'rejected', selected_label: 'Revise', requires_feedback: true },
-];
-
 export function adaptApprovalRequest(event: ApprovalRequest): ApprovalPanelData {
   const resolved = resolveDisplay(event.toolName, event.display, event.action);
   return {
@@ -83,14 +78,12 @@ function extractFromArgs(
     };
   }
 
-  const oldString = stringField(detail, 'old_string');
-  const newString = stringField(detail, 'new_string');
-  if (oldString !== undefined && newString !== undefined) {
-    const path = stringField(detail, 'file_path') ?? stringField(detail, 'path') ?? '';
-    // Diff block carries its own `+N -M path` header — no separate
-    // file_op title row needed.
+  const editPath = stringField(detail, 'file_path') ?? stringField(detail, 'path');
+  if (toolName === 'Edit' && editPath !== undefined && Array.isArray(detail['line_ops'])) {
     return {
-      blocks: [{ type: 'diff', path, old_text: oldString, new_text: newString }],
+      blocks: [
+        { type: 'file_op', operation: 'edit', path: editPath, detail: editLineOpsDetail(detail) },
+      ],
       description: '',
     };
   }
@@ -143,6 +136,46 @@ function extractFromArgs(
   return null;
 }
 
+function editLineOpsDetail(detail: Record<string, unknown>): string {
+  const lines: string[] = [];
+  const tag = stringField(detail, 'expected_tag');
+  if (tag !== undefined) lines.push(`Expected tag: ${tag.toUpperCase()}`);
+  for (const candidate of detail['line_ops'] as unknown[]) {
+    if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) continue;
+    const operation = candidate as Record<string, unknown>;
+    const op = operation['op'];
+    if (
+      (op === 'swap' || op === 'del') &&
+      typeof operation['start'] === 'number' &&
+      typeof operation['end'] === 'number'
+    ) {
+      lines.push(
+        `${op === 'swap' ? 'replace' : 'delete'} lines ${String(operation['start'])}-${String(operation['end'])}`,
+      );
+      if (op === 'swap' && typeof operation['content'] === 'string') {
+        appendEditContent(lines, operation['content']);
+      }
+    } else if (
+      (op === 'insert_pre' || op === 'insert_post') &&
+      typeof operation['line'] === 'number'
+    ) {
+      lines.push(
+        `insert ${op === 'insert_pre' ? 'before' : 'after'} line ${String(operation['line'])}`,
+      );
+      if (typeof operation['content'] === 'string') {
+        appendEditContent(lines, operation['content']);
+      }
+    }
+  }
+  return lines.join('\n');
+}
+
+function appendEditContent(lines: string[], content: string): void {
+  const contentLines = content.split('\n');
+  if (content.endsWith('\n')) contentLines.pop();
+  for (const line of contentLines) lines.push(`+ ${line}`);
+}
+
 function inferFileOp(toolName: string): 'read' | 'write' | 'edit' | 'glob' | 'grep' {
   const lower = toolName.toLowerCase();
   if (lower.includes('glob')) return 'glob';
@@ -175,8 +208,6 @@ export function adaptPanelResponse(response: ApprovalPanelResponse): ApprovalRes
 
 function describeApproval(display: ToolInputDisplay, action: string): string {
   switch (display.kind) {
-    case 'plan_review':
-      return '';
     case 'goal_start':
       return 'Start a goal?';
     case 'generic':
@@ -262,15 +293,6 @@ function adaptDisplay(display: ToolInputDisplay): DisplayBlock[] {
       if (display.operation === 'write' && typeof display.content === 'string') {
         return [{ type: 'file_content', path, content: display.content }];
       }
-      // Edit attaches the old_string/new_string hunk as before/after — render
-      // it as a diff block so ctrl+e expansion works on the change.
-      if (
-        display.operation === 'edit' &&
-        typeof display.before === 'string' &&
-        typeof display.after === 'string'
-      ) {
-        return [{ type: 'diff', path, old_text: display.before, new_text: display.after }];
-      }
       return [
         {
           type: 'file_op',
@@ -321,8 +343,6 @@ function adaptDisplay(display: ToolInputDisplay): DisplayBlock[] {
           text: `Stop task ${display.task_id ?? ''}: ${display.task_description ?? ''}`,
         },
       ];
-    case 'plan_review':
-      return [];
     case 'goal_start': {
       const lines = [`Start goal: ${display.objective}`];
       if (typeof display.completionCriterion === 'string' && display.completionCriterion.length > 0) {
@@ -341,10 +361,7 @@ function adaptDisplay(display: ToolInputDisplay): DisplayBlock[] {
   }
 }
 
-function adaptChoices(toolName: string, display: ToolInputDisplay): ApprovalPanelChoice[] {
-  if (toolName === 'ExitPlanMode' || display.kind === 'plan_review') {
-    return adaptPlanReviewChoices(display);
-  }
+function adaptChoices(_toolName: string, display: ToolInputDisplay): ApprovalPanelChoice[] {
   if (display.kind === 'goal_start') {
     return adaptGoalStartChoices(display);
   }
@@ -373,18 +390,6 @@ function adaptGoalStartChoices(
           description: option.description,
         },
   );
-}
-
-function adaptPlanReviewChoices(display: ToolInputDisplay): ApprovalPanelChoice[] {
-  const optionChoices =
-    display.kind === 'plan_review' && display.options !== undefined && display.options.length >= 2
-      ? display.options.map((option) => ({
-          label: option.label,
-          response: 'approved' as const,
-          selected_label: option.label,
-        }))
-      : [{ label: 'Approve', response: 'approved' as const, selected_label: 'Approve' }];
-  return [...optionChoices, ...PLAN_REJECT_CHOICES].map((choice) => cloneChoice(choice));
 }
 
 function cloneChoice(choice: ApprovalPanelChoice): ApprovalPanelChoice {

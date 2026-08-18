@@ -3,7 +3,7 @@
  */
 
 import { Disposable, InstantiationType, registerSingleton } from '../../di';
-import type { KimiConfig } from '../../config';
+import type { KimiConfig, ProviderConfig } from '../../config';
 import type { AuthSummary } from '@nori-code/protocol';
 import { createManagedAuthFacade, type ServicesAuthFacade } from '../auth/managedAuth';
 import { IEnvironmentService } from '../environment/environment';
@@ -50,7 +50,7 @@ export class AuthSummaryService
 
     const ready =
       providers_count >= 1 &&
-      default_model !== null &&
+      await this._firstReadyModelId(config) !== undefined &&
       (managed_provider === null || managed_provider.status !== 'revoked');
 
     return { ready, providers_count, default_model, managed_provider };
@@ -63,9 +63,9 @@ export class AuthSummaryService
       throw new AuthProvisioningRequiredError();
     }
 
-    const modelId = modelOverride ?? config.defaultModel;
-    if (modelId === undefined || modelId === '') {
-      throw new AuthModelNotResolvedError(undefined);
+    const modelId = resolveReadyModelId(config, modelOverride);
+    if (modelId === undefined) {
+      throw new AuthModelNotResolvedError(nonEmpty(modelOverride) ?? undefined);
     }
 
     const alias = config.models?.[modelId];
@@ -131,12 +131,72 @@ export class AuthSummaryService
       return false;
     }
   }
+
+  private async _firstReadyModelId(config: KimiConfig): Promise<string | undefined> {
+    for (const modelId of Object.keys(config.models ?? {})) {
+      if (!modelResolves(config, modelId)) continue;
+      const alias = config.models?.[modelId];
+      const providerName = alias?.provider ?? config.defaultProvider;
+      if (providerName === undefined) continue;
+      const provider = config.providers?.[providerName];
+      if (provider === undefined) continue;
+      if (hasInlineCredential(provider)) return modelId;
+      if (provider.oauth !== undefined && await this._hasCachedToken(providerName)) return modelId;
+    }
+    return undefined;
+  }
 }
 
 function nonEmpty(value: string | undefined): string | null {
   if (value === undefined) return null;
   const trimmed = value.trim();
   return trimmed.length === 0 ? null : trimmed;
+}
+
+export function resolveReadyModelId(config: KimiConfig, modelOverride?: string): string | undefined {
+  const requested = nonEmpty(modelOverride);
+  if (requested !== null) return requested;
+
+  const configured = nonEmpty(config.defaultModel);
+  if (configured !== null && modelResolves(config, configured)) return configured;
+
+  return firstResolvedModelId(config);
+}
+
+export function firstUsableModelId(config: KimiConfig): string | undefined {
+  for (const modelId of Object.keys(config.models ?? {})) {
+    if (modelResolves(config, modelId) && providerHasStaticCredential(config, modelId)) {
+      return modelId;
+    }
+  }
+  return undefined;
+}
+
+function firstResolvedModelId(config: KimiConfig): string | undefined {
+  return Object.keys(config.models ?? {}).find(modelId => modelResolves(config, modelId));
+}
+
+function modelResolves(config: KimiConfig, modelId: string): boolean {
+  const alias = config.models?.[modelId];
+  if (alias === undefined) return false;
+  const providerName = alias.provider ?? config.defaultProvider;
+  if (providerName === undefined || providerName === '') return false;
+  const provider = config.providers?.[providerName];
+  return provider !== undefined && provider.disabled !== true;
+}
+
+function providerHasStaticCredential(config: KimiConfig, modelId: string): boolean {
+  const alias = config.models?.[modelId];
+  if (alias === undefined) return false;
+  const providerName = alias.provider ?? config.defaultProvider;
+  if (providerName === undefined) return false;
+  const provider = config.providers?.[providerName];
+  if (provider === undefined) return false;
+  return hasInlineCredential(provider);
+}
+
+function hasInlineCredential(provider: ProviderConfig): boolean {
+  return nonEmpty(provider.apiKey) !== null;
 }
 
 // Self-register under the global singleton registry. All ctor deps are

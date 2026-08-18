@@ -43,7 +43,7 @@ function makeStartupInput(): KimiTUIStartupInput {
       session: undefined,
       continue: false,
       permission: undefined,
-      plan: false,
+      discuss: false,
       model: undefined,
       outputFormat: undefined,
       prompt: undefined,
@@ -155,8 +155,7 @@ function baseAgentState(
     context: { history: [], tokenCount: 0 },
     replay,
     permission: { mode: 'manual', rules: [] },
-    plan: null,
-    swarmMode: false,
+    discussMode: false,
     usage: {},
     tools: [],
     toolStore: {},
@@ -178,7 +177,7 @@ function makeSession(
       model: 'k2',
       thinkingEffort: 'off',
       permission: 'manual',
-      planMode: false,
+      discussMode: false,
       contextTokens: 0,
       maxContextTokens: 100,
       contextUsage: 0,
@@ -189,7 +188,7 @@ function makeSession(
     setModel: vi.fn(async () => {}),
     setThinking: vi.fn(async () => {}),
     setPermission: vi.fn(async () => {}),
-    setPlanMode: vi.fn(async () => {}),
+    setDiscussMode: vi.fn(async () => {}),
     onEvent: vi.fn(() => vi.fn()),
     listMcpServers: vi.fn(async () => []),
     listSkills: vi.fn(async () => []),
@@ -640,12 +639,12 @@ describe('KimiTUI resume message replay', () => {
     expect(driver.streamingUI.getToolComponent('call_read_2')).toBeUndefined();
   });
 
-  it('renders replayed AgentSwarm calls as compact result summaries', async () => {
+  it('renders replayed SubAgent calls as compact result summaries', async () => {
     const replay: AgentReplayRecord[] = [
-      message('user', [{ type: 'text', text: 'review files with a swarm' }]),
+      message('user', [{ type: 'text', text: 'review files with subagents' }]),
       message('assistant', [], {
         toolCalls: [
-          toolCall('call_swarm', 'AgentSwarm', {
+          toolCall('call_subagent', 'SubAgent', {
             description: 'Review changed files',
             items: ['src/a.ts', 'src/b.ts'],
           }),
@@ -656,32 +655,32 @@ describe('KimiTUI resume message replay', () => {
         [{
           type: 'text',
           text: [
-            '<agent_swarm_result>',
+            '<subagent_result>',
             '<summary>completed: 1, failed: 1</summary>',
             '<subagent index="1" outcome="completed">Reviewed src/a.ts.</subagent>',
             '<subagent index="2" outcome="failed">Agent timed out.</subagent>',
-            '</agent_swarm_result>',
+            '</subagent_result>',
           ].join('\n'),
         }],
-        { toolCallId: 'call_swarm' },
+        { toolCallId: 'call_subagent' },
       ),
     ];
 
     const driver = await replayIntoDriver(replay);
     const transcript = stripAnsi(driver.state.transcriptContainer.render(140).join('\n'));
 
-    expect(transcript).toContain('Agent swarm: ✓ 1 completed · ✗ 1 failed');
-    expect(transcript).not.toContain('<agent_swarm_result>');
+    expect(transcript).toContain('SubAgent: ✓ 1 completed · ✗ 1 failed');
+    expect(transcript).not.toContain('<subagent_result>');
     expect(transcript).not.toContain('Reviewed src/a.ts.');
     expect(transcript).not.toContain('Agent timed out.');
   });
 
-  it('does not show no-index replayed AgentSwarm failures as completed', async () => {
+  it('does not show no-index replayed SubAgent failures as completed', async () => {
     const replay: AgentReplayRecord[] = [
-      message('user', [{ type: 'text', text: 'review files with a swarm' }]),
+      message('user', [{ type: 'text', text: 'review files with subagents' }]),
       message('assistant', [], {
         toolCalls: [
-          toolCall('call_swarm', 'AgentSwarm', {
+          toolCall('call_subagent', 'SubAgent', {
             description: 'Review changed files',
             items: ['src/a.ts', 'src/b.ts'],
           }),
@@ -692,27 +691,27 @@ describe('KimiTUI resume message replay', () => {
         [{
           type: 'text',
           text: [
-            '<agent_swarm_result>',
+            '<subagent_result>',
             '<summary>failed: 1, aborted: 1</summary>',
-            '<resume_hint>Call AgentSwarm with resume_agent_ids using the agent_id values ' +
+            '<resume_hint>Call SubAgent with resume_agent_ids using the agent_id values ' +
               'in this result to continue unfinished work.</resume_hint>',
             '<subagent agent_id="agent-1" item="src/a.ts" outcome="failed">' +
               'Agent timed out.</subagent>',
             '<subagent agent_id="agent-2" item="src/b.ts" outcome="aborted">' +
               'User interrupted.</subagent>',
-            '</agent_swarm_result>',
+            '</subagent_result>',
           ].join('\n'),
         }],
-        { toolCallId: 'call_swarm' },
+        { toolCallId: 'call_subagent' },
       ),
     ];
 
     const driver = await replayIntoDriver(replay);
     const transcript = stripAnsi(driver.state.transcriptContainer.render(140).join('\n'));
 
-    expect(transcript).toContain('Agent swarm: ✗ 1 failed · ⊘ 1 aborted');
-    expect(transcript).not.toContain('Agent swarm: ✓ Completed.');
-    expect(transcript).not.toContain('<agent_swarm_result>');
+    expect(transcript).toContain('SubAgent: ✗ 1 failed · ⊘ 1 aborted');
+    expect(transcript).not.toContain('SubAgent: ✓ Completed.');
+    expect(transcript).not.toContain('<subagent_result>');
   });
 
   it('hydrates todo and background snapshot state from resumed main agent', async () => {
@@ -1064,9 +1063,9 @@ describe('KimiTUI resume message replay', () => {
     expect(transcript).not.toContain('Compaction complete');
   });
 
-  it('renders plan permission and approval replay notices', async () => {
+  it('renders Discuss permission and approval replay notices', async () => {
     const driver = await replayIntoDriver([
-      { time: REPLAY_TIME, type: 'plan_updated', enabled: true },
+      { time: REPLAY_TIME, type: 'discuss_updated', enabled: true },
       { time: REPLAY_TIME, type: 'permission_updated', mode: 'auto' },
       { time: REPLAY_TIME, type: 'permission_updated', mode: 'yolo' },
       { time: REPLAY_TIME, type: 'permission_updated', mode: 'manual' },
@@ -1085,75 +1084,16 @@ describe('KimiTUI resume message replay', () => {
           },
         },
       },
-      { time: REPLAY_TIME, type: 'plan_updated', enabled: false },
+      { time: REPLAY_TIME, type: 'discuss_updated', enabled: false },
     ]);
 
     const transcript = driver.state.transcriptContainer.render(120).join('\n');
 
-    expect(transcript).toContain('Plan mode: ON');
+    expect(transcript).toContain('Discuss: ON');
     expect(transcript).toContain('Permission mode: auto');
     expect(transcript).toContain('YOLO mode: ON');
     expect(transcript).toContain('YOLO mode: OFF');
     expect(transcript).toContain('Approved for session: run command');
-    expect(transcript).toContain('Plan mode: OFF');
-  });
-
-  it('keeps only the final approved plan card after rejected plan reviews', async () => {
-    const driver = await replayIntoDriver([
-      message('assistant', [], {
-        toolCalls: [toolCall('call_exit_reject', 'ExitPlanMode', {})],
-      }),
-      {
-        time: REPLAY_TIME,
-        type: 'approval_result',
-        record: {
-          turnId: 0,
-          toolCallId: 'call_exit_reject',
-          action: 'Review plan',
-          toolName: 'ExitPlanMode',
-          result: { decision: 'rejected', selectedLabel: 'Reject' },
-        },
-      },
-      message('tool', [{ type: 'text', text: 'Plan rejected by user. Plan mode remains active.' }], {
-        toolCallId: 'call_exit_reject',
-        isError: true,
-      }),
-      message('assistant', [], {
-        toolCalls: [toolCall('call_exit_final', 'ExitPlanMode', {})],
-      }),
-      {
-        time: REPLAY_TIME,
-        type: 'approval_result',
-        record: {
-          turnId: 1,
-          toolCallId: 'call_exit_final',
-          action: 'Review plan',
-          toolName: 'ExitPlanMode',
-          result: { decision: 'approved', selectedLabel: 'Approve' },
-        },
-      },
-      message(
-        'tool',
-        [
-          {
-            type: 'text',
-            text:
-              'Exited plan mode. Plan mode deactivated. All tools are now available.\n' +
-              'Plan saved to: /tmp/plans/final-plan.md\n\n' +
-              '## Approved Plan:\n# Final Plan\n\n- replay final approved plan',
-          },
-        ],
-        { toolCallId: 'call_exit_final' },
-      ),
-      { time: REPLAY_TIME, type: 'plan_updated', enabled: false },
-    ]);
-
-    const transcript = driver.state.transcriptContainer.render(120).join('\n');
-
-    expect(transcript).toContain('Plan review rejected');
-    expect(transcript).toContain('Final Plan');
-    expect(transcript).toContain('replay final approved plan');
-    expect(transcript).not.toContain('Plan rejected by user.');
-    expect(transcript).not.toContain('Plan mode: OFF');
+    expect(transcript).toContain('Discuss: OFF');
   });
 });

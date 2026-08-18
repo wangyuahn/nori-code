@@ -1,20 +1,11 @@
-import { usePhaseStatus, useVaultNotes, type SwarmConnectionState } from '../hooks/useApi';
+import { useVaultNotes } from '../hooks/useApi';
 import { useI18n } from '../i18n';
 import type { ModelCatalogItem, Session } from '../api/client';
 import { UsageOverview } from './UsageOverview';
 
-const PHASES = ['plan', 'implement', 'review'] as const;
-
-export function Dashboard({ swarm, sessions, models }: { swarm: SwarmConnectionState; sessions: Session[]; models: ModelCatalogItem[] }) {
+export function Dashboard({ sessions, models }: { sessions: Session[]; models: ModelCatalogItem[] }) {
   const { tr } = useI18n();
-  const { phase } = usePhaseStatus();
-  const { swarmStatuses, connected } = swarm;
   const { notes: vaultNotes } = useVaultNotes();
-
-  const phaseIndex = phase.phase === 'idle' ? -1 : PHASES.indexOf(phase.phase as typeof PHASES[number]);
-  const agents = Array.from(swarmStatuses.values());
-  const activeCount = agents.filter(a => a.status === 'running').length;
-  const doneCount = agents.filter(a => a.status === 'done').length;
 
   const vaultCounts = { analysis: 0, decision: 0, review: 0, task: 0 };
   for (const n of vaultNotes) {
@@ -24,45 +15,6 @@ export function Dashboard({ swarm, sessions, models }: { swarm: SwarmConnectionS
   return (
     <div className="dashboard-layout">
       <div className="dashboard-main">
-      {/* Phase */}
-      <div className="card">
-        <div className="card-header">{tr('Phase', '阶段')}</div>
-        <div className="phase-bar">
-          {PHASES.map((p, i) => {
-            const isActive = i === phaseIndex;
-            const isDone = i < phaseIndex;
-            return (
-              <div key={p} className={`phase-step ${isActive ? 'active' : ''} ${isDone ? 'done' : ''}`}>
-                {isDone ? '✓ ' : ''}{tr(p, p === 'plan' ? '规划' : p === 'implement' ? '实现' : '评审')}
-              </div>
-            );
-          })}
-          {phaseIndex === -1 && <div className="phase-step muted">{tr('Idle', '空闲')}</div>}
-        </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--nori-text-muted)', marginTop: 8 }}>
-          <span>{tr('Mode', '模式')}: {phase.mode || 'hybrid'}</span>
-          <span>{tr('Step', '步骤')}: {phase.step}</span>
-        </div>
-      </div>
-
-      {/* Status row */}
-      <div className="grid-2">
-        <div className="card">
-          <div className="card-header">{tr('Connection', '连接')}</div>
-          <div className="dashboard-connection-stat">
-            <span className={`status-dot ${connected ? 'active' : 'error'}`} />
-            <span>{connected ? tr('Live', '已连接') : tr('Offline', '离线')}</span>
-          </div>
-        </div>
-        <div className="card">
-          <div className="card-header">{tr('Swarm', '智能体协作')}</div>
-          <div className="dashboard-swarm-stat">
-            {activeCount > 0 ? tr(`${activeCount} active`, `${activeCount} 个活动中`) : doneCount > 0 ? tr(`${doneCount} done`, `${doneCount} 个已完成`) : '—'}
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--nori-text-muted)' }}>{tr(`${agents.length} total`, `共 ${agents.length} 个`)}</div>
-        </div>
-      </div>
-
       {/* Vault stats */}
       <div className="card">
         <div className="card-header">{tr('Vault', '知识库')}</div>
@@ -76,21 +28,6 @@ export function Dashboard({ swarm, sessions, models }: { swarm: SwarmConnectionS
         </div>
       </div>
 
-      {/* Recent agents */}
-      {agents.length > 0 && (
-        <div className="card">
-          <div className="card-header">{tr('Recent agents', '最近智能体')}</div>
-          {agents.slice(0, 5).map(a => (
-            <div key={a.swarm_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--nori-border)' }}>
-              <span className={`status-dot ${a.status}`} />
-              <span style={{ flex: 1, fontFamily: 'var(--nori-font)', fontSize: 12 }}>{a.swarm_id.slice(0, 12)}</span>
-              <span className={`badge badge-${a.status === 'done' ? 'success' : a.status === 'running' ? 'info' : a.status === 'failed' ? 'danger' : 'muted'}`}>
-                {a.status}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
       </div>
       <aside className="dashboard-usage">
         <UsageOverview sessions={sessions} models={models}/>

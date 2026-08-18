@@ -39,7 +39,7 @@ export interface EditorKeyboardHost {
   hideSessionPicker(): void;
   openUndoSelector(): void;
   stop(exitCode?: number): Promise<void>;
-  handlePlanToggle(next: boolean): void;
+  handleDiscussToggle(next: boolean): void;
   handleInputModeChange(mode: 'prompt' | 'bash'): void;
   clearQueuedMessages(): void;
   setExternalEditorRunning(running: boolean): void;
@@ -163,10 +163,10 @@ export class EditorKeyboardController {
         host.showError(NO_ACTIVE_SESSION_MESSAGE);
         return;
       }
-      const next = !host.state.appState.planMode;
-      host.track('shortcut_plan_toggle', { enabled: next });
-      host.track('shortcut_mode_switch', { to_mode: next ? 'plan' : 'agent' });
-      host.handlePlanToggle(next);
+      const next = !host.state.appState.discussMode;
+      host.track('shortcut_discuss_toggle', { enabled: next });
+      host.track('shortcut_mode_switch', { to_mode: next ? 'discuss' : 'agent' });
+      host.handleDiscussToggle(next);
     };
 
     editor.onInputModeChange = (mode) => {

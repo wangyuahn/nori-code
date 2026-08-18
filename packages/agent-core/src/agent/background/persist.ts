@@ -171,6 +171,9 @@ function normalizePersistedTask(task: DiskPersistedTask): PersistedTask {
   return {
     ...task,
     detached: task.detached ?? true,
+    stopReason: task.stopReason,
+    terminalNotificationSuppressed: task.terminalNotificationSuppressed,
+    timeoutMs: task.timeoutMs,
   };
 }
 

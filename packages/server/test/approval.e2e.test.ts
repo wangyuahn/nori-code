@@ -433,6 +433,68 @@ describe('Approval reverse-RPC: WS broadcast → REST resolve → Promise settle
     expect(env.code).toBe(40001);
   });
 
+  it('scopes child approvals by agent_id and resolves only the selected transcript', async () => {
+    const r = await bootDaemon();
+    const sid = await createSession(r);
+    const broker = r.services.invokeFunction(
+      (a) => a.get(IApprovalService) as ApprovalService,
+    );
+    const main = broker.request({
+      sessionId: sid,
+      agentId: 'main',
+      toolCallId: 'tc_main',
+      toolName: 'shell.run',
+      action: 'Run main',
+      display: { kind: 'generic', summary: 'main' } as never,
+    });
+    const child = broker.request({
+      sessionId: sid,
+      agentId: 'team_reviewer',
+      toolCallId: 'tc_child',
+      toolName: 'shell.run',
+      action: 'Run child',
+      display: { kind: 'generic', summary: 'child' } as never,
+    });
+
+    try {
+      const childList = await appOf(r).inject({
+        method: 'GET',
+        url: `/api/v1/sessions/${sid}/approvals?status=pending&agent_id=team_reviewer`,
+      });
+      const childEnv = envelopeOf<{ items: Array<{ approval_id: string; tool_call_id: string }> }>(childList.json());
+      expect(childEnv.code).toBe(0);
+      expect(childEnv.data?.items).toEqual([
+        expect.objectContaining({ tool_call_id: 'tc_child' }),
+      ]);
+      const childId = childEnv.data?.items[0]?.approval_id;
+      expect(childId).toBeDefined();
+
+      const resolved = await appOf(r).inject({
+        method: 'POST',
+        url: `/api/v1/sessions/${sid}/approvals/${childId}`,
+        payload: { decision: 'approved', agent_id: 'team_reviewer' },
+      });
+      expect(envelopeOf<{ resolved: boolean }>(resolved.json()).code).toBe(0);
+      expect((await child).decision).toBe('approved');
+
+      const mainList = await appOf(r).inject({
+        method: 'GET',
+        url: `/api/v1/sessions/${sid}/approvals?status=pending&agent_id=main`,
+      });
+      expect(envelopeOf<{ items: Array<{ tool_call_id: string }> }>(mainList.json()).data?.items).toEqual([
+        expect.objectContaining({ tool_call_id: 'tc_main' }),
+      ]);
+    } finally {
+      for (const item of broker.listPending(sid, 'main')) {
+        broker.resolve(item.approval_id, { decision: 'cancelled' });
+      }
+      for (const item of broker.listPending(sid, 'team_reviewer')) {
+        broker.resolve(item.approval_id, { decision: 'cancelled' });
+      }
+      await Promise.all([main.catch(() => undefined), child.catch(() => undefined)]);
+    }
+  });
+
   it('REST resolve on unknown approval_id returns 40404', async () => {
     const r = await bootDaemon();
     const sid = await createSession(r);

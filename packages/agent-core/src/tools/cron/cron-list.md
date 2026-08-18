@@ -42,7 +42,7 @@ Each record carries:
 Guidelines:
 
 - This tool is read-only and never mutates state, so it is always
-  safe to call (including in plan mode).
+  safe to call in restricted modes.
 - Users cannot directly manage cron tasks themselves; if they want to
   cancel or modify a schedule, route the request through the model
   (i.e. call `CronDelete` or `CronCreate` on their behalf).

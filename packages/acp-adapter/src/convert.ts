@@ -191,40 +191,9 @@ export function displayBlockToAcpContent(
       newText: block.after,
     };
   }
-  if (block.kind === 'plan_review') {
-    const text = composePlanContent(block);
-    if (text === null) return null;
-    return { type: 'content', content: { type: 'text', text } };
-  }
   return null;
 }
 
-/**
- * Render the text body of a `plan_review` display block:
- *  - When `block.plan` (after trimming) is empty, return `null` — the
- *    caller drops the content entry rather than surfacing a blank
- *    headline. The policy at
- *    `packages/agent-core/src/tools/builtin/planning/exit-plan-mode.ts:110`
- *    already guarantees a non-empty plan; this guard exists so the
- *    adapter does not depend on that invariant.
- *  - When `block.path` is set, prefix the plan with `Plan saved to:
- *    <path>` so the ACP client can show the on-disk location alongside
- *    the markdown body. Otherwise emit the plan markdown alone.
- *
- * The output is consumed by the ACP client as plain text inside a
- * `tool_call_update` content entry; no markdown-specific escaping is
- * needed (markdown is the content type, not a wire-format escape
- * concern).
- */
-function composePlanContent(
-  block: Extract<ToolInputDisplay, { kind: 'plan_review' }>,
-): string | null {
-  if (block.plan.trim().length === 0) return null;
-  if (block.path !== undefined) {
-    return `Plan saved to: ${block.path}\n\n${block.plan}`;
-  }
-  return block.plan;
-}
 
 /**
  * Convert a {@link ToolResultEvent}'s `output` into ACP

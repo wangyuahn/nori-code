@@ -53,14 +53,14 @@ function makeInMemoryStreamPair(): {
 
 interface FakeSessionHandle {
   session: Session;
-  planModeCalls: boolean[];
+  discussModeCalls: boolean[];
   setPermissionCalls: PermissionMode[];
   setModelCalls: string[];
   setThinkingCalls: string[];
 }
 
 function makeFakeSession(sessionId: string): FakeSessionHandle {
-  const planModeCalls: boolean[] = [];
+  const discussModeCalls: boolean[] = [];
   const setPermissionCalls: PermissionMode[] = [];
   const setModelCalls: string[] = [];
   const setThinkingCalls: string[] = [];
@@ -70,8 +70,8 @@ function makeFakeSession(sessionId: string): FakeSessionHandle {
     cancel: async () => undefined,
     onEvent: (_fn: (event: Event) => void) => () => undefined,
     setApprovalHandler: (_handler: ApprovalHandler | undefined) => undefined,
-    setPlanMode: async (enabled: boolean) => {
-      planModeCalls.push(enabled);
+    setDiscussMode: async (enabled: boolean) => {
+      discussModeCalls.push(enabled);
     },
     setPermission: async (mode: PermissionMode) => {
       setPermissionCalls.push(mode);
@@ -83,7 +83,7 @@ function makeFakeSession(sessionId: string): FakeSessionHandle {
       setThinkingCalls.push(effort);
     },
   } as unknown as Session;
-  return { session, planModeCalls, setPermissionCalls, setModelCalls, setThinkingCalls };
+  return { session, discussModeCalls, setPermissionCalls, setModelCalls, setThinkingCalls };
 }
 
 function makeHarness(handle: FakeSessionHandle): KimiHarness {
@@ -265,18 +265,18 @@ describe('AcpServer session/set_config_option', () => {
   });
 
   const MODE_CASES: ReadonlyArray<{
-    modeId: 'default' | 'plan' | 'auto' | 'yolo';
-    expectedPlan: boolean;
+    modeId: 'default' | 'discuss' | 'auto' | 'yolo';
+    expectedDiscuss: boolean;
     expectedPermission: PermissionMode;
   }> = [
-    { modeId: 'default', expectedPlan: false, expectedPermission: 'manual' },
-    { modeId: 'plan', expectedPlan: true, expectedPermission: 'manual' },
-    { modeId: 'auto', expectedPlan: false, expectedPermission: 'auto' },
-    { modeId: 'yolo', expectedPlan: false, expectedPermission: 'yolo' },
+    { modeId: 'default', expectedDiscuss: true, expectedPermission: 'manual' },
+    { modeId: 'discuss', expectedDiscuss: true, expectedPermission: 'manual' },
+    { modeId: 'auto', expectedDiscuss: false, expectedPermission: 'auto' },
+    { modeId: 'yolo', expectedDiscuss: false, expectedPermission: 'yolo' },
   ];
 
-  for (const { modeId, expectedPlan, expectedPermission } of MODE_CASES) {
-    it(`configId="mode" + "${modeId}" → setPlanMode(${expectedPlan}) + setPermission(${expectedPermission}) + 1 config_option_update`, async () => {
+  for (const { modeId, expectedDiscuss, expectedPermission } of MODE_CASES) {
+    it(`configId="mode" + "${modeId}" → setDiscussMode(${expectedDiscuss}) + setPermission(${expectedPermission}) + 1 config_option_update`, async () => {
       const handle = makeFakeSession(`sess-mode-${modeId}`);
       const harness = makeHarness(handle);
       const { client, capturing, sessionId } = await openSession(harness);
@@ -284,7 +284,7 @@ describe('AcpServer session/set_config_option', () => {
 
       await client.setSessionConfigOption({ sessionId, configId: 'mode', value: modeId });
 
-      expect(handle.planModeCalls).toEqual([expectedPlan]);
+      expect(handle.discussModeCalls).toEqual([expectedDiscuss]);
       expect(handle.setPermissionCalls).toEqual([expectedPermission]);
       const updates = capturing.notifications.filter(
         (n) => n.sessionId === sessionId && n.update.sessionUpdate === 'config_option_update',
@@ -309,7 +309,7 @@ describe('AcpServer session/set_config_option', () => {
       client.setSessionConfigOption({ sessionId, configId: 'theme', value: 'dark' }),
     ).rejects.toMatchObject({ code: -32602 });
 
-    expect(handle.planModeCalls).toEqual([]);
+    expect(handle.discussModeCalls).toEqual([]);
     expect(handle.setPermissionCalls).toEqual([]);
     expect(handle.setModelCalls).toEqual([]);
     const updates = capturing.notifications.filter(

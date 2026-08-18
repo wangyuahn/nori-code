@@ -1,10 +1,10 @@
-﻿import { Tray, Menu, nativeImage, BrowserWindow } from 'electron';
+import { Tray, Menu, nativeImage, BrowserWindow } from 'electron';
 
 import { NORI_PRODUCT_NAME, noriRuntimeIconPath } from './brand';
 
 let tray: Tray | null = null;
 
-export interface TrayState { phase: string; swarmActive: boolean; }
+export interface TrayState { phase: string; subagentActive: boolean; }
 
 function trayImage() {
   const image = nativeImage.createFromPath(noriRuntimeIconPath());
@@ -13,9 +13,9 @@ function trayImage() {
 
 function menuTemplate(state?: TrayState) {
   const phase = state?.phase ?? 'idle';
-  const swarmLabel = state?.swarmActive ? ' · Swarm active' : '';
+  const subagentLabel = state?.subagentActive ? ' · SubAgent active' : '';
   return [
-    { label: `${NORI_PRODUCT_NAME}${swarmLabel}`, enabled: false },
+    { label: `${NORI_PRODUCT_NAME}${subagentLabel}`, enabled: false },
     { label: `Phase: ${phase}`, enabled: false },
     { type: 'separator' as const },
     { label: 'Show Nori Work', click: () => { const win = BrowserWindow.getAllWindows()[0]; win?.show(); win?.focus(); } },

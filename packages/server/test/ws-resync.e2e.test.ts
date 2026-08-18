@@ -246,6 +246,47 @@ describe('WS durable journal + resync_required (v2)', () => {
     a2.ws.close();
   });
 
+  it('replays only the requested agent events while retaining the session watermark', async () => {
+    const r = await spawn();
+    const bus = r.services.invokeFunction((acc) => acc.get(IEventService));
+    const broadcast = r.services.invokeFunction(
+      (acc) => acc.get(IWSBroadcastService),
+    ) as WSBroadcastService;
+
+    bus.publish({ type: 'evt.before', sessionId: 'sid_agents', agentId: 'main' } as unknown as Event);
+    await broadcast._drainForTest('sid_agents');
+
+    bus.publish({ type: 'evt.main', sessionId: 'sid_agents', agentId: 'main' } as unknown as Event);
+    bus.publish({ type: 'evt.sub', sessionId: 'sid_agents', agentId: 'agent_sub' } as unknown as Event);
+    bus.publish({ type: 'evt.main.after', sessionId: 'sid_agents', agentId: 'main' } as unknown as Event);
+    await broadcast._drainForTest('sid_agents');
+
+    const conn = await openConn(wsUrl(r.address));
+    await receiveType(conn, 'server_hello', 1000);
+    conn.ws.send(
+      JSON.stringify({
+        type: 'client_hello',
+        id: 'cli_agent_replay',
+        payload: {
+          client_id: 'agent_replay',
+          subscriptions: ['sid_agents'],
+          cursors: { sid_agents: { seq: 1 } },
+          agent_ids: { sid_agents: ['agent_sub'] },
+        },
+      }),
+    );
+
+    const replayed = await receiveType(conn, 'evt.sub', 1000);
+    expect(replayed.seq).toBe(3);
+    const ack = await receiveType(conn, 'ack', 1000);
+    const payload = ack.payload as { cursors?: Record<string, { seq: number }> };
+    expect(payload.cursors?.['sid_agents']?.seq).toBe(4);
+    await expect(receiveType(conn, 'evt.main', 300)).rejects.toBeInstanceOf(Error);
+    await expect(receiveType(conn, 'evt.main.after', 300)).rejects.toBeInstanceOf(Error);
+
+    conn.ws.close();
+  });
+
   it('client connects with a gap beyond the replay cap → resync_required(buffer_overflow)', async () => {
     const r = await spawn();
 

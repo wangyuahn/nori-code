@@ -162,6 +162,27 @@ async function helloAndSubscribe(conn: Conn, clientId: string, sessionId: string
   await receiveType(conn, 'ack', 1000);
 }
 
+async function helloAndSubscribeAgent(
+  conn: Conn,
+  clientId: string,
+  sessionId: string,
+  agentIds: readonly string[],
+): Promise<void> {
+  await receiveType(conn, 'server_hello', 1000);
+  conn.ws.send(
+    JSON.stringify({
+      type: 'client_hello',
+      id: `cli_${clientId}`,
+      payload: {
+        client_id: clientId,
+        subscriptions: [sessionId],
+        agent_ids: { [sessionId]: agentIds },
+      },
+    }),
+  );
+  await receiveType(conn, 'ack', 1000);
+}
+
 describe('WS broadcast + per-session seq (W5.2)', () => {
   it('two subscribers both receive seq=1 then seq=2 for the same session', async () => {
     const r = await spawn();
@@ -222,6 +243,37 @@ describe('WS broadcast + per-session seq (W5.2)', () => {
     expect(ev.session_id).toBe('sid_x');
     expect(ev.seq).toBe(1); // first event on sid_x, so seq=1 even though sid_other got seq=1 first
     a.ws.close();
+  });
+
+  it('filters live events by agent while session-only subscribers retain all agents', async () => {
+    const r = await spawn();
+    const filtered = await openConn(wsUrl(r.address));
+    const allAgents = await openConn(wsUrl(r.address));
+    await helloAndSubscribeAgent(filtered, 'filtered', 'sid_agents', ['agent_sub']);
+    await helloAndSubscribe(allAgents, 'all_agents', 'sid_agents');
+
+    await waitFor(() =>
+      r.services.invokeFunction(
+        (acc) => acc.get(ISessionClientsService).subscriberCount('sid_agents') === 2,
+      ),
+    );
+
+    const bus = r.services.invokeFunction((acc) => acc.get(IEventService));
+    bus.publish({ type: 'main.event', sessionId: 'sid_agents', agentId: 'main' } as unknown as Event);
+    bus.publish({ type: 'sub.event', sessionId: 'sid_agents', agentId: 'agent_sub' } as unknown as Event);
+
+    const filteredEvent = await receiveType(filtered, 'sub.event', 1000);
+    expect(filteredEvent.seq).toBe(2);
+
+    const mainEvent = await receiveType(allAgents, 'main.event', 1000);
+    const subEvent = await receiveType(allAgents, 'sub.event', 1000);
+    expect(mainEvent.seq).toBe(1);
+    expect(subEvent.seq).toBe(2);
+
+    await expect(receiveType(filtered, 'main.event', 300)).rejects.toBeInstanceOf(Error);
+
+    filtered.ws.close();
+    allAgents.ws.close();
   });
 
   it('per-session seq counters are independent across subscribers and sessions', async () => {

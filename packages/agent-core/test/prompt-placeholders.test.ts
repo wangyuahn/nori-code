@@ -24,6 +24,7 @@ const SRC = join(import.meta.dirname, '..', 'src');
 const TEMPLATED = new Set([
   'agent/compaction/compaction-instruction.md',
   'profile/default/coder-system.md',
+  'profile/default/nori-coder-system.md',
   'profile/default/nori-system.md',
   'profile/default/system.md',
   'tools/builtin/file/read.md',
@@ -32,8 +33,7 @@ const TEMPLATED = new Set([
 ]);
 
 const STATIC_PLACEHOLDER_PROTOCOL_FILES = new Set([
-  'agent/swarm/enter-reminder.md',
-  'tools/builtin/collaboration/agent-swarm.md',
+  'tools/builtin/collaboration/subagent.md',
 ]);
 
 const mdFiles = globSync('**/*.md', { cwd: SRC })

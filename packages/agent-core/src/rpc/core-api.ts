@@ -1,5 +1,5 @@
 import type { AgentConfigData } from '#/agent/config';
-import type { AgentContextData } from '#/agent/context';
+import type { AgentContextData, SpeakerOrigin } from '#/agent/context';
 import type { BackgroundTaskInfo } from '#/agent/background';
 import type {
   GoalBudgetLimits,
@@ -11,8 +11,6 @@ import type {
   GoalToolResult,
 } from '#/agent/goal';
 import type { PermissionData, PermissionMode } from '#/agent/permission';
-import type { PlanData } from '#/agent/plan';
-import type { SwarmModeTrigger } from '#/agent/swarm';
 import type { ToolInfo } from '#/agent/tool';
 import type { CronCreateRequest, CronTaskDetails } from '#/tools/cron/types';
 import type { KimiConfig, KimiConfigPatch, McpServerConfig } from '#/config';
@@ -58,6 +56,7 @@ export interface CreateSessionPayload {
   readonly model?: string | undefined;
   readonly thinking?: string | undefined;
   readonly permission?: PermissionMode | undefined;
+  readonly discussMode?: boolean | undefined;
   readonly metadata?: JsonObject | undefined;
   readonly mcpServers?: Readonly<Record<string, McpServerConfig>>;
   readonly additionalDirs?: readonly string[];
@@ -180,6 +179,8 @@ export interface SessionSummary {
 export interface PromptPayload {
   readonly input: readonly ContentPart[];
   readonly goalIntake?: boolean;
+  /** Server-assigned model-facing source identity for this input. */
+  readonly speaker?: SpeakerOrigin;
 }
 export interface RunShellCommandPayload {
   readonly command: string;
@@ -207,6 +208,7 @@ export interface CancelShellCommandPayload {
 export interface SteerPayload {
   readonly input: readonly ContentPart[];
   readonly goalIntake?: boolean;
+  readonly speaker?: SpeakerOrigin;
 }
 export interface CancelPayload {
   readonly turnId?: number;
@@ -220,12 +222,10 @@ export interface SetPermissionPayload {
 export interface NoriRuntimeSettings {
   readonly coderWriteEnabled: boolean;
   readonly toolsReadonly: boolean;
-  readonly maxSwarmDepth: number;
 }
 export interface SetNoriRuntimeSettingsPayload {
   readonly coderWriteEnabled?: boolean;
   readonly toolsReadonly?: boolean;
-  readonly maxSwarmDepth?: number;
 }
 export interface SetModelPayload {
   readonly model: string;
@@ -234,11 +234,8 @@ export interface SetModelResult {
   readonly model: string;
   readonly providerName?: string | undefined;
 }
-export interface CancelPlanPayload {
+export interface CancelDiscussPayload {
   readonly id?: string;
-}
-export interface EnterSwarmPayload {
-  readonly trigger: SwarmModeTrigger;
 }
 export interface BeginCompactionPayload {
   readonly instruction?: string;
@@ -415,12 +412,9 @@ export interface AgentAPI {
   getNoriRuntimeSettings: (payload: EmptyPayload) => NoriRuntimeSettings;
   setModel: (payload: SetModelPayload) => SetModelResult;
   getModel: (payload: EmptyPayload) => string;
-  enterPlan: (payload: EmptyPayload) => void;
-  cancelPlan: (payload: CancelPlanPayload) => void;
-  clearPlan: (payload: EmptyPayload) => void;
-  enterSwarm: (payload: EnterSwarmPayload) => void;
-  exitSwarm: (payload: EmptyPayload) => void;
-  getSwarmMode: (payload: EmptyPayload) => boolean;
+  enterDiscuss: (payload: EmptyPayload) => void;
+  cancelDiscuss: (payload: CancelDiscussPayload) => void;
+  getDiscussMode: (payload: EmptyPayload) => boolean;
   beginCompaction: (payload: BeginCompactionPayload) => void;
   cancelCompaction: (payload: EmptyPayload) => void;
   registerTool: (payload: RegisterToolPayload) => void;
@@ -444,7 +438,6 @@ export interface AgentAPI {
   getContext: (payload: EmptyPayload) => AgentContextData;
   getConfig: (payload: EmptyPayload) => AgentConfigData;
   getPermission: (payload: EmptyPayload) => PermissionData;
-  getPlan: (payload: EmptyPayload) => PlanData;
   getUsage: (payload: EmptyPayload) => UsageStatus;
   getTools: (payload: EmptyPayload) => readonly ToolInfo[];
   getBackground: (payload: GetBackgroundPayload) => readonly BackgroundTaskInfo[];

@@ -11,12 +11,16 @@ export interface ToolCall {
   name: string;
   args: unknown;
   result?: string;
+  isError?: boolean;
+  startedAt?: number;
+  endedAt?: number;
 }
 
 export type WorkBlock =
   | { id: string; type: 'thinking'; text: string }
   | { id: string; type: 'progress'; text: string }
-  | { id: string; type: 'tool'; tool: ToolCall };
+  | { id: string; type: 'tool'; tool: ToolCall }
+  | { id: string; type: 'context_injection'; source: string; text?: string };
 
 export interface TodoItem {
   title: string;
@@ -28,6 +32,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   text: string;
   images?: ChatImage[];
+  files?: ChatFile[];
   toolCalls?: ToolCall[];
   thinking?: string;
   workBlocks?: WorkBlock[];
@@ -40,6 +45,12 @@ export interface ChatMessage {
 export interface ChatImage {
   src: string;
   alt: string;
+}
+
+export interface ChatFile {
+  name: string;
+  mediaType: string;
+  size?: number;
 }
 
 interface RealtimeSubscriptionWaiter {
@@ -259,20 +270,134 @@ export function fallbackSessionTitle(text: string): string | undefined {
   return (words || firstLine).slice(0, 80).trim();
 }
 
-export function apiMessageToChat(m: Message): ChatMessage | null {
-  const originKind = m.metadata?.origin?.kind;
-  if (m.role === 'user' && originKind !== undefined && originKind !== 'user') {
-    return { id: m.id, role: 'system', text: '', createdAt: m.created_at, turnBoundary: true };
-  }
+const SILENT_WAKE_ORIGIN_KINDS = new Set([
+  'background_task',
+  'retry',
+  'cron_job',
+  'cron_missed',
+]);
 
-  const rawText = Array.isArray(m.content)
+export function isSilentWakeOrigin(kind: string | undefined): boolean {
+  return kind !== undefined && SILENT_WAKE_ORIGIN_KINDS.has(kind);
+}
+
+export function contextInjectionSource(origin: { kind?: string; [key: string]: unknown } | undefined): string {
+  if (origin === undefined || typeof origin.kind !== 'string' || origin.kind.length === 0) return 'unknown';
+  if (origin.kind === 'injection') {
+    return typeof origin.variant === 'string' && origin.variant.trim() !== '' ? origin.variant : 'injection';
+  }
+  if (origin.kind === 'skill_activation') {
+    return typeof origin.skillName === 'string' && origin.skillName.trim() !== '' ? origin.skillName : 'skill';
+  }
+  if (origin.kind === 'plugin_command') {
+    const pluginId = typeof origin.pluginId === 'string' ? origin.pluginId : '';
+    const commandName = typeof origin.commandName === 'string' ? origin.commandName : '';
+    const joined = [pluginId, commandName].filter(part => part.length > 0).join('/');
+    return joined || 'plugin';
+  }
+  if (origin.kind === 'system_trigger') {
+    return typeof origin.name === 'string' && origin.name.trim() !== '' ? origin.name : 'system_trigger';
+  }
+  if (origin.kind === 'hook_result') {
+    return typeof origin.event === 'string' && origin.event.trim() !== '' ? origin.event : 'hook_result';
+  }
+  if (origin.kind === 'compaction_summary') return 'compaction_summary';
+  if (origin.kind === 'shell_command') return 'shell_command';
+  return origin.kind;
+}
+
+function messagePlainText(m: Message): string {
+  return Array.isArray(m.content)
     ? m.content
-        .filter((c: MessageContent) => c.type === 'text' && c.text)
-        .map((c: MessageContent) => c.text ?? '')
-        .join('')
+      .filter((c: MessageContent) => c.type === 'text' && c.text)
+      .map((c: MessageContent) => c.text ?? '')
+      .join('')
     : typeof m.content === 'string'
       ? m.content
       : '';
+}
+
+const UPLOADED_FILE_TAG = /<uploaded-file\s+name="([^"]*)"\s+media-type="([^"]*)"\s+size="(\d+)">[\s\S]*?<\/uploaded-file>/g;
+
+function unescapeAttachmentAttribute(value: string): string {
+  return value
+    .replaceAll('&quot;', '"')
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&amp;', '&');
+}
+
+export function splitUploadedFileMarkup(text: string): { text: string; files: ChatFile[] } {
+  const files: ChatFile[] = [];
+  const stripped = text.replace(UPLOADED_FILE_TAG, (_match, name: string, mediaType: string, size: string) => {
+    files.push({
+      name: unescapeAttachmentAttribute(name),
+      mediaType: unescapeAttachmentAttribute(mediaType),
+      size: Number(size),
+    });
+    return '';
+  }).replaceAll(/\n{3,}/g, '\n\n').trim();
+  return { text: stripped, files };
+}
+
+export function chatFilesFromPromptAttachments(attachments: readonly PromptAttachment[]): ChatFile[] {
+  return attachments.flatMap(attachment => attachment.kind === 'file'
+    ? [{ name: attachment.name, mediaType: attachment.media_type, size: attachment.size }]
+    : []);
+}
+
+export function chatImagesFromPromptAttachments(attachments: readonly PromptAttachment[]): ChatImage[] {
+  return attachments.flatMap(attachment => attachment.kind === 'image'
+    ? [{
+        src: `data:${attachment.source.media_type};base64,${attachment.source.data}`,
+        alt: attachment.name,
+      }]
+    : []);
+}
+
+function contentFileParts(content: Message['content']): ChatFile[] {
+  if (!Array.isArray(content)) return [];
+  return content.flatMap(part => {
+    if (part.type !== 'file' || part.name === undefined || part.name.length === 0) return [];
+    return [{
+      name: part.name,
+      mediaType: part.media_type ?? 'application/octet-stream',
+      size: part.size,
+    }];
+  });
+}
+
+async function releasePromptFileBlobs(attachments: readonly PromptAttachment[]): Promise<void> {
+  await Promise.all(attachments.map(attachment =>
+    attachment.kind === 'file'
+      ? api.files.delete(attachment.file_id).catch(() => undefined)
+      : Promise.resolve(),
+  ));
+}
+
+export function apiMessageToChat(m: Message): ChatMessage | null {
+  const origin = m.metadata?.origin;
+  const originKind = origin?.kind;
+  if (m.role === 'user' && originKind !== undefined && originKind !== 'user') {
+    if (isSilentWakeOrigin(originKind)) {
+      return { id: m.id, role: 'system', text: '', createdAt: m.created_at, turnBoundary: true };
+    }
+    const injected = stripLeadingSystemReminders(messagePlainText(m));
+    return {
+      id: m.id,
+      role: 'system',
+      text: '',
+      createdAt: m.created_at,
+      workBlocks: [{
+        id: `${m.id}-context-injection`,
+        type: 'context_injection',
+        source: contextInjectionSource(origin),
+        ...(injected ? { text: injected } : {}),
+      }],
+    };
+  }
+
+  const rawText = messagePlainText(m);
   const text = m.role === 'user'
     ? stripLeadingSystemReminders(rawText)
     : m.role === 'assistant'
@@ -306,6 +431,7 @@ export function apiMessageToChat(m: Message): ChatMessage | null {
     name: tc.name,
     args: tc.args,
     result: tc.result,
+    isError: tc.is_error,
   }));
 
   if (Array.isArray(m.content)) {
@@ -314,8 +440,18 @@ export function apiMessageToChat(m: Message): ChatMessage | null {
         toolCalls = mergeToolCalls(toolCalls, [{ id: c.tool_call_id, name: c.tool_name ?? c.name ?? 'tool', args: c.input }]);
       } else if (c.type === 'tool_result') {
         const matching = toolCalls.find(tool => tool.id && tool.id === c.tool_call_id);
-        if (matching) matching.result = c.output;
-        else toolCalls.push({ id: c.tool_call_id, name: 'tool', args: undefined, result: c.output });
+        if (matching) {
+          matching.result = c.output;
+          matching.isError = c.is_error === true;
+        } else {
+          toolCalls.push({
+            id: c.tool_call_id,
+            name: 'tool',
+            args: undefined,
+            result: c.output,
+            isError: c.is_error === true,
+          });
+        }
       }
     }
   }
@@ -323,14 +459,17 @@ export function apiMessageToChat(m: Message): ChatMessage | null {
   const thinking = m.thinking || thinkingFromContent || undefined;
   const textIsProgress = m.role === 'assistant' && toolCalls.length > 0 && Boolean(text.trim());
   const workBlocks = workBlocksFromMessage(m, toolCalls, thinking, textIsProgress ? text : undefined);
-  const visibleText = textIsProgress ? '' : text;
-  if (!visibleText && !thinking && toolCalls.length === 0 && images.length === 0) return null;
+  const parsedUploads = m.role === 'user' ? splitUploadedFileMarkup(text) : { text, files: [] as ChatFile[] };
+  const files = [...contentFileParts(m.content), ...parsedUploads.files];
+  const visibleText = textIsProgress ? '' : (m.role === 'user' ? parsedUploads.text : text);
+  if (!visibleText && !thinking && toolCalls.length === 0 && images.length === 0 && files.length === 0) return null;
 
   return {
     id: m.id,
     role: m.role === 'tool' ? 'assistant' : m.role,
     text: visibleText,
     images: images.length > 0 ? images : undefined,
+    files: files.length > 0 ? files : undefined,
     thinking,
     workBlocks: workBlocks.length > 0 ? workBlocks : undefined,
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
@@ -350,7 +489,9 @@ export function foldConversationTurns(messages: ChatMessage[]): ChatMessage[] {
     }
     if (message.role !== 'assistant') {
       folded.push(message);
-      assistantIndex = message.role === 'user' ? -1 : assistantIndex;
+      // A visible non-assistant event is part of the transcript. Never merge a
+      // later retry answer into an assistant message that precedes it.
+      assistantIndex = -1;
       continue;
     }
 
@@ -534,6 +675,9 @@ function mergeToolCalls(previous: ToolCall[], incoming: ToolCall[]): ToolCall[] 
       if (tool.name !== 'tool') match.name = tool.name;
       if (tool.args !== undefined) match.args = tool.args;
       if (tool.result !== undefined) match.result = tool.result;
+      if (tool.isError !== undefined) match.isError = tool.isError;
+      if (tool.startedAt !== undefined) match.startedAt = tool.startedAt;
+      if (tool.endedAt !== undefined) match.endedAt = tool.endedAt;
     } else {
       merged.push({ ...tool });
     }
@@ -570,6 +714,16 @@ function messageTime(message: ChatMessage): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+/**
+ * Prompt submit returns a synthetic `msg_<sid>_pending_<promptId>` before the
+ * transcript assigns the stable `msg_<sid>_<index>` id. Treat both that
+ * placeholder and local/live ids as transient so history merge can collapse
+ * them by text instead of showing the same user turn twice.
+ */
+export function isTransientChatMessageId(id: string): boolean {
+  return id.startsWith('local-user-') || id.startsWith('live-') || id.includes('_pending_prompt_');
+}
+
 export function confirmOptimisticUserMessage(
   messages: ChatMessage[],
   localId: string,
@@ -580,6 +734,20 @@ export function confirmOptimisticUserMessage(
     return messages.map(message => message.id === localId ? { ...message, createdAt } : message);
   }
   if (messages.some(message => message.id === serverId)) {
+    return messages.filter(message => message.id !== localId);
+  }
+  const local = messages.find(message => message.id === localId);
+  // History may already expose the derived transcript id while submit still
+  // returns the pending placeholder — drop the optimistic row instead of
+  // renaming it to a second id for the same text.
+  if (local !== undefined && messages.some(message =>
+    message.id !== localId
+    && !isTransientChatMessageId(message.id)
+    && message.role === local.role
+    && message.text === local.text
+    && Math.abs(messageTime(message) - messageTime(local)) < 15_000
+    && (local.role === 'assistant' || (message.thinking ?? '') === (local.thinking ?? '')),
+  )) {
     return messages.filter(message => message.id !== localId);
   }
   return messages.map(message => message.id === localId
@@ -593,7 +761,7 @@ export function mergeHistory(previous: ChatMessage[], remote: ChatMessage[]): Ch
 
   for (const local of previous) {
     if (remoteIds.has(local.id)) continue;
-    const isOptimisticLocal = local.id.startsWith('local-user-') || local.id.startsWith('live-');
+    const isOptimisticLocal = isTransientChatMessageId(local.id);
     const duplicateIndex = isOptimisticLocal ? remote.findIndex(serverMessage =>
       serverMessage.role === local.role &&
       serverMessage.text === local.text &&
@@ -679,7 +847,23 @@ export function shouldFinishAbortedPrompt(
   return abortedPromptId === undefined || abortedPromptId === activePromptId;
 }
 
-export function useChatMessages(sessionId: string | null, sessionTitle?: string): UseChatMessagesResult {
+export function chatScopeKey(sessionId: string | null, agentId = 'main'): string | null {
+  return sessionId === null ? null : `${sessionId}\u0000${agentId}`;
+}
+
+function hasCurrentScope(
+  scopeRef: { current: string | null },
+  sessionId: string,
+  agentId: string,
+): boolean {
+  return scopeRef.current === chatScopeKey(sessionId, agentId);
+}
+
+export function useChatMessages(
+  sessionId: string | null,
+  agentId = 'main',
+  sessionTitle?: string,
+): UseChatMessagesResult {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -695,8 +879,8 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
   const [activeSubagentIds, setActiveSubagentIds] = useState<string[]>([]);
   const [codeChanges, setCodeChanges] = useState<CodeChange[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
-  const sessionRef = useRef(sessionId);
-  const sessionStatusSessionIdRef = useRef<string | null>(null);
+  const scopeRef = useRef(chatScopeKey(sessionId, agentId));
+  const sessionStatusScopeRef = useRef<string | null>(null);
   const sessionTitleRef = useRef(sessionTitle);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const subscriptionGateRef = useRef(new RealtimeSubscriptionGate());
@@ -723,11 +907,11 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
   const liveWorkBlocksRef = useRef<WorkBlock[]>([]);
   const attentionRequestIdsRef = useRef(new Set<string>());
 
-  sessionRef.current = sessionId;
+  scopeRef.current = chatScopeKey(sessionId, agentId);
   sessionTitleRef.current = sessionTitle;
 
   const applyGeneratedTitle = useCallback((text: string, fallbackText?: string) => {
-    if (!sessionId || titleAppliedRef.current || !canApplyGeneratedSessionTitle(sessionTitleRef.current)) {
+    if (agentId !== 'main' || !sessionId || titleAppliedRef.current || !canApplyGeneratedSessionTitle(sessionTitleRef.current)) {
       return;
     }
     const title = generatedSessionTitle(text) ?? (fallbackText ? fallbackSessionTitle(fallbackText) : undefined);
@@ -740,7 +924,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
       titleAppliedRef.current = false;
       console.error('Failed to apply generated session title:', error);
     });
-  }, [sessionId]);
+  }, [agentId, sessionId]);
 
   const clearDraft = useCallback(() => {
     streamingRef.current = '';
@@ -766,7 +950,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     applyGeneratedTitle(assistantRawRef.current, titlePromptRef.current ?? undefined);
     if (sessionId) {
       const completed = liveAssistantMessage({
-        sessionId,
+        sessionId: `${sessionId}-${agentId}`,
         text: stripGeneratedSessionTitle(streamingRef.current),
         thinking: thinkingRef.current,
         workBlocks: liveWorkBlocksRef.current,
@@ -780,11 +964,14 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     promptIdRef.current = null;
     turnUsageRef.current = undefined;
     clearDraft();
-  }, [applyGeneratedTitle, clearDraft, sessionId]);
+  }, [agentId, applyGeneratedTitle, clearDraft, sessionId]);
 
-  const hydrateInFlight = useCallback(async (targetSessionId: string) => {
-    const snapshot = await api.sessions.getSnapshot(targetSessionId);
-    if (sessionRef.current !== targetSessionId) return false;
+  const hydrateInFlight = useCallback(async (targetSessionId: string, targetAgentId = agentId) => {
+    // The snapshot endpoint is currently parent-session scoped. Never use a
+    // main-agent snapshot to rebuild a child transcript.
+    if (targetAgentId !== 'main') return false;
+    const snapshot = await api.sessions.getSnapshot(targetSessionId, targetAgentId);
+    if (!hasCurrentScope(scopeRef, targetSessionId, targetAgentId)) return false;
     setPendingApprovals(previous => preserveEqual(previous, snapshot.pending_approvals ?? []));
     setPendingQuestions(previous => preserveEqual(previous, snapshot.pending_questions ?? []));
     const inFlight = snapshot.in_flight_turn;
@@ -823,9 +1010,9 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     lastStreamActivityAtRef.current = Date.now();
     setIsStreaming(true);
     return true;
-  }, []);
+  }, [agentId]);
 
-  const applyHistoryItems = useCallback((items: Message[], targetSessionId: string, replace: boolean) => {
+  const applyHistoryItems = useCallback((items: Message[], targetSessionId: string, targetAgentId: string, replace: boolean) => {
     for (const message of items) {
       if (message.role !== 'assistant') continue;
       const rawText = Array.isArray(message.content)
@@ -838,7 +1025,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
       .map(apiMessageToChat)
       .filter((message): message is ChatMessage => message !== null)
       .sort((a, b) => messageTime(a) - messageTime(b)));
-    if (sessionRef.current === targetSessionId) {
+    if (hasCurrentScope(scopeRef, targetSessionId, targetAgentId)) {
       hasUserPromptRef.current = history.some(message => message.role === 'user');
       setTodos(latestTodos(history));
       setMessages(previous => {
@@ -849,11 +1036,11 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     return history;
   }, [applyGeneratedTitle]);
 
-  const refreshHistory = useCallback(async (targetSessionId = sessionId, replace = false) => {
+  const refreshHistory = useCallback(async (targetSessionId = sessionId, targetAgentId = agentId, replace = false) => {
     if (!targetSessionId) return [] as ChatMessage[];
-    const data = await api.getMessages(targetSessionId, { page_size: 100 });
-    return applyHistoryItems(data?.items ?? [], targetSessionId, replace);
-  }, [applyHistoryItems, sessionId]);
+    const data = await api.sessions.getMessages(targetSessionId, { page_size: 100, agent_id: targetAgentId });
+    return applyHistoryItems(data?.items ?? [], targetSessionId, targetAgentId, replace);
+  }, [agentId, applyHistoryItems, sessionId]);
 
   useEffect(() => {
     setMessages([]);
@@ -871,7 +1058,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     historyRefreshTimerRef.current = null;
     compactTriggeredRef.current = false;
     compactingRef.current = false;
-    sessionStatusSessionIdRef.current = null;
+    sessionStatusScopeRef.current = null;
     setSessionStatus(null);
     setPendingQuestions([]);
     attentionRequestIdsRef.current = new Set([
@@ -885,14 +1072,14 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     setCompacting(false);
     clearDraft();
     if (!sessionId) return;
-    void refreshHistory(sessionId)
+    void refreshHistory(sessionId, agentId)
       .catch(error => {
-        if (sessionRef.current === sessionId) console.error('Failed to load messages:', error);
+        if (hasCurrentScope(scopeRef, sessionId, agentId)) console.error('Failed to load messages:', error);
       })
       .finally(() => {
-        if (sessionRef.current === sessionId) setMessagesLoading(false);
+        if (hasCurrentScope(scopeRef, sessionId, agentId)) setMessagesLoading(false);
       });
-  }, [clearDraft, refreshHistory, sessionId]);
+  }, [agentId, clearDraft, refreshHistory, sessionId]);
 
   useEffect(() => {
     const ids = [
@@ -911,9 +1098,9 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
 
     const refreshStatus = async () => {
       try {
-        let status = await api.sessions.getStatus(sessionId);
-        if (disposed || sessionRef.current !== sessionId) return;
-        sessionStatusSessionIdRef.current = sessionId;
+        let status = await api.sessions.getStatus(sessionId, agentId);
+        if (disposed || !hasCurrentScope(scopeRef, sessionId, agentId)) return;
+        sessionStatusScopeRef.current = chatScopeKey(sessionId, agentId);
         setSessionStatus(previous => preserveEqual(previous, status));
 
         if (status.context_usage < 0.78) compactTriggeredRef.current = false;
@@ -927,10 +1114,10 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
           compactingRef.current = true;
           setCompacting(true);
           try {
-            await api.sessions.compact(sessionId);
-            status = await api.sessions.getStatus(sessionId);
-            if (!disposed && sessionRef.current === sessionId) {
-              sessionStatusSessionIdRef.current = sessionId;
+            await api.sessions.compact(sessionId, undefined, agentId);
+            status = await api.sessions.getStatus(sessionId, agentId);
+            if (!disposed && hasCurrentScope(scopeRef, sessionId, agentId)) {
+              sessionStatusScopeRef.current = chatScopeKey(sessionId, agentId);
               setSessionStatus(previous => preserveEqual(previous, status));
             }
           } catch (error) {
@@ -952,24 +1139,24 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
       disposed = true;
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [isStreaming, sessionId]);
+  }, [agentId, isStreaming, sessionId]);
 
   const refreshApprovals = useCallback(async () => {
     if (!sessionId) {
       setPendingApprovals([]);
       return;
     }
-    const result = await api.sessions.approvals.list(sessionId);
-    if (sessionRef.current !== sessionId) return;
+    const result = await api.sessions.approvals.list(sessionId, agentId);
+    if (!hasCurrentScope(scopeRef, sessionId, agentId)) return;
     const now = Date.now();
     const expired = result.items.filter(request => Date.parse(request.expires_at) <= now);
     if (expired.length > 0) {
-      await api.abortSession(sessionId).catch(() => undefined);
+      await api.abortSession(sessionId, agentId).catch(() => undefined);
       setPendingApprovals([]);
       setIsStreaming(false);
       clearDraft();
       setMessages(previous => mergeHistory(previous, [{
-        id: `approval-expired-${sessionId}-${now}`,
+        id: `approval-expired-${sessionId}-${agentId}-${now}`,
         role: 'system',
         text: '工具授权已过期，本轮已自动取消。可以继续发送消息并重试。',
         createdAt: new Date().toISOString(),
@@ -977,26 +1164,26 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
       return;
     }
     setPendingApprovals(previous => preserveEqual(previous, result.items));
-  }, [clearDraft, sessionId]);
+  }, [agentId, clearDraft, sessionId]);
 
   const refreshQuestions = useCallback(async () => {
     if (!sessionId) {
       setPendingQuestions([]);
       return;
     }
-    const result = await api.sessions.questions.list(sessionId);
-    if (sessionRef.current === sessionId) {
+    const result = await api.sessions.questions.list(sessionId, agentId);
+    if (hasCurrentScope(scopeRef, sessionId, agentId)) {
       setPendingQuestions(previous => preserveEqual(previous, result.items));
     }
-  }, [sessionId]);
+  }, [agentId, sessionId]);
 
   const refreshPromptQueue = useCallback(async () => {
     if (!sessionId) {
       setQueuedPrompts([]);
       return;
     }
-    const result = await api.sessions.prompts.list(sessionId);
-    if (sessionRef.current !== sessionId) return;
+    const result = await api.sessions.prompts.list(sessionId, agentId);
+    if (!hasCurrentScope(scopeRef, sessionId, agentId)) return;
     if (result.active) promptIdRef.current = result.active.prompt_id;
     const queued = result.queued.map(prompt => ({
       id: prompt.prompt_id,
@@ -1004,7 +1191,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
       createdAt: prompt.created_at,
     }));
     setQueuedPrompts(previous => preserveEqual(previous, queued));
-  }, [sessionId]);
+  }, [agentId, sessionId]);
 
   useEffect(() => {
     setPendingApprovals([]);
@@ -1021,7 +1208,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
       void refreshPromptQueue().catch(() => undefined);
     }, 750);
     return () => clearInterval(timer);
-  }, [refreshApprovals, refreshPromptQueue, refreshQuestions, sessionId]);
+  }, [agentId, refreshApprovals, refreshPromptQueue, refreshQuestions, sessionId]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -1034,8 +1221,8 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
       if (historyRefreshTimerRef.current) clearTimeout(historyRefreshTimerRef.current);
       historyRefreshTimerRef.current = setTimeout(() => {
         historyRefreshTimerRef.current = null;
-        if (!disposed && sessionRef.current === sessionId) {
-          void refreshHistory(sessionId, true).catch(error => console.error('Failed to refresh completed turn:', error));
+        if (!disposed && hasCurrentScope(scopeRef, sessionId, agentId)) {
+          void refreshHistory(sessionId, agentId, true).catch(error => console.error('Failed to refresh completed turn:', error));
         }
       }, 300);
     };
@@ -1065,7 +1252,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
           socket.send(JSON.stringify({
             type: 'subscribe',
             id: subscribeRequestId,
-            payload: { session_ids: [sessionId] },
+            payload: { session_ids: [sessionId], agent_ids: { [sessionId]: [agentId] } },
           }));
         };
 
@@ -1092,15 +1279,15 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
             return;
           }
           if (data.type === 'resync_required') {
-            void refreshHistory(sessionId).catch(error => console.error('WebSocket resync failed:', error));
-            void hydrateInFlight(sessionId).catch(error => console.error('In-flight snapshot sync failed:', error));
+            void refreshHistory(sessionId, agentId).catch(error => console.error('WebSocket resync failed:', error));
+            void hydrateInFlight(sessionId, agentId).catch(error => console.error('In-flight snapshot sync failed:', error));
             return;
           }
 
           const type = normalizeEventType(data.type);
           const payload = data.payload ?? {};
           if (data.session_id && data.session_id !== sessionId) return;
-          if (shouldIgnoreTranscriptEvent(type, payload.agentId)) return;
+          if (shouldIgnoreTranscriptEvent(type, payload.agentId, agentId)) return;
 
           switch (type) {
             case 'turn.started':
@@ -1117,7 +1304,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
               if (!delta) break;
               const reconciled = appendStreamDelta(assistantRawRef.current, delta, data.offset);
               if (reconciled === null) {
-                void hydrateInFlight(sessionId).catch(error => console.error('Assistant stream gap recovery failed:', error));
+                void hydrateInFlight(sessionId, agentId).catch(error => console.error('Assistant stream gap recovery failed:', error));
                 break;
               }
               assistantRawRef.current = reconciled.text;
@@ -1133,7 +1320,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
               if (!delta) break;
               const reconciled = appendStreamDelta(thinkingRawRef.current, delta, data.offset);
               if (reconciled === null) {
-                void hydrateInFlight(sessionId).catch(error => console.error('Thinking stream gap recovery failed:', error));
+                void hydrateInFlight(sessionId, agentId).catch(error => console.error('Thinking stream gap recovery failed:', error));
                 break;
               }
               thinkingRawRef.current = reconciled.text;
@@ -1159,7 +1346,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
                 const errorMessage = payload.error?.message;
                 if (errorMessage) {
                 setMessages(previous => mergeHistory(previous, [{
-                  id: `turn-error-${sessionId}-${String(payload.turnId ?? Date.now())}`,
+                  id: `turn-error-${sessionId}-${agentId}-${String(payload.turnId ?? Date.now())}`,
                   role: 'system',
                   text: errorMessage,
                   createdAt: new Date().toISOString(),
@@ -1188,7 +1375,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
             case 'tool.call.started':
               lastStreamActivityAtRef.current = Date.now();
               if (payload.toolCallId && payload.name) {
-                const tool = { id: payload.toolCallId, name: payload.name, args: payload.args };
+                const tool = { id: payload.toolCallId, name: payload.name, args: payload.args, startedAt: Date.now() };
                 activeToolCallsRef.current.set(payload.toolCallId, tool);
                 const progress = createProgressBlock(
                   `live-progress-${payload.turnId ?? 'turn'}-${liveWorkBlocksRef.current.length}`,
@@ -1214,7 +1401,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
               if (payload.toolCallId) {
                 const result = serializeToolOutput(payload.output ?? payload.result);
                 liveWorkBlocksRef.current = liveWorkBlocksRef.current.map(block => block.type === 'tool' && block.tool.id === payload.toolCallId
-                  ? { ...block, tool: { ...block.tool, result } }
+                  ? { ...block, tool: { ...block.tool, result, isError: payload.isError === true, endedAt: Date.now() } }
                   : block);
                 setCurrentWorkBlocks(liveWorkBlocksRef.current);
                 activeToolCallsRef.current.delete(payload.toolCallId);
@@ -1319,14 +1506,14 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
       wsRef.current?.close();
       wsRef.current = null;
     };
-  }, [clearDraft, finishLiveTurn, hydrateInFlight, refreshHistory, sessionId]);
+  }, [agentId, clearDraft, finishLiveTurn, hydrateInFlight, refreshHistory, sessionId]);
 
   useEffect(() => {
     if (!isStreaming || !sessionId) return;
     const timer = setInterval(() => {
       if (Date.now() - lastStreamActivityAtRef.current < 6000) return;
-      void hydrateInFlight(sessionId)
-        .then(inFlight => inFlight ? null : refreshHistory(sessionId))
+      void hydrateInFlight(sessionId, agentId)
+        .then(inFlight => inFlight ? null : refreshHistory(sessionId, agentId))
         .then(history => {
           if (history === null) return;
           const completedAssistant = history.some(message =>
@@ -1334,7 +1521,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
             messageTime(message) >= sendStartedAtRef.current - 2000 &&
             Boolean(message.text.trim() || message.thinking?.trim() || message.toolCalls?.length),
           );
-          if (completedAssistant && sessionRef.current === sessionId) {
+          if (completedAssistant && hasCurrentScope(scopeRef, sessionId, agentId)) {
             setIsStreaming(false);
             clearDraft();
           }
@@ -1342,7 +1529,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
         .catch(() => undefined);
     }, 6000);
     return () => clearInterval(timer);
-  }, [clearDraft, hydrateInFlight, isStreaming, refreshHistory, sessionId]);
+  }, [agentId, clearDraft, hydrateInFlight, isStreaming, refreshHistory, sessionId]);
 
   const waitForSubscription = useCallback(async (signal?: AbortSignal): Promise<boolean> => {
     return subscriptionGateRef.current.wait(30_000, signal);
@@ -1352,6 +1539,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
     const trimmed = text.trim();
     if (!sessionId || (!trimmed && attachments.length === 0)) return false;
     if (sendInFlightRef.current) return false;
+    const submitScope = chatScopeKey(sessionId, agentId);
 
     const activeBeforeSubmit = isStreaming || activeTurnIdRef.current !== null;
     const controller = new AbortController();
@@ -1364,16 +1552,12 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
       sendStartedAtRef.current = Date.now();
       lastStreamActivityAtRef.current = Date.now();
     }
-    const shouldGenerateTitle = !hasUserPromptRef.current;
+    const shouldGenerateTitle = agentId === 'main' && !hasUserPromptRef.current;
     hasUserPromptRef.current = true;
-    const visibleText = trimmed || (attachments.length === 1 ? `[${attachments[0]?.name ?? 'attachment'}]` : `[${attachments.length} attachments]`);
-    const visibleImages = attachments.flatMap(attachment => attachment.kind === 'image'
-      ? [{
-          src: `data:${attachment.source.media_type};base64,${attachment.source.data}`,
-          alt: attachment.name,
-        }]
-      : []);
-    const localMessageId = `local-user-${Date.now()}`;
+    const visibleText = trimmed;
+    const visibleImages = chatImagesFromPromptAttachments(attachments);
+    const visibleFiles = chatFilesFromPromptAttachments(attachments);
+    const localMessageId = `local-user-${agentId}-${Date.now()}`;
     const optimisticSteer = activeBeforeSubmit && behavior === 'steer';
     const insertedOptimisticMessage = !activeBeforeSubmit || optimisticSteer;
     if (!activeBeforeSubmit) {
@@ -1383,13 +1567,14 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
         role: 'user',
         text: visibleText,
         images: visibleImages.length > 0 ? visibleImages : undefined,
+        files: visibleFiles.length > 0 ? visibleFiles : undefined,
         createdAt: new Date().toISOString(),
       }]);
     } else if (optimisticSteer) {
       const boundaryTime = new Date().toISOString();
       const boundaryText = stripGeneratedSessionTitle(streamingRef.current);
       const boundaryThinking = thinkingRef.current;
-      const boundaryProgress = createProgressBlock(`live-steer-progress-${sessionId}-${Date.now()}`, boundaryText);
+      const boundaryProgress = createProgressBlock(`live-steer-progress-${sessionId}-${agentId}-${Date.now()}`, boundaryText);
       const boundaryWorkBlocks = [
         ...liveWorkBlocksRef.current,
         ...(boundaryProgress === undefined ? [] : [boundaryProgress]),
@@ -1398,7 +1583,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
       const boundaryAssistant: ChatMessage | null =
         boundaryThinking || boundaryWorkBlocks.length > 0
           ? {
-              id: `live-steer-boundary-${sessionId}-${Date.now()}`,
+              id: `live-steer-boundary-${sessionId}-${agentId}-${Date.now()}`,
               role: 'assistant',
               text: '',
               thinking: boundaryThinking || undefined,
@@ -1416,6 +1601,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
           role: 'user',
           text: visibleText,
           images: visibleImages.length > 0 ? visibleImages : undefined,
+          files: visibleFiles.length > 0 ? visibleFiles : undefined,
           createdAt: boundaryTime,
         },
       ));
@@ -1441,18 +1627,22 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
         sessionId,
         shouldGenerateTitle ? firstPromptWithTitleInstruction(promptText) : promptText,
         attachments,
-        options,
+        { ...options, agentId },
         controller.signal,
       );
+      if (scopeRef.current !== submitScope) {
+        await releasePromptFileBlobs(attachments);
+        return false;
+      }
       if (response.status === 'queued') {
         setQueuedPrompts(previous => previous.some(item => item.id === response.prompt_id) ? previous : [...previous, { id: response.prompt_id, text: visibleText, createdAt: response.created_at }]);
         if (behavior === 'steer') {
           try {
-            await api.sessions.prompts.steer(sessionId, [response.prompt_id]);
+            await api.sessions.prompts.steer(sessionId, [response.prompt_id], agentId);
           } catch (error) {
             // A failed immediate steer must not silently remain queued and run
             // later as an unrelated turn.
-            await api.sessions.prompts.abort(sessionId, response.prompt_id).catch(() => undefined);
+            await api.sessions.prompts.abort(sessionId, response.prompt_id, agentId).catch(() => undefined);
             setQueuedPrompts(previous => previous.filter(item => item.id !== response.prompt_id));
             throw error;
           }
@@ -1466,6 +1656,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
             role: 'user',
             text: visibleText,
             images: visibleImages.length > 0 ? visibleImages : undefined,
+            files: visibleFiles.length > 0 ? visibleFiles : undefined,
             createdAt: response.created_at,
           }]));
         }
@@ -1478,6 +1669,7 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
           response.created_at,
         ));
       }
+      await releasePromptFileBlobs(attachments);
       return true;
     } catch (error) {
       if (controller.signal.aborted) return false;
@@ -1499,60 +1691,60 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
       if (sendSettledRef.current === sendSettled) sendSettledRef.current = null;
       sendInFlightRef.current = false;
     }
-  }, [clearDraft, isStreaming, sessionId, waitForSubscription]);
+  }, [agentId, clearDraft, isStreaming, sessionId, waitForSubscription]);
 
   const cancelQueuedPrompt = useCallback(async (promptId: string) => {
     if (!sessionId) return;
-    await api.sessions.prompts.abort(sessionId, promptId);
+    await api.sessions.prompts.abort(sessionId, promptId, agentId);
     setQueuedPrompts(previous => previous.filter(item => item.id !== promptId));
-  }, [sessionId]);
+  }, [agentId, sessionId]);
 
   const abort = useCallback(async (): Promise<boolean> => {
     if (!sessionId) return false;
-    const abortRequest = api.abortSession(sessionId);
+    const abortRequest = api.abortSession(sessionId, agentId);
     sendAbortRef.current?.abort();
     await sendSettledRef.current?.catch(() => undefined);
     try {
       await abortRequest;
-      const stillRunning = await hydrateInFlight(sessionId).catch(() => true);
+      const stillRunning = await hydrateInFlight(sessionId, agentId).catch(() => true);
       if (!stillRunning) {
         finishLiveTurn(activeTurnIdRef.current ?? undefined);
       }
       return true;
     } catch (error) {
       setMessages(previous => [...previous, {
-        id: `abort-error-${Date.now()}`,
+        id: `abort-error-${agentId}-${Date.now()}`,
         role: 'system',
         text: `Error: ${error instanceof Error ? error.message : 'Failed to stop response'}`,
         createdAt: new Date().toISOString(),
       }]);
       return false;
     }
-  }, [finishLiveTurn, hydrateInFlight, sessionId]);
+  }, [agentId, finishLiveTurn, hydrateInFlight, sessionId]);
 
   const rewindToPrompt = useCallback(async (count: number) => {
     if (!sessionId || isStreaming) return undefined;
     const prompt = promptForRewind(messages, count);
-    const result = await api.sessions.undo(sessionId, count);
-    if (sessionRef.current !== sessionId) return undefined;
+    const result = await api.sessions.undo(sessionId, count, agentId);
+    if (!hasCurrentScope(scopeRef, sessionId, agentId)) return undefined;
     clearDraft();
     setPendingApprovals([]);
     setPendingQuestions([]);
     setQueuedPrompts([]);
     setIsStreaming(false);
     hasUserPromptRef.current = true;
-    applyHistoryItems(result.messages.items, sessionId, true);
-    if (sessionRef.current === sessionId) {
-      sessionStatusSessionIdRef.current = sessionId;
+    applyHistoryItems(result.messages.items, sessionId, agentId, true);
+    if (hasCurrentScope(scopeRef, sessionId, agentId)) {
+      sessionStatusScopeRef.current = chatScopeKey(sessionId, agentId);
       setSessionStatus(previous => preserveEqual(previous, result.status));
     }
     return prompt;
-  }, [applyHistoryItems, clearDraft, isStreaming, messages, sessionId]);
+  }, [agentId, applyHistoryItems, clearDraft, isStreaming, messages, sessionId]);
 
   const refreshMessages = useCallback(async () => {
     if (!sessionId) return;
-    await refreshHistory(sessionId, true);
-  }, [refreshHistory, sessionId]);
+    await refreshHistory(sessionId, agentId, true);
+  }, [agentId, refreshHistory, sessionId]);
 
   const resolveApproval = useCallback(async (
     approvalId: string,
@@ -1566,40 +1758,41 @@ export function useChatMessages(sessionId: string | null, sessionTitle?: string)
         remember: options.remember,
         feedback: options.feedback,
         selected_label: options.selectedLabel,
+        agent_id: agentId,
       });
       setPendingApprovals(previous => previous.filter(request => request.approval_id !== approvalId));
       setIsStreaming(true);
       await refreshApprovals();
     } catch (error) {
-      await api.abortSession(sessionId).catch(() => undefined);
+      await api.abortSession(sessionId, agentId).catch(() => undefined);
       setPendingApprovals([]);
       setIsStreaming(false);
       clearDraft();
       setMessages(previous => [...previous, {
-        id: `approval-error-${Date.now()}`,
+        id: `approval-error-${agentId}-${Date.now()}`,
         role: 'system',
         text: error instanceof Error ? error.message : '工具授权失败，本轮已取消。',
         createdAt: new Date().toISOString(),
       }]);
     }
-  }, [clearDraft, refreshApprovals, sessionId]);
+  }, [agentId, clearDraft, refreshApprovals, sessionId]);
 
   const resolveQuestion = useCallback(async (questionId: string, answers: Record<string, QuestionAnswer>) => {
     if (!sessionId) return;
-    await api.sessions.questions.resolve(sessionId, questionId, answers);
+    await api.sessions.questions.resolve(sessionId, questionId, answers, agentId);
     setPendingQuestions(previous => previous.filter(request => request.question_id !== questionId));
     setIsStreaming(true);
     await refreshQuestions();
-  }, [refreshQuestions, sessionId]);
+  }, [agentId, refreshQuestions, sessionId]);
 
   const dismissQuestion = useCallback(async (questionId: string) => {
     if (!sessionId) return;
-    await api.sessions.questions.dismiss(sessionId, questionId);
+    await api.sessions.questions.dismiss(sessionId, questionId, agentId);
     setPendingQuestions(previous => previous.filter(request => request.question_id !== questionId));
     await refreshQuestions();
-  }, [refreshQuestions, sessionId]);
+  }, [agentId, refreshQuestions, sessionId]);
 
-  return { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus: statusForSession(sessionStatus, sessionStatusSessionIdRef.current, sessionId), compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort };
+  return { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus: statusForSession(sessionStatus, sessionStatusScopeRef.current, chatScopeKey(sessionId, agentId)), compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort };
 }
 
 export function statusForSession(
@@ -1631,8 +1824,12 @@ function serializeToolOutput(output: unknown): string | undefined {
   }
 }
 
-export function shouldIgnoreTranscriptEvent(type: string, agentId?: string): boolean {
-  return Boolean(agentId && agentId !== 'main' && isMainTranscriptEvent(type));
+export function shouldIgnoreTranscriptEvent(
+  type: string,
+  eventAgentId?: string,
+  selectedAgentId = 'main',
+): boolean {
+  return isMainTranscriptEvent(type) && (eventAgentId ?? 'main') !== selectedAgentId;
 }
 
 function isMainTranscriptEvent(type: string): boolean {

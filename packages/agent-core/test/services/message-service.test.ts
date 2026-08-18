@@ -339,6 +339,22 @@ describe('MessageService', () => {
     expect(resumeOrder!).toBeLessThan(getContextOrder!);
   });
 
+  it('reads a child transcript from its own agent scope', async () => {
+    const getContextMock = bridge.rpc.getContext as ReturnType<typeof vi.fn>;
+    getContextMock.mockImplementation(async ({ agentId }: { agentId: string }): Promise<AgentContextData> => ({
+      history: agentId === 'agent-1'
+        ? [mkUserMessage('child-only')]
+        : [mkUserMessage('main-only')],
+      tokenCount: 0,
+    }));
+
+    const page = await impl.list(SESSION_ID, {}, 'agent-1');
+
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]?.content).toEqual([{ type: 'text', text: 'child-only' }]);
+    expect(getContextMock).toHaveBeenCalledWith({ sessionId: SESSION_ID, agentId: 'agent-1' });
+  });
+
   it('maps resumeSession failure to SessionNotFoundError (wire-compat 40401)', async () => {
     const sessions = [mkSummary()];
     const rpc: Partial<CoreRPC> = {

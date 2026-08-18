@@ -6,7 +6,6 @@
  *              model?: string,
  *              thinking?: 'off'|'low'|'medium'|'high'|'xhigh'|'max',
  *              permission_mode?: 'manual'|'yolo'|'auto',
- *              plan_mode?: boolean,
  *            }
  *     Reply: PromptSubmitResult { prompt_id, user_message_id, status, content, created_at }
  *            status='running' when sent immediately, status='queued' when
@@ -47,8 +46,7 @@ export const promptSubmissionSchema = z.object({
   model: z.string().min(1).optional(),
   thinking: promptThinkingSchema.optional(),
   permission_mode: promptPermissionModeSchema.optional(),
-  plan_mode: z.boolean().optional(),
-  swarm_mode: z.boolean().optional(),
+  discuss_mode: z.boolean().optional(),
   loop_mode: z.boolean().optional(),
   goal_objective: z.string().optional(),
   goal_control: z.enum(['pause', 'resume', 'cancel']).optional(),
@@ -78,8 +76,14 @@ export type PromptSubmitResult = z.infer<typeof promptSubmitResultSchema>;
 
 export const promptSteerRequestSchema = z.object({
   prompt_ids: z.array(z.string().min(1)).min(1),
+  agent_id: z.string().min(1).optional(),
 });
 export type PromptSteerRequest = z.infer<typeof promptSteerRequestSchema>;
+
+export const promptAgentQuerySchema = z.object({
+  agent_id: z.string().min(1).optional(),
+});
+export type PromptAgentQuery = z.infer<typeof promptAgentQuerySchema>;
 
 export const promptSteerResultSchema = z.object({
   steered: z.literal(true),

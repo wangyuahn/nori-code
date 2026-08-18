@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { normalizeProviderPresets } from '../src/routes/modelCatalog';
+import { BUILTIN_PROVIDER_PRESETS, mergeProviderPresetLists, toWireProviderPreset } from '@nori-code/oauth';
 
 describe('normalizeProviderPresets', () => {
   it('normalizes supported models.dev providers and strips Anthropic /v1', () => {
@@ -65,5 +66,16 @@ describe('normalizeProviderPresets', () => {
         models: {},
       },
     })).toEqual([]);
+  });
+
+  it('keeps builtin templates when merging with models.dev results', () => {
+    const builtin = BUILTIN_PROVIDER_PRESETS.map(preset => toWireProviderPreset(preset));
+    const merged = mergeProviderPresetLists(builtin, [
+      { id: 'openai', name: 'Online OpenAI', type: 'openai', env: [], model_count: 3 },
+      { id: 'custom-gateway', name: 'Gateway', type: 'openai', env: [], model_count: 1 },
+    ]);
+    expect(merged[0]?.builtin).toBe(true);
+    expect(merged.some(item => item.id === 'custom-gateway')).toBe(true);
+    expect(merged.filter(item => item.id === 'openai')).toHaveLength(1);
   });
 });

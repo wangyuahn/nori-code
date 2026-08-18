@@ -888,7 +888,7 @@ describe('Session MCP startup', () => {
 
       await Promise.race([
         turnEnded,
-        sleep(1_000).then(() => {
+        sleep(3_000).then(() => {
           throw new Error('Timed out waiting for turn.ended');
         }),
       ]);

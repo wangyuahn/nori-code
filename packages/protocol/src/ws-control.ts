@@ -35,6 +35,18 @@ export const cursorsBySessionSchema = z.record(z.string(), sessionCursorSchema);
 
 export type CursorsBySession = z.infer<typeof cursorsBySessionSchema>;
 
+/**
+ * Optional per-session agent filter for a WebSocket subscription. Omitting a
+ * session key preserves the legacy behavior and delivers every agent event
+ * for that session.
+ */
+export const agentIdsBySessionSchema = z.record(
+  z.string(),
+  z.array(z.string().min(1)).min(1),
+);
+
+export type AgentIdsBySession = z.infer<typeof agentIdsBySessionSchema>;
+
 export const wsEventEnvelopeSchema = <T extends z.ZodTypeAny>(payload: T) =>
   z.object({
     type: z.string(),
@@ -94,6 +106,7 @@ export const clientHelloPayloadSchema = z.object({
   client_id: z.string(),
   subscriptions: z.array(z.string()),
   cursors: cursorsBySessionSchema.optional(),
+  agent_ids: agentIdsBySessionSchema.optional(),
 });
 
 export const clientHelloMessageSchema = z.object({
@@ -123,6 +136,7 @@ export const watchFsConfigSchema = z.object({
 export const subscribePayloadSchema = z.object({
   session_ids: z.array(z.string()),
   cursors: cursorsBySessionSchema.optional(),
+  agent_ids: agentIdsBySessionSchema.optional(),
   watch_fs: z.record(z.string(), watchFsConfigSchema).optional(),
 });
 
@@ -197,6 +211,7 @@ export const watchFsAckMessageSchema = wsAckEnvelopeSchema(watchFsAckPayloadSche
 export const abortPayloadSchema = z.object({
   session_id: z.string(),
   prompt_id: z.string(),
+  agent_id: z.string().min(1).optional(),
 });
 
 export const abortMessageSchema = z.object({

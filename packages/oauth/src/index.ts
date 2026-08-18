@@ -99,7 +99,20 @@ export type {
 } from './stubs';
 
 export { refreshProviderModels } from './refresh-provider-models';
-export { reasoningEffortsFromRecord } from './reasoning-options';
+export { defaultEffortFromList, reasoningEffortsFromRecord } from './reasoning-options';
+export {
+  BUILTIN_PROVIDER_PRESETS,
+  MODELS_DEV_CATALOG_URL,
+  mergeProviderPresetLists,
+  toWireProviderPreset,
+  uniqueCopiedProviderId,
+} from './builtin-provider-presets';
+export type {
+  BuiltinProviderAuth,
+  BuiltinProviderPreset,
+  BuiltinProviderType,
+  WireProviderPreset,
+} from './builtin-provider-presets';
 export type {
   ProviderChange,
   RefreshProviderHost,

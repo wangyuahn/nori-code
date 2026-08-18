@@ -379,13 +379,13 @@ async function encodeWithinBudget(image: JimpImage, opts: EncodeOptions): Promis
 
   if (sourceIsPng) {
     // Lossless PNG first: best for screenshots/UI (sharp text) and keeps alpha.
-    const png = await image.getBuffer('image/png', { deflateLevel: 9 });
+    const png = await image.getBuffer('image/png', { deflateLevel: 6 });
     if (png.length <= byteBudget) return consider(png, 'image/png');
     consider(png, 'image/png');
 
     // Over budget: a smaller PNG before going lossy.
     if (fitWithinEdge(image, fallbackEdge)) {
-      const smallerPng = await image.getBuffer('image/png', { deflateLevel: 9 });
+      const smallerPng = await image.getBuffer('image/png', { deflateLevel: 6 });
       if (smallerPng.length <= byteBudget) return consider(smallerPng, 'image/png');
       consider(smallerPng, 'image/png');
     }

@@ -86,10 +86,15 @@ describe('resolveSafePath', () => {
     }
   });
 
-  it('rejects a symlink that targets a path OUTSIDE cwd', async () => {
+  it('rejects a symlink that targets a path OUTSIDE cwd', async (ctx) => {
     const outside = join(tmpDir, 'outside.txt');
     writeFileSync(outside, 'sneaky');
-    symlinkSync(outside, join(cwd, 'escape'));
+    try {
+      symlinkSync(outside, join(cwd, 'escape'));
+    } catch (error) {
+      if (isWindowsSymlinkPrivilegeError(error)) return ctx.skip('Windows symlink privilege is unavailable');
+      throw error;
+    }
     try {
       await resolveSafePath(cwd, 'escape');
       throw new Error('should have rejected symlink-outside');
@@ -99,8 +104,13 @@ describe('resolveSafePath', () => {
     }
   });
 
-  it('accepts a symlink that targets a path INSIDE cwd', async () => {
-    symlinkSync(join(cwd, 'hello.txt'), join(cwd, 'alias'));
+  it('accepts a symlink that targets a path INSIDE cwd', async (ctx) => {
+    try {
+      symlinkSync(join(cwd, 'hello.txt'), join(cwd, 'alias'));
+    } catch (error) {
+      if (isWindowsSymlinkPrivilegeError(error)) return ctx.skip('Windows symlink privilege is unavailable');
+      throw error;
+    }
     const r = await resolveSafePath(cwd, 'alias');
 
     expect(r.relative).toBe('hello.txt');
@@ -111,3 +121,11 @@ describe('resolveSafePath', () => {
     expect(r.relative).toBe('does-not-exist.txt');
   });
 });
+
+function isWindowsSymlinkPrivilegeError(error: unknown): boolean {
+  return process.platform === 'win32'
+    && typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && error.code === 'EPERM';
+}

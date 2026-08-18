@@ -6,6 +6,12 @@ export interface NoriMemoryNote {
   score?: number;
   excerpt?: string;
   content?: string;
+  /** Write/create instant as ISO-8601 UTC from note frontmatter. */
+  created_at?: string;
+  /** Last edit instant as ISO-8601 UTC from frontmatter or file mtime. */
+  updated_at?: string;
+  /** UTC calendar date (`YYYY-MM-DD`) when only legacy date metadata exists. */
+  date?: string;
 }
 
 export interface NoriMemoryProvider {
@@ -26,20 +32,4 @@ export interface NoriMemoryProvider {
     tags?: string[];
   }): Promise<{ path: string }>;
   removeNote(title: string): Promise<boolean>;
-}
-
-export interface NoriSwarmProvider {
-  launchDag(
-    templateName: string,
-    params: Record<string, unknown>,
-    depth: number,
-  ): Promise<{ swarm_id: string }>;
-  getStatus(swarmId: string): Promise<{
-    status: string;
-    results?: Record<string, unknown>;
-  }>;
-  getResult(swarmId: string): Promise<{
-    status: string;
-    task_results: Record<string, { status: string; output?: { analysis_summary?: string } }>;
-  }>;
 }

@@ -16,7 +16,7 @@ describe('builtin skill: update-config', () => {
 
   it('pins the doc URL as the single source of truth and references TOML / FetchURL / /reload', () => {
     const content = UPDATE_CONFIG_SKILL.content;
-    expect(content).toContain('config-files.html');
+    expect(content).toContain('config-files.md');
     expect(content).toContain('FetchURL');
     expect(content).toContain('/reload');
     expect(content.toLowerCase()).toContain('toml');

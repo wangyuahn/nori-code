@@ -1,29 +1,29 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Dashboard } from './components/Dashboard';
-import { SwarmPanel, runningSwarmAgents, swarmRunProgress, swarmRunTokens, useBackgroundTasks } from './components/SwarmPanel';
+import { useBackgroundTasks } from './hooks/useBackgroundTasks';
 import { CronJobPanel } from './components/CronJobPanel';
 import { AccountCenter } from './components/AccountCenter';
 import { CodeView } from './components/CodeView';
+import { SessionAgentTree } from './components/SessionAgentTree';
 import { Icon, type IconName } from './components/Icon';
-import { useSessions, usePhaseStatus, useSwarmWebSocket, useServerStatus } from './hooks/useApi';
+import { useSessions, usePhaseStatus, useServerStatus } from './hooks/useApi';
 import { useChatMessages } from './hooks/useChatMessages';
-import { api, type BackgroundTask, type FsEntry, type Message, type ModelCatalogItem, type PromptAttachment, type PromptExecutionOptions, type Session, type SessionAgentConfig, type SwarmStatus } from './api/client';
+import { api, type BackgroundTask, type FsEntry, type Message, type ModelCatalogItem, type PromptAttachment, type PromptExecutionOptions, type Session, type SessionAgent, type SessionAgentConfig } from './api/client';
 import { FileTree } from './components/FileTree';
 import { ProjectFolderPicker } from './components/ProjectFolderPicker';
 import { useI18n } from './i18n';
 import { modelThinkingOptions } from './utils/model-thinking';
 import { loadRewindLimit } from './rewindPreferences';
 import type { ChatSlashCommandName } from './utils/chat-slash-commands';
-import { installSoundUnlock, playNotificationSound } from './notificationSounds';
+import { installSoundUnlock } from './notificationSounds';
 
-type View = 'chat' | 'dashboard' | 'swarm' | 'cron' | 'account';
+type View = 'chat' | 'dashboard' | 'cron' | 'account';
 type SidebarTab = 'sessions' | 'files';
 type InitialMessage = { text: string; attachments: PromptAttachment[]; options?: PromptExecutionOptions };
 
 const NAV_ITEMS: { key: View; icon: IconName; label: string }[] = [
   { key: 'chat', icon: 'chat', label: 'Chat' },
   { key: 'dashboard', icon: 'dashboard', label: 'Overview' },
-  { key: 'swarm', icon: 'swarm', label: 'Swarm' },
   { key: 'cron', icon: 'clock', label: 'Cron Job' },
 ];
 
@@ -56,6 +56,7 @@ function persistSidebarExpanded(expanded: boolean): void {
 export function App() {
   const { tr } = useI18n();
   const [activeView, setActiveView] = useState<View>('chat');
+  const [activeAgentSelection, setActiveAgentSelection] = useState<{ sessionId: string; agent: SessionAgent } | null>(null);
   const [sidebarExpanded, setSidebarExpanded] = useState(loadSidebarExpanded);
   const [sidebarWidth, setSidebarWidth] = useState(() => Math.max(220, Math.min(480, Number(localStorage.getItem('nori-sidebar-width')) || 256)));
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('sessions');
@@ -71,36 +72,17 @@ export function App() {
     model: '',
     thinking: 'off',
     permission_mode: 'manual',
-    plan_mode: false,
+    discuss_mode: true,
     main_write_enabled: true,
   });
   const [rewindLimit, setRewindLimit] = useState(loadRewindLimit);
   const [cronJobCount, setCronJobCount] = useState(0);
   const cronCountRequestRef = useRef(0);
-  const swarm = useSwarmWebSocket();
-  const swarmSoundStateRef = useRef<Map<string, SwarmStatus['status']> | null>(null);
-
   useEffect(() => installSoundUnlock(), []);
 
   useEffect(() => {
     persistSidebarExpanded(sidebarExpanded);
   }, [sidebarExpanded]);
-
-  useEffect(() => {
-    const roots = Array.from(swarm.swarmStatuses.values()).filter(run => !run.parent_swarm_id);
-    if (swarmSoundStateRef.current === null) {
-      if (roots.length > 0) swarmSoundStateRef.current = new Map(roots.map(run => [run.swarm_id, run.status]));
-      return;
-    }
-    const previous = swarmSoundStateRef.current;
-    for (const run of roots) {
-      const before = previous.get(run.swarm_id);
-      const wasActive = before === 'pending' || before === 'running' || before === 'paused';
-      if (wasActive && run.status === 'done') playNotificationSound('agent-complete');
-      if (wasActive && run.status === 'failed') playNotificationSound('error');
-      previous.set(run.swarm_id, run.status);
-    }
-  }, [swarm.swarmStatuses]);
 
   const {
     sessions,
@@ -118,7 +100,35 @@ export function App() {
     refresh: refreshSessions,
   } = useSessions();
   const activeSession: Session | null = sessions.find(session => session.id === sessionId) ?? null;
+  const activeAgent = activeAgentSelection?.sessionId === sessionId ? activeAgentSelection.agent : null;
+  const activeAgentId = activeAgent?.agent_id ?? 'main';
+  const selectSessionAgent = useCallback((agent: SessionAgent | null) => {
+    setActiveAgentSelection(agent && sessionId ? { sessionId, agent } : null);
+    setActiveView('chat');
+  }, [sessionId]);
   const backgroundTasks = useBackgroundTasks(sessionId);
+  const [globalActivityCount, setGlobalActivityCount] = useState(0);
+  useEffect(() => {
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const refresh = async () => {
+      try {
+        const result = await api.sessions.getActivity();
+        if (!disposed) setGlobalActivityCount(result.items.length);
+      } catch {
+        // Drop the last server snapshot; current-session realtime state remains
+        // available through sessionActiveAgentCount as a local fallback.
+        if (!disposed) setGlobalActivityCount(0);
+      } finally {
+        if (!disposed) timer = setTimeout(() => void refresh(), 2_500);
+      }
+    };
+    void refresh();
+    return () => {
+      disposed = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
   useEffect(() => {
     const requestId = ++cronCountRequestRef.current;
     if (!sessionId) {
@@ -138,15 +148,6 @@ export function App() {
     const interval = window.setInterval(() => { void refresh(); }, 30_000);
     return () => { window.clearInterval(interval); };
   }, [sessionId]);
-  const allAgentRuns = Array.from(swarm.swarmStatuses.values());
-  const sessionSwarmRuns = allAgentRuns.filter(status =>
-    status.session_id === sessionId,
-  );
-  const activeSwarmRuns = sessionSwarmRuns.filter(status => {
-    const progress = swarmRunProgress(status);
-    return progress.running || progress.status === 'paused';
-  });
-  const activeAgentTokens = activeSwarmRuns.reduce((total, run) => total + swarmRunTokens(run), 0);
   useEffect(() => { setSelectedProjectFile(null); }, [sessionId]);
   useEffect(() => {
     if (activeSession?.metadata?.cwd) setSelectedProjectRoot(activeSession.metadata.cwd);
@@ -154,7 +155,6 @@ export function App() {
   const viewLabels: Record<View, string> = {
     chat: tr('Chat', '对话'),
     dashboard: tr('Dashboard', '仪表盘'),
-    swarm: tr('Swarm', '智能体协作'),
     cron: tr('Cron Job', '定时任务'),
     account: tr('My profile', '我的'),
   };
@@ -162,13 +162,11 @@ export function App() {
     sessions: tr('Sessions', '会话'),
     files: tr('Files', '文件'),
   };
-  const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort } = useChatMessages(sessionId, activeSession?.title);
-  const sessionActiveAgentCount = countActiveAgents(activeSubagentIds, sessionSwarmRuns, backgroundTasks.tasks);
-  const globalActiveAgentCount = countActiveAgents(activeSubagentIds, allAgentRuns, backgroundTasks.tasks);
-  const hasSwarmActivity = allAgentRuns.some(status => {
-    const progress = swarmRunProgress(status);
-    return progress.running || progress.status === 'paused';
-  });
+  const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort } = useChatMessages(sessionId, activeAgentId, activeSession?.title);
+  const sessionActiveAgentCount = countActiveAgents(activeSubagentIds, backgroundTasks.tasks);
+  // The server aggregate is authoritative across sessions. The current session
+  // count remains a realtime fallback while that poll is loading or unavailable.
+  const effectiveGlobalActiveAgentCount = effectiveGlobalActiveAgentCountFor(sessionActiveAgentCount, globalActivityCount);
 
   useEffect(() => {
     const onLimitChanged = (event: Event) => {
@@ -214,7 +212,16 @@ export function App() {
       setDraftAgentConfig(previous => ({ ...previous, model: modelId, thinking: effort }));
       return;
     }
-    await updateSessionProfile(activeSession.id, { agent_config: { model: modelId, thinking: effort } });
+    await updateActiveAgentProfile({ model: modelId, thinking: effort });
+  };
+
+  const updateActiveAgentProfile = async (agentConfig: SessionAgentConfig) => {
+    if (!activeSession) return;
+    if (activeAgentId === 'main') {
+      await updateSessionProfile(activeSession.id, { agent_config: agentConfig });
+      return;
+    }
+    await api.sessions.updateProfile(activeSession.id, { agent_id: activeAgentId, agent_config: agentConfig });
   };
 
   const changeThinking = async (effort: string) => {
@@ -222,7 +229,7 @@ export function App() {
       setDraftAgentConfig(previous => ({ ...previous, thinking: effort }));
       return;
     }
-    await updateSessionProfile(activeSession.id, { agent_config: { thinking: effort } });
+    await updateActiveAgentProfile({ thinking: effort });
   };
 
   const changePermission = async (permissionMode: 'auto' | 'yolo' | 'manual') => {
@@ -230,16 +237,16 @@ export function App() {
       setDraftAgentConfig(previous => ({ ...previous, permission_mode: permissionMode }));
       return;
     }
-    await updateSessionProfile(activeSession.id, { agent_config: { permission_mode: permissionMode } });
+    await updateActiveAgentProfile({ permission_mode: permissionMode });
   };
 
-  const changeTaskMode = async (taskMode: 'plan' | 'code') => {
-    const planMode = taskMode === 'plan';
+  const changeTaskMode = async (taskMode: 'discuss' | 'code') => {
+    const discussMode = taskMode === 'discuss';
     if (!activeSession) {
-      setDraftAgentConfig(previous => ({ ...previous, plan_mode: planMode }));
+      setDraftAgentConfig(previous => ({ ...previous, discuss_mode: discussMode }));
       return;
     }
-    await updateSessionProfile(activeSession.id, { agent_config: { plan_mode: planMode } });
+    await updateActiveAgentProfile({ discuss_mode: discussMode });
   };
 
   const changeMainWrite = async (enabled: boolean) => {
@@ -247,12 +254,12 @@ export function App() {
       setDraftAgentConfig(previous => ({ ...previous, main_write_enabled: enabled }));
       return;
     }
-    await updateSessionProfile(activeSession.id, { agent_config: { main_write_enabled: enabled } });
+    await updateActiveAgentProfile({ main_write_enabled: enabled });
   };
 
   const controlGoal = async (action: 'pause' | 'resume' | 'cancel') => {
     if (!activeSession) return;
-    await updateSessionProfile(activeSession.id, { agent_config: { goal_control: action } });
+    await updateActiveAgentProfile({ goal_control: action });
   };
 
   const createConversation = async (cwd: string, firstMessage?: InitialMessage) => {
@@ -264,7 +271,7 @@ export function App() {
         model: draftAgentConfig.model?.trim() || undefined,
         thinking: draftAgentConfig.thinking,
         permission_mode: draftAgentConfig.permission_mode,
-        plan_mode: draftAgentConfig.plan_mode,
+        discuss_mode: draftAgentConfig.discuss_mode,
         main_write_enabled: draftAgentConfig.main_write_enabled,
       },
     });
@@ -283,7 +290,7 @@ export function App() {
     }
     setPendingInitialMessage(firstMessage ?? null);
     setFolderPickerOpen(true);
-    return true;
+    return false;
   };
 
   const startNewConversation = () => {
@@ -297,8 +304,7 @@ export function App() {
 
   const handleSendMessage = async (text: string, attachments: PromptAttachment[] = [], behavior: 'queue' | 'steer' = 'queue', options?: PromptExecutionOptions) => {
     if (activeSession) {
-      await sendMessage(text, attachments, behavior, options);
-      return true;
+      return sendMessage(text, attachments, behavior, options);
     }
     const firstMessage = { text, attachments, options };
     if (selectedProjectRoot) return createConversation(selectedProjectRoot, firstMessage);
@@ -308,7 +314,7 @@ export function App() {
   const handleRunSlashCommand = async (command: ChatSlashCommandName, args: string, options?: PromptExecutionOptions) => {
     if (!activeSession) return false;
     if (command === 'compact') {
-      await api.sessions.compact(activeSession.id, args);
+      await api.sessions.compact(activeSession.id, args, activeAgentId);
       return true;
     }
     return sendMessage(args, [], 'queue', options);
@@ -340,17 +346,8 @@ export function App() {
         return (
           <div className="view-page view-page-wide">
             <div className="view-stack">
-              <ViewHeader eyebrow={tr('Workspace', '工作区')} title={tr('Overview', '概览')} description={tr('Track the current phase, swarm activity, and knowledge captured by Nori.', '跟踪当前阶段、智能体协作动态以及 Nori 沉淀的知识。')} />
-              <Dashboard swarm={swarm} sessions={sessions} models={models} />
-            </div>
-          </div>
-        );
-      case 'swarm':
-        return (
-          <div className="view-page">
-            <div className="view-stack">
-              <ViewHeader eyebrow={tr('Coordination', '协作')} title={tr('Swarm', '智能体协作')} description={tr('See every active agent and follow task progress in real time.', '查看所有活动智能体并实时跟踪任务进度。')} />
-              <SwarmPanel swarm={swarm} sessionId={sessionId} sessions={sessions} models={models} backgroundState={backgroundTasks} />
+              <ViewHeader eyebrow={tr('Workspace', '工作区')} title={tr('Overview', '概览')} description={tr('Review workspace usage and knowledge captured by Nori.', '查看工作区用量与 Nori 沉淀的知识。')} />
+              <Dashboard sessions={sessions} models={models} />
             </div>
           </div>
         );
@@ -378,6 +375,7 @@ export function App() {
         return (
           <CodeView
             session={activeSession}
+            agentId={activeAgentId}
             allSessions={sessions}
             messages={messages}
             messagesLoading={messagesLoading}
@@ -386,7 +384,6 @@ export function App() {
             workBlocks={currentWorkBlocks}
             isStreaming={isStreaming}
             activeAgentCount={sessionActiveAgentCount}
-            activeAgentTokens={activeAgentTokens}
             sessionStatus={sessionStatus}
             compacting={compacting}
             models={models}
@@ -441,8 +438,6 @@ export function App() {
         {sidebarTab === 'sessions' && <PrimaryNavigation
           activeView={activeView}
           labels={viewLabels}
-          activeAgentCount={globalActiveAgentCount}
-          hasSwarmActivity={hasSwarmActivity}
           cronJobCount={cronJobCount}
           onSelect={itemKey => {
             setActiveView(itemKey);
@@ -489,14 +484,27 @@ export function App() {
 
       <div className="main-area">
         <header className="top-bar">
-          <div className="workspace-breadcrumb"><span>Nori Work</span><Icon name="chevron-right" size={13} /><strong>{viewLabels[activeView]}</strong></div>
+          <div className="workspace-breadcrumb">
+            <span>Nori Work</span><Icon name="chevron-right" size={13}/><strong>{activeView === 'chat' && activeSession ? activeSession.title : viewLabels[activeView]}</strong>
+            {activeView === 'chat' && activeAgent && <><Icon name="chevron-right" size={13}/><strong>{activeAgent.title || activeAgent.name || activeAgent.agent_id}</strong></>}
+          </div>
           <div className="top-bar-actions">
+            {activeView === 'chat' && <SessionAgentTree
+              sessionId={sessionId}
+              selectedAgentId={activeAgentId}
+              backgroundTasks={backgroundTasks.tasks}
+              backgroundLoading={backgroundTasks.loading}
+              backgroundError={backgroundTasks.error}
+              hasGlobalActivity={effectiveGlobalActiveAgentCount > 0}
+              onSelectAgent={selectSessionAgent}
+              onBackgroundTaskCancelled={backgroundTasks.markCancelled}
+            />}
             <div className="session-chip" title={activeSession?.id ?? tr('No active session', '无活动会话')}><span className={`status-dot${activeSession ? ' active' : ' idle'}`} /><span>{activeSession?.title || tr('No session', '无会话')}</span></div>
           </div>
           <WindowControls />
         </header>
         <main className={`content-area content-area-${activeView}`}>{renderContent()}</main>
-        <StatusBar sending={isStreaming} activeAgentCount={globalActiveAgentCount} hasSwarmActivity={hasSwarmActivity} />
+        <StatusBar sending={isStreaming} activeAgentCount={effectiveGlobalActiveAgentCount} />
       </div>
       <ProjectFolderPicker
         open={folderPickerOpen}
@@ -518,22 +526,19 @@ export function App() {
   );
 }
 
-export function PrimaryNavigation({ activeView, labels, activeAgentCount, hasSwarmActivity, cronJobCount, onSelect }: {
+export function PrimaryNavigation({ activeView, labels, cronJobCount, onSelect }: {
   activeView: View;
   labels: Record<View, string>;
-  activeAgentCount: number;
-  hasSwarmActivity: boolean;
   cronJobCount: number;
   onSelect: (view: View) => void;
 }) {
   return <nav className="sidebar-primary-nav" aria-label="Primary navigation">
     {NAV_ITEMS.map(item => {
-      const swarmActive = item.key === 'swarm' && (hasSwarmActivity || activeAgentCount > 0);
       const cronActive = item.key === 'cron' && cronJobCount > 0;
-      const count = item.key === 'swarm' ? activeAgentCount : item.key === 'cron' ? cronJobCount : 0;
+      const count = item.key === 'cron' ? cronJobCount : 0;
       return <button
         key={item.key}
-        className={`sidebar-nav-item${activeView === item.key ? ' active' : ''}${swarmActive || cronActive ? ' activity-pending' : ''}`}
+        className={`sidebar-nav-item${activeView === item.key ? ' active' : ''}${cronActive ? ' activity-pending' : ''}`}
         onClick={() => { onSelect(item.key); }}
         aria-current={activeView === item.key ? 'page' : undefined}
         title={labels[item.key]}
@@ -576,22 +581,18 @@ export function WindowControls() {
 
 export function countActiveAgents(
   activeSubagentIds: readonly string[],
-  agentRuns: readonly SwarmStatus[],
   backgroundTasks: readonly BackgroundTask[],
 ): number {
-  const knownSwarmAgentIds = new Set(agentRuns.flatMap(run =>
-    run.tasks?.flatMap(task => [task.id, ...(task.agent_id ? [task.agent_id] : [])]) ?? [],
-  ));
-  const liveNonSwarmCount = new Set(activeSubagentIds.filter(id => !knownSwarmAgentIds.has(id))).size;
-  const polledNonSwarmCount = backgroundTasks.filter(task =>
-    task.kind === 'subagent' && task.status === 'running' && !knownSwarmAgentIds.has(task.id),
+  const realtimeCount = new Set(activeSubagentIds).size;
+  const polledCount = backgroundTasks.filter(task =>
+    task.kind === 'subagent' && task.status === 'running',
   ).length;
-  const activeSwarmRuns = agentRuns.filter(run => {
-    const progress = swarmRunProgress(run);
-    return progress.running || progress.status === 'paused';
-  });
-  const runningSwarm = runningSwarmAgents(activeSwarmRuns);
-  return runningSwarm.ids.size + runningSwarm.untracked + Math.max(liveNonSwarmCount, polledNonSwarmCount);
+  // Realtime agent ids and task records describe the same work through different APIs.
+  return Math.max(realtimeCount, polledCount);
+}
+
+export function effectiveGlobalActiveAgentCountFor(sessionActiveAgentCount: number, serverActivityCount: number): number {
+  return Math.max(0, sessionActiveAgentCount, serverActivityCount);
 }
 
 function ViewHeader({
@@ -612,7 +613,7 @@ function ViewHeader({
   );
 }
 
-function StatusBar({ sending, activeAgentCount, hasSwarmActivity }: { sending: boolean; activeAgentCount: number; hasSwarmActivity: boolean }) {
+function StatusBar({ sending, activeAgentCount }: { sending: boolean; activeAgentCount: number }) {
   const { tr } = useI18n();
   const { phase } = usePhaseStatus();
   const { connected } = useServerStatus();
@@ -625,7 +626,7 @@ function StatusBar({ sending, activeAgentCount, hasSwarmActivity }: { sending: b
       </div>
       <div className="status-right">
         <span className="status-item"><span className={`status-dot${connected ? ' success' : ' error'}`} />{connected ? tr('Local server', '本地服务') : tr('Offline', '离线')}</span>
-        <span className="status-item"><Icon name="swarm" size={13} />{activeAgentCount > 0 ? tr(`${activeAgentCount} agents active`, `${activeAgentCount} 个智能体活动中`) : hasSwarmActivity ? tr('Swarm queued', '协作排队中') : tr('Swarm idle', '协作空闲')}</span>
+        <span className="status-item"><Icon name="git-branch" size={13} />{activeAgentCount > 0 ? tr(`${activeAgentCount} active tasks`, `${activeAgentCount} 个活动任务`) : tr('No active tasks', '暂无活动任务')}</span>
       </div>
     </footer>
   );

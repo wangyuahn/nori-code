@@ -1,6 +1,6 @@
 /**
  * UsagePanelComponent — wraps pre-coloured `/usage` lines in a blue box
- * border with a left indent, mirroring the PlanBoxComponent layout so
+ * border with a left indent, mirroring the message-panel layout so
  * the pattern stays consistent across command-triggered panels.
  */
 

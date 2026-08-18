@@ -8,13 +8,12 @@ import type {
   AgentAPI,
   BeginCompactionPayload,
   CancelPayload,
-  CancelPlanPayload,
+  CancelDiscussPayload,
   CancelShellCommandPayload,
   CreateGoalPayload,
   CronCreateRequest,
   DetachBackgroundPayload,
   EmptyPayload,
-  EnterSwarmPayload,
   GetBackgroundOutputPayload,
   GetBackgroundPayload,
   McpServerInfo,
@@ -176,28 +175,16 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
     return (await this.getAgent(agentId)).getModel(payload);
   }
 
-  async enterPlan({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {
-    return (await this.getAgent(agentId)).enterPlan(payload);
+  async enterDiscuss({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {
+    return (await this.getAgent(agentId)).enterDiscuss(payload);
   }
 
-  async cancelPlan({ agentId, ...payload }: AgentScopedPayload<CancelPlanPayload>) {
-    return (await this.getAgent(agentId)).cancelPlan(payload);
+  async cancelDiscuss({ agentId, ...payload }: AgentScopedPayload<CancelDiscussPayload>) {
+    return (await this.getAgent(agentId)).cancelDiscuss(payload);
   }
 
-  async clearPlan({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {
-    return (await this.getAgent(agentId)).clearPlan(payload);
-  }
-
-  async enterSwarm({ agentId, ...payload }: AgentScopedPayload<EnterSwarmPayload>) {
-    return (await this.getAgent(agentId)).enterSwarm(payload);
-  }
-
-  async exitSwarm({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {
-    return (await this.getAgent(agentId)).exitSwarm(payload);
-  }
-
-  async getSwarmMode({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {
-    return (await this.getAgent(agentId)).getSwarmMode(payload);
+  async getDiscussMode({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {
+    return (await this.getAgent(agentId)).getDiscussMode(payload);
   }
 
   async beginCompaction({ agentId, ...payload }: AgentScopedPayload<BeginCompactionPayload>) {
@@ -302,10 +289,6 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
 
   async getPermission({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {
     return (await this.getAgent(agentId)).getPermission(payload);
-  }
-
-  async getPlan({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {
-    return (await this.getAgent(agentId)).getPlan(payload);
   }
 
   async getUsage({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {

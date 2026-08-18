@@ -476,10 +476,10 @@ export function configToTomlData(config: KimiConfig): Record<string, unknown> {
   const scalarFields: (keyof KimiConfig)[] = [
     'defaultProvider',
     'defaultModel',
-    'planMode',
+    'discussMode',
     'yolo',
     'defaultPermissionMode',
-    'defaultPlanMode',
+    'defaultDiscussMode',
     'mergeAllAvailableSkills',
     'extraSkillDirs',
     'telemetry',

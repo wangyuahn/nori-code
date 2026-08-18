@@ -128,7 +128,7 @@ export class AcpSession {
 
   /**
    * The adapter-side authoritative current mode id. Updated by
-   * {@link setMode} after both SDK toggles (`setPlanMode` + `setPermission`)
+   * {@link setMode} after both SDK toggles (`setDiscussMode` + `setPermission`)
    * land so the next `config_option_update` notification reflects the
    * new mode. Always one of the four PLAN D9 literals.
    */
@@ -404,15 +404,14 @@ export class AcpSession {
    * Forward an ACP `session/set_mode` request to the underlying SDK
    * session.
    *
-   * Phase 12.2 supports the full 4-mode taxonomy (PLAN D9 at
-   * `PLAN.md:85-106`):
+   * Phase 12.2 supports the full 4-mode taxonomy:
    *
-   *  - `'default'` → `setPlanMode(false)` + `setPermission('manual')`
-   *  - `'plan'`    → `setPlanMode(true)`  + `setPermission('manual')`
-   *  - `'auto'`    → `setPlanMode(false)` + `setPermission('auto')`
-   *  - `'yolo'`    → `setPlanMode(false)` + `setPermission('yolo')`
+   *  - `'default'` → `setDiscussMode(true)` + `setPermission('manual')`
+   *  - `'discuss'` → `setDiscussMode(true)` + `setPermission('manual')`
+   *  - `'auto'`    → `setDiscussMode(false)` + `setPermission('auto')`
+   *  - `'yolo'`    → `setDiscussMode(false)` + `setPermission('yolo')`
    *
-   * Order inside every arm is `setPlanMode` → `setPermission` →
+   * Order inside every arm is `setDiscussMode` → `setPermission` →
    * `emitConfigOptionUpdate`. The dispatch table lives in
    * {@link acpModeToToggles} so the registry of modes and the toggles
    * each mode maps to stay co-located.
@@ -431,7 +430,7 @@ export class AcpSession {
    *  - Unknown `modeId` → JSON-RPC `invalid_params` (-32602) BEFORE any
    *    SDK call, so the client sees a structured rejection rather than
    *    a partial state change.
-   *  - SDK errors from `setPlanMode` or `setPermission` propagate
+   *  - SDK errors from `setDiscussMode` or `setPermission` propagate
    *    as-is up to {@link AcpServer.setSessionMode}. When either throws,
    *    the `config_option_update` notification is suppressed (the client
    *    will see the rejection and can re-query state).
@@ -440,8 +439,8 @@ export class AcpSession {
     if (!isAcpModeId(modeId)) {
       throw RequestError.invalidParams({ modeId }, `Unknown sessionModeId: ${modeId}`);
     }
-    const { plan, permission } = acpModeToToggles(modeId);
-    await this.session.setPlanMode(plan);
+    const { discuss, permission } = acpModeToToggles(modeId);
+    await this.session.setDiscussMode(discuss);
     await this.session.setPermission(permission);
     this.currentModeIdInternal = modeId;
     await this.emitConfigOptionUpdate();
@@ -1224,13 +1223,6 @@ export class AcpSession {
   private async handleApproval(req: ApprovalRequest): Promise<ApprovalResponse> {
     const toolCall = buildPermissionToolCallUpdate(this.currentTurnId, req);
     const options = approvalRequestToPermissionOptions(req);
-    // Phase 13.2 telemetry breadcrumb: how many discrete options does
-    // the plan_review surface carry? PII-free (just a count), matches
-    // the Phase 11.2 telemetry discipline.
-    if (req.display.kind === 'plan_review') {
-      const count = req.display.options?.length ?? 0;
-      this.emitTelemetry('plan_review_options_count', { count });
-    }
     try {
       // `requestPermission` is an awaitable JSON-RPC request (unlike
       // the fire-and-forget `sessionUpdate` notifications elsewhere in
@@ -1244,10 +1236,7 @@ export class AcpSession {
       // Map the discriminator first (pure mapper, easy to unit-test),
       // then stitch the matched option's human-readable name as
       // `selectedLabel` so the SDK can surface "approved as
-      // 'Approve once'" in subsequent reasoning. `attachSelectedLabel`
-      // is a no-op for `cancelled` outcomes, unknown optionIds, and
-      // plan_* optionIds (Phase 13.2 — the plan_review branch attaches
-      // selectedLabel inside `permissionResponseToApprovalResponse`).
+      // 'Approve once'" in subsequent reasoning.
       return attachSelectedLabel(
         response,
         permissionResponseToApprovalResponse(req, response),
@@ -1412,7 +1401,7 @@ function formatStatusReport(status: SessionStatus): string {
     `- Model: ${status.model ?? '(not set)'}`,
     `- Thinking: ${status.thinkingEffort}`,
     `- Permission: ${status.permission}`,
-    `- Plan mode: ${status.planMode ? 'on' : 'off'}`,
+    `- Discuss mode: ${status.discussMode ? 'on' : 'off'}`,
     `- Context: ${status.contextTokens.toLocaleString('en-US')} / ${maxTokens}${usage}`,
   ].join('\n');
 }

@@ -31,7 +31,6 @@ const LEGACY_SESSION_APPROVAL_ACTION_TO_PATTERN: Readonly<Record<string, string>
 // in particular, `run background command` would need to encode
 // `run_in_background=true`, which `Bash`'s `matchesRule` cannot express.
 const LEGACY_SESSION_APPROVAL_UNRESTORABLE_ACTIONS = new Set<string>([
-  'run command in plan mode',
   'run background command',
 ]);
 

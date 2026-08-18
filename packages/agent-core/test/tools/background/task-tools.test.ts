@@ -580,12 +580,12 @@ describe('background tool descriptions', () => {
     expect(description).toContain('run that task in the foreground instead');
   });
 
-  it('TaskList description mentions active_only default, read-only, and plan-mode safety', () => {
+  it('TaskList description mentions active_only default, read-only, and restricted-mode safety', () => {
     const description = new TaskListTool(manager).description;
 
     expect(description).toMatch(/active_only/);
     expect(description).toMatch(/read[- ]only/i);
-    expect(description).toMatch(/plan[- ]mode/i);
+    expect(description).toMatch(/restricted[- ]modes?/i);
     expect(description).toMatch(/background tasks?/i);
     // command/PID/exit-code are shell-task fields only (ProcessBackgroundTaskInfo).
     expect(description).toMatch(/shell tasks/i);

@@ -34,4 +34,24 @@ describe('workspace rewind', () => {
     expect((await readFile(join(root, 'tracked.txt'), 'utf8')).replaceAll('\r\n', '\n')).toBe('before\n');
     await expect(readFile(join(root, 'created.txt'), 'utf8')).rejects.toThrow();
   });
+
+  it('keeps a child agent checkpoint independent from the main agent', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'nori-rewind-agent-'));
+    cleanup.push(root);
+    await execFileAsync('git', ['init'], { cwd: root });
+    await writeFile(join(root, 'tracked.txt'), 'initial\n');
+
+    const sessionId = `test-agent-${Date.now()}`;
+    cleanup.push(join(process.env['HOME'] ?? process.env['USERPROFILE'] ?? '', '.nori-code', 'rewind', sessionId));
+    cleanup.push(join(process.env['HOME'] ?? process.env['USERPROFILE'] ?? '', '.nori-code', 'rewind', `${sessionId}--agent_reviewer`));
+    await captureWorkspaceCheckpoint(sessionId, root);
+    await writeFile(join(root, 'tracked.txt'), 'main checkpoint\n');
+    await captureWorkspaceCheckpoint(sessionId, root, 'agent_reviewer');
+    await writeFile(join(root, 'tracked.txt'), 'after child\n');
+
+    expect(await restoreWorkspaceCheckpoint(sessionId, 1, 'agent_reviewer')).toBe(true);
+    expect((await readFile(join(root, 'tracked.txt'), 'utf8')).replaceAll('\r\n', '\n')).toBe('main checkpoint\n');
+    expect(await restoreWorkspaceCheckpoint(sessionId, 1)).toBe(true);
+    expect((await readFile(join(root, 'tracked.txt'), 'utf8')).replaceAll('\r\n', '\n')).toBe('initial\n');
+  });
 });

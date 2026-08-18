@@ -33,9 +33,9 @@ export function SubagentNode({ node, sessionId }: Props) {
               {node.type}
             </Pill>
             <span className="font-mono text-[12px] text-fg-0">{node.agentId}</span>
-            {node.swarmItem ? (
-              <Pill tone="subagent" variant="outline" title={node.swarmItem}>
-                {node.swarmItem}
+            {node.subagentTask ? (
+              <Pill tone="subagent" variant="outline" title={node.subagentTask}>
+                {node.subagentTask}
               </Pill>
             ) : null}
             {node.parentAgentId !== null ? (

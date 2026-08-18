@@ -14,6 +14,9 @@ import {
   listSessionChildrenQuerySchema,
   listSessionChildrenResponseSchema,
   listSessionsQuerySchema,
+  sessionAgentQuerySchema,
+  sessionAgentTreeResponseSchema,
+  sessionActivityResponseSchema,
   sessionStatusResponseSchema,
   updateSessionProfileRequestSchema,
   updateSessionRequestSchema,
@@ -110,6 +113,27 @@ describe('listSessionsQuerySchema', () => {
   });
 });
 
+describe('sessionActivityResponseSchema', () => {
+  it('distinguishes agent work and background work without transcript data', () => {
+    const parsed = sessionActivityResponseSchema.parse({
+      items: [{
+        session_id: 'sess_active',
+        agent_id: 'team-reviewer',
+        status: 'running',
+        last_active: '2026-08-18T04:00:00.000Z',
+      }, {
+        session_id: 'sess_unopened',
+        agent_id: 'background:bash-1',
+        kind: 'background',
+        task_id: 'bash-1',
+        status: 'running',
+      }],
+    });
+    expect(parsed.items[0]).toMatchObject({ agent_id: 'team-reviewer', kind: 'agent' });
+    expect(parsed.items[1]).toMatchObject({ kind: 'background', task_id: 'bash-1' });
+  });
+});
+
 describe('listSessionChildrenQuerySchema', () => {
   it('does not advertise exclude_empty (child lists do not filter by it)', () => {
     const parsed = listSessionChildrenQuerySchema.parse({ exclude_empty: true });
@@ -164,18 +188,28 @@ describe('updateSessionProfileRequestSchema', () => {
     expect(parsed.agent_config?.model).toBe('moonshot-v1-128k');
   });
 
-  it('accepts agent_config runtime controls (thinking + permission_mode + plan_mode)', () => {
+  it('accepts agent_config runtime controls (thinking + permission_mode + discuss_mode)', () => {
     const parsed = updateSessionProfileRequestSchema.parse({
       agent_config: {
         thinking: 'medium',
         permission_mode: 'auto',
-        plan_mode: false,
+        discuss_mode: false,
       },
     });
     expect(parsed.agent_config).toEqual({
       thinking: 'medium',
       permission_mode: 'auto',
-      plan_mode: false,
+      discuss_mode: false,
+    });
+  });
+
+  it('keeps an agent target as routing metadata rather than session data', () => {
+    expect(updateSessionProfileRequestSchema.parse({
+      agent_id: 'team_reviewer',
+      agent_config: { discuss_mode: true },
+    })).toEqual({
+      agent_id: 'team_reviewer',
+      agent_config: { discuss_mode: true },
     });
   });
 });
@@ -325,9 +359,8 @@ describe('sessionStatusResponseSchema', () => {
       model: 'moonshot-v1-128k',
       thinking_level: 'on',
       permission: 'ask',
-      plan_mode: true,
+      discuss_mode: true,
       main_write_enabled: true,
-      swarm_mode: false,
       goal: null,
       context_tokens: 1024,
       max_context_tokens: 128000,
@@ -343,7 +376,7 @@ describe('sessionStatusResponseSchema', () => {
     });
     expect(parsed.status).toBe('running');
     expect(parsed.model).toBe('moonshot-v1-128k');
-    expect(parsed.plan_mode).toBe(true);
+    expect(parsed.discuss_mode).toBe(true);
     expect(parsed.context_usage).toBe(0.008);
     expect(parsed.usage?.total?.output).toBe(200);
   });
@@ -353,9 +386,8 @@ describe('sessionStatusResponseSchema', () => {
       status: 'idle',
       thinking_level: 'off',
       permission: 'auto',
-      plan_mode: false,
+      discuss_mode: false,
       main_write_enabled: false,
-      swarm_mode: false,
       goal: null,
       context_tokens: 0,
       max_context_tokens: 0,
@@ -370,9 +402,8 @@ describe('sessionStatusResponseSchema', () => {
       sessionStatusResponseSchema.safeParse({
         thinking_level: 'off',
         permission: 'auto',
-        plan_mode: false,
+        discuss_mode: false,
         main_write_enabled: false,
-        swarm_mode: false,
         goal: null,
         context_tokens: 0,
         max_context_tokens: 0,
@@ -387,9 +418,8 @@ describe('sessionStatusResponseSchema', () => {
         status: 'unknown',
         thinking_level: 'off',
         permission: 'auto',
-        plan_mode: false,
+        discuss_mode: false,
         main_write_enabled: false,
-        swarm_mode: false,
         goal: null,
         context_tokens: 0,
         max_context_tokens: 0,
@@ -404,9 +434,8 @@ describe('sessionStatusResponseSchema', () => {
         status: 'idle',
         thinking_level: 'off',
         permission: 'auto',
-        plan_mode: false,
+        discuss_mode: false,
         main_write_enabled: false,
-        swarm_mode: false,
         goal: null,
         context_tokens: -1,
         max_context_tokens: 0,
@@ -421,9 +450,8 @@ describe('sessionStatusResponseSchema', () => {
         status: 'idle',
         thinking_level: 'off',
         permission: 'auto',
-        plan_mode: false,
+        discuss_mode: false,
         main_write_enabled: false,
-        swarm_mode: false,
         goal: null,
         context_tokens: 10,
         max_context_tokens: 5,
@@ -445,6 +473,12 @@ describe('compactSessionRequestSchema', () => {
   it('accepts an optional instruction string', () => {
     expect(compactSessionRequestSchema.parse({ instruction: '  focus on decisions  ' })).toEqual({
       instruction: '  focus on decisions  ',
+    });
+  });
+
+  it('accepts an optional agent id', () => {
+    expect(compactSessionRequestSchema.parse({ agent_id: 'agent_reviewer' })).toEqual({
+      agent_id: 'agent_reviewer',
     });
   });
 
@@ -471,9 +505,42 @@ describe('undoSessionRequestSchema', () => {
     });
   });
 
+  it('keeps an explicit agent id with the default count', () => {
+    expect(undoSessionRequestSchema.parse({ agent_id: 'agent_reviewer' })).toEqual({
+      count: 1,
+      agent_id: 'agent_reviewer',
+    });
+  });
+
   it('rejects zero count and oversized page size', () => {
     expect(undoSessionRequestSchema.safeParse({ count: 0 }).success).toBe(false);
     expect(undoSessionRequestSchema.safeParse({ page_size: 101 }).success).toBe(false);
+  });
+});
+
+describe('session agent tree schemas', () => {
+  it('parses an agent-scoped status query and agent tree node', () => {
+    expect(sessionAgentQuerySchema.parse({ agent_id: 'agent_reviewer' })).toEqual({
+      agent_id: 'agent_reviewer',
+    });
+    const parsed = sessionAgentTreeResponseSchema.parse({
+      agents: [{
+        id: 'agent_reviewer',
+        kind: 'sub',
+        parent_agent_id: 'main',
+        name: 'src/review.ts',
+        status: 'running',
+        usage: {
+          input_other: 10,
+          output: 4,
+          input_cache_read: 2,
+          input_cache_creation: 1,
+        },
+        last_active: '2026-08-17T12:00:00.000Z',
+        archived: false,
+      }],
+    });
+    expect(parsed.agents[0]?.parent_agent_id).toBe('main');
   });
 });
 
@@ -497,9 +564,8 @@ describe('undoSessionResponseSchema', () => {
         model: 'kimi-k2',
         thinking_level: 'auto',
         permission: 'manual',
-        plan_mode: false,
+        discuss_mode: false,
         main_write_enabled: true,
-        swarm_mode: false,
         goal: null,
         context_tokens: 10,
         max_context_tokens: 100,

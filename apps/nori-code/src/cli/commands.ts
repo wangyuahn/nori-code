@@ -86,7 +86,7 @@ export function createProgram(
         .argParser((value: string, previous: string[] | undefined) => [...(previous ?? []), value])
         .default([]),
     )
-    .option('--plan', 'Start in plan mode.', false);
+    .option('--discuss', 'Start in Discuss.', false);
 
   registerExportCommand(program);
   registerProviderCommand(program);
@@ -136,7 +136,7 @@ export function createProgram(
       session: sessionValue,
       continue: raw['continue'] === true || raw['C'] === true,
       permission,
-      plan: raw['plan'] as boolean,
+      discuss: raw['discuss'] === true,
       model: raw['model'] as string | undefined,
       outputFormat: raw['outputFormat'] as CLIOptions['outputFormat'],
       prompt: raw['prompt'] as string | undefined,

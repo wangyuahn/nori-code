@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import {
   ErrorCode,
   promptAbortResponseSchema,
+  promptAgentQuerySchema,
   promptListResponseSchema,
   promptSubmissionSchema,
   promptSubmitResultSchema,
@@ -34,7 +35,7 @@ interface PromptRouteHost {
     path: string,
     options: { preHandler: unknown[]; schema?: Record<string, unknown> },
     handler: (
-      req: { id: string; body: unknown; params: unknown },
+      req: { id: string; body: unknown; params: unknown; query: unknown },
       reply: { send(payload: unknown): unknown },
     ) => Promise<void> | void,
   ): unknown;
@@ -64,6 +65,7 @@ export function registerPromptsRoutes(
       method: 'GET',
       path: '/sessions/{session_id}/prompts',
       params: sessionIdParamSchema,
+      querystring: promptAgentQuerySchema,
       success: { data: promptListResponseSchema },
       errors: {
         [ErrorCode.SESSION_NOT_FOUND]: {},
@@ -76,7 +78,7 @@ export function registerPromptsRoutes(
       try {
         const { session_id } = req.params;
         const result = await ix.invokeFunction((a) =>
-          a.get(IPromptService).list(session_id),
+          a.get(IPromptService).list(session_id, req.query.agent_id),
         );
         reply.send(okEnvelope(result, req.id));
       } catch (error) {
@@ -133,7 +135,11 @@ export function registerPromptsRoutes(
           const session = await services.sessions.get(session_id);
           let checkpointCaptured = false;
           try {
-            checkpointCaptured = await captureWorkspaceCheckpoint(session_id, session.metadata.cwd);
+            checkpointCaptured = await captureWorkspaceCheckpoint(
+              session_id,
+              session.metadata.cwd,
+              body.agent_id,
+            );
           } catch {
             // Conversation-only rewind still works outside Git workspaces.
           }
@@ -143,7 +149,9 @@ export function registerPromptsRoutes(
               await resolvePromptMediaFiles(body, services.files),
             );
           } catch (error) {
-            if (checkpointCaptured) await discardLatestWorkspaceCheckpoint(session_id).catch(() => undefined);
+            if (checkpointCaptured) {
+              await discardLatestWorkspaceCheckpoint(session_id, body.agent_id).catch(() => undefined);
+            }
             throw error;
           }
         })();
@@ -180,7 +188,7 @@ export function registerPromptsRoutes(
       try {
         const { session_id } = req.params;
         const result = await ix.invokeFunction((a) =>
-          a.get(IPromptService).steer(session_id, req.body.prompt_ids),
+          a.get(IPromptService).steer(session_id, req.body.prompt_ids, req.body.agent_id),
         );
         reply.send(okEnvelope(result, req.id));
       } catch (error) {
@@ -199,6 +207,7 @@ export function registerPromptsRoutes(
     {
       method: 'POST',
       path: '/sessions/{session_id}/prompts/{tail}',
+      querystring: promptAgentQuerySchema,
       success: { data: z.union([promptAbortResponseSchema, promptSteerResultSchema]) },
       errors: {
         [ErrorCode.VALIDATION_FAILED]: {},
@@ -248,8 +257,8 @@ export function registerPromptsRoutes(
         const result = await ix.invokeFunction((a) => {
           const service = a.get(IPromptService);
           return parsed.action === 'abort'
-            ? service.abort(session_id, prompt_id)
-            : service.steer(session_id, [prompt_id]);
+            ? service.abort(session_id, prompt_id, req.query.agent_id)
+            : service.steer(session_id, [prompt_id], req.query.agent_id);
         });
         reply.send(okEnvelope(result, req.id));
       } catch (error) {

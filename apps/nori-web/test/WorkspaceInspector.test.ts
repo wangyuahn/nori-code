@@ -361,13 +361,13 @@ describe('workspace change presentation', () => {
     }
   });
 
-  it('does not attribute unrelated workspace changes to a swarm invocation', () => {
+  it('does not attribute unrelated workspace changes to a SubAgent invocation', () => {
     const messages: ChatMessage[] = [{
       id: 'assistant-1',
       role: 'assistant',
       text: '',
       createdAt: '2026-07-15T05:00:00.000Z',
-      toolCalls: [{ name: 'AgentSwarm', args: { tasks: ['review'] } }],
+      toolCalls: [{ name: 'SubAgent', args: { tasks: ['review'] } }],
     }];
 
     expect(collectAttributions(messages)).toEqual([]);
@@ -400,10 +400,10 @@ describe('workspace change presentation', () => {
         name: 'Edit',
         args: {
           path: 'C:/Users/sudden/Desktop/games/stardrift.html',
-          old_string: 'background:#ff0000;',
-          new_string: 'background:#050510;',
+          expected_tag: 'A1B2',
+          line_ops: [{ op: 'swap', start: 1, end: 1, content: 'background:#050510;' }],
         },
-        result: 'Replaced 1 occurrence',
+        result: '[stardrift.html#C3D4]\nApplied 1 line operation to stardrift.html.',
       }],
     }];
 
@@ -412,9 +412,31 @@ describe('workspace change presentation', () => {
       agentId: 'main',
       operation: 'edit',
       path: 'stardrift.html',
-      diff: '-background:#ff0000;\n+background:#050510;',
+      diff: '@@ replace lines 1-1 @@\n- [original line 1 replaced]\n+background:#050510;',
       occurredAt: '2026-07-15T10:43:43.244Z',
     }]);
+  });
+
+  it('does not reconstruct failed hash edits as project changes', () => {
+    const messages: ChatMessage[] = [{
+      id: 'assistant-failed-edit',
+      role: 'assistant',
+      text: '',
+      createdAt: '2026-07-15T10:43:43.244Z',
+      toolCalls: [{
+        id: 'edit-failed',
+        name: 'Edit',
+        args: {
+          path: 'C:/Users/sudden/Desktop/games/stardrift.html',
+          expected_tag: 'A1B2',
+          line_ops: [{ op: 'swap', start: 1, end: 1, content: 'background:#050510;' }],
+        },
+        result: 'Content tag mismatch for stardrift.html',
+        isError: true,
+      }],
+    }];
+
+    expect(collectToolCodeChanges(messages, 'C:/Users/sudden/Desktop/games')).toEqual([]);
   });
 
   it('accumulates repeated changes to the same file instead of replacing the older diff', () => {
@@ -668,8 +690,12 @@ describe('workspace change presentation', () => {
       toolCalls: [{
         id: 'edit-non-git',
         name: 'Edit',
-        args: { path: 'C:/projects/game/index.html', old_string: 'red', new_string: 'black' },
-        result: 'Replaced 1 occurrence',
+        args: {
+          path: 'C:/projects/game/index.html',
+          expected_tag: 'A1B2',
+          line_ops: [{ op: 'swap', start: 1, end: 1, content: 'black' }],
+        },
+        result: '[index.html#C3D4]\nApplied 1 line operation to index.html.',
       }],
     }];
 

@@ -25,7 +25,7 @@
  *   - steer removes queued prompts and dispatches core.rpc.steer
  *   - failed steer restores queued prompts
  *   - per-request stateless controls (model / thinking / permission_mode /
- *     plan_mode) bootstrap once, diff-dispatch on change, no-op on match,
+ *     discuss_mode) bootstrap once, diff-dispatch on change, no-op on match,
  *     reseed after session close, agent.status.updated mirrors into shadow.
  */
 
@@ -77,7 +77,7 @@ function mkBody(over: Partial<PromptSubmission> = {}): PromptSubmission {
     model: 'kimi-code/k2',
     thinking: 'off',
     permission_mode: 'manual',
-    plan_mode: false,
+    discuss_mode: false,
     ...over,
   };
 }
@@ -102,26 +102,23 @@ interface RpcRecord {
   setModelCalls: unknown[];
   setThinkingCalls: unknown[];
   setPermissionCalls: unknown[];
-  enterPlanCalls: unknown[];
-  cancelPlanCalls: unknown[];
-  getSwarmModeCalls: number;
+  enterDiscussCalls: unknown[];
+  cancelDiscussCalls: unknown[];
+  getDiscussModeCalls: number;
   startBtwCalls: unknown[];
-  enterSwarmCalls: unknown[];
-  exitSwarmCalls: unknown[];
   createGoalCalls: unknown[];
   pauseGoalCalls: unknown[];
   resumeGoalCalls: unknown[];
   cancelGoalCalls: unknown[];
   getConfigCalls: number;
   getPermissionCalls: number;
-  getPlanCalls: number;
 }
 
 interface BridgeStubOptions {
-  /** Initial bootstrap values returned by getConfig/getPermission/getPlan. */
+  /** Initial bootstrap values returned by getConfig/getPermission/getDiscussMode. */
   config?: { modelAlias?: string; thinkingEffort?: string };
   permission?: { mode: 'manual' | 'yolo' | 'auto' };
-  plan?: null | { id: string; content: string; path: string };
+  discussMode?: boolean;
   sessions?: SessionSummary[];
   onPrompt?: (payload: unknown) => void | Promise<void>;
 }
@@ -136,19 +133,16 @@ function makeBridge(
     setModelCalls: [],
     setThinkingCalls: [],
     setPermissionCalls: [],
-    enterPlanCalls: [],
-    cancelPlanCalls: [],
-    getSwarmModeCalls: 0,
+    enterDiscussCalls: [],
+    cancelDiscussCalls: [],
+    getDiscussModeCalls: 0,
     startBtwCalls: [],
-    enterSwarmCalls: [],
-    exitSwarmCalls: [],
     createGoalCalls: [],
     pauseGoalCalls: [],
     resumeGoalCalls: [],
     cancelGoalCalls: [],
     getConfigCalls: 0,
     getPermissionCalls: 0,
-    getPlanCalls: 0,
   };
   const config = {
     cwd: '/tmp/ws',
@@ -158,7 +152,6 @@ function makeBridge(
     modelAlias: opts.config?.modelAlias ?? 'kimi-code/k2',
   };
   const permission = { mode: opts.permission?.mode ?? 'manual', rules: [] };
-  const plan = opts.plan === undefined ? null : opts.plan;
   const sessions = opts.sessions ?? [mkSummary()];
 
   const rpc: Partial<CoreRPC> = {
@@ -190,9 +183,9 @@ function makeBridge(
       record.getPermissionCalls += 1;
       return permission;
     }),
-    getPlan: vi.fn().mockImplementation(async () => {
-      record.getPlanCalls += 1;
-      return plan;
+    getDiscussMode: vi.fn().mockImplementation(async () => {
+      record.getDiscussModeCalls += 1;
+      return opts.discussMode ?? false;
     }),
     setModel: vi.fn().mockImplementation(async (payload) => {
       record.setModelCalls.push(payload);
@@ -204,25 +197,15 @@ function makeBridge(
     setPermission: vi.fn().mockImplementation(async (payload) => {
       record.setPermissionCalls.push(payload);
     }),
-    enterPlan: vi.fn().mockImplementation(async (payload) => {
-      record.enterPlanCalls.push(payload);
+    enterDiscuss: vi.fn().mockImplementation(async (payload) => {
+      record.enterDiscussCalls.push(payload);
     }),
-    cancelPlan: vi.fn().mockImplementation(async (payload) => {
-      record.cancelPlanCalls.push(payload);
-    }),
-    getSwarmMode: vi.fn().mockImplementation(async () => {
-      record.getSwarmModeCalls += 1;
-      return false;
+    cancelDiscuss: vi.fn().mockImplementation(async (payload) => {
+      record.cancelDiscussCalls.push(payload);
     }),
     startBtw: vi.fn().mockImplementation(async (payload) => {
       record.startBtwCalls.push(payload);
       return 'agent_btw';
-    }),
-    enterSwarm: vi.fn().mockImplementation(async (payload) => {
-      record.enterSwarmCalls.push(payload);
-    }),
-    exitSwarm: vi.fn().mockImplementation(async (payload) => {
-      record.exitSwarmCalls.push(payload);
     }),
     createGoal: vi.fn().mockImplementation(async (payload) => {
       record.createGoalCalls.push(payload);
@@ -317,6 +300,7 @@ function makeSessionService(): {
     listChildren: vi.fn() as unknown as ISessionService['listChildren'],
     createChild: vi.fn() as unknown as ISessionService['createChild'],
     getStatus: vi.fn() as unknown as ISessionService['getStatus'],
+    listAgents: vi.fn() as unknown as ISessionService['listAgents'],
     getSessionWarnings: vi.fn() as unknown as ISessionService['getSessionWarnings'],
     compact: vi.fn() as unknown as ISessionService['compact'],
     undo: vi.fn() as unknown as ISessionService['undo'],
@@ -362,6 +346,24 @@ describe('PromptService.submit', () => {
     expect(result.user_message_id).toMatch(/^msg_sess_01PT_pending_prompt_/);
   });
 
+  it('passes the requested prompt model to the auth readiness gate', async () => {
+    const { bridge } = makeBridge();
+    const { bus } = makeBus();
+    const auth = makeAuth();
+    const impl = newSvc(bridge, bus, auth);
+    await impl.submit(SID, mkBody({ model: 'custom/local-chat' }));
+    expect(auth.ensureReady).toHaveBeenCalledWith('custom/local-chat');
+  });
+
+  it('passes undefined to the auth readiness gate when the prompt omits a model', async () => {
+    const { bridge } = makeBridge();
+    const { bus } = makeBus();
+    const auth = makeAuth();
+    const impl = newSvc(bridge, bus, auth);
+    await impl.submit(SID, mkBodyMinimal());
+    expect(auth.ensureReady).toHaveBeenCalledWith(undefined);
+  });
+
   it('translates text + image content to kosong ContentParts', async () => {
     const { bridge, record } = makeBridge();
     const { bus } = makeBus();
@@ -402,6 +404,7 @@ describe('PromptService.submit', () => {
         agentId: 'main',
         input: [{ type: 'text', text: 'hi' }],
         goalIntake: true,
+        speaker: { from: 'user', speakerName: '用户' },
       },
     ]);
   });
@@ -524,14 +527,28 @@ describe('PromptService.submit', () => {
       }),
     );
     const listed = await impl.list(SID);
+    const agentListed = await impl.list(SID, 'agent_btw');
 
     expect(main.status).toBe('running');
     expect(btw.status).toBe('running');
     expect(listed.active?.prompt_id).toBe(main.prompt_id);
     expect(listed.queued).toHaveLength(0);
+    expect(agentListed.active?.prompt_id).toBe(btw.prompt_id);
     expect(record.promptCalls).toEqual([
-      { sessionId: SID, agentId: 'main', input: [{ type: 'text', text: 'main' }] },
-      { sessionId: SID, agentId: 'agent_btw', input: [{ type: 'text', text: 'side question' }] },
+      {
+        sessionId: SID,
+        agentId: 'main',
+        input: [{ type: 'text', text: 'main' }],
+        goalIntake: undefined,
+        speaker: { from: 'user', speakerName: '用户' },
+      },
+      {
+        sessionId: SID,
+        agentId: 'agent_btw',
+        input: [{ type: 'text', text: 'side question' }],
+        goalIntake: undefined,
+        speaker: { from: 'user', speakerName: '用户' },
+      },
     ]);
     const submitted = events.filter((event) => event.type === 'prompt.submitted') as Array<{
       type: 'prompt.submitted';
@@ -594,6 +611,8 @@ describe('PromptService.submit', () => {
       sessionId: SID,
       agentId: 'main',
       input: [{ type: 'text', text: 'two' }],
+      goalIntake: undefined,
+      speaker: { from: 'user', speakerName: '用户' },
     });
     const listed = await impl.list(SID);
     expect(listed.active?.prompt_id).toBe(second.prompt_id);
@@ -688,6 +707,15 @@ describe('PromptService.startBtw', () => {
     await expect(impl.startBtw(SID)).resolves.toBe('agent_btw');
 
     expect(record.startBtwCalls).toEqual([{ sessionId: SID, agentId: 'main' }]);
+  });
+
+  it('uses the session model alias for the auth readiness gate', async () => {
+    const { bridge } = makeBridge({ config: { modelAlias: 'custom/local-chat' } });
+    const { bus } = makeBus();
+    const auth = makeAuth();
+    const impl = newSvc(bridge, bus, auth);
+    await impl.startBtw(SID);
+    expect(auth.ensureReady).toHaveBeenCalledWith('custom/local-chat');
   });
 });
 
@@ -1014,6 +1042,26 @@ describe('PromptService.abortBySession', () => {
     });
   });
 
+  it('aborts only the selected agent prompt', async () => {
+    const { bridge, record } = makeBridge();
+    const { bus, triggerSubscribers } = makeBus();
+    const impl = newSvc(bridge, bus);
+    await impl.submit(SID, mkBodyMinimal({ content: [{ type: 'text', text: 'main' }] }));
+    await impl.submit(SID, mkBodyMinimal({
+      agent_id: 'agent_reviewer',
+      content: [{ type: 'text', text: 'review' }],
+    }));
+    triggerSubscribers({
+      type: 'turn.started', turnId: 11, origin: { kind: 'user' }, sessionId: SID, agentId: 'agent_reviewer',
+    } as unknown as Event);
+
+    await impl.abortBySession(SID, 'agent_reviewer');
+
+    expect(record.cancelCalls).toEqual([{ sessionId: SID, agentId: 'agent_reviewer', turnId: 11 }]);
+    expect(impl.getCurrentPromptId(SID)).toBeDefined();
+    expect(impl.getCurrentPromptId(SID, 'agent_reviewer')).toBeUndefined();
+  });
+
   it('queues a fast follow-up until the aborted turn actually ends', async () => {
     const { bridge, record } = makeBridge();
     const { bus, triggerSubscribers } = makeBus();
@@ -1057,6 +1105,8 @@ describe('PromptService queue steer', () => {
         sessionId: SID,
         agentId: 'main',
         input: [{ type: 'text', text: 'queued' }],
+        goalIntake: undefined,
+        speaker: { from: 'user', speakerName: '用户' },
       },
     ]);
     expect((await impl.list(SID)).queued).toHaveLength(0);
@@ -1091,6 +1141,8 @@ describe('PromptService queue steer', () => {
         sessionId: SID,
         agentId: 'main',
         input: [{ type: 'text', text: 'first\n\nsecond' }],
+        goalIntake: undefined,
+        speaker: { from: 'user', speakerName: '用户' },
       },
     ]);
     expect((await impl.list(SID)).queued).toHaveLength(0);
@@ -1114,6 +1166,7 @@ describe('PromptService queue steer', () => {
         agentId: 'main',
         input: [{ type: 'text', text: 'new task' }],
         goalIntake: true,
+        speaker: { from: 'user', speakerName: '用户' },
       },
     ]);
   });
@@ -1163,38 +1216,36 @@ describe('PromptService queue steer', () => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Stateless per-request session controls (model / thinking / permission_mode /
-// plan_mode)
+// discuss_mode)
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('PromptService stateless controls — bootstrap + shadow', () => {
-  it('bootstraps shadow from getConfig/getPermission/getPlan on first submit', async () => {
+  it('bootstraps shadow from getConfig/getPermission/getDiscussMode on first submit', async () => {
     const { bridge, record } = makeBridge({
       config: { modelAlias: 'kimi-code/k2', thinkingEffort: 'medium' },
       permission: { mode: 'yolo' },
-      plan: { id: 'plan_abc', content: '', path: '/tmp/p' },
+      discussMode: true,
     });
     const { bus } = makeBus();
     const impl = newSvc(bridge, bus);
-    await impl.submit(SID, mkBody({ thinking: 'medium', permission_mode: 'yolo', plan_mode: true }));
+    await impl.submit(SID, mkBody({ thinking: 'medium', permission_mode: 'yolo', discuss_mode: true }));
     const snap = impl._agentStateForTest(SID);
     expect(snap).toEqual({
       model: 'kimi-code/k2',
       thinking: 'medium',
       permissionMode: 'yolo',
-      planMode: true,
-      swarmMode: false,
+      discussMode: true,
     });
     // Getters fired exactly once each.
     expect(record.getConfigCalls).toBe(1);
     expect(record.getPermissionCalls).toBe(1);
-    expect(record.getPlanCalls).toBe(1);
-    expect(record.getSwarmModeCalls).toBe(1);
+    expect(record.getDiscussModeCalls).toBe(1);
     // No setters fired because body matched the bootstrap snapshot.
     expect(record.setModelCalls).toEqual([]);
     expect(record.setThinkingCalls).toEqual([]);
     expect(record.setPermissionCalls).toEqual([]);
-    expect(record.enterPlanCalls).toEqual([]);
-    expect(record.cancelPlanCalls).toEqual([]);
+    expect(record.enterDiscussCalls).toEqual([]);
+    expect(record.cancelDiscussCalls).toEqual([]);
   });
 
   it('does not re-bootstrap on subsequent submits in the same session', async () => {
@@ -1221,7 +1272,7 @@ describe('PromptService stateless controls — bootstrap + shadow', () => {
     await impl.submit(SID, mkBody({ content: [{ type: 'text', text: 'again' }] }));
     expect(record.getConfigCalls).toBe(1);
     expect(record.getPermissionCalls).toBe(1);
-    expect(record.getPlanCalls).toBe(1);
+    expect(record.getDiscussModeCalls).toBe(1);
   });
 
   it('re-bootstraps after the session closes', async () => {
@@ -1253,7 +1304,7 @@ describe('PromptService stateless controls — bootstrap + shadow', () => {
     await impl.submit(SID, mkBody({ content: [{ type: 'text', text: 'after-close' }] }));
     expect(record.getConfigCalls).toBe(2);
     expect(record.getPermissionCalls).toBe(2);
-    expect(record.getPlanCalls).toBe(2);
+    expect(record.getDiscussModeCalls).toBe(2);
   });
 });
 
@@ -1344,30 +1395,30 @@ describe('PromptService stateless controls — diff dispatch', () => {
     ]);
   });
 
-  it('enters plan mode when plan_mode goes false→true', async () => {
-    const { bridge, record } = makeBridge({ plan: null });
+  it('enters Discuss when discuss_mode goes false→true', async () => {
+    const { bridge, record } = makeBridge({ discussMode: false });
     const { bus } = makeBus();
     const impl = newSvc(bridge, bus);
-    await impl.submit(SID, mkBody({ plan_mode: true }));
-    expect(record.enterPlanCalls).toEqual([
+    await impl.submit(SID, mkBody({ discuss_mode: true }));
+    expect(record.enterDiscussCalls).toEqual([
       { sessionId: SID, agentId: 'main' },
     ]);
-    expect(record.cancelPlanCalls).toEqual([]);
-    expect(impl._agentStateForTest(SID)?.planMode).toBe(true);
+    expect(record.cancelDiscussCalls).toEqual([]);
+    expect(impl._agentStateForTest(SID)?.discussMode).toBe(true);
   });
 
-  it('cancels plan mode when plan_mode goes true→false', async () => {
+  it('cancels Discuss when discuss_mode goes true→false', async () => {
     const { bridge, record } = makeBridge({
-      plan: { id: 'plan_xyz', content: '', path: '/tmp/p' },
+      discussMode: true,
     });
     const { bus } = makeBus();
     const impl = newSvc(bridge, bus);
-    await impl.submit(SID, mkBody({ plan_mode: false }));
-    expect(record.cancelPlanCalls).toEqual([
+    await impl.submit(SID, mkBody({ discuss_mode: false }));
+    expect(record.cancelDiscussCalls).toEqual([
       { sessionId: SID, agentId: 'main' },
     ]);
-    expect(record.enterPlanCalls).toEqual([]);
-    expect(impl._agentStateForTest(SID)?.planMode).toBe(false);
+    expect(record.enterDiscussCalls).toEqual([]);
+    expect(impl._agentStateForTest(SID)?.discussMode).toBe(false);
   });
 
   it('no-ops on repeated identical submissions (no extra setter RPCs)', async () => {
@@ -1399,8 +1450,8 @@ describe('PromptService stateless controls — diff dispatch', () => {
     expect(record.setModelCalls).toEqual([]);
     expect(record.setThinkingCalls).toEqual([]);
     expect(record.setPermissionCalls).toEqual([]);
-    expect(record.enterPlanCalls).toEqual([]);
-    expect(record.cancelPlanCalls).toEqual([]);
+    expect(record.enterDiscussCalls).toEqual([]);
+    expect(record.cancelDiscussCalls).toEqual([]);
   });
 });
 
@@ -1414,14 +1465,14 @@ describe('PromptService stateless controls — live shadow updates', () => {
       type: 'agent.status.updated',
       model: 'kimi-code/k1',
       permission: 'yolo',
-      planMode: true,
+      discussMode: true,
       sessionId: SID,
       agentId: 'main',
     } as unknown as Event);
     expect(impl._agentStateForTest(SID)).toMatchObject({
       model: 'kimi-code/k1',
       permissionMode: 'yolo',
-      planMode: true,
+      discussMode: true,
     });
   });
 
@@ -1484,11 +1535,11 @@ describe('PromptService stateless controls — dispatch log', () => {
     expect(impl._dispatchLogForTest(SID)).toBeUndefined();
   });
 
-  it('appends one entry per setter dispatched, in the order setModel/setThinking/setPermission/(enter|cancel)Plan', async () => {
+  it('appends one entry per setter dispatched, in the order setModel/setThinking/setPermission/(enter|cancel)Discuss', async () => {
     const { bridge } = makeBridge({
       config: { modelAlias: 'kimi-code/k2', thinkingEffort: 'off' },
       permission: { mode: 'manual' },
-      plan: null,
+      discussMode: false,
     });
     const { bus } = makeBus();
     const impl = newSvc(bridge, bus);
@@ -1498,13 +1549,13 @@ describe('PromptService stateless controls — dispatch log', () => {
         model: 'kimi-code/k1',
         thinking: 'high',
         permission_mode: 'yolo',
-        plan_mode: true,
+        discuss_mode: true,
       }),
     );
     const log = impl._dispatchLogForTest(SID);
     expect(log).toBeDefined();
     const kinds = (log ?? []).map((e) => e.kind);
-    expect(kinds).toEqual(['setModel', 'setThinking', 'setPermission', 'enterPlan']);
+    expect(kinds).toEqual(['setModel', 'setThinking', 'setPermission', 'enterDiscuss']);
     expect(log?.[0]?.payload).toEqual({
       sessionId: SID,
       agentId: 'main',
@@ -1519,11 +1570,11 @@ describe('PromptService stateless controls — dispatch log', () => {
   });
 
   it('does NOT append entries when a repeat submit matches the shadow', async () => {
-    const { bridge } = makeBridge({ plan: null });
+    const { bridge } = makeBridge({ discussMode: false });
     const { bus, triggerSubscribers } = makeBus();
     const impl = newSvc(bridge, bus);
-    // First submit toggles plan_mode on -> 1 entry.
-    await impl.submit(SID, mkBody({ plan_mode: true }));
+    // First submit toggles discuss_mode on -> 1 entry.
+    await impl.submit(SID, mkBody({ discuss_mode: true }));
     triggerSubscribers({
       type: 'turn.started',
       turnId: 1,
@@ -1539,113 +1590,30 @@ describe('PromptService stateless controls — dispatch log', () => {
       agentId: 'main',
     } as unknown as Event);
     expect(impl._dispatchLogForTest(SID)?.length).toBe(1);
-    expect(impl._dispatchLogForTest(SID)?.[0]?.kind).toBe('enterPlan');
+    expect(impl._dispatchLogForTest(SID)?.[0]?.kind).toBe('enterDiscuss');
 
-    // Second submit with the same plan_mode -> shadow suppresses dispatch.
+    // Second submit with the same discuss_mode -> shadow suppresses dispatch.
     // This is the property scenario 04 cannot observe over WS frames alone.
-    await impl.submit(SID, mkBody({ plan_mode: true }));
+    await impl.submit(SID, mkBody({ discuss_mode: true }));
     expect(impl._dispatchLogForTest(SID)?.length).toBe(1);
   });
 
   it('clears the buffer when the session closes (re-bootstrap on next submit)', async () => {
-    const { bridge } = makeBridge({ plan: null });
+    const { bridge } = makeBridge({ discussMode: false });
     const { bus } = makeBus();
     const { sessionService, triggerClose } = makeSessionService();
     const impl = new PromptService(bridge, bus, makeAuth(), sessionService, new NoopLogService());
-    await impl.submit(SID, mkBody({ plan_mode: true }));
+    await impl.submit(SID, mkBody({ discuss_mode: true }));
     expect(impl._dispatchLogForTest(SID)?.length).toBe(1);
     triggerClose(SID);
     expect(impl._dispatchLogForTest(SID)).toBeUndefined();
-  });
-
-  it('bootstraps swarmMode from getSwarmMode', async () => {
-    const { bridge, record } = makeBridge({
-      config: { modelAlias: 'kimi-code/k2', thinkingEffort: 'off' },
-      permission: { mode: 'manual' },
-      plan: null,
-    });
-    const { bus } = makeBus();
-    const impl = newSvc(bridge, bus);
-    await impl.submit(SID, mkBody({ model: 'kimi-code/k1' }));
-    expect(record.getSwarmModeCalls).toBe(1);
-  });
-
-  it('dispatches enterSwarm/exitSwarm and records them in the log', async () => {
-    const { bridge, record } = makeBridge({
-      config: { modelAlias: 'kimi-code/k2', thinkingEffort: 'off' },
-      permission: { mode: 'manual' },
-      plan: null,
-    });
-    const { bus, triggerSubscribers } = makeBus();
-    const impl = newSvc(bridge, bus);
-
-    await impl.submit(SID, mkBody({ swarm_mode: true }));
-    expect(record.enterSwarmCalls.length).toBe(1);
-    expect(record.enterSwarmCalls[0]).toEqual({
-      sessionId: SID,
-      agentId: 'main',
-      trigger: 'manual',
-    });
-    let log = impl._dispatchLogForTest(SID);
-    expect(log?.some((e) => e.kind === 'enterSwarm')).toBe(true);
-
-    triggerSubscribers({
-      type: 'turn.started',
-      turnId: 1,
-      origin: { kind: 'user' },
-      sessionId: SID,
-      agentId: 'main',
-    } as unknown as Event);
-    triggerSubscribers({
-      type: 'turn.ended',
-      turnId: 1,
-      reason: 'completed',
-      sessionId: SID,
-      agentId: 'main',
-    } as unknown as Event);
-
-    await impl.submit(SID, mkBody({ swarm_mode: false }));
-    expect(record.exitSwarmCalls.length).toBe(1);
-    expect(record.exitSwarmCalls[0]).toEqual({ sessionId: SID, agentId: 'main' });
-    log = impl._dispatchLogForTest(SID);
-    expect(log?.some((e) => e.kind === 'exitSwarm')).toBe(true);
-  });
-
-  it('does not re-dispatch swarm_mode when it matches the shadow', async () => {
-    const { bridge, record } = makeBridge({
-      config: { modelAlias: 'kimi-code/k2', thinkingEffort: 'off' },
-      permission: { mode: 'manual' },
-      plan: null,
-    });
-    const { bus, triggerSubscribers } = makeBus();
-    const impl = newSvc(bridge, bus);
-    await impl.submit(SID, mkBody({ swarm_mode: true }));
-    expect(record.enterSwarmCalls.length).toBe(1);
-
-    triggerSubscribers({
-      type: 'turn.started',
-      turnId: 1,
-      origin: { kind: 'user' },
-      sessionId: SID,
-      agentId: 'main',
-    } as unknown as Event);
-    triggerSubscribers({
-      type: 'turn.ended',
-      turnId: 1,
-      reason: 'completed',
-      sessionId: SID,
-      agentId: 'main',
-    } as unknown as Event);
-
-    await impl.submit(SID, mkBody({ swarm_mode: true }));
-    expect(record.enterSwarmCalls.length).toBe(1);
   });
 
   it('dispatches createGoal and records it in the log', async () => {
     const { bridge, record } = makeBridge({
       config: { modelAlias: 'kimi-code/k2', thinkingEffort: 'off' },
       permission: { mode: 'manual' },
-      plan: null,
+      discussMode: false,
     });
     const { bus } = makeBus();
     const impl = newSvc(bridge, bus);
@@ -1665,7 +1633,7 @@ describe('PromptService stateless controls — dispatch log', () => {
     const { bridge, record } = makeBridge({
       config: { modelAlias: 'kimi-code/k2', thinkingEffort: 'off' },
       permission: { mode: 'manual' },
-      plan: null,
+      discussMode: false,
     });
     const { bus } = makeBus();
     const impl = newSvc(bridge, bus);
@@ -1691,14 +1659,13 @@ describe('PromptService stateful session — content-only path', () => {
     // Bootstrap getters never ran (no body control to diff against).
     expect(record.getConfigCalls).toBe(0);
     expect(record.getPermissionCalls).toBe(0);
-    expect(record.getPlanCalls).toBe(0);
-    expect(record.getSwarmModeCalls).toBe(0);
+    expect(record.getDiscussModeCalls).toBe(0);
     // No setters fired either.
     expect(record.setModelCalls).toEqual([]);
     expect(record.setThinkingCalls).toEqual([]);
     expect(record.setPermissionCalls).toEqual([]);
-    expect(record.enterPlanCalls).toEqual([]);
-    expect(record.cancelPlanCalls).toEqual([]);
+    expect(record.enterDiscussCalls).toEqual([]);
+    expect(record.cancelDiscussCalls).toEqual([]);
     // Shadow stays absent — there's nothing to remember.
     expect(impl._agentStateForTest(SID)).toBeUndefined();
     // Dispatch log untouched.
@@ -1770,6 +1737,20 @@ describe('PromptService.applyAgentState (POST /sessions/{sid}/profile path)', ()
     expect(log?.[0]?.source).toBe('meta');
     // No prompt minted → entry's promptId is the empty string.
     expect(log?.[0]?.promptId).toBe('');
+  });
+
+  it('keeps child runtime state and setter dispatches isolated from main', async () => {
+    const { bridge, record } = makeBridge({ config: { thinkingEffort: 'off' } });
+    const { bus } = makeBus();
+    const impl = newSvc(bridge, bus);
+
+    await impl.applyAgentState(SID, { thinking: 'high' }, 'meta', undefined, 'team_reviewer');
+
+    expect(record.setThinkingCalls).toEqual([
+      { sessionId: SID, agentId: 'team_reviewer', effort: 'high' },
+    ]);
+    expect(impl._agentStateForTest(SID)).toBeUndefined();
+    expect(impl._agentStateForTest(SID, 'team_reviewer')).toMatchObject({ thinking: 'high' });
   });
 
   it('subsequent content-only submit observes the shadow set via /profile and dispatches nothing', async () => {

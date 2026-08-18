@@ -26,7 +26,7 @@ import {
   handleEditorCommand,
   handleEffortCommand,
   handleModelCommand,
-  handlePlanCommand,
+  handleDiscussCommand,
   handleSettingPermission,
   handleThemeCommand,
   showExperimentsPanel,
@@ -35,7 +35,6 @@ import {
   showSettingsSelector,
 } from './config';
 import { handleGoalCommand } from './goal';
-import { handleSwarmCommand } from './swarm';
 import { handleFeedbackCommand, showMcpServers, showStatusReport, showUsage } from './info';
 import { handleAddDirCommand } from './add-dir';
 import { parseSlashInput } from './parse';
@@ -66,7 +65,7 @@ export {
   handleEditorCommand,
   handleEffortCommand,
   handleModelCommand,
-  handlePlanCommand,
+  handleDiscussCommand,
   handleSettingPermission,
   handleThemeCommand,
   showModelPicker,
@@ -78,7 +77,6 @@ export { handleFeedbackCommand, showMcpServers, showStatusReport, showUsage } fr
 export { handlePluginsCommand } from './plugins';
 export { handleReloadCommand, handleReloadTuiCommand } from './reload';
 export { handleGoalCommand } from './goal';
-export { handleSwarmCommand } from './swarm';
 export {
   handleExportDebugZipCommand,
   handleExportMdCommand,
@@ -325,8 +323,8 @@ async function handleBuiltInSlashCommand(
     case 'auto':
       await handleSettingPermission(host, 'auto');
       return;
-    case 'plan':
-      await handlePlanCommand(host, args);
+    case 'discuss':
+      await handleDiscussCommand(host, args);
       return;
     case 'compact':
       await handleCompactCommand(host, args);
@@ -334,8 +332,8 @@ async function handleBuiltInSlashCommand(
     case 'goal':
       await handleGoalCommand(host, args);
       return;
-    case 'swarm':
-      await handleSwarmCommand(host, args);
+    case 'subagent':
+      host.sendNormalUserInput(args);
       return;
     case 'init':
       await handleInitCommand(host);

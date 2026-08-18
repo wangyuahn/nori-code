@@ -1,6 +1,11 @@
 export type { StatResult } from './types';
 export type { KaosProcess } from './process';
 export type { Kaos } from './kaos';
+export {
+  computeContentTag,
+  createContentTagHasher,
+  type ContentTagHasher,
+} from './content-tag';
 export type {
   Environment,
   EnvironmentDeps,

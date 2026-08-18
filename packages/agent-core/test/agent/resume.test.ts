@@ -43,7 +43,7 @@ describe('Agent resume', () => {
     expect(persistence.records.filter((record) => record.type === 'metadata')).toHaveLength(1);
   });
 
-  it('replays persisted records without restarting turns, compactions, plan turns, or tools', async () => {
+  it('replays persisted records without restarting turns, compactions, or tools', async () => {
     const persistence = new RecordingAgentPersistence(resumeHistory());
     const execWithEnv = vi.fn().mockRejectedValue(new Error('Bash should not execute on resume'));
     const ctx = testAgent({
@@ -53,8 +53,6 @@ describe('Agent resume', () => {
 
     await ctx.agent.resume();
 
-    expect(ctx.agent.planMode.isActive).toBe(true);
-    expect(ctx.agent.planMode.planFilePath).toContain('resume-plan');
     expect(ctx.newEvents()).toMatchInlineSnapshot(`[]`);
     expect(ctx.llmCalls).toHaveLength(0);
     expect(execWithEnv).not.toHaveBeenCalled();
@@ -81,8 +79,8 @@ describe('Agent resume', () => {
         messages:
           user: text "Historical prompt"
           user: text "Historical compacted summary."
-          user: text "Fresh prompt after resume"
-          user: text <plan-mode-reminder>
+          user: text "<message from=\\"user\\" name=\\"用户\\">Fresh prompt after resume</message>"
+          user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
   });
 
@@ -198,7 +196,8 @@ describe('Agent resume', () => {
           tool[call_resume_write]: text "wrote file"
           tool[call_resume_skill]: text "skill loaded"
           user: text "<system-reminder>\\nresume skill body\\n</system-reminder>"
-          user: text "Fresh prompt after deferred resume"
+          user: text "<message from=\\"user\\" name=\\"用户\\">Fresh prompt after deferred resume</message>"
+          user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
     await ctx.expectResumeMatches();
   });
@@ -662,6 +661,7 @@ describe('Agent resume', () => {
       'tool',
       'tool',
       'user',
+      'user',
     ]);
     expect(textContent(llmHistory[3])).toContain(
       '<system>ERROR: Tool execution failed.</system>',
@@ -669,7 +669,8 @@ describe('Agent resume', () => {
     expect(textContent(llmHistory[3])).toContain(
       'Tool execution was interrupted before its result was recorded',
     );
-    expect(textContent(llmHistory[4])).toBe('continue after resume');
+    expect(textContent(llmHistory[4])).toBe('<message from="user" name="用户">continue after resume</message>');
+    expect(textContent(llmHistory[5])).toContain('standalone summary');
     expect(
       ctx.agent.context.history.some(
         (message) => message.role === 'user' && textContent(message) === 'continue after resume',
@@ -1386,10 +1387,6 @@ function resumeHistory(): AgentRecord[] {
       compactedCount: 3,
       tokensBefore: 12,
       tokensAfter: 4,
-    },
-    {
-      type: 'plan_mode.enter',
-      id: 'resume-plan',
     },
   ];
 }

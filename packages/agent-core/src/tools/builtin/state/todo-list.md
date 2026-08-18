@@ -1,4 +1,4 @@
-Use this tool to maintain a structured TODO list as you work through a multi-step task. Use it proactively and often when progress tracking helps the current work. This is especially useful in long-running investigations and implementation tasks with several tool calls; in plan mode, write the plan to the plan file rather than tracking it here.
+Use this tool to maintain a structured TODO list as you work through a multi-step task. Use it proactively and often when progress tracking helps the current work. This is especially useful in long-running investigations and implementation tasks with several tool calls. In Discuss, keep the meeting in TeamDecide/TeamSpeak rather than turning this list into a meeting record.
 
 **When to use:**
 - Multi-step tasks that span several tool calls
@@ -22,7 +22,7 @@ Use this tool to maintain a structured TODO list as you work through a multi-ste
 - Call with `todos: [...]` to replace the full list. Statuses: pending / in_progress / done.
 - Call with no `todos` argument to retrieve the current list without changing it.
 - Call with `todos: []` to clear the list.
-- Keep titles short and actionable (e.g. "Read session-control.ts", "Add planMode flag to TurnManager").
+- Keep titles short and actionable (e.g. "Read session-control.ts", "Add Discuss state to TurnManager").
 - Update statuses as you make progress.
 - When work is underway, keep exactly one task `in_progress`.
 - Only mark a task `done` when it is fully accomplished.

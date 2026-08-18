@@ -42,6 +42,14 @@ export interface UserPromptOrigin {
   readonly kind: 'user';
 }
 
+export type SpeakerKind = 'user' | 'lead' | 'team' | 'sub' | 'system';
+
+export interface SpeakerOrigin {
+  readonly from: SpeakerKind;
+  readonly speakerId?: string;
+  readonly speakerName?: string;
+}
+
 export interface SkillActivationOrigin {
   readonly kind: 'skill_activation';
   readonly activationId: string;
@@ -124,7 +132,7 @@ export interface RetryOrigin {
   readonly trigger?: string;
 }
 
-export type PromptOrigin =
+export type PromptOrigin = (
   | UserPromptOrigin
   | SkillActivationOrigin
   | PluginCommandOrigin
@@ -136,7 +144,10 @@ export type PromptOrigin =
   | CronJobOrigin
   | CronMissedOrigin
   | HookResultOrigin
-  | RetryOrigin;
+  | RetryOrigin
+) & {
+  readonly speaker?: SpeakerOrigin;
+};
 
 export type GoalStatus = 'active' | 'paused' | 'blocked' | 'complete';
 export type GoalActor = 'user' | 'model' | 'runtime' | 'system';
@@ -209,7 +220,6 @@ export type KimiErrorCode =
   | 'session.permission_mode_invalid'
   | 'session.thinking_empty'
   | 'session.model_empty'
-  | 'session.plan_mode_invalid'
   | 'session.approval_handler_error'
   | 'session.question_handler_error'
   | 'session.init_failed'
@@ -342,12 +352,10 @@ export interface AgentStatusUpdatedEvent {
   readonly contextTokens?: number;
   readonly maxContextTokens?: number;
   readonly contextUsage?: number;
-  readonly planMode?: boolean;
-  readonly swarmMode?: boolean;
+  readonly discussMode?: boolean;
   readonly permission?: PermissionMode;
   readonly coderWriteEnabled?: boolean;
   readonly toolsReadonly?: boolean;
-  readonly maxSwarmDepth?: number;
   readonly usage?: UsageStatus;
 }
 
@@ -602,7 +610,7 @@ export interface SubagentSpawnedEvent {
   readonly parentToolCallUuid?: string;
   readonly parentAgentId?: string;
   readonly description?: string;
-  readonly swarmIndex?: number;
+  readonly subagentIndex?: number;
   readonly runInBackground: boolean;
 }
 
@@ -863,6 +871,12 @@ export const retryOriginSchema = z.object({
   trigger: z.string().optional(),
 }) satisfies z.ZodType<RetryOrigin>;
 
+export const speakerOriginSchema = z.object({
+  from: z.enum(['user', 'lead', 'team', 'sub', 'system']),
+  speakerId: z.string().min(1).optional(),
+  speakerName: z.string().min(1).optional(),
+}) satisfies z.ZodType<SpeakerOrigin>;
+
 export const promptOriginSchema = z.discriminatedUnion('kind', [
   userPromptOriginSchema,
   skillActivationOriginSchema,
@@ -876,7 +890,9 @@ export const promptOriginSchema = z.discriminatedUnion('kind', [
   cronMissedOriginSchema,
   hookResultOriginSchema,
   retryOriginSchema,
-]) satisfies z.ZodType<PromptOrigin>;
+]).and(z.object({
+  speaker: speakerOriginSchema.optional(),
+})) satisfies z.ZodType<PromptOrigin>;
 
 export const goalStatusSchema = z.enum(['active', 'paused', 'blocked', 'complete']) satisfies z.ZodType<GoalStatus>;
 
@@ -950,7 +966,6 @@ export const kimiErrorCodeSchema = z.enum([
   'session.permission_mode_invalid',
   'session.thinking_empty',
   'session.model_empty',
-  'session.plan_mode_invalid',
   'session.approval_handler_error',
   'session.question_handler_error',
   'session.init_failed',
@@ -1069,12 +1084,10 @@ export const agentStatusUpdatedEventSchema = z.object({
   contextTokens: z.number().optional(),
   maxContextTokens: z.number().optional(),
   contextUsage: z.number().optional(),
-  planMode: z.boolean().optional(),
-  swarmMode: z.boolean().optional(),
+  discussMode: z.boolean().optional(),
   permission: permissionModeSchema.optional(),
   coderWriteEnabled: z.boolean().optional(),
   toolsReadonly: z.boolean().optional(),
-  maxSwarmDepth: z.number().optional(),
   usage: usageStatusSchema.optional(),
 }) satisfies z.ZodType<AgentStatusUpdatedEvent>;
 
@@ -1303,7 +1316,7 @@ export const subagentSpawnedEventSchema = z.object({
   parentToolCallUuid: z.string().optional(),
   parentAgentId: z.string().optional(),
   description: z.string().optional(),
-  swarmIndex: z.number().optional(),
+  subagentIndex: z.number().optional(),
   runInBackground: z.boolean(),
 }) satisfies z.ZodType<SubagentSpawnedEvent>;
 

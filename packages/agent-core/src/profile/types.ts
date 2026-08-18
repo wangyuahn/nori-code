@@ -47,9 +47,6 @@ export interface SystemPromptContext {
 
   // NORI: 新增字段
   readonly noriPhase?: string;            // 当前 phase: 'plan' | 'implement' | 'review'
-  readonly noriSwarmDepth?: number;       // 当前 swarm 递归深度
-  readonly noriMaxSwarmDepth?: number;    // swarm 递归深度上限
-  readonly noriPreSwarmDoc?: string;      // pre-swarm doc 规则状态: 'enforced' | 'disabled'
   readonly noriVaultPath?: string;        // Obsidian vault 路径
   readonly noriToolHints?: string;        // 预渲染的 <tool_hints> XML 块
 }

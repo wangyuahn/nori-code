@@ -4,7 +4,7 @@ import { ErrorCodes, KimiError } from '../../errors';
 import { isRealUserInput } from '../../agent/compaction';
 import type { AgentContextData, ContextMessage } from '../../agent/context';
 import type { JsonObject, ListSessionsPayload, SessionSummary } from '../../rpc';
-import type { SessionMeta } from '../../session';
+import type { AgentMeta, SessionMeta } from '../../session';
 import {
   type CompactSessionRequest,
   type CompactSessionResponse,
@@ -12,6 +12,8 @@ import {
   type Message,
   type PageResponse,
   type Session,
+  type SessionAgentTreeNode,
+  type SessionAgentTreeResponse,
   type SessionChildCreate,
   type SessionCreate,
   type SessionFork,
@@ -23,6 +25,7 @@ import {
   type UndoSessionRequest,
   type UndoSessionResponse,
   type UsageStatus,
+  type BackgroundTaskInfo,
 } from '@nori-code/protocol';
 
 import { IApprovalService } from '../approval/approval';
@@ -45,6 +48,11 @@ const MAX_PAGE_SIZE = 100;
 const DEFAULT_UNDO_MESSAGE_PAGE_SIZE = 50;
 const MAX_UNDO_MESSAGE_PAGE_SIZE = 100;
 const CHILD_SESSION_KIND = 'child';
+const MAIN_AGENT_ID = 'main';
+
+function sessionAgentKey(sessionId: string, agentId: string): string {
+  return `${sessionId}\u0000${agentId}`;
+}
 
 function asJsonObject(value: Record<string, unknown>): JsonObject {
   return value as unknown as JsonObject;
@@ -75,6 +83,19 @@ function mapRealtimeUsage(usage: UsageStatus | undefined): SessionStatusResponse
     ...(usage.currentTurn === undefined ? {} : { current_turn: mapTokenUsage(usage.currentTurn) }),
     ...(usage.total === undefined ? {} : { total: mapTokenUsage(usage.total) }),
   };
+}
+
+function mapAgentUsage(usage: UsageStatus | undefined): SessionAgentTreeNode['usage'] {
+  const total = usage?.total;
+  if (total === undefined) return undefined;
+  return mapTokenUsage(total);
+}
+
+function treeAgentKind(agentId: string, agent: AgentMeta): SessionAgentTreeNode['kind'] {
+  if (agentId === MAIN_AGENT_ID || agent.type === 'main') return 'main';
+  if (agent.discussion !== undefined) return 'discussion';
+  if (agent.kind === 'team') return 'team';
+  return agent.type;
 }
 
 function mapSessionUsage(usage: UsageStatus | undefined): Session['usage'] | undefined {
@@ -135,9 +156,11 @@ export class SessionService extends Disposable implements ISessionService {
   private readonly _onDidClose = this._register(new Emitter<{ sessionId: string }>());
   readonly onDidClose = this._onDidClose.event;
 
-  private readonly _statusBySession = new Map<string, SessionStatus>();
+  private readonly _statusByAgent = new Map<string, SessionStatus>();
   private readonly _activeTurns = new Set<string>();
   private readonly _abortedTurns = new Set<string>();
+  private readonly _lastActivityByAgent = new Map<string, string>();
+  private readonly _activeBackgroundTasks = new Map<string, import('./session').SessionAgentActivity>();
   private _promptService: IPromptService | undefined;
 
   constructor(
@@ -169,20 +192,21 @@ export class SessionService extends Disposable implements ISessionService {
    *   4. aborted           — last turn ended as cancelled/failed and no new work started
    *   5. idle              — everything else
    */
-  private _computeStatus(sessionId: string): SessionStatus {
-    if (this.approvalService.listPending(sessionId).length > 0) {
+  private _computeStatus(sessionId: string, agentId = MAIN_AGENT_ID): SessionStatus {
+    const key = sessionAgentKey(sessionId, agentId);
+    if (this.approvalService.listPending(sessionId, agentId).length > 0) {
       return 'awaiting_approval';
     }
-    if (this.questionService.listPending(sessionId).length > 0) {
+    if (this.questionService.listPending(sessionId, agentId).length > 0) {
       return 'awaiting_question';
     }
     if (
-      this.promptService.getCurrentPromptId(sessionId) !== undefined ||
-      this._activeTurns.has(sessionId)
+      this.promptService.getCurrentPromptId(sessionId, agentId) !== undefined ||
+      this._activeTurns.has(key)
     ) {
       return 'running';
     }
-    if (this._abortedTurns.has(sessionId)) {
+    if (this._abortedTurns.has(key)) {
       return 'aborted';
     }
     return 'idle';
@@ -203,8 +227,7 @@ export class SessionService extends Disposable implements ISessionService {
         ...(agentState.permissionMode !== undefined
           ? { permission_mode: agentState.permissionMode as Session['agent_config']['permission_mode'] }
           : {}),
-        ...(agentState.planMode !== undefined ? { plan_mode: agentState.planMode } : {}),
-        ...(agentState.swarmMode !== undefined ? { swarm_mode: agentState.swarmMode } : {}),
+        ...(agentState.discussMode !== undefined ? { discuss_mode: agentState.discussMode } : {}),
       };
     }
     const runtime = session.metadata['noriRuntime'];
@@ -216,7 +239,7 @@ export class SessionService extends Disposable implements ISessionService {
     }
     const status = this._computeStatus(session.id);
     session.status = status;
-    this._statusBySession.set(session.id, status);
+    this._statusByAgent.set(sessionAgentKey(session.id, MAIN_AGENT_ID), status);
     return session;
   }
 
@@ -225,19 +248,20 @@ export class SessionService extends Disposable implements ISessionService {
    * session differs from the last one we announced. Called after every relevant
    * lifecycle event so the session list stays in sync.
    */
-  private _emitStatusChanged(sessionId: string): void {
-    const previous = this._statusBySession.get(sessionId) ?? 'idle';
-    const next = this._computeStatus(sessionId);
+  private _emitStatusChanged(sessionId: string, agentId = MAIN_AGENT_ID): void {
+    const key = sessionAgentKey(sessionId, agentId);
+    const previous = this._statusByAgent.get(key) ?? 'idle';
+    const next = this._computeStatus(sessionId, agentId);
     if (previous === next) return;
 
-    this._statusBySession.set(sessionId, next);
+    this._statusByAgent.set(key, next);
     this.eventService.publish({
       type: 'event.session.status_changed',
-      agentId: 'main',
+      agentId,
       sessionId,
       status: next,
       previous_status: previous,
-      current_prompt_id: this.promptService.getCurrentPromptId(sessionId),
+      current_prompt_id: this.promptService.getCurrentPromptId(sessionId, agentId),
     } as unknown as Event);
   }
 
@@ -245,28 +269,31 @@ export class SessionService extends Disposable implements ISessionService {
     const type = (event as { type?: string }).type;
     const sessionId = (event as { sessionId?: string }).sessionId;
     if (sessionId === undefined || sessionId === '' || type === undefined) return;
+    const agentId = (event as { agentId?: string }).agentId ?? MAIN_AGENT_ID;
+    const key = sessionAgentKey(sessionId, agentId);
+    this._lastActivityByAgent.set(key, new Date().toISOString());
 
     switch (type) {
       case 'turn.started': {
-        this._activeTurns.add(sessionId);
-        this._abortedTurns.delete(sessionId);
-        this._emitStatusChanged(sessionId);
+        this._activeTurns.add(key);
+        this._abortedTurns.delete(key);
+        this._emitStatusChanged(sessionId, agentId);
         break;
       }
       case 'turn.ended': {
-        this._activeTurns.delete(sessionId);
+        this._activeTurns.delete(key);
         const reason = (event as { reason?: string }).reason;
         if (reason === 'cancelled' || reason === 'failed' || reason === 'filtered') {
-          this._abortedTurns.add(sessionId);
+          this._abortedTurns.add(key);
         } else {
-          this._abortedTurns.delete(sessionId);
+          this._abortedTurns.delete(key);
         }
-        this._emitStatusChanged(sessionId);
+        this._emitStatusChanged(sessionId, agentId);
         break;
       }
       case 'prompt.submitted': {
-        this._abortedTurns.delete(sessionId);
-        this._emitStatusChanged(sessionId);
+        this._abortedTurns.delete(key);
+        this._emitStatusChanged(sessionId, agentId);
         break;
       }
       case 'prompt.completed':
@@ -277,7 +304,31 @@ export class SessionService extends Disposable implements ISessionService {
       case 'event.question.requested':
       case 'event.question.answered':
       case 'event.question.dismissed': {
-        this._emitStatusChanged(sessionId);
+        this._emitStatusChanged(sessionId, agentId);
+        break;
+      }
+      case 'background.task.started':
+      case 'background.task.updated':
+      case 'background.task.terminated': {
+        const info = (event as { info?: BackgroundTaskInfo }).info;
+        if (info === undefined) break;
+        const taskKey = `${sessionId}\u0000${info.taskId}`;
+        const terminal = type === 'background.task.terminated'
+          || ['completed', 'failed', 'timed_out', 'killed', 'lost', 'cancelled', 'stopped'].includes(String(info.status));
+        if (terminal) {
+          this._activeBackgroundTasks.delete(taskKey);
+          break;
+        }
+        this._activeBackgroundTasks.set(taskKey, {
+          sessionId,
+          agentId: 'agentId' in info && info.agentId !== undefined
+            ? info.agentId
+            : `background:${info.taskId}`,
+          kind: 'background',
+          taskId: info.taskId,
+          status: 'running',
+          lastActive: new Date(info.startedAt).toISOString(),
+        });
         break;
       }
     }
@@ -366,7 +417,7 @@ export class SessionService extends Disposable implements ISessionService {
     return session;
   }
 
-  async update(id: string, input: SessionUpdate): Promise<Session> {
+  async update(id: string, input: SessionUpdate, agentId = MAIN_AGENT_ID): Promise<Session> {
     const all = await this.core.rpc.listSessions({});
     const summary = all.find((s) => s.id === id);
     if (summary === undefined) {
@@ -391,25 +442,23 @@ export class SessionService extends Disposable implements ISessionService {
       if (ac.model !== undefined && ac.model !== '') patch.model = ac.model;
       if (ac.thinking !== undefined) patch.thinking = ac.thinking;
       if (ac.permission_mode !== undefined) patch.permission_mode = ac.permission_mode;
-      if (ac.plan_mode !== undefined) patch.plan_mode = ac.plan_mode;
-      if (ac.swarm_mode !== undefined) patch.swarm_mode = ac.swarm_mode;
+      if (ac.discuss_mode !== undefined) patch.discuss_mode = ac.discuss_mode;
       if (ac.goal_objective !== undefined) patch.goal_objective = ac.goal_objective;
       if (ac.goal_control !== undefined) patch.goal_control = ac.goal_control;
       if (
         patch.model !== undefined ||
         patch.thinking !== undefined ||
         patch.permission_mode !== undefined ||
-        patch.plan_mode !== undefined ||
-        patch.swarm_mode !== undefined ||
+        patch.discuss_mode !== undefined ||
         patch.goal_objective !== undefined ||
         patch.goal_control !== undefined
       ) {
-        await this.promptService.applyAgentState(id, patch, 'meta');
+        await this.promptService.applyAgentState(id, patch, 'meta', undefined, agentId);
       }
       if (ac.main_write_enabled !== undefined) {
         await this.core.rpc.setNoriRuntimeSettings({
           sessionId: id,
-          agentId: 'main',
+          agentId,
           toolsReadonly: !ac.main_write_enabled,
         });
       }
@@ -514,7 +563,97 @@ export class SessionService extends Disposable implements ISessionService {
     });
   }
 
-  async getStatus(id: string, ensureResumed = true): Promise<SessionStatusResponse> {
+  async listAgents(id: string): Promise<SessionAgentTreeResponse> {
+    const summary = await this.requireSummary(id);
+    // Metadata for dormant sessions is reconstructed by resume; without it a
+    // freshly opened parent conversation would incorrectly expose only main.
+    await this.core.rpc.resumeSession({ sessionId: id });
+    const meta = await this.tryGetMeta(id);
+    const agents = new Map(Object.entries(meta?.agents ?? {}));
+    if (!agents.has(MAIN_AGENT_ID)) {
+      agents.set(MAIN_AGENT_ID, {
+        homedir: '',
+        type: MAIN_AGENT_ID,
+        parentAgentId: null,
+      });
+    }
+
+    const nodes = await Promise.all(
+      [...agents.entries()]
+        .toSorted(([leftId, left], [rightId, right]) => {
+          if (left.type === 'main') return -1;
+          if (right.type === 'main') return 1;
+          return leftId.localeCompare(rightId);
+        })
+        .map(async ([agentId, agent]): Promise<SessionAgentTreeNode> => {
+          const key = sessionAgentKey(id, agentId);
+          let usage: SessionAgentTreeNode['usage'];
+          try {
+            usage = mapAgentUsage(await this.core.rpc.getUsage({ sessionId: id, agentId }));
+          } catch {
+            usage = undefined;
+          }
+          return {
+            id: agentId,
+            kind: treeAgentKind(agentId, agent),
+            parent_agent_id: agent.parentAgentId,
+            name: agent.name ?? agent.subagentItem ?? agentId,
+            title: agent.title,
+            intro: agent.intro,
+            summary: agent.discussion?.topic ?? agent.assignedTask ?? agent.subagentItem,
+            subagent_item: agent.subagentItem,
+            status: this._computeStatus(id, agentId),
+            usage,
+            last_active: this._lastActivityByAgent.get(key) ?? new Date(summary.updatedAt).toISOString(),
+            archived: agent.discussion?.status === 'archived' || agent.archived === true,
+          };
+        }),
+    );
+    return { agents: nodes };
+  }
+
+  listActiveAgentActivity(): readonly import('./session').SessionAgentActivity[] {
+    const activeStatuses = new Set<SessionStatus>(['running', 'awaiting_approval', 'awaiting_question']);
+    const active = new Map<string, import('./session').SessionAgentActivity>();
+    for (const [key, status] of this._statusByAgent) {
+      if (!activeStatuses.has(status)) continue;
+      const separator = key.indexOf('\u0000');
+      if (separator < 1) continue;
+      const sessionId = key.slice(0, separator);
+      const agentId = key.slice(separator + 1);
+      active.set(key, {
+        sessionId,
+        agentId,
+        kind: 'agent',
+        status,
+        lastActive: this._lastActivityByAgent.get(key),
+      });
+    }
+    for (const key of this._activeTurns) {
+      if (active.has(key)) continue;
+      const separator = key.indexOf('\u0000');
+      if (separator < 1) continue;
+      const sessionId = key.slice(0, separator);
+      const agentId = key.slice(separator + 1);
+      active.set(key, {
+        sessionId,
+        agentId,
+        kind: 'agent',
+        status: 'running',
+        lastActive: this._lastActivityByAgent.get(key),
+      });
+    }
+    for (const [key, item] of this._activeBackgroundTasks) {
+      if (!active.has(key)) active.set(key, item);
+    }
+    return [...active.values()];
+  }
+
+  async getStatus(
+    id: string,
+    agentId = MAIN_AGENT_ID,
+    ensureResumed = true,
+  ): Promise<SessionStatusResponse> {
     const all = await this.core.rpc.listSessions({});
     const summary = all.find((s) => s.id === id);
     if (summary === undefined) {
@@ -523,31 +662,30 @@ export class SessionService extends Disposable implements ISessionService {
 
     if (ensureResumed) await this.core.rpc.resumeSession({ sessionId: id });
 
-    const [config, context, permission, plan, usage, runtime, goalResult] = await Promise.all([
-      this.core.rpc.getConfig({ sessionId: id, agentId: 'main' }),
-      this.core.rpc.getContext({ sessionId: id, agentId: 'main' }),
-      this.core.rpc.getPermission({ sessionId: id, agentId: 'main' }),
-      this.core.rpc.getPlan({ sessionId: id, agentId: 'main' }),
-      this.core.rpc.getUsage?.({ sessionId: id, agentId: 'main' }),
-      this.core.rpc.getNoriRuntimeSettings({ sessionId: id, agentId: 'main' }),
-      this.core.rpc.getGoal({ sessionId: id, agentId: 'main' }),
+    const [config, context, permission, discussMode, usage, runtime, goalResult] = await Promise.all([
+      this.core.rpc.getConfig({ sessionId: id, agentId }),
+      this.core.rpc.getContext({ sessionId: id, agentId }),
+      this.core.rpc.getPermission({ sessionId: id, agentId }),
+      this.core.rpc.getDiscussMode({ sessionId: id, agentId }),
+      this.core.rpc.getUsage?.({ sessionId: id, agentId }),
+      this.core.rpc.getNoriRuntimeSettings({ sessionId: id, agentId }),
+      this.core.rpc.getGoal({ sessionId: id, agentId }),
     ]);
 
     const maxContextTokens = config.modelCapabilities?.max_context_tokens ?? 0;
     const contextTokens = context.tokenCount;
     const contextUsage = maxContextTokens > 0 ? contextTokens / maxContextTokens : 0;
 
-    const agentState = this.promptService.getAgentStateSnapshot(id);
+    const agentState = this.promptService.getAgentStateSnapshot(id, agentId);
 
     const realtimeUsage = mapRealtimeUsage(usage);
     return {
-      status: this._computeStatus(id),
+      status: this._computeStatus(id, agentId),
       model: config.modelAlias ?? config.provider?.model,
       thinking_level: config.thinkingEffort,
       permission: permission.mode,
-      plan_mode: plan !== null,
+      discuss_mode: agentState?.discussMode ?? discussMode,
       main_write_enabled: !runtime.toolsReadonly,
-      swarm_mode: agentState?.swarmMode ?? false,
       goal: goalResult.goal,
       context_tokens: contextTokens,
       max_context_tokens: maxContextTokens,
@@ -586,9 +724,10 @@ export class SessionService extends Disposable implements ISessionService {
     await this.core.rpc.resumeSession({ sessionId: id });
 
     const instruction = normalizeOptionalString(input.instruction);
+    const agentId = input.agent_id ?? MAIN_AGENT_ID;
     await this.core.rpc.beginCompaction({
       sessionId: id,
-      agentId: 'main',
+      agentId,
       instruction,
     });
     return {};
@@ -597,7 +736,8 @@ export class SessionService extends Disposable implements ISessionService {
   async undo(id: string, input: UndoSessionRequest): Promise<UndoSessionResponse> {
     const summary = await this.requireSummary(id);
     await this.core.rpc.resumeSession({ sessionId: id });
-    const before = await this.core.rpc.getContext({ sessionId: id, agentId: 'main' });
+    const agentId = input.agent_id ?? MAIN_AGENT_ID;
+    const before = await this.core.rpc.getContext({ sessionId: id, agentId });
     if (!canUndoHistory(before.history, input.count)) {
       throw new SessionUndoUnavailableError(id);
     }
@@ -605,7 +745,7 @@ export class SessionService extends Disposable implements ISessionService {
     try {
       await this.core.rpc.undoHistory({
         sessionId: id,
-        agentId: 'main',
+        agentId,
         count: input.count,
       });
     } catch (error) {
@@ -615,10 +755,10 @@ export class SessionService extends Disposable implements ISessionService {
       throw error;
     }
 
-    const after = await this.core.rpc.getContext({ sessionId: id, agentId: 'main' });
+    const after = await this.core.rpc.getContext({ sessionId: id, agentId });
     return {
       messages: pageContextMessages(id, summary.createdAt, after, input.page_size),
-      status: await this.getStatus(id, false),
+      status: await this.getStatus(id, agentId, false),
     };
   }
 
@@ -630,9 +770,7 @@ export class SessionService extends Disposable implements ISessionService {
     }
     await this.core.rpc.archiveSession({ sessionId: id });
     this._onDidClose.fire({ sessionId: id });
-    this._statusBySession.delete(id);
-    this._activeTurns.delete(id);
-    this._abortedTurns.delete(id);
+    this._clearAgentRuntimeState(id);
     return { archived: true };
   }
 
@@ -644,9 +782,7 @@ export class SessionService extends Disposable implements ISessionService {
     }
     await this.core.rpc.deleteSession({ sessionId: id });
     this._onDidClose.fire({ sessionId: id });
-    this._statusBySession.delete(id);
-    this._activeTurns.delete(id);
-    this._abortedTurns.delete(id);
+    this._clearAgentRuntimeState(id);
     return { deleted: true };
   }
 
@@ -657,6 +793,20 @@ export class SessionService extends Disposable implements ISessionService {
       throw new SessionNotFoundError(id);
     }
     return summary;
+  }
+
+  private _clearAgentRuntimeState(sessionId: string): void {
+    const prefix = `${sessionId}\u0000`;
+    for (const map of [this._statusByAgent, this._lastActivityByAgent, this._activeBackgroundTasks]) {
+      for (const key of map.keys()) {
+        if (key.startsWith(prefix)) map.delete(key);
+      }
+    }
+    for (const set of [this._activeTurns, this._abortedTurns]) {
+      for (const key of set) {
+        if (key.startsWith(prefix)) set.delete(key);
+      }
+    }
   }
 
   private async tryGetMeta(id: string): Promise<SessionMeta | undefined> {

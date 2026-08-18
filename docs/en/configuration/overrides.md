@@ -18,7 +18,7 @@ Environment variables fall into three categories by function and cannot be colla
 
 ## Priority for ordinary runtime parameters
 
-For ordinary runtime parameters such as model alias, Plan mode, yolo mode, and Skills directories, priority from highest to lowest is:
+For ordinary runtime parameters such as model alias, Discuss mode, yolo mode, and Skills directories, priority from highest to lowest is:
 
 1. **Command-line options** (`-m`, `--plan`, `--yolo`, etc.): apply only to the current startup
 2. **User config file** (`~/.kimi-code/config.toml`): stores long-term preferences
@@ -56,7 +56,7 @@ Options passed at startup have the highest priority and apply only to the curren
 | `-S, --session [id]` | Resume a specific session; enters interactive selection when no id is given |
 | `-c, --continue` | Resume the last session for the current working directory |
 | `-y, --yolo` | Auto-approve all tool calls |
-| `--plan` | Start in Plan mode |
+| `--plan` | Start in Discuss (the flag is retained for compatibility) |
 | `-m, --model <model>` | Use a specific model alias for this session |
 | `-p, --prompt <prompt>` | Run in non-interactive mode: execute a single prompt and exit |
 | `--output-format <format>` | Output format for `-p` mode: `text` or `stream-json` |
@@ -94,10 +94,10 @@ KIMI_API_KEY = "sk-test"
 kimi --yolo -p "Batch rename the following files..."
 ```
 
-**Enter Plan mode temporarily** (to make it permanent, set `default_plan_mode = true` in the config file):
+**Enter Discuss temporarily**:
 
 ```sh
-kimi --plan
+kimi --discuss
 ```
 
 ## Next steps

@@ -57,6 +57,8 @@ export const ErrorCode = {
   TERMINAL_NOT_FOUND: 40414,
   /** skill_name 不存在 */
   SKILL_NOT_FOUND: 40415,
+  /** vault note path/title 不存在 */
+  VAULT_NOTE_NOT_FOUND: 40416,
 
   /** session 有正在进行的 prompt，拒绝新请求 */
   SESSION_BUSY: 40901,
@@ -97,6 +99,8 @@ export const ErrorCode = {
   GOAL_OBJECTIVE_TOO_LONG: 40918,
   /** fs.mkdir 目标路径已存在（文件或目录） */
   FS_ALREADY_EXISTS: 40919,
+  /** vault note 在打开后被其他写入修改 */
+  VAULT_NOTE_CONFLICT: 40920,
 
   /** approval 60s 超时 */
   APPROVAL_EXPIRED: 41001,
@@ -170,6 +174,7 @@ export const ErrorCodeReason: Readonly<Record<ErrorCode, string>> = {
   [ErrorCode.MODEL_NOT_FOUND]: 'model.not_found',
   [ErrorCode.TERMINAL_NOT_FOUND]: 'terminal.not_found',
   [ErrorCode.SKILL_NOT_FOUND]: 'skill.not_found',
+  [ErrorCode.VAULT_NOTE_NOT_FOUND]: 'vault.note_not_found',
 
   [ErrorCode.SESSION_BUSY]: 'session.busy',
   [ErrorCode.APPROVAL_ALREADY_RESOLVED]: 'approval.already_resolved',
@@ -191,6 +196,7 @@ export const ErrorCodeReason: Readonly<Record<ErrorCode, string>> = {
   [ErrorCode.GOAL_OBJECTIVE_EMPTY]: 'goal.objective_empty',
   [ErrorCode.GOAL_OBJECTIVE_TOO_LONG]: 'goal.objective_too_long',
   [ErrorCode.FS_ALREADY_EXISTS]: 'fs.already_exists',
+  [ErrorCode.VAULT_NOTE_CONFLICT]: 'vault.note_conflict',
 
   [ErrorCode.APPROVAL_EXPIRED]: 'approval.expired',
   [ErrorCode.QUESTION_EXPIRED]: 'question.expired',

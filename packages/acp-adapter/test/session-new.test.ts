@@ -144,7 +144,7 @@ describe('AcpServer session/new', () => {
     expect(captured[1]?.options.id).toBe(second.sessionId);
   });
 
-  it('advertises configOptions (PLAN D11 + Phase 15 thinking toggle) — model + thinking + mode under the unified SessionConfigOption surface', async () => {
+  it('advertises configOptions — model + thinking + mode under the unified SessionConfigOption surface', async () => {
     const captured: CapturedCall[] = [];
     const { harness } = makeHarness('sess-modes', captured);
     const { agentStream, clientStream } = makeInMemoryStreamPair();
@@ -154,7 +154,7 @@ describe('AcpServer session/new', () => {
 
     const response = await client.newSession({ cwd: '/tmp/work', mcpServers: [] });
 
-    // Phase 14 (PLAN D11) replaces Phase 12's dedicated `modes:` field
+    // The unified config option surface replaces the dedicated `modes:` field
     // with the spec's generic `configOptions:` surface — model + mode
     // are now sibling SessionConfigOption entries on the same dropdown
     // channel. Positive proof the legacy field is gone:
@@ -179,7 +179,7 @@ describe('AcpServer session/new', () => {
     expect(thinkingOpt!.category).toBe('thought_level');
     expect(thinkingOpt!.currentValue).toBe('off');
 
-    // Mode picker — locked taxonomy (PLAN D9). Same order assertions
+    // Mode picker — same order assertions
     // the Phase 12 test made, just rephrased against the new shape.
     if (modeOpt!.type !== 'select') {
       throw new Error('mode option must be a select');
@@ -187,7 +187,7 @@ describe('AcpServer session/new', () => {
     expect(modeOpt!.currentValue).toBe('default');
     expect(modeOpt!.options).toHaveLength(4);
     const modeIds = modeOpt!.options.map((o) => 'value' in o ? o.value : '');
-    expect(modeIds).toEqual(['default', 'plan', 'auto', 'yolo']);
+    expect(modeIds).toEqual(['default', 'discuss', 'auto', 'yolo']);
     for (const entry of modeOpt!.options) {
       if ('value' in entry) {
         expect(typeof entry.name).toBe('string');

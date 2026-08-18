@@ -9,7 +9,7 @@ afterEach(() => {
 });
 
 describe('prompt execution options', () => {
-  it('maps goal and swarm commands to the existing prompt API fields', async () => {
+  it('maps goal and SubAgent commands to the existing prompt API fields', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       code: 0,
       msg: 'ok',
@@ -28,7 +28,6 @@ describe('prompt execution options', () => {
       model: 'provider/model-a',
       thinking: 'high',
       goalObjective: 'ship the release',
-      swarmMode: true,
       loopMode: true,
     });
 
@@ -38,7 +37,6 @@ describe('prompt execution options', () => {
       model: 'provider/model-a',
       thinking: 'high',
       goal_objective: 'ship the release',
-      swarm_mode: true,
       loop_mode: true,
       content: [{ type: 'text', text: 'ship the release' }],
     });

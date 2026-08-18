@@ -196,6 +196,13 @@ describe('questionResolveRequestSchema (REST §3.6)', () => {
     });
     expect(parsed.answers['q_1']).toEqual({ kind: 'skipped' });
   });
+
+  it('accepts an agent target for a child transcript', () => {
+    expect(questionResolveRequestSchema.parse({
+      answers: { q_1: { kind: 'skipped' } },
+      agent_id: 'team_reviewer',
+    }).agent_id).toBe('team_reviewer');
+  });
 });
 
 describe('questionResolveResultSchema (REST §3.6)', () => {
@@ -267,6 +274,13 @@ describe('listPendingQuestionsResponseSchema (REST pending recovery)', () => {
     expect(listPendingQuestionsQuerySchema.parse({ status: 'pending' })).toEqual({
       status: 'pending',
     });
+  });
+
+  it('accepts an agent target when listing pending questions', () => {
+    expect(listPendingQuestionsQuerySchema.parse({
+      status: 'pending',
+      agent_id: 'team_reviewer',
+    }).agent_id).toBe('team_reviewer');
   });
 
   it('rejects unsupported status query', () => {

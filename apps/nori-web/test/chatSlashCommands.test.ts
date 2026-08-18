@@ -4,12 +4,12 @@ import { CHAT_SLASH_COMMANDS, chatSlashCommandSuggestions, resolveChatSlashComma
 
 describe('chat slash commands', () => {
   it('only exposes Web actions that are not duplicated by existing controls', () => {
-    expect(CHAT_SLASH_COMMANDS.map(command => command.name)).toEqual(['compact', 'goal', 'swarm']);
+    expect(CHAT_SLASH_COMMANDS.map(command => command.name)).toEqual(['compact', 'goal']);
     expect(CHAT_SLASH_COMMANDS.map(command => command.name)).not.toContain('plan');
   });
 
   it('filters command suggestions by the command prefix', () => {
-    expect(chatSlashCommandSuggestions('/').map(command => command.name)).toEqual(['compact', 'goal', 'swarm']);
+    expect(chatSlashCommandSuggestions('/').map(command => command.name)).toEqual(['compact', 'goal']);
     expect(chatSlashCommandSuggestions('/go').map(command => command.name)).toEqual(['goal']);
     expect(chatSlashCommandSuggestions('explain /goal')).toEqual([]);
   });
@@ -22,7 +22,7 @@ describe('chat slash commands', () => {
         args: 'ship the release',
       },
     });
-    expect(resolveChatSlashCommand('/swarm')).toMatchObject({ kind: 'error' });
+    expect(resolveChatSlashCommand('/unknown')).toEqual({ kind: 'none' });
     expect(resolveChatSlashCommand('/compact preserve recent tool results')).toEqual({
       kind: 'command',
       value: {

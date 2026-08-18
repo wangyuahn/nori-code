@@ -564,6 +564,61 @@ describe('Question reverse-RPC: WS broadcast → REST resolve → Promise settle
     expect(env.code).toBe(40405);
   });
 
+  it('scopes child questions by agent_id and leaves the main transcript pending', async () => {
+    const r = await bootDaemon();
+    const sid = await createSession(r);
+    const broker = r.services.invokeFunction(
+      (a) => a.get(IQuestionService) as QuestionService,
+    );
+    const main = broker.request({
+      sessionId: sid,
+      agentId: 'main',
+      questions: [{ question: 'Main?', options: [{ label: 'A' }, { label: 'B' }] }],
+    });
+    const child = broker.request({
+      sessionId: sid,
+      agentId: 'team_reviewer',
+      questions: [{ question: 'Child?', options: [{ label: 'A' }, { label: 'B' }] }],
+    });
+
+    try {
+      const childList = await appOf(r).inject({
+        method: 'GET',
+        url: `/api/v1/sessions/${sid}/questions?status=pending&agent_id=team_reviewer`,
+      });
+      const childEnv = envelopeOf<{ items: Array<{ question_id: string; questions: Array<{ question: string }> }> }>(childList.json());
+      expect(childEnv.code).toBe(0);
+      expect(childEnv.data?.items).toEqual([
+        expect.objectContaining({ questions: [expect.objectContaining({ question: 'Child?' })] }),
+      ]);
+      const childId = childEnv.data?.items[0]?.question_id;
+      expect(childId).toBeDefined();
+
+      const resolved = await appOf(r).inject({
+        method: 'POST',
+        url: `/api/v1/sessions/${sid}/questions/${childId}`,
+        payload: {
+          agent_id: 'team_reviewer',
+          answers: { q_0: { kind: 'single', option_id: 'opt_0_0' } },
+        },
+      });
+      expect(envelopeOf<{ resolved: boolean }>(resolved.json()).code).toBe(0);
+      expect(await child).not.toBeNull();
+
+      const mainList = await appOf(r).inject({
+        method: 'GET',
+        url: `/api/v1/sessions/${sid}/questions?status=pending&agent_id=main`,
+      });
+      expect(envelopeOf<{ items: Array<{ questions: Array<{ question: string }> }> }>(mainList.json()).data?.items).toEqual([
+        expect.objectContaining({ questions: [expect.objectContaining({ question: 'Main?' })] }),
+      ]);
+    } finally {
+      for (const item of broker.listPending(sid, 'main')) broker.dismiss(item.question_id);
+      for (const item of broker.listPending(sid, 'team_reviewer')) broker.dismiss(item.question_id);
+      await Promise.all([main.catch(() => undefined), child.catch(() => undefined)]);
+    }
+  });
+
   it('REST :dismiss on unknown question_id returns 40405', async () => {
     const r = await bootDaemon();
     const sid = await createSession(r);

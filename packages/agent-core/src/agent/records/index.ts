@@ -85,20 +85,14 @@ function restoreAgentRecord(
     case 'micro_compaction.apply':
       agent.microCompaction.apply(input.cutoff);
       return;
-    case 'plan_mode.enter':
-      agent.planMode.restoreEnter(input);
+    case 'discuss_mode.enter':
+      agent.discussMode.restoreEnter(input);
       return;
-    case 'plan_mode.cancel':
-      agent.planMode.cancel(input.id);
+    case 'discuss_mode.cancel':
+      agent.discussMode.cancel(input.id);
       return;
-    case 'plan_mode.exit':
-      agent.planMode.exit(input.id);
-      return;
-    case 'swarm_mode.enter':
-      agent.swarmMode.restoreEnter(input.trigger);
-      return;
-    case 'swarm_mode.exit':
-      agent.swarmMode.exit();
+    case 'discuss_mode.exit':
+      agent.discussMode.exit(input.id);
       return;
     case 'context.append_message':
       agent.context.appendMessage(input.message);

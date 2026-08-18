@@ -57,7 +57,7 @@ function makeStartupInput(
       session: undefined,
       continue: false,
       permission: undefined,
-      plan: false,
+      discuss: false,
       model: undefined,
       outputFormat: undefined,
       prompt: undefined,
@@ -85,7 +85,7 @@ function makeSession(overrides: Record<string, unknown> = {}) {
       model: 'k2',
       thinkingEffort: 'off',
       permission: 'manual',
-      planMode: false,
+      discussMode: false,
       contextTokens: 10,
       maxContextTokens: 100,
       contextUsage: 0.1,
@@ -95,7 +95,7 @@ function makeSession(overrides: Record<string, unknown> = {}) {
     setModel: vi.fn(async () => {}),
     setThinking: vi.fn(async () => {}),
     setPermission: vi.fn(async () => {}),
-    setPlanMode: vi.fn(async () => {}),
+    setDiscussMode: vi.fn(async () => {}),
     getGoal: vi.fn(async () => ({ goal: null })),
     onEvent: vi.fn(() => () => {}),
     getResumeState: vi.fn(() => null),
@@ -129,7 +129,7 @@ function goalSnapshot(overrides: Partial<GoalSnapshot> = {}): GoalSnapshot {
   };
 }
 
-function createResumeState(overrides: { permissionMode?: string; planMode?: boolean } = {}) {
+function createResumeState(overrides: { permissionMode?: string; discussMode?: boolean } = {}) {
   return {
     id: 'ses-latest',
     workDir: '/tmp/proj-a',
@@ -149,8 +149,7 @@ function createResumeState(overrides: { permissionMode?: string; planMode?: bool
         context: { history: [], tokenCount: 10 },
         replay: [],
         permission: { mode: overrides.permissionMode ?? 'manual', rules: [] },
-        plan: overrides.planMode ? { id: 'plan-1', content: '', path: '/tmp/plan.md' } : null,
-        swarmDepth: 0,
+        discussMode: overrides.discussMode ?? false,
         usage: {},
         tools: [],
         background: [],
@@ -221,21 +220,21 @@ describe('KimiTUI startup', () => {
         model: 'k2',
         thinkingEffort: 'off',
         permission: 'yolo',
-        planMode: true,
+        discussMode: true,
         contextTokens: 25,
         maxContextTokens: 200,
         contextUsage: 0.125,
       })),
     });
     const harness = makeHarness(session);
-    const driver = makeDriver(harness, makeStartupInput({ permission: 'yolo', plan: true }));
+    const driver = makeDriver(harness, makeStartupInput({ permission: 'yolo', discuss: true }));
 
     await expect(driver.init()).resolves.toBe(false);
 
     expect(harness.createSession).toHaveBeenCalledWith({
       workDir: '/tmp/proj-a',
       permission: 'yolo',
-      planMode: true,
+      discussMode: true,
     });
     expect(session.setApprovalHandler).toHaveBeenCalledOnce();
     expect(session.setQuestionHandler).toHaveBeenCalledOnce();
@@ -246,7 +245,7 @@ describe('KimiTUI startup', () => {
       sessionId: 'ses-1',
       model: 'k2',
       permissionMode: 'yolo',
-      planMode: true,
+      discussMode: true,
       contextTokens: 25,
       maxContextTokens: 200,
       contextUsage: 0.125,
@@ -277,7 +276,7 @@ describe('KimiTUI startup', () => {
         model: 'k2',
         thinkingEffort: 'off',
         permission,
-        planMode: false,
+        discussMode: false,
         contextTokens: 10,
         maxContextTokens: 100,
         contextUsage: 0.1,
@@ -305,7 +304,7 @@ describe('KimiTUI startup', () => {
         model: 'k2',
         thinkingEffort: 'off',
         permission,
-        planMode: false,
+        discussMode: false,
         contextTokens: 10,
         maxContextTokens: 100,
         contextUsage: 0.1,
@@ -325,59 +324,59 @@ describe('KimiTUI startup', () => {
     expect(driver.state.appState.permissionMode).toBe('yolo');
   });
 
-  it('applies --plan mode when resuming a session via --continue', async () => {
-    let planMode = false;
+  it('applies --discuss mode when resuming a session via --continue', async () => {
+    let discussMode = false;
     const session = makeSession({
       id: 'ses-latest',
       getStatus: vi.fn(async () => ({
         model: 'k2',
         thinkingEffort: 'off',
         permission: 'manual',
-        planMode,
+        discussMode,
         contextTokens: 10,
         maxContextTokens: 100,
         contextUsage: 0.1,
       })),
-      setPlanMode: vi.fn(async (enabled: boolean) => {
-        planMode = enabled;
+      setDiscussMode: vi.fn(async (enabled: boolean) => {
+        discussMode = enabled;
       }),
     });
     const harness = makeHarness(session, {
       listSessions: vi.fn(async () => [{ id: 'ses-latest' }]),
     });
-    const driver = makeDriver(harness, makeStartupInput({ continue: true, plan: true }));
+    const driver = makeDriver(harness, makeStartupInput({ continue: true, discuss: true }));
 
     await expect(driver.init()).resolves.toBe(true);
 
-    expect(session.setPlanMode).toHaveBeenCalledWith(true);
-    expect(driver.state.appState.planMode).toBe(true);
+    expect(session.setDiscussMode).toHaveBeenCalledWith(true);
+    expect(driver.state.appState.discussMode).toBe(true);
   });
 
-  it('skips setPlanMode when the resumed session is already in plan mode', async () => {
+  it('skips setDiscussMode when the resumed session is already in Discuss', async () => {
     const session = makeSession({
       id: 'ses-latest',
       getStatus: vi.fn(async () => ({
         model: 'k2',
         thinkingEffort: 'off',
         permission: 'manual',
-        planMode: true,
+        discussMode: true,
         contextTokens: 10,
         maxContextTokens: 100,
         contextUsage: 0.1,
       })),
-      setPlanMode: vi.fn(async () => {
-        throw new Error('Already in plan mode');
+      setDiscussMode: vi.fn(async () => {
+        throw new Error('Already in Discuss');
       }),
     });
     const harness = makeHarness(session, {
       listSessions: vi.fn(async () => [{ id: 'ses-latest' }]),
     });
-    const driver = makeDriver(harness, makeStartupInput({ continue: true, plan: true }));
+    const driver = makeDriver(harness, makeStartupInput({ continue: true, discuss: true }));
 
     await expect(driver.init()).resolves.toBe(true);
 
-    expect(session.setPlanMode).not.toHaveBeenCalled();
-    expect(driver.state.appState.planMode).toBe(true);
+    expect(session.setDiscussMode).not.toHaveBeenCalled();
+    expect(driver.state.appState.discussMode).toBe(true);
   });
 
   it('forces footer state to reflect --auto even if getStatus lags behind', async () => {
@@ -387,7 +386,7 @@ describe('KimiTUI startup', () => {
         model: 'k2',
         thinkingEffort: 'off',
         permission: 'manual',
-        planMode: false,
+        discussMode: false,
         contextTokens: 10,
         maxContextTokens: 100,
         contextUsage: 0.1,
@@ -405,35 +404,35 @@ describe('KimiTUI startup', () => {
     expect(driver.state.appState.permissionMode).toBe('auto');
   });
 
-  it('forces footer state to reflect --plan even if getStatus lags behind', async () => {
+  it('forces footer state to reflect --discuss even if getStatus lags behind', async () => {
     const session = makeSession({
       id: 'ses-latest',
       getStatus: vi.fn(async () => ({
         model: 'k2',
         thinkingEffort: 'off',
         permission: 'manual',
-        planMode: false,
+        discussMode: false,
         contextTokens: 10,
         maxContextTokens: 100,
         contextUsage: 0.1,
       })),
-      setPlanMode: vi.fn(async () => {}),
+      setDiscussMode: vi.fn(async () => {}),
     });
     const harness = makeHarness(session, {
       listSessions: vi.fn(async () => [{ id: 'ses-latest' }]),
     });
-    const driver = makeDriver(harness, makeStartupInput({ continue: true, plan: true }));
+    const driver = makeDriver(harness, makeStartupInput({ continue: true, discuss: true }));
 
     await expect(driver.init()).resolves.toBe(true);
 
-    expect(session.setPlanMode).toHaveBeenCalledWith(true);
-    expect(driver.state.appState.planMode).toBe(true);
+    expect(session.setDiscussMode).toHaveBeenCalledWith(true);
+    expect(driver.state.appState.discussMode).toBe(true);
   });
 
   it('keeps --auto in the footer after session replay hydration', async () => {
     const session = makeSession({
       id: 'ses-latest',
-      getResumeState: vi.fn(() => createResumeState({ permissionMode: 'manual', planMode: false })),
+      getResumeState: vi.fn(() => createResumeState({ permissionMode: 'manual', discussMode: false })),
     });
     const harness = makeHarness(session, {
       listSessions: vi.fn(async () => [{ id: 'ses-latest' }]),
@@ -450,15 +449,15 @@ describe('KimiTUI startup', () => {
     expect(driver.state.appState.permissionMode).toBe('auto');
   });
 
-  it('keeps --plan in the footer after session replay hydration', async () => {
+  it('keeps --discuss in the footer after session replay hydration', async () => {
     const session = makeSession({
       id: 'ses-latest',
-      getResumeState: vi.fn(() => createResumeState({ permissionMode: 'manual', planMode: false })),
+      getResumeState: vi.fn(() => createResumeState({ permissionMode: 'manual', discussMode: false })),
     });
     const harness = makeHarness(session, {
       listSessions: vi.fn(async () => [{ id: 'ses-latest' }]),
     });
-    const driver = makeDriver(harness, makeStartupInput({ continue: true, plan: true }));
+    const driver = makeDriver(harness, makeStartupInput({ continue: true, discuss: true }));
 
     await expect(driver.init()).resolves.toBe(true);
     await (
@@ -467,7 +466,7 @@ describe('KimiTUI startup', () => {
       }
     ).finishStartup(true);
 
-    expect(driver.state.appState.planMode).toBe(true);
+    expect(driver.state.appState.discussMode).toBe(true);
   });
 
   it('applies --auto permission when resuming an explicit session', async () => {
@@ -478,7 +477,7 @@ describe('KimiTUI startup', () => {
         model: 'k2',
         thinkingEffort: 'off',
         permission,
-        planMode: false,
+        discussMode: false,
         contextTokens: 10,
         maxContextTokens: 100,
         contextUsage: 0.1,
@@ -558,7 +557,7 @@ describe('KimiTUI startup', () => {
       workDir: '/tmp/proj-a',
       model: 'kimi-code/k2.5',
       permission: undefined,
-      planMode: undefined,
+      discussMode: undefined,
     });
   });
 
@@ -572,7 +571,7 @@ describe('KimiTUI startup', () => {
         model,
         thinkingEffort: 'off',
         permission: 'manual',
-        planMode: false,
+        discussMode: false,
         contextTokens: 10,
         maxContextTokens: 100,
         contextUsage: 0.1,
@@ -611,7 +610,7 @@ describe('KimiTUI startup', () => {
         model: 'k2',
         thinkingEffort: 'off',
         permission,
-        planMode: false,
+        discussMode: false,
         contextTokens: 10,
         maxContextTokens: 100,
         contextUsage: 0.1,
@@ -644,20 +643,20 @@ describe('KimiTUI startup', () => {
     expect(driver.state.appState.permissionMode).toBe('auto');
   });
 
-  it('skips setPlanMode after picking a session already in plan mode', async () => {
+  it('skips setDiscussMode after picking a session already in Discuss', async () => {
     const session = makeSession({
       id: 'ses-picked',
       getStatus: vi.fn(async () => ({
         model: 'k2',
         thinkingEffort: 'off',
         permission: 'manual',
-        planMode: true,
+        discussMode: true,
         contextTokens: 10,
         maxContextTokens: 100,
         contextUsage: 0.1,
       })),
-      setPlanMode: vi.fn(async () => {
-        throw new Error('Already in plan mode');
+      setDiscussMode: vi.fn(async () => {
+        throw new Error('Already in Discuss');
       }),
     });
     const harness = makeHarness(session, {
@@ -670,7 +669,7 @@ describe('KimiTUI startup', () => {
         },
       ]),
     });
-    const driver = makeDriver(harness, makeStartupInput({ session: '', plan: true }));
+    const driver = makeDriver(harness, makeStartupInput({ session: '', discuss: true }));
 
     await (driver as unknown as { initMainTui(): Promise<boolean> }).initMainTui();
     expect(driver.state.startupState).toBe('picker');
@@ -680,8 +679,8 @@ describe('KimiTUI startup', () => {
     picker.handleInput('\r');
     await new Promise((resolve) => setImmediate(resolve));
 
-    expect(session.setPlanMode).not.toHaveBeenCalled();
-    expect(driver.state.appState.planMode).toBe(true);
+    expect(session.setDiscussMode).not.toHaveBeenCalled();
+    expect(driver.state.appState.discussMode).toBe(true);
   });
 
   it('toggles the sessions picker from current cwd to all sessions with Ctrl+A', async () => {
@@ -956,8 +955,8 @@ describe('KimiTUI startup', () => {
     const picked = makeSession({
       id: 'ses-2',
       setPermission: vi.fn(async () => {}),
-      setPlanMode: vi.fn(async () => {
-        throw new Error('Already in plan mode');
+      setDiscussMode: vi.fn(async () => {
+        throw new Error('Already in Discuss');
       }),
     });
     const harness = makeHarness(initial, {
@@ -971,7 +970,7 @@ describe('KimiTUI startup', () => {
         },
       ]),
     });
-    const driver = makeDriver(harness, makeStartupInput({ permission: 'auto', plan: true }));
+    const driver = makeDriver(harness, makeStartupInput({ permission: 'auto', discuss: true }));
     await expect(driver.init()).resolves.toBe(false);
 
     await (driver as unknown as { showSessionPicker(): Promise<void> }).showSessionPicker();
@@ -981,9 +980,9 @@ describe('KimiTUI startup', () => {
 
     expect(driver.state.appState.sessionId).toBe('ses-2');
     expect(picked.setPermission).not.toHaveBeenCalled();
-    expect(picked.setPlanMode).not.toHaveBeenCalled();
+    expect(picked.setDiscussMode).not.toHaveBeenCalled();
     expect(driver.state.appState.permissionMode).toBe('manual');
-    expect(driver.state.appState.planMode).toBe(false);
+    expect(driver.state.appState.discussMode).toBe(false);
   });
 
   it('clears startup picker exit confirmation before resuming a selected session', async () => {
@@ -1115,13 +1114,13 @@ describe('KimiTUI startup', () => {
     });
   });
 
-  it('preserves fresh startup yolo and plan intent after OAuth login', async () => {
+  it('preserves fresh startup yolo and Discuss intent after OAuth login', async () => {
     const session = makeSession({
       getStatus: vi.fn(async () => ({
         model: 'k2',
         thinkingEffort: 'off',
         permission: 'yolo',
-        planMode: true,
+        discussMode: true,
         contextTokens: 10,
         maxContextTokens: 100,
         contextUsage: 0.1,
@@ -1141,7 +1140,7 @@ describe('KimiTUI startup', () => {
       })),
       createSession,
     });
-    const driver = makeDriver(harness, makeStartupInput({ permission: 'yolo', plan: true }));
+    const driver = makeDriver(harness, makeStartupInput({ permission: 'yolo', discuss: true }));
 
     await expect(driver.init()).resolves.toBe(false);
 
@@ -1149,7 +1148,7 @@ describe('KimiTUI startup', () => {
       sessionId: '',
       model: '',
       permissionMode: 'yolo',
-      planMode: true,
+      discussMode: true,
     });
 
     vi.mocked(promptPlatformSelection).mockResolvedValue('kimi-code');
@@ -1158,20 +1157,20 @@ describe('KimiTUI startup', () => {
     expect(createSession).toHaveBeenNthCalledWith(1, {
       workDir: '/tmp/proj-a',
       permission: 'yolo',
-      planMode: true,
+      discussMode: true,
     });
     expect(createSession).toHaveBeenNthCalledWith(2, {
       workDir: '/tmp/proj-a',
       model: 'k2',
       thinking: 'off',
       permission: 'yolo',
-      planMode: true,
+      discussMode: true,
     });
     expect(driver.state.appState).toMatchObject({
       sessionId: 'ses-1',
       model: 'k2',
       permissionMode: 'yolo',
-      planMode: true,
+      discussMode: true,
     });
   });
 
@@ -1181,7 +1180,7 @@ describe('KimiTUI startup', () => {
         model: 'k2',
         thinkingEffort: 'off',
         permission: 'auto',
-        planMode: false,
+        discussMode: false,
         contextTokens: 10,
         maxContextTokens: 100,
         contextUsage: 0.1,
@@ -1212,7 +1211,7 @@ describe('KimiTUI startup', () => {
       model: 'k2',
       thinking: 'off',
       permission: undefined,
-      planMode: undefined,
+      discussMode: undefined,
     });
     expect(driver.state.appState).toMatchObject({
       permissionMode: 'auto',

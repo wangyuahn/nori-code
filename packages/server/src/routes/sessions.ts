@@ -13,6 +13,9 @@ import {
   listSessionChildrenResponseSchema,
   pageResponseSchema,
   sessionAbortResponseSchema,
+  sessionAgentQuerySchema,
+  sessionAgentTreeResponseSchema,
+  sessionActivityResponseSchema,
   sessionSchema,
   sessionWarningsResponseSchema,
   sessionStatusResponseSchema,
@@ -134,6 +137,7 @@ const sessionActionRequestSchema = z.preprocess(
     instruction: z.string().optional(),
     count: z.number().int().positive().optional(),
     page_size: z.number().int().min(1).max(100).optional(),
+    agent_id: z.string().min(1).optional(),
   }),
 );
 
@@ -305,6 +309,30 @@ export function registerSessionsRoutes(
   );
   app.get(listRoute.path, listRoute.options, listRoute.handler as Parameters<SessionRouteHost['get']>[2]);
 
+  const activityRoute = defineRoute(
+    {
+      method: 'GET',
+      path: '/sessions/activity',
+      success: { data: sessionActivityResponseSchema },
+      description: 'List active agent work without loading session transcripts',
+      tags: ['sessions'],
+      operationId: 'listSessionActivity',
+    },
+    async (req, reply) => {
+      const items = (ix.invokeFunction((a) => a.get(ISessionService).listActiveAgentActivity?.()) ?? [])
+        .map(item => ({
+          session_id: item.sessionId,
+          agent_id: item.agentId,
+          kind: item.kind,
+          ...(item.taskId === undefined ? {} : { task_id: item.taskId }),
+          status: item.status,
+          ...(item.lastActive === undefined ? {} : { last_active: item.lastActive }),
+        }));
+      reply.send(okEnvelope({ items }, req.id));
+    },
+  );
+  app.get(activityRoute.path, activityRoute.options, activityRoute.handler as Parameters<SessionRouteHost['get']>[2]);
+
   const getRoute = defineRoute(
     {
       method: 'GET',
@@ -376,9 +404,9 @@ export function registerSessionsRoutes(
     async (req, reply) => {
       try {
         const { session_id } = req.params;
-        const body = req.body;
+        const { agent_id, ...body } = req.body;
         const session = await ix.invokeFunction((a) =>
-          a.get(ISessionService).update(session_id, body),
+          a.get(ISessionService).update(session_id, body, agent_id),
         );
         // Broadcast the title change to every connection (including clients not
         // subscribed to this session, and covering inactive sessions whose rename
@@ -464,8 +492,9 @@ export function registerSessionsRoutes(
         }
 
         if (parsed.action === 'abort') {
+          const body = sessionActionRequestSchema.parse(req.body);
           const result = await ix.invokeFunction((a) =>
-            a.get(IPromptService).abortBySession(parsed.id),
+            a.get(IPromptService).abortBySession(parsed.id, body.agent_id),
           );
           reply.send(okEnvelope(result, req.id));
           return;
@@ -497,7 +526,7 @@ export function registerSessionsRoutes(
 
         const body = undoSessionRequestSchema.parse(req.body);
         const result = await ix.invokeFunction((a) => a.get(ISessionService).undo(parsed.id, body));
-        await restoreWorkspaceCheckpoint(parsed.id, body.count).catch(() => false);
+        await restoreWorkspaceCheckpoint(parsed.id, body.count, body.agent_id).catch(() => false);
         reply.send(okEnvelope(result, req.id));
       } catch (err) {
         sendMappedError(reply, req.id, err);
@@ -508,6 +537,37 @@ export function registerSessionsRoutes(
     sessionActionRoute.path,
     sessionActionRoute.options,
     sessionActionRoute.handler as Parameters<SessionRouteHost['post']>[2],
+  );
+
+  const listAgentsRoute = defineRoute(
+    {
+      method: 'GET',
+      path: '/sessions/{session_id}/agents',
+      params: sessionIdParamSchema,
+      success: { data: sessionAgentTreeResponseSchema },
+      errors: {
+        [ErrorCode.SESSION_NOT_FOUND]: {},
+      },
+      description: 'List active agents within a parent session',
+      tags: ['sessions'],
+      operationId: 'listSessionAgents',
+    },
+    async (req, reply) => {
+      try {
+        const { session_id } = req.params;
+        const agents = await ix.invokeFunction((a) =>
+          a.get(ISessionService).listAgents(session_id),
+        );
+        reply.send(okEnvelope(agents, req.id));
+      } catch (err) {
+        sendMappedError(reply, req.id, err);
+      }
+    },
+  );
+  app.get(
+    listAgentsRoute.path,
+    listAgentsRoute.options,
+    listAgentsRoute.handler as Parameters<SessionRouteHost['get']>[2],
   );
 
   const listChildrenRoute = defineRoute(
@@ -580,6 +640,7 @@ export function registerSessionsRoutes(
       method: 'GET',
       path: '/sessions/{session_id}/status',
       params: sessionIdParamSchema,
+      querystring: sessionAgentQuerySchema,
       success: { data: sessionStatusResponseSchema },
       errors: {
         [ErrorCode.VALIDATION_FAILED]: { detailsSchema },
@@ -592,7 +653,7 @@ export function registerSessionsRoutes(
       try {
         const { session_id } = req.params;
         const status = await ix.invokeFunction((a) =>
-          a.get(ISessionService).getStatus(session_id),
+          a.get(ISessionService).getStatus(session_id, req.query.agent_id),
         );
         reply.send(okEnvelope(status, req.id));
       } catch (err) {

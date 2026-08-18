@@ -28,6 +28,8 @@ export interface ResolvedRuntimeProvider {
   readonly providerName: string;
   readonly provider: KosongProviderConfig;
   readonly modelCapabilities: ModelCapability;
+  /** Effective metadata from the same configuration snapshot as the provider. */
+  readonly modelAlias?: ModelAlias;
   /** Declared 'always_thinking' capability — the model cannot disable thinking. */
   readonly alwaysThinking?: boolean;
   readonly maxOutputSize?: number;
@@ -85,6 +87,15 @@ export class SingleModelProvider implements ModelProvider {
 
 export class ProviderManager implements ModelProvider {
   constructor(private readonly options: ProviderManagerOptions) {}
+
+  /**
+   * Keeps a provider configuration source while giving one transcript its own
+   * stable cache-affinity key. Session-owned agents must not share this key:
+   * interleaved transcripts would otherwise evict each other's hot prefix.
+   */
+  withPromptCacheKey(promptCacheKey: string | undefined): ProviderManager {
+    return new ProviderManager({ ...this.options, promptCacheKey });
+  }
 
   private get config(): KimiConfig {
     const { config } = this.options;
@@ -144,6 +155,7 @@ export class ProviderManager implements ModelProvider {
       providerName,
       provider,
       modelCapabilities: resolveModelCapabilities(effectiveAlias, provider),
+      modelAlias: effectiveAlias,
       alwaysThinking: (effectiveAlias.capabilities ?? []).some(
         (c) => c.trim().toLowerCase() === 'always_thinking',
       ),

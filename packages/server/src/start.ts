@@ -26,8 +26,6 @@ import {
 } from './services/pinoLoggerService';
 import { resolveRequestId } from './request-id';
 import { registerApiV1Routes } from './routes/registerApiV1Routes';
-import { registerSwarmWsRoute } from './routes/swarmWs';
-import { listSwarmStatuses } from './routes/swarmStatus';
 import {
   IConnectionRegistry,
   IRestGateway,
@@ -378,16 +376,6 @@ export async function startServer(opts: ServerStartOptions): Promise<RunningServ
     enableTerminals: bindClass === 'loopback' || allowRemoteTerminals,
   });
 
-  // Swarm WebSocket route — must be registered on the raw HTTP server, not
-  // inside the /api/v1 prefix, because Fastify upgrade listeners need the raw
-  // server object. The main WS gateway also uses prependListener, so swarm's
-  // prependListener must fire before the gateway's — registration order matters.
-  try {
-    registerSwarmWsRoute(app as never, ix, listSwarmStatuses);
-  } catch (err) {
-    pinoLogger.warn({ err }, 'failed to register swarm WS route');
-  }
-
   app.get('/asyncapi.json', async (_req, reply) => {
     // Reflect the bound host, never the caller-supplied `Host` header (PLAN
     // §3.6-3: Host-header reflection is an information-leak / SSRF-adjacent
@@ -482,7 +470,7 @@ export async function startServer(opts: ServerStartOptions): Promise<RunningServ
       const terminalService = a.get(ITerminalService);
 
       wsGw.setAbortHandler({
-        abort: (sid, pid) => promptService.abort(sid, pid),
+        abort: (sid, pid, agentId) => promptService.abort(sid, pid, agentId),
         currentSeq: (sid) => wsBroadcast.currentSeq(sid),
       });
       wsGw.setTerminalHandler({

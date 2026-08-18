@@ -118,7 +118,7 @@ describe('InjectionManager registration', () => {
     expect(injectors.some((injector) => injector instanceof ResponseSummaryInjector)).toBe(true);
   });
 
-  it('adds one response-summary reminder for each main-agent user prompt', async () => {
+  it('projects the response-summary reminder without persisting it', async () => {
     const ctx = testAgent();
     ctx.configure();
     const appendPrompt = (text: string) => {
@@ -131,15 +131,18 @@ describe('InjectionManager registration', () => {
     appendPrompt('Implement the feature.');
     await ctx.agent.injection.inject();
     await ctx.agent.injection.inject();
+
+    expect(ctx.agent.context.history).toHaveLength(1);
+    expect(ctx.agent.context.messages).toHaveLength(2);
+    expect(JSON.stringify(ctx.agent.context.messages.at(-1)?.content)).toContain('standalone summary');
+    expect(ctx.newEvents()).not.toContain(RESPONSE_SUMMARY_REMINDER_VARIANT);
+
     appendPrompt('Now verify it.');
     await ctx.agent.injection.inject();
 
-    const reminders = ctx.agent.context.history.filter(message =>
-      message.origin?.kind === 'injection'
-      && message.origin.variant === RESPONSE_SUMMARY_REMINDER_VARIANT,
-    );
-    expect(reminders).toHaveLength(2);
-    expect(JSON.stringify(reminders[0]?.content)).toContain('standalone summary');
+    expect(ctx.agent.context.history).toHaveLength(2);
+    expect(ctx.agent.context.messages).toHaveLength(2);
+    expect(JSON.stringify(ctx.agent.context.messages.at(-1)?.content)).toContain('standalone summary');
   });
 
   it('does not add the response-summary reminder to subagents', async () => {
@@ -152,10 +155,7 @@ describe('InjectionManager registration', () => {
 
     await ctx.agent.injection.inject();
 
-    expect(ctx.agent.context.history.some(message =>
-      message.origin?.kind === 'injection'
-      && message.origin.variant === RESPONSE_SUMMARY_REMINDER_VARIANT,
-    )).toBe(false);
+    expect(JSON.stringify(ctx.agent.context.messages)).not.toContain('standalone summary');
   });
 });
 

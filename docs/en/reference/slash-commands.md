@@ -22,7 +22,7 @@ Some commands are only available in the idle state. Executing these commands whi
 | `/editor` | — | Configure the external editor launched by `Ctrl-G` | Yes |
 | `/theme` | — | Switch the terminal UI color theme | Yes |
 
-`/settings` also accepts the `/setting` alias for direct runtime changes. Common Nori subcommands are `/setting readonly on|off` (block or allow direct `Write` / `Edit` by the main Agent), `/setting coder write on|off` (grant or revoke direct write access for coding subagents), `/setting depth <n>` (set swarm nesting depth), and `/setting auto` (open the guided setup).
+`/settings` also accepts the `/setting` alias for direct runtime changes. Common Nori subcommands are `/setting readonly on|off` (block or allow direct `Write` / `Edit` by the main Agent), `/setting coder write on|off` (grant or revoke direct write access for coding subagents), `/setting depth <n>` (set SubAgent nesting depth), and `/setting auto` (open the guided setup).
 
 ## Session Management
 
@@ -46,16 +46,16 @@ Some commands are only available in the idle state. Executing these commands whi
 
 | Command | Alias | Description | Always available |
 | --- | --- | --- | --- |
-| `/yolo [on\|off]` | `/yes` | Toggle YOLO mode. Without arguments, flips the current state; explicitly passing `on`/`off` forces the setting. When enabled, skips approval for regular tool calls; Plan mode exit approval is not affected | Yes |
+| `/yolo [on\|off]` | `/yes` | Toggle YOLO mode. Without arguments, flips the current state; explicitly passing `on`/`off` forces the setting. When enabled, skips approval for regular tool calls; Discuss exit approval is not affected | Yes |
 | `/auto [on\|off]` | — | Toggle auto permission mode. When enabled, tool approvals are handled automatically and the Agent will not ask the user questions | Yes |
-| `/plan [on\|off]` | — | Toggle Plan mode. Without arguments, flips the current state; explicitly passing `on`/`off` forces the setting. Simply toggling does not create an empty plan file | Yes |
-| `/plan clear` | — | Clear the current plan | No |
-| `/swarm on\|off` | — | Turn swarm mode on or off without sending a prompt. | Yes |
-| `/swarm <task>` | — | Turn swarm mode on, then send `<task>` as a normal prompt. If the turn completes normally, swarm mode turns off automatically. In `manual` permission mode, Kimi Code asks whether to switch to `auto` or `yolo` before starting. | No |
+| `/plan [on\|off]` | — | Toggle Discuss. Without arguments, flips the current state; explicitly passing `on`/`off` forces the setting. The command name is retained for compatibility | Yes |
+| `/plan clear` | — | Clear legacy plan state | No |
+| `/subagent on\|off` | — | Turn SubAgent mode on or off without sending a prompt. | No |
+| `/subagent <task>` | — | Turn SubAgent mode on, then send `<task>` as a normal prompt. If the turn completes normally, SubAgent mode turns off automatically. In `manual` permission mode, Nori Code asks whether to switch to `auto` or `yolo` before starting. | No |
 | `/goal [...]` | — | Start or manage an autonomous goal | See below |
 
 ::: warning
-`/yolo` skips approval for regular tool calls. Please make sure you understand the potential risks before enabling it. Plan mode exit approval is not bypassed by `/yolo`; `Bash` inside Plan mode is still subject to the regular `/yolo` allow rules.
+`/yolo` skips approval for regular tool calls. Please make sure you understand the potential risks before enabling it. Discuss exit approval is not bypassed by `/yolo`; `Bash` inside Discuss is still subject to the regular `/yolo` allow rules.
 :::
 
 ## Autonomous Goal

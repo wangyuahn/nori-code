@@ -1,11 +1,24 @@
 import type { GoalSnapshot } from '../../../agent/goal';
 
-export function buildGoalCompletionSummaryPrompt(goal: GoalSnapshot): string {
-  return [
-    buildGoalCompletionPromptMessage(goal),
-    '',
+import MEMORY_CLEANUP_REMINDER from './goal-completion-memory.md?raw';
+
+export interface GoalCompletionPromptOptions {
+  /** When true, remind the model to optionally clean shared memory. */
+  readonly includeMemoryCleanup?: boolean;
+}
+
+export function buildGoalCompletionSummaryPrompt(
+  goal: GoalSnapshot,
+  options: GoalCompletionPromptOptions = {},
+): string {
+  const parts = [buildGoalCompletionPromptMessage(goal), ''];
+  if (options.includeMemoryCleanup === true) {
+    parts.push(MEMORY_CLEANUP_REMINDER.trim(), '');
+  }
+  parts.push(
     'Write a concise final message for the user. State that the goal is complete, summarize the main work completed, and mention any validation you ran. Do not call more goal tools.',
-  ].join('\n');
+  );
+  return parts.join('\n');
 }
 
 export function buildGoalBlockedReasonPrompt(goal: GoalSnapshot): string {

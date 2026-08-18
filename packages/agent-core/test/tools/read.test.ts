@@ -1,4 +1,4 @@
-import type { Kaos } from '@nori-code/kaos';
+import { computeContentTag, type Kaos } from '@nori-code/kaos';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -59,9 +59,15 @@ function readLinesFromContent(content: string): Kaos['readLines'] {
   };
 }
 
-function withReadStatus(output: string, status: string): string {
+function withReadStatus(
+  sourceContent: string,
+  output: string,
+  status: string,
+  path = '/tmp/a.txt',
+): string {
+  const anchor = `[${path}#${computeContentTag(sourceContent)}]`;
   const note = `<system>${status}</system>`;
-  return output.length > 0 ? `${output}\n${note}` : note;
+  return output.length > 0 ? `${anchor}\n${output}\n${note}` : `${anchor}\n${note}`;
 }
 
 function toolWithContent(content: string, workspace: WorkspaceConfig = PERMISSIVE_WORKSPACE) {
@@ -131,6 +137,7 @@ describe('ReadTool', () => {
 
     expect(result).toEqual({
       output: withReadStatus(
+        'alpha\nbeta\n',
         '1\talpha\n2\tbeta',
         '2 lines read from file starting from line 1. Total lines in file: 2. End of file reached.',
       ),
@@ -144,6 +151,7 @@ describe('ReadTool', () => {
 
     expect(result.output).toBe(
       withReadStatus(
+        'alpha\r\nbeta\r\n',
         ['1\talpha', '2\tbeta'].join('\n'),
         '2 lines read from file starting from line 1. Total lines in file: 2. End of file reached.',
       ),
@@ -157,8 +165,9 @@ describe('ReadTool', () => {
 
     expect(result.output).toBe(
       withReadStatus(
+        'alpha\r\nbeta\ngamma\rdone',
         ['1\talpha\\r', '2\tbeta', '3\tgamma\\rdone'].join('\n'),
-        '3 lines read from file starting from line 1. Total lines in file: 3. End of file reached. Mixed or lone carriage-return line endings are shown as \\r. Use exact \\r\\n or \\r escapes in Edit.old_string for those lines.',
+        '3 lines read from file starting from line 1. Total lines in file: 3. End of file reached. Mixed or lone carriage-return line endings are shown as \\r. Preserve those explicit \\r characters in Edit.line_ops content when replacing affected lines.',
       ),
     );
   });
@@ -170,6 +179,7 @@ describe('ReadTool', () => {
 
     expect(result).toEqual({
       output: withReadStatus(
+        'a\nb\nc\nd\ne',
         '2\tb\n3\tc',
         '2 lines read from file starting from line 2. Total lines in file: 5.',
       ),
@@ -183,6 +193,7 @@ describe('ReadTool', () => {
 
     expect(result).toEqual({
       output: withReadStatus(
+        'a\nb',
         '',
         'No lines read from file. Total lines in file: 2. End of file reached.',
       ),
@@ -196,6 +207,7 @@ describe('ReadTool', () => {
 
     expect(result).toEqual({
       output: withReadStatus(
+        'a\nb\nc\nd\ne',
         '3\tc\n4\td\n5\te',
         '3 lines read from file starting from line 3. Total lines in file: 5. End of file reached.',
       ),
@@ -209,6 +221,7 @@ describe('ReadTool', () => {
 
     expect(result.output).toBe(
       withReadStatus(
+        'a\nb\nc\nd\ne',
         '1\ta\n2\tb',
         '2 lines read from file starting from line 1. Total lines in file: 5.',
       ),
@@ -252,8 +265,10 @@ describe('ReadTool', () => {
 
     expect(result.output).toBe(
       withReadStatus(
+        'external',
         '1\texternal',
         '1 line read from file starting from line 1. Total lines in file: 1. End of file reached.',
+        '/tmp/external.txt',
       ),
     );
     expect(readBytes).toHaveBeenCalledWith('/tmp/external.txt', MEDIA_SNIFF_BYTES);
@@ -339,8 +354,10 @@ describe('ReadTool', () => {
 
     expect(result.output).toBe(
       withReadStatus(
+        'home note',
         '1\thome note',
         '1 line read from file starting from line 1. Total lines in file: 1. End of file reached.',
+        '~/notes/today.txt',
       ),
     );
     expect(readBytes).toHaveBeenCalledWith('/home/test/notes/today.txt', MEDIA_SNIFF_BYTES);
@@ -653,6 +670,7 @@ describe('ReadTool', () => {
       endsWithNewline: false,
       hasNul: false,
       lineEndingFlags: { hasCrLf: false, hasLf: true, hasLoneCr: false },
+      contentTag: computeContentTag(content),
     }));
     const tool = new ReadTool(
       createFakeKaos({
@@ -695,6 +713,7 @@ describe('ReadTool', () => {
       endsWithNewline: false,
       hasNul: false,
       lineEndingFlags: { hasCrLf: false, hasLf: true, hasLoneCr: false },
+      contentTag: computeContentTag(content),
     }));
     const tool = new ReadTool(
       createFakeKaos({
@@ -786,7 +805,9 @@ describe('ReadTool', () => {
     );
     const output = toolContentString(result);
 
-    expect(output).toMatch(/^301\t0301/);
+    expect(output).toMatch(
+      new RegExp(`^\\[/tmp/tail-small-window\\.txt#${computeContentTag(content)}\\]\\n301\\t0301`),
+    );
     expect(output).not.toContain('Max');
   });
 
@@ -847,7 +868,12 @@ describe('ReadTool', () => {
 
     expect(result.isError).toBeFalsy();
     expect(result.output).toBe(
-      withReadStatus('', 'No lines read from file. Total lines in file: 0. End of file reached.'),
+      withReadStatus(
+        '',
+        '',
+        'No lines read from file. Total lines in file: 0. End of file reached.',
+        '/tmp/empty.txt',
+      ),
     );
   });
 

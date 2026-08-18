@@ -10,6 +10,7 @@ import {
   type CursorQuery,
   type PageResponse,
   type Session,
+  type SessionAgentTreeResponse,
   type SessionChildCreate,
   type SessionCreate,
   type SessionFork,
@@ -48,7 +49,7 @@ export interface ISessionService {
 
   get(id: string): Promise<Session>;
 
-  update(id: string, input: SessionUpdate): Promise<Session>;
+  update(id: string, input: SessionUpdate, agentId?: string): Promise<Session>;
 
   fork(id: string, input: SessionFork): Promise<Session>;
 
@@ -56,7 +57,12 @@ export interface ISessionService {
 
   createChild(id: string, input: SessionChildCreate): Promise<Session>;
 
-  getStatus(id: string): Promise<SessionStatusResponse>;
+  getStatus(id: string, agentId?: string, ensureResumed?: boolean): Promise<SessionStatusResponse>;
+
+  listAgents(id: string): Promise<SessionAgentTreeResponse>;
+
+  /** Returns active agent work without resuming or loading session transcripts. */
+  listActiveAgentActivity?(): readonly SessionAgentActivity[];
 
   getSessionWarnings(id: string): Promise<readonly SessionWarning[]>;
 
@@ -71,6 +77,15 @@ export interface ISessionService {
   readonly onDidCreate: Event<{ session: Session }>;
 
   readonly onDidClose: Event<{ sessionId: string }>;
+}
+
+export interface SessionAgentActivity {
+  readonly sessionId: string;
+  readonly agentId: string;
+  readonly kind: 'agent' | 'background';
+  readonly taskId?: string;
+  readonly status: import('@nori-code/protocol').SessionStatus;
+  readonly lastActive: string | undefined;
 }
 
 export const ISessionService = createDecorator<ISessionService>('sessionService');

@@ -34,7 +34,7 @@ describe('CLI options parsing', () => {
     it('returns defaults when no arguments are given', () => {
       const opts = parse([]);
       expect(opts.permission).toBeUndefined();
-      expect(opts.plan).toBe(false);
+      expect(opts.discuss).toBe(false);
       expect(opts.continue).toBe(false);
       expect(opts.session).toBeUndefined();
       expect(opts.model).toBeUndefined();
@@ -165,13 +165,13 @@ describe('CLI options parsing', () => {
     });
   });
 
-  describe('--plan', () => {
-    it('sets plan mode flag', () => {
-      expect(parse(['--plan']).plan).toBe(true);
+  describe('--discuss', () => {
+    it('sets Discuss mode flag', () => {
+      expect(parse(['--discuss']).discuss).toBe(true);
     });
   });
 
-  describe('--auto / --yolo / --plan with --session / --continue', () => {
+  describe('--auto / --yolo / --discuss with --session / --continue', () => {
     it('allows --auto with --continue', () => {
       const opts = parse(['--auto', '--continue']);
       expect(opts.permission).toBe('auto');
@@ -200,16 +200,16 @@ describe('CLI options parsing', () => {
       expect(validateOptions(opts).uiMode).toBe('shell');
     });
 
-    it('allows --plan with --continue', () => {
-      const opts = parse(['--plan', '--continue']);
-      expect(opts.plan).toBe(true);
+    it('allows --discuss with --continue', () => {
+      const opts = parse(['--discuss', '--continue']);
+      expect(opts.discuss).toBe(true);
       expect(opts.continue).toBe(true);
       expect(validateOptions(opts).uiMode).toBe('shell');
     });
 
-    it('allows --plan with an explicit session id', () => {
-      const opts = parse(['--plan', '--session', 'ses_123']);
-      expect(opts.plan).toBe(true);
+    it('allows --discuss with an explicit session id', () => {
+      const opts = parse(['--discuss', '--session', 'ses_123']);
+      expect(opts.discuss).toBe(true);
       expect(opts.session).toBe('ses_123');
       expect(validateOptions(opts).uiMode).toBe('shell');
     });
@@ -276,10 +276,10 @@ describe('CLI options parsing', () => {
       expect(() => validateOptions(opts)).toThrow('Cannot combine --prompt with --permission.');
     });
 
-    it('rejects prompt mode with --plan', () => {
-      const opts = parse(['-p', 'run this', '--plan']);
+    it('rejects prompt mode with --discuss', () => {
+      const opts = parse(['-p', 'run this', '--discuss']);
       expect(() => validateOptions(opts)).toThrow(OptionConflictError);
-      expect(() => validateOptions(opts)).toThrow('Cannot combine --prompt with --plan.');
+      expect(() => validateOptions(opts)).toThrow('Cannot combine --prompt with --discuss.');
     });
 
     it('parses --output-format=stream-json in prompt mode', () => {

@@ -11,6 +11,12 @@ import {
   testProviderResponseSchema,
 } from '@nori-code/protocol';
 import { IModelCatalogService, ModelNotFoundError, ProviderNotFoundError, type IInstantiationService } from '@nori-code/agent-core';
+import {
+  BUILTIN_PROVIDER_PRESETS,
+  MODELS_DEV_CATALOG_URL,
+  mergeProviderPresetLists,
+  toWireProviderPreset,
+} from '@nori-code/oauth';
 
 import { errEnvelope, okEnvelope } from '../envelope';
 import { defineRoute } from '../middleware/defineRoute';
@@ -66,6 +72,11 @@ const providerPresetSchema = z.object({
   base_url: z.string().optional(),
   env: z.array(z.string()),
   model_count: z.number().int().nonnegative(),
+  builtin: z.boolean().optional(),
+  auth: z.enum(['api_key', 'none']).optional(),
+  required_fields: z.array(z.string()).optional(),
+  default_model: z.string().optional(),
+  catalog_id: z.string().optional(),
 });
 
 const providerPresetsResponseSchema = z.object({
@@ -74,7 +85,7 @@ const providerPresetsResponseSchema = z.object({
   warning: z.string().optional(),
 });
 
-const PROVIDER_PRESET_SOURCE = 'https://models.dev/api.json';
+const PROVIDER_PRESET_SOURCE = MODELS_DEV_CATALOG_URL;
 
 type ProviderWireType = 'anthropic' | 'openai' | 'kimi' | 'google-genai' | 'openai_responses' | 'vertexai';
 
@@ -152,10 +163,11 @@ export function registerModelCatalogRoutes(
       method: 'GET',
       path: '/provider-presets',
       success: { data: providerPresetsResponseSchema },
-      description: 'List online provider presets from models.dev',
+      description: 'List built-in provider templates plus optional models.dev presets',
       tags: ['providers'],
     },
     async (req, reply) => {
+      const builtin = BUILTIN_PROVIDER_PRESETS.map(preset => toWireProviderPreset(preset));
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 10_000);
       try {
@@ -164,11 +176,18 @@ export function registerModelCatalogRoutes(
           signal: controller.signal,
         });
         if (!response.ok) throw new Error('HTTP ' + response.status);
-        const items = normalizeProviderPresets(await response.json());
-        reply.send(okEnvelope({ items, source: PROVIDER_PRESET_SOURCE }, req.id));
+        const online = normalizeProviderPresets(await response.json());
+        reply.send(okEnvelope({
+          items: mergeProviderPresetLists(builtin, online),
+          source: PROVIDER_PRESET_SOURCE,
+        }, req.id));
       } catch (error) {
         const warning = error instanceof Error ? error.message : String(error);
-        reply.send(okEnvelope({ items: [], source: PROVIDER_PRESET_SOURCE, warning }, req.id));
+        reply.send(okEnvelope({
+          items: builtin,
+          source: 'builtin',
+          warning,
+        }, req.id));
       } finally {
         clearTimeout(timeout);
       }

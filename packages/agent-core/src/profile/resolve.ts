@@ -170,9 +170,6 @@ function buildTemplateVars(
 
     // NORI: 新增模板变量
     KIMI_NORI_PHASE: context.noriPhase ?? '',
-    KIMI_NORI_SWARM_DEPTH: context.noriSwarmDepth !== undefined ? String(context.noriSwarmDepth) : '',
-    KIMI_NORI_MAX_SWARM_DEPTH: context.noriMaxSwarmDepth !== undefined ? String(context.noriMaxSwarmDepth) : '',
-    KIMI_NORI_PRE_SWARM_DOC: context.noriPreSwarmDoc ?? 'disabled',
     KIMI_NORI_VAULT_PATH: context.noriVaultPath ?? '',
     KIMI_NORI_TOOL_HINTS: context.noriToolHints ?? '',
   };

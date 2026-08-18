@@ -13,7 +13,7 @@ export {
   handleCompactCommand,
   handleEditorCommand,
   handleModelCommand,
-  handlePlanCommand,
+  handleDiscussCommand,
   handleSettingPermission,
   handleThemeCommand,
   showExperimentsPanel,
@@ -25,8 +25,7 @@ export { handleFeedbackCommand, showMcpServers, showStatusReport, showUsage } fr
 export { handlePluginsCommand } from './plugins';
 export { handleReloadCommand, handleReloadTuiCommand } from './reload';
 export { handleGoalCommand, parseGoalCommand } from './goal';
-export { handleSwarmCommand } from './swarm';
-export { goalArgumentCompletions, swarmArgumentCompletions } from './registry';
+export { goalArgumentCompletions, subagentArgumentCompletions } from './registry';
 export { handleForkCommand, handleInitCommand, handleTitleCommand } from './session';
 export { handleUndoCommand } from './undo';
 export { handleWebCommand } from './web';

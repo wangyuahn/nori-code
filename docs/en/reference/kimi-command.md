@@ -1,6 +1,6 @@
 # `kimi` Command
 
-`kimi` is the main command for Kimi Code CLI, used to start an interactive session in the terminal. Running it without any arguments opens a new session in the current working directory; combined with different flags, you can resume a previous session, skip approvals, start in Plan mode, or load Skills from a custom directory.
+`kimi` is the main command for Kimi Code CLI, used to start an interactive session in the terminal. Running it without any arguments opens a new session in the current working directory; combined with different flags, you can resume a previous session, skip approvals, start Discuss, or load Skills from a custom directory.
 
 ```sh
 kimi [options]
@@ -22,14 +22,14 @@ All flags are optional — run `kimi` directly to enter an interactive session:
 | `--output-format <format>` | | Set the non-interactive output format; supports `text` and `stream-json`. Can only be used with `--prompt`; defaults to `text` |
 | `--yolo` | `-y` | Auto-approve regular tool calls, skipping approval requests |
 | `--auto` | | Start with auto permission mode; tool approvals are handled automatically and the Agent will not ask the user questions |
-| `--plan` | | Start a new session in Plan mode — the AI will prioritize read-only tools for exploration and planning |
+| `--plan` | | Start a new session in Discuss — the Agent uses read-only tools for a team meeting (the flag is retained for compatibility) |
 | `--skills-dir <dir>` | | Load Skills from the specified directory, replacing the automatically discovered user and project directories. Can be repeated |
 | `--add-dir <dir>` | | Add an extra workspace directory for this session. Relative paths resolve against the current working directory. Can be repeated |
 
 `-r` / `--resume` is a hidden alias for `--session`; `--yes` and `--auto-approve` are hidden aliases for `--yolo` and are not shown in help output.
 
 ::: warning
-`--yolo` skips human approval for regular tool calls, including file writes and shell command execution. Use it only in trusted working directories. Plan mode exit approval is not bypassed by `--yolo`; `Bash` inside Plan mode is handled under the regular allow rules.
+`--yolo` skips human approval for regular tool calls, including file writes and shell command execution. Use it only in trusted working directories. It does not bypass Discuss's read-only restrictions.
 :::
 
 ### Flag Conflict Rules
@@ -41,7 +41,7 @@ The following combinations are rejected at startup:
 - `--prompt` cannot be used with `--yolo`, `--auto`, or `--plan` — non-interactive mode uses `auto` permission by default
 - `--output-format` can only be used together with `--prompt`
 
-When resuming a session, you can override its saved permission or plan mode by adding `--auto`, `--yolo`, or `--plan`. For example, `kimi --continue --auto` resumes the latest session and switches it to auto permission mode.
+When resuming a session, you can override its saved permission or Discuss state by adding `--auto`, `--yolo`, or `--plan`. For example, `kimi --continue --auto` resumes the latest session and switches it to auto permission mode.
 
 ## Common Usage
 
@@ -76,7 +76,7 @@ Let the Agent handle everything autonomously, without asking the user questions:
 kimi --auto
 ```
 
-Read the code and produce an implementation plan before making any file changes:
+Enter Discuss to read the code in a read-only team meeting before making file changes:
 
 ```sh
 kimi --plan

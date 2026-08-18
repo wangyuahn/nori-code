@@ -105,8 +105,8 @@ describe('buildThinkingOption', () => {
 });
 
 describe('buildModeOption', () => {
-  it('returns the locked 4-mode taxonomy in order (default → plan → auto → yolo) with description carried through', () => {
-    const option = buildModeOption('plan');
+  it('returns the Discuss-aware 4-mode taxonomy in order with description carried through', () => {
+    const option = buildModeOption('discuss');
 
     expect(option.id).toBe('mode');
     expect(option.category).toBe('mode');
@@ -114,10 +114,10 @@ describe('buildModeOption', () => {
     if (option.type !== 'select') {
       throw new Error('expected a SessionConfigSelect option');
     }
-    expect(option.currentValue).toBe('plan');
+    expect(option.currentValue).toBe('discuss');
     expect(option.options).toHaveLength(4);
     const ids = option.options.map((o) => ('value' in o ? o.value : ''));
-    expect(ids).toEqual(['default', 'plan', 'auto', 'yolo']);
+    expect(ids).toEqual(['default', 'discuss', 'auto', 'yolo']);
     for (const entry of option.options) {
       if ('value' in entry) {
         expect(typeof entry.name).toBe('string');

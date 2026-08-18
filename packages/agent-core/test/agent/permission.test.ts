@@ -17,13 +17,11 @@ import {
   parsePattern,
   type PermissionRuleMatchExecution,
 } from '../../src/agent/permission/matches-rule';
-import { AgentSwarmExclusiveDenyPermissionPolicy } from '../../src/agent/permission/policies/agent-swarm-exclusive-deny';
 import { AutoModeAskUserQuestionDenyPermissionPolicy } from '../../src/agent/permission/policies/auto-mode-ask-user-question-deny';
 import { FallbackAskPermissionPolicy } from '../../src/agent/permission/policies/fallback-ask';
 import { createPermissionDecisionPolicies } from '../../src/agent/permission/policies';
 import { ModeApprovePermissionPolicy } from '../../src/agent/permission/policies/mode-approve';
 import { ReadonlyPermissionPolicy } from '../../src/agent/permission/policies/tools-readonly-deny';
-import { SwarmModeAgentSwarmApprovePermissionPolicy } from '../../src/agent/permission/policies/swarm-mode-agent-swarm-approve';
 import { ToolAccesses } from '../../src/loop';
 import type { ToolInputDisplay } from '../../src/tools/display';
 import {
@@ -33,6 +31,14 @@ import {
 } from '../../src/tools/support/rule-match';
 import { createFakeKaos } from '../tools/fixtures/fake-kaos';
 import { createCommandKaos, testAgent } from './harness/agent';
+
+function editArgs(path: string) {
+  return {
+    path,
+    expected_tag: 'A1B2',
+    line_ops: [{ op: 'swap' as const, start: 1, end: 1, content: 'B' }],
+  };
+}
 
 describe('Agent permission', () => {
   it('keeps readonly manual mode blocking writes but lets Bash and approved modes pass through', () => {
@@ -73,10 +79,11 @@ describe('Agent permission', () => {
 
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
       [wire] permission.set_mode         { "mode": "auto", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": false, "swarmMode": false, "permission": "auto", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3 }
-      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Run Bash in auto mode" } ], "origin": { "kind": "user" }, "time": "<time>" }
-      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run Bash in auto mode" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "discussMode": false, "permission": "auto", "coderWriteEnabled": false, "toolsReadonly": false }
+      [wire] goal.rewind_checkpoint      { "snapshot": null, "time": "<time>" }
+      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Run Bash in auto mode" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
+      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run Bash in auto mode" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<auto-mode-enter-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "permission_mode" } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
@@ -88,18 +95,18 @@ describe('Agent permission', () => {
       [emit] tool.progress               { "turnId": 0, "toolCallId": "call_bash", "update": { "kind": "stdout", "text": "auto-output" } }
       [wire] context.append_loop_event   { "event": { "type": "tool.result", "parentUuid": "call_bash", "toolCallId": "call_bash", "result": { "output": "auto-output" } }, "time": "<time>" }
       [emit] tool.result                 { "turnId": 0, "toolCallId": "call_bash", "output": "auto-output" }
-      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 91, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
-      [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 91, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
-      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 91, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 116, "maxContextTokens": 1000000, "contextUsage": 0.000116, "planMode": false, "swarmMode": false, "permission": "auto", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "mock-model": { "inputOther": 91, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 91, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 91, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 309, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 309, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
+      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 309, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 334, "maxContextTokens": 1000000, "contextUsage": 0.000334, "discussMode": false, "permission": "auto", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "mock-model": { "inputOther": 309, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 309, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 309, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-3>", "turnId": "0", "step": 2 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 2, "stepId": "<uuid-3>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "The command printed auto-output." }
       [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-4>", "turnId": "0", "step": 2, "stepUuid": "<uuid-3>", "part": { "type": "text", "text": "The command printed auto-output." } }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "0", "step": 2, "usage": { "inputOther": 120, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed         { "turnId": 0, "step": 2, "stepId": "<uuid-3>", "usage": { "inputOther": 120, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 120, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 131, "maxContextTokens": 1000000, "contextUsage": 0.000131, "planMode": false, "swarmMode": false, "permission": "auto", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "mock-model": { "inputOther": 211, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 211, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 211, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "0", "step": 2, "usage": { "inputOther": 338, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 0, "step": 2, "stepId": "<uuid-3>", "usage": { "inputOther": 338, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 338, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 349, "maxContextTokens": 1000000, "contextUsage": 0.000349, "discussMode": false, "permission": "auto", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "mock-model": { "inputOther": 647, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 647, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 647, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                  { "turnId": 0, "reason": "completed" }
     `);
     expect(ctx.llmInputs()).toMatchInlineSnapshot(`
@@ -107,14 +114,17 @@ describe('Agent permission', () => {
         system: <system-prompt>
         tools: Bash
         messages:
-          user: text "Run Bash in auto mode"
+          user: text "<message from=\\"user\\" name=\\"用户\\">Run Bash in auto mode</message>"
           user: text <auto-mode-enter-reminder>
+          user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
 
       call 2:
         messages:
-          <last>
+          user: text "<message from=\\"user\\" name=\\"用户\\">Run Bash in auto mode</message>"
+          user: text <auto-mode-enter-reminder>
           assistant: text "Running without asking."  calls call_bash:Bash { "command": "printf permission-output", "timeout": 60 }
           tool[call_bash]: text "auto-output"
+          user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
     await ctx.expectResumeMatches();
   });
@@ -130,10 +140,11 @@ describe('Agent permission', () => {
 
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
       [wire] permission.set_mode         { "mode": "yolo", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": false, "swarmMode": false, "permission": "yolo", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3 }
-      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Run Bash in yolo mode" } ], "origin": { "kind": "user" }, "time": "<time>" }
-      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run Bash in yolo mode" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "discussMode": false, "permission": "yolo", "coderWriteEnabled": false, "toolsReadonly": false }
+      [wire] goal.rewind_checkpoint      { "snapshot": null, "time": "<time>" }
+      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Run Bash in yolo mode" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
+      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run Bash in yolo mode" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "Running in yolo mode." }
@@ -144,18 +155,18 @@ describe('Agent permission', () => {
       [emit] tool.progress               { "turnId": 0, "toolCallId": "call_bash", "update": { "kind": "stdout", "text": "yolo-output" } }
       [wire] context.append_loop_event   { "event": { "type": "tool.result", "parentUuid": "call_bash", "toolCallId": "call_bash", "result": { "output": "yolo-output" } }, "time": "<time>" }
       [emit] tool.result                 { "turnId": 0, "toolCallId": "call_bash", "output": "yolo-output" }
-      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
-      [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
-      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 32, "maxContextTokens": 1000000, "contextUsage": 0.000032, "planMode": false, "swarmMode": false, "permission": "yolo", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "mock-model": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 7, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 225, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 225, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
+      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 225, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 250, "maxContextTokens": 1000000, "contextUsage": 0.00025, "discussMode": false, "permission": "yolo", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "mock-model": { "inputOther": 225, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 225, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 225, "output": 25, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-3>", "turnId": "0", "step": 2 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 2, "stepId": "<uuid-3>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "The command printed yolo-output." }
       [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-4>", "turnId": "0", "step": 2, "stepUuid": "<uuid-3>", "part": { "type": "text", "text": "The command printed yolo-output." } }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "0", "step": 2, "usage": { "inputOther": 36, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed         { "turnId": 0, "step": 2, "stepId": "<uuid-3>", "usage": { "inputOther": 36, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 36, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 47, "maxContextTokens": 1000000, "contextUsage": 0.000047, "planMode": false, "swarmMode": false, "permission": "yolo", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "mock-model": { "inputOther": 43, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 43, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 43, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "0", "step": 2, "usage": { "inputOther": 254, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 0, "step": 2, "stepId": "<uuid-3>", "usage": { "inputOther": 254, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 254, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 265, "maxContextTokens": 1000000, "contextUsage": 0.000265, "discussMode": false, "permission": "yolo", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "mock-model": { "inputOther": 479, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 479, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 479, "output": 36, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                  { "turnId": 0, "reason": "completed" }
     `);
     expect(ctx.llmInputs()).toMatchInlineSnapshot(`
@@ -163,13 +174,15 @@ describe('Agent permission', () => {
         system: <system-prompt>
         tools: Bash
         messages:
-          user: text "Run Bash in yolo mode"
+          user: text "<message from=\\"user\\" name=\\"用户\\">Run Bash in yolo mode</message>"
+          user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
 
       call 2:
         messages:
-          <last>
+          user: text "<message from=\\"user\\" name=\\"用户\\">Run Bash in yolo mode</message>"
           assistant: text "Running in yolo mode."  calls call_bash:Bash { "command": "printf permission-output", "timeout": 60 }
           tool[call_bash]: text "yolo-output"
+          user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
     await ctx.expectResumeMatches();
   });
@@ -188,19 +201,20 @@ describe('Agent permission', () => {
 
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
       [wire] permission.set_mode         { "mode": "manual", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 96, "maxContextTokens": 1000000, "contextUsage": 0.000096, "planMode": false, "swarmMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "mock-model": { "inputOther": 89, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 89, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
-      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Back to manual" } ], "origin": { "kind": "user" }, "time": "<time>" }
-      [emit] turn.started                { "turnId": 1, "origin": { "kind": "user" } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Back to manual" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 315, "maxContextTokens": 1000000, "contextUsage": 0.000315, "discussMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "mock-model": { "inputOther": 308, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 308, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] goal.rewind_checkpoint      { "snapshot": null, "time": "<time>" }
+      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Back to manual" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
+      [emit] turn.started                { "turnId": 1, "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Back to manual" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<auto-mode-exit-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "permission_mode" } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-3>", "turnId": "1", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 1, "step": 1, "stepId": "<uuid-3>" }
       [emit] assistant.delta             { "turnId": 1, "delta": "Manual turn done." }
       [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-4>", "turnId": "1", "step": 1, "stepUuid": "<uuid-3>", "part": { "type": "text", "text": "Manual turn done." } }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "1", "step": 1, "usage": { "inputOther": 161, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed         { "turnId": 1, "step": 1, "stepId": "<uuid-3>", "usage": { "inputOther": 161, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 161, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 169, "maxContextTokens": 1000000, "contextUsage": 0.000169, "planMode": false, "swarmMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "mock-model": { "inputOther": 250, "output": 15, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 250, "output": 15, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 161, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "1", "step": 1, "usage": { "inputOther": 392, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 1, "step": 1, "stepId": "<uuid-3>", "usage": { "inputOther": 392, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 392, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 400, "maxContextTokens": 1000000, "contextUsage": 0.0004, "discussMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "mock-model": { "inputOther": 700, "output": 15, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 700, "output": 15, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 392, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                  { "turnId": 1, "reason": "completed" }
     `);
     expect(ctx.llmInputs()).toMatchInlineSnapshot(`
@@ -208,15 +222,18 @@ describe('Agent permission', () => {
         system: <system-prompt>
         tools: []
         messages:
-          user: text "Use auto first"
+          user: text "<message from=\\"user\\" name=\\"用户\\">Use auto first</message>"
           user: text <auto-mode-enter-reminder>
+          user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
 
       call 2:
         messages:
-          <last>
+          user: text "<message from=\\"user\\" name=\\"用户\\">Use auto first</message>"
+          user: text <auto-mode-enter-reminder>
           assistant: text "Auto turn done."
-          user: text "Back to manual"
+          user: text "<message from=\\"user\\" name=\\"用户\\">Back to manual</message>"
           user: text <auto-mode-exit-reminder>
+          user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
     await ctx.expectResumeMatches();
   });
@@ -237,9 +254,10 @@ describe('Agent permission', () => {
     ctx.mockNextResponse({ type: 'text', text: 'I will try Bash.' }, bashCall);
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Try to run Bash' }] });
     expect(await ctx.untilApproval(false)).toMatchInlineSnapshot(`
-      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Try to run Bash" } ], "origin": { "kind": "user" }, "time": "<time>" }
-      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Try to run Bash" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [wire] goal.rewind_checkpoint      { "snapshot": null, "time": "<time>" }
+      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Try to run Bash" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
+      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Try to run Bash" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "I will try Bash." }
@@ -251,7 +269,8 @@ describe('Agent permission', () => {
       system: <system-prompt>
       tools: Bash
       messages:
-        user: text "Try to run Bash"
+        user: text "<message from=\\"user\\" name=\\"用户\\">Try to run Bash</message>"
+        user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
 
     ctx.mockNextResponse({ type: 'text', text: 'I will not run the command.' });
@@ -261,26 +280,27 @@ describe('Agent permission', () => {
       [emit] tool.call.started                   { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "args": { "command": "printf should-not-run", "timeout": 60 }, "description": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }
       [wire] context.append_loop_event           { "event": { "type": "tool.result", "parentUuid": "call_bash", "toolCallId": "call_bash", "result": { "output": "Tool \\"Bash\\" was not run because the user rejected the approval request.", "isError": true } }, "time": "<time>" }
       [emit] tool.result                         { "turnId": 0, "toolCallId": "call_bash", "output": "Tool \\"Bash\\" was not run because the user rejected the approval request.", "isError": true }
-      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 5, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
-      [emit] turn.step.completed                 { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 5, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
-      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 5, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated                { "model": "mock-model", "contextTokens": 27, "maxContextTokens": 1000000, "contextUsage": 0.000027, "planMode": false, "swarmMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "mock-model": { "inputOther": 5, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 5, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 5, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 224, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
+      [emit] turn.step.completed                 { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 224, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
+      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 224, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated                { "model": "mock-model", "contextTokens": 246, "maxContextTokens": 1000000, "contextUsage": 0.000246, "discussMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "mock-model": { "inputOther": 224, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 224, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 224, "output": 22, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] context.append_loop_event           { "event": { "type": "step.begin", "uuid": "<uuid-3>", "turnId": "0", "step": 2 }, "time": "<time>" }
       [emit] turn.step.started                   { "turnId": 0, "step": 2, "stepId": "<uuid-3>" }
       [emit] assistant.delta                     { "turnId": 0, "delta": "I will not run the command." }
       [wire] context.append_loop_event           { "event": { "type": "content.part", "uuid": "<uuid-4>", "turnId": "0", "step": 2, "stepUuid": "<uuid-3>", "part": { "type": "text", "text": "I will not run the command." } }, "time": "<time>" }
-      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "0", "step": 2, "usage": { "inputOther": 58, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed                 { "turnId": 0, "step": 2, "stepId": "<uuid-3>", "usage": { "inputOther": 58, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 58, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated                { "model": "mock-model", "contextTokens": 68, "maxContextTokens": 1000000, "contextUsage": 0.000068, "planMode": false, "swarmMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "mock-model": { "inputOther": 63, "output": 32, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 63, "output": 32, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 63, "output": 32, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event           { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "0", "step": 2, "usage": { "inputOther": 277, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed                 { "turnId": 0, "step": 2, "stepId": "<uuid-3>", "usage": { "inputOther": 277, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                        { "model": "mock-model", "usage": { "inputOther": 277, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated                { "model": "mock-model", "contextTokens": 287, "maxContextTokens": 1000000, "contextUsage": 0.000287, "discussMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "mock-model": { "inputOther": 501, "output": 32, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 501, "output": 32, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 501, "output": 32, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                          { "turnId": 0, "reason": "completed" }
     `);
     expect(execWithEnv).not.toHaveBeenCalled();
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       messages:
-        <last>
+        user: text "<message from=\\"user\\" name=\\"用户\\">Try to run Bash</message>"
         assistant: text "I will try Bash."  calls call_bash:Bash { "command": "printf should-not-run", "timeout": 60 }
         tool[call_bash]: text "<system>ERROR: Tool execution failed.</system>\\nTool \\"Bash\\" was not run because the user rejected the approval request."
+        user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
     await ctx.expectResumeMatches();
   });
@@ -423,23 +443,26 @@ describe('Permission auto mode', () => {
     });
   });
 
-  it('tracks plan-mode Bash bypass in auto mode through auto-mode-approve', async () => {
+  it('tracks Discuss Bash deny in auto mode through discuss-mode-guard-deny', async () => {
     const { manager, requestApproval, telemetryTrack } = makePermissionManager(
       async () => ({
         decision: 'approved',
       }),
-      { planModeActive: true },
+      { discussModeActive: true },
     );
     manager.setMode('auto');
 
-    await expect(manager.beforeToolCall(hookContext({ id: 'call_plan_bash' }))).resolves.toBeUndefined();
+    await expect(manager.beforeToolCall(hookContext({ id: 'call_plan_bash' }))).resolves.toMatchObject({
+      block: true,
+      reason: expect.stringContaining('Discuss is active'),
+    });
 
     expect(requestApproval).not.toHaveBeenCalled();
     expect(telemetryTrack).toHaveBeenCalledWith('permission_policy_decision', {
-      policy_name: 'auto-mode-approve',
+      policy_name: 'discuss-mode-guard-deny',
       tool_name: 'Bash',
       permission_mode: 'auto',
-      decision: 'approve',
+      decision: 'deny',
     });
   });
 
@@ -476,7 +499,7 @@ describe('Permission auto mode', () => {
 
   it.each([
     ['Write', { path: '/tmp/notes.md', content: 'x' }, 'write', 'write file'],
-    ['Edit', { path: '/tmp/notes.md', old_string: 'a', new_string: 'b' }, 'edit', 'edit file'],
+    ['Edit', editArgs('/tmp/notes.md'), 'edit', 'edit file'],
   ] as const)(
     'requests approval in manual mode for %s outside the cwd',
     async (toolName, args, operation, action) => {
@@ -515,7 +538,7 @@ describe('Permission auto mode', () => {
 
   it.each([
     ['Write', { path: '/tmp/notes.md', content: 'x' }],
-    ['Edit', { path: '/tmp/notes.md', old_string: 'a', new_string: 'b' }],
+    ['Edit', editArgs('/tmp/notes.md')],
   ] as const)('approves %s outside the cwd in yolo mode', async (toolName, args) => {
     const { manager, requestApproval, telemetryTrack } = makePermissionManager(async () => ({
       decision: 'approved',
@@ -566,7 +589,7 @@ describe('Permission auto mode', () => {
     ['Read', { path: '/tmp/notes.md' }],
     ['ReadMediaFile', { path: '/tmp/image.png' }],
     ['Write', { path: '/tmp/notes.md', content: 'x' }],
-    ['Edit', { path: '/tmp/notes.md', old_string: 'a', new_string: 'b' }],
+    ['Edit', editArgs('/tmp/notes.md')],
   ] as const)('approves %s outside the cwd in auto mode', async (toolName, args) => {
     const { manager, requestApproval, telemetryTrack } = makePermissionManager(async () => ({
       decision: 'approved',
@@ -593,7 +616,7 @@ describe('Permission auto mode', () => {
     ['Read', { path: '/workspace/notes.md' }],
     ['ReadMediaFile', { path: '/workspace/image.png' }],
     ['Write', { path: '/workspace/notes.md', content: 'x' }],
-    ['Edit', { path: '/workspace/notes.md', old_string: 'a', new_string: 'b' }],
+    ['Edit', editArgs('/workspace/notes.md')],
     ['Grep', { pattern: 'TODO', path: '/workspace' }],
   ] as const)(
     'does not request approval for %s inside the workspace in yolo mode',
@@ -767,9 +790,8 @@ describe('Permission policy chain', () => {
   it('keeps built-in policies in document order', () => {
     expect(createPermissionDecisionPolicies({} as Agent).map((policy) => policy.name)).toEqual([
       'pre-tool-call-hook',
-      'agent-swarm-exclusive-deny',
       'auto-mode-ask-user-question-deny',
-      'plan-mode-guard-deny',
+      'discuss-mode-guard-deny',
       'tools-readonly-deny',
       'user-configured-deny',
       'auto-mode-approve',
@@ -777,54 +799,16 @@ describe('Permission policy chain', () => {
       'session-approval-history',
       'user-configured-ask',
       'user-configured-allow',
-      'exit-plan-mode-review-ask',
       'goal-start-review-ask',
-      'plan-mode-tool-approve',
+      'discuss-mode-tool-approve',
       'sensitive-file-access-ask',
       'git-control-path-access-ask',
-      'swarm-mode-agent-swarm-approve',
       'default-tool-approve',
       'git-cwd-write-approve',
       'fallback-ask',
     ]);
   });
 
-  it('denies invalid AgentSwarm batches before auto-mode approval', async () => {
-    const { manager, requestApproval, telemetryTrack } = makePermissionManager(async () => ({
-      decision: 'approved',
-    }));
-    manager.mode = 'auto';
-    const agentSwarmCall = toolCall('call_agent_swarm', 'AgentSwarm', {
-      description: 'Review files',
-      prompt_template: 'Review {{item}}',
-      items: ['src/a.ts', 'src/b.ts'],
-    });
-    const readCall = toolCall('call_read', 'Read', { path: 'src/a.ts' });
-
-    await expect(
-      manager.beforeToolCall(
-        hookContext({
-          id: 'call_agent_swarm',
-          toolName: 'AgentSwarm',
-          toolCalls: [agentSwarmCall, readCall],
-        }),
-      ),
-    ).resolves.toMatchObject({
-      block: true,
-      reason: expect.stringContaining('AgentSwarm must be the only tool call'),
-    });
-
-    expect(requestApproval).not.toHaveBeenCalled();
-    expect(telemetryTrack).toHaveBeenCalledWith(
-      'permission_policy_decision',
-      expect.objectContaining({
-        policy_name: 'agent-swarm-exclusive-deny',
-        tool_name: 'AgentSwarm',
-        permission_mode: 'auto',
-        decision: 'deny',
-      }),
-    );
-  });
 });
 
 describe('Simple permission policy direct behavior', () => {
@@ -870,116 +854,6 @@ describe('Simple permission policy direct behavior', () => {
         hookContext({
           id: 'call_bash_auto',
           toolName: 'Bash',
-        }),
-      ),
-    ).toBeUndefined();
-  });
-
-  it('approves only AgentSwarm when swarm mode is active', () => {
-    const swarmMode = { isActive: false };
-    const agent = { swarmMode } as unknown as Agent;
-    const policy = new SwarmModeAgentSwarmApprovePermissionPolicy(agent);
-
-    expect(
-      policy.evaluate(hookContext({ id: 'call_agent_swarm_inactive', toolName: 'AgentSwarm' })),
-    ).toBeUndefined();
-    Object.assign(swarmMode, { isActive: true });
-    expect(
-      policy.evaluate(hookContext({ id: 'call_agent_swarm_active', toolName: 'AgentSwarm' })),
-    ).toEqual({ kind: 'approve' });
-    expect(
-      policy.evaluate(hookContext({ id: 'call_agent_active', toolName: 'Agent' })),
-    ).toBeUndefined();
-  });
-
-  it('denies AgentSwarm mixed with other tool calls in the same response', () => {
-    const policy = new AgentSwarmExclusiveDenyPermissionPolicy();
-    const agentSwarmCall = toolCall('call_agent_swarm', 'AgentSwarm', {
-      description: 'Review files',
-      prompt_template: 'Review {{item}}',
-      items: ['src/a.ts', 'src/b.ts'],
-    });
-    const readCall = toolCall('call_read', 'Read', { path: 'src/a.ts' });
-
-    expect(
-      policy.evaluate(
-        hookContext({
-          id: 'call_agent_swarm',
-          toolName: 'AgentSwarm',
-          toolCalls: [agentSwarmCall, readCall],
-        }),
-      ),
-    ).toMatchObject({
-      kind: 'deny',
-      message: expect.stringContaining('AgentSwarm must be the only tool call'),
-      reason: {
-        agent_swarm_tool_calls: 1,
-        tool_calls: 2,
-      },
-    });
-    expect(
-      policy.evaluate(
-        hookContext({
-          id: 'call_read',
-          toolName: 'Read',
-          args: { path: 'src/a.ts' },
-          toolCalls: [agentSwarmCall, readCall],
-        }),
-      ),
-    ).toMatchObject({ kind: 'deny' });
-  });
-
-  it('denies multiple AgentSwarm calls with one-at-a-time guidance', () => {
-    const policy = new AgentSwarmExclusiveDenyPermissionPolicy();
-    const first = toolCall('call_agent_swarm_1', 'AgentSwarm', {
-      description: 'Review files',
-      prompt_template: 'Review {{item}}',
-      items: ['src/a.ts', 'src/b.ts'],
-    });
-    const second = toolCall('call_agent_swarm_2', 'AgentSwarm', {
-      description: 'Review tests',
-      prompt_template: 'Review {{item}}',
-      items: ['test/a.ts', 'test/b.ts'],
-    });
-
-    const result = policy.evaluate(
-      hookContext({
-        id: 'call_agent_swarm_1',
-        toolName: 'AgentSwarm',
-        toolCalls: [first, second],
-      }),
-    );
-
-    expect(result).toMatchObject({
-      kind: 'deny',
-      message: expect.stringContaining('Multiple AgentSwarm calls are not forbidden'),
-      reason: {
-        agent_swarm_tool_calls: 2,
-        tool_calls: 2,
-      },
-    });
-    expect(result).toMatchObject({
-      message: expect.stringContaining('call one AgentSwarm, wait for its result'),
-    });
-    expect(result).toMatchObject({
-      message: expect.stringContaining('merge the work into a single AgentSwarm'),
-    });
-  });
-
-  it('allows a single AgentSwarm call for later permission policies', () => {
-    const policy = new AgentSwarmExclusiveDenyPermissionPolicy();
-    const agentSwarmCall = toolCall('call_agent_swarm', 'AgentSwarm', {
-      description: 'Review files',
-      prompt_template: 'Review {{item}}',
-      items: ['src/a.ts', 'src/b.ts'],
-    });
-
-    expect(
-      policy.evaluate(
-        hookContext({
-          id: 'call_agent_swarm',
-          toolName: 'AgentSwarm',
-          toolCalls: [agentSwarmCall],
         }),
       ),
     ).toBeUndefined();
@@ -1119,9 +993,9 @@ describe('Default tool approve policy', () => {
     ['TaskOutput', { task_id: 'task_1' }],
     ['WebSearch', { query: 'kimi code' }],
     ['FetchURL', { url: 'https://example.com' }],
-    ['Agent', { prompt: 'review this' }],
     ['AskUserQuestion', { questions: [] }],
     ['Skill', { name: 'test-skill' }],
+    ['TeamDecide', { action: 'vote' }],
   ] as const)('approves %s in manual mode without requesting approval', async (toolName, args) => {
     const { manager, requestApproval, telemetryTrack } = makePermissionManager(async () => ({
       decision: 'approved',
@@ -1152,7 +1026,7 @@ describe('Default tool approve policy', () => {
   it.each([
     ['Bash', { command: 'printf first', timeout: 60 }],
     ['Write', { path: '/workspace/a.ts', content: 'x' }],
-    ['Edit', { path: '/workspace/a.ts', old_string: 'a', new_string: 'b' }],
+    ['Edit', editArgs('/workspace/a.ts')],
     ['Custom', { value: 1 }],
   ] as const)('does not default-approve %s', async (toolName, args) => {
     const { manager, requestApproval, telemetryTrack } = makePermissionManager(async () => ({
@@ -1593,8 +1467,8 @@ describe('User-configured permission policies', () => {
   );
 });
 
-describe('Plan mode tool approve policy', () => {
-  it('approves EnterPlanMode in manual mode without requesting approval', async () => {
+describe('Discuss mode tool approve policy', () => {
+  it('approves EnterDiscussMode in manual mode without requesting approval', async () => {
     const { manager, requestApproval, telemetryTrack } = makePermissionManager(async () => ({
       decision: 'approved',
     }));
@@ -1602,8 +1476,8 @@ describe('Plan mode tool approve policy', () => {
     await expect(
       manager.beforeToolCall(
         hookContext({
-          id: 'call_enter_plan',
-          toolName: 'EnterPlanMode',
+          id: 'call_enter_discuss',
+          toolName: 'EnterDiscussMode',
           args: {},
         }),
       ),
@@ -1613,576 +1487,40 @@ describe('Plan mode tool approve policy', () => {
     expect(telemetryTrack).toHaveBeenCalledWith(
       'permission_policy_decision',
       expect.objectContaining({
-        policy_name: 'plan-mode-tool-approve',
-        tool_name: 'EnterPlanMode',
+        policy_name: 'discuss-mode-tool-approve',
+        tool_name: 'EnterDiscussMode',
         decision: 'approve',
-      }),
-    );
-  });
-
-  it.each(['Write', 'Edit'] as const)(
-    'approves %s when it only writes the active plan file',
-    async (toolName) => {
-      const planFilePath = '/workspace/.kimi/plans/current.md';
-      const { manager, requestApproval, telemetryTrack } = makePermissionManager(
-        async () => ({ decision: 'approved' }),
-        { planModeActive: true, planFilePath },
-      );
-      const args =
-        toolName === 'Write'
-          ? { path: planFilePath, content: '# Plan' }
-          : { path: planFilePath, old_string: '# Draft', new_string: '# Plan' };
-
-      await expect(
-        manager.beforeToolCall(
-          hookContext({
-            id: `call_${toolName}_plan_approve`,
-            toolName,
-            args,
-          }),
-        ),
-      ).resolves.toBeUndefined();
-
-      expect(requestApproval).not.toHaveBeenCalled();
-      expect(telemetryTrack).toHaveBeenCalledWith(
-        'permission_policy_decision',
-        expect.objectContaining({
-          policy_name: 'plan-mode-tool-approve',
-          tool_name: toolName,
-          decision: 'approve',
-        }),
-      );
-    },
-  );
-
-  it('denies active plan-mode writes that have no file write access', async () => {
-    const planFilePath = '/workspace/.kimi/plans/current.md';
-    const args = { path: planFilePath, content: '# Plan' };
-    const { manager, requestApproval, telemetryTrack } = makePermissionManager(
-      async () => ({ decision: 'approved' }),
-      { planModeActive: true, planFilePath },
-    );
-
-    await expect(
-      manager.beforeToolCall(
-        hookContext({
-          id: 'call_write_no_access',
-          toolName: 'Write',
-          args,
-          execution: {
-            ...testExecution('Write', args),
-            accesses: ToolAccesses.none(),
-          },
-        }),
-      ),
-    ).resolves.toMatchObject({
-      block: true,
-      reason: expect.stringContaining('Plan mode is active'),
-    });
-
-    expect(requestApproval).not.toHaveBeenCalled();
-    expect(telemetryTrack).toHaveBeenCalledWith(
-      'permission_policy_decision',
-      expect.objectContaining({
-        policy_name: 'plan-mode-guard-deny',
-        tool_name: 'Write',
-        decision: 'deny',
-      }),
-    );
-  });
-
-  it('approves ExitPlanMode directly when plan mode is inactive', async () => {
-    const { manager, requestApproval, telemetryTrack } = makePermissionManager(async () => ({
-      decision: 'approved',
-    }));
-
-    await expect(
-      manager.beforeToolCall(
-        hookContext({
-          id: 'call_exit_inactive',
-          toolName: 'ExitPlanMode',
-          args: {},
-          execution: planReviewExecution({ plan: '# Plan', path: '/tmp/plan.md' }),
-        }),
-      ),
-    ).resolves.toBeUndefined();
-
-    expect(requestApproval).not.toHaveBeenCalled();
-    expect(telemetryTrack).toHaveBeenCalledWith(
-      'permission_policy_decision',
-      expect.objectContaining({
-        policy_name: 'plan-mode-tool-approve',
-        tool_name: 'ExitPlanMode',
-        decision: 'approve',
-      }),
-    );
-  });
-
-  it('approves ExitPlanMode while active when there is no plan review display', async () => {
-    const { manager, requestApproval, telemetryTrack } = makePermissionManager(
-      async () => ({ decision: 'approved' }),
-      { planModeActive: true, planFilePath: '/tmp/plan.md' },
-    );
-
-    await expect(
-      manager.beforeToolCall(
-        hookContext({
-          id: 'call_exit_generic_display',
-          toolName: 'ExitPlanMode',
-          args: {},
-          execution: {
-            ...testExecution('ExitPlanMode', {}),
-            display: genericDisplay(),
-            approvalRule: 'ExitPlanMode',
-          },
-        }),
-      ),
-    ).resolves.toBeUndefined();
-
-    expect(requestApproval).not.toHaveBeenCalled();
-    expect(telemetryTrack).toHaveBeenCalledWith(
-      'permission_policy_decision',
-      expect.objectContaining({
-        policy_name: 'plan-mode-tool-approve',
-        tool_name: 'ExitPlanMode',
-        decision: 'approve',
-      }),
-    );
-  });
-
-  it('approves ExitPlanMode while active when the plan review is blank', async () => {
-    const { manager, requestApproval, telemetryTrack } = makePermissionManager(
-      async () => ({ decision: 'approved' }),
-      { planModeActive: true, planFilePath: '/tmp/plan.md' },
-    );
-
-    await expect(
-      manager.beforeToolCall(
-        hookContext({
-          id: 'call_exit_blank_plan',
-          toolName: 'ExitPlanMode',
-          args: {},
-          execution: planReviewExecution({ plan: '  \n\t', path: '/tmp/plan.md' }),
-        }),
-      ),
-    ).resolves.toBeUndefined();
-
-    expect(requestApproval).not.toHaveBeenCalled();
-    expect(telemetryTrack).toHaveBeenCalledWith(
-      'permission_policy_decision',
-      expect.objectContaining({
-        policy_name: 'plan-mode-tool-approve',
-        tool_name: 'ExitPlanMode',
-        decision: 'approve',
-      }),
-    );
-  });
-
-  it('defers non-empty plan reviews to the review approval policy', async () => {
-    const { manager, requestApproval, telemetryTrack } = makePermissionManager(
-      async () => ({ decision: 'approved' }),
-      { planModeActive: true, planFilePath: '/tmp/plan.md' },
-    );
-
-    await expect(
-      manager.beforeToolCall(
-        hookContext({
-          id: 'call_exit_review',
-          toolName: 'ExitPlanMode',
-          args: {},
-          execution: planReviewExecution({ plan: '# Plan', path: '/tmp/plan.md' }),
-        }),
-      ),
-    ).resolves.toMatchObject({
-      syntheticResult: {
-        isError: false,
-        output: expect.stringContaining('Exited plan mode.'),
-      },
-    });
-
-    expect(requestApproval).toHaveBeenCalledTimes(1);
-    expect(telemetryTrack).toHaveBeenCalledWith(
-      'permission_policy_decision',
-      expect.objectContaining({
-        policy_name: 'exit-plan-mode-review-ask',
-        tool_name: 'ExitPlanMode',
-        decision: 'ask',
       }),
     );
   });
 });
 
-describe('Plan mode Bash permission policy', () => {
-  it('uses ordinary Bash approval in manual plan mode', async () => {
-    const { manager, requestApproval } = makePlanPermissionManager({
-      mode: 'manual',
-      approval: { decision: 'approved' },
-    });
-
-    await expect(
-      manager.beforeToolCall(
-        hookContext({
-          id: 'call_plan_bash',
-          toolName: 'Bash',
-          args: { command: 'ls -la', timeout: 60 },
-        }),
-      ),
-    ).resolves.toBeUndefined();
-
-    expect(requestApproval).toHaveBeenCalledWith(
-      {
-        turnId: 0,
-        toolCallId: 'call_plan_bash',
-        toolName: 'Bash',
-        action: 'run command',
-        display: {
-          kind: 'command',
-          command: 'ls -la',
-        },
-      },
-      { signal: expect.any(AbortSignal) },
-    );
-  });
-
-  it('reuses ordinary Bash approve-for-session in plan mode', async () => {
-    const { manager, requestApproval } = makePlanPermissionManager({
-      mode: 'manual',
-    });
-    manager.recordApprovalResult({
-      turnId: 0,
-      toolCallId: 'call_ordinary_bash',
-      toolName: 'Bash',
-      action: 'run command',
-      sessionApprovalRule: 'Bash(ls -la)',
-      result: {
-        decision: 'approved',
-        scope: 'session',
-        selectedLabel: 'Approve for this session',
-      },
-    });
-
-    await expect(
-      manager.beforeToolCall(
-        hookContext({
-          id: 'call_plan_bash',
-          toolName: 'Bash',
-          args: { command: 'ls -la', timeout: 60 },
-        }),
-      ),
-    ).resolves.toBeUndefined();
-
-    expect(requestApproval).not.toHaveBeenCalled();
-    expect(manager.data().rules).toEqual([]);
-    expect(manager.sessionApprovalRulePatterns).toContain('Bash(ls -la)');
-  });
-
-  it.each(['yolo', 'auto'] as const)(
-    'defers Bash to ordinary %s permission behavior in plan mode',
+describe('Discuss Bash permission policy', () => {
+  it.each(['manual', 'yolo', 'auto'] as const)(
+    'denies Bash while Discuss is active in %s mode',
     async (mode) => {
-      const { manager, requestApproval } = makePlanPermissionManager({
-        mode,
-        approval: { decision: 'rejected' },
-      });
+      const { manager, requestApproval } = makePermissionManager(
+        async () => ({ decision: 'approved' }),
+        { discussModeActive: true },
+      );
+      manager.setMode(mode);
 
       await expect(
         manager.beforeToolCall(
           hookContext({
             id: 'call_plan_bash',
             toolName: 'Bash',
-            args: { command: 'rm generated.txt', timeout: 60 },
+            args: { command: 'ls -la', timeout: 60 },
           }),
         ),
-      ).resolves.toBeUndefined();
+      ).resolves.toMatchObject({
+        block: true,
+        reason: expect.stringContaining('Discuss is active'),
+      });
 
       expect(requestApproval).not.toHaveBeenCalled();
     },
   );
-});
-
-describe('ExitPlanMode permission policy', () => {
-  const planOptions = [
-    { label: 'Approach A', description: 'Use the small change.' },
-    { label: 'Approach B', description: 'Use the complete refactor.' },
-  ];
-
-  it('allows ExitPlanMode directly in auto mode without requesting approval', async () => {
-    const { manager, requestApproval } = makePlanPermissionManager({
-      mode: 'auto',
-      plan: '# Auto Plan',
-    });
-
-    const result = await manager.beforeToolCall(
-      hookContext({ id: 'call_exit', toolName: 'ExitPlanMode', args: {} }),
-    );
-
-    expect(result).toBeUndefined();
-    expect(requestApproval).not.toHaveBeenCalled();
-  });
-
-  it('does not request plan-review approval in yolo mode', async () => {
-    const { manager, record, requestApproval, exit } = makePlanPermissionManager({
-      mode: 'yolo',
-      plan: '# Plan\n\n- Step',
-      path: '/tmp/plan.md',
-      approval: { decision: 'approved', selectedLabel: 'Approach B' },
-    });
-
-    const result = await manager.beforeToolCall(
-      hookContext({
-        id: 'call_exit',
-        toolName: 'ExitPlanMode',
-        args: { options: planOptions },
-        execution: planReviewExecution({
-          plan: '# Plan\n\n- Step',
-          path: '/tmp/plan.md',
-          options: planOptions,
-        }),
-      }),
-    );
-
-    expect(requestApproval).not.toHaveBeenCalled();
-    expect(record).not.toHaveBeenCalled();
-    expect(exit).not.toHaveBeenCalled();
-    expect(result).toBeUndefined();
-  });
-
-  it('reuses session approval for ExitPlanMode without re-prompting plan review', async () => {
-    const { manager, requestApproval, exit } = makePlanPermissionManager({
-      mode: 'manual',
-      plan: '# Updated Plan',
-      approval: { decision: 'approved' },
-    });
-    manager.recordApprovalResult({
-      turnId: 0,
-      toolCallId: 'previous_exit',
-      toolName: 'ExitPlanMode',
-      action: 'Presenting plan and exiting plan mode',
-      sessionApprovalRule: 'ExitPlanMode',
-      result: { decision: 'approved', scope: 'session' },
-    });
-
-    const result = await manager.beforeToolCall(
-      hookContext({
-        id: 'call_exit',
-        toolName: 'ExitPlanMode',
-        args: {},
-        execution: planReviewExecution({ plan: '# Updated Plan', path: '/tmp/plan.md' }),
-      }),
-    );
-
-    expect(requestApproval).not.toHaveBeenCalled();
-    expect(exit).not.toHaveBeenCalled();
-    expect(result).toBeUndefined();
-  });
-
-  it('returns a synthetic stop-turn result when the user rejects the plan', async () => {
-    const { manager, exit } = makePlanPermissionManager({
-      mode: 'manual',
-      plan: '# Draft Plan',
-      approval: { decision: 'rejected', selectedLabel: 'Reject' },
-    });
-
-    const result = await manager.beforeToolCall(
-      hookContext({
-        id: 'call_exit',
-        toolName: 'ExitPlanMode',
-        args: {},
-        execution: planReviewExecution({ plan: '# Draft Plan', path: '/tmp/plan.md' }),
-      }),
-    );
-
-    expect(exit).not.toHaveBeenCalled();
-    expect(result).toMatchObject({
-      syntheticResult: {
-        isError: true,
-        stopTurn: true,
-        output: 'Plan rejected by user. Plan mode remains active.',
-      },
-    });
-  });
-
-  it('keeps plan mode active when plan approval is cancelled', async () => {
-    const { manager, exit } = makePlanPermissionManager({
-      mode: 'manual',
-      plan: '# Draft Plan',
-      approval: { decision: 'cancelled', feedback: 'dismissed' },
-    });
-
-    const result = await manager.beforeToolCall(
-      hookContext({
-        id: 'call_exit',
-        toolName: 'ExitPlanMode',
-        args: {},
-        execution: planReviewExecution({ plan: '# Draft Plan', path: '/tmp/plan.md' }),
-      }),
-    );
-
-    expect(exit).not.toHaveBeenCalled();
-    expect(result).toMatchObject({
-      syntheticResult: {
-        isError: false,
-        output: 'Plan approval dismissed. Plan mode remains active.',
-      },
-    });
-  });
-
-  it('keeps plan mode active when plan approval request fails', async () => {
-    const { manager, exit, record } = makePlanPermissionManager({
-      mode: 'manual',
-      plan: '# Draft Plan',
-      approvalError: new Error('approval transport closed'),
-    });
-
-    await expect(
-      manager.beforeToolCall(
-        hookContext({
-          id: 'call_exit',
-          toolName: 'ExitPlanMode',
-          args: {},
-          execution: planReviewExecution({ plan: '# Draft Plan', path: '/tmp/plan.md' }),
-        }),
-      ),
-    ).rejects.toThrow('approval transport closed');
-
-    expect(exit).not.toHaveBeenCalled();
-    expect(record).not.toHaveBeenCalled();
-  });
-
-  it('keeps plan mode active and returns revision feedback as a synthetic result', async () => {
-    const { manager, exit } = makePlanPermissionManager({
-      mode: 'manual',
-      plan: '# Draft Plan',
-      approval: {
-        decision: 'rejected',
-        selectedLabel: 'Revise',
-        feedback: 'Add verification.',
-      },
-    });
-
-    const result = await manager.beforeToolCall(
-      hookContext({
-        id: 'call_exit',
-        toolName: 'ExitPlanMode',
-        args: {},
-        execution: planReviewExecution({ plan: '# Draft Plan', path: '/tmp/plan.md' }),
-      }),
-    );
-
-    expect(exit).not.toHaveBeenCalled();
-    expect(result).toMatchObject({
-      syntheticResult: {
-        isError: false,
-        output: expect.stringContaining('Add verification.'),
-      },
-    });
-  });
-
-  it('returns approved plan output without a saved-to line when display has no path', async () => {
-    const { manager } = makePlanPermissionManager({
-      mode: 'manual',
-      plan: '# Draft Plan',
-      approval: { decision: 'approved' },
-    });
-
-    const result = await manager.beforeToolCall(
-      hookContext({
-        id: 'call_exit_no_path',
-        toolName: 'ExitPlanMode',
-        args: {},
-        execution: planReviewExecution({ plan: '# Draft Plan' }),
-      }),
-    );
-
-    expect(result).toMatchObject({
-      syntheticResult: {
-        isError: false,
-        output: expect.stringContaining('## Approved Plan:\n# Draft Plan'),
-      },
-    });
-    expect(result?.syntheticResult?.output).not.toContain('Plan saved to:');
-  });
-
-  it('does not force a selected-approach prefix for labels that are not in the options', async () => {
-    const { manager, telemetryTrack } = makePlanPermissionManager({
-      mode: 'manual',
-      plan: '# Draft Plan',
-      approval: { decision: 'approved', selectedLabel: 'Approach C' },
-    });
-
-    const result = await manager.beforeToolCall(
-      hookContext({
-        id: 'call_exit_unknown_option',
-        toolName: 'ExitPlanMode',
-        args: { options: planOptions },
-        execution: planReviewExecution({
-          plan: '# Draft Plan',
-          path: '/tmp/plan.md',
-          options: planOptions,
-        }),
-      }),
-    );
-
-    expect(result?.syntheticResult?.output).not.toContain('Selected approach:');
-    expect(telemetryTrack).toHaveBeenCalledWith('plan_resolved', {
-      outcome: 'approved',
-      chosen_option: 'Approach C',
-    });
-  });
-
-  it('returns the exit failure when reject-and-exit cannot leave plan mode', async () => {
-    const { manager, exit } = makePlanPermissionManager({
-      mode: 'manual',
-      plan: '# Draft Plan',
-      approval: { decision: 'rejected', selectedLabel: 'Reject and Exit' },
-    });
-    exit.mockImplementation(() => {
-      throw new Error('state transition failure');
-    });
-
-    const result = await manager.beforeToolCall(
-      hookContext({
-        id: 'call_exit_reject_exit_failure',
-        toolName: 'ExitPlanMode',
-        args: {},
-        execution: planReviewExecution({ plan: '# Draft Plan', path: '/tmp/plan.md' }),
-      }),
-    );
-
-    expect(result).toMatchObject({
-      syntheticResult: {
-        isError: true,
-        output: 'Failed to exit plan mode: state transition failure',
-      },
-    });
-  });
-
-  it('tracks approval transport errors before rethrowing', async () => {
-    const { manager, telemetryTrack } = makePlanPermissionManager({
-      mode: 'manual',
-      plan: '# Draft Plan',
-      approvalError: new Error('approval transport closed'),
-    });
-
-    await expect(
-      manager.beforeToolCall(
-        hookContext({
-          id: 'call_exit_approval_error',
-          toolName: 'ExitPlanMode',
-          args: {},
-          execution: planReviewExecution({ plan: '# Draft Plan', path: '/tmp/plan.md' }),
-        }),
-      ),
-    ).rejects.toThrow('approval transport closed');
-
-    expect(telemetryTrack).toHaveBeenCalledWith(
-      'permission_approval_result',
-      expect.objectContaining({
-        policy_name: 'exit-plan-mode-review-ask',
-        tool_name: 'ExitPlanMode',
-        result: 'error',
-      }),
-    );
-  });
 });
 
 describe('Agent-local approve for session', () => {
@@ -2783,7 +2121,7 @@ describe('Default git CWD Write/Edit permission', () => {
 
     await expect(
       manager.beforeToolCall(
-        editHook({ path: '/workspace/src/a.ts', old_string: 'A', new_string: 'B' }),
+        editHook(editArgs('/workspace/src/a.ts')),
       ),
     ).resolves.toBeUndefined();
 
@@ -2801,7 +2139,7 @@ describe('Default git CWD Write/Edit permission', () => {
 
   it.each([
     ['Write', { path: '/extra/src/a.ts', content: 'x' }],
-    ['Edit', { path: '/extra/src/a.ts', old_string: 'A', new_string: 'B' }],
+    ['Edit', editArgs('/extra/src/a.ts')],
   ] as const)('approves %s on an additionalDir path in manual mode', async (toolName, args) => {
     const { kaos } = gitKaos();
     const { manager, requestApproval, telemetryTrack } = makePermissionManager(
@@ -2860,7 +2198,7 @@ describe('Default git CWD Write/Edit permission', () => {
     ).resolves.toBeUndefined();
     await expect(
       manager.beforeToolCall(
-        editHook({ path: 'src/b.ts', old_string: 'A', new_string: 'B' }, 'call_2'),
+        editHook(editArgs('src/b.ts'), 'call_2'),
       ),
     ).resolves.toBeUndefined();
 
@@ -3692,7 +3030,7 @@ describe('Default git CWD Write/Edit permission', () => {
       manager.beforeToolCall(writeHook({ path: 'src/a.ts', content: 'x' }, 'call_1')),
     ).resolves.toBeUndefined();
     await expect(
-      manager.beforeToolCall(editHook({ path: 'src/b.ts', old_string: 'A', new_string: 'B' }, 'call_2')),
+      manager.beforeToolCall(editHook(editArgs('src/b.ts'), 'call_2')),
     ).resolves.toBeUndefined();
 
     expect(requestApproval).not.toHaveBeenCalled();
@@ -3797,7 +3135,6 @@ describe('Permission rule helpers', () => {
         path: '/workspace/a.ts',
       }),
     ).toBe(false);
-    expect(ruleMatches(permissionRule('AgentSwarm(swarm)'), 'AgentSwarm', {})).toBe(false);
   });
 
   it('treats empty arg patterns as tool-name-only matches', () => {
@@ -3856,15 +3193,13 @@ function makePermissionManager(
   handleApproval: (request: unknown) => Promise<ApprovalResponse>,
   options: {
     readonly parent?: PermissionManager | undefined;
-    readonly planModeActive?: boolean;
-    readonly planFilePath?: string | null | undefined;
+    readonly discussModeActive?: boolean;
     readonly kaos?: Kaos;
     readonly cwd?: string;
     readonly additionalDirs?: readonly string[];
     readonly agentType?: Agent['type'];
     readonly hooks?: Agent['hooks'];
     readonly approvalRpc?: boolean;
-    readonly swarmModeActive?: boolean;
   } = {},
 ): {
   manager: PermissionManager;
@@ -3887,84 +3222,15 @@ function makePermissionManager(
     rpc: options.approvalRpc === false ? undefined : { requestApproval },
     hooks: options.hooks,
     telemetry: { track: telemetryTrack },
-    planMode: {
+    discussMode: {
       get isActive() {
-        return options.planModeActive ?? false;
-      },
-      get planFilePath() {
-        return options.planFilePath ?? null;
-      },
-      data: vi.fn(async () => null),
-      exit: vi.fn(),
-    },
-    swarmMode: {
-      get isActive() {
-        return options.swarmModeActive ?? false;
+        return options.discussModeActive ?? false;
       },
     },
   } as unknown as Agent;
   manager = new PermissionManager(agent, options);
   Object.assign(agent, { permission: manager });
   return { manager, record, requestApproval, telemetryTrack };
-}
-
-function makePlanPermissionManager(input: {
-  readonly mode: PermissionMode;
-  readonly plan?: string | null | undefined;
-  readonly path?: string | undefined;
-  readonly approval?: ApprovalResponse | undefined;
-  readonly approvalError?: Error | undefined;
-}): {
-  manager: PermissionManager;
-  record: ReturnType<typeof vi.fn>;
-  requestApproval: ReturnType<typeof vi.fn>;
-  exit: ReturnType<typeof vi.fn>;
-  telemetryTrack: ReturnType<typeof vi.fn>;
-} {
-  const requestApproval = vi.fn(async () => {
-    if (input.approvalError !== undefined) throw input.approvalError;
-    return input.approval ?? { decision: 'approved' };
-  });
-  const record = vi.fn();
-  const exit = vi.fn();
-  const telemetryTrack = vi.fn();
-  const path = input.path ?? '/tmp/plan.md';
-  const agent = {
-    type: 'main',
-    config: { cwd: '/workspace' },
-    kaos: createFakeKaos(),
-    emitStatusUpdated: vi.fn(),
-    records: { logRecord: record },
-    replayBuilder: { push: vi.fn() },
-    rpc: { requestApproval },
-    log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
-    telemetry: { track: telemetryTrack },
-    planMode: {
-      get isActive() {
-        return true;
-      },
-      get planFilePath() {
-        return path;
-      },
-      data: vi.fn(async () => {
-        if (input.plan === null) return null;
-        return {
-          content: input.plan ?? '# Plan',
-          path,
-        };
-      }),
-      exit,
-    },
-    swarmMode: {
-      get isActive() {
-        return false;
-      },
-    },
-  } as unknown as Agent;
-  const manager = new PermissionManager(agent);
-  Object.assign(agent, { permission: manager });
-  manager.mode = input.mode;
-  return { manager, record, requestApproval, exit, telemetryTrack };
 }
 
 function hookContext(input: {
@@ -4028,25 +3294,6 @@ function genericDisplay(): ToolInputDisplay {
   return { kind: 'generic', summary: 'Approve tool', detail: {} };
 }
 
-function planReviewExecution(input: {
-  readonly plan: string;
-  readonly path?: string | undefined;
-  readonly options?: readonly { readonly label: string; readonly description: string }[] | undefined;
-}): PermissionPolicyContext['execution'] {
-  return {
-    description: 'Presenting plan and exiting plan mode',
-    display: {
-      kind: 'plan_review',
-      plan: input.plan,
-      path: input.path,
-      options: input.options,
-    },
-    accesses: ToolAccesses.none(),
-    approvalRule: 'ExitPlanMode',
-    execute: async () => ({ output: '' }),
-  };
-}
-
 function testExecution(
   toolName: string,
   args: Record<string, unknown>,
@@ -4102,8 +3349,6 @@ function testDescription(toolName: string, args: Record<string, unknown>): strin
   switch (toolName) {
     case 'Bash':
       return 'run command';
-    case 'ExitPlanMode':
-      return 'review plan';
     case 'Read':
       return 'read file';
     case 'ReadMediaFile':

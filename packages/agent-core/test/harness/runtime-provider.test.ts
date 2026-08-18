@@ -734,6 +734,38 @@ describe('resolveRuntimeProvider customHeaders propagation', () => {
 });
 
 describe('ProviderManager prompt cache key', () => {
+  it('creates independently cache-affine providers without changing the config source', () => {
+    let sharedConfig: KimiConfig = BASE_CONFIG;
+    const manager = new ProviderManager({
+      config: () => sharedConfig,
+      promptCacheKey: 'session:main',
+    });
+    const subagent = manager.withPromptCacheKey('session:agent-1');
+
+    expect(manager.resolveProviderConfig('kimi-code/kimi-for-coding').provider).toMatchObject({
+      generationKwargs: { prompt_cache_key: 'session:main' },
+    });
+    expect(subagent.resolveProviderConfig('kimi-code/kimi-for-coding').provider).toMatchObject({
+      generationKwargs: { prompt_cache_key: 'session:agent-1' },
+    });
+
+    const baseModels = BASE_CONFIG.models!;
+    sharedConfig = {
+      ...BASE_CONFIG,
+      models: {
+        ...baseModels,
+        'kimi-code/kimi-for-coding': {
+          ...baseModels['kimi-code/kimi-for-coding']!,
+          model: 'changed-at-runtime',
+        },
+      },
+    };
+    expect(subagent.resolveProviderConfig('kimi-code/kimi-for-coding').provider).toMatchObject({
+      model: 'changed-at-runtime',
+      generationKwargs: { prompt_cache_key: 'session:agent-1' },
+    });
+  });
+
   it('applies a prompt cache key to Kimi providers', () => {
     const manager = new ProviderManager({
       config: BASE_CONFIG,
@@ -869,14 +901,13 @@ describe('resolveThinkingEffort', () => {
     capabilities: ['thinking', 'always_thinking'],
   };
 
-  it('returns the requested effort verbatim when one is provided', () => {
+  it('normalizes requested effort to model capabilities', () => {
     expect(resolveThinkingEffort('on', { effort: 'medium' }, booleanModel)).toBe('on');
     expect(resolveThinkingEffort('off', { effort: 'medium' }, booleanModel)).toBe('off');
-    expect(resolveThinkingEffort('low', { effort: 'medium' }, booleanModel)).toBe('low');
-    // No normalization: empty / whitespace strings are returned as-is.
-    expect(resolveThinkingEffort('', { enabled: false, effort: 'medium' }, booleanModel)).toBe('');
+    expect(resolveThinkingEffort('low', { effort: 'medium' }, booleanModel)).toBe('on');
+    expect(resolveThinkingEffort('', { enabled: false, effort: 'medium' }, booleanModel)).toBe('on');
     expect(resolveThinkingEffort('   ', { enabled: false, effort: 'medium' }, booleanModel)).toBe(
-      '   ',
+      'on',
     );
   });
 
@@ -888,10 +919,8 @@ describe('resolveThinkingEffort', () => {
   });
 
   it('uses config.effort as the default effort when enabled', () => {
-    expect(resolveThinkingEffort(undefined, { effort: 'medium' }, booleanModel)).toBe('medium');
-    expect(resolveThinkingEffort(undefined, { enabled: true, effort: 'medium' }, booleanModel)).toBe(
-      'medium',
-    );
+    expect(resolveThinkingEffort(undefined, { effort: 'medium' }, booleanModel)).toBe('on');
+    expect(resolveThinkingEffort(undefined, { enabled: true, effort: 'medium' }, booleanModel)).toBe('on');
   });
 
   it('falls back to the model default effort when no effort is set', () => {

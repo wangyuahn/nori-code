@@ -7,9 +7,14 @@ export interface UserPromptOrigin {
   readonly kind: 'user';
   /** The host explicitly requested goal-loop intake for this prompt. */
   readonly goalIntake?: boolean;
+  /** The default model-facing speaker for direct human input. */
+  readonly speaker?: SpeakerOrigin;
 }
 
-export const USER_PROMPT_ORIGIN: UserPromptOrigin = { kind: 'user' };
+export const USER_PROMPT_ORIGIN: UserPromptOrigin = {
+  kind: 'user',
+  speaker: { from: 'user', speakerName: '用户' },
+};
 
 export interface SkillActivationOrigin {
   readonly kind: 'skill_activation';
@@ -51,6 +56,26 @@ export interface CompactionSummaryOrigin {
 export interface SystemTriggerOrigin {
   readonly kind: 'system_trigger';
   readonly name: string;
+  /**
+   * Durable ordering marker for a human-visible team discussion statement.
+   * It is transcript metadata only; model projection deliberately omits it.
+   */
+  readonly discussionEntryId?: number;
+  /** Durable idempotency marker for a team-discussion lifecycle notice. */
+  readonly discussionLifecycleNoticeId?: string;
+}
+
+/**
+ * Identifies a message produced by a participant rather than by the current
+ * agent. Human submissions retain the existing `kind: 'user'` origin so Goal
+ * checkpoints and UserPrompt hooks keep their established semantics.
+ */
+export type SpeakerKind = 'user' | 'lead' | 'team' | 'sub' | 'system';
+
+export interface SpeakerOrigin {
+  readonly from: SpeakerKind;
+  readonly speakerId?: string;
+  readonly speakerName?: string;
 }
 
 export interface BackgroundTaskOrigin {
@@ -58,6 +83,8 @@ export interface BackgroundTaskOrigin {
   readonly taskId: string;
   readonly status: BackgroundTaskStatus;
   readonly notificationId: string;
+  /** Model-facing identity for detached SubAgent completion notifications. */
+  readonly speaker?: SpeakerOrigin;
 }
 
 export interface CronJobOrigin {
@@ -88,7 +115,7 @@ export interface RetryOrigin {
   readonly trigger?: string;
 }
 
-export type PromptOrigin =
+export type PromptOrigin = (
   | UserPromptOrigin
   | SkillActivationOrigin
   | PluginCommandOrigin
@@ -100,7 +127,11 @@ export type PromptOrigin =
   | CronJobOrigin
   | CronMissedOrigin
   | HookResultOrigin
-  | RetryOrigin;
+  | RetryOrigin
+) & {
+  /** Optional model-facing identity without changing origin lifecycle semantics. */
+  readonly speaker?: SpeakerOrigin;
+};
 
 export type ContextMessage = Message & {
   readonly origin?: PromptOrigin | undefined;

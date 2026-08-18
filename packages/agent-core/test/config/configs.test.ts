@@ -52,7 +52,6 @@ function expectKimiErrorCode(fn: () => unknown, code: string): void {
 const COMPLETE_TOML = `
 default_model = "kimi-code/kimi-for-coding"
 default_permission_mode = "auto"
-default_plan_mode = false
 merge_all_available_skills = true
 extra_skill_dirs = ["~/team-skills", ".agents/team-skills"]
 telemetry = false
@@ -142,7 +141,6 @@ describe('harness config TOML loader', () => {
     expect(config.defaultModel).toBe('kimi-code/kimi-for-coding');
     expect(config.thinking?.enabled).toBe(true);
     expect(config.defaultPermissionMode).toBe('auto');
-    expect(config.defaultPlanMode).toBe(false);
     expect(config.mergeAllAvailableSkills).toBe(true);
     expect(config.extraSkillDirs).toEqual(['~/team-skills', '.agents/team-skills']);
     expect(config.telemetry).toBe(false);
@@ -372,7 +370,7 @@ removed_flag = true
     const configPath = join(dir, 'custom-agents.toml');
     await writeConfigFile(configPath, {
       providers: {},
-      loopControl: { maxStepsPerTurn: 0, goalMaxTurns: 18 },
+      loopControl: { maxStepsPerTurn: 0, goalMaxTurns: 18, goalBackgroundIdleMinutes: 5 },
       customAgents: {
         reviewer: { description: 'Review risky changes', role: 'Find correctness bugs.', baseProfile: 'explore', model: 'deepseek-review', enabled: true },
       },
@@ -381,6 +379,7 @@ removed_flag = true
     const text = await readFile(configPath, 'utf8');
     expect(text).toContain('max_steps_per_turn = 0');
     expect(text).toContain('goal_max_turns = 18');
+    expect(text).toContain('goal_background_idle_minutes = 5');
     expect(text).toContain('[custom_agents.reviewer]');
     expect(text).toContain('model = "deepseek-review"');
     expect(parseConfigString(text, configPath).customAgents?.['reviewer']).toMatchObject({
@@ -547,6 +546,34 @@ describe('harness config schema and patch merge', () => {
     expect(merged.thinking).toEqual({ enabled: true, effort: 'high' });
     expect(merged.hooks).toEqual(base.hooks);
     expect(merged.raw?.['theme']).toBe('dark');
+  });
+
+  it('clears model thinking efforts when a patch sets them to null', () => {
+    const base = parseConfigString(`
+[providers.x]
+type = "openai"
+api_key = "sk-test"
+
+[models."x/m"]
+provider = "x"
+model = "m"
+max_context_size = 1000
+thinking_support = true
+support_efforts = ["low", "high"]
+default_effort = "high"
+`);
+    const merged = mergeConfigPatch(base, {
+      models: {
+        'x/m': {
+          thinkingSupport: false,
+          supportEfforts: null,
+          defaultEffort: null,
+        },
+      },
+    });
+    expect(merged.models?.['x/m']?.thinkingSupport).toBe(false);
+    expect(merged.models?.['x/m']?.supportEfforts).toBeUndefined();
+    expect(merged.models?.['x/m']?.defaultEffort).toBeUndefined();
   });
 
   it('deep-merges experimental config patches', () => {

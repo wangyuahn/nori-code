@@ -7,7 +7,7 @@ import {
   isOfficialKimiCodingEndpoint,
   OFFICIAL_KIMI_CODING_INPUT_CAPABILITIES,
 } from './provider-capabilities';
-import { reasoningMetadataFromRecord } from './reasoning-options';
+import { defaultEffortFromList, reasoningMetadataFromRecord } from './reasoning-options';
 
 export interface RefreshProviderHost {
   getConfig(): Promise<ManagedKimiConfigShape>;
@@ -180,7 +180,7 @@ function normalizeModels(
       capabilities: capabilitiesFor(record, id, efforts, endpointCapabilities),
       thinkingSupport: reasoning.supported ?? thinkingSupportFor(record, id, efforts),
       supportEfforts: efforts,
-      defaultEffort: stringField(record, 'default_effort'),
+      defaultEffort: stringField(record, 'default_effort') ?? defaultEffortFromList(efforts),
     });
   }
   return [...models.values()].sort((a, b) => a.id.localeCompare(b.id));
@@ -243,7 +243,9 @@ async function enrichModelsFromCatalog(
       capabilities: [...new Set([...(model.capabilities ?? []), ...catalogCapabilities])],
       thinkingSupport: reasoning.supported ?? thinkingSupportFor(record, model.id, efforts) ?? model.thinkingSupport,
       supportEfforts: efforts ?? model.supportEfforts,
-      defaultEffort: stringField(record, 'default_effort') ?? model.defaultEffort,
+      defaultEffort: stringField(record, 'default_effort')
+        ?? defaultEffortFromList(efforts)
+        ?? model.defaultEffort,
     };
   });
 }
@@ -336,7 +338,11 @@ function sameModels(current: Array<[string, ManagedKimiModelAlias]>, discovered:
     if (model.maxContextSize !== undefined && existing.maxContextSize !== model.maxContextSize) return false;
     if (model.displayName !== undefined && existing.displayName !== model.displayName) return false;
     if (model.defaultEffort !== undefined && existing.defaultEffort !== model.defaultEffort) return false;
-    if (model.thinkingSupport !== undefined && existing.thinkingSupport !== model.thinkingSupport) return false;
+    const existingThinkingSupport = existing.thinkingSupport
+      ?? (existing.capabilities?.includes('thinking') || existing.capabilities?.includes('always_thinking')
+        ? true
+        : undefined);
+    if (model.thinkingSupport !== undefined && existingThinkingSupport !== model.thinkingSupport) return false;
     if (!sameStringSet(existing.capabilities ?? ['tool_use'], model.capabilities ?? existing.capabilities ?? ['tool_use'])) return false;
     if (!sameStringSet(existing.supportEfforts ?? [], model.supportEfforts ?? existing.supportEfforts ?? [])) return false;
   }

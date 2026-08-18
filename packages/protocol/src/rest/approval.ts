@@ -20,6 +20,7 @@ import { isoDateTimeSchema } from '../time';
 
 export const listPendingApprovalsQuerySchema = z.object({
   status: z.literal('pending'),
+  agent_id: z.string().min(1).optional(),
 });
 export type ListPendingApprovalsQuery = z.infer<typeof listPendingApprovalsQuerySchema>;
 
@@ -28,7 +29,9 @@ export const listPendingApprovalsResponseSchema = z.object({
 });
 export type ListPendingApprovalsResponse = z.infer<typeof listPendingApprovalsResponseSchema>;
 
-export const approvalResolveRequestSchema = approvalResponseSchema;
+export const approvalResolveRequestSchema = approvalResponseSchema.extend({
+  agent_id: z.string().min(1).optional(),
+});
 export type ApprovalResolveRequest = z.infer<typeof approvalResolveRequestSchema>;
 
 export const approvalResolveResultSchema = z.object({

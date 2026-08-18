@@ -223,34 +223,6 @@ describe('ApprovalPanelComponent', () => {
     },
   );
 
-  it('renders ExitPlanMode with plan-specific header and plan-review choices', () => {
-    const pending: PendingApproval = {
-      data: {
-        id: 'approval_plan',
-        tool_call_id: 'tool_plan',
-        tool_name: 'ExitPlanMode',
-        action: 'review plan',
-        description: '',
-        display: [],
-        choices: [
-          { label: 'Approve', response: 'approved' },
-          { label: 'Reject', response: 'rejected' },
-          { label: 'Revise', response: 'rejected', requires_feedback: true },
-        ],
-      },
-    };
-    const dialog = new ApprovalPanelComponent(pending, () => {});
-
-    const out = strip(dialog.render(80).join('\n'));
-    expect(out).toContain('Ready to build with this plan?');
-    expect(out).not.toContain('Approve ExitPlanMode?');
-    expect(out).toContain('Approve');
-    expect(out).toContain('Reject');
-    expect(out).toContain('Revise');
-    expect(out).not.toContain('Approve for this session');
-    expect(out).not.toContain('Investigate');
-  });
-
   // Inline expand-in-place used to inflate the panel past the viewport on
   // any non-trivial Edit, which then collided with pi-tui's inline scroll
   // and made the terminal flicker / refuse to scroll. The panel now always
@@ -339,30 +311,6 @@ describe('ApprovalPanelComponent', () => {
     expect(after).not.toContain('new30');
   });
 
-  it('does nothing on ctrl+e when there is nothing to preview', () => {
-    const pending: PendingApproval = {
-      data: {
-        id: 'approval_plan_only',
-        tool_call_id: 'tool_plan_only',
-        tool_name: 'ExitPlanMode',
-        action: 'review plan',
-        description: '',
-        display: [],
-        choices: [{ label: 'Approve', response: 'approved' }],
-      },
-    };
-    const previewCalls: Array<DiffDisplayBlock | FileContentDisplayBlock> = [];
-    const dialog = new ApprovalPanelComponent(
-      pending,
-      () => {},
-      undefined,
-      (block) => previewCalls.push(block),
-    );
-
-    dialog.handleInput('\u0005'); // Ctrl+E
-    expect(previewCalls).toEqual([]);
-  });
-
   it('renders Write as a syntax-highlighted code block (file_content), not a diff', () => {
     const responses: Array<{ response: string }> = [];
     const lines: string[] = [];
@@ -410,6 +358,31 @@ describe('ApprovalPanelComponent', () => {
     expect(responses).toEqual([]);
   });
 
+  it('renders Edit operation ranges and replacement content as separate approval lines', () => {
+    const pending: PendingApproval = {
+      data: {
+        id: 'approval_edit',
+        tool_call_id: 'tool_edit',
+        tool_name: 'Edit',
+        action: 'edit',
+        description: '',
+        display: [{
+          type: 'file_op',
+          operation: 'edit',
+          path: 'src/existing.ts',
+          detail: 'Expected tag: A1B2\nreplace lines 2-3\n+ const x = 1;\n+ const y = 2;',
+        }],
+        choices: [{ label: 'Approve once', response: 'approved' }],
+      },
+    };
+
+    const rendered = strip(new ApprovalPanelComponent(pending, () => {}).render(100).join('\n'));
+    expect(rendered).toContain('Expected tag: A1B2');
+    expect(rendered).toContain('replace lines 2-3');
+    expect(rendered).toContain('+ const x = 1;');
+    expect(rendered).toContain('+ const y = 2;');
+  });
+
   it('renders unknown file_content extensions as plain text without stderr noise', () => {
     const pending: PendingApproval = {
       data: {
@@ -442,42 +415,4 @@ describe('ApprovalPanelComponent', () => {
     }
   });
 
-  it('returns feedback for plan-review revise choice', () => {
-    const responses: Array<{
-      response: string;
-      feedback?: string | undefined;
-      selected_label?: string | undefined;
-    }> = [];
-    const pending: PendingApproval = {
-      data: {
-        id: 'approval_plan',
-        tool_call_id: 'tool_plan',
-        tool_name: 'ExitPlanMode',
-        action: 'review plan',
-        description: '',
-        display: [],
-        choices: [
-          { label: 'Approve', response: 'approved' },
-          {
-            label: 'Revise',
-            response: 'rejected',
-            selected_label: 'Revise',
-            requires_feedback: true,
-          },
-        ],
-      },
-    };
-    const dialog = new ApprovalPanelComponent(
-      pending,
-      (response) => responses.push(response),
-    );
-
-    dialog.handleInput('2');
-    dialog.handleInput('n');
-    dialog.handleInput('o');
-    dialog.handleInput('\r');
-    expect(responses).toEqual([
-      { response: 'rejected', feedback: 'no', selected_label: 'Revise' },
-    ]);
-  });
 });

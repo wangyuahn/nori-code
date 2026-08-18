@@ -4,10 +4,11 @@
  * Four fixture states cover acceptance:
  *   1. **Empty config**            → ready=false, providers_count=0; prompt
  *                                    submit blocked with `40110`.
- *   2. **Manual provider, no key** → ready=false (key gate not met);
- *                                    prompt submit blocked with `40111`.
- *   3. **Provider, no default**    → ready=false (no default_model);
- *                                    prompt submit blocked with `40113`.
+ *   2. **Manual provider, no key** → prompt submit blocked with `40111`.
+ *   3. **Provider + key + model, no default_model** → ready=true;
+ *                                    prompt submit with that model passes the
+ *                                    gate (40113 is only for an unresolvable
+ *                                    requested/default alias).
  *   4. **Provider + key + model**  → ready=true; prompt submit gets past the
  *                                    gate (and may fail downstream — that's
  *                                    out of scope here).
@@ -149,7 +150,7 @@ describe('GET /api/v1/auth — readiness probe (P2.1 D2)', () => {
     });
   });
 
-  it('returns ready=false when provider exists but default_model missing', async () => {
+  it('returns ready=true when a usable model exists even if default_model is missing', async () => {
     seedConfig(
       [
         '[providers.x]',
@@ -167,7 +168,7 @@ describe('GET /api/v1/auth — readiness probe (P2.1 D2)', () => {
     const res = await appOf(r).inject({ method: 'GET', url: '/api/v1/auth' });
     const env = envelopeOf<AuthSummary>(res.json());
     const summary = authSummarySchema.parse(env.data);
-    expect(summary.ready).toBe(false);
+    expect(summary.ready).toBe(true);
     expect(summary.providers_count).toBe(1);
     expect(summary.default_model).toBeNull();
   });
@@ -221,7 +222,7 @@ describe('GET /api/v1/auth — readiness probe (P2.1 D2)', () => {
       name: 'managed:kimi-code',
       status: 'unauthenticated',
     });
-    // ready is still false — no default_model, even though provider exists
+    // ready is still false — the managed provider has no usable model alias
     expect(summary.ready).toBe(false);
   });
 });
@@ -242,7 +243,7 @@ describe('POST /api/v1/sessions/{sid}/prompts — readiness gate (P2.1 D1)', () 
         model: 'x',
         thinking: 'off',
         permission_mode: 'manual',
-        plan_mode: false,
+        discuss_mode: false,
       },
     });
     const env = envelopeOf<unknown>(res.json());
@@ -277,7 +278,7 @@ describe('POST /api/v1/sessions/{sid}/prompts — readiness gate (P2.1 D1)', () 
         model: 'x',
         thinking: 'off',
         permission_mode: 'manual',
-        plan_mode: false,
+        discuss_mode: false,
       },
     });
     const env = envelopeOf<unknown>(res.json());
@@ -286,7 +287,73 @@ describe('POST /api/v1/sessions/{sid}/prompts — readiness gate (P2.1 D1)', () 
     expect(env.details).toEqual({ provider_id: 'x' });
   });
 
-  it('returns 40113 with details.model_id when default_model alias does not resolve', async () => {
+  it('returns 40113 with details.model_id when the requested model alias does not resolve', async () => {
+    seedConfig(
+      [
+        'default_model = "missing-alias"',
+        '',
+        '[providers.x]',
+        'type = "kimi"',
+        'api_key = "sk-test"',
+        '',
+        '[models.x]',
+        'provider = "x"',
+        'model = "x"',
+        'max_context_size = 1000',
+        '',
+      ].join('\n'),
+    );
+    const r = await bootDaemon();
+    const sid = await createSession(r);
+    const res = await appOf(r).inject({
+      method: 'POST',
+      url: `/api/v1/sessions/${sid}/prompts`,
+      payload: {
+        content: [{ type: 'text', text: 'hello' }],
+        model: 'missing-alias',
+        thinking: 'off',
+        permission_mode: 'manual',
+        discuss_mode: false,
+      },
+    });
+    const env = envelopeOf<unknown>(res.json());
+    expect(env.code).toBe(40113);
+    expect(env.data).toBeNull();
+    expect(env.details).toEqual({ model_id: 'missing-alias' });
+  });
+
+  it('passes the readiness gate when default_model is unset but the request names a configured model', async () => {
+    seedConfig(
+      [
+        '[providers.x]',
+        'type = "kimi"',
+        'api_key = "sk-test"',
+        '',
+        '[models.x]',
+        'provider = "x"',
+        'model = "x"',
+        'max_context_size = 1000',
+        '',
+      ].join('\n'),
+    );
+    const r = await bootDaemon();
+    const sid = await createSession(r);
+    const res = await appOf(r).inject({
+      method: 'POST',
+      url: `/api/v1/sessions/${sid}/prompts`,
+      payload: {
+        content: [{ type: 'text', text: 'hello' }],
+        model: 'x',
+        thinking: 'off',
+        permission_mode: 'manual',
+        discuss_mode: false,
+      },
+    });
+    const env = envelopeOf<unknown>(res.json());
+    expect([40110, 40111, 40112, 40113]).not.toContain(env.code);
+  });
+
+  it('passes the readiness gate when default_model is broken but the request names a configured model', async () => {
     seedConfig(
       [
         'default_model = "missing-alias"',
@@ -312,47 +379,11 @@ describe('POST /api/v1/sessions/{sid}/prompts — readiness gate (P2.1 D1)', () 
         model: 'x',
         thinking: 'off',
         permission_mode: 'manual',
-        plan_mode: false,
+        discuss_mode: false,
       },
     });
     const env = envelopeOf<unknown>(res.json());
-    expect(env.code).toBe(40113);
-    expect(env.data).toBeNull();
-    expect(env.details).toEqual({ model_id: 'missing-alias' });
-  });
-
-  it('returns 40113 when default_model is unset (no model_id detail)', async () => {
-    seedConfig(
-      [
-        '[providers.x]',
-        'type = "kimi"',
-        'api_key = "sk-test"',
-        '',
-        '[models.x]',
-        'provider = "x"',
-        'model = "x"',
-        'max_context_size = 1000',
-        '',
-      ].join('\n'),
-    );
-    const r = await bootDaemon();
-    const sid = await createSession(r);
-    const res = await appOf(r).inject({
-      method: 'POST',
-      url: `/api/v1/sessions/${sid}/prompts`,
-      payload: {
-        content: [{ type: 'text', text: 'hello' }],
-        model: 'x',
-        thinking: 'off',
-        permission_mode: 'manual',
-        plan_mode: false,
-      },
-    });
-    const env = envelopeOf<unknown>(res.json());
-    expect(env.code).toBe(40113);
-    // No model_id in details when default is simply unset — clients should
-    // route to "select a model" UX rather than "this alias is broken".
-    expect(env.details).toBeNull();
+    expect([40110, 40111, 40112, 40113]).not.toContain(env.code);
   });
 
   it('passes the readiness gate when provider + key + default_model are all set', async () => {
@@ -381,7 +412,7 @@ describe('POST /api/v1/sessions/{sid}/prompts — readiness gate (P2.1 D1)', () 
         model: 'x',
         thinking: 'off',
         permission_mode: 'manual',
-        plan_mode: false,
+        discuss_mode: false,
       },
     });
     const env = envelopeOf<unknown>(res.json());

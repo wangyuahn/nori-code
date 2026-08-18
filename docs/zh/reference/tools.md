@@ -2,7 +2,7 @@
 
 内置工具是 Kimi Code CLI 随核心引擎提供的工具集，无需安装 MCP server 即可使用。Agent 在每次对话中会根据任务需要自动选择并调用这些工具；用户可以通过权限审批界面查看每次工具调用的细节。
 
-与 MCP 工具相比，内置工具由运行时直接管理，生命周期与会话绑定，无需外部进程。两者都遵循统一的审批机制：**只读类工具**（如 `Read`、`Grep`、`Glob`）默认自动放行，**写入与执行类工具**（如 `Write`、`Edit`、`Bash`）默认需要用户审批。Nori 的会话级只读设置会拦截直接 `Write` 和 `Edit`，但不会移除文件读取工具，也不会拦截 `Bash`；`Bash` 仍按当前权限模式和规则处理。YOLO 模式下普通工具调用的审批会被跳过，但 Plan 模式下的退出审批不受影响。
+与 MCP 工具相比，内置工具由运行时直接管理，生命周期与会话绑定，无需外部进程。两者都遵循统一的审批机制：**只读类工具**（如 `Read`、`Grep`、`Glob`）默认自动放行，**写入与执行类工具**（如 `Write`、`Edit`、`Bash`）默认需要用户审批。Nori 的会话级只读设置会拦截直接 `Write` 和 `Edit`，但不会移除文件读取工具，也不会拦截 `Bash`；`Bash` 仍按当前权限模式和规则处理。YOLO 模式下普通工具调用的审批会被跳过。Discuss 通过 TeamAssign 或 UI 切换进入 Code，不再走计划文件审批。
 
 ## 文件类
 
@@ -12,16 +12,16 @@
 | --- | --- | --- |
 | `Read` | 自动放行 | 读取文本文件内容 |
 | `Write` | 需审批 | 创建或覆盖文件 |
-| `Edit` | 需审批 | 精确字符串替换 |
+| `Edit` | 需审批 | 基于哈希锚点的行编辑 |
 | `Grep` | 自动放行 | 基于 ripgrep 的全文搜索 |
 | `Glob` | 自动放行 | 按 glob 模式查找文件 |
 | `ReadMediaFile` | 自动放行 | 读取图片或视频文件 |
 
-**`Read`** 接受文件路径（`path`）以及可选的 `line_offset`（起始行号，支持负数从末尾倒数）和 `n_lines`（读取行数上限）。单次最多返回 1000 行或 100 KB，超出部分会附带截断提示。如果文件是图片或视频，工具会提示改用 `ReadMediaFile`。
+**`Read`** 接受文件路径（`path`）以及可选的 `line_offset`（起始行号，支持负数从末尾倒数）和 `n_lines`（读取行数上限）。单次最多返回 1000 行或 100 KB，超出部分会附带截断提示。文本输出第一行是 `[path#TAG]`，其中四位十六进制 `TAG` 是 `Edit` 必须使用的文件快照锚点。如果文件是图片或视频，工具会提示改用 `ReadMediaFile`。
 
 **`Write`** 接受 `path`、`content` 和可选的 `mode`（`overwrite` 或 `append`，默认覆盖）。缺失的父目录会自动创建；`append` 模式将内容追加到文件末尾，不自动添加换行。
 
-**`Edit`** 接受 `path`、`old_string`（要替换的精确文本）和 `new_string`（替换后的文本）。默认只替换唯一一处匹配，若文件中存在多处相同内容会报错并提示使用 `replace_all: true`。`old_string` 与 `new_string` 不能相同。
+**`Edit`** 接受 `path`、`expected_tag`（最近一次 `Read` 返回的四位哈希）和非空 `line_ops` 数组。所有操作都使用该快照中的原始行号：`swap` 替换闭区间，`del` 删除闭区间，`insert_pre` / `insert_post` 在原始行前后插入。完整操作列表会在一次写入前统一校验；TAG 过期、范围无效或重叠时不会修改文件。
 
 **`Grep`** 调用 ripgrep 搜索文件内容，支持正则表达式（`pattern`）、搜索路径（`path`）、文件类型过滤（`type`，如 `ts`、`py`）、glob 过滤（`glob`）和输出模式（`output_mode`：`files_with_matches` / `content` / `count_matches`，默认 `files_with_matches`）。`content` 模式支持上下文行（`-A`、`-B`、`-C`）、忽略大小写（`-i`）、行号（`-n`，默认 true）、跨行匹配（`multiline`）。所有模式支持 `offset` + `head_limit` 分页，`head_limit` 默认 250、传 0 表示不限。`.env`、私钥等敏感文件会被自动过滤；`include_ignored=true` 可搜索被 `.gitignore` 忽略的文件，但敏感文件仍保持过滤。
 
@@ -59,18 +59,15 @@
 
 **`FetchURL`** 接受单个 `url` 参数，返回页面内容。对 HTML 页面，宿主会提取正文而非返回完整 HTML；纯文本或 Markdown 页面直接透传。同样需要宿主注入实现。
 
-## Plan 模式
+## Discuss（讨论）
 
 | 工具 | 默认审批 | 说明 |
 | --- | --- | --- |
-| `EnterPlanMode` | 自动放行 | 进入 Plan 模式 |
-| `ExitPlanMode` | 自动放行（需用户确认计划） | 退出 Plan 模式并提交计划 |
+| `EnterDiscussMode` | 自动放行 | 进入 Discuss（讨论） |
 
-Plan 模式是一种受约束的工作状态：进入后 `Write` 与 `Edit` 只允许写入当前的计划文件，`TaskStop` 被完全拦截。其余工具（包括 `Bash`）仍按当前权限规则处理。
+Discuss 是只读团队开会。新会话默认进入该状态（用户可关闭）。期间 `Write`、`Edit`、`Bash`、`SubAgent`、`TaskStop`、`CronCreate`、`CronDelete` 被拦截。没有 session 文件工作流，也没有 `ExitDiscussMode` 模型出口。
 
-**`EnterPlanMode`** 不接受任何参数，进入成功后返回工作流指引及计划文件路径。
-
-**`ExitPlanMode`** 读取当前计划文件内容，将计划呈现给用户审批后退出 Plan 模式。可选参数 `options` 允许 Agent 提供 1–3 个备选方案（每项含 `label` 与 `description`，`label` 最长 80 字符），供用户在审批时选择；`label` 不能重复，也不能使用 `Approve`、`Reject`、`Reject and Exit`、`Revise` 等保留词。
+**`EnterDiscussMode`** 不接受参数。进入后用 `TeamCreate` 建伙伴，用 `TeamDecide` 开会（主持先发言，成员用 `TeamSpeak`；不调用会记录为 skipped，即弃权），再用 `TeamAssign` 进入 Code。UI 的 Discuss/Code 切换也可离开或再进入。
 
 ## 状态管理
 
@@ -86,14 +83,17 @@ Plan 模式是一种受约束的工作状态：进入后 `Write` 与 `Edit` 只�
 
 | 工具 | 默认审批 | 说明 |
 | --- | --- | --- |
-| `Agent` | 自动放行 | 派生子 Agent 执行子任务 |
-| `AgentSwarm` | swarm mode 中自动放行，否则需审批 | 启动基于 item 的子 Agent，或恢复已有子 Agent |
+| `SubAgent` | SubAgent 模式中自动放行，否则需审批 | 启动一个或多个临时 SubAgent |
+| `TeamCreate` | 自动放行 | 创建持久团队伙伴 |
+| `TeamDecide` | 自动放行 | 开会或在执行后投票 |
+| `TeamSpeak` | 自动放行 | 发布讨论发言；不调用会将本轮记录为 skipped（弃权） |
+| `TeamAssign` | 自动放行 | 分配任务；成功后离开 Discuss 进入 Code |
 | `AskUserQuestion` | 自动放行 | 向用户提问以获取结构化输入 |
 | `Skill` | 自动放行 | 调用已注册的 inline Skill |
 
-**`Agent`** 将子任务委托给子 Agent 执行。必填参数：`prompt`（完整任务描述）和 `description`（3–5 个词的简短说明）。可选参数：`subagent_type`（默认 `nori-coder`）、`resume`（恢复已有 Agent 的 ID，与 `subagent_type` 互斥）和 `run_in_background`（默认 false）。Agent 任务使用固定 30 分钟超时。前台模式下父 Agent 等待子 Agent 完成再继续；后台模式立即返回任务 ID，完成时通过合成 User 消息自动回到主 Agent。多个前台 `Agent` 调用在同一步运行时，TUI 会合并展示，并为每个子 Agent 显示运行、等待、完成或失败状态以及已耗时长。子 Agent 体系细节见 [Agent 与子 Agent](../customization/agents.md)。
+**`SubAgent`** 是统一的临时代理入口。可用 `prompt_template` + `items`、`tasks`（含 `depends_on` DAG）或 `resume_agent_ids` 一次启动一个或多个完整子会话。完成后归档到父会话，可再打开。一次模型响应若调用 `SubAgent`，该调用必须是该响应中的唯一工具调用。Discuss 期间不要用 SubAgent，先 TeamAssign。
 
-**`AgentSwarm`** 可以从共享的 `prompt_template` 和 `items` 数组、具体的 `tasks` 数组、已有的 `resume_agent_ids`，或这些输入的组合启动子 Agent。`prompt_template` + `items` 适合均质并行任务；模板必须包含 `{{item}}` 占位符，每个 item 会启动一个新的子 Agent。`tasks` 适合真实工程流程，包括单个委派任务和 DAG（有向依赖图）：每个 task 可设置 `id`、`description`、`subagent_type`、`prompt` 和 `depends_on`。同一依赖层的 task 会并行运行，下游 task 启动前会收到上游结果。顶层 `subagent_type` 指定新建子 Agent 的默认 profile，省略时使用 `nori-coder`；单个 task 可以用自己的 `subagent_type` 覆盖。本工具最多支持 128 个子 Agent，会等待全部子 Agent 完成，并返回聚合报告。在 TUI 中，前台 swarm 会在输入框上方显示实时 `Agent swarm` 进度面板。若一次模型响应调用 `AgentSwarm`，该调用必须是该响应中的唯一工具调用；如需运行多个 swarm，应先调用一个 `AgentSwarm` 并等待结果，再调用下一个，若单个模板可以覆盖这些工作，也可以合并为一个 swarm。在 `manual` 权限模式下，未处于 swarm mode 时调用 `AgentSwarm` 会触发审批，除非已有权限规则允许；swarm mode 已开启时，`AgentSwarm` 本身会自动放行。权限规则只能按工具名 `AgentSwarm` 匹配，不支持 `AgentSwarm(swarm)` 这类参数模式。默认情况下，本工具会逐步提升并发且不设上限（立即启动 5 个子 Agent，之后每 700 毫秒再启动 1 个）；将 `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY` 设为正整数可限制该阶段同时运行的子 Agent 数量，不设置则表示不限制。若设置为非正整数的值，本次 AgentSwarm 调用会立即失败。
+**`TeamCreate`** 每个成员必须有 `name`、`title`、`intro`、`mandate`、`role`。**`TeamDecide`** `action=start` 必须有 `topic` 和主持 `statement`。成员只用 `TeamSpeak` 发言。执行后 `action=vote` 不要求 Discuss；全队投票（`discuss_again` / `proceed` / `abstain`），含 `task=null` 的成员。
 
 **`AskUserQuestion`** 以结构化多选题的形式向用户提问，适用于需要消歧或选择方案的场景。`questions` 参数接受 1–4 道题，每道题需提供 `question`（以 `?` 结尾）、`options`（2–4 个选项，每项含 `label` 和 `description`）以及可选的 `header`（最多 12 字符）和 `multi_select`（默认 false）。系统自动附加"其他"选项。`background` 为 true 时启动后台问题任务并立即返回任务 ID。宿主未实现交互式提问能力时返回失败提示，Agent 应改为在文本回复中直接提问。
 
@@ -101,29 +101,22 @@ Plan 模式是一种受约束的工作状态：进入后 `Write` 与 `Edit` 只�
 
 ## Nori 工具
 
-Nori 专用工具在内置工具集上增加共享记忆、文档写入和已配置的 swarm 模板能力。只有对应供应商或运行时能力可用时，这些工具才会出现在工具列表中。
+Nori 专用工具在内置工具集上增加共享记忆、文档写入和已配置的 graph/DAG 检查模板能力。只有对应供应商或运行时能力可用时，这些工具才会出现在工具列表中。
 
 | 工具 | 默认审批 | 说明 |
 | --- | --- | --- |
 | `nori_memory_search` | 按权限规则处理 | 搜索 Obsidian 共享记忆库 |
 | `nori_memory_write` | 按权限规则处理 | 向记忆库写入 analysis、decision、task 或 review 笔记 |
-| `nori_plan_write` | 按权限规则处理；不受只读模式拦截 | 在允许的工作区目录写入计划、设计或分析文档 |
-| `nori_swarm_launch` | 按权限规则处理 | 启动已配置的 DAG swarm 模板 |
-| `nori_swarm_status` | 按权限规则处理 | 查询已配置 swarm 的状态 |
-| `nori_swarm_result` | 按权限规则处理 | 获取已配置 swarm 的结果 |
 | `nori_ask_parent` | 仅子 Agent 可用 | 让子 Agent 向父 Agent 请求指导 |
 
 **`nori_memory_search`** 接受具体的 `keywords`，以及可选的 `note_types`、`top_k`、`include_linked`、`link_depth`、`chain_depth` 和 `follow_up_keywords`。当第一轮结果暴露出更好的关键词或链接笔记时，使用链式检索（`chain_depth: 1` 或 `2`）。
 
 **`nori_memory_write`** 把结构化笔记写入共享记忆库。适合记录任务进度、架构分析、审阅发现，以及未来轮次或子 Agent 需要检索的决策。
 
-**`nori_plan_write`** 只写入 `docs/`、`plans/`、`.nori-code/`、`design/`、`specs/` 等允许目录下的文档类文件，扩展名包括 `.md`、`.txt`、`.yaml`、`.json` 和 `.toml`。它用于计划和设计文档，不用于源码编辑。
-
-**`nori_swarm_launch`**、**`nori_swarm_status`** 和 **`nori_swarm_result`** 是已配置 swarm 模板的兼容 API。普通模型驱动的编码循环优先使用 `AgentSwarm.tasks`；当项目定义了可复用 DAG 工作流时，再使用已配置模板。
 
 ## 后台任务
 
-后台任务工具用于管理通过 `Bash`、`Agent` 或 `AskUserQuestion` 启动的后台任务。任务进入终止状态时会自动把状态和已保存的输出路径送回 Agent；如需提前检查进度，使用 `TaskOutput`。
+后台任务工具用于管理通过 `Bash`、`SubAgent` 或 `AskUserQuestion` 启动的后台任务。任务进入终止状态时会自动把状态和已保存的输出路径送回 Agent；如需提前检查进度，使用 `TaskOutput`。
 
 | 工具 | 默认审批 | 说明 |
 | --- | --- | --- |
@@ -153,7 +146,7 @@ Nori 专用工具在内置工具集上增加共享记忆、文档写入和已配
 
 **`CronList`** 是只读工具，不接受任何参数。为每个生效中的任务返回一条记录，字段包括 `id`、`cron`、`humanSchedule`、`nextFireAt`、`recurring`、`ageDays` 和 `stale`。记录用 `---` 分隔，按调度时间排列。
 
-**`CronDelete`** 只接受一个 `id`。对周期任务，未来所有触发立即停止；对一次性任务，挂起的那次触发会被取消。已触发的一次性任务会自动删除，因此对已触发过的一次性任务调用 `CronDelete` 会返回 `No cron job with id ...`。删除不可撤销，需要还原时只能再次 `CronCreate`。`CronDelete` 在 Plan 模式下同样会被拦截。
+**`CronDelete`** 只接受一个 `id`。对周期任务，未来所有触发立即停止；对一次性任务，挂起的那次触发会被取消。已触发的一次性任务会自动删除，因此对已触发过的一次性任务调用 `CronDelete` 会返回 `No cron job with id ...`。删除不可撤销，需要还原时只能再次 `CronCreate`。`CronDelete` 在 Discuss 中同样会被拦截。
 
 ## 下一步
 

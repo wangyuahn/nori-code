@@ -6,7 +6,7 @@ export interface Suggestion {
   /** Unique identifier for deduplication within a session. */
   id: string;
   priority: 'high' | 'medium' | 'low';
-  category: 'memory' | 'swarm' | 'review' | 'documentation' | 'quality';
+  category: 'memory' | 'review' | 'documentation' | 'quality';
   message: string;
   /** Optional tool name to suggest calling. */
   action?: string;
@@ -24,10 +24,6 @@ export interface SuggestionContext {
     toolsCalled: string[];
     /** Number of nori_memory_write calls. */
     memoryWriteCount: number;
-    /** Number of nori_swarm_launch calls. */
-    swarmLaunchCount: number;
-    /** Number of nori_swarm_result / nori_swarm_status calls. */
-    swarmResultCheckCount: number;
     /** Number of files created (Write tool calls). */
     filesCreated: number;
     /** Number of test files created. */
@@ -89,39 +85,22 @@ export class SuggestionEngine {
       });
     }
 
-    // 3. Swarm launched but results not checked
-    if (
-      context.currentTurn.swarmLaunchCount > 0 &&
-      context.currentTurn.swarmResultCheckCount <= 0
-    ) {
-      this.addIfNew(suggestions, {
-        id: 'check-swarm-results',
-        priority: 'high',
-        category: 'swarm',
-        message:
-          'Swarm results are ready. Review them before proceeding.',
-        action: 'nori_swarm_result',
-        pending: true,
-      });
-    }
-
-    // 4. New files created but no tests written
+    // 3. New files created but no tests written
     if (
       context.currentTurn.filesCreated > 0 &&
       context.currentTurn.testFilesCreated <= 0
     ) {
       this.addIfNew(suggestions, {
-        id: 'run-swarm-check',
+        id: 'run-tests',
         priority: 'medium',
         category: 'quality',
         message:
-          'New files created. Consider running a swarm check to verify.',
-        action: 'nori_swarm_launch',
+          'New files created. Consider adding tests to verify the change.',
         pending: true,
       });
     }
 
-    // 5. Phase transition: implement → review
+    // 4. Phase transition: implement → review
     if (
       context.phaseTransition?.from === 'implement' &&
       context.phaseTransition?.to === 'review'
@@ -131,12 +110,12 @@ export class SuggestionEngine {
         priority: 'medium',
         category: 'review',
         message:
-          'Implementation complete. The review phase will automatically run tests and swarm checks.',
+          'Implementation complete. The review phase will automatically run tests.',
         pending: true,
       });
     }
 
-    // 6. Always: search past decisions
+    // 5. Always: search past decisions
     this.addIfNew(suggestions, {
       id: 'search-past-decisions',
       priority: 'low',

@@ -48,8 +48,8 @@ export { ProcessBackgroundTask } from './process-task';
 export type { ProcessBackgroundTaskInfo } from './process-task';
 export { QuestionBackgroundTask } from './question-task';
 export type { QuestionBackgroundTaskInfo } from './question-task';
-export { SwarmBackgroundTask } from './swarm-task';
-export type { SwarmTaskControl } from './swarm-task';
+export { SubagentBackgroundTask } from './subagent-task';
+export type { SubagentTaskControl } from './subagent-task';
 export { BackgroundTaskPersistence } from './persist';
 export type {
   BackgroundTaskInfo,
@@ -158,7 +158,7 @@ type BackgroundTaskNotification = Record<string, unknown> & {
   readonly type: string;
   readonly source_kind: 'background_task';
   readonly source_id: string;
-  /** Subagent id accepted by Agent(resume=...). Omitted for process tasks. */
+  /** Temporary subagent id. Omitted for process tasks. */
   readonly agent_id?: string | undefined;
   readonly title: string;
   readonly severity: 'info' | 'warning';
@@ -233,10 +233,12 @@ export class BackgroundManager {
     this.agent.telemetry.track('background_task_created', {
       kind: info.kind === 'process' ? 'bash' : info.kind,
     });
+    this.agent.turn.noteBackgroundActivity?.();
   }
 
   private emitTaskUpdated(info: BackgroundTaskInfo): void {
     this.agent.emitEvent({ type: 'background.task.updated', info });
+    this.agent.turn.noteBackgroundActivity?.();
   }
 
   private emitTaskTerminated(info: BackgroundTaskInfo): void {
@@ -246,6 +248,7 @@ export class BackgroundManager {
       duration_ms: info.endedAt !== null ? info.endedAt - info.startedAt : null,
       status: info.status,
     });
+    this.agent.turn.noteBackgroundActivity?.();
   }
 
   private assertCanRegister(startedInBackground: boolean): void {
@@ -526,6 +529,7 @@ export class BackgroundManager {
     const entry = this.tasks.get(taskId);
     if (!entry) return undefined;
     if (TERMINAL_STATUSES.has(entry.status)) {
+      await entry.terminal;
       await entry.persistWriteQueue;
       return this.toInfo(entry);
     }
@@ -703,10 +707,11 @@ export class BackgroundManager {
   private async restoreBackgroundTaskNotification(info: BackgroundTaskInfo): Promise<void> {
     const context = await this.buildBackgroundTaskNotificationContext(info);
     if (context === undefined) return;
-    // Reconciliation happens while reopening a session. Restore every terminal
-    // result into context without starting unsolicited model work; live terminal
-    // events still use notifyBackgroundTask() and wake the owning agent.
-    this.agent.context.appendUserMessage(context.content, context.origin);
+    if (info.status === 'failed' || info.status === 'lost') {
+      this.agent.turn.steer(context.content, context.origin);
+    } else {
+      this.agent.context.appendUserMessage(context.content, context.origin);
+    }
     this.fireNotificationHook(context.notification);
   }
 
@@ -720,6 +725,15 @@ export class BackgroundManager {
       taskId: info.taskId,
       status: info.status,
       notificationId: `task:${info.taskId}:${info.status}`,
+      ...(info.kind === 'agent' && info.agentId
+        ? {
+            speaker: {
+              from: 'sub' as const,
+              speakerId: info.agentId,
+              speakerName: `SubAgent ${info.agentId}`,
+            },
+          }
+        : {}),
     };
     const key = notificationKey(origin);
     if (this.scheduledNotificationKeys.has(key)) return;
@@ -978,18 +992,5 @@ function buildBackgroundTaskNotificationBody(info: BackgroundTaskInfo): string {
         }.`
         : `${info.description} ${info.status}.`;
 
-  if (info.kind !== 'agent') return baseLine;
-  if (info.status === 'completed') return baseLine;
-  const agentId = info.agentId;
-  if (agentId === undefined || agentId === info.taskId) return baseLine;
-
-  const recovery = [
-    '',
-    `To recover or continue this subagent, call Agent(resume="${agentId}", prompt="Pick up where you left off; redo the last tool call if its result was never observed.").`,
-    `Use agent_id ("${agentId}"), NOT source_id / task_id ("${info.taskId}") — the two look alike but only agent_id is accepted by the resume parameter.`,
-    'Agent tasks always run in the background; completion is delivered automatically.',
-    'The subagent retains its full prior context across the restart, but any in-flight tool call lost its result and may need to be redone.',
-  ].join('\n');
-
-  return `${baseLine}${recovery}`;
+  return baseLine;
 }

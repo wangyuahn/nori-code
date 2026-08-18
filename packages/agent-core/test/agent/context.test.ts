@@ -13,6 +13,55 @@ import { recordingTelemetry, type TelemetryRecord } from '../fixtures/telemetry'
 import { testAgent } from './harness/agent';
 
 describe('Agent context', () => {
+  it('projects speaker envelopes without changing cacheable transcript history', () => {
+    const ctx = testAgent();
+    ctx.configure();
+    const input = 'source </message> & content';
+
+    ctx.agent.context.appendUserMessage([{ type: 'text', text: input }], {
+      kind: 'user',
+      speaker: { from: 'lead', speakerId: 'agent-1', speakerName: 'Lead <One>' },
+    });
+
+    expect(ctx.agent.context.history[0]?.content).toEqual([{ type: 'text', text: input }]);
+    expect(ctx.agent.context.messages[0]?.content).toEqual([
+      {
+        type: 'text',
+        text: '<message from="lead:agent-1" name="Lead &lt;One&gt;">source &lt;/message&gt; &amp; content</message>',
+      },
+    ]);
+  });
+
+  it('projects only the speaker identity, not origin routing metadata, into model text', async () => {
+    const ctx = testAgent();
+    ctx.configure();
+    const input = 'Review the current request cache behavior.';
+
+    ctx.agent.context.appendUserMessage([{ type: 'text', text: input }], {
+      kind: 'system_trigger',
+      name: 'team-discussion-message',
+      speaker: { from: 'team', speakerId: 'reviewer-1', speakerName: 'Cache Reviewer' },
+    });
+
+    const raw = ctx.agent.context.history[0];
+    const projected = ctx.agent.context.messages[0];
+    const rawText = raw?.content.map((part) => (part.type === 'text' ? part.text : '')).join('');
+    const projectedText = projected?.content
+      .map((part) => (part.type === 'text' ? part.text : ''))
+      .join('');
+
+    expect(rawText).toBe(input);
+    expect(projectedText).toBe(
+      '<message from="team:reviewer-1" name="Cache Reviewer">Review the current request cache behavior.</message>',
+    );
+    expect(projectedText).not.toContain('system_trigger');
+    expect(projectedText).not.toContain('team-discussion-message');
+    expect(projectedText).not.toContain('agent_id');
+    expect(projectedText).not.toContain('createdAt');
+    expect(projectedText).not.toContain('updatedAt');
+    await ctx.expectResumeMatches();
+  });
+
   it('stores prompt origins without leaking them to LLM projection', () => {
     const ctx = testAgent();
     ctx.configure();
@@ -51,7 +100,7 @@ describe('Agent context', () => {
     });
 
     expect(ctx.agent.context.history.map(({ role, origin }) => ({ role, origin }))).toEqual([
-      { role: 'user', origin: { kind: 'user' } },
+      { role: 'user', origin: { kind: 'user', speaker: { from: 'user', speakerName: '用户' } } },
       { role: 'user', origin: { kind: 'injection', variant: 'host' } },
       { role: 'assistant', origin: undefined },
       { role: 'tool', origin: undefined },
@@ -414,10 +463,10 @@ describe('Agent context', () => {
     });
 
     expect(ctx.agent.context.history).toHaveLength(4);
-    expect(ctx.agent.context.messages).toEqual([
+    expect(ctx.agent.context.messages).toMatchObject([
       {
         role: 'user',
-        content: [{ type: 'text', text: 'hooked input' }],
+        content: [{ type: 'text', text: '<message from="user" name="用户">hooked input</message>' }],
         toolCalls: [],
       },
       {
@@ -468,10 +517,10 @@ describe('Agent context', () => {
     ctx.agent.context.appendUserMessage([{ type: 'text', text: 'safe followup' }]);
 
     expect(ctx.agent.context.history).toHaveLength(3);
-    expect(ctx.agent.context.messages).toEqual([
+    expect(ctx.agent.context.messages).toMatchObject([
       {
         role: 'user',
-        content: [{ type: 'text', text: 'blocked prompt' }],
+        content: [{ type: 'text', text: '<message from="user" name="用户">blocked prompt</message>' }],
         toolCalls: [],
       },
       {
@@ -486,7 +535,7 @@ describe('Agent context', () => {
       },
       {
         role: 'user',
-        content: [{ type: 'text', text: 'safe followup' }],
+        content: [{ type: 'text', text: '<message from="user" name="用户">safe followup</message>' }],
         toolCalls: [],
       },
     ]);
@@ -507,12 +556,13 @@ describe('Agent context', () => {
       system: <system-prompt>
       tools: []
       messages:
-        user: text "user before step 1"
+        user: text "<message from=\\"user\\" name=\\"用户\\">user before step 1</message>"
         assistant: text "earlier assistant"
-        user: text "lookup something"
+        user: text "<message from=\\"user\\" name=\\"用户\\">lookup something</message>"
         assistant: text "I will call Lookup."  calls call_lookup:Lookup { "query": "moon" }
         tool[call_lookup]: text "lookup result"
-        user: text "continue"
+        user: text "<message from=\\"user\\" name=\\"用户\\">continue</message>"
+        user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
     await ctx.expectResumeMatches();
   });
@@ -534,7 +584,8 @@ describe('Agent context', () => {
       tools: []
       messages:
         user: text "<system-reminder>\\nRemember the host note.\\n</system-reminder>"
-        user: text "Real user prompt"
+        user: text "<message from=\\"user\\" name=\\"用户\\">Real user prompt</message>"
+        user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
   });
 
@@ -799,7 +850,7 @@ describe('Agent context', () => {
     });
 
     expect(ctx.agent.context.history.map(({ role, origin }) => ({ role, origin }))).toEqual([
-      { role: 'user', origin: { kind: 'user' } },
+      { role: 'user', origin: { kind: 'user', speaker: { from: 'user', speakerName: '用户' } } },
       { role: 'user', origin: { kind: 'compaction_summary' } },
       { role: 'user', origin: { kind: 'injection', variant: 'host' } },
     ]);
@@ -820,7 +871,8 @@ describe('Agent context', () => {
       system: <system-prompt>
       tools: []
       messages:
-        user: text "fresh prompt"
+        user: text "<message from=\\"user\\" name=\\"用户\\">fresh prompt</message>"
+        user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
     await ctx.expectResumeMatches();
   });
@@ -845,9 +897,10 @@ describe('Agent context', () => {
       system: <system-prompt>
       tools: []
       messages:
-        user: text "old user message\\n\\nrecent user message"
+        user: text "<message from=\\"user\\" name=\\"用户\\">old user message</message>\\n\\n<message from=\\"user\\" name=\\"用户\\">recent user message</message>"
         user: text "summary of old context"
-        user: text "new prompt"
+        user: text "<message from=\\"user\\" name=\\"用户\\">new prompt</message>"
+        user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
     await ctx.expectResumeMatches();
   });
@@ -1075,9 +1128,9 @@ describe('Agent context', () => {
     });
     ctx.dispatch({
       type: 'context.append_message',
-      message: userMessage('Plan mode is active', {
+      message: userMessage('Discuss mode is active', {
         kind: 'injection',
-        variant: 'plan_mode',
+        variant: 'discuss_mode',
       }),
     });
     ctx.dispatch({
@@ -1094,14 +1147,14 @@ describe('Agent context', () => {
     expect(ctx.agent.context.history).toEqual([
       expect.objectContaining({
         role: 'user',
-        origin: { kind: 'injection', variant: 'plan_mode' },
+        origin: { kind: 'injection', variant: 'discuss_mode' },
       }),
     ]);
     expect(ctx.agent.replayBuilder.buildResult()).toEqual([
       expect.objectContaining({
         type: 'message',
         message: expect.objectContaining({
-          origin: { kind: 'injection', variant: 'plan_mode' },
+          origin: { kind: 'injection', variant: 'discuss_mode' },
         }),
       }),
     ]);

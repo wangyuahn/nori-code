@@ -8,9 +8,9 @@
  * registry get no chip at all.
  */
 
-import { computeDiffLines } from '#/tui/components/media/diff-preview';
 import type { ToolCallBlockData, ToolResultBlockData } from '#/tui/types';
 
+import { operationContentLineCount, parseEditLineOperations } from './edit-line-ops';
 import { goalStatusChip } from './goal';
 import { readMediaChip } from './media';
 import { strArg } from './types';
@@ -44,15 +44,15 @@ export interface WriteStats {
 }
 
 export function computeEditStats(args: Record<string, unknown>): EditStats {
-  const oldStr = strArg(args, 'old_string');
-  const newStr = strArg(args, 'new_string');
-  if (oldStr.length === 0 && newStr.length === 0) return { added: 0, removed: 0 };
-  const diff = computeDiffLines(oldStr, newStr);
   let added = 0;
   let removed = 0;
-  for (const line of diff) {
-    if (line.kind === 'add') added++;
-    else if (line.kind === 'delete') removed++;
+  for (const operation of parseEditLineOperations(args)) {
+    if (operation.op === 'swap' || operation.op === 'del') {
+      removed += operation.end - operation.start + 1;
+    }
+    if (operation.op !== 'del') {
+      added += operationContentLineCount(operation.content);
+    }
   }
   return { added, removed };
 }

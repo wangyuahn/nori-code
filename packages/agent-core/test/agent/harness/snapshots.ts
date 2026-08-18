@@ -221,8 +221,8 @@ function formatText(text: string): string {
   if (isAutoModeExitReminder(text)) {
     return '<auto-mode-exit-reminder>';
   }
-  if (isPlanModeReminder(text)) {
-    return '<plan-mode-reminder>';
+  if (isDiscussModeReminder(text)) {
+    return '<discuss-mode-reminder>';
   }
   if (text.includes('<!-- Compression Priorities (in order) -->')) {
     return '<compaction-instruction>';
@@ -252,7 +252,7 @@ function normalizeValue(value: unknown, uuidLabels: Map<string, string>): unknow
   if (typeof value === 'string') {
     if (isAutoModeEnterReminder(value)) return '<auto-mode-enter-reminder>';
     if (isAutoModeExitReminder(value)) return '<auto-mode-exit-reminder>';
-    if (isPlanModeReminder(value)) return '<plan-mode-reminder>';
+    if (isDiscussModeReminder(value)) return '<discuss-mode-reminder>';
     if (!isUuid(value)) return value;
     let label = uuidLabels.get(value);
     if (label === undefined) {
@@ -325,10 +325,11 @@ function isVolatileDurationKey(key: string): boolean {
   );
 }
 
-function isPlanModeReminder(value: string): boolean {
+function isDiscussModeReminder(value: string): boolean {
   return (
-    value.includes('Plan mode is active. You MUST NOT make any edits') &&
-    value.includes('Plan file:')
+    value.includes('Discuss is active') &&
+    value.includes('TeamCreate') &&
+    value.includes('TeamDecide')
   );
 }
 

@@ -14,14 +14,14 @@ function strip(text: string): string {
 describe('NoticeComponent', () => {
   it('renders top and bottom spacing around the notice copy', () => {
     const component = new NoticeMessageComponent(
-      'Plan mode: ON',
-      'Plan will be created here: /tmp/plans/test-plan.md',
+      'Discuss mode: ON',
+      'Discussion is active.',
     );
 
     const lines = component.render(120).map((line) => strip(line));
     expect(lines[0]).toBe('');
-    expect(lines[1]).toContain('Plan mode: ON');
-    expect(lines[2]).toContain('Plan will be created here: /tmp/plans/test-plan.md');
+    expect(lines[1]).toContain('Discuss mode: ON');
+    expect(lines[2]).toContain('Discussion is active.');
   });
 });
 

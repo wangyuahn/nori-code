@@ -37,6 +37,7 @@ import {
   listPendingQuestionsQuerySchema,
   listPendingQuestionsResponseSchema,
   questionResolveRequestSchema,
+  questionDismissRequestSchema,
   questionResolveResultSchema,
 } from '@nori-code/protocol';
 import { IQuestionService, questionToAgentCoreResponse, type IInstantiationService } from '@nori-code/agent-core';
@@ -102,7 +103,7 @@ export function registerQuestionsRoutes(
       const broker = ix.invokeFunction((a) =>
         a.get(IQuestionService) as QuestionService,
       );
-      reply.send(okEnvelope({ items: broker.listPending(session_id) }, req.id));
+      reply.send(okEnvelope({ items: broker.listPending(session_id, req.query.agent_id) }, req.id));
     },
   );
   app.get(
@@ -168,7 +169,14 @@ export function registerQuestionsRoutes(
         a.get(IQuestionService) as QuestionService,
       );
 
-      if (!broker.isPending(questionId)) {
+      const targetParse = questionDismissRequestSchema.safeParse(req.body);
+      if (!targetParse.success) {
+        reply.send(errEnvelope(ErrorCode.VALIDATION_FAILED, 'invalid agent_id', req.id));
+        return;
+      }
+      const targetAgentId = targetParse.data.agent_id;
+
+      if (!broker.isPending(questionId, targetAgentId)) {
         if (broker.isRecentlyResolved(questionId)) {
           reply.send({
             code: ErrorCode.APPROVAL_ALREADY_RESOLVED, // 40902 — shared "already_resolved"
@@ -225,8 +233,8 @@ export function registerQuestionsRoutes(
         return;
       }
 
-      const body = bodyParse.data;
-      const inProc = questionToAgentCoreResponse(body);
+      const { agent_id: _agentId, ...response } = bodyParse.data;
+      const inProc = questionToAgentCoreResponse(response);
       broker.resolve(questionId, inProc);
       broker.markResolved(questionId);
 

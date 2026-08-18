@@ -22,4 +22,4 @@ Guidelines:
   to locate the task ID you need, then call `TaskOutput` with that ID to read
   the task's output and details.
 - This tool is read-only and does not change any state, so it is always safe
-  to call, including in plan mode.
+  to call in restricted modes.

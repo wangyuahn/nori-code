@@ -59,11 +59,8 @@ export function compactionUserMessageDisposition(
     case 'hook_result':
     case 'retry':
       return 'drop';
-    default: {
-      const _exhaustive: never = origin;
-      void _exhaustive;
+    default:
       return 'drop';
-    }
   }
 }
 

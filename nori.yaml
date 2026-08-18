@@ -1,6 +1,6 @@
 # nori.yaml
 # Nori Code project configuration.
-# This file defines phases, swarm settings, models, and error handling.
+# This file defines phases, SubAgent settings, models, and error handling.
 
 version: '1'
 
@@ -120,32 +120,6 @@ phases:
         prompt_template: 'Write a pattern note documenting reusable patterns discovered during review.'
 
 # ---------------------------------------------------------------------------
-#  Swarm — distributed agent execution
-# ---------------------------------------------------------------------------
-swarm:
-  max_concurrency: 4
-  max_swarm_depth: 3
-  default_timeout: 300
-  coder_write_enabled: false
-  checks:
-    - id: type_check
-      agent_type: coder
-      depends_on: []
-      on_failure: fix_and_retry
-    - id: lint_check
-      agent_type: coder
-      depends_on: [type_check]
-      on_failure: report
-    - id: test_check
-      agent_type: coder
-      depends_on: [lint_check]
-      on_failure: block
-    - id: review_gate
-      agent_type: reviewer
-      depends_on: [test_check]
-      on_failure: block
-
-# ---------------------------------------------------------------------------
 #  Models — LLM assignments per role
 # ---------------------------------------------------------------------------
 models:
@@ -206,7 +180,7 @@ on_error:
 #  Rules — behavior rules and note-writing flags
 # ---------------------------------------------------------------------------
 rules:
-  pre_swarm_doc_required: false
+  pre_subagent_doc_required: false
   require_analysis_note: true
   require_decision_note: true
   require_pattern_note: true
@@ -231,35 +205,24 @@ rules:
       prompt: |
         Before leaving the implement phase:
         1. Run tests to verify your changes work
-        2. Use nori_swarm_launch for post-code review
+        2. Use SubAgent tasks for post-code review
         3. Check that no existing tests are broken
       enforced: true
       editable: true
 
     # 重要工具调用前搜索记忆
-    - name: search_before_swarm
-      description: search_before_swarm
-      condition: { type: on_tool, tool: nori_swarm_launch, stage: before }
+    - name: search_before_subagent
+      description: search_before_subagent
+      condition: { type: on_tool, tool: SubAgent, stage: before }
       prompt: |
-        Before launching a swarm, search the vault for:
-        - Past swarm execution patterns and results
+        Before launching SubAgent tasks, search the vault for:
+        - Past SubAgent execution patterns and results
         - Similar implementation tasks and their outcomes
         - Relevant code review notes
         Use nori_memory_search.
       enforced: true
       editable: true
 
-    # 计划阶段必须产出分析文档
-    - name: require_plan_document
-      description: require_plan_document
-      condition: { type: on_phase, phase: plan, stage: exit }
-      prompt: |
-        Before exiting the plan phase, ensure you have:
-        1. Written a clear plan document (nori_memory_write or nori_plan_write)
-        2. Identified all affected modules and dependencies
-        3. Listed any architectural decisions that need to be made
-      enforced: true
-      editable: false
 
     # 实现阶段必须搜索记忆获取上下文
     - name: use_nori_before_code
@@ -274,16 +237,16 @@ rules:
       enforced: true
       editable: true
 
-    # Swarm完成后必须检查执行结果
-    - name: require_post_swarm_review
-      description: require_post_swarm_review
-      condition: { type: on_tool, tool: nori_swarm_launch, stage: after }
+    # SubAgent 完成后必须检查执行结果
+    - name: require_post_subagent_review
+      description: require_post_subagent_review
+      condition: { type: on_tool, tool: SubAgent, stage: after }
       prompt: |
-        After the swarm finishes, review its results:
-        1. Verify all swarm sub-tasks completed without errors
+        After SubAgent tasks finish, review their results:
+        1. Verify all SubAgent tasks completed without errors
         2. Check that generated code passes lint and type checks
-        3. Confirm tests introduced or modified by the swarm are green
-        4. Run nori_memory_write to record the swarm outcome for future reference
+        3. Confirm tests introduced or modified by SubAgent tasks are green
+        4. Run nori_memory_write to record the SubAgent outcome for future reference
       enforced: true
       editable: true
 

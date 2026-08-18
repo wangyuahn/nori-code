@@ -3,11 +3,20 @@
  * Reads markdown files directly from the filesystem.
  */
 
-import { readFileSync, readdirSync, existsSync, statSync, type Dirent } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { readFileSync, readdirSync, existsSync, statSync, writeFileSync, type Dirent } from 'node:fs';
 import { join, basename, relative } from 'node:path';
 import { z } from 'zod';
-import { parse as parseYaml } from 'yaml';
-import { okEnvelope } from '../envelope';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { ErrorCode } from '@nori-code/protocol';
+import {
+  compareMemoryNotesByWrittenAtDesc,
+  nowUtcIso,
+  resolveMemoryNoteTimestamps,
+  timestampsConflict,
+  utcDateOnly,
+} from '@nori-code/agent-core/tools/builtin/nori/memory-note-meta';
+import { errEnvelope, okEnvelope } from '../envelope';
 import { defineRoute } from '../middleware/defineRoute';
 import type { IInstantiationService } from '@nori-code/agent-core';
 
@@ -17,6 +26,19 @@ interface RouteHost {
     options: { schema?: Record<string, unknown> },
     handler: (
       req: { id: string; query: Record<string, unknown>; params: Record<string, unknown> },
+      reply: { send(payload: unknown): void },
+    ) => Promise<void> | void,
+  ): unknown;
+  patch(
+    path: string,
+    options: { preHandler?: unknown[]; schema?: Record<string, unknown> },
+    handler: (
+      req: {
+        id: string;
+        query: Record<string, unknown>;
+        params: Record<string, unknown>;
+        body: unknown;
+      },
       reply: { send(payload: unknown): void },
     ) => Promise<void> | void,
   ): unknown;
@@ -30,6 +52,11 @@ const noteSchema = z.object({
   date: z.string(),
   path: z.string(),
   links: z.array(z.string()).default([]),
+  tags: z.array(z.string()).default([]),
+  created_at: z.string().optional(),
+  updated_at: z.string().optional(),
+  /** Stable content version used to detect edits made outside Nori Work. */
+  content_hash: z.string().optional(),
 });
 
 const noteDetailSchema = noteSchema.extend({
@@ -51,7 +78,24 @@ const noteIdParamsSchema = z.object({
   note_id: z.string(),
 });
 
+const updateNoteBodySchema = z.object({
+  title: z.string().trim().min(1).max(200).optional(),
+  content: z.string().optional(),
+  tags: z.array(z.string().trim().min(1).max(80)).max(32).optional(),
+  expected_updated_at: z.string().optional(),
+  expected_content_hash: z.string().trim().min(1).optional(),
+}).refine(
+  (value) => value.title !== undefined || value.content !== undefined || value.tags !== undefined,
+  { message: 'At least one of title, content, or tags is required' },
+);
+
 export type NoteEntry = z.infer<typeof noteSchema>;
+
+export type VaultNoteUpdateResult =
+  | { status: 'updated'; note: NoteEntry & { content: string } }
+  | { status: 'missing' }
+  | { status: 'conflict'; current: NoteEntry }
+  | { status: 'io'; message: string };
 
 /** Resolve the vault path from project root or NORI_CODE_HOME. */
 function resolveVaultPath(): string {
@@ -89,62 +133,120 @@ export function scanVault(vaultPath: string): NoteEntry[] {
     if (!existsSync(folderPath)) continue;
 
     for (const filePath of markdownFiles(folderPath)) {
-      const entry = basename(filePath);
-      let content: string;
-      try { content = readFileSync(filePath, 'utf-8'); } catch { continue; }
-
-      // Get file modification time
-      let mtime = '';
-      try {
-        mtime = statSync(filePath).mtime.toISOString().slice(0, 10);
-      } catch { mtime = ''; }
-
-      const frontmatter = parseFrontmatter(content);
-      // Prefer the canonical memory title because wiki-links target it. Fall
-      // back to the filename for legacy notes without frontmatter.
-      const rawTitle = basename(entry, '.md');
-      const filenameTitle = rawTitle.replace(/^\d{4}-\d{2}-\d{2}-/, '');
-      const title = typeof frontmatter['title'] === 'string' && frontmatter['title'].trim() !== ''
-        ? frontmatter['title'].trim()
-        : filenameTitle;
-      const links = relatedLinks(frontmatter, content);
-
-      // Preview: first non-empty, non-heading line, skipping YAML frontmatter
-      const lines = content.split('\n');
-      let inFrontmatter = false;
-      let preview = '';
-      for (const line of lines) {
-        const trimmed = line.trim();
-        // Skip YAML frontmatter delimiters and their content
-        if (trimmed === '---') {
-          inFrontmatter = !inFrontmatter;
-          continue;
-        }
-        if (inFrontmatter) continue;
-        if (trimmed === '' || trimmed.startsWith('#') || trimmed.startsWith('- [')) continue;
-        preview = trimmed.slice(0, 200);
-        break;
-      }
-      if (!preview) preview = '(empty)';
-
-      const noteType = FOLDER_TO_TYPE[folder] ?? 'analysis';
-      const notePath = relative(vaultPath, filePath).replaceAll('\\', '/');
-
-      notes.push({
-        title,
-        type: noteType,
-        folder: noteType,
-        preview,
-        date: mtime,
-        path: notePath,
-        links,
-      });
+      const note = readNoteEntry(vaultPath, folder, filePath);
+      if (note) notes.push(note);
     }
   }
 
-  // Sort by date descending
-  notes.sort((a, b) => b.date.localeCompare(a.date));
+  notes.sort(compareMemoryNotesByWrittenAtDesc);
   return notes;
+}
+
+function readNoteEntry(vaultPath: string, folder: string, filePath: string): NoteEntry | undefined {
+  const entry = basename(filePath);
+  let content: string;
+  try { content = readFileSync(filePath, 'utf-8'); } catch { return undefined; }
+
+  let fileMtimeIso: string | undefined;
+  try { fileMtimeIso = statSync(filePath).mtime.toISOString(); } catch { fileMtimeIso = undefined; }
+
+  const frontmatter = parseFrontmatter(content);
+  const timestamps = resolveMemoryNoteTimestamps(frontmatter, { fileMtimeIso });
+  const rawTitle = basename(entry, '.md');
+  const filenameTitle = rawTitle.replace(/^\d{4}-\d{2}-\d{2}-/, '');
+  const title = typeof frontmatter['title'] === 'string' && frontmatter['title'].trim() !== ''
+    ? frontmatter['title'].trim()
+    : filenameTitle;
+  const links = relatedLinks(frontmatter, content);
+  const tags = stringList(frontmatter['tags']);
+  const noteType = FOLDER_TO_TYPE[folder] ?? 'analysis';
+  const notePath = relative(vaultPath, filePath).replaceAll('\\', '/');
+
+  return {
+    title,
+    type: noteType,
+    folder: noteType,
+    preview: notePreview(content),
+    date: timestamps.date ?? '',
+    path: notePath,
+    links,
+    tags,
+    created_at: timestamps.created_at,
+    updated_at: timestamps.updated_at,
+    content_hash: noteContentHash(content),
+  };
+}
+
+export function updateVaultNote(
+  vaultPath: string,
+  noteId: string,
+  patch: {
+    title?: string;
+    content?: string;
+    tags?: string[];
+    expected_updated_at?: string;
+    expected_content_hash?: string;
+  },
+  now: Date = new Date(),
+): VaultNoteUpdateResult {
+  const notes = scanVault(vaultPath);
+  const current = findNote(notes, noteId);
+  if (!current) return { status: 'missing' };
+  if (
+    contentHashesConflict(patch.expected_content_hash, current.content_hash)
+    || (patch.expected_content_hash === undefined && timestampsConflict(patch.expected_updated_at, current.updated_at))
+  ) {
+    return { status: 'conflict', current };
+  }
+
+  const absolute = join(vaultPath, current.path);
+  let raw: string;
+  try {
+    raw = readFileSync(absolute, 'utf-8');
+  } catch (error) {
+    return { status: 'io', message: error instanceof Error ? error.message : String(error) };
+  }
+
+  const { fields, body } = splitFrontmatter(raw);
+  const timestamps = resolveMemoryNoteTimestamps(fields, {
+    fileMtimeIso: current.updated_at,
+  });
+  const writtenAt = nowUtcIso(now);
+  const createdAt = timestamps.created_at ?? writtenAt;
+  const nextTitle = patch.title?.trim() || current.title;
+  const nextTags = patch.tags ?? stringList(fields['tags']);
+  const nextBody = patch.content === undefined ? body : stripFrontmatter(patch.content);
+
+  const nextFields: Record<string, unknown> = { ...fields };
+  nextFields['title'] = nextTitle;
+  nextFields['type'] = typeof fields['type'] === 'string' ? fields['type'] : current.type;
+  nextFields['date'] = timestamps.date ?? utcDateOnly(createdAt);
+  nextFields['created_at'] = createdAt;
+  nextFields['updated_at'] = writtenAt;
+  if (nextTags.length > 0) nextFields['tags'] = nextTags;
+  else delete nextFields['tags'];
+
+  const serialized = stringifyYaml(nextFields, { lineWidth: 0 }).trimEnd();
+  try {
+    writeFileSync(absolute, `---\n${serialized}\n---\n\n${nextBody.trimEnd()}\n`, 'utf-8');
+  } catch (error) {
+    return { status: 'io', message: error instanceof Error ? error.message : String(error) };
+  }
+
+  const updated = readNoteEntry(vaultPath, current.folder, absolute);
+  if (!updated) return { status: 'io', message: 'Note was written but could not be re-read' };
+  let content = '';
+  try { content = readFileSync(absolute, 'utf-8'); } catch { content = ''; }
+  return { status: 'updated', note: { ...updated, content } };
+}
+
+function noteContentHash(content: string): string {
+  return createHash('sha256').update(content).digest('hex');
+}
+
+function contentHashesConflict(expected: string | undefined, current: string | undefined): boolean {
+  if (expected === undefined || expected.trim() === '') return false;
+  return current === undefined || expected !== current;
 }
 
 function markdownFiles(root: string): string[] {
@@ -185,16 +287,49 @@ function normalizeLinkTarget(value: string): string {
 }
 
 function parseFrontmatter(content: string): Record<string, unknown> {
+  return splitFrontmatter(content).fields;
+}
+
+function splitFrontmatter(content: string): { fields: Record<string, unknown>; body: string } {
   const match = /^---\s*\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(content);
-  if (!match?.[1]) return {};
+  if (!match?.[1]) return { fields: {}, body: content };
   try {
     const parsed = parseYaml(match[1]) as unknown;
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+    const fields = typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
       ? parsed as Record<string, unknown>
       : {};
+    return { fields, body: content.slice(match[0].length) };
   } catch {
-    return {};
+    return { fields: {}, body: content };
   }
+}
+
+function stripFrontmatter(content: string): string {
+  return splitFrontmatter(content).body;
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function notePreview(content: string): string {
+  const lines = content.split('\n');
+  let inFrontmatter = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === '---') {
+      inFrontmatter = !inFrontmatter;
+      continue;
+    }
+    if (inFrontmatter) continue;
+    if (trimmed === '' || trimmed.startsWith('#') || trimmed.startsWith('- [')) continue;
+    return trimmed.slice(0, 200);
+  }
+  return '(empty)';
 }
 
 function searchNotes(notes: NoteEntry[], query: string, types?: string[]): NoteEntry[] {
@@ -202,7 +337,9 @@ function searchNotes(notes: NoteEntry[], query: string, types?: string[]): NoteE
   return notes.filter(n => {
     if (types && types.length > 0 && !types.includes(n.type)) return false;
     if (!q) return true;
-    return n.title.toLowerCase().includes(q) || n.preview.toLowerCase().includes(q);
+    return n.title.toLowerCase().includes(q)
+      || n.preview.toLowerCase().includes(q)
+      || n.tags.some(tag => tag.toLowerCase().includes(q));
   });
 }
 
@@ -277,11 +414,51 @@ export function registerVaultRoutes(app: RouteHost, _ix: IInstantiationService):
         reply.send(okEnvelope(null, req.id));
         return;
       }
-      // Read full content — if the file was deleted since boot, return empty content
       let content = '';
       try { content = readFileSync(join(vaultPath, note.path), 'utf-8'); } catch { /* file missing/deleted */ }
       reply.send(okEnvelope({ ...note, content }, req.id));
     },
   );
   app.get(noteRoute.path, noteRoute.options, noteRoute.handler as Parameters<RouteHost['get']>[2]);
+
+  const updateRoute = defineRoute(
+    {
+      method: 'PATCH',
+      path: '/vault/notes/{note_id}',
+      params: noteIdParamsSchema,
+      body: updateNoteBodySchema,
+      success: { data: noteDetailSchema },
+      errors: {
+        [ErrorCode.VAULT_NOTE_NOT_FOUND]: {},
+        [ErrorCode.VAULT_NOTE_CONFLICT]: { dataSchema: noteSchema },
+        [ErrorCode.PERSISTENCE_FAILURE]: {},
+      },
+      description: 'Update title, body, or tags of a vault note in place',
+      tags: ['vault'],
+    },
+    async (req, reply) => {
+      const result = updateVaultNote(vaultPath, req.params['note_id'], req.body);
+      if (result.status === 'missing') {
+        reply.send(errEnvelope(ErrorCode.VAULT_NOTE_NOT_FOUND, 'Note not found.', req.id));
+        return;
+      }
+      if (result.status === 'conflict') {
+        reply.send({
+          ...errEnvelope(
+            ErrorCode.VAULT_NOTE_CONFLICT,
+            'This note was modified after you opened it. Refresh and try again.',
+            req.id,
+          ),
+          data: result.current,
+        });
+        return;
+      }
+      if (result.status === 'io') {
+        reply.send(errEnvelope(ErrorCode.PERSISTENCE_FAILURE, result.message, req.id));
+        return;
+      }
+      reply.send(okEnvelope(result.note, req.id));
+    },
+  );
+  app.patch(updateRoute.path, updateRoute.options, updateRoute.handler as Parameters<RouteHost['patch']>[2]);
 }

@@ -42,7 +42,7 @@ describe('approval-adapter · toBrokerRequest (in-process → protocol)', () => 
   });
 
   it('preserves tool_input_display verbatim (12-arm passthrough)', () => {
-    const exotic = { kind: 'plan_review', plan: '...', options: [{ label: 'ok' }] } as never;
+    const exotic = { kind: 'custom_display', value: '...', options: [{ label: 'ok' }] } as never;
     const protoReq = toBrokerRequest(
       { ...inProc, display: exotic },
       {

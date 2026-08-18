@@ -25,7 +25,7 @@ The following example covers the most commonly used configuration fields. You ca
 ```toml
 default_model = "kimi-code/kimi-for-coding"
 default_permission_mode = "manual"
-default_plan_mode = false
+default_discuss_mode = false
 merge_all_available_skills = true
 telemetry = true
 
@@ -77,7 +77,7 @@ Fields in the config file fall into two categories: **top-level scalars** that d
 | --- | --- | --- | --- |
 | `default_model` | `string` | — | Default model alias; must be defined in `models` |
 | `default_permission_mode` | `string` | `manual` | Default permission mode for new sessions; one of `manual` (prompt for unapproved actions), `auto` (auto-approve ordinary tool calls while static deny rules still apply), or `yolo` (skip ordinary approvals in trusted workspaces) |
-| `default_plan_mode` | `boolean` | `false` | Whether new sessions start in Plan mode (produce a plan before executing) by default |
+| `default_discuss_mode` | `boolean` | `false` | Whether new sessions start in Discuss (a read-only team meeting) by default |
 | `merge_all_available_skills` | `boolean` | `true` | Whether to merge Agent Skills from all available directories |
 | `extra_skill_dirs` | `array<string>` | — | Extra skill search directories, layered on top of the default directories |
 | `telemetry` | `boolean` | `true` | Whether anonymous telemetry is enabled; disabled only when explicitly set to `false` |
@@ -233,7 +233,7 @@ api_key = "sk-xxx"
 
 `permission` sets permission rules that are automatically loaded when a session starts, controlling whether the Agent needs user confirmation before calling a tool. Rules are written as a `[[permission.rules]]` array of tables, matched in order — the first matching rule takes effect.
 
-Nori's runtime settings are separate from these static rules. `/setting readonly on|off` controls whether the main Agent may call `Write` and `Edit` directly; it does not remove `Read`, `Grep`, `Glob`, or `Bash`, and `Bash` still follows the current permission mode. `/setting coder write on|off` controls whether coding subagents can write directly, and `/setting depth <n>` controls swarm nesting depth. These settings are stored with the session runtime state rather than as `[[permission.rules]]` entries in `config.toml`.
+Nori's runtime settings are separate from these static rules. `/setting readonly on|off` controls whether the main Agent may call `Write` and `Edit` directly; it does not remove `Read`, `Grep`, `Glob`, or `Bash`, and `Bash` still follows the current permission mode. `/setting coder write on|off` controls whether coding subagents can write directly, and `/setting depth <n>` controls SubAgent nesting depth. These settings are stored with the session runtime state rather than as `[[permission.rules]]` entries in `config.toml`.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -242,7 +242,7 @@ Nori's runtime settings are separate from these static rules. `/setting readonly
 | `pattern` | `string` | Yes | Match pattern in the form `ToolName` or `ToolName(arg-pattern)`, e.g. `Read` or `Bash(rm -rf*)` |
 | `reason` | `string` | No | Rule description for debugging and auditing |
 
-Built-in tool names are listed in [Built-in tools](../reference/tools.md). Most built-in tools that accept rule arguments define their own matching subject, such as `Bash(command-pattern)` or `Read(path-pattern)`. `AgentSwarm`, MCP tools, and custom tools can only be matched by tool name — argument patterns are not supported for them.
+Built-in tool names are listed in [Built-in tools](../reference/tools.md). Most built-in tools that accept rule arguments define their own matching subject, such as `Bash(command-pattern)` or `Read(path-pattern)`. `SubAgent`, MCP tools, and custom tools can only be matched by tool name — argument patterns are not supported for them.
 
 ```toml
 [[permission.rules]]

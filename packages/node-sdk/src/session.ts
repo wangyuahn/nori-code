@@ -3,7 +3,6 @@ import {
   KimiError,
   type AgentContextData,
   type KimiErrorCode,
-  type SwarmModeTrigger,
 } from '@nori-code/agent-core';
 
 import { type ApprovalHandler, type Event, type QuestionHandler } from '#/events';
@@ -27,7 +26,6 @@ import type {
   ReloadSummary,
   ResumedSessionState,
   ResumedSessionSummary,
-  SessionPlan,
   SessionStatus,
   SessionSummary,
   SessionUsage,
@@ -140,14 +138,6 @@ export class Session {
     });
   }
 
-  async swarm(input: string | PromptInput): Promise<void> {
-    this.ensureOpen();
-    await this.rpc.swarm({
-      sessionId: this.id,
-      input: normalizePromptInput(input),
-    });
-  }
-
   async init(): Promise<void> {
     this.ensureOpen();
     await this.rpc.generateAgentsMd({ sessionId: this.id });
@@ -233,40 +223,15 @@ export class Session {
     return this.rpc.getNoriRuntimeSettings({ sessionId: this.id });
   }
 
-  async setPlanMode(enabled: boolean): Promise<void> {
-    this.ensureOpen();
-    if (typeof enabled !== 'boolean') {
-      throw new KimiError(
-        ErrorCodes.SESSION_PLAN_MODE_INVALID,
-        'Session plan mode must be a boolean',
-      );
-    }
-    await this.rpc.setPlanMode({ sessionId: this.id, enabled });
-  }
-
-  async setSwarmMode(enabled: boolean, trigger: SwarmModeTrigger): Promise<void> {
+  async setDiscussMode(enabled: boolean): Promise<void> {
     this.ensureOpen();
     if (typeof enabled !== 'boolean') {
       throw new KimiError(
         ErrorCodes.REQUEST_INVALID,
-        'Session swarm mode must be a boolean',
+        'Session Discuss mode must be a boolean',
       );
     }
-    if (enabled) {
-      await this.rpc.setSwarmMode({ sessionId: this.id, enabled: true, trigger });
-    } else {
-      await this.rpc.setSwarmMode({ sessionId: this.id, enabled: false });
-    }
-  }
-
-  async getPlan(): Promise<SessionPlan> {
-    this.ensureOpen();
-    return this.rpc.getPlan({ sessionId: this.id });
-  }
-
-  async clearPlan(): Promise<void> {
-    this.ensureOpen();
-    await this.rpc.clearPlan({ sessionId: this.id });
+    await this.rpc.setDiscussMode({ sessionId: this.id, enabled });
   }
 
   async compact(options: CompactOptions = {}): Promise<void> {

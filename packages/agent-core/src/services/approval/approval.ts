@@ -84,7 +84,7 @@ export interface IApprovalService {
    * Returns the protocol-shaped pending approval requests for a session.
    * Used by the session status lifecycle to detect `awaiting_approval`.
    */
-  listPending(sessionId: string): readonly ProtocolApprovalRequest[];
+  listPending(sessionId: string, agentId?: string): readonly ProtocolApprovalRequest[];
 }
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare

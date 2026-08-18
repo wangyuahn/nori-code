@@ -7,6 +7,7 @@ import {
   ErrorCode,
   WS_PROTOCOL_VERSION,
   type AbortMessage,
+  type AgentIdsBySession,
   type ClientHelloMessage,
   type ClientControlMessage,
   type CursorsBySession,
@@ -43,6 +44,7 @@ export interface BufferReplaySource {
   getBufferedSince(
     sessionId: string,
     cursor: SessionCursor,
+    agentIds?: readonly string[],
   ): Promise<{
     events: Array<{ seq: number; envelope: EventEnvelope }>;
     resyncRequired: 'buffer_overflow' | 'session_recreated' | 'epoch_changed' | false;
@@ -57,6 +59,7 @@ export interface AbortHandler {
   abort(
     sessionId: string,
     promptId: string,
+    agentId?: string,
   ): Promise<{ aborted: boolean; at_seq?: number }>;
 
   currentSeq(sessionId: string): number;
@@ -134,6 +137,13 @@ export class WsConnection {
 
   /** Last cursor each subscribed session was synced from (client-claimed). */
   public readonly cursorsBySession = new Map<string, SessionCursor>();
+
+  /**
+   * Optional per-session agent filters. A missing entry deliberately means
+   * every agent, which keeps clients using the legacy session-only protocol
+   * compatible.
+   */
+  public readonly agentIdsBySession = new Map<string, ReadonlySet<string>>();
 
   /** ISO 8601 UTC timestamp the socket was accepted at. */
   public readonly connectedAt: string;
@@ -269,9 +279,9 @@ export class WsConnection {
 
   private async onClientHello(msg: ClientHelloMessage): Promise<void> {
     this.gotClientHello = true;
-    const { subscriptions, cursors } = msg.payload;
+    const { subscriptions, cursors, agent_ids } = msg.payload;
 
-    const sync = await this.syncSessions(subscriptions, cursors);
+    const sync = await this.syncSessions(subscriptions, cursors, agent_ids);
 
     this.logger.info(
       {
@@ -301,6 +311,7 @@ export class WsConnection {
   private async syncSessions(
     sessionIds: readonly string[],
     cursors: CursorsBySession | undefined,
+    agentIds: AgentIdsBySession | undefined,
   ): Promise<{
     accepted: string[];
     resyncRequired: string[];
@@ -310,7 +321,16 @@ export class WsConnection {
     const resyncRequired: string[] = [];
     const serverCursors: CursorsBySession = {};
 
-    for (const sid of sessionIds) {
+    const requestedSessionIds = new Set([
+      ...sessionIds,
+      ...Object.keys(cursors ?? {}),
+      ...Object.keys(agentIds ?? {}),
+    ]);
+
+    // Install the filter before registering the connection. A live event can
+    // be dispatched as soon as the subscription becomes visible.
+    for (const sid of requestedSessionIds) {
+      this.setAgentFilter(sid, agentIds?.[sid]);
       if (!this.subscriptions.has(sid)) {
         this.subscribe(sid);
       }
@@ -320,12 +340,7 @@ export class WsConnection {
     if (cursors) {
       for (const [sid, cursor] of Object.entries(cursors)) {
         this.cursorsBySession.set(sid, cursor);
-        if (!this.subscriptions.has(sid)) {
-          this.subscribe(sid);
-        }
-        if (!accepted.includes(sid)) accepted.push(sid);
-
-        const result = await this.wsBroadcast.getBufferedSince(sid, cursor);
+        const result = await this.wsBroadcast.getBufferedSince(sid, cursor, agentIds?.[sid]);
         if (result.resyncRequired !== false) {
           this.send(
             buildResyncRequired(sid, result.resyncRequired, result.currentSeq, result.epoch),
@@ -351,13 +366,13 @@ export class WsConnection {
   }
 
   private async onSubscribe(msg: SubscribeMessage): Promise<void> {
-    const { session_ids, cursors, watch_fs } = msg.payload;
+    const { session_ids, cursors, agent_ids, watch_fs } = msg.payload;
     this.logger.info(
-      { sessionIds: session_ids, cursors, hasWatchFs: !!watch_fs },
+      { sessionIds: session_ids, cursors, agentIds: agent_ids, hasWatchFs: !!watch_fs },
       'ws subscribe',
     );
 
-    const sync = await this.syncSessions(session_ids, cursors);
+    const sync = await this.syncSessions(session_ids, cursors, agent_ids);
 
     if (watch_fs && this.fsWatchHandler !== undefined) {
       for (const [sid, cfg] of Object.entries(watch_fs)) {
@@ -397,6 +412,7 @@ export class WsConnection {
     for (const sid of session_ids) {
       this.unsubscribe(sid);
       this.cursorsBySession.delete(sid);
+      this.agentIdsBySession.delete(sid);
 
       if (this.fsWatchHandler !== undefined) {
 
@@ -481,7 +497,7 @@ export class WsConnection {
   }
 
   private onAbort(msg: AbortMessage): void {
-    const { session_id, prompt_id } = msg.payload;
+    const { session_id, prompt_id, agent_id } = msg.payload;
     if (this.abortHandler === undefined) {
       this.send(
         buildAck(msg.id, ErrorCode.INTERNAL_ERROR, 'abort handler not wired', {}),
@@ -489,7 +505,7 @@ export class WsConnection {
       return;
     }
     void this.abortHandler
-      .abort(session_id, prompt_id)
+      .abort(session_id, prompt_id, agent_id)
       .then((result) => {
         this.send(
           buildAck(msg.id, 0, 'success', {
@@ -646,6 +662,20 @@ export class WsConnection {
     this.sessionClients.unsubscribe(this, sid);
   }
 
+  /** Whether a session-scoped agent event belongs on this connection. */
+  public acceptsAgentEvent(sid: string, agentId: string): boolean {
+    const agentIds = this.agentIdsBySession.get(sid);
+    return agentIds === undefined || agentIds.has(agentId);
+  }
+
+  private setAgentFilter(sid: string, agentIds: readonly string[] | undefined): void {
+    if (agentIds === undefined) {
+      this.agentIdsBySession.delete(sid);
+      return;
+    }
+    this.agentIdsBySession.set(sid, new Set(agentIds));
+  }
+
   private startPingTimer(): void {
     this.pingTimer = setInterval(() => {
       if (this.closed) return;
@@ -681,6 +711,7 @@ export class WsConnection {
 
     this.sessionClients.forgetConnection(this);
     this.subscriptions.clear();
+    this.agentIdsBySession.clear();
 
     if (this.fsWatchHandler !== undefined) {
       try {

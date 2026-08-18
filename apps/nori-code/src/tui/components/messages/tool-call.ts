@@ -8,7 +8,6 @@ import { isAbsolute, relative, sep } from 'node:path';
 import { Container, Spacer, Text, truncateToWidth, visibleWidth } from '@nori-code/pi-tui';
 import type { Component, TUI } from '@nori-code/pi-tui';
 import { highlightLines, langFromPath } from '#/tui/components/media/code-highlight';
-import { renderDiffLinesClustered } from '#/tui/components/media/diff-preview';
 import {
   COMMAND_PREVIEW_LINES,
   RESULT_PREVIEW_LINES,
@@ -28,10 +27,13 @@ import { decodeMcpToolName } from '#/tui/utils/mcp-tool-name';
 import { isRenderCacheEnabled } from '#/tui/utils/render-cache';
 import { sanitizeShellOutput } from '#/tui/utils/shell-output';
 
-import { agentSwarmResultSummaryFromOutput } from './agent-swarm-progress';
-import { PlanBoxComponent } from './plan-box';
+import { subagentResultSummaryFromOutput } from './subagent-progress';
 import { ShellExecutionComponent } from './shell-execution';
 import { countNonEmptyLines, pickChip } from './tool-renderers/chip';
+import {
+  editOperationLabel,
+  parseEditLineOperations,
+} from './tool-renderers/edit-line-ops';
 import { buildGoalToolHeader } from './tool-renderers/goal';
 import { isGenericToolResult, pickResultRenderer } from './tool-renderers/registry';
 import { TruncatedOutputComponent } from './tool-renderers/truncated';
@@ -41,7 +43,6 @@ const MAX_SUB_TOOL_CALLS_SHOWN = 4;
 const MAX_SINGLE_SUBAGENT_TOOL_ROWS = 4;
 // Hanging indent for a sub-tool's previewed output, nested under its activity row.
 const SUBAGENT_SUBTOOL_OUTPUT_INDENT = 6;
-const APPROVED_PLAN_MARKER = '## Approved Plan:';
 const STREAMING_PROGRESS_INTERVAL_MS = 1000;
 const SUBAGENT_ELAPSED_INTERVAL_MS = 1000;
 const PROGRESS_URL_RE = /https?:\/\/\S+/g;
@@ -176,72 +177,6 @@ function formatElapsed(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
   return `${String(minutes)}m ${String(remainder)}s`;
-}
-
-function extractApprovedPlan(output: string): string {
-  const markerIndex = output.indexOf(APPROVED_PLAN_MARKER);
-  if (markerIndex < 0) return '';
-  return output.slice(markerIndex + APPROVED_PLAN_MARKER.length).trim();
-}
-
-interface ExitPlanModeOutcome {
-  readonly kind: 'approved' | 'rejected';
-  readonly chosen?: string;
-  readonly feedback?: string;
-  readonly path?: string;
-}
-
-const REJECT_PREFIX = 'User rejected the plan.';
-const REJECT_FEEDBACK_PREFIX = 'User rejected the plan. Feedback:';
-const APPROVED_OPTION_RE = /^User approved option "([^"]+)"\./;
-const PLAN_REJECT_PREFIX = 'Plan rejected by user.';
-const SELECTED_APPROACH_RE = /^Exited plan mode\. Selected approach: ([^\n]+)\n/;
-const PLAN_SAVED_TO_RE = /\nPlan saved to: ([^\n]+)\n/;
-
-/**
- * Parses the ExitPlanMode result content string to recover the approval outcome
- * and optional plan path. Core-side templates live in
- * `packages/agent-core/src/tools/builtin/planning/exit-plan-mode.ts`:
- *   - Approved output starts with 'Exited plan mode.' and selected options
- *     are reported as 'Selected approach: <label>'. Older outputs may start
- *     with 'User approved option "<label>".' Plan-file mode may include
- *     'Plan saved to: <path>'.
- *   - Rejected output starts with 'Plan rejected by user.' or older
- *     'User rejected the plan.'; feedback uses 'User rejected the plan.
- *     Feedback:\n\n<text>'.
- * This is a string protocol rather than a structured payload. Prefer a
- * structured event payload if core starts emitting one.
- */
-function interpretExitPlanModeOutcome(output: string): ExitPlanModeOutcome {
-  if (output.startsWith(REJECT_PREFIX)) {
-    if (output.startsWith(REJECT_FEEDBACK_PREFIX)) {
-      const feedback = output.slice(REJECT_FEEDBACK_PREFIX.length).trimStart();
-      return { kind: 'rejected', feedback };
-    }
-    return { kind: 'rejected' };
-  }
-  if (output.startsWith(PLAN_REJECT_PREFIX)) {
-    return { kind: 'rejected' };
-  }
-  const pathMatch = PLAN_SAVED_TO_RE.exec(output);
-  const path = pathMatch?.[1]?.trim();
-  const optionMatch = SELECTED_APPROACH_RE.exec(output) ?? APPROVED_OPTION_RE.exec(output);
-  if (optionMatch !== null) {
-    return path !== undefined && path.length > 0
-      ? { kind: 'approved', chosen: optionMatch[1], path }
-      : { kind: 'approved', chosen: optionMatch[1] };
-  }
-  return path !== undefined && path.length > 0 ? { kind: 'approved', path } : { kind: 'approved' };
-}
-
-function isExitPlanModeOutcomeOutput(output: string): boolean {
-  return (
-    output.startsWith(REJECT_PREFIX) ||
-    output.startsWith(PLAN_REJECT_PREFIX) ||
-    output.startsWith('Exited plan mode.') ||
-    APPROVED_OPTION_RE.test(output) ||
-    output.includes(APPROVED_PLAN_MARKER)
-  );
 }
 
 function unescapeJsonString(s: string): string {
@@ -524,15 +459,6 @@ export class ToolCallComponent extends Container {
   private readonly markdownTheme = createMarkdownTheme();
   private result: ToolResultBlockData | undefined;
   private ui: TUI | undefined;
-  private planPath: string | undefined;
-  /**
-   * Fallback plan body used when the LLM uses plan-file mode and
-   * `args.plan` is empty. `KimiTUI` calls `setPlanInfo` with
-   * `session.getPlan()` content so the plan box can render while
-   * approval is pending, and so rejected or revised results still show
-   * the plan body even without a `## Approved Plan:` marker.
-   */
-  private currentPlan: string | undefined;
   private headerText: Text;
   private callPreviewEndIndex = 0;
 
@@ -774,26 +700,8 @@ export class ToolCallComponent extends Container {
     this.stopDetachHintTimer();
   }
 
-  /**
-   * Injects plan body/path asynchronously. Only ExitPlanMode cards use
-   * this: plan-file mode leaves `args.plan` empty, so `KimiTUI` fetches
-   * the plan via `session.getPlan()` and calls this method to render the
-   * plan box.
-   */
-  setPlanInfo(info: { plan?: string; path?: string }): void {
-    if (this.toolCall.name !== 'ExitPlanMode') return;
-    let changed = false;
-    if (info.plan !== undefined && info.plan.length > 0 && this.currentPlan !== info.plan) {
-      this.currentPlan = info.plan;
-      changed = true;
-    }
-    if (info.path !== undefined && info.path.length > 0 && this.planPath !== info.path) {
-      this.planPath = info.path;
-      changed = true;
-    }
-    if (!changed) return;
-    this.rebuildBody();
-    this.ui?.requestRender();
+  setDiscussInfo(_info: { summary?: string }): void {
+    void _info;
   }
 
   private applySubagentReplay(subagent: ToolCallBlockData['subagent']): void {
@@ -1416,22 +1324,6 @@ export class ToolCallComponent extends Container {
       bullet = currentTheme.fg('text', STATUS_BULLET);
     }
 
-    if (toolCall.name === 'ExitPlanMode') {
-      const label = currentTheme.boldFg('primary', 'Current plan');
-      if (!isFinished || result === undefined || result.is_error === true) {
-        return label;
-      }
-      const outcome = interpretExitPlanModeOutcome(result.output);
-      if (outcome.kind === 'approved') {
-        const chipText =
-          outcome.chosen !== undefined && outcome.chosen.length > 0
-            ? `Approved: ${outcome.chosen}`
-            : 'Approved';
-        return `${label}${currentTheme.fg('success', ` · ${chipText}`)}`;
-      }
-      return label;
-    }
-
     if (toolCall.name === 'AskUserQuestion') {
       const isBackgroundAsk = toolCall.args['background'] === true;
       const label = isFinished
@@ -1866,10 +1758,6 @@ export class ToolCallComponent extends Container {
 
   private buildCallPreview(): void {
     const name = this.toolCall.name;
-    if (name === 'ExitPlanMode') {
-      this.buildPlanPreview();
-      return;
-    }
     if (this.result === undefined && this.toolCall.truncated === true) {
       this.addChild(
         new Text(
@@ -1914,16 +1802,32 @@ export class ToolCallComponent extends Container {
         );
       }
     } else if (name === 'Edit') {
-      const oldStr = str(this.toolCall.args['old_string']);
-      const newStr = str(this.toolCall.args['new_string']);
-      if (oldStr.length === 0 && newStr.length === 0) return;
       const filePath = str(this.toolCall.args['file_path'] ?? this.toolCall.args['path']);
-      const lines = renderDiffLinesClustered(oldStr, newStr, filePath, {
-        contextLines: 3,
-        ...(shouldCap ? { maxLines: COMMAND_PREVIEW_LINES } : {}),
-      });
+      const operations = parseEditLineOperations(this.toolCall.args);
+      if (operations.length === 0) return;
+      const lang = langFromPath(filePath);
+      const allLines: string[] = [];
+      for (const operation of operations) {
+        allLines.push(currentTheme.dim(editOperationLabel(operation)));
+        if (operation.op === 'del') continue;
+        for (const contentLine of highlightLines(operation.content, lang)) {
+          allLines.push(currentTheme.fg('success', '+ ') + contentLine);
+        }
+      }
+      const lines = shouldCap ? allLines.slice(0, COMMAND_PREVIEW_LINES) : allLines;
       for (const line of lines) {
         this.addChild(new Text(line, 2, 0));
+      }
+      if (shouldCap && allLines.length > lines.length) {
+        this.addChild(
+          new Text(
+            currentTheme.dim(
+              `... (${String(allLines.length - lines.length)} more lines, ctrl+o to expand)`,
+            ),
+            2,
+            0,
+          ),
+        );
       }
     } else if (name === 'Bash' && this.result === undefined) {
       // While a long-running Bash call is in-flight (args finalized, no result
@@ -2010,55 +1914,12 @@ export class ToolCallComponent extends Container {
     // leave the body blank and let the header do the talking.
   }
 
-  private buildPlanPreview(): void {
-    // Priority: inline `args.plan`, approved plan parsed from result, then
-    // asynchronously injected currentPlan used while approval is in flight.
-    // Once a plan is found, PlanBoxComponent renders it.
-    const plan = this.resolvePlanForPreview();
-    if (plan.length === 0) return;
-    const path = this.resolvePlanPath();
-    this.addChild(
-      new PlanBoxComponent(plan, this.markdownTheme, currentTheme.color('success'), path, {
-        status: this.resolvePlanBoxStatus(),
-      }),
-    );
-  }
-
-  private resolvePlanForPreview(): string {
-    const inlinePlan = str(this.toolCall.args['plan']);
-    if (inlinePlan.length > 0) return inlinePlan;
-    if (this.result !== undefined && !this.result.is_error) {
-      const approved = extractApprovedPlan(this.result.output);
-      if (approved.length > 0) return approved;
-    }
-    return this.currentPlan ?? '';
-  }
-
-  // Priority: approved result.output with 'Plan saved to: <path>', then the
-  // planPath asynchronously injected by setPlanInfo while approval is in flight.
-  private resolvePlanPath(): string | undefined {
-    if (this.result !== undefined && !this.result.is_error) {
-      const fromResult = interpretExitPlanModeOutcome(this.result.output).path;
-      if (fromResult !== undefined && fromResult.length > 0) return fromResult;
-    }
-    return this.planPath;
-  }
-
-  private resolvePlanBoxStatus(): { label: string; colorHex: string } | undefined {
-    const result = this.result;
-    if (this.toolCall.name !== 'ExitPlanMode' || result === undefined) return undefined;
-    if (!isExitPlanModeOutcomeOutput(result.output)) return undefined;
-    const outcome = interpretExitPlanModeOutcome(result.output);
-    if (outcome.kind !== 'rejected') return undefined;
-    return { label: 'Rejected', colorHex: currentTheme.color('error') };
-  }
-
   private buildContent(): void {
     const { result } = this;
     if (result === undefined) return;
 
-    if (this.toolCall.name === 'AgentSwarm') {
-      this.buildAgentSwarmResultSummary(result);
+    if (this.toolCall.name === 'SubAgent') {
+      this.buildSubAgentResultSummary(result);
       return;
     }
 
@@ -2075,32 +1936,10 @@ export class ToolCallComponent extends Container {
       return;
     }
 
-    if (this.toolCall.name === 'ExitPlanMode' && isExitPlanModeOutcomeOutput(result.output)) {
-      // Approved plans are already rendered by buildCallPreview via
-      // resolvePlanForPreview. Rejected or revise feedback uses a warning label
-      // plus normal body text so it remains visible in the transcript.
-      const outcome = interpretExitPlanModeOutcome(result.output);
-      if (outcome.kind === 'rejected' && outcome.feedback !== undefined) {
-        const trimmed = outcome.feedback.trim();
-        if (trimmed.length > 0) {
-          const labelTone = (text: string) => currentTheme.boldFg('warning', text);
-          this.addChild(new Text(labelTone('↪ Suggestion'), 2, 0));
-          for (const line of trimmed.split('\n')) {
-            this.addChild(new Text(line, 4, 0));
-          }
-        }
-      }
-      return;
-    }
-
     // TodoList: the authoritative list is shown in the dedicated
     // TodoPanel before the input area, so repeating the text dump here is
     // pure clutter. Keep the headline, drop the body.
     if (this.toolCall.name === 'TodoList' && !result.is_error) {
-      return;
-    }
-
-    if (this.toolCall.name === 'EnterPlanMode' && !result.is_error) {
       return;
     }
 
@@ -2122,8 +1961,8 @@ export class ToolCallComponent extends Container {
     }
   }
 
-  private buildAgentSwarmResultSummary(result: ToolResultBlockData): void {
-    const summary = agentSwarmResultSummaryFromOutput(result.output);
+  private buildSubAgentResultSummary(result: ToolResultBlockData): void {
+    const summary = subagentResultSummaryFromOutput(result.output);
     const dim = (s: string): string => currentTheme.fg('textDim', s);
     const segments: string[] = [];
 
@@ -2144,7 +1983,7 @@ export class ToolCallComponent extends Container {
     }
 
     if (segments.length > 0) {
-      this.addChild(new Text(`${dim('Agent swarm: ')}${segments.join(dim(' · '))}`, 2, 0));
+      this.addChild(new Text(`${dim('SubAgent: ')}${segments.join(dim(' · '))}`, 2, 0));
       return;
     }
 
@@ -2155,7 +1994,7 @@ export class ToolCallComponent extends Container {
       : result.is_error === true
         ? `${FAILURE_MARK.trimEnd()} Failed.`
         : `${SUCCESS_MARK.trimEnd()} Completed.`;
-    this.addChild(new Text(`${dim('Agent swarm: ')}${currentTheme.fg(colorToken, label)}`, 2, 0));
+    this.addChild(new Text(`${dim('SubAgent: ')}${currentTheme.fg(colorToken, label)}`, 2, 0));
   }
 
   /**

@@ -71,6 +71,14 @@ async function makePlugin(
   return realpath(root);
 }
 
+function isWindowsSymlinkPrivilegeError(error: unknown): boolean {
+  return process.platform === 'win32'
+    && typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && error.code === 'EPERM';
+}
+
 describe('PluginManager', () => {
   it('install() adds a plugin and load() rehydrates it from disk', async () => {
     const home = await makeKimiHome();
@@ -132,11 +140,16 @@ describe('PluginManager', () => {
     await expect(manager.install('relative/plugin')).rejects.toThrow(/absolute path/i);
   });
 
-  it('install() copies a symlinked plugin root into the managed plugins dir', async () => {
+  it('install() copies a symlinked plugin root into the managed plugins dir', async (ctx) => {
     const home = await makeKimiHome();
     const pluginRoot = await makePlugin('demo');
     const link = path.join(await mkdtemp(path.join(tmpdir(), 'plugin-link-')), 'demo-link');
-    await symlink(pluginRoot, link);
+    try {
+      await symlink(pluginRoot, link);
+    } catch (error) {
+      if (isWindowsSymlinkPrivilegeError(error)) return ctx.skip('Windows symlink privilege is unavailable');
+      throw error;
+    }
     const manager = new PluginManager({ kimiHomeDir: home });
     await manager.load();
 
@@ -883,7 +896,11 @@ describe('PluginManager', () => {
         command: './hooks/guard.sh',
         timeout: 10,
         cwd: installedRoot,
-        env: { NORI_CODE_HOME: home, KIMI_PLUGIN_ROOT: installedRoot },
+        env: {
+          NORI_CODE_HOME: home,
+          NORI_PLUGIN_ROOT: installedRoot,
+          KIMI_PLUGIN_ROOT: installedRoot,
+        },
       },
     ]);
   });

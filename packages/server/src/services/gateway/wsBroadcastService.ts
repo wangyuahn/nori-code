@@ -1,5 +1,3 @@
-
-
 import { join } from 'node:path';
 
 import { Disposable, IEnvironmentService, IEventService, ILogService } from '@nori-code/agent-core';
@@ -14,21 +12,7 @@ import {
   type BufferedSinceResult,
   type SessionSnapshotState,
 } from './wsBroadcast';
-
 import { buildEventEnvelope, type EventEnvelope } from '#/ws/protocol';
-import {
-  countSettledSwarmTasks,
-  findSwarmByAgent,
-  findSwarmByToolCall,
-  getSwarmStatus,
-  nextSwarmRound,
-  reconcileSwarmStatus,
-  setSwarmStatus,
-  type SwarmStatusEntry,
-  type SwarmTaskStatusEntry,
-  type SwarmTokenUsage,
-  updateSwarmStatus,
-} from '../../routes/swarmStatus';
 
 interface BufferEntry {
   seq: number;
@@ -36,103 +20,13 @@ interface BufferEntry {
 }
 
 interface SessionState {
-  /** Resolves when the journal file has been opened/recovered. */
   ready: Promise<SessionEventJournal>;
-  /** Set once `ready` resolves — for sync best-effort reads. */
   journal: SessionEventJournal | undefined;
-  /** In-memory tail cache of the most recent durable envelopes. */
   tail: BufferEntry[];
-  /** Per-session dispatch chain: keeps journal append + fan-out ordered. */
   queue: Promise<void>;
 }
 
 const MAIN_AGENT_ID = 'main';
-const MAX_SWARM_OUTPUT_CHARS = 128_000;
-
-interface PendingSwarmToolCall {
-  ownerAgentId: string;
-  toolCallId: string;
-  description: string;
-}
-
-function isSubagentTranscriptEvent(event: Event): boolean {
-  if (event.agentId === MAIN_AGENT_ID) return false;
-  const type = (event as { type: string }).type;
-  return type.startsWith('turn.')
-    || type.startsWith('assistant.')
-    || type.startsWith('thinking.')
-    || type.startsWith('tool.call.')
-    || type.startsWith('shell.')
-    || type === 'tool.progress'
-    || type === 'tool.result'
-    || type === 'prompt.completed'
-    || type === 'error';
-}
-
-function toSwarmUsage(usage: {
-  inputOther: number;
-  output: number;
-  inputCacheRead: number;
-  inputCacheCreation: number;
-}): SwarmTokenUsage {
-  const input = usage.inputOther + usage.inputCacheRead + usage.inputCacheCreation;
-  return {
-    input,
-    output: usage.output,
-    cache_read: usage.inputCacheRead,
-    cache_write: usage.inputCacheCreation,
-    total: input + usage.output,
-  };
-}
-
-function addSwarmUsage(
-  current: SwarmTokenUsage | undefined,
-  incoming: SwarmTokenUsage,
-): SwarmTokenUsage {
-  if (current === undefined) return incoming;
-  return {
-    input: current.input + incoming.input,
-    output: current.output + incoming.output,
-    cache_read: current.cache_read + incoming.cache_read,
-    cache_write: current.cache_write + incoming.cache_write,
-    total: current.total + incoming.total,
-  };
-}
-
-function aggregateSwarmUsage(
-  tasks: readonly SwarmTaskStatusEntry[] | undefined,
-): SwarmTokenUsage | undefined {
-  const usages = tasks?.flatMap(task => task.usage === undefined ? [] : [task.usage]) ?? [];
-  if (usages.length === 0) return undefined;
-  return usages.reduce<SwarmTokenUsage>((total, usage) => addSwarmUsage(total, usage), {
-    input: 0,
-    output: 0,
-    cache_read: 0,
-    cache_write: 0,
-    total: 0,
-  });
-}
-
-function upsertSwarmTask(
-  current: readonly SwarmTaskStatusEntry[] | undefined,
-  task: SwarmTaskStatusEntry,
-): SwarmTaskStatusEntry[] {
-  const tasks = [...(current ?? [])];
-  const index = tasks.findIndex(item => item.id === task.id);
-  if (index < 0) tasks.push(task);
-  else tasks[index] = { ...tasks[index], ...task };
-  return tasks;
-}
-
-function estimateOutputTokens(text: string): number {
-  let asciiChars = 0;
-  let nonAsciiChars = 0;
-  for (const char of text) {
-    if (char.charCodeAt(0) <= 0x7f) asciiChars++;
-    else nonAsciiChars++;
-  }
-  return Math.ceil(asciiChars / 4) + nonAsciiChars;
-}
 
 export class WSBroadcastService extends Disposable implements IWSBroadcastService {
   readonly _serviceBrand: undefined;
@@ -141,7 +35,6 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
   private readonly _maxBufferSize: number;
   private readonly _journalDir: string;
   private readonly _turnTracker = new InFlightTurnTracker();
-  private readonly _pendingSwarmTools = new Map<string, PendingSwarmToolCall[]>();
 
   constructor(
     @IEventService eventService: IEventService,
@@ -153,366 +46,87 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
     super();
     this._maxBufferSize = DEFAULT_MAX_BUFFER_SIZE;
     this._journalDir = join(env.homeDir, 'server', 'events');
-
-    this._register(
-      eventService.onDidPublish((event) => {
-        this._onEvent(event);
-      }),
-    );
+    this._register(eventService.onDidPublish((event) => this._onEvent(event)));
   }
 
   private _onEvent(event: Event): void {
     if (this._store.isDisposed) return;
     const sid = extractSessionId(event);
-    const evType = (event as { type?: string }).type ?? '<no-type>';
-    if (!sid) {
+    const evType = event.type;
+    if (sid === undefined) {
       this.logger.warn(
         { eventType: evType, eventKeys: Object.keys(event as object) },
         'wsBroadcast: event has no session_id; dropping',
       );
       return;
     }
-    this._updateSwarmStatus(sid, event);
-    // Subagent transcript streams have their own task-output surface. Sending
-    // every token and tool step through the main session socket can generate
-    // thousands of frames per second during a swarm, starving the main
-    // assistant stream and making snapshots wait behind an ever-growing
-    // journal queue. Shared events such as code.change and subagent lifecycle
-    // updates still pass through this channel.
-    if (isSubagentTranscriptEvent(event)) return;
     const state = this._getOrCreateSession(sid);
     state.queue = state.queue
       .then(() => this._dispatch(sid, state, event))
-      .catch((err: unknown) => {
-        this.logger.warn({ sid, eventType: evType, err: String(err) }, 'wsBroadcast dispatch failed');
+      .catch((error: unknown) => {
+        this.logger.warn({ sid, eventType: evType, err: String(error) }, 'wsBroadcast dispatch failed');
       });
-  }
-
-  private _updateSwarmStatus(sid: string, event: Event): void {
-    if (
-      event.type === 'tool.call.started'
-      && (event.name === 'AgentSwarm' || event.name === 'nori_swarm_launch')
-    ) {
-      const pending = this._pendingSwarmTools.get(sid) ?? [];
-      pending.push({
-        ownerAgentId: event.agentId,
-        toolCallId: event.toolCallId,
-        description: event.description ?? event.name,
-      });
-      this._pendingSwarmTools.set(sid, pending);
-      return;
-    }
-
-    if (
-      event.type === 'background.task.started'
-      || event.type === 'background.task.updated'
-      || event.type === 'background.task.terminated'
-    ) {
-      const { info } = event;
-      if (info.kind !== 'agent') return;
-
-      if (!info.subagentType?.startsWith('swarm')) {
-        const prior = getSwarmStatus(info.taskId);
-        const terminal = event.type === 'background.task.terminated';
-        const status = event.type === 'background.task.updated'
-          ? info.paused === true ? 'paused' as const : 'running' as const
-          : !terminal
-            ? 'running' as const
-            : info.status === 'completed'
-              ? 'done' as const
-              : info.status === 'killed'
-                ? 'stopped' as const
-                : 'failed' as const;
-        const agentId = info.agentId ?? info.taskId;
-        const priorTask = prior?.tasks?.find(task => task.id === info.taskId || task.agent_id === agentId);
-        const task: SwarmTaskStatusEntry = {
-          ...priorTask,
-          id: info.taskId,
-          agent_id: agentId,
-          parent_agent_id: event.agentId,
-          profile: info.subagentType,
-          label: info.description,
-          status: info.paused === true
-            ? 'paused'
-            : !terminal
-              ? 'running'
-              : info.status === 'completed'
-                ? 'completed'
-                : info.status === 'killed'
-                  ? 'cancelled'
-                  : 'failed',
-        };
-        setSwarmStatus(reconcileSwarmStatus({
-          ...prior,
-          swarm_id: info.taskId,
-          status,
-          task_count: 1,
-          completed_count: terminal ? 1 : 0,
-          session_id: sid,
-          task_id: info.taskId,
-          description: info.description,
-          owner_agent_id: event.agentId,
-          round: prior?.round ?? nextSwarmRound(sid),
-          started_at: prior?.started_at ?? new Date(info.startedAt).toISOString(),
-          tasks: [task],
-          usage: task.usage,
-        }, status));
-        return;
-      }
-
-      const prior = getSwarmStatus(info.taskId);
-      const parsedCount = Number.parseInt(info.subagentType.split(':')[1] ?? '', 10);
-      const taskCount = Number.isFinite(parsedCount) && parsedCount > 0
-        ? parsedCount
-        : Math.max(prior?.task_count ?? 0, prior?.tasks?.length ?? 0, 1);
-      const terminal = event.type === 'background.task.terminated';
-      const pending = event.type === 'background.task.started'
-        ? this._takePendingSwarmTool(sid, event.agentId)
-        : undefined;
-      const parentSwarm = prior?.parent_swarm_id === undefined && event.agentId !== MAIN_AGENT_ID
-        ? findSwarmByAgent(sid, event.agentId)
-        : undefined;
-      const status = event.type === 'background.task.updated'
-        ? info.paused === true ? 'paused' as const : 'running' as const
-        : !terminal
-          ? 'running' as const
-        : info.status === 'completed'
-          ? 'done' as const
-          : info.status === 'killed'
-            ? 'stopped' as const
-            : 'failed' as const;
-      const next: SwarmStatusEntry = {
-        ...prior,
-        swarm_id: info.taskId,
-        status,
-        task_count: taskCount,
-        completed_count: prior?.completed_count ?? 0,
-        session_id: sid,
-        task_id: info.taskId,
-        description: info.description,
-        owner_agent_id: prior?.owner_agent_id ?? event.agentId,
-        parent_swarm_id: prior?.parent_swarm_id ?? parentSwarm?.swarm_id,
-        tool_call_id: prior?.tool_call_id ?? pending?.toolCallId,
-        round: prior?.round ?? parentSwarm?.round ?? nextSwarmRound(sid),
-        started_at: prior?.started_at ?? new Date(info.startedAt).toISOString(),
-        usage: aggregateSwarmUsage(prior?.tasks),
-      };
-      setSwarmStatus(event.type === 'background.task.started'
-        ? next
-        : reconcileSwarmStatus(next, status));
-      return;
-    }
-
-    if (event.type === 'subagent.spawned') {
-      const ownerAgentId = event.parentAgentId ?? event.agentId;
-      const swarm = findSwarmByToolCall(sid, ownerAgentId, event.parentToolCallId);
-      if (swarm === undefined) return;
-      const task: SwarmTaskStatusEntry = {
-        id: event.subagentId,
-        agent_id: event.subagentId,
-        parent_agent_id: ownerAgentId,
-        profile: event.subagentName,
-        label: event.description ?? `Agent ${String((event.swarmIndex ?? 0) + 1)}`,
-        status: 'pending',
-      };
-      updateSwarmStatus(swarm.swarm_id, current => {
-        const tasks = upsertSwarmTask(current.tasks, task);
-        return {
-          ...current,
-          tasks,
-          task_count: Math.max(current.task_count, tasks.length),
-          completed_count: countSettledSwarmTasks(tasks),
-        };
-      });
-      return;
-    }
-
-    if (event.type === 'subagent.started') {
-      this._updateSwarmTask(sid, event.subagentId, task => ({ ...task, status: 'running' }));
-      return;
-    }
-
-    // A nested Agent completion wakes its owner in a new turn without spawning
-    // or explicitly resuming that owner. Treat the turn boundary as the source
-    // of truth so a task projected as waiting returns to running immediately.
-    if (event.type === 'turn.started') {
-      this._updateSwarmTask(sid, event.agentId, task => ({ ...task, status: 'running' }));
-      return;
-    }
-
-    if (event.type === 'subagent.suspended') {
-      this._updateSwarmTask(sid, event.subagentId, task => ({ ...task, status: 'paused' }));
-      return;
-    }
-
-    if (event.type === 'assistant.delta') {
-      this._updateSwarmTask(sid, event.agentId, task => {
-        const output = `${task.output ?? ''}${event.delta}`.slice(-MAX_SWARM_OUTPUT_CHARS);
-        const liveOutput = `${task.live_output ?? ''}${event.delta}`.slice(-MAX_SWARM_OUTPUT_CHARS);
-        return {
-          ...task,
-          output,
-          output_bytes: output.length,
-          live_output: liveOutput,
-          live_output_tokens: estimateOutputTokens(liveOutput),
-        };
-      }, false);
-      return;
-    }
-
-    if (event.type === 'turn.step.completed') {
-      const usage = event.usage;
-      if (usage === undefined) return;
-      this._updateSwarmTask(sid, event.agentId, task => ({
-        ...task,
-        usage: addSwarmUsage(task.usage, toSwarmUsage(usage)),
-        live_output: '',
-        live_output_tokens: 0,
-      }), false);
-      return;
-    }
-
-    if (event.type === 'subagent.completed') {
-      this._updateSwarmTask(sid, event.subagentId, task => ({
-        ...task,
-        status: 'completed',
-        output: event.resultSummary.slice(-MAX_SWARM_OUTPUT_CHARS),
-        output_bytes: event.resultSummary.length,
-        usage: event.usage === undefined ? task.usage : toSwarmUsage(event.usage),
-        live_output: '',
-        live_output_tokens: 0,
-        context_tokens: event.contextTokens,
-      }));
-      return;
-    }
-
-    if (event.type === 'subagent.failed') {
-      this._updateSwarmTask(sid, event.subagentId, task => ({
-        ...task,
-        status: 'failed',
-        output: event.error,
-        output_bytes: event.error.length,
-      }));
-    }
-  }
-
-  private _takePendingSwarmTool(sid: string, ownerAgentId: string): PendingSwarmToolCall | undefined {
-    const pending = this._pendingSwarmTools.get(sid);
-    if (pending === undefined) return undefined;
-    const index = pending.findIndex(item => item.ownerAgentId === ownerAgentId);
-    if (index < 0) return undefined;
-    const [matched] = pending.splice(index, 1);
-    if (pending.length === 0) this._pendingSwarmTools.delete(sid);
-    return matched;
-  }
-
-  private _updateSwarmTask(
-    sid: string,
-    agentId: string,
-    update: (task: SwarmTaskStatusEntry) => SwarmTaskStatusEntry,
-    notify = true,
-  ): void {
-    const swarm = findSwarmByAgent(sid, agentId);
-    if (swarm === undefined) return;
-    updateSwarmStatus(swarm.swarm_id, current => {
-      const tasks = current.tasks?.map(task => task.agent_id === agentId ? update(task) : task);
-      const taskCount = Math.max(current.task_count, tasks?.length ?? 0);
-      const completedCount = countSettledSwarmTasks(tasks);
-      const allTasksSettled = taskCount > 0
-        && tasks !== undefined
-        && tasks.length >= taskCount
-        && completedCount >= taskCount;
-      const failed = tasks?.some(task => task.status === 'failed') ?? false;
-      const stopped = !failed && (tasks?.some(task => task.status === 'cancelled') ?? false);
-      const hasRunningTask = tasks?.some(task => task.status === 'running') ?? false;
-      return {
-        ...current,
-        tasks,
-        status: allTasksSettled
-          ? failed ? 'failed' : stopped ? 'stopped' : 'done'
-          : hasRunningTask && current.status === 'paused' ? 'running' : current.status,
-        task_count: taskCount,
-        completed_count: completedCount,
-        usage: aggregateSwarmUsage(tasks),
-      };
-    }, notify);
   }
 
   private async _dispatch(sid: string, state: SessionState, event: Event): Promise<void> {
     if (this._store.isDisposed) return;
     const journal = await state.ready;
-    const evType = (event as { type?: string }).type ?? 'event.unknown';
-
-    // Track in-flight turn state inside the dispatch queue so accumulated
-    // text, the journal watermark, and fan-out order stay consistent. For
-    // text deltas this also yields the pre-append offset for the envelope.
     const annotation = this._turnTracker.apply(sid, event);
+    const envelope = isVolatileEventType(event.type)
+      ? buildEventEnvelope(journal.seq, sid, event, {
+          epoch: journal.epoch,
+          volatile: true,
+          ...(annotation.offset !== undefined ? { offset: annotation.offset } : {}),
+        })
+      : buildEventEnvelope(journal.nextSeq(), sid, event, { epoch: journal.epoch });
 
-    let envelope: EventEnvelope;
-    if (isVolatileEventType(evType)) {
-      // Volatile frames ride the current durable watermark and are never
-      // journaled or replayed; reconnecting clients recover their state from
-      // the session snapshot instead.
-      envelope = buildEventEnvelope(journal.seq, sid, event, {
-        epoch: journal.epoch,
-        volatile: true,
-        ...(annotation.offset !== undefined ? { offset: annotation.offset } : {}),
-      });
-    } else {
-      const seq = journal.nextSeq();
-      envelope = buildEventEnvelope(seq, sid, event, { epoch: journal.epoch });
-      journal.append(seq, envelope);
-      state.tail.push({ seq, envelope });
-      while (state.tail.length > this._maxBufferSize) {
-        state.tail.shift();
-      }
+    if (!isVolatileEventType(event.type)) {
+      journal.append(envelope.seq, envelope);
+      state.tail.push({ seq: envelope.seq, envelope });
+      while (state.tail.length > this._maxBufferSize) state.tail.shift();
     }
-
     if (this._store.isDisposed) return;
-    const targets = isGlobalSessionEvent(evType)
+    const globalEvent = isGlobalSessionEvent(event.type);
+    const targets = globalEvent
       ? this.connectionRegistry.values()
       : this.sessionClients.getConnections(sid);
-    for (const conn of targets) {
-      conn.send(envelope);
+    for (const connection of targets) {
+      if (!globalEvent && !connection.acceptsAgentEvent(sid, event.agentId)) continue;
+      connection.send(envelope);
     }
   }
 
-  async getBufferedSince(sid: string, cursor: SessionCursor): Promise<BufferedSinceResult> {
+  async getBufferedSince(
+    sid: string,
+    cursor: SessionCursor,
+    agentIds?: readonly string[],
+  ): Promise<BufferedSinceResult> {
     const state = this._getOrCreateSession(sid);
     const journal = await state.ready;
-    // Drain in-flight dispatches so the watermark reflects everything
-    // published before this call.
     await state.queue;
-
     const currentSeq = journal.seq;
     const epoch = journal.epoch;
-
     if (cursor.epoch !== undefined && cursor.epoch !== epoch) {
       return { events: [], resyncRequired: 'epoch_changed', currentSeq, epoch };
     }
-    if (cursor.seq > currentSeq) {
-      // Client is ahead of the journal — a cursor from another incarnation
-      // (e.g. pre-journal v1 server). Without a matching epoch we cannot
-      // trust it; force a snapshot rebuild.
-      return { events: [], resyncRequired: 'epoch_changed', currentSeq, epoch };
+    if (cursor.seq > currentSeq || currentSeq - cursor.seq > this._maxBufferSize) {
+      return {
+        events: [],
+        resyncRequired: cursor.seq > currentSeq ? 'epoch_changed' : 'buffer_overflow',
+        currentSeq,
+        epoch,
+      };
     }
-    if (cursor.seq === currentSeq) {
-      return { events: [], resyncRequired: false, currentSeq, epoch };
-    }
-    if (currentSeq - cursor.seq > this._maxBufferSize) {
-      return { events: [], resyncRequired: 'buffer_overflow', currentSeq, epoch };
-    }
-
-    const tail = state.tail;
-    if (tail.length > 0 && tail[0]!.seq <= cursor.seq + 1) {
-      const events = tail.filter((e) => e.seq > cursor.seq);
-      return { events, resyncRequired: false, currentSeq, epoch };
-    }
-
-    // Gap reaches behind the memory tail (e.g. first subscribe after a
-    // server restart) — serve from the on-disk journal.
-    const events = await journal.readSince(cursor.seq, this._maxBufferSize);
-    return { events, resyncRequired: false, currentSeq, epoch };
+    if (cursor.seq === currentSeq) return { events: [], resyncRequired: false, currentSeq, epoch };
+    const events = state.tail.length > 0 && state.tail[0]!.seq <= cursor.seq + 1
+      ? state.tail
+      : await journal.readSince(cursor.seq, this._maxBufferSize);
+    return {
+      events: filterReplayEvents(events, cursor.seq, agentIds),
+      resyncRequired: false,
+      currentSeq,
+      epoch,
+    };
   }
 
   async getCursor(sid: string): Promise<{ seq: number; epoch: string }> {
@@ -526,8 +140,6 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
     const state = this._getOrCreateSession(sid);
     const journal = await state.ready;
     await state.queue;
-    // Sync reads after the drain — seq and in-flight state form a
-    // consistent pair (no dispatch can interleave a sync section).
     return {
       seq: journal.seq,
       epoch: journal.epoch,
@@ -547,41 +159,35 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
     return this._sessions.get(sid)?.tail.length ?? 0;
   }
 
-  /** Settles when every queued dispatch for `sid` has completed. */
   async _drainForTest(sid: string): Promise<void> {
     const state = this._sessions.get(sid);
-    if (!state) return;
+    if (state === undefined) return;
     await state.ready;
     await state.queue;
   }
 
   private _getOrCreateSession(sid: string): SessionState {
     let state = this._sessions.get(sid);
-    if (!state) {
-      const filePath = join(this._journalDir, `${sanitizeFileName(sid)}.jsonl`);
-      const created: SessionState = {
-        ready: SessionEventJournal.open(filePath, this.logger),
-        journal: undefined,
-        tail: [],
-        queue: Promise.resolve(),
-      };
-      created.ready = created.ready.then((journal) => {
-        created.journal = journal;
-        return journal;
-      });
-      this._sessions.set(sid, created);
-      state = created;
-    }
+    if (state !== undefined) return state;
+    const created: SessionState = {
+      ready: SessionEventJournal.open(join(this._journalDir, `${sanitizeFileName(sid)}.jsonl`), this.logger),
+      journal: undefined,
+      tail: [],
+      queue: Promise.resolve(),
+    };
+    created.ready = created.ready.then((journal) => {
+      created.journal = journal;
+      return journal;
+    });
+    this._sessions.set(sid, created);
+    state = created;
     return state;
   }
 
   override dispose(): void {
     if (this._store.isDisposed) return;
     for (const state of this._sessions.values()) {
-      const journal = state.journal;
-      if (journal) {
-        void journal.close().catch(() => {});
-      }
+      if (state.journal !== undefined) void state.journal.close().catch(() => {});
     }
     this._sessions.clear();
     super.dispose();
@@ -589,34 +195,36 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
 }
 
 function extractSessionId(event: Event): string | undefined {
-  const camel = (event as { sessionId?: unknown }).sessionId;
-  if (typeof camel === 'string' && camel.length > 0) return camel;
-  const snake = (event as { session_id?: unknown }).session_id;
-  if (typeof snake === 'string' && snake.length > 0) return snake;
-  return undefined;
+  const sessionId = (event as { sessionId?: unknown }).sessionId;
+  if (typeof sessionId === 'string' && sessionId.length > 0) return sessionId;
+  const session_id = (event as { session_id?: unknown }).session_id;
+  return typeof session_id === 'string' && session_id.length > 0 ? session_id : undefined;
+}
+
+function filterReplayEvents(
+  entries: readonly BufferEntry[],
+  cursorSeq: number,
+  agentIds: readonly string[] | undefined,
+): BufferEntry[] {
+  const afterCursor = entries.filter((entry) => entry.seq > cursorSeq);
+  if (agentIds === undefined) return [...afterCursor];
+  const selected = new Set(agentIds);
+  return afterCursor.filter((entry) => selected.has(entry.envelope.payload.agentId));
 }
 
 function isGlobalSessionEvent(type: string): boolean {
   return (
     type === 'event.session.created' ||
     type === 'event.session.status_changed' ||
-    // Session metadata (e.g. title) must reach every connection, including
-    // clients not yet subscribed to the session, so session lists stay in sync
-    // when another client creates or renames a session.
     type === 'session.meta.updated' ||
     type === 'event.config.changed' ||
-    // Provider-model catalog is global (not session-scoped): every connected
-    // client must learn when a manual or scheduled refresh changes it.
     type === 'event.model_catalog.changed' ||
-    // Workspace registry is not session-scoped: workspace lifecycle events ride
-    // the '__global__' watermark and fan out to every connection.
     type === 'event.workspace.created' ||
     type === 'event.workspace.updated' ||
     type === 'event.workspace.deleted'
   );
 }
 
-/** Session ids are ULID-ish, but never trust an id used as a path segment. */
 function sanitizeFileName(sid: string): string {
   return sid.replace(/[^A-Za-z0-9._-]/g, '_');
 }

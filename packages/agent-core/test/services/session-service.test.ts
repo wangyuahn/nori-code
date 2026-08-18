@@ -207,7 +207,7 @@ function makeFakeBridge(state: FakeBridgeState): ICoreProcessService {
       modelCapabilities: { max_context_tokens: 100 },
     }),
     getPermission: vi.fn().mockResolvedValue({ mode: 'manual' }),
-    getPlan: vi.fn().mockResolvedValue(null),
+    getDiscussMode: vi.fn().mockResolvedValue(false),
     getUsage: vi
       .fn()
       .mockImplementation(async ({ sessionId }: { sessionId: string }) => {
@@ -216,7 +216,6 @@ function makeFakeBridge(state: FakeBridgeState): ICoreProcessService {
     getNoriRuntimeSettings: vi.fn().mockResolvedValue({
       coderWriteEnabled: true,
       toolsReadonly: false,
-      maxSwarmDepth: 2,
     }),
     getGoal: vi.fn().mockResolvedValue({ goal: null }),
   };
@@ -290,24 +289,29 @@ function makeEventServiceStub(): {
 
 function makePromptServiceStub(): {
   promptService: IPromptService;
-  calls: Array<{ sid: string; patch: Record<string, unknown>; source: string; promptId: string | undefined }>;
+  calls: Array<{ sid: string; patch: Record<string, unknown>; source: string; promptId: string | undefined; agentId: string | undefined }>;
   activePromptIds: Map<string, string | undefined>;
 } {
-  const calls: Array<{ sid: string; patch: Record<string, unknown>; source: string; promptId: string | undefined }> = [];
+  const calls: Array<{
+    sid: string;
+    patch: Record<string, unknown>;
+    source: string;
+    promptId: string | undefined;
+    agentId: string | undefined;
+  }> = [];
   const activePromptIds = new Map<string, string | undefined>();
   const agentStates = new Map<string, import('../../src/services/prompt/prompt').AgentStateSnapshot>();
   const applyAgentState = vi
     .fn()
-    .mockImplementation(async (sid: string, patch: Record<string, unknown>, source: string, promptId?: string) => {
-      calls.push({ sid, patch, source, promptId });
+    .mockImplementation(async (sid: string, patch: Record<string, unknown>, source: string, promptId?: string, agentId?: string) => {
+      calls.push({ sid, patch, source, promptId, agentId });
       const current = agentStates.get(sid) ?? {};
       agentStates.set(sid, {
         ...current,
         ...(typeof patch['model'] === 'string' ? { model: patch['model'] } : {}),
         ...(typeof patch['thinking'] === 'string' ? { thinking: patch['thinking'] } : {}),
         ...(typeof patch['permission_mode'] === 'string' ? { permissionMode: patch['permission_mode'] } : {}),
-        ...(typeof patch['plan_mode'] === 'boolean' ? { planMode: patch['plan_mode'] } : {}),
-        ...(typeof patch['swarm_mode'] === 'boolean' ? { swarmMode: patch['swarm_mode'] } : {}),
+        ...(typeof patch['discuss_mode'] === 'boolean' ? { discussMode: patch['discuss_mode'] } : {}),
       });
     });
   const emitter = new Emitter<never>();
@@ -851,7 +855,7 @@ describe('SessionService.update', () => {
   it('forwards agent_config.model through IPromptService.applyAgentState (source="meta")', async () => {
     const updated = await svc.update(created.id, { agent_config: { model: 'kimi-code/k9' } });
     expect(promptStub.calls).toEqual([
-      { sid: created.id, patch: { model: 'kimi-code/k9' }, source: 'meta', promptId: undefined },
+      { sid: created.id, patch: { model: 'kimi-code/k9' }, source: 'meta', promptId: undefined, agentId: 'main' },
     ]);
     expect(updated.agent_config.model).toBe('kimi-code/k9');
   });
@@ -861,31 +865,50 @@ describe('SessionService.update', () => {
     expect(promptStub.calls).toEqual([]);
   });
 
-  it('forwards thinking + permission_mode + plan_mode through applyAgentState in one call', async () => {
+  it('forwards thinking + permission_mode + discuss_mode through applyAgentState in one call', async () => {
     await svc.update(created.id, {
       agent_config: {
         thinking: 'high',
         permission_mode: 'yolo',
-        plan_mode: true,
+        discuss_mode: true,
       },
     });
     expect(promptStub.calls).toEqual([
       {
         sid: created.id,
-        patch: { thinking: 'high', permission_mode: 'yolo', plan_mode: true },
+        patch: { thinking: 'high', permission_mode: 'yolo', discuss_mode: true },
         source: 'meta',
         promptId: undefined,
+        agentId: 'main',
       },
     ]);
   });
 
   it('combines model + runtime controls into a single applyAgentState call', async () => {
     await svc.update(created.id, {
-      agent_config: { model: 'kimi-code/k9', plan_mode: false },
+      agent_config: { model: 'kimi-code/k9', discuss_mode: false },
     });
     expect(promptStub.calls).toHaveLength(1);
-    expect(promptStub.calls[0]?.patch).toEqual({ model: 'kimi-code/k9', plan_mode: false });
+    expect(promptStub.calls[0]?.patch).toEqual({ model: 'kimi-code/k9', discuss_mode: false });
     expect(promptStub.calls[0]?.source).toBe('meta');
+  });
+
+  it('routes a child profile control to that agent without mutating session metadata', async () => {
+    await svc.update(
+      created.id,
+      { agent_config: { model: 'kimi-code/reviewer', discuss_mode: true } },
+      'team_reviewer',
+    );
+    expect(promptStub.calls).toEqual([
+      {
+        sid: created.id,
+        patch: { model: 'kimi-code/reviewer', discuss_mode: true },
+        source: 'meta',
+        promptId: undefined,
+        agentId: 'team_reviewer',
+      },
+    ]);
+    expect(state.metadataPatches.has(created.id)).toBe(false);
   });
 
   it('does not call applyAgentState when agent_config carries no runtime fields', async () => {
@@ -1025,6 +1048,56 @@ describe('SessionService children', () => {
   });
 });
 
+describe('SessionService agent tree', () => {
+  it('lists metadata agents with per-agent runtime status and best-effort usage', async () => {
+    const created = await svc.create({ metadata: { cwd: '/tmp/agent-tree' } });
+    state.metas.set(created.id, {
+      title: 'Agent tree',
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(2_000_000).toISOString(),
+      isCustomTitle: true,
+      agents: {
+        main: { homedir: '/tmp/main', type: 'main', parentAgentId: null },
+        agent_reviewer: {
+          homedir: '/tmp/agent_reviewer',
+          type: 'sub',
+          parentAgentId: 'main',
+          subagentItem: 'src/review.ts',
+        },
+      },
+      custom: {},
+    });
+    state.usages.set(created.id, {
+      total: { inputOther: 10, output: 4, inputCacheRead: 2, inputCacheCreation: 1 },
+    });
+    eventBus.eventService.publish({
+      type: 'turn.started',
+      sessionId: created.id,
+      agentId: 'agent_reviewer',
+    } as unknown as Event);
+
+    const tree = await svc.listAgents(created.id);
+
+    expect(tree.agents).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'main',
+        kind: 'main',
+        parent_agent_id: null,
+        status: 'idle',
+        usage: { input_other: 10, output: 4, input_cache_read: 2, input_cache_creation: 1 },
+      }),
+      expect.objectContaining({
+        id: 'agent_reviewer',
+        kind: 'sub',
+        parent_agent_id: 'main',
+        name: 'src/review.ts',
+        status: 'running',
+      }),
+    ]));
+    expect(tree.agents.find(agent => agent.id === 'agent_reviewer')?.last_active).toMatch(/Z$/);
+  });
+});
+
 describe('SessionService.archive', () => {
   it('calls bridge.rpc.archiveSession and returns { archived: true }', async () => {
     const created = await svc.create({ metadata: { cwd: '/tmp/d' } });
@@ -1070,6 +1143,14 @@ describe('SessionService.compact', () => {
     ]);
   });
 
+  it('targets a named agent when supplied', async () => {
+    const created = await svc.create({ metadata: { cwd: '/tmp/compact-agent' } });
+    await svc.compact(created.id, { agent_id: 'agent_reviewer' });
+    expect(state.compactions).toEqual([
+      { sessionId: created.id, agentId: 'agent_reviewer', instruction: undefined },
+    ]);
+  });
+
   it('throws SessionNotFoundError on a missing id', async () => {
     await expect(svc.compact('does-not-exist', {})).rejects.toBeInstanceOf(SessionNotFoundError);
     expect(state.compactions).toEqual([]);
@@ -1112,7 +1193,7 @@ describe('SessionService.undo', () => {
       model: 'kimi-k2',
       thinking_level: 'auto',
       permission: 'manual',
-      plan_mode: false,
+      discuss_mode: false,
       context_tokens: 20,
       max_context_tokens: 100,
       context_usage: 0.2,
@@ -1138,6 +1219,18 @@ describe('SessionService.undo', () => {
       { type: 'text', text: 'summary' },
       { type: 'text', text: 'recent prompt' },
       { type: 'text', text: 'recent answer' },
+    ]);
+  });
+
+  it('targets a named agent', async () => {
+    const created = await svc.create({ metadata: { cwd: '/tmp/undo-agent' } });
+    state.contexts.set(created.id, {
+      history: [textMessage('user', 'review this')],
+      tokenCount: 8,
+    });
+    await svc.undo(created.id, { count: 1, agent_id: 'agent_reviewer' });
+    expect(state.undoPayloads).toEqual([
+      { sessionId: created.id, agentId: 'agent_reviewer', count: 1 },
     ]);
   });
 
@@ -1219,6 +1312,79 @@ describe('SessionService status lifecycle', () => {
       previous_status: 'idle',
       status: 'running',
     }));
+  });
+
+  it('aggregates child-agent activity without loading or visiting that session', async () => {
+    const session = await svc.create({ metadata: { cwd: '/tmp/global-activity' } });
+    const resumedBefore = [...state.resumedIds];
+    eventBus.eventService.publish({
+      type: 'turn.started',
+      sessionId: session.id,
+      agentId: 'team-reviewer',
+    } as unknown as Event);
+
+    expect(svc.listActiveAgentActivity()).toContainEqual(expect.objectContaining({
+      sessionId: session.id,
+      agentId: 'team-reviewer',
+      status: 'running',
+    }));
+    expect(state.resumedIds).toEqual(resumedBefore);
+
+    eventBus.eventService.publish({
+      type: 'turn.ended',
+      sessionId: session.id,
+      agentId: 'team-reviewer',
+      reason: 'success',
+    } as unknown as Event);
+    expect(svc.listActiveAgentActivity()).toEqual([]);
+  });
+
+  it('aggregates active background tasks globally without resuming their parent session', async () => {
+    const session = await svc.create({ metadata: { cwd: '/tmp/global-background-activity' } });
+    const resumedBefore = [...state.resumedIds];
+    eventBus.eventService.publish({
+      type: 'background.task.started',
+      sessionId: session.id,
+      agentId: 'main',
+      info: {
+        taskId: 'bash-global-1',
+        kind: 'process',
+        description: 'pnpm test --filter agent-core',
+        status: 'running',
+        startedAt: Date.now(),
+        endedAt: null,
+        command: 'pnpm test --filter agent-core',
+        pid: 42,
+        exitCode: null,
+      },
+    } as unknown as Event);
+
+    expect(svc.listActiveAgentActivity()).toContainEqual(expect.objectContaining({
+      sessionId: session.id,
+      agentId: 'background:bash-global-1',
+      kind: 'background',
+      taskId: 'bash-global-1',
+      status: 'running',
+    }));
+    expect(state.resumedIds).toEqual(resumedBefore);
+
+    eventBus.eventService.publish({
+      type: 'background.task.terminated',
+      sessionId: session.id,
+      agentId: 'main',
+      info: {
+        taskId: 'bash-global-1',
+        kind: 'process',
+        description: 'pnpm test --filter agent-core',
+        status: 'completed',
+        startedAt: Date.now() - 100,
+        endedAt: Date.now(),
+        command: 'pnpm test --filter agent-core',
+        pid: 42,
+        exitCode: 0,
+      },
+    } as unknown as Event);
+    expect(svc.listActiveAgentActivity()).toEqual([]);
   });
 
   it('turn.ended with success moves status back to idle', async () => {

@@ -196,18 +196,18 @@ describe('sessionUpdateSchema', () => {
     ).toEqual({ agent_config: { model: 'moonshot-v1-256k' } });
   });
 
-  it('parses a runtime-controls patch (thinking + permission_mode + plan_mode)', () => {
+  it('parses a runtime-controls patch (thinking + permission_mode + discuss_mode)', () => {
     const parsed = sessionUpdateSchema.parse({
       agent_config: {
         thinking: 'high',
         permission_mode: 'yolo',
-        plan_mode: true,
+        discuss_mode: true,
       },
     });
     expect(parsed.agent_config).toEqual({
       thinking: 'high',
       permission_mode: 'yolo',
-      plan_mode: true,
+      discuss_mode: true,
     });
   });
 

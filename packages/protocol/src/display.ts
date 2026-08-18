@@ -62,20 +62,6 @@ export const ToolInputDisplaySchema = z.discriminatedUnion('kind', [
     task_description: z.string(),
   }),
   z.object({
-    kind: z.literal('plan_review'),
-    plan: z.string(),
-    path: z.string().optional(),
-    options: z
-      .array(
-        z.object({
-          label: z.string(),
-          description: z.string(),
-        }),
-      )
-      .readonly()
-      .optional(),
-  }),
-  z.object({
     kind: z.literal('goal_start'),
     objective: z.string(),
     completionCriterion: z.string().optional(),

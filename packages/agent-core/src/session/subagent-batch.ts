@@ -12,7 +12,7 @@ import { isUserCancellation } from '../utils/abort';
 Subagent batch scheduling contract:
 Normal phase:
 - Return results in input order; empty input returns an empty list.
-- Start up to 5 tasks immediately, then 1 more every 700 ms while queued work remains. By default active tasks do not cap this ramp; when KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY is set to a positive integer, the ramp additionally stops while active tasks reach that cap, and resumes as tasks complete.
+- Start up to 5 tasks immediately, then 1 more every 700 ms while queued work remains. By default active tasks do not cap this ramp; when NORI_CODE_SUBAGENT_MAX_CONCURRENCY is set to a positive integer, the ramp additionally stops while active tasks reach that cap, and resumes as tasks complete.
 - Launch priority: previous agent id saved after a rate limit, explicit resume, then new spawn.
 - Readiness can be reported while the attempt is active. Ready normal launches seed the first rate-limit capacity.
 - The first provider rate limit stops the ramp and enters rate-limit phase.
@@ -36,20 +36,20 @@ const RATE_LIMIT_RETRY_FACTOR = 2;
 const RATE_LIMIT_CAPACITY_SHRINK_INTERVAL_MS = 2000;
 const RATE_LIMIT_CAPACITY_RECOVERY_INTERVAL_MS = 3 * 60 * 1000;
 const RATE_LIMIT_SUSPENDED_REASON = 'Provider rate limit; subagent requeued for retry.';
-const MANUAL_PAUSE_MESSAGE = 'Swarm paused; subagent will resume with its existing context.';
+const MANUAL_PAUSE_MESSAGE = 'SubAgent batch paused; subagent will resume with its existing context.';
 
-export class SwarmPausedError extends Error {
+export class SubagentPausedError extends Error {
   constructor() {
     super(MANUAL_PAUSE_MESSAGE);
-    this.name = 'SwarmPausedError';
+    this.name = 'SubagentPausedError';
   }
 }
 
-export function isSwarmPauseReason(value: unknown): boolean {
-  return value instanceof SwarmPausedError;
+export function isSubagentPauseReason(value: unknown): boolean {
+  return value instanceof SubagentPausedError;
 }
 
-const AGENT_SWARM_MAX_CONCURRENCY_ENV = 'NORI_CODE_AGENT_SWARM_MAX_CONCURRENCY';
+const SUBAGENT_MAX_CONCURRENCY_ENV = 'NORI_CODE_SUBAGENT_MAX_CONCURRENCY';
 
 type BaseQueuedSubagentTask<T> = {
   readonly data: T;
@@ -58,8 +58,8 @@ type BaseQueuedSubagentTask<T> = {
   readonly parentToolCallUuid?: string;
   readonly prompt: string;
   readonly description: string;
-  readonly swarmIndex?: number;
-  readonly swarmItem?: string;
+  readonly subagentIndex?: number;
+  readonly subagentItem?: string;
   readonly runInBackground: boolean;
   readonly timeout?: number;
   readonly signal?: AbortSignal;
@@ -99,6 +99,8 @@ export type SubagentBatchLauncher = {
   spawn(options: SpawnSubagentOptions): Promise<SubagentHandle>;
   resume(agentId: string, options: RunSubagentOptions): Promise<SubagentHandle>;
   retry(agentId: string, options: RunSubagentOptions): Promise<SubagentHandle>;
+  /** Releases a temporary task agent once it cannot be retried or resumed. */
+  discard?(agentId: string): Promise<void>;
   suspended?(event: SubagentSuspendedEvent): void;
 };
 
@@ -138,6 +140,8 @@ export type SubagentBatchOptions = {
    * phase is governed by its own capacity logic and is not affected.
    */
   readonly maxConcurrency?: number;
+  /** Release spawned task agents after their terminal result is recorded. */
+  readonly discardTerminalAgents?: boolean;
 };
 
 export class SubagentBatch<T> {
@@ -145,10 +149,12 @@ export class SubagentBatch<T> {
   private readonly pending: Array<TaskState<T>>;
   private readonly results: Array<SubagentResult<T> | undefined>;
   private readonly active = new Set<ActiveAttempt<T>>();
+  private readonly discardedAgentIds = new Set<string>();
   private readonly controller = new AbortController();
   private readonly batchSignal: AbortSignal | undefined;
   private readonly batchAbortListener: () => void;
   private readonly maxConcurrency: number | undefined;
+  private readonly discardTerminalAgents: boolean;
   private normalLaunchCount = 0;
   private normalLaunchTimer: ReturnType<typeof setTimeout> | undefined;
   private rateLimitLaunchTimer: ReturnType<typeof setTimeout> | undefined;
@@ -173,6 +179,7 @@ export class SubagentBatch<T> {
     options: SubagentBatchOptions = {},
   ) {
     this.maxConcurrency = options.maxConcurrency;
+    this.discardTerminalAgents = options.discardTerminalAgents === true;
     this.states = tasks.map((task, index) => ({
       index,
       task,
@@ -213,7 +220,7 @@ export class SubagentBatch<T> {
           reason: MANUAL_PAUSE_MESSAGE,
         });
       }
-      attempt.controller.abort(new SwarmPausedError());
+      attempt.controller.abort(new SubagentPausedError());
     }
   }
 
@@ -344,10 +351,10 @@ export class SubagentBatch<T> {
 
     this.runAttempt(attempt).then(
       (outcome) => {
-        this.handleAttemptOutcome(attempt, outcome);
+        void this.handleAttemptOutcome(attempt, outcome).catch((error) => this.fail(error));
       },
       (error) => {
-        this.handleAttemptError(attempt, error);
+        void this.handleAttemptError(attempt, error).catch((error) => this.fail(error));
       },
     );
   }
@@ -360,7 +367,7 @@ export class SubagentBatch<T> {
       parentToolCallUuid: task.parentToolCallUuid,
       prompt: this.promptForAttempt(state),
       description: task.description,
-      swarmIndex: task.swarmIndex,
+      subagentIndex: task.subagentIndex,
       runInBackground: task.runInBackground,
       signal: attempt.controller.signal,
       onReady: () => {
@@ -381,7 +388,7 @@ export class SubagentBatch<T> {
       } else {
         const spawnOptions: SpawnSubagentOptions = {
           profileName: task.profileName,
-          swarmItem: task.swarmItem,
+          subagentItem: task.subagentItem,
           ...runOptions,
         };
         handle = await this.launcher.spawn(spawnOptions);
@@ -443,7 +450,7 @@ export class SubagentBatch<T> {
     }
   }
 
-  private handleAttemptOutcome(attempt: ActiveAttempt<T>, outcome: AttemptOutcome<T>): void {
+  private async handleAttemptOutcome(attempt: ActiveAttempt<T>, outcome: AttemptOutcome<T>): Promise<void> {
     if (!this.releaseAttempt(attempt)) return;
     if (this.finished) return;
 
@@ -455,21 +462,24 @@ export class SubagentBatch<T> {
 
     if ('status' in outcome) {
       this.results[attempt.state.index] = outcome;
+      await this.discardResultAgent(outcome);
     } else if (this.isOnlyUnfinishedTask(attempt.state)) {
-      this.results[attempt.state.index] = {
+      const result: SubagentResult<T> = {
         task: attempt.state.task,
         agentId: outcome.agentId,
         status: 'failed',
         state: 'started',
         error: outcome.error,
       };
+      this.results[attempt.state.index] = result;
+      await this.discardResultAgent(result);
     } else {
       this.requeueRateLimited(attempt, outcome.agentId);
     }
     this.schedule();
   }
 
-  private handleAttemptError(attempt: ActiveAttempt<T>, error: unknown): void {
+  private async handleAttemptError(attempt: ActiveAttempt<T>, error: unknown): Promise<void> {
     if (!this.releaseAttempt(attempt)) return;
     if (this.finished) return;
     if (attempt.paused) {
@@ -477,12 +487,14 @@ export class SubagentBatch<T> {
       this.schedule();
       return;
     }
-    this.results[attempt.state.index] = {
+    const result: SubagentResult<T> = {
       task: attempt.state.task,
       agentId: attempt.state.agentId,
       status: 'failed',
       error: error instanceof Error ? error.message : String(error),
     };
+    this.results[attempt.state.index] = result;
+    await this.discardResultAgent(result);
     this.schedule();
   }
 
@@ -677,14 +689,54 @@ export class SubagentBatch<T> {
     if (this.finished) return;
     this.finished = true;
     this.cleanup();
-    this.resolve?.(results);
+    void this.resolveAfterDiscard(results);
   }
 
   private fail(error: unknown): void {
     if (this.finished) return;
     this.finished = true;
     this.cleanup();
-    this.reject?.(error);
+    void this.rejectAfterDiscard(error);
+  }
+
+  private async resolveAfterDiscard(results: Array<SubagentResult<T>>): Promise<void> {
+    try {
+      await this.discardResultAgents(results);
+      this.resolve?.(results);
+    } catch (error) {
+      this.reject?.(error);
+    }
+  }
+
+  private async rejectAfterDiscard(error: unknown): Promise<void> {
+    try {
+      await this.discardAgentIds(this.states.map((state) => state.agentId));
+      this.reject?.(error);
+    } catch (cleanupError) {
+      this.reject?.(cleanupError);
+    }
+  }
+
+  private async discardResultAgent(result: SubagentResult<T>): Promise<void> {
+    if (!this.discardTerminalAgents || result.agentId === undefined) return;
+    if (this.discardedAgentIds.has(result.agentId)) return;
+    this.discardedAgentIds.add(result.agentId);
+    await this.launcher.discard?.(result.agentId);
+  }
+
+  private async discardResultAgents(results: readonly SubagentResult<T>[]): Promise<void> {
+    await Promise.all(results.map((result) => this.discardResultAgent(result)));
+  }
+
+  private async discardAgentIds(agentIds: readonly (string | undefined)[]): Promise<void> {
+    if (!this.discardTerminalAgents) return;
+    await Promise.all(agentIds.map((agentId) => this.discardAgentId(agentId)));
+  }
+
+  private async discardAgentId(agentId: string | undefined): Promise<void> {
+    if (agentId === undefined || this.discardedAgentIds.has(agentId)) return;
+    this.discardedAgentIds.add(agentId);
+    await this.launcher.discard?.(agentId);
   }
 
   private cleanup(): void {
@@ -752,21 +804,21 @@ export class SubagentBatch<T> {
 }
 
 /**
- * Resolve the optional AgentSwarm normal-phase concurrency cap from the environment.
+ * Resolve the optional SubAgent normal-phase concurrency cap from the environment.
  *
  * Returns `undefined` when the variable is unset/empty. A present value must be a
  * positive integer; invalid input fails fast so a misconfigured cap never silently
  * reverts to the uncapped ramp.
  */
-export function resolveSwarmMaxConcurrency(
+export function resolveSubagentMaxConcurrency(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): number | undefined {
-  const raw = env[AGENT_SWARM_MAX_CONCURRENCY_ENV];
+  const raw = env[SUBAGENT_MAX_CONCURRENCY_ENV];
   if (raw === undefined || raw.trim() === '') return undefined;
   const value = Number(raw);
   if (!Number.isInteger(value) || value <= 0) {
     throw new Error(
-      `${AGENT_SWARM_MAX_CONCURRENCY_ENV} must be a positive integer, got ${JSON.stringify(raw)}.`,
+      `${SUBAGENT_MAX_CONCURRENCY_ENV} must be a positive integer, got ${JSON.stringify(raw)}.`,
     );
   }
   return value;

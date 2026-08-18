@@ -30,8 +30,10 @@ describe('ReadMediaFileTool description by capabilities', () => {
     expect(tool.description).toContain('Image files are not supported');
   });
 
-  it('throws when no image/video capability is present', () => {
-    expect(() => makeTool({ image_in: false, video_in: false })).toThrow(/image_in or video_in/);
+  it('describes the tool as unavailable when no image/video capability is present', () => {
+    expect(makeTool({ image_in: false, video_in: false }).description).toContain(
+      'does not support image or video input',
+    );
   });
 
   it('description pins the stable contract phrases: image+video, 100MB, parallel reads, Read pointer', () => {

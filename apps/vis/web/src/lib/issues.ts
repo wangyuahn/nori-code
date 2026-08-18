@@ -10,7 +10,7 @@
 //   - step.end finishReason 'max_tokens' (response cut at the output cap)
 //   - step.begin without paired step.end (incomplete step)
 //   - full_compaction.begin without complete/cancel (incomplete compaction)
-//   - plan_mode.enter without exit/cancel (still in plan mode)
+//   - discuss_mode.enter without exit/cancel (still in Discuss)
 //   - permission.record_approval_result with decision='rejected' (info)
 //
 // Wire-file parse warnings are appended as info-level entries with no lineNo.
@@ -28,7 +28,7 @@ export type IssueKind =
   | 'model_max_tokens'
   | 'incomplete_step'
   | 'incomplete_compaction'
-  | 'active_plan_mode'
+  | 'active_discuss_mode'
   | 'rejected_approval'
   | 'wire_warning';
 
@@ -58,11 +58,11 @@ export function computeIssues(
   const out: Issue[] = [];
 
   // Track in-flight tool calls keyed by toolCallId, step begins by uuid,
-  // compaction begin lineNo, and plan mode enter id.
+  // compaction begin lineNo, and Discuss mode enter id.
   const toolCallById = new Map<string, { lineNo: number; name: string }>();
   const stepBeginByUuid = new Map<string, { lineNo: number; step: number; turnId: string }>();
   let lastCompactionBegin: { lineNo: number; source: string } | null = null;
-  let lastPlanEnter: { lineNo: number; id: string } | null = null;
+  let lastDiscussEnter: { lineNo: number; id: string } | null = null;
 
   for (const entry of entries) {
     const r = entry.data;
@@ -142,12 +142,12 @@ export function computeIssues(
         lastCompactionBegin = null;
         break;
 
-      case 'plan_mode.enter':
-        lastPlanEnter = { lineNo, id: r.id };
+      case 'discuss_mode.enter':
+        lastDiscussEnter = { lineNo, id: r.id };
         break;
-      case 'plan_mode.cancel':
-      case 'plan_mode.exit':
-        lastPlanEnter = null;
+      case 'discuss_mode.cancel':
+      case 'discuss_mode.exit':
+        lastDiscussEnter = null;
         break;
 
       case 'permission.record_approval_result':
@@ -194,12 +194,12 @@ export function computeIssues(
       summary: `${lastCompactionBegin.source} compaction never completed`,
     });
   }
-  if (lastPlanEnter !== null) {
+  if (lastDiscussEnter !== null) {
     out.push({
       severity: 'info',
-      kind: 'active_plan_mode',
-      lineNo: lastPlanEnter.lineNo,
-      summary: `plan mode still active: ${lastPlanEnter.id}`,
+      kind: 'active_discuss_mode',
+      lineNo: lastDiscussEnter.lineNo,
+      summary: `Discuss mode still active: ${lastDiscussEnter.id}`,
     });
   }
 

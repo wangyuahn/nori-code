@@ -1,9 +1,7 @@
 import type { Agent } from '../..';
 import type { PermissionPolicy } from '../types';
-import { AgentSwarmExclusiveDenyPermissionPolicy } from './agent-swarm-exclusive-deny';
 import { AutoModeAskUserQuestionDenyPermissionPolicy } from './auto-mode-ask-user-question-deny';
 import { DefaultToolApprovePermissionPolicy } from './default-tool-approve';
-import { ExitPlanModeReviewAskPermissionPolicy } from './exit-plan-mode-review-ask';
 import { FallbackAskPermissionPolicy } from './fallback-ask';
 import {
   GitControlPathAccessAskPermissionPolicy,
@@ -11,11 +9,10 @@ import {
 } from './file-access-ask';
 import { GitCwdWriteApprovePermissionPolicy } from './git-cwd-write-approve';
 import { GoalStartReviewAskPermissionPolicy } from './goal-start-review-ask';
-import { PlanModeGuardDenyPermissionPolicy } from './plan-mode-guard-deny';
-import { PlanModeToolApprovePermissionPolicy } from './plan-mode-tool-approve';
+import { DiscussModeGuardDenyPermissionPolicy } from './discuss-mode-guard-deny';
+import { DiscussModeToolApprovePermissionPolicy } from './discuss-mode-tool-approve';
 import { PreToolCallHookPermissionPolicy } from './pre-tool-call-hook';
 import { SessionApprovalHistoryPermissionPolicy } from './session-approval-history';
-import { SwarmModeAgentSwarmApprovePermissionPolicy } from './swarm-mode-agent-swarm-approve';
 import {
   UserConfiguredAllowPermissionPolicy,
   UserConfiguredAskPermissionPolicy,
@@ -29,12 +26,10 @@ export function createPermissionDecisionPolicies(agent: Agent): PermissionPolicy
   return [
     // PreToolUse hook returned a block → deny.
     new PreToolCallHookPermissionPolicy(agent),
-    // AgentSwarm is batch-exclusive and must run alone, regardless of permission mode.
-    new AgentSwarmExclusiveDenyPermissionPolicy(),
     // auto mode + AskUserQuestion → deny.
     new AutoModeAskUserQuestionDenyPermissionPolicy(agent),
-    // plan mode: Write/Edit outside the plan file, or TaskStop → deny.
-    new PlanModeGuardDenyPermissionPolicy(agent),
+    // Discuss: Write/Edit/Bash/SubAgent and related mutating tools → deny.
+    new DiscussModeGuardDenyPermissionPolicy(agent),
     // tools_readonly: deny Write/Edit/Bash when readonly is active.
     new ReadonlyPermissionPolicy(agent),
     // User-configured deny rule matches → deny.
@@ -50,20 +45,16 @@ export function createPermissionDecisionPolicies(agent: Agent): PermissionPolicy
     new UserConfiguredAskPermissionPolicy(agent),
     // User-configured allow rule matches → approve.
     new UserConfiguredAllowPermissionPolicy(agent),
-    // ExitPlanMode with active plan_review + non-empty plan + non-auto → ask (tracks plan_submitted/plan_resolved itself). Runs before session history so a stale session approval can't bypass review of a new plan body.
-    new ExitPlanModeReviewAskPermissionPolicy(agent),
     // CreateGoal (non-auto) → ask with the same start menu as /goal: choose the
     // permission mode to run the goal under, or decline. Applies the mode, then
     // lets the tool create the goal.
     new GoalStartReviewAskPermissionPolicy(agent),
-    // EnterPlanMode, Write/Edit on the plan file, or ExitPlanMode with no actionable plan_review → approve.
-    new PlanModeToolApprovePermissionPolicy(agent),
+    // EnterDiscussMode auto-approves; TeamAssign is the Discuss→Code exit.
+    new DiscussModeToolApprovePermissionPolicy(),
     // Access touches a sensitive file (.env, SSH key, credentials) → ask.
     new SensitiveFileAccessAskPermissionPolicy(),
     // Access touches .git or a git control-dir path → ask.
     new GitControlPathAccessAskPermissionPolicy(agent),
-    // Swarm mode keeps AgentSwarm available without making it a globally default-approved tool.
-    new SwarmModeAgentSwarmApprovePermissionPolicy(agent),
     // Tool is in the default-approve list (read-only / UI helpers) → approve.
     new DefaultToolApprovePermissionPolicy(),
     // Write/Edit on POSIX paths inside cwd inside a git work tree → approve.

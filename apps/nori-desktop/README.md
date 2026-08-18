@@ -21,7 +21,7 @@ The current desktop workspace also includes:
 - Reorderable, resizable inspector tools with standalone-window support.
 - Project file preview and direct `@path` references to the main Agent.
 - Custom Agent roles with explicit read, write, terminal, web, and delegation permissions.
-- Background AgentSwarm monitoring and controls for pause, guidance, resume, and stop.
+- Background SubAgent monitoring and controls for pause, guidance, resume, and stop.
 - Configurable completion, Agent, approval, and error notification sounds.
 
 At startup, the desktop process launches or reuses the bundled Nori SEA server, reads `~/.nori-code/server/lock`, obtains its origin and token, and loads the renderer. On a normal Nori Work exit, the desktop process stops the associated Nori daemon through the lock-validated server kill command.

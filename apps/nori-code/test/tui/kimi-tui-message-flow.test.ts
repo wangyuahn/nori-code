@@ -15,9 +15,9 @@ import { ApprovalPanelComponent } from '#/tui/components/dialogs/approval-panel'
 import { NORI_CODE_PLUGIN_MARKETPLACE_URL } from '#/constant/app';
 import { MOON_SPINNER_FRAMES } from '#/tui/constant/rendering';
 import {
-  AgentSwarmProgressComponent,
-  agentSwarmGridHeightForTerminalRows,
-} from '#/tui/components/messages/agent-swarm-progress';
+  SubAgentProgressComponent,
+  subagentGridHeightForTerminalRows,
+} from '#/tui/components/messages/subagent-progress';
 import { BtwPanelComponent } from '#/tui/components/panes/btw-panel';
 import { WelcomeComponent } from '#/tui/components/chrome/welcome';
 import { ModelSelectorComponent } from '#/tui/components/dialogs/model-selector';
@@ -119,7 +119,7 @@ function makeStartupInput(): KimiTUIStartupInput {
       session: undefined,
       continue: false,
       permission: undefined,
-      plan: false,
+      discuss: false,
       model: undefined,
       outputFormat: undefined,
       prompt: undefined,
@@ -152,7 +152,7 @@ function makeSession(overrides: Record<string, unknown> = {}) {
       model: 'k2',
       thinkingEffort: 'off',
       permission: 'manual',
-      planMode: false,
+      discussMode: false,
       contextTokens: 0,
       maxContextTokens: 100,
       contextUsage: 0,
@@ -163,8 +163,7 @@ function makeSession(overrides: Record<string, unknown> = {}) {
     setModel: vi.fn(async () => {}),
     setThinking: vi.fn(async () => {}),
     setPermission: vi.fn(async () => {}),
-    setPlanMode: vi.fn(async () => {}),
-    setSwarmMode: vi.fn(async () => {}),
+    setDiscussMode: vi.fn(async () => {}),
     onEvent: vi.fn(() => vi.fn()),
     listMcpServers: vi.fn(async () => []),
     listSkills: vi.fn(async () => []),
@@ -176,7 +175,7 @@ function makeSession(overrides: Record<string, unknown> = {}) {
             model: 'k2',
             thinkingEffort: 'off',
             permission: 'manual',
-            planMode: false,
+            discussMode: false,
             contextTokens: 0,
             maxContextTokens: 100,
             contextUsage: 0,
@@ -908,25 +907,25 @@ command = "vim"
     }
   });
 
-  it('does not re-enter plan mode after creating a plan-mode session', async () => {
+  it('does not re-enter Discuss after creating a Discuss session', async () => {
     const session = makeSession({
       getStatus: vi.fn(async () => ({
         model: 'k2',
         thinkingEffort: 'off',
         permission: 'manual',
-        planMode: true,
+        discussMode: true,
         contextTokens: 0,
         maxContextTokens: 100,
         contextUsage: 0,
       })),
-      setPlanMode: vi.fn(async () => {
-        throw new Error('Already in plan mode');
+      setDiscussMode: vi.fn(async () => {
+        throw new Error('Already in Discuss');
       }),
     });
     const { driver, harness } = await makeDriver(session);
     harness.createSession.mockClear();
-    session.setPlanMode.mockClear();
-    driver.state.appState.planMode = true;
+    session.setDiscussMode.mockClear();
+    driver.state.appState.discussMode = true;
 
     driver.handleUserInput('/new');
 
@@ -936,10 +935,10 @@ command = "vim"
         model: 'k2',
         thinking: 'off',
         permission: 'manual',
-        planMode: true,
+        discussMode: true,
       });
     });
-    expect(session.setPlanMode).not.toHaveBeenCalled();
+    expect(session.setDiscussMode).not.toHaveBeenCalled();
     expect(stripSgr(renderTranscript(driver))).not.toContain('Post-create setup failed');
   });
 
@@ -975,10 +974,10 @@ command = "vim"
     driver.state.editor.onShiftTab?.();
 
     await vi.waitFor(() => {
-      expect(session.setPlanMode).toHaveBeenCalledWith(true);
+      expect(session.setDiscussMode).toHaveBeenCalledWith(true);
     });
-    expect(harness.track).toHaveBeenCalledWith('shortcut_plan_toggle', { enabled: true });
-    expect(harness.track).toHaveBeenCalledWith('shortcut_mode_switch', { to_mode: 'plan' });
+    expect(harness.track).toHaveBeenCalledWith('shortcut_discuss_toggle', { enabled: true });
+    expect(harness.track).toHaveBeenCalledWith('shortcut_mode_switch', { to_mode: 'discuss' });
   });
 
   it('routes /yolo through session permission state without app-layer telemetry duplication', async () => {
@@ -1290,19 +1289,19 @@ command = "vim"
     ).toHaveLength(1);
   });
 
-  it('removes AgentSwarm progress from undone turns', async () => {
+  it('removes SubAgent progress from undone turns', async () => {
     const { driver, session } = await makeDriver();
     const sendQueued = vi.fn();
 
-    driver.handleUserInput('launch swarm');
+    driver.handleUserInput('launch subagents');
     driver.sessionEventHandler.handleEvent(
       {
         type: 'tool.call.started',
         agentId: 'main',
         sessionId: 'ses-1',
         turnId: 1,
-        toolCallId: 'call_swarm',
-        name: 'AgentSwarm',
+        toolCallId: 'call_subagent',
+        name: 'SubAgent',
         args: {
           description: 'Review changed files',
           prompt_template: 'Review {{item}}',
@@ -1313,8 +1312,8 @@ command = "vim"
     );
 
     let transcript = stripSgr(renderTranscript(driver));
-    expect(transcript).toContain('launch swarm');
-    expect(transcript).toContain('Agent Swarm');
+    expect(transcript).toContain('launch subagents');
+    expect(transcript).toContain('SubAgent');
     expect(transcript).toContain('Review changed files');
 
     driver.state.appState.streamingPhase = 'idle';
@@ -1326,8 +1325,7 @@ command = "vim"
     });
 
     transcript = stripSgr(renderTranscript(driver));
-    expect(transcript).not.toContain('launch swarm');
-    expect(transcript).not.toContain('Agent Swarm');
+    expect(transcript).not.toContain('launch subagents');
     expect(transcript).not.toContain('Review changed files');
   });
 
@@ -2691,78 +2689,6 @@ command = "vim"
     expect(stripSgr(renderTranscript(driver))).toContain('LLM not set');
   });
 
-  it('renders swarm mode markers from /swarm commands, not tool-triggered status updates', async () => {
-    const { driver } = await makeDriver();
-
-    driver.sessionEventHandler.handleEvent(
-      {
-        type: 'agent.status.updated',
-        agentId: 'main',
-        sessionId: 'ses-1',
-        swarmMode: true,
-      } as Event,
-      vi.fn(),
-    );
-
-    expect(driver.state.appState.swarmDepth).toBe(1);
-    expect(stripSgr(renderTranscript(driver))).not.toContain('Swarm activated');
-
-    let transcript = stripSgr(renderTranscript(driver));
-    expect(countOccurrences(transcript, 'Swarm activated')).toBe(0);
-
-    driver.sessionEventHandler.handleEvent(
-      {
-        type: 'agent.status.updated',
-        agentId: 'main',
-        sessionId: 'ses-1',
-        swarmMode: false,
-      } as Event,
-      vi.fn(),
-    );
-
-    expect(driver.state.appState.swarmDepth).toBe(0);
-    transcript = stripSgr(renderTranscript(driver));
-    expect(transcript).not.toContain('Swarm deactivated');
-    expect(transcript).not.toContain('Swarm ended');
-
-    expect(countOccurrences(transcript, 'Swarm activated')).toBe(0);
-    expect(countOccurrences(transcript, 'Swarm deactivated')).toBe(0);
-    expect(countOccurrences(transcript, 'Swarm ended')).toBe(0);
-  });
-
-  it('renders an ended marker when a one-shot /swarm task exits', async () => {
-    const { driver, session } = await makeDriver(undefined);
-    driver.state.appState.permissionMode = 'auto';
-
-    driver.handleUserInput('/swarm Ship feature X');
-
-    await vi.waitFor(() => {
-      expect(session.setSwarmMode).toHaveBeenCalledWith(true, 'task');
-    });
-    await vi.waitFor(() => {
-      expect(countOccurrences(stripSgr(renderTranscript(driver)), 'Swarm activated')).toBe(1);
-    });
-    let transcript = stripSgr(renderTranscript(driver));
-    expect(countOccurrences(transcript, 'Swarm activated')).toBe(1);
-    expect(transcript).not.toContain('Swarm ended');
-
-    driver.sessionEventHandler.handleEvent(
-      {
-        type: 'agent.status.updated',
-        agentId: 'main',
-        sessionId: 'ses-1',
-        swarmMode: false,
-      } as Event,
-      vi.fn(),
-    );
-
-    expect(driver.state.appState.swarmDepth).toBe(0);
-    transcript = stripSgr(renderTranscript(driver));
-    expect(countOccurrences(transcript, 'Swarm activated')).toBe(1);
-    expect(countOccurrences(transcript, 'Swarm ended')).toBe(1);
-    expect(transcript).not.toContain('Swarm deactivated');
-  });
-
   it('queues Ctrl-S input instead of steering while /init is running', async () => {
     let resolveInit: (() => void) | undefined;
     const session = makeSession({
@@ -2932,61 +2858,7 @@ command = "vim"
     expect(transcript).not.toContain('/export-debug-zip');
   });
 
-  it('shows ExitPlanMode plan only in the current-plan card during approval', async () => {
-    const planContent = '# No Duplicate Plan\n\n- Do the non-duplicated plan work';
-    const session = makeSession({
-      getPlan: vi.fn(async () => ({
-        id: 'no-duplicate-plan',
-        content: planContent,
-        path: '/tmp/no-duplicate-plan.md',
-      })),
-    });
-    const { driver } = await makeDriver(session);
-
-    driver.sessionEventHandler.handleEvent(
-      {
-        type: 'tool.call.started',
-        agentId: 'main',
-        sessionId: 'ses-1',
-        turnId: 1,
-        toolCallId: 'call_exit_plan',
-        name: 'ExitPlanMode',
-        args: {},
-      } as Event,
-      vi.fn(),
-    );
-
-    await vi.waitFor(() => {
-      const transcript = stripSgr(renderTranscript(driver));
-      expect(transcript).toContain('Current plan');
-      expect(countOccurrences(transcript, 'non-duplicated plan work')).toBe(1);
-    });
-
-    const approvalHandler = vi.mocked(session.setApprovalHandler).mock.calls[0]?.[0] as
-      | ((request: ApprovalRequest) => Promise<ApprovalResponse>)
-      | undefined;
-    if (approvalHandler === undefined) throw new Error('expected approval handler');
-    void approvalHandler({
-      turnId: 1,
-      toolCallId: 'call_exit_plan',
-      toolName: 'ExitPlanMode',
-      action: 'Review plan',
-      display: {
-        kind: 'plan_review',
-        plan: planContent,
-        path: '/tmp/no-duplicate-plan.md',
-      },
-    });
-
-    await vi.waitFor(() => {
-      const approval = stripSgr(driver.state.editorContainer.render(120).join('\n'));
-      expect(approval).toContain('Ready to build with this plan?');
-      expect(approval).not.toContain('non-duplicated plan work');
-      expect(approval).not.toContain('/tmp/no-duplicate-plan.md');
-    });
-  });
-
-  it('renders AgentSwarm progress in the transcript instead of the tool-card body', async () => {
+  it('renders SubAgent progress in the transcript instead of the tool-card body', async () => {
     const { driver } = await makeDriver();
     const sendQueued = vi.fn();
 
@@ -2996,8 +2868,8 @@ command = "vim"
         agentId: 'main',
         sessionId: 'ses-1',
         turnId: 1,
-        toolCallId: 'call_swarm',
-        name: 'AgentSwarm',
+        toolCallId: 'call_subagent',
+        name: 'SubAgent',
         args: {
           description: 'Review changed files',
           prompt_template: 'Review {{item}}',
@@ -3012,11 +2884,11 @@ command = "vim"
         type: 'subagent.spawned',
         agentId: 'main',
         sessionId: 'ses-1',
-        parentToolCallId: 'call_swarm',
+        parentToolCallId: 'call_subagent',
         subagentId: 'agent-1',
         subagentName: 'coder',
         description: 'Review changed files #1 (coder)',
-        swarmIndex: 1,
+        subagentIndex: 1,
         runInBackground: false,
       } as Event,
       sendQueued,
@@ -3027,11 +2899,11 @@ command = "vim"
         type: 'subagent.spawned',
         agentId: 'main',
         sessionId: 'ses-1',
-        parentToolCallId: 'call_swarm',
+        parentToolCallId: 'call_subagent',
         subagentId: 'agent-2',
         subagentName: 'coder',
         description: 'Review changed files #2 (coder)',
-        swarmIndex: 2,
+        subagentIndex: 2,
         runInBackground: false,
       } as Event,
       sendQueued,
@@ -3115,7 +2987,7 @@ command = "vim"
     expect(driver.state.ui.requestRender).toHaveBeenCalled();
 
     transcript = stripSgr(renderTranscript(driver));
-    expect(transcript).toContain('Agent Swarm');
+    expect(transcript).toContain('SubAgent');
     expect(transcript).toContain('Review changed files');
     expect(transcript).toContain('001 [');
     expect(transcript).toContain('Reviewing src/a.ts');
@@ -3149,8 +3021,8 @@ command = "vim"
         agentId: 'main',
         sessionId: 'ses-1',
         turnId: 1,
-        toolCallId: 'call_swarm',
-        name: 'AgentSwarm',
+        toolCallId: 'call_subagent',
+        name: 'SubAgent',
         args: {
           description: 'Review changed files',
           prompt_template: 'Review {{item}}',
@@ -3166,11 +3038,11 @@ command = "vim"
           type: 'subagent.spawned',
           agentId: 'main',
           sessionId: 'ses-1',
-          parentToolCallId: 'call_swarm',
+          parentToolCallId: 'call_subagent',
           subagentId,
           subagentName: 'coder',
           description: `Review changed files #${String(index + 1)} (coder)`,
-          swarmIndex: index + 1,
+          subagentIndex: index + 1,
           runInBackground: false,
         } as Event,
         sendQueued,
@@ -3203,7 +3075,7 @@ command = "vim"
     expect(transcript).toContain('✗ The user manually interrupted this subagent x.');
   });
 
-  it('does not let later transcript entries reduce the AgentSwarm grid height', async () => {
+  it('does not let later transcript entries reduce the SubAgent grid height', async () => {
     const { driver } = await makeDriver();
     const sendQueued = vi.fn();
     const terminalColumns = 80;
@@ -3213,7 +3085,7 @@ command = "vim"
     const rowsAfterTranscript = outerChildren
       .slice(transcriptIndex + 1)
       .reduce((sum, child) => sum + child.render(terminalColumns).length, 0);
-    const nonGridRows = 20 - (agentSwarmGridHeightForTerminalRows(20) ?? 0);
+    const nonGridRows = 20 - (subagentGridHeightForTerminalRows(20) ?? 0);
     setTerminalRows(driver, rowsAfterTranscript + nonGridRows + 2);
 
     driver.sessionEventHandler.handleEvent(
@@ -3222,8 +3094,8 @@ command = "vim"
         agentId: 'main',
         sessionId: 'ses-1',
         turnId: 1,
-        toolCallId: 'call_swarm',
-        name: 'AgentSwarm',
+        toolCallId: 'call_subagent',
+        name: 'SubAgent',
         args: {
           description: 'Review changed files',
           prompt_template: 'Review {{item}}',
@@ -3233,16 +3105,16 @@ command = "vim"
       sendQueued,
     );
 
-    const swarmProgress = driver.state.transcriptContainer.children.find(
-      (child): child is AgentSwarmProgressComponent => child instanceof AgentSwarmProgressComponent,
+    const subagentProgress = driver.state.transcriptContainer.children.find(
+      (child): child is SubAgentProgressComponent => child instanceof SubAgentProgressComponent,
     );
-    if (swarmProgress === undefined) throw new Error('expected AgentSwarm progress');
+    if (subagentProgress === undefined) throw new Error('expected SubAgent progress');
 
     const transcriptWidth = Math.max(1, terminalColumns - 2);
-    const renderSwarm = (): string =>
-      stripSgr(swarmProgress.render(transcriptWidth).join('\n'));
+    const renderSubagent = (): string =>
+      stripSgr(subagentProgress.render(transcriptWidth).join('\n'));
 
-    expect(renderSwarm()).toContain('001 Queued...');
+    expect(renderSubagent()).toContain('001 Queued...');
 
     driver.sessionEventHandler.handleEvent(
       {
@@ -3258,24 +3130,24 @@ command = "vim"
     );
 
     const transcriptChildren = driver.state.transcriptContainer.children;
-    const swarmIndex = transcriptChildren.indexOf(
-      swarmProgress as (typeof transcriptChildren)[number],
+    const subagentIndex = transcriptChildren.indexOf(
+      subagentProgress as (typeof transcriptChildren)[number],
     );
-    expect(swarmIndex).toBeGreaterThanOrEqual(0);
+    expect(subagentIndex).toBeGreaterThanOrEqual(0);
 
-    const rowsAfterSwarmInTranscript = transcriptChildren
-      .slice(swarmIndex + 1)
+    const rowsAfterSubagentInTranscript = transcriptChildren
+      .slice(subagentIndex + 1)
       .reduce((sum, child) => sum + child.render(transcriptWidth).length, 0);
-    expect(rowsAfterSwarmInTranscript).toBeGreaterThan(0);
+    expect(rowsAfterSubagentInTranscript).toBeGreaterThan(0);
 
-    expect(renderSwarm()).toContain('001 Queued...');
+    expect(renderSubagent()).toContain('001 Queued...');
     const transcript = stripSgr(
       driver.state.transcriptContainer.render(terminalColumns).join('\n'),
     );
     expect(transcript).toContain('Using Read (src/after.ts)');
   });
 
-  it('shows AgentSwarm as completed when only some subagents fail', async () => {
+  it('shows SubAgent as completed when only some subagents fail', async () => {
     const { driver } = await makeDriver();
     const sendQueued = vi.fn();
 
@@ -3285,8 +3157,8 @@ command = "vim"
         agentId: 'main',
         sessionId: 'ses-1',
         turnId: 1,
-        toolCallId: 'call_swarm',
-        name: 'AgentSwarm',
+        toolCallId: 'call_subagent',
+        name: 'SubAgent',
         args: {
           description: 'Review changed files',
           prompt_template: 'Review {{item}}',
@@ -3301,13 +3173,13 @@ command = "vim"
         agentId: 'main',
         sessionId: 'ses-1',
         turnId: 1,
-        toolCallId: 'call_swarm',
+        toolCallId: 'call_subagent',
         output: [
-          '<agent_swarm_result>',
+          '<subagent_result>',
           '<summary>completed: 1, failed: 1</summary>',
           '<subagent index="1" agent_id="agent-1" outcome="completed">Imports are stable.</subagent>',
           '<subagent index="2" agent_id="agent-2" outcome="failed">Agent timed out after 30s.</subagent>',
-          '</agent_swarm_result>',
+          '</subagent_result>',
         ].join('\n'),
         isError: undefined,
       } as Event,
@@ -3322,7 +3194,7 @@ command = "vim"
     expect(transcript).toContain('✗ Agent timed out after 30s.');
   });
 
-  it('renders AgentSwarm progress while tool args are still streaming', async () => {
+  it('renders SubAgent progress while tool args are still streaming', async () => {
     const { driver } = await makeDriver();
     const sendQueued = vi.fn();
 
@@ -3332,15 +3204,15 @@ command = "vim"
         agentId: 'main',
         sessionId: 'ses-1',
         turnId: 1,
-        toolCallId: 'call_swarm',
-        name: 'AgentSwarm',
+        toolCallId: 'call_subagent',
+        name: 'SubAgent',
         argumentsPart: '{"description":"Review changed files',
       } as Event,
       sendQueued,
     );
 
     let transcript = stripSgr(renderTranscript(driver));
-    expect(transcript).toContain('Agent Swarm');
+    expect(transcript).toContain('SubAgent');
     expect(transcript).toContain('Orchestrating...');
     expect(transcript).not.toContain('01');
 
@@ -3350,14 +3222,14 @@ command = "vim"
         agentId: 'main',
         sessionId: 'ses-1',
         turnId: 1,
-        toolCallId: 'call_swarm',
+        toolCallId: 'call_subagent',
         argumentsPart: '","items":["src/a.ts","src/b',
       } as Event,
       sendQueued,
     );
 
     transcript = stripSgr(renderTranscript(driver));
-    expect(transcript).toContain('Agent Swarm');
+    expect(transcript).toContain('SubAgent');
     expect(transcript).toContain('Review changed files');
     expect(transcript).toContain('001 src/a.ts');
     expect(transcript).toContain('002 src/b');
@@ -3367,11 +3239,11 @@ command = "vim"
         type: 'subagent.spawned',
         agentId: 'main',
         sessionId: 'ses-1',
-        parentToolCallId: 'call_swarm',
+        parentToolCallId: 'call_subagent',
         subagentId: 'agent-1',
         subagentName: 'coder',
         description: 'Review changed files #1 (coder)',
-        swarmIndex: 1,
+        subagentIndex: 1,
         runInBackground: false,
       } as Event,
       sendQueued,
@@ -3388,8 +3260,8 @@ command = "vim"
         agentId: 'main',
         sessionId: 'ses-1',
         turnId: 1,
-        toolCallId: 'call_swarm',
-        name: 'AgentSwarm',
+        toolCallId: 'call_subagent',
+        name: 'SubAgent',
         args: {
           description: 'Review changed files',
           prompt_template: 'Review {{item}}',
@@ -3406,89 +3278,13 @@ command = "vim"
     expect(transcript).not.toContain('002 [');
   });
 
-  it('shows plan review reject on the plan card without an approval notice', async () => {
-    const planContent = '# Reject Plan\n\n- keep this plan visible after reject';
-    const session = makeSession({
-      getPlan: vi.fn(async () => ({
-        id: 'reject-plan',
-        content: planContent,
-        path: '/tmp/reject-plan.md',
-      })),
-    });
-    const { driver } = await makeDriver(session);
-
-    driver.sessionEventHandler.handleEvent(
-      {
-        type: 'tool.call.started',
-        agentId: 'main',
-        sessionId: 'ses-1',
-        turnId: 1,
-        toolCallId: 'call_exit_reject_plan',
-        name: 'ExitPlanMode',
-        args: {},
-      } as Event,
-      vi.fn(),
-    );
-
-    await vi.waitFor(() => {
-      const transcript = stripSgr(renderTranscript(driver));
-      expect(transcript).toContain('Reject Plan');
-      expect(countOccurrences(transcript, 'keep this plan visible after reject')).toBe(1);
-    });
-
-    const approvalHandler = vi.mocked(session.setApprovalHandler).mock.calls[0]?.[0] as
-      | ((request: ApprovalRequest) => Promise<ApprovalResponse>)
-      | undefined;
-    if (approvalHandler === undefined) throw new Error('expected approval handler');
-    const response = approvalHandler({
-      turnId: 1,
-      toolCallId: 'call_exit_reject_plan',
-      toolName: 'ExitPlanMode',
-      action: 'Review plan',
-      display: {
-        kind: 'plan_review',
-        plan: planContent,
-        path: '/tmp/reject-plan.md',
-      },
-    });
-
-    await vi.waitFor(() => {
-      expect(driver.state.editorContainer.children[0]).toBeInstanceOf(ApprovalPanelComponent);
-    });
-    (driver.state.editorContainer.children[0] as ApprovalPanelComponent).handleInput('2');
-    await expect(response).resolves.toMatchObject({ decision: 'rejected' });
-
-    driver.sessionEventHandler.handleEvent(
-      {
-        type: 'tool.result',
-        agentId: 'main',
-        sessionId: 'ses-1',
-        turnId: 1,
-        toolCallId: 'call_exit_reject_plan',
-        output: 'Plan rejected by user. Plan mode remains active.',
-        isError: true,
-      } as Event,
-      vi.fn(),
-    );
-
-    await vi.waitFor(() => {
-      const transcript = stripSgr(renderTranscript(driver));
-      expect(transcript).toContain('plan: reject-plan.md · Rejected');
-      expect(transcript).toContain('Reject Plan');
-      expect(countOccurrences(transcript, 'keep this plan visible after reject')).toBe(1);
-      expect(transcript).not.toContain('Rejected: Review plan');
-      expect(transcript).not.toContain('Plan rejected by user.');
-      expect(transcript).not.toContain('Plan mode remains active.');
-    });
-  });
-
   it('renders /status using the active session runtime status', async () => {
     const session = makeSession({
       getStatus: vi.fn(async () => ({
         model: 'k2',
         thinkingEffort: 'high',
         permission: 'auto',
-        planMode: true,
+        discussMode: true,
         contextTokens: 25,
         maxContextTokens: 100,
         contextUsage: 0.25,
@@ -3508,7 +3304,7 @@ command = "vim"
       expect(output).toContain('Model');
       expect(output).toContain('thinking high');
       expect(output).toContain('Permissions  auto');
-      expect(output).toContain('Plan mode    on');
+      expect(output).toContain('Discuss      on');
       expect(output).toContain('Context window');
       expect(output).toContain('25.0%');
     });

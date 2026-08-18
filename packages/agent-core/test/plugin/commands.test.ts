@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { resolve } from 'node:path';
+
 import { expandCommandArguments, parseCommandText } from '../../src/plugin/commands';
 
 describe('parseCommandText', () => {
@@ -14,7 +16,7 @@ describe('parseCommandText', () => {
       name: 'deploy',
       description: 'Deploy to Vercel',
       body: 'Deploy this. Args: $ARGUMENTS',
-      path: '/p/commands/deploy.md',
+      path: resolve('/p/commands/deploy.md'),
     });
   });
 

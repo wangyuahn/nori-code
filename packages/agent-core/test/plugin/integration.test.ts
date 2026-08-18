@@ -11,7 +11,7 @@ describe('PluginManager → SkillRegistry integration', () => {
     const home = await mkdtemp(path.join(tmpdir(), 'kimi-home-'));
     const pluginRoot = await realpath(await mkdtemp(path.join(tmpdir(), 'plugin-')));
     await writeFile(
-      path.join(pluginRoot, 'kimi.plugin.json'),
+      path.join(pluginRoot, 'nori.plugin.json'),
       JSON.stringify({ name: 'demo', skills: './skills/' }),
       'utf8',
     );

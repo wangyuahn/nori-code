@@ -270,7 +270,7 @@ export class AcpServer implements Agent {
     if (!(await harnessIsAuthed(this.harness))) {
       throw RequestError.authRequired();
     }
-    // ACP's `cwd` maps to the SDK's `workDir`. `model`, `planMode`, and
+    // ACP's `cwd` maps to the SDK's `workDir`. `model`, `discussMode`, and
     // similar fields are wired in Phase 8 (per PLAN D3) — Phase 3.2 keeps
     // the surface minimal. Phase 10.1 adds `mcpServers` forwarding so
     // ACP-supplied servers (Zed config, JetBrains config) are passed

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { AgentSwarmProgressComponent } from '#/tui/components/messages/agent-swarm-progress';
+import { SubAgentProgressComponent } from '#/tui/components/messages/subagent-progress';
 import type { SessionEventHandler } from '#/tui/controllers/session-event-handler';
 import { KimiTUI, type KimiTUIStartupInput, type TUIState } from '#/tui/kimi-tui';
 
@@ -20,7 +20,7 @@ function makeStartupInput(): KimiTUIStartupInput {
       session: undefined,
       continue: false,
       permission: undefined,
-      plan: false,
+      discuss: false,
       model: undefined,
       outputFormat: undefined,
       prompt: undefined,
@@ -50,18 +50,18 @@ function makeDriverWithTerminalProgress(): {
   return { driver, state: driver.state, setProgress };
 }
 
-function startSwarmProgress(driver: ActivityDriver, state: TUIState): AgentSwarmProgressComponent {
+function startSubagentProgress(driver: ActivityDriver, state: TUIState): SubAgentProgressComponent {
   const handler = driver.sessionEventHandler.subAgentEventHandler;
-  handler.handleAgentSwarmToolCallStarted('call_swarm', {
+  handler.handleSubAgentToolCallStarted('call_subagent', {
     description: 'Review changed files',
   });
   handler.handleLifecycleEvent({
     type: 'subagent.spawned',
     subagentId: 'agent-1',
     subagentName: 'coder',
-    parentToolCallId: 'call_swarm',
+    parentToolCallId: 'call_subagent',
     description: 'Review changed files #1 (coder)',
-    swarmIndex: 1,
+    subagentIndex: 1,
     runInBackground: false,
   } as Parameters<typeof handler.handleLifecycleEvent>[0]);
   handler.handleLifecycleEvent({
@@ -70,9 +70,9 @@ function startSwarmProgress(driver: ActivityDriver, state: TUIState): AgentSwarm
   } as Parameters<typeof handler.handleLifecycleEvent>[0]);
 
   const progress = state.transcriptContainer.children.find(
-    (child): child is AgentSwarmProgressComponent => child instanceof AgentSwarmProgressComponent,
+    (child): child is SubAgentProgressComponent => child instanceof SubAgentProgressComponent,
   );
-  if (progress === undefined) throw new Error('expected AgentSwarm progress');
+  if (progress === undefined) throw new Error('expected SubAgent progress');
   return progress;
 }
 
@@ -162,11 +162,11 @@ describe('updateActivityPane terminal progress', () => {
     }
   });
 
-  it('moves the moon spinner into the AgentSwarm progress row while active', () => {
+  it('moves the moon spinner into the SubAgent progress row while active', () => {
     vi.useFakeTimers();
     try {
       const { driver, state, setProgress } = makeDriverWithTerminalProgress();
-      const progress = startSwarmProgress(driver, state);
+      const progress = startSubagentProgress(driver, state);
       state.livePane = { ...state.livePane, mode: 'tool' };
 
       driver.updateActivityPane();
@@ -178,21 +178,21 @@ describe('updateActivityPane terminal progress', () => {
       expect(strip(progress.render(80).join('\n'))).toContain('🌑 Working...');
 
       state.activitySpinner?.instance.stop();
-      driver.sessionEventHandler.clearAgentSwarmProgress();
+      driver.sessionEventHandler.clearSubAgentProgress();
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('keeps ended AgentSwarm progress on a placeholder instead of the moon spinner', () => {
+  it('keeps ended SubAgent progress on a placeholder instead of the moon spinner', () => {
     vi.useFakeTimers();
     try {
       const { driver, state } = makeDriverWithTerminalProgress();
-      const progress = startSwarmProgress(driver, state);
-      driver.sessionEventHandler.subAgentEventHandler.handleAgentSwarmToolResult(
-        'call_swarm',
+      const progress = startSubagentProgress(driver, state);
+      driver.sessionEventHandler.subAgentEventHandler.handleSubAgentToolResult(
+        'call_subagent',
         {
-          tool_call_id: 'call_swarm',
+          tool_call_id: 'call_subagent',
           output: 'Done',
           is_error: false,
         },
@@ -209,7 +209,7 @@ describe('updateActivityPane terminal progress', () => {
       expect(output).not.toContain('🌑 Working...');
 
       state.activitySpinner?.instance.stop();
-      driver.sessionEventHandler.clearAgentSwarmProgress();
+      driver.sessionEventHandler.clearSubAgentProgress();
     } finally {
       vi.useRealTimers();
     }

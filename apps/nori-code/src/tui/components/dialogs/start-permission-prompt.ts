@@ -29,7 +29,7 @@ export interface StartPermissionPromptOptions<
 }
 
 // ---------------------------------------------------------------------------
-// Pre-built option sets for goal / swarm permission prompts
+// Pre-built option sets for goal / SubAgent permission prompts
 // ---------------------------------------------------------------------------
 
 export const GOAL_MANUAL_OPTIONS: readonly StartPermissionOption[] = [
@@ -43,7 +43,7 @@ export const GOAL_MANUAL_OPTIONS: readonly StartPermissionOption[] = [
     value: 'yolo',
     label: 'Switch to YOLO and start',
     description:
-      'Tools and plan changes are approved automatically. Nori Code may still ask you questions.',
+      'Tools and Discuss transitions are approved automatically. Nori Code may still ask you questions.',
   },
   {
     value: 'manual',
@@ -69,7 +69,7 @@ export const GOAL_YOLO_OPTIONS: readonly StartPermissionOption[] = [
     value: 'yolo',
     label: 'Keep YOLO and start',
     description:
-      'Tools and plan changes stay approved automatically. Nori Code may still ask you questions.',
+      'Tools and Discuss transitions stay approved automatically. Nori Code may still ask you questions.',
   },
   {
     value: 'cancel',
@@ -82,24 +82,24 @@ export function goalStartOptions(mode: 'manual' | 'yolo'): readonly StartPermiss
   return mode === 'yolo' ? GOAL_YOLO_OPTIONS : GOAL_MANUAL_OPTIONS;
 }
 
-export const SWARM_OPTIONS: readonly StartPermissionOption[] = [
+export const SUBAGENT_OPTIONS: readonly StartPermissionOption[] = [
   {
     value: 'auto',
     label: 'Switch to Auto and start',
     description:
-      'Best for swarm tasks. Tools are approved automatically, and questions are skipped.',
+      'Best for SubAgent tasks. Tools are approved automatically, and questions are skipped.',
   },
   {
     value: 'yolo',
     label: 'Switch to YOLO and start',
     description:
-      'Tools and plan changes are approved automatically. Nori Code may still ask you questions.',
+      'Tools and Discuss transitions are approved automatically. Nori Code may still ask you questions.',
   },
   {
     value: 'manual',
     label: 'Start in Manual',
     description:
-      'Keep approvals on. Nori Code may stop and wait for you during the swarm task.',
+      'Keep approvals on. Nori Code may stop and wait for you during the SubAgent task.',
   },
 ];
 
@@ -110,14 +110,14 @@ export const GOAL_MANUAL_NOTICE = [
 ] as const;
 
 export const GOAL_YOLO_NOTICE = [
-  'YOLO mode approves tools and plan changes automatically.',
+  'YOLO mode approves tools and Discuss transitions automatically.',
   'YOLO mode can still stop for questions.',
   'Switch to Auto if you want questions skipped during goal work.',
 ] as const;
 
-export const SWARM_NOTICE = [
+export const SUBAGENT_NOTICE = [
   'Manual mode asks you before Nori Code runs commands, edits files, or takes other risky actions.',
-  'Manual mode can block swarm work while agents are running.',
+  'Manual mode can block SubAgent work while agents are running.',
   'You can go back without losing your command.',
 ] as const;
 

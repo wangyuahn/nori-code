@@ -22,7 +22,7 @@
 | `/editor` | — | 配置 `Ctrl-G` 调起的外部编辑器 | 是 |
 | `/theme` | — | 切换终端 UI 配色主题 | 是 |
 
-`/settings` 也可以用 `/setting` 别名直接修改运行时设置。常用的 Nori 子命令包括 `/setting readonly on|off`（拦截或允许主 Agent 直接 `Write` / `Edit`）、`/setting coder write on|off`（授予或撤销编码子 Agent 的直接写权限）、`/setting depth <n>`（设置 swarm 嵌套深度）和 `/setting auto`（打开引导式配置）。
+`/settings` 也可以用 `/setting` 别名直接修改运行时设置。常用的 Nori 子命令包括 `/setting readonly on|off`（拦截或允许主 Agent 直接 `Write` / `Edit`）、`/setting coder write on|off`（授予或撤销编码子 Agent 的直接写权限）、`/setting depth <n>`（设置 SubAgent 嵌套深度）和 `/setting auto`（打开引导式配置）。
 
 ## 会话管理
 
@@ -44,16 +44,16 @@
 
 | 命令 | 别名 | 说明 | 随时可用 |
 | --- | --- | --- | --- |
-| `/yolo [on\|off]` | `/yes` | 切换 YOLO 模式。不带参数时翻转；显式传 `on`/`off` 时强制设置。开启后跳过普通工具调用审批；Plan 模式的退出审批不受影响 | 是 |
+| `/yolo [on\|off]` | `/yes` | 切换 YOLO 模式。不带参数时翻转；显式传 `on`/`off` 时强制设置。开启后跳过普通工具调用审批；不会改变 Discuss 的只读限制 | 是 |
 | `/auto [on\|off]` | — | 切换 auto 权限模式。开启后工具审批自动处理，Agent 不会向用户提问 | 是 |
-| `/plan [on\|off]` | — | 切换 Plan 模式。不带参数时翻转；显式传 `on`/`off` 时强制设置。单纯切换不会创建空计划文件 | 是 |
-| `/plan clear` | — | 清除当前 plan 方案 | 否 |
-| `/swarm on\|off` | — | 开启或关闭 swarm mode，但不发送提示词。 | 是 |
-| `/swarm <task>` | — | 先开启 swarm mode，再把 `<task>` 作为普通提示词发送。如果该轮次正常完成，swarm mode 会自动关闭。若当前是 `manual` 权限模式，启动前会提示是否切换到 `auto` 或 `yolo`。 | 否 |
+| `/plan [on\|off]` | — | 切换 Discuss。不带参数时翻转；显式传 `on`/`off` 时强制设置。命令名为兼容性保留 | 是 |
+| `/plan clear` | — | 清除旧计划状态 | 否 |
+| `/subagent on\|off` | — | 开启或关闭 SubAgent 模式，但不发送提示词。 | 否 |
+| `/subagent <task>` | — | 先开启 SubAgent 模式，再把 `<task>` 作为普通提示词发送。如果该轮次正常完成，SubAgent 模式会自动关闭。若当前是 `manual` 权限模式，启动前会提示是否切换到 `auto` 或 `yolo`。 | 否 |
 | `/goal [...]` | — | 开始或管理目标模式 | 见下文 |
 
 ::: warning 注意
-`/yolo` 会跳过普通工具调用的审批确认，使用前请确保了解可能的风险。Plan 模式的退出审批不会被 `/yolo` 跳过；Plan 模式下的 `Bash` 也按 `/yolo` 的普通放行规则处理。
+`/yolo` 会跳过普通工具调用的审批确认，使用前请确保了解可能的风险，但不会绕过 Discuss 的只读限制。
 :::
 
 ## 目标模式

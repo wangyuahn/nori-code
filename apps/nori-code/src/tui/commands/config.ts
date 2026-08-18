@@ -25,10 +25,10 @@ import { SettingsSelectorComponent, type SettingsSelection } from '../components
 import {
   StartPermissionPromptComponent,
   goalStartOptions,
-  SWARM_OPTIONS,
+  SUBAGENT_OPTIONS,
   GOAL_MANUAL_NOTICE,
   GOAL_YOLO_NOTICE,
-  SWARM_NOTICE,
+  SUBAGENT_NOTICE,
 } from '../components/dialogs/start-permission-prompt';
 import { ThemeSelectorComponent } from '../components/dialogs/theme-selector';
 import { UpdatePreferenceSelectorComponent } from '../components/dialogs/update-preference-selector';
@@ -51,12 +51,12 @@ import { setExperimentalFeatures } from './experimental-flags';
 import type { SlashCommandHost } from './dispatch';
 
 // ---------------------------------------------------------------------------
-// Plan / Config commands
+// Discuss / Config commands
 // ---------------------------------------------------------------------------
 
 const MODEL_PICKER_REFRESH_TIMEOUT_MS = 2_000;
 
-export async function handlePlanCommand(host: SlashCommandHost, args: string): Promise<void> {
+export async function handleDiscussCommand(host: SlashCommandHost, args: string): Promise<void> {
   const session = host.session;
   if (session === undefined) {
     host.showError(NO_ACTIVE_SESSION_MESSAGE);
@@ -64,40 +64,30 @@ export async function handlePlanCommand(host: SlashCommandHost, args: string): P
   }
 
   const subcmd = args.trim().toLowerCase();
-  if (subcmd === 'clear') {
-    await session.clearPlan();
-    host.showNotice('Plan cleared');
-    return;
-  }
-
   let enabled: boolean;
-  if (subcmd.length === 0) enabled = !host.state.appState.planMode;
+  if (subcmd.length === 0) enabled = !host.state.appState.discussMode;
   else if (subcmd === 'on') enabled = true;
   else if (subcmd === 'off') enabled = false;
   else {
-    host.showError(`Unknown plan subcommand: ${subcmd}`);
+    host.showError(`Unknown Discuss subcommand: ${subcmd}`);
     return;
   }
 
-  await applyPlanMode(host, session, enabled);
+  await applyDiscussMode(host, session, enabled);
 }
 
-async function applyPlanMode(host: SlashCommandHost, session: Session, enabled: boolean): Promise<void> {
+async function applyDiscussMode(host: SlashCommandHost, session: Session, enabled: boolean): Promise<void> {
   try {
-    await session.setPlanMode(enabled);
-    host.setAppState({ planMode: enabled });
+    await session.setDiscussMode(enabled);
+    host.setAppState({ discussMode: enabled });
     if (enabled) {
-      const plan = await session.getPlan().catch(() => null);
-      host.showNotice(
-        'Plan mode: ON',
-        plan?.path !== undefined ? `Plan will be created here: ${plan.path}` : undefined,
-      );
+      host.showNotice('Discuss: ON', 'Read-only team meeting is active.');
       return;
     }
-    host.showNotice('Plan mode: OFF');
+    host.showNotice('Discuss: OFF');
   } catch (error) {
     const msg = formatErrorMessage(error);
-    host.showError(`Failed to set plan mode: ${msg}`);
+    host.showError(`Failed to set Discuss: ${msg}`);
   }
 }
 
@@ -127,18 +117,18 @@ export async function handleSettingPermission(host: SlashCommandHost, mode: stri
 }
 
 // ---------------------------------------------------------------------------
-// Shared permission guard for Goal / Swarm start flows
+// Shared permission guard for Goal / SubAgent start flows
 // ---------------------------------------------------------------------------
 
 /**
  * Ensures the session has a permissive-enough mode before starting a goal or
- * swarm task.  When the current permission is `auto` (or `yolo` for swarm) the
+ * SubAgent task. When the current permission is `auto` (or `yolo` for SubAgent) the
  * callback runs immediately; otherwise a permission prompt is shown so the
  * user can switch modes or proceed in Manual.
  */
 export async function ensureAutoPermission(
   host: SlashCommandHost,
-  action: 'goal' | 'swarm',
+  action: 'goal' | 'subagent',
   commandText: string,
   onStart: () => Promise<void>,
 ): Promise<void> {
@@ -150,13 +140,13 @@ export async function ensureAutoPermission(
     return;
   }
 
-  // Swarm runs fine under yolo; only prompt on manual.
-  if (action === 'swarm' && currentMode === 'yolo') {
+  // SubAgent runs fine under yolo; only prompt on manual.
+  if (action === 'subagent' && currentMode === 'yolo') {
     await onStart();
     return;
   }
 
-  const cancelStatus = action === 'goal' ? 'Goal not started.' : 'Swarm task not started.';
+  const cancelStatus = action === 'goal' ? 'Goal not started.' : 'SubAgent task not started.';
 
   const cancelStart = (): void => {
     host.restoreInputText(commandText);
@@ -166,15 +156,15 @@ export async function ensureAutoPermission(
   const isYolo = currentMode === 'yolo';
   const title = action === 'goal'
     ? (isYolo ? 'Start a goal in YOLO mode?' : 'Start a goal with approvals on?')
-    : 'Start a swarm task with approvals on?';
+    : 'Start a SubAgent task with approvals on?';
 
   const noticeLines = action === 'goal'
     ? (isYolo ? GOAL_YOLO_NOTICE : GOAL_MANUAL_NOTICE)
-    : SWARM_NOTICE;
+    : SUBAGENT_NOTICE;
 
   const options = action === 'goal'
     ? goalStartOptions(isYolo ? 'yolo' : 'manual')
-    : SWARM_OPTIONS;
+    : SUBAGENT_OPTIONS;
 
   host.mountEditorReplacement(
     new StartPermissionPromptComponent({
@@ -588,7 +578,7 @@ const PERMISSION_OPTIONS = [
     value: 'yolo',
     label: 'YOLO',
     description:
-      'Automatically approve tool actions and plan transitions. The agent can still ask you explicit questions when your input is needed.',
+      'Automatically approve tool actions and Discuss transitions. The agent can still ask you explicit questions when your input is needed.',
   },
 ] as const;
 
@@ -808,9 +798,6 @@ function handleSettingsSelection(host: SlashCommandHost, value: SettingsSelectio
       );
       return;
     }
-    case 'swarm-depth':
-      showSwarmDepthPicker(host);
-      return;
     case 'note-rules':
       showNoteRulesPicker(host);
       return;
@@ -863,15 +850,6 @@ export async function handleSettingCommand(host: SlashCommandHost, args: string)
       await applyCoderWriteChoice(host, next);
       return;
     }
-    case 'depth': {
-      const depth = Number(subcommand);
-      if (!Number.isInteger(depth) || depth < 1) {
-        host.showError('Usage: /setting depth <positive-integer>');
-        return;
-      }
-      await applyMaxSwarmDepthChoice(host, depth);
-      return;
-    }
     case 'auto':
       showSettingAutoWizard(host);
       return;
@@ -908,7 +886,6 @@ async function applyCoderWriteChoice(host: SlashCommandHost, enabled: boolean): 
     host.setAppState({
       coderWriteEnabled: settings.coderWriteEnabled,
       toolsReadonly: settings.toolsReadonly,
-      maxSwarmDepth: settings.maxSwarmDepth,
     });
     host.showStatus(`Coder write: ${settings.coderWriteEnabled ? 'ON' : 'OFF'}`);
   } catch (error) {
@@ -924,27 +901,10 @@ async function applyReadOnlyChoice(host: SlashCommandHost, enabled: boolean): Pr
     host.setAppState({
       coderWriteEnabled: settings.coderWriteEnabled,
       toolsReadonly: settings.toolsReadonly,
-      maxSwarmDepth: settings.maxSwarmDepth,
     });
     host.showStatus(`Read-only mode: ${settings.toolsReadonly ? 'ON' : 'OFF'}`);
   } catch (error) {
     host.showError(`Failed to set read-only mode: ${formatErrorMessage(error)}`);
-  }
-}
-
-async function applyMaxSwarmDepthChoice(host: SlashCommandHost, depth: number): Promise<void> {
-  try {
-    const settings = await host.requireSession().setNoriRuntimeSettings({
-      maxSwarmDepth: depth,
-    });
-    host.setAppState({
-      coderWriteEnabled: settings.coderWriteEnabled,
-      toolsReadonly: settings.toolsReadonly,
-      maxSwarmDepth: settings.maxSwarmDepth,
-    });
-    host.showStatus(`Swarm max depth: ${String(settings.maxSwarmDepth)}`);
-  } catch (error) {
-    host.showError(`Failed to set swarm max depth: ${formatErrorMessage(error)}`);
   }
 }
 
@@ -986,11 +946,10 @@ async function applySettingAutoWizardAnswers(
     }
 
     const settings = await session.setNoriRuntimeSettings({
-      maxSwarmDepth: answers.swarmDepth,
       coderWriteEnabled: answers.coderWrite,
     });
 
-    await session.setPlanMode(answers.planMode);
+    await session.setDiscussMode(answers.discussMode);
 
     const notifications = {
       ...host.state.appState.notifications,
@@ -1006,11 +965,10 @@ async function applySettingAutoWizardAnswers(
     host.setAppState({
       permissionMode: answers.permission,
       model: answers.model === '__none__' ? host.state.appState.model : answers.model,
-      planMode: answers.planMode,
+      discussMode: answers.discussMode,
       notifications,
       coderWriteEnabled: settings.coderWriteEnabled,
       toolsReadonly: settings.toolsReadonly,
-      maxSwarmDepth: settings.maxSwarmDepth,
     });
     host.showStatus('Auto settings applied.', 'success');
   } catch (error) {
@@ -1019,34 +977,6 @@ async function applySettingAutoWizardAnswers(
 }
 
 // ---------------------------------------------------------------------------
-// Swarm depth picker
-// ---------------------------------------------------------------------------
-
-const SWARM_DEPTH_OPTIONS = [
-  { value: '1', label: '1', description: 'Allow swarm delegation without recursive nesting.' },
-  { value: '2', label: '2', description: 'Allow one nested swarm level.' },
-  { value: '3', label: '3', description: 'Allow two nested swarm levels.' },
-] as const;
-
-function showSwarmDepthPicker(host: SlashCommandHost): void {
-  const currentDepth = String(host.state.appState.maxSwarmDepth);
-  host.mountEditorReplacement(
-    new ChoicePickerComponent({
-      title: 'Swarm Depth',
-      options: [...SWARM_DEPTH_OPTIONS],
-      currentValue: currentDepth === '0' ? '1' : currentDepth,
-      onSelect: (value) => {
-        host.restoreEditor();
-        const depth = Number(value);
-        void applyMaxSwarmDepthChoice(host, depth);
-      },
-      onCancel: () => {
-        host.restoreEditor();
-      },
-    }),
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Note rules picker
 // ---------------------------------------------------------------------------
@@ -1136,14 +1066,14 @@ function setWorkflowConfig(host: SlashCommandHost, patch: Partial<WorkflowConfig
 function showWorkflowPicker(host: SlashCommandHost): void {
   const config = getWorkflowConfig(host);
 
-  const bugHuntLabel = config.bugHuntSwarmRequired ? 'ON' : 'OFF';
+  const bugHuntLabel = config.bugHuntSubAgentRequired ? 'ON' : 'OFF';
   const gateLabel = String(config.maxReviewGateContinuations);
 
   const options: ChoiceOption[] = [
     {
-      value: 'bug-hunt-swarm',
-      label: `Bug Hunt Swarm: ${bugHuntLabel}`,
-      description: 'Automatically launch AgentSwarm for bug hunt / failure diagnosis requests.',
+      value: 'bug-hunt-subagent',
+      label: `Bug Hunt SubAgent: ${bugHuntLabel}`,
+      description: 'Automatically launch SubAgent for bug hunt / failure diagnosis requests.',
     },
     {
       value: 'review-thresholds',
@@ -1165,10 +1095,10 @@ function showWorkflowPicker(host: SlashCommandHost): void {
       onSelect: (value) => {
         host.restoreEditor();
         switch (value) {
-          case 'bug-hunt-swarm': {
-            const next = !getWorkflowConfig(host).bugHuntSwarmRequired;
-            setWorkflowConfig(host, { bugHuntSwarmRequired: next });
-            host.showStatus(`Bug Hunt Swarm: ${next ? 'ON' : 'OFF'}`);
+          case 'bug-hunt-subagent': {
+            const next = !getWorkflowConfig(host).bugHuntSubAgentRequired;
+            setWorkflowConfig(host, { bugHuntSubAgentRequired: next });
+            host.showStatus(`Bug Hunt SubAgent: ${next ? 'ON' : 'OFF'}`);
             break;
           }
           case 'review-thresholds':

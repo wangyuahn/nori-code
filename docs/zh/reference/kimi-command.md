@@ -1,6 +1,6 @@
 # kimi 命令
 
-`kimi` 是 Kimi Code CLI 的主命令，用于在终端中启动一次交互式会话。不带任何参数运行时，它会在当前工作目录下开启一个新会话；配合不同的 flag，可以续上历史会话、跳过审批、从 Plan 模式开始，或者指定自定义的 Skills 目录。
+`kimi` 是 Kimi Code CLI 的主命令，用于在终端中启动一次交互式会话。不带任何参数运行时，它会在当前工作目录下开启一个新会话；配合不同的 flag，可以续上历史会话、跳过审批、从 Discuss 开始，或者指定自定义的 Skills 目录。
 
 ```sh
 kimi [options]
@@ -22,14 +22,14 @@ kimi <subcommand> [options]
 | `--output-format <format>` | | 设置非交互输出格式，支持 `text` 与 `stream-json`。仅可与 `--prompt` 一起使用，默认 `text` |
 | `--yolo` | `-y` | 自动批准普通工具调用，跳过审批请求 |
 | `--auto` | | 以 auto 权限模式启动；工具审批自动处理，Agent 不会向用户提问 |
-| `--plan` | | 以 Plan 模式启动新会话，AI 会优先使用只读工具进行探索和规划 |
+| `--plan` | | 以 Discuss 启动新会话，Agent 会在只读团队会议中使用只读工具（flag 为兼容性保留） |
 | `--skills-dir <dir>` | | 从指定目录加载 Skills，替换自动发现的用户和项目目录。可重复传入 |
 | `--add-dir <dir>` | | 为本次会话添加额外的工作目录。相对路径按当前工作目录解析。可重复传入 |
 
 `-r` / `--resume` 是 `--session` 的隐藏别名；`--yes` 和 `--auto-approve` 是 `--yolo` 的隐藏别名，在帮助信息中不显示。
 
 ::: warning 注意
-`--yolo` 会跳过普通工具调用的人工确认，包括文件写入和 Shell 命令执行，请只在受信任的工作目录下使用。Plan 模式的退出审批不会被 `--yolo` 跳过；Plan 模式下的 `Bash` 按普通放行规则处理。
+`--yolo` 会跳过普通工具调用的人工确认，包括文件写入和 Shell 命令执行，请只在受信任的工作目录下使用。它不会绕过 Discuss 的只读限制。
 :::
 
 ### flag 冲突规则
@@ -41,7 +41,7 @@ kimi <subcommand> [options]
 - `--prompt` 不能与 `--yolo`、`--auto` 或 `--plan` 同时使用——非交互模式固定使用 `auto` 权限
 - `--output-format` 只能与 `--prompt` 一起使用
 
-恢复会话时，可以通过 `--auto`、`--yolo` 或 `--plan` 覆盖原会话保存的权限或计划模式。例如，`kimi --continue --auto` 会恢复最近会话并切换到 auto 权限模式。
+恢复会话时，可以通过 `--auto`、`--yolo` 或 `--plan` 覆盖原会话保存的权限或 Discuss 状态。例如，`kimi --continue --auto` 会恢复最近会话并切换到 auto 权限模式。
 
 ## 典型用法
 
@@ -76,7 +76,7 @@ kimi --yolo
 kimi --auto
 ```
 
-先阅读代码、产出实现计划，而不是立刻动手修改文件：
+进入 Discuss，以只读团队会议的方式先阅读代码，而不是立刻动手修改文件：
 
 ```sh
 kimi --plan

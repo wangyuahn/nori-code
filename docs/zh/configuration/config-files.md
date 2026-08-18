@@ -25,7 +25,7 @@ TOML 字段名一律用下划线（snake_case），如 `default_model`、`max_co
 ```toml
 default_model = "kimi-code/kimi-for-coding"
 default_permission_mode = "manual"
-default_plan_mode = false
+default_discuss_mode = false
 merge_all_available_skills = true
 telemetry = true
 
@@ -77,7 +77,7 @@ timeout = 5
 | --- | --- | --- | --- |
 | `default_model` | `string` | — | 默认模型别名，必须在 `models` 中定义 |
 | `default_permission_mode` | `string` | `manual` | 新会话的默认权限模式，可选 `manual`（未预先放行的动作会询问）、`auto`（自动批准普通工具调用，但静态 deny 规则仍生效）、`yolo`（在受信任工作区跳过普通审批） |
-| `default_plan_mode` | `boolean` | `false` | 新会话是否默认以 Plan 模式（先出计划再执行）启动 |
+| `default_discuss_mode` | `boolean` | `false` | 新会话是否默认以 Discuss（只读团队会议）启动 |
 | `merge_all_available_skills` | `boolean` | `true` | 是否合并所有目录中的 Agent Skills |
 | `extra_skill_dirs` | `array<string>` | — | 额外 Skill 搜索目录，叠加到默认目录之上 |
 | `telemetry` | `boolean` | `true` | 是否启用匿名遥测；显式设为 `false` 时关闭 |
@@ -233,7 +233,7 @@ api_key = "sk-xxx"
 
 `permission` 设置会话启动时自动加载的权限规则，控制 Agent 调用工具时是否需要用户确认。规则用 `[[permission.rules]]` 数组表写出，按顺序匹配，第一条命中即生效。
 
-Nori 的运行时设置与这些静态规则分开处理。`/setting readonly on|off` 控制主 Agent 是否可以直接调用 `Write` 和 `Edit`；它不会移除 `Read`、`Grep`、`Glob` 或 `Bash`，`Bash` 仍按当前权限模式处理。`/setting coder write on|off` 控制编码子 Agent 是否可以直接写文件，`/setting depth <n>` 控制 swarm 嵌套深度。这些设置保存在会话运行时状态中，而不是作为 `config.toml` 里的 `[[permission.rules]]` 条目保存。
+Nori 的运行时设置与这些静态规则分开处理。`/setting readonly on|off` 控制主 Agent 是否可以直接调用 `Write` 和 `Edit`；它不会移除 `Read`、`Grep`、`Glob` 或 `Bash`，`Bash` 仍按当前权限模式处理。`/setting coder write on|off` 控制编码子 Agent 是否可以直接写文件，`/setting depth <n>` 控制 SubAgent 嵌套深度。这些设置保存在会话运行时状态中，而不是作为 `config.toml` 里的 `[[permission.rules]]` 条目保存。
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
@@ -242,7 +242,7 @@ Nori 的运行时设置与这些静态规则分开处理。`/setting readonly on
 | `pattern` | `string` | 是 | 匹配模式，格式为 `工具名` 或 `工具名(参数模式)`，如 `Read`、`Bash(rm -rf*)` |
 | `reason` | `string` | 否 | 规则说明，仅用于调试和审计 |
 
-内置工具名见[内置工具](../reference/tools.md)。大多数支持规则参数的内置工具会定义自己的匹配对象，例如 `Bash(command-pattern)` 或 `Read(path-pattern)`。`AgentSwarm`、MCP 工具和自定义工具只能按工具名匹配，不支持参数模式。
+内置工具名见[内置工具](../reference/tools.md)。大多数支持规则参数的内置工具会定义自己的匹配对象，例如 `Bash(command-pattern)` 或 `Read(path-pattern)`。`SubAgent`、MCP 工具和自定义工具只能按工具名匹配，不支持参数模式。
 
 ```toml
 [[permission.rules]]

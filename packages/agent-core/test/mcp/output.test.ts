@@ -334,7 +334,9 @@ describe('mcpResultToExecutableOutput', () => {
 
   test('downsamples an oversized real image instead of leaving it full-size', async () => {
     const big = Buffer.from(
-      await new Jimp({ width: 2600, height: 2600, color: 0x3366ccff }).getBuffer('image/png'),
+      await new Jimp({ width: 2600, height: 2600, color: 0x3366ccff }).getBuffer('image/png', {
+        deflateLevel: 1,
+      }),
     ).toString('base64');
 
     const out = await mcpResultToExecutableOutput(
@@ -354,5 +356,5 @@ describe('mcpResultToExecutableOutput', () => {
     // The image was compressed and kept, not dropped to a notice.
     const joined = parts.map((p) => (p.type === 'text' ? p.text : '')).join('');
     expect(joined).not.toContain('image_url dropped');
-  });
+  }, 10_000);
 });

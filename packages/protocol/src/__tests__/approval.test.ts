@@ -107,6 +107,13 @@ describe('approvalResolveRequestSchema (REST §3.6)', () => {
     const value = approvalResolveRequestSchema.parse({ decision: 'rejected', feedback: 'no' });
     expect(value.decision).toBe('rejected');
   });
+
+  it('accepts an agent target for a child transcript', () => {
+    expect(approvalResolveRequestSchema.parse({
+      decision: 'approved',
+      agent_id: 'team_reviewer',
+    }).agent_id).toBe('team_reviewer');
+  });
 });
 
 describe('approvalResolveResultSchema (REST §3.6)', () => {
@@ -154,6 +161,13 @@ describe('listPendingApprovalsResponseSchema (REST pending recovery)', () => {
     expect(listPendingApprovalsQuerySchema.parse({ status: 'pending' })).toEqual({
       status: 'pending',
     });
+  });
+
+  it('accepts an agent target when listing pending approvals', () => {
+    expect(listPendingApprovalsQuerySchema.parse({
+      status: 'pending',
+      agent_id: 'team_reviewer',
+    }).agent_id).toBe('team_reviewer');
   });
 
   it('rejects unsupported status query', () => {

@@ -5,7 +5,7 @@ import {
   resolveSlashCommandAvailability,
   addDirArgumentCompletions,
   sortSlashCommands,
-  swarmArgumentCompletions,
+  subagentArgumentCompletions,
   type KimiSlashCommand,
 } from '#/tui/commands/index';
 import { describe, expect, it } from 'vitest';
@@ -49,25 +49,26 @@ describe('built-in slash command registry', () => {
     expect(resolveSlashCommandAvailability(plan!, 'clear')).toBe('idle-only');
   });
 
-  it('keeps swarm mode changes and swarm tasks idle-only', () => {
-    const swarm = findBuiltInSlashCommand('swarm');
-    expect(swarm).toBeDefined();
-    expect((swarm as KimiSlashCommand).experimentalFlag).toBeUndefined();
-    expect(resolveSlashCommandAvailability(swarm!, 'on')).toBe('idle-only');
-    expect(resolveSlashCommandAvailability(swarm!, 'off')).toBe('idle-only');
-    expect(resolveSlashCommandAvailability(swarm!, 'Ship feature X')).toBe('idle-only');
+  it('keeps SubAgent mode changes and SubAgent tasks idle-only', () => {
+    const subagent = findBuiltInSlashCommand('subagent');
+    expect(subagent).toBeDefined();
+    expect(subagent?.name).toBe('subagent');
+    expect((subagent as KimiSlashCommand).experimentalFlag).toBeUndefined();
+    expect(resolveSlashCommandAvailability(subagent!, 'on')).toBe('idle-only');
+    expect(resolveSlashCommandAvailability(subagent!, 'off')).toBe('idle-only');
+    expect(resolveSlashCommandAvailability(subagent!, 'Ship feature X')).toBe('idle-only');
   });
 
-  it('offers swarm subcommand argument completions', () => {
+  it('offers SubAgent subcommand argument completions', () => {
     const values = (prefix: string): string[] | null => {
-      const items = swarmArgumentCompletions(prefix);
+      const items = subagentArgumentCompletions(prefix);
       return items === null ? null : items.map((item) => item.value);
     };
 
     expect(values('')).toEqual(['on', 'off']);
     expect(values('O')).toEqual(['on', 'off']);
-    expect(swarmArgumentCompletions('of')).toEqual([
-      { value: 'off', label: 'off', description: 'Turn swarm mode off' },
+    expect(subagentArgumentCompletions('of')).toEqual([
+      { value: 'off', label: 'off', description: 'Turn SubAgent mode off' },
     ]);
     expect(values('on')).toBeNull();
     expect(values('off')).toBeNull();
@@ -169,6 +170,7 @@ describe('built-in slash command registry', () => {
         'sessions',
         'settings',
         'status',
+        'subagent',
         'theme',
         'title',
         'undo',

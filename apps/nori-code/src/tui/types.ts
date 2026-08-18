@@ -30,11 +30,9 @@ export interface AppState {
   additionalDirs: readonly string[];
   sessionId: string;
   permissionMode: PermissionMode;
-  planMode: boolean;
+  discussMode: boolean;
   /** 'bash' when the editor is in `!` shell-command mode. */
   inputMode: 'prompt' | 'bash';
-  swarmDepth: number;
-  maxSwarmDepth: number;
   /** Whether nori-coder subagent has been granted write access (Write/Edit/Bash). */
   coderWriteEnabled: boolean;
   /** Whether the main Nori orchestrator blocks direct Write/Edit/Bash. */
@@ -222,7 +220,7 @@ export interface TUIStartupOptions {
   readonly sessionFlag?: string;
   readonly continueLast: boolean;
   readonly permission?: 'auto' | 'yolo';
-  readonly plan: boolean;
+  readonly discuss: boolean;
   readonly model?: string;
   readonly startupNotice?: string;
 }

@@ -10,7 +10,7 @@ import { generate } from '@nori-code/kosong';
 
 import type { EnabledPluginSessionStart, PluginCommandDef } from '#/plugin';
 import { expandCommandArguments } from '../plugin/commands';
-import type { PluginCommandOrigin, UserPromptOrigin } from './context';
+import type { PluginCommandOrigin, PromptOrigin } from './context';
 
 import type { McpConnectionManager } from '../mcp';
 import { FlagResolver, type ExperimentalFlagResolver } from '../flags';
@@ -38,7 +38,7 @@ import { GoalMode } from './goal';
 import { HookEngine } from '../session/hooks';
 import { InjectionManager } from './injection/manager';
 import { PermissionManager, type PermissionManagerOptions } from './permission';
-import { PlanMode } from './plan';
+import { DiscussMode } from './discussion';
 import {
   AgentRecords,
   BlobStore,
@@ -50,7 +50,6 @@ import {
 import { ReplayBuilder, type ReplayBuilderOptions } from './replay';
 import { SkillManager } from './skill';
 import type { SkillRegistry } from './skill/types';
-import { SwarmMode } from './swarm';
 import { ToolManager } from './tool/index';
 import { TurnFlow } from './turn';
 import { KosongLLM } from './turn/kosong-llm';
@@ -59,12 +58,11 @@ import { LlmRequestLogger, splitGenerateOptions } from './llm-request-logger';
 import { resolveCompletionBudget } from '../utils/completion-budget';
 import type { Kaos } from '@nori-code/kaos';
 import type { ToolServices } from '../tools/support/services';
-import type { NoriMemoryProvider, NoriSwarmProvider } from '../tools/builtin/nori/types';
+import type { NoriMemoryProvider } from '../tools/builtin/nori/types';
 import { RuleEngine, type RuleConfig } from './turn/rule-engine';
 import type { NoriWorkflowConfig } from './nori-workflow';
 
 export type { AgentRecord, AgentRecordPersistence } from './records';
-export type { SwarmModeTrigger } from './swarm';
 export type { BuiltinTool, ToolInfo, ToolSource, UserToolRegistration } from './tool';
 export * from './goal';
 
@@ -96,8 +94,6 @@ export interface AgentOptions {
   readonly additionalDirs?: readonly string[];
   readonly systemPromptContextProvider?: (() => Promise<PreparedSystemPromptContext>) | undefined;
   readonly obsidianMemory?: NoriMemoryProvider;
-  readonly swarmManager?: NoriSwarmProvider;
-  readonly noriSwarmMaxDepth?: number;
   readonly noriWorkflow?: NoriWorkflowConfig;
   readonly coderWriteEnabled?: boolean;
   readonly noriRules?: RuleConfig[];
@@ -136,8 +132,7 @@ export class Agent {
   readonly turn: TurnFlow;
   readonly injection: InjectionManager;
   readonly permission: PermissionManager;
-  readonly planMode: PlanMode;
-  readonly swarmMode: SwarmMode;
+  readonly discussMode: DiscussMode;
   readonly usage: UsageRecorder;
   readonly skills: SkillManager | null;
   readonly tools: ToolManager;
@@ -147,15 +142,15 @@ export class Agent {
   readonly replayBuilder: ReplayBuilder;
 
   readonly obsidianMemory?: NoriMemoryProvider;
-  readonly swarmManager?: NoriSwarmProvider;
-  noriSwarmMaxDepth: number;
   readonly noriWorkflow?: NoriWorkflowConfig;
-  /** Mutable current swarm depth, updated as swarms are launched / completed. */
-  noriSwarmDepth: number;
 
   /** When true, bypasses toolsReadonly for Write/Edit on sub-agents
    *  whose profile is nori-coder/coder.  Toggled via /setting coder write. */
   coderWriteEnabled: boolean;
+
+  /** Persistent team members stay read-only until TeamAssign explicitly grants work. */
+  teamWriteLocked = false;
+  teamWriteEnabled = false;
 
   /** Custom rule definitions loaded from nori.yaml. */
   readonly noriRules: RuleConfig[];
@@ -186,10 +181,7 @@ export class Agent {
     this.additionalDirs = normalizeAdditionalDirs(options.additionalDirs ?? []);
     this.systemPromptContextProvider = options.systemPromptContextProvider;
     this.obsidianMemory = options.obsidianMemory;
-    this.swarmManager = options.swarmManager;
-    this.noriSwarmMaxDepth = options.noriSwarmMaxDepth ?? 3;
     this.noriWorkflow = options.noriWorkflow;
-    this.noriSwarmDepth = 0;
     this.coderWriteEnabled = options.coderWriteEnabled ?? false;
     this.noriRules = options.noriRules ?? [];
     this.ruleEngine = new RuleEngine(this.noriRules);
@@ -217,8 +209,7 @@ export class Agent {
     this.turn = new TurnFlow(this);
     this.injection = new InjectionManager(this);
     this.permission = new PermissionManager(this, options.permission);
-    this.planMode = new PlanMode(this);
-    this.swarmMode = new SwarmMode(this);
+    this.discussMode = new DiscussMode(this);
     this.usage = new UsageRecorder(this);
     this.skills = options.skills ? new SkillManager(this, options.skills) : null;
     this.tools = new ToolManager(this);
@@ -364,18 +355,22 @@ export class Agent {
   get rpcMethods(): PromisableMethods<AgentAPI> {
     return {
       prompt: async (payload) => {
-        const origin: UserPromptOrigin = payload.goalIntake === true
-          ? { kind: 'user', goalIntake: true }
-          : { kind: 'user' };
+        const origin: PromptOrigin = {
+          kind: 'user',
+          goalIntake: payload.goalIntake === true ? true : undefined,
+          speaker: payload.speaker ?? { from: 'user', speakerName: '用户' },
+        };
         this.turn.prompt(payload.input, origin);
       },
       runShellCommand: (payload) => this.tools.runShellCommand(payload.command, payload.commandId),
       cancelShellCommand: (payload) => this.tools.cancelShellCommand(payload.commandId),
       steer: (payload) => {
         this.telemetry.track('input_steer', { parts: payload.input.length });
-        const origin: UserPromptOrigin = payload.goalIntake === true
-          ? { kind: 'user', goalIntake: true }
-          : { kind: 'user' };
+        const origin: PromptOrigin = {
+          kind: 'user',
+          goalIntake: payload.goalIntake === true ? true : undefined,
+          speaker: payload.speaker ?? { from: 'user', speakerName: '用户' },
+        };
         this.turn.steer(payload.input, origin);
       },
       cancel: (payload) => {
@@ -423,22 +418,16 @@ export class Agent {
         if (payload.toolsReadonly !== undefined) {
           this.permission.setToolsReadonly(payload.toolsReadonly);
         }
-        if (payload.maxSwarmDepth !== undefined) {
-          this.noriSwarmMaxDepth = payload.maxSwarmDepth;
-          this.tools.refreshBuiltinTools();
-        }
         this.emitStatusUpdated();
         return {
           coderWriteEnabled: this.coderWriteEnabled,
           toolsReadonly: this.permission.toolsReadonly,
-          maxSwarmDepth: this.noriSwarmMaxDepth,
         };
       },
       getNoriRuntimeSettings: () => {
         return {
           coderWriteEnabled: this.coderWriteEnabled,
           toolsReadonly: this.permission.toolsReadonly,
-          maxSwarmDepth: this.noriSwarmMaxDepth,
         };
       },
       setModel: (payload) => {
@@ -458,21 +447,15 @@ export class Agent {
       getModel: () => {
         return this.config.modelAlias ?? '';
       },
-      enterPlan: async () => {
-        await this.planMode.enter();
+      enterDiscuss: async () => {
+        await this.discussMode.enter();
+        await this.subagentHost?.lockTeamWritesForDiscuss?.();
       },
-      cancelPlan: (payload) => {
-        this.planMode.cancel(payload.id);
+      cancelDiscuss: (payload) => {
+        this.discussMode.cancel(payload.id);
       },
-      clearPlan: () => this.planMode.clear(),
-      enterSwarm: (payload) => {
-        this.swarmMode.enter(payload.trigger);
-      },
-      exitSwarm: () => {
-        this.swarmMode.exit();
-      },
-      getSwarmMode: () => {
-        return this.swarmMode.isActive;
+      getDiscussMode: () => {
+        return this.discussMode.isActive;
       },
       beginCompaction: (payload) => {
         this.fullCompaction.begin({ source: 'manual', instruction: payload.instruction });
@@ -548,7 +531,6 @@ export class Agent {
       getContext: () => this.context.data(),
       getConfig: () => this.config.data(),
       getPermission: () => this.permission.data(),
-      getPlan: () => this.planMode.data(),
       getUsage: () => this.usage.data(),
       getTools: () => this.tools.data(),
       getBackground: (payload) => this.background.list(payload.activeOnly ?? false, payload.limit),
@@ -589,12 +571,10 @@ export class Agent {
       contextTokens,
       maxContextTokens,
       contextUsage,
-      planMode: this.planMode.isActive,
-      swarmMode: this.swarmMode.isActive,
+      discussMode: this.discussMode.isActive,
       permission: this.permission.mode,
       coderWriteEnabled: this.coderWriteEnabled,
       toolsReadonly: this.permission.toolsReadonly,
-      maxSwarmDepth: this.noriSwarmMaxDepth,
       usage,
     } as AgentEvent);
   }

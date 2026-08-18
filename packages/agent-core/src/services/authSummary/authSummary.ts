@@ -40,9 +40,10 @@ export interface IAuthSummaryService {
   get(): Promise<AuthSummary>;
 
   /**
-   * Throw a sentinel auth error if the daemon can NOT currently serve a
-   * prompt with `modelOverride` (or `config.defaultModel` if omitted).
-   * Returns void on success.
+ * Throw a sentinel auth error if the daemon can NOT currently serve a
+ * prompt with `modelOverride` (or a resolvable `config.defaultModel` /
+ * first catalog alias if omitted).
+ * Returns void on success.
    */
   ensureReady(modelOverride?: string): Promise<void>;
 }
@@ -90,9 +91,9 @@ export class AuthTokenUnauthorizedError extends Error {
 }
 
 /**
- * `40113 auth.model_not_resolved` — the (default or requested) model alias
- * does not resolve to a configured provider. Two sub-cases:
- *   - no default model set at all (`modelId === undefined`)
+ * `40113 auth.model_not_resolved` — the requested, default, or fallback
+ * catalog model alias does not resolve to a configured provider. Sub-cases:
+ *   - no usable model in the request, `defaultModel`, or catalog (`modelId === undefined`)
  *   - alias missing or points at a non-existent provider
  */
 export class AuthModelNotResolvedError extends Error {

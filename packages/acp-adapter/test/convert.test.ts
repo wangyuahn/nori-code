@@ -279,52 +279,6 @@ describe('acpBlocksToPromptParts', () => {
   });
 });
 
-describe('displayBlockToAcpContent — plan_review branch (Phase 13.2)', () => {
-  const planMd = '## Goal\n\nShip the plan_review surface so Zed sees the markdown body.';
-
-  it('returns null when block.plan is empty after trimming', () => {
-    const block: ToolInputDisplay = { kind: 'plan_review', plan: '   \n\t  ' };
-    expect(displayBlockToAcpContent(block)).toBeNull();
-  });
-
-  it('renders the plan markdown alone when no path is set', () => {
-    const block: ToolInputDisplay = { kind: 'plan_review', plan: planMd };
-    expect(displayBlockToAcpContent(block)).toEqual({
-      type: 'content',
-      content: { type: 'text', text: planMd },
-    });
-  });
-
-  it('prefixes "Plan saved to: <path>" when block.path is set', () => {
-    const block: ToolInputDisplay = {
-      kind: 'plan_review',
-      plan: planMd,
-      path: '/tmp/plan.md',
-    };
-    expect(displayBlockToAcpContent(block)).toEqual({
-      type: 'content',
-      content: {
-        type: 'text',
-        text: `Plan saved to: /tmp/plan.md\n\n${planMd}`,
-      },
-    });
-  });
-
-  it('preserves the plan body verbatim — no markdown escaping or normalisation', () => {
-    const richMd = '**bold** & <tag> with "quotes"';
-    const block: ToolInputDisplay = { kind: 'plan_review', plan: richMd };
-    const out = displayBlockToAcpContent(block);
-    expect(out).toEqual({
-      type: 'content',
-      content: { type: 'text', text: richMd },
-    });
-  });
-
-  it('still returns null for an unmapped kind (Phase 5 invariant)', () => {
-    const cmd: ToolInputDisplay = { kind: 'command', command: 'ls' };
-    expect(displayBlockToAcpContent(cmd)).toBeNull();
-  });
-});
 
 describe('compressPromptImageParts', () => {
   async function pngBase64(width: number, height: number): Promise<string> {

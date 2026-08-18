@@ -26,6 +26,12 @@ export default defineConfig({
         ),
       },
       {
+        find: /^@nori-code\/agent-core\/tools\/builtin\/nori\/memory-note-meta$/,
+        replacement: fileURLToPath(
+          new URL('../agent-core/src/tools/builtin/nori/memory-note-meta.ts', import.meta.url),
+        ),
+      },
+      {
         find: /^@moonshot-ai\/agent-core\/session\/store$/,
         replacement: fileURLToPath(
           new URL('../agent-core/src/session/store/index.ts', import.meta.url),

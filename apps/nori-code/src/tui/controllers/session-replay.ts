@@ -207,15 +207,10 @@ export class SessionReplayRenderer {
       case 'goal_updated':
         this.renderGoalReplayRecord(context, record);
         return;
-      case 'plan_updated':
+      case 'discuss_updated':
         this.flushAssistant(context);
-        if (!record.enabled && context.suppressNextPlanModeOffNotice) {
-          context.suppressNextPlanModeOffNotice = false;
-          return;
-        }
-        context.suppressNextPlanModeOffNotice = false;
         this.host.appendTranscriptEntry(
-          replayEntry(context, 'status', `Plan mode: ${record.enabled ? 'ON' : 'OFF'}`, 'notice'),
+          replayEntry(context, 'status', `Discuss: ${record.enabled ? 'ON' : 'OFF'}`, 'notice'),
         );
         return;
       case 'permission_updated':
@@ -587,11 +582,6 @@ export class SessionReplayRenderer {
     context: ReplayRenderContext,
     record: Extract<AgentReplayRecord, { type: 'approval_result' }>['record'],
   ): void {
-    if (record.toolName === 'ExitPlanMode') {
-      this.renderPlanReviewResult(context, record);
-      return;
-    }
-
     const { result } = record;
     const parts: string[] = [];
     switch (result.decision) {
@@ -610,34 +600,6 @@ export class SessionReplayRenderer {
       parts.push(` — "${result.feedback}"`);
     }
     this.host.appendTranscriptEntry(replayEntry(context, 'status', parts.join(''), 'notice'));
-  }
-
-  private renderPlanReviewResult(
-    context: ReplayRenderContext,
-    record: Extract<AgentReplayRecord, { type: 'approval_result' }>['record'],
-  ): void {
-    const { result } = record;
-    if (result.decision === 'approved') {
-      context.suppressNextPlanModeOffNotice = true;
-      return;
-    }
-    this.removeToolCall(record.toolCallId);
-
-    let content: string;
-    switch (result.decision) {
-      case 'rejected':
-        content =
-          result.selectedLabel === 'Revise' ? 'Plan sent back for revision' : 'Plan review rejected';
-        break;
-      case 'cancelled':
-        content = 'Plan review cancelled';
-        break;
-    }
-    const detail =
-      result.feedback !== undefined && result.feedback.length > 0
-        ? `Feedback: ${result.feedback}`
-        : undefined;
-    this.host.appendTranscriptEntry(replayEntry(context, 'status', content, 'notice', { detail }));
   }
 
   private removeToolCall(toolCallId: string): void {

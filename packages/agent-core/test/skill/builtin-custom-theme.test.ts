@@ -16,7 +16,7 @@ describe('builtin skill: custom-theme', () => {
 
   it('pins the docs token reference and points users at NORI_CODE_HOME/themes and /theme', () => {
     const content = CUSTOM_THEME_SKILL.content;
-    expect(content).toContain('customization/themes.html');
+    expect(content).toContain('customization/themes.md');
     expect(content).toContain('FetchURL');
     expect(content).toContain('<NORI_CODE_HOME>/themes');
     expect(content).toContain('/theme');

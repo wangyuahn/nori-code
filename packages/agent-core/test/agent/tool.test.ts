@@ -110,55 +110,6 @@ describe('Agent tools', () => {
     });
   });
 
-  it('continues after a foreground Agent tool returns a max_tokens failure', async () => {
-    const completion = Promise.reject(
-      new Error('Subagent turn failed before completing its final summary: reason=max_tokens.'),
-    );
-    void completion.catch(() => undefined);
-    const subagentHost = {
-      spawn: vi.fn().mockResolvedValue({
-        agentId: 'agent-child',
-        profileName: 'coder',
-        resumed: false,
-        completion,
-      }),
-      resume: vi.fn(),
-    } as unknown as SessionSubagentHost;
-    const ctx = testAgent({ subagentHost });
-    ctx.configure({ tools: ['Agent'] });
-
-    ctx.mockNextResponse({ type: 'text', text: 'I will ask a subagent.' }, agentCall());
-    ctx.mockNextResponse({
-      type: 'text',
-      text: 'The subagent failed with reason=max_tokens, so I will continue in the parent turn.',
-    });
-    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Delegate and recover' }] });
-    await ctx.untilTurnEnd();
-
-    expect(subagentHost.spawn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        profileName: 'coder',
-        parentToolCallId: 'call_agent',
-        prompt: 'Investigate deeply',
-        description: 'Investigate deeply',
-        runInBackground: false,
-      }),
-    );
-    expect(ctx.llmCalls).toHaveLength(2);
-    expect(ctx.allEvents).toContainEqual(
-      expect.objectContaining({
-        type: '[rpc]',
-        event: 'tool.result',
-        args: expect.objectContaining({
-          toolCallId: 'call_agent',
-          isError: true,
-          output: expect.stringContaining('reason=max_tokens'),
-        }),
-      }),
-    );
-    expect(JSON.stringify(ctx.llmCalls[1]?.history)).toContain('reason=max_tokens');
-  });
-
   it('passes text from content-part error outputs to PostToolUseFailure hooks', async () => {
     const lookupCall: ToolCall = {
       type: 'function',
@@ -224,7 +175,8 @@ describe('Agent tools', () => {
       system: <system-prompt>
       tools: Bash, Write
       messages:
-        user: text "Which tools are active?"
+        user: text "<message from=\\"user\\" name=\\"用户\\">Which tools are active?</message>"
+        user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
     await ctx.expectResumeMatches();
   });
@@ -257,16 +209,18 @@ describe('Agent tools', () => {
     expect(managedBash!.description).toContain('run_in_background=true');
   });
 
-  it('exposes AgentSwarm when a subagent host is available', () => {
+  it('exposes only SubAgent when a subagent host is available', () => {
     const subagentHost = {} as unknown as SessionSubagentHost;
 
     const ctx = testAgent({
       subagentHost,
       experimentalFlags: new FlagResolver({}, FLAG_DEFINITIONS),
     });
-    ctx.configure({ tools: ['AgentSwarm'] });
+    ctx.configure({ tools: ['SubAgent'] });
 
-    expect(ctx.agent.tools.loopTools.some((tool) => tool.name === 'AgentSwarm')).toBe(true);
+    const names = ctx.agent.tools.loopTools.map((tool) => tool.name);
+    expect(names).toContain('SubAgent');
+    expect(names).not.toContain('Agent');
   });
 
   it('routes registered user tools through tool.call request/response', async () => {
@@ -301,11 +255,12 @@ describe('Agent tools', () => {
       }),
     ).toMatchInlineSnapshot(`
       [wire] permission.set_mode         { "mode": "auto", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": false, "swarmMode": false, "permission": "auto", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3 }
+      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "discussMode": false, "permission": "auto", "coderWriteEnabled": false, "toolsReadonly": false }
       [wire] tools.register_user_tool    { "name": "Lookup", "description": "Look up a short test value.", "parameters": { "type": "object", "properties": { "query": { "type": "string" } }, "required": [ "query" ], "additionalProperties": false }, "time": "<time>" }
-      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Look up moon" } ], "origin": { "kind": "user" }, "time": "<time>" }
-      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Look up moon" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [wire] goal.rewind_checkpoint      { "snapshot": null, "time": "<time>" }
+      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Look up moon" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
+      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Look up moon" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
       [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<auto-mode-enter-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "permission_mode" } }, "time": "<time>" }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
@@ -320,33 +275,36 @@ describe('Agent tools', () => {
       system: <system-prompt>
       tools: Lookup
       messages:
-        user: text "Look up moon"
+        user: text "<message from=\\"user\\" name=\\"用户\\">Look up moon</message>"
         user: text <auto-mode-enter-reminder>
+        user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
 
     ctx.mockNextResponse({ type: 'text', text: 'The lookup result is moon-result.' });
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
       [wire] context.append_loop_event   { "event": { "type": "tool.result", "parentUuid": "call_lookup", "toolCallId": "call_lookup", "result": { "output": "moon-result" } }, "time": "<time>" }
       [emit] tool.result                 { "turnId": 0, "toolCallId": "call_lookup", "output": "moon-result" }
-      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 88, "output": 16, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
-      [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 88, "output": 16, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
-      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 88, "output": 16, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 104, "maxContextTokens": 1000000, "contextUsage": 0.000104, "planMode": false, "swarmMode": false, "permission": "auto", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "mock-model": { "inputOther": 88, "output": 16, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 88, "output": 16, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 88, "output": 16, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 307, "output": 16, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 307, "output": 16, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
+      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 307, "output": 16, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 323, "maxContextTokens": 1000000, "contextUsage": 0.000323, "discussMode": false, "permission": "auto", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "mock-model": { "inputOther": 307, "output": 16, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 307, "output": 16, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 307, "output": 16, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-3>", "turnId": "0", "step": 2 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 2, "stepId": "<uuid-3>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "The lookup result is moon-result." }
       [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-4>", "turnId": "0", "step": 2, "stepUuid": "<uuid-3>", "part": { "type": "text", "text": "The lookup result is moon-result." } }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "0", "step": 2, "usage": { "inputOther": 108, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed         { "turnId": 0, "step": 2, "stepId": "<uuid-3>", "usage": { "inputOther": 108, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 108, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 120, "maxContextTokens": 1000000, "contextUsage": 0.00012, "planMode": false, "swarmMode": false, "permission": "auto", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "mock-model": { "inputOther": 196, "output": 28, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 196, "output": 28, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 196, "output": 28, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-3>", "turnId": "0", "step": 2, "usage": { "inputOther": 327, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 0, "step": 2, "stepId": "<uuid-3>", "usage": { "inputOther": 327, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 327, "output": 12, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 339, "maxContextTokens": 1000000, "contextUsage": 0.000339, "discussMode": false, "permission": "auto", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "mock-model": { "inputOther": 634, "output": 28, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 634, "output": 28, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 634, "output": 28, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                  { "turnId": 0, "reason": "completed" }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       messages:
-        <last>
+        user: text "<message from=\\"user\\" name=\\"用户\\">Look up moon</message>"
+        user: text <auto-mode-enter-reminder>
         assistant: text "I will look it up."  calls call_lookup:Lookup { "query": "moon" }
         tool[call_lookup]: text "moon-result"
+        user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
 
     await ctx.rpc.unregisterTool({ name: 'Lookup' });
@@ -355,25 +313,30 @@ describe('Agent tools', () => {
 
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
       [wire] tools.unregister_user_tool   { "name": "Lookup", "time": "<time>" }
-      [wire] turn.prompt                  { "input": [ { "type": "text", "text": "Can you still use Lookup?" } ], "origin": { "kind": "user" }, "time": "<time>" }
-      [emit] turn.started                 { "turnId": 1, "origin": { "kind": "user" } }
-      [wire] context.append_message       { "message": { "role": "user", "content": [ { "type": "text", "text": "Can you still use Lookup?" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [wire] goal.rewind_checkpoint       { "snapshot": null, "time": "<time>" }
+      [wire] turn.prompt                  { "input": [ { "type": "text", "text": "Can you still use Lookup?" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
+      [emit] turn.started                 { "turnId": 1, "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }
+      [wire] context.append_message       { "message": { "role": "user", "content": [ { "type": "text", "text": "Can you still use Lookup?" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
       [wire] context.append_loop_event    { "event": { "type": "step.begin", "uuid": "<uuid-5>", "turnId": "1", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started            { "turnId": 1, "step": 1, "stepId": "<uuid-5>" }
       [emit] assistant.delta              { "turnId": 1, "delta": "No lookup tool is available." }
       [wire] context.append_loop_event    { "event": { "type": "content.part", "uuid": "<uuid-6>", "turnId": "1", "step": 1, "stepUuid": "<uuid-5>", "part": { "type": "text", "text": "No lookup tool is available." } }, "time": "<time>" }
-      [wire] context.append_loop_event    { "event": { "type": "step.end", "uuid": "<uuid-5>", "turnId": "1", "step": 1, "usage": { "inputOther": 128, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed          { "turnId": 1, "step": 1, "stepId": "<uuid-5>", "usage": { "inputOther": 128, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                 { "model": "mock-model", "usage": { "inputOther": 128, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated         { "model": "mock-model", "contextTokens": 138, "maxContextTokens": 1000000, "contextUsage": 0.000138, "planMode": false, "swarmMode": false, "permission": "auto", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "mock-model": { "inputOther": 324, "output": 38, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 324, "output": 38, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 128, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event    { "event": { "type": "step.end", "uuid": "<uuid-5>", "turnId": "1", "step": 1, "usage": { "inputOther": 358, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed          { "turnId": 1, "step": 1, "stepId": "<uuid-5>", "usage": { "inputOther": 358, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                 { "model": "mock-model", "usage": { "inputOther": 358, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated         { "model": "mock-model", "contextTokens": 368, "maxContextTokens": 1000000, "contextUsage": 0.000368, "discussMode": false, "permission": "auto", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "mock-model": { "inputOther": 992, "output": 38, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 992, "output": 38, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 358, "output": 10, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                   { "turnId": 1, "reason": "completed" }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       tools: []
       messages:
-        <last>
+        user: text "<message from=\\"user\\" name=\\"用户\\">Look up moon</message>"
+        user: text <auto-mode-enter-reminder>
+        assistant: text "I will look it up."  calls call_lookup:Lookup { "query": "moon" }
+        tool[call_lookup]: text "moon-result"
         assistant: text "The lookup result is moon-result."
-        user: text "Can you still use Lookup?"
+        user: text "<message from=\\"user\\" name=\\"用户\\">Can you still use Lookup?</message>"
+        user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
     await ctx.expectResumeMatches();
   });
@@ -490,19 +453,6 @@ function bashCall(): ToolCall {
     id: 'call_bash',
     name: 'Bash',
     arguments: '{"command":"printf hook-output","timeout":60}',
-  };
-}
-
-function agentCall(): ToolCall {
-  return {
-    type: 'function',
-    id: 'call_agent',
-    name: 'Agent',
-    arguments: JSON.stringify({
-        prompt: 'Investigate deeply',
-        description: 'Investigate deeply',
-        subagent_type: 'coder',
-      }),
   };
 }
 

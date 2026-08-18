@@ -14,6 +14,14 @@ async function realpath(p: string): Promise<string> {
   return (await fsRealpath(p)).replaceAll('\\', '/');
 }
 
+function isWindowsSymlinkPrivilegeError(error: unknown): boolean {
+  return process.platform === 'win32'
+    && typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && error.code === 'EPERM';
+}
+
 const tempDirs: string[] = [];
 
 afterEach(async () => {
@@ -923,12 +931,17 @@ describe('resolveSkillRoots extra dirs', () => {
     expect(paths).not.toContain(await realpath(projectBrand));
   });
 
-  it('collapses a real dir and a symlink to the same target into one root', async () => {
+  it('collapses a real dir and a symlink to the same target into one root', async (ctx) => {
     const { homeDir, repoDir, workDir } = await makeWorkspace();
     const real = path.join(repoDir, 'real');
     await mkdir(real, { recursive: true });
     const link = path.join(repoDir, 'link');
-    await symlink(real, link);
+    try {
+      await symlink(real, link);
+    } catch (error) {
+      if (isWindowsSymlinkPrivilegeError(error)) return ctx.skip('Windows symlink privilege is unavailable');
+      throw error;
+    }
 
     const roots = await resolveSkillRoots({
       paths: { userHomeDir: homeDir, workDir },
@@ -954,12 +967,17 @@ describe('resolveSkillRoots extra dirs', () => {
     expect(extras).toHaveLength(1);
   });
 
-  it('preserves source=extra on the surviving root after symlink dedup', async () => {
+  it('preserves source=extra on the surviving root after symlink dedup', async (ctx) => {
     const { homeDir, repoDir, workDir } = await makeWorkspace();
     const real = path.join(repoDir, 'real');
     await mkdir(real, { recursive: true });
     const link = path.join(repoDir, 'link');
-    await symlink(real, link);
+    try {
+      await symlink(real, link);
+    } catch (error) {
+      if (isWindowsSymlinkPrivilegeError(error)) return ctx.skip('Windows symlink privilege is unavailable');
+      throw error;
+    }
 
     const roots = await resolveSkillRoots({
       paths: { userHomeDir: homeDir, workDir },
@@ -971,12 +989,17 @@ describe('resolveSkillRoots extra dirs', () => {
     expect(extras[0]?.source).toBe('extra');
   });
 
-  it('stores the real path, not the symlink path, for a symlinked extra dir', async () => {
+  it('stores the real path, not the symlink path, for a symlinked extra dir', async (ctx) => {
     const { homeDir, repoDir, workDir } = await makeWorkspace();
     const real = path.join(repoDir, 'real');
     await mkdir(real, { recursive: true });
     const link = path.join(repoDir, 'link');
-    await symlink(real, link);
+    try {
+      await symlink(real, link);
+    } catch (error) {
+      if (isWindowsSymlinkPrivilegeError(error)) return ctx.skip('Windows symlink privilege is unavailable');
+      throw error;
+    }
 
     const roots = await resolveSkillRoots({
       paths: { userHomeDir: homeDir, workDir },

@@ -217,6 +217,29 @@ describe('ConfigState thinking clamp for always-thinking models', () => {
     expect(ctx.agent.config.thinkingEffort).toBe('off');
   });
 
+  it('keeps thinking off when a toggleable model declares effort levels', () => {
+    const config: KimiConfig = {
+      providers: { kimi: { type: 'kimi', apiKey: 'test-key' } },
+      models: {
+        'kimi-code/effort': {
+          provider: 'kimi',
+          model: 'kimi-effort',
+          maxContextSize: 128_000,
+          capabilities: ['thinking'],
+          supportEfforts: ['low', 'medium', 'high'],
+          defaultEffort: 'high',
+        },
+      },
+    };
+    const ctx = testAgent({
+      initialConfig: config,
+      providerManager: new ProviderManager({ config }),
+    });
+
+    ctx.agent.config.update({ modelAlias: 'kimi-code/effort', thinkingEffort: 'off' });
+    expect(ctx.agent.config.thinkingEffort).toBe('off');
+  });
+
   it('re-clamps a stale off when switching onto an always-thinking model', () => {
     const ctx = alwaysThinkingAgent();
     ctx.agent.config.update({ modelAlias: 'kimi-code/toggle', thinkingEffort: 'off' });
@@ -227,6 +250,32 @@ describe('ConfigState thinking clamp for always-thinking models', () => {
     ctx.agent.config.update({ modelAlias: 'kimi-code/deep' });
     expect(ctx.agent.config.thinkingEffort).toBe('on');
   });
+
+  it('restores a requested effort after replaying a removed model alias', () => {
+    const config: KimiConfig = {
+      providers: { kimi: { type: 'kimi', apiKey: 'test-key' } },
+      models: {
+        'kimi-code/current': {
+          provider: 'kimi',
+          model: 'kimi-current',
+          maxContextSize: 128_000,
+          capabilities: ['thinking'],
+          supportEfforts: ['low', 'medium', 'high'],
+          defaultEffort: 'high',
+        },
+      },
+    };
+    const ctx = testAgent({
+      initialConfig: config,
+      providerManager: new ProviderManager({ config }),
+    });
+
+    ctx.agent.config.update({ modelAlias: 'removed-model', thinkingEffort: 'high' });
+    expect(ctx.agent.config.thinkingEffort).toBe('off');
+
+    ctx.agent.config.update({ modelAlias: 'kimi-code/current' });
+    expect(ctx.agent.config.thinkingEffort).toBe('high');
+  });
 });
 
 describe('ConfigState.provider applies global NORI_MODEL_* request config', () => {
@@ -236,7 +285,12 @@ describe('ConfigState.provider applies global NORI_MODEL_* request config', () =
         config: {
           providers: { kimi: { type: 'kimi', apiKey: 'test-key' } },
           models: {
-            'kimi-code': { provider: 'kimi', model: 'kimi-code', maxContextSize: 128_000 },
+            'kimi-code': {
+              provider: 'kimi',
+              model: 'kimi-code',
+              maxContextSize: 128_000,
+              capabilities: ['thinking'],
+            },
           },
         },
       }),

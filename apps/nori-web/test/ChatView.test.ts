@@ -2,6 +2,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ApprovalRequest, ModelCatalogItem, QuestionRequest, Session } from '../src/api/client';
+import { api } from '../src/api/client';
 import { ChatView, modelSupportsImageInput, type ChatViewProps } from '../src/components/ChatView';
 import { I18nProvider } from '../src/i18n';
 import { modelThinkingOptions } from '../src/utils/model-thinking';
@@ -47,6 +48,99 @@ describe('chat image attachments', () => {
     const image = container.querySelector<HTMLImageElement>('.chat-message-images img');
     expect(image?.src).toBe('data:image/png;base64,aGVsbG8=');
     expect(image?.alt).toBe('screen.png');
+  });
+
+  it('renders uploaded files on sent user messages', async () => {
+    const { container } = await renderChat({
+      messages: [{
+        id: 'user-file',
+        role: 'user',
+        text: 'Please inspect this file.',
+        files: [{ name: 'notes.txt', mediaType: 'text/plain', size: 12 }],
+      }],
+    });
+
+    const chip = container.querySelector('.chat-message-user .chat-message-attachments .composer-attachment');
+    expect(chip?.textContent).toContain('notes.txt');
+    expect(chip?.querySelector('button')).toBeNull();
+  });
+
+  it('does not delete uploaded files when the composer accepts a send', async () => {
+    const upload = vi.spyOn(api.files, 'upload').mockResolvedValue({
+      id: 'f_notes',
+      name: 'notes.txt',
+      media_type: 'text/plain',
+      size: 5,
+      created_at: '2026-07-15T00:00:00.000Z',
+    });
+    const del = vi.spyOn(api.files, 'delete').mockResolvedValue({ deleted: true });
+    const { container, props } = await renderChat({
+      session: session('text-model'),
+      models: [model('text-model', ['tool_use'])],
+    });
+    const fileInput = container.querySelector<HTMLInputElement>('.composer-image-input')!;
+    Object.defineProperty(fileInput, 'files', {
+      configurable: true,
+      value: [new File(['hello'], 'notes.txt', { type: 'text/plain' })],
+    });
+
+    await act(async () => {
+      fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    await vi.waitFor(() => {
+      expect(container.querySelector('.composer-attachment [title="notes.txt"]')?.textContent).toBe('notes.txt');
+    });
+
+    await enterText(container.querySelector('textarea.chat-input')!, 'please read this');
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('.chat-send-btn')!.click();
+      await Promise.resolve();
+    });
+
+    expect(props.onSendMessage).toHaveBeenCalledWith(
+      'please read this',
+      [expect.objectContaining({ kind: 'file', name: 'notes.txt', file_id: 'f_notes' })],
+      'queue',
+      expect.objectContaining({ model: 'text-model' }),
+    );
+    expect(del).not.toHaveBeenCalled();
+    upload.mockRestore();
+    del.mockRestore();
+  });
+
+  it('keeps composer attachments when send is not accepted', async () => {
+    const upload = vi.spyOn(api.files, 'upload').mockResolvedValue({
+      id: 'f_keep',
+      name: 'keep.txt',
+      media_type: 'text/plain',
+      size: 4,
+      created_at: '2026-07-15T00:00:00.000Z',
+    });
+    const { container } = await renderChat({
+      session: session('text-model'),
+      models: [model('text-model', ['tool_use'])],
+      onSendMessage: vi.fn(async () => false),
+    });
+    const fileInput = container.querySelector<HTMLInputElement>('.composer-image-input')!;
+    Object.defineProperty(fileInput, 'files', {
+      configurable: true,
+      value: [new File(['keep'], 'keep.txt', { type: 'text/plain' })],
+    });
+    await act(async () => {
+      fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    await vi.waitFor(() => {
+      expect(container.querySelector('.composer-attachment [title="keep.txt"]')).not.toBeNull();
+    });
+    await enterText(container.querySelector('textarea.chat-input')!, 'retry later');
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('.chat-send-btn')!.click();
+      await Promise.resolve();
+    });
+    expect(container.querySelector('.composer-attachment [title="keep.txt"]')).not.toBeNull();
+    upload.mockRestore();
   });
 
   it('uses catalog capabilities instead of model names', () => {
@@ -206,6 +300,9 @@ describe('chat image attachments', () => {
       fileInput.dispatchEvent(new Event('change', { bubbles: true }));
       await new Promise(resolve => setTimeout(resolve, 0));
     });
+    await vi.waitFor(() => {
+      expect(container.querySelector('.composer-attachment [title="screen.png"]')).not.toBeNull();
+    });
 
     const select = container.querySelector<HTMLSelectElement>('.model-select')!;
     await act(async () => {
@@ -304,9 +401,8 @@ describe('model thinking options', () => {
         model: 'runtime-model',
         thinking_level: 'off',
         permission: 'manual',
-        plan_mode: false,
+        discuss_mode: false,
         main_write_enabled: true,
-        swarm_mode: false,
         goal: null,
         context_tokens: 0,
         max_context_tokens: 128_000,
@@ -331,9 +427,8 @@ describe('model thinking options', () => {
         model: 'old-model',
         thinking_level: 'off',
         permission: 'manual',
-        plan_mode: false,
+        discuss_mode: false,
         main_write_enabled: true,
-        swarm_mode: false,
         goal: null,
         context_tokens: 0,
         max_context_tokens: 128_000,
@@ -820,17 +915,17 @@ describe('live response controls', () => {
   it('merges a wake-up stream into the existing assistant bubble immediately', async () => {
     const { container } = await renderChat({
       messages: [
-        { id: 'user-1', role: 'user', text: 'Run the swarm' },
-        { id: 'assistant-1', role: 'assistant', text: 'The swarm is running.' },
+        { id: 'user-1', role: 'user', text: 'Run the SubAgent' },
+        { id: 'assistant-1', role: 'assistant', text: 'The SubAgent is running.' },
       ],
-      streaming: 'The swarm completed successfully.',
+      streaming: 'The SubAgent completed successfully.',
       isStreaming: true,
     });
 
     const assistantMessages = container.querySelectorAll('.chat-message-assistant');
     expect(assistantMessages).toHaveLength(1);
-    expect(assistantMessages[0]?.textContent).toContain('The swarm is running.');
-    expect(assistantMessages[0]?.textContent).toContain('The swarm completed successfully.');
+    expect(assistantMessages[0]?.textContent).toContain('The SubAgent is running.');
+    expect(assistantMessages[0]?.textContent).toContain('The SubAgent completed successfully.');
     expect(assistantMessages[0]?.classList.contains('chat-message-streaming')).toBe(true);
   });
 
@@ -905,7 +1000,7 @@ describe('chat slash commands and task-mode shortcut', () => {
     await enterText(input, '/');
 
     const commands = Array.from(container.querySelectorAll<HTMLElement>('.composer-command-menu code')).map(element => element.textContent);
-    expect(commands).toEqual(['/compact [instruction]', '/goal <objective>', '/swarm <task>']);
+    expect(commands).toEqual(['/compact [instruction]', '/goal <objective>']);
     expect(commands).not.toContain('/plan');
   });
 
@@ -943,9 +1038,8 @@ describe('chat slash commands and task-mode shortcut', () => {
         status: 'ready',
         thinking_level: 'off',
         permission: 'manual',
-        plan_mode: false,
+        discuss_mode: false,
         main_write_enabled: true,
-        swarm_mode: false,
         goal: null,
         context_tokens: 0,
         max_context_tokens: 128_000,
@@ -979,9 +1073,8 @@ describe('chat slash commands and task-mode shortcut', () => {
         status: 'ready',
         thinking_level: 'off',
         permission: 'manual',
-        plan_mode: false,
+        discuss_mode: false,
         main_write_enabled: true,
-        swarm_mode: false,
         goal: null,
         context_tokens: 0,
         max_context_tokens: 128_000,
@@ -1022,30 +1115,9 @@ describe('chat slash commands and task-mode shortcut', () => {
         model: 'multimodal-model',
         thinking: 'off',
         goalObjective: 'ship the release',
-        swarmMode: undefined,
       },
     );
     expect(input.value).toBe('');
-  });
-
-  it('executes a swarm command with the selected model and thinking options', async () => {
-    const onRunSlashCommand = vi.fn(async () => true);
-    const { container } = await renderChat({ onRunSlashCommand });
-    const input = container.querySelector<HTMLTextAreaElement>('.chat-input')!;
-    await enterText(input, '/swarm inspect the parser');
-
-    await pressKey(input, 'Enter');
-
-    expect(onRunSlashCommand).toHaveBeenCalledWith(
-      'swarm',
-      'inspect the parser',
-      {
-        model: 'multimodal-model',
-        thinking: 'off',
-        goalObjective: undefined,
-        swarmMode: true,
-      },
-    );
   });
 
   it('rejects /plan instead of sending it as a normal prompt', async () => {

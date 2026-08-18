@@ -9,7 +9,6 @@ import type { ContextMessage, PromptOrigin } from '../context';
 import type { PermissionApprovalResultRecord, PermissionMode } from '../permission';
 import type { UserToolRegistration } from '../tool';
 import type { UsageRecordScope } from '../usage';
-import type { SwarmModeTrigger } from '../swarm';
 
 // Agent records are the ordered event log used to rebuild agent state on resume.
 // Use records, not state.json, when correctness depends on the order in which
@@ -42,20 +41,15 @@ export interface AgentRecordEvents {
 
   'full_compaction.begin': CompactionBeginData;
 
-  'plan_mode.enter': {
+  'discuss_mode.enter': {
     id: string;
   };
-  'plan_mode.cancel': {
+  'discuss_mode.cancel': {
     id?: string;
   };
-  'plan_mode.exit': {
+  'discuss_mode.exit': {
     id?: string;
   };
-
-  'swarm_mode.enter': {
-    trigger: SwarmModeTrigger;
-  };
-  'swarm_mode.exit': {};
 
   'tools.register_user_tool': UserToolRegistration;
   'tools.unregister_user_tool': {

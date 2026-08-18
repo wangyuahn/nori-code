@@ -11,7 +11,7 @@ describe('KimiCore plugin RPCs', () => {
     const home = await mkdtemp(path.join(tmpdir(), 'kimi-home-'));
     const pluginRoot = await mkdtemp(path.join(tmpdir(), 'plugin-'));
     await writeFile(
-      path.join(pluginRoot, 'kimi.plugin.json'),
+      path.join(pluginRoot, 'nori.plugin.json'),
       JSON.stringify({ name: 'demo', version: '1.0.0' }),
       'utf8',
     );
@@ -38,7 +38,7 @@ describe('KimiCore plugin RPCs', () => {
     const home = await mkdtemp(path.join(tmpdir(), 'kimi-home-'));
     const pluginRoot = await mkdtemp(path.join(tmpdir(), 'plugin-'));
     await writeFile(
-      path.join(pluginRoot, 'kimi.plugin.json'),
+      path.join(pluginRoot, 'nori.plugin.json'),
       JSON.stringify({ name: 'demo', version: '1.0.0' }),
       'utf8',
     );
@@ -58,7 +58,7 @@ describe('KimiCore plugin RPCs', () => {
     const home = await mkdtemp(path.join(tmpdir(), 'kimi-home-'));
     const pluginRoot = await mkdtemp(path.join(tmpdir(), 'plugin-'));
     await writeFile(
-      path.join(pluginRoot, 'kimi.plugin.json'),
+      path.join(pluginRoot, 'nori.plugin.json'),
       JSON.stringify({
         name: 'demo',
         mcpServers: {
@@ -106,7 +106,7 @@ oauth = { storage = "file", key = "oauth/nori-code-env-1234", oauth_host = "http
         'utf8',
       );
       await writeFile(
-        path.join(pluginRoot, 'kimi.plugin.json'),
+        path.join(pluginRoot, 'nori.plugin.json'),
         JSON.stringify({
           name: 'kimi-datasource',
           mcpServers: {
@@ -178,7 +178,7 @@ oauth = { storage = "file", key = "oauth/nori-code-env-1234", oauth_host = "http
     const home = await mkdtemp(path.join(tmpdir(), 'kimi-home-'));
     const pluginRoot = await mkdtemp(path.join(tmpdir(), 'plugin-'));
     await writeFile(
-      path.join(pluginRoot, 'kimi.plugin.json'),
+      path.join(pluginRoot, 'nori.plugin.json'),
       JSON.stringify({ name: 'demo' }),
       'utf8',
     );

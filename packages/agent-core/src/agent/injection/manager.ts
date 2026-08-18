@@ -6,7 +6,7 @@ import { GoalIntakeInjector } from './goal-intake';
 import type { DynamicInjector } from './injector';
 import { PermissionModeInjector } from './permission-mode';
 import { PluginSessionStartInjector } from './plugin-session-start';
-import { PlanModeInjector } from './plan-mode';
+import { DiscussModeInjector } from './discuss-mode';
 import { ResponseSummaryInjector } from './response-summary';
 import { TodoListReminderInjector } from './todo-list';
 
@@ -28,7 +28,7 @@ export class InjectionManager {
       new GoalIntakeInjector(agent),
       new ResponseSummaryInjector(agent),
       new TodoListReminderInjector(agent),
-      new PlanModeInjector(agent),
+      new DiscussModeInjector(agent),
       new PermissionModeInjector(agent),
     ];
     this.goalInjector = agent.type === 'main' ? new GoalInjector(agent) : null;

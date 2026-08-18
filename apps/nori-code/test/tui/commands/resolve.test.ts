@@ -104,14 +104,14 @@ describe('resolveSlashCommandInput', () => {
       commandName: 'experiments',
       reason: 'streaming',
     });
-    expect(resolve('/swarm on', { isStreaming: true })).toEqual({
+    expect(resolve('/subagent on', { isStreaming: true })).toEqual({
       kind: 'blocked',
-      commandName: 'swarm',
+      commandName: 'subagent',
       reason: 'streaming',
     });
-    expect(resolve('/swarm off', { isStreaming: true })).toEqual({
+    expect(resolve('/subagent off', { isStreaming: true })).toEqual({
       kind: 'blocked',
-      commandName: 'swarm',
+      commandName: 'subagent',
       reason: 'streaming',
     });
   });
@@ -142,14 +142,14 @@ describe('resolveSlashCommandInput', () => {
       commandName: 'experiments',
       reason: 'compacting',
     });
-    expect(resolve('/swarm on', { isCompacting: true })).toEqual({
+    expect(resolve('/subagent on', { isCompacting: true })).toEqual({
       kind: 'blocked',
-      commandName: 'swarm',
+      commandName: 'subagent',
       reason: 'compacting',
     });
-    expect(resolve('/swarm off', { isCompacting: true })).toEqual({
+    expect(resolve('/subagent off', { isCompacting: true })).toEqual({
       kind: 'blocked',
-      commandName: 'swarm',
+      commandName: 'subagent',
       reason: 'compacting',
     });
   });
@@ -245,10 +245,10 @@ describe('resolveSlashCommandInput', () => {
     });
   });
 
-  it('resolves /swarm without an experimental flag', () => {
-    expect(resolve('/swarm Ship feature X')).toMatchObject({
+  it('resolves /subagent without an experimental flag', () => {
+    expect(resolve('/subagent Ship feature X')).toMatchObject({
       kind: 'builtin',
-      name: 'swarm',
+      name: 'subagent',
       args: 'Ship feature X',
     });
   });

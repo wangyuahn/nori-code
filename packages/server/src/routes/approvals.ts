@@ -97,7 +97,7 @@ export function registerApprovalsRoutes(
       const broker = ix.invokeFunction((a) =>
         a.get(IApprovalService) as ApprovalService,
       );
-      reply.send(okEnvelope({ items: broker.listPending(session_id) }, req.id));
+      reply.send(okEnvelope({ items: broker.listPending(session_id, req.query.agent_id) }, req.id));
     },
   );
   app.get(
@@ -132,7 +132,7 @@ export function registerApprovalsRoutes(
         const broker = ix.invokeFunction((a) =>
           a.get(IApprovalService) as ApprovalService,
         );
-        if (!broker.isPending(approval_id)) {
+        if (!broker.isPending(approval_id, body.agent_id)) {
           // 40404 path covers BOTH "never-existed" and "already-resolved" in
           // this iteration. REST.md §3.6 lists 40902 for "已应答 + 抢答场景" —
           // for that we'd need a resolved-ids ledger. To still honor the 40902
@@ -160,7 +160,8 @@ export function registerApprovalsRoutes(
         // Adapt wire body → in-process SDK shape; settle the broker Promise.
         // The broker also broadcasts `event.approval.resolved` synchronously
         // before settling.
-        const inProc = approvalToAgentCoreResponse(body);
+        const { agent_id: _agentId, ...response } = body;
+        const inProc = approvalToAgentCoreResponse(response);
         broker.resolve(approval_id, inProc);
         // Mark for short-window idempotency.
         broker.markResolved(approval_id);

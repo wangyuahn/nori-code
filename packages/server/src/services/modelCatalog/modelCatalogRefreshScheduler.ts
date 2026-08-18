@@ -103,7 +103,7 @@ export class ModelCatalogRefreshScheduler
 }
 
 function resolveIntervalMs(configValue: number | undefined): number {
-  const raw = process.env[INTERVAL_ENV];
+  const raw = process.env[INTERVAL_ENV] ?? process.env['KIMI_CODE_MODEL_CATALOG_REFRESH_INTERVAL_MS'];
   if (raw !== undefined && raw.trim().length > 0) {
     const parsed = Number(raw);
     if (Number.isFinite(parsed) && parsed >= 0) return parsed;
@@ -112,7 +112,7 @@ function resolveIntervalMs(configValue: number | undefined): number {
 }
 
 function resolveRefreshOnStart(configValue: boolean | undefined): boolean {
-  const raw = process.env[REFRESH_ON_START_ENV];
+  const raw = process.env[REFRESH_ON_START_ENV] ?? process.env['KIMI_CODE_MODEL_CATALOG_REFRESH_ON_START'];
   if (raw !== undefined && raw.trim().length > 0) {
     const normalized = raw.trim().toLowerCase();
     return normalized === '1' || normalized === 'true' || normalized === 'yes';

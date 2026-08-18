@@ -3,6 +3,7 @@ import { api, type FsDiffResponse, type FsGitStatusResponse, type FsReadResponse
 import type { ChatMessage, CodeChange, TodoItem } from '../hooks/useChatMessages';
 import type { GitStatusRefreshOptions } from '../hooks/useFilesystem';
 import { useI18n } from '../i18n';
+import { editLineOperationsDiff } from '../utils/edit-line-ops';
 import { FilePreview } from './FilePreview';
 import { Icon } from './Icon';
 import { LspPanel } from './LspPanel';
@@ -273,7 +274,7 @@ function WorkspaceActivitySummary({ mainWorking, agentCount, agentTokens, goal, 
   ];
   const hasLiveActivity = mainWorking || agentCount > 0;
   const headline = mainWorking ? currentMainPhrase : currentAgentPhrase;
-  const icon = mainWorking ? 'sparkles' : agentCount > 0 ? 'swarm' : goal ? 'target' : 'list';
+  const icon = mainWorking ? 'sparkles' : agentCount > 0 ? 'git-branch' : goal ? 'target' : 'list';
   const statusSummary = [
     mainWorking ? tr('Nori active', 'Nori 工作中') : '',
     agentCount > 0 ? tr(`${agentCount} agents`, `${agentCount} 个智能体`) : '',
@@ -663,12 +664,17 @@ export function collectToolCodeChanges(messages: ChatMessage[], projectPath?: st
   const changes: CodeChange[] = [];
   for (const message of messages) {
     for (const tool of message.toolCalls ?? []) {
-      if ((tool.name !== 'Edit' && tool.name !== 'Write') || tool.result === undefined) continue;
+      if (
+        (tool.name !== 'Edit' && tool.name !== 'Write') ||
+        tool.result === undefined ||
+        tool.isError === true
+      ) continue;
       const args = tool.args && typeof tool.args === 'object' ? tool.args as Record<string, unknown> : {};
       const rawPath = typeof args['path'] === 'string' ? args['path'] : '';
       if (!rawPath) continue;
+      const lineOperationDiff = compactOperationLines(editLineOperationsDiff(args['line_ops']));
       const diff = tool.name === 'Edit'
-        ? changedTextDiff(args['old_string'], args['new_string'])
+        ? lineOperationDiff || changedTextDiff(args['old_string'], args['new_string'])
         : addedTextDiff(args['content']);
       if (!diff) continue;
       changes.push({

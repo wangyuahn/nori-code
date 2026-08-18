@@ -66,7 +66,7 @@ export interface ContextResponse {
   contextTokens: number;
   config: import('../../server/src/lib/context-projector').ConfigSnapshot;
   permission: { mode: import('../../server/src/lib/agent-record-types').PermissionMode | null };
-  planMode: { active: boolean; id?: string };
+  discussMode: { active: boolean; id?: string };
   goal: import('../../server/src/lib/context-projector').GoalSnapshot | null;
-  swarm: { active: boolean; trigger?: string };
+  subagent: { active: boolean; trigger?: string };
 }

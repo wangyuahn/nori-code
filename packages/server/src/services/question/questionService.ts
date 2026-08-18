@@ -21,6 +21,7 @@ class PendingQuestion implements IDisposable {
   constructor(
     readonly questionId: string,
     readonly sessionId: string,
+    readonly agentId: string,
     readonly toolCallId: string | undefined,
     readonly createdAt: string,
     readonly protocolRequest: ProtocolQuestionRequest,
@@ -116,6 +117,7 @@ export class QuestionService extends Disposable implements IQuestionService {
       const pending = new PendingQuestion(
         questionId,
         req.sessionId,
+        req.agentId,
         req.toolCallId,
         createdAt,
         protocolRequest,
@@ -151,7 +153,7 @@ export class QuestionService extends Disposable implements IQuestionService {
     const answeredEvent: Event = {
       type: 'event.question.answered',
       sessionId: p.sessionId,
-      agentId: 'main',
+      agentId: p.agentId,
       question_id: p.questionId,
       answers: response === null ? null : (response as { answers?: unknown }).answers ?? response,
       resolved_at: resolvedAt,
@@ -172,7 +174,7 @@ export class QuestionService extends Disposable implements IQuestionService {
     const dismissedEvent: Event = {
       type: 'event.question.dismissed',
       sessionId: p.sessionId,
-      agentId: 'main',
+      agentId: p.agentId,
       question_id: p.questionId,
       dismissed_at: dismissedAt,
     } as unknown as Event;
@@ -181,13 +183,14 @@ export class QuestionService extends Disposable implements IQuestionService {
     p.resolve(questionDismissedResult());
   }
 
-  isPending(questionId: string): boolean {
-    return this._pending.has(questionId);
+  isPending(questionId: string, agentId?: string): boolean {
+    const pending = this._pending.get(questionId);
+    return pending !== undefined && (agentId === undefined || pending.agentId === agentId);
   }
 
-  listPending(sessionId: string): ProtocolQuestionRequest[] {
+  listPending(sessionId: string, agentId = 'main'): ProtocolQuestionRequest[] {
     return Array.from(this._pending.values())
-      .filter((p) => p.sessionId === sessionId)
+      .filter((p) => p.sessionId === sessionId && p.agentId === agentId)
       .map((p) => p.protocolRequest);
   }
 

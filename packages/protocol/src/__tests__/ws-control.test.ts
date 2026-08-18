@@ -101,7 +101,7 @@ describe('ws-control — AsyncAPI document', () => {
     expect(doc['asyncapi']).toBe('3.1.0');
     expect(doc['defaultContentType']).toBe('application/json');
     expect(doc['info']).toMatchObject({
-      title: 'Kimi Code WebSocket API',
+      title: 'Nori Code WebSocket API',
       version: '1.2.3',
     });
 
@@ -226,6 +226,32 @@ describe('ws-control — §3.2 client_hello', () => {
     expect(result.success).toBe(true);
   });
 
+  it('client_hello accepts an optional per-session agent filter', () => {
+    const result = clientHelloMessageSchema.safeParse({
+      type: 'client_hello',
+      id: 'c1',
+      payload: {
+        client_id: 'web_abc',
+        subscriptions: ['sess_1'],
+        agent_ids: { sess_1: ['main', 'agent_sub_1'] },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('client_hello rejects an empty agent filter', () => {
+    const result = clientHelloMessageSchema.safeParse({
+      type: 'client_hello',
+      id: 'c1',
+      payload: {
+        client_id: 'web_abc',
+        subscriptions: ['sess_1'],
+        agent_ids: { sess_1: [] },
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
   it('client_hello rejects the v1 bare-seq cursor map', () => {
     const result = clientHelloMessageSchema.safeParse({
       type: 'client_hello',
@@ -259,6 +285,18 @@ describe('ws-control — §3.3 subscribe / unsubscribe', () => {
         watch_fs: {
           sess_1: { paths: ['src'], recursive: true },
         },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('subscribe accepts an optional per-session agent filter', () => {
+    const result = subscribeMessageSchema.safeParse({
+      type: 'subscribe',
+      id: 'c2',
+      payload: {
+        session_ids: ['sess_1'],
+        agent_ids: { sess_1: ['agent_sub_1'] },
       },
     });
     expect(result.success).toBe(true);
@@ -337,7 +375,7 @@ describe('ws-control — §3.4 abort', () => {
     const result = abortMessageSchema.safeParse({
       type: 'abort',
       id: 'c6',
-      payload: { session_id: 'sess_1', prompt_id: 'prompt_1' },
+      payload: { session_id: 'sess_1', prompt_id: 'prompt_1', agent_id: 'agent_reviewer' },
     });
     expect(result.success).toBe(true);
   });

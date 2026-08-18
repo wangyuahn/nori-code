@@ -107,9 +107,7 @@ export class SDKRpcClient extends SDKRpcClientBase {
     kaos: Kaos,
     persistenceKaos?: Kaos,
   ): Promise<SessionSummary> {
-    const { planMode, ...coreInput } = input;
-    void planMode;
-    return this.core.createSessionWithOverrides(coreInput, { kaos, persistenceKaos });
+    return this.core.createSessionWithOverrides(input, { kaos, persistenceKaos });
   }
 
   override async resumeSessionWithKaos(

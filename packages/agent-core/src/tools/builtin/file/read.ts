@@ -1,4 +1,4 @@
-import type { Kaos, StatResult } from '@nori-code/kaos';
+import { createContentTagHasher, type Kaos, type StatResult } from '@nori-code/kaos';
 import { z } from 'zod';
 
 import type { BuiltinTool } from '../../../agent/tool';
@@ -69,6 +69,8 @@ interface RenderedLine {
 }
 
 interface FinishReadResultInput {
+  readonly displayPath: string;
+  readonly contentTag: string;
   readonly renderedLines: readonly string[];
   readonly truncatedLineNumbers: readonly number[];
   readonly maxLinesReached: boolean;
@@ -88,6 +90,7 @@ interface TextFileScan {
   endsWithNewline: boolean;
   hasNul: boolean;
   lineEndingFlags: LineEndingFlags;
+  contentTag: string;
 }
 
 type RangeReadKaos = TextPreviewKaos & {
@@ -348,6 +351,8 @@ export class ReadTool implements BuiltinTool<ReadInput> {
       const lineEndingStyle = lineEndingStyleFromFlags(scan.lineEndingFlags);
       const rendered = renderEntries(selectedEntries, lineEndingStyle);
       return this.finishReadResult({
+        displayPath,
+        contentTag: scan.contentTag,
         renderedLines: rendered.renderedLines,
         truncatedLineNumbers: rendered.truncatedLineNumbers,
         maxLinesReached: effectiveLimit >= MAX_LINES && lineOffset + MAX_LINES <= scan.totalLines,
@@ -361,11 +366,13 @@ export class ReadTool implements BuiltinTool<ReadInput> {
 
     const selectedEntries: ReadLineEntry[] = [];
     const flags: LineEndingFlags = { hasCrLf: false, hasLf: false, hasLoneCr: false };
+    const tagHasher = createContentTagHasher();
     let currentLineNo = 0;
     let maxLinesReached = false;
     let collectionClosed = false;
 
     for await (const rawLine of this.kaos.readLines(safePath, { errors: 'strict' })) {
+      tagHasher.update(rawLine);
       if (containsNulByte(rawLine)) {
         return { isError: true, output: notReadableFileOutput(displayPath) };
       }
@@ -398,6 +405,8 @@ export class ReadTool implements BuiltinTool<ReadInput> {
     const rendered = renderEntries(selectedEntries, lineEndingStyle);
 
     return this.finishReadResult({
+      displayPath,
+      contentTag: tagHasher.digest(),
       renderedLines: rendered.renderedLines,
       truncatedLineNumbers: rendered.truncatedLineNumbers,
       maxLinesReached,
@@ -436,6 +445,8 @@ export class ReadTool implements BuiltinTool<ReadInput> {
         rawContent: stripTrailingLf(rawLine),
       }));
       return this.finishTailEntries({
+        displayPath,
+        contentTag: scan.contentTag,
         entries,
         lineEndingFlags: scan.lineEndingFlags,
         effectiveLimit,
@@ -446,9 +457,11 @@ export class ReadTool implements BuiltinTool<ReadInput> {
 
     const entries: ReadLineEntry[] = [];
     const flags: LineEndingFlags = { hasCrLf: false, hasLf: false, hasLoneCr: false };
+    const tagHasher = createContentTagHasher();
     let currentLineNo = 0;
 
     for await (const rawLine of this.kaos.readLines(safePath, { errors: 'strict' })) {
+      tagHasher.update(rawLine);
       if (containsNulByte(rawLine)) {
         return { isError: true, output: notReadableFileOutput(displayPath) };
       }
@@ -464,6 +477,8 @@ export class ReadTool implements BuiltinTool<ReadInput> {
     }
 
     return this.finishTailEntries({
+      displayPath,
+      contentTag: tagHasher.digest(),
       entries,
       lineEndingFlags: flags,
       effectiveLimit,
@@ -473,6 +488,8 @@ export class ReadTool implements BuiltinTool<ReadInput> {
   }
 
   private finishTailEntries(input: {
+    displayPath: string;
+    contentTag: string;
     entries: readonly ReadLineEntry[];
     lineEndingFlags: LineEndingFlags;
     effectiveLimit: number;
@@ -515,6 +532,8 @@ export class ReadTool implements BuiltinTool<ReadInput> {
     }
 
     return this.finishReadResult({
+      displayPath: input.displayPath,
+      contentTag: input.contentTag,
       renderedLines,
       truncatedLineNumbers,
       maxLinesReached: false,
@@ -528,14 +547,25 @@ export class ReadTool implements BuiltinTool<ReadInput> {
 
   private finishReadResult(input: FinishReadResultInput): ExecutableToolResult {
     return {
-      output: this.finishOutput(input.renderedLines, this.finishMessage(input)),
+      output: this.finishOutput(
+        input.displayPath,
+        input.contentTag,
+        input.renderedLines,
+        this.finishMessage(input),
+      ),
     };
   }
 
-  private finishOutput(renderedLines: readonly string[], message: string): string {
+  private finishOutput(
+    displayPath: string,
+    contentTag: string,
+    renderedLines: readonly string[],
+    message: string,
+  ): string {
+    const anchor = `[${displayPath}#${contentTag}]`;
     const rendered = renderedLines.join('\n');
     const status = `<system>${message}</system>`;
-    return rendered.length > 0 ? `${rendered}\n${status}` : status;
+    return rendered.length > 0 ? `${anchor}\n${rendered}\n${status}` : `${anchor}\n${status}`;
   }
 
   private finishMessage(input: FinishReadResultInput): string {
@@ -561,7 +591,7 @@ export class ReadTool implements BuiltinTool<ReadInput> {
     }
     if (input.lineEndingStyle === 'mixed') {
       parts.push(
-        'Mixed or lone carriage-return line endings are shown as \\r. Use exact \\r\\n or \\r escapes in Edit.old_string for those lines.',
+        'Mixed or lone carriage-return line endings are shown as \\r. Preserve those explicit \\r characters in Edit.line_ops content when replacing affected lines.',
       );
     }
     return parts.join(' ');

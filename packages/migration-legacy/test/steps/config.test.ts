@@ -434,7 +434,7 @@ base_url = "https://target.example/v1"
     await writeFile(
       join(src, 'config.toml'),
       'merge_all_available_skills = true\n' +
-        'plan_mode = true\n' +
+        'legacy_ui_toggle = true\n' +
         'yolo = true\n' +
         '[experimental]\n' +
         'micro_compaction = false\n' +
@@ -474,7 +474,7 @@ base_url = "https://target.example/v1"
     expect(cfg).not.toContain('kill_grace_period_ms');
     expect(cfg).not.toContain('print_wait_ceiling_s');
     expect(cfg).not.toContain('read_max_bytes');
-    expect(cfg).not.toContain('plan_mode = true');
+    expect(cfg).not.toContain('legacy_ui_toggle = true');
     expect(cfg).not.toContain('yolo = true');
   });
 

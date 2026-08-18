@@ -15,7 +15,6 @@ import {
   type SDKAPI,
   type ToolCallRequest,
   type ToolCallResponse,
-  type SwarmModeTrigger,
 } from '@nori-code/agent-core';
 import type { Kaos } from '@nori-code/kaos';
 
@@ -44,7 +43,6 @@ import type {
   PluginSummary,
   ReloadSummary,
   CompactOptions,
-  SessionPlan,
   SessionStatus,
   SessionUsage,
   SetNoriRuntimeSettingsInput,
@@ -92,13 +90,9 @@ export interface SetSessionPermissionRpcInput extends SessionIdRpcInput {
 
 export type SetSessionNoriRuntimeRpcInput = SessionIdRpcInput & SetNoriRuntimeSettingsInput;
 
-export interface SetSessionPlanModeRpcInput extends SessionIdRpcInput {
+export interface SetSessionDiscussModeRpcInput extends SessionIdRpcInput {
   readonly enabled: boolean;
 }
-
-export type SetSessionSwarmModeRpcInput =
-  | (SessionIdRpcInput & { readonly enabled: true; readonly trigger: SwarmModeTrigger })
-  | (SessionIdRpcInput & { readonly enabled: false });
 
 export interface ActivateSkillRpcInput extends SessionIdRpcInput {
   readonly name: string;
@@ -135,9 +129,7 @@ export abstract class SDKRpcClientBase {
 
   async createSession(input: CreateSessionOptions): Promise<SessionSummary> {
     const rpc = await this.getRpc();
-    const { planMode, ...coreInput } = input;
-    void planMode;
-    return rpc.createSession(coreInput);
+    return rpc.createSession(input);
   }
 
   async createSessionWithKaos(
@@ -352,7 +344,6 @@ export abstract class SDKRpcClientBase {
       agentId: this.interactiveAgentId,
       coderWriteEnabled: input.coderWriteEnabled,
       toolsReadonly: input.toolsReadonly,
-      maxSwarmDepth: input.maxSwarmDepth,
     });
   }
 
@@ -364,60 +355,15 @@ export abstract class SDKRpcClientBase {
     });
   }
 
-  async setPlanMode(input: SetSessionPlanModeRpcInput): Promise<void> {
+  async setDiscussMode(input: SetSessionDiscussModeRpcInput): Promise<void> {
     const rpc = await this.getRpc();
     if (!input.enabled) {
-      return rpc.cancelPlan({
+      return rpc.cancelDiscuss({
         sessionId: input.sessionId,
         agentId: this.interactiveAgentId,
       });
     }
-    return rpc.enterPlan({
-      sessionId: input.sessionId,
-      agentId: this.interactiveAgentId,
-    });
-  }
-
-  async setSwarmMode(input: SetSessionSwarmModeRpcInput): Promise<void> {
-    if (input.enabled) return this.enterSwarmMode(input);
-    return this.exitSwarmMode(input);
-  }
-
-  async swarm(input: SessionPromptRpcInput): Promise<void> {
-    await this.enterSwarmMode({ sessionId: input.sessionId, trigger: 'task' });
-    return this.prompt(input);
-  }
-
-  private async enterSwarmMode(
-    input: SessionIdRpcInput & { readonly trigger: SwarmModeTrigger },
-  ): Promise<void> {
-    const rpc = await this.getRpc();
-    return rpc.enterSwarm({
-      sessionId: input.sessionId,
-      agentId: this.interactiveAgentId,
-      trigger: input.trigger,
-    });
-  }
-
-  private async exitSwarmMode(input: SessionIdRpcInput): Promise<void> {
-    const rpc = await this.getRpc();
-    return rpc.exitSwarm({
-      sessionId: input.sessionId,
-      agentId: this.interactiveAgentId,
-    });
-  }
-
-  async getPlan(input: SessionIdRpcInput): Promise<SessionPlan> {
-    const rpc = await this.getRpc();
-    return rpc.getPlan({
-      sessionId: input.sessionId,
-      agentId: this.interactiveAgentId,
-    });
-  }
-
-  async clearPlan(input: SessionIdRpcInput): Promise<void> {
-    const rpc = await this.getRpc();
-    await rpc.clearPlan({
+    return rpc.enterDiscuss({
       sessionId: input.sessionId,
       agentId: this.interactiveAgentId,
     });
@@ -480,11 +426,7 @@ export abstract class SDKRpcClientBase {
       sessionId: input.sessionId,
       agentId,
     });
-    const plan = await rpc.getPlan({
-      sessionId: input.sessionId,
-      agentId,
-    });
-    const swarmMode = await rpc.getSwarmMode({
+    const discussMode = await rpc.getDiscussMode({
       sessionId: input.sessionId,
       agentId,
     });
@@ -505,11 +447,9 @@ export abstract class SDKRpcClientBase {
       model: config.modelAlias ?? config.provider?.model,
       thinkingEffort: config.thinkingEffort,
       permission: permission.mode,
-      planMode: plan !== null,
-      swarmMode,
+      discussMode,
       coderWriteEnabled: noriRuntime.coderWriteEnabled,
       toolsReadonly: noriRuntime.toolsReadonly,
-      maxSwarmDepth: noriRuntime.maxSwarmDepth,
       contextTokens,
       maxContextTokens,
       contextUsage,

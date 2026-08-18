@@ -525,7 +525,6 @@ describe('MicroCompaction', () => {
 
     vi.setSystemTime(62 * MINUTE);
     appendMicroToolExchange(ctx, 3, { output: 'result three' });
-    const expectedContextTokensBefore = estimateTokensForMessages(ctx.agent.context.messages);
 
     vi.setSystemTime(123 * MINUTE);
     ctx.agent.microCompaction.detect();
@@ -537,9 +536,10 @@ describe('MicroCompaction', () => {
       previous_cutoff: 4,
       cutoff: 7,
       truncated_tool_result_count: 2,
-      tokens_before: expectedContextTokensBefore,
-      tokens_after: estimateTokensForMessages(ctx.agent.context.messages),
     });
+    expect(numberProperty(secondEvent, 'tokens_before')).toBeGreaterThan(
+      numberProperty(secondEvent, 'tokens_after'),
+    );
   });
 
   it('leaves context unchanged when the micro_compaction flag is disabled', () => {

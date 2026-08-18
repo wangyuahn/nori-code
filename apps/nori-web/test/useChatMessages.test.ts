@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../src/api/client';
-import { apiMessageToChat, canApplyGeneratedSessionTitle, confirmOptimisticUserMessage, fallbackSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, latestTodos, liveAssistantMessage, mergeHistory, mergeInFlightWorkBlocks, promptForRewind, RealtimeSubscriptionGate, removeTerminatedAgent, shouldFinishAbortedPrompt, shouldIgnoreTranscriptEvent, statusForSession, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
+import { apiMessageToChat, canApplyGeneratedSessionTitle, chatFilesFromPromptAttachments, chatScopeKey, confirmOptimisticUserMessage, contextInjectionSource, fallbackSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, isTransientChatMessageId, latestTodos, liveAssistantMessage, mergeHistory, mergeInFlightWorkBlocks, promptForRewind, RealtimeSubscriptionGate, removeTerminatedAgent, shouldFinishAbortedPrompt, shouldIgnoreTranscriptEvent, splitUploadedFileMarkup, statusForSession, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
 
 describe('agent activity events', () => {
   it('removes a manually terminated agent from the live activity set', () => {
@@ -15,9 +15,8 @@ describe('session-bound realtime status', () => {
     model: 'session-a-model',
     thinking_level: 'off',
     permission: 'manual',
-    plan_mode: false,
+    discuss_mode: false,
     main_write_enabled: true,
-    swarm_mode: false,
     goal: null,
     context_tokens: 0,
     max_context_tokens: 128_000,
@@ -29,6 +28,13 @@ describe('session-bound realtime status', () => {
     expect(statusForSession(status, 'session-a', 'session-b')).toBeNull();
     expect(statusForSession(status, 'session-a', null)).toBeNull();
     expect(statusForSession(status, null, null)).toBeNull();
+  });
+
+  it('keeps transient chat state scoped by both parent session and agent', () => {
+    expect(chatScopeKey('session-a', 'main')).toBe('session-a\u0000main');
+    expect(chatScopeKey('session-a', 'agent-review')).toBe('session-a\u0000agent-review');
+    expect(chatScopeKey('session-a', 'main')).not.toBe(chatScopeKey('session-a', 'agent-review'));
+    expect(statusForSession(status, chatScopeKey('session-a', 'main'), chatScopeKey('session-a', 'agent-review'))).toBeNull();
   });
 });
 
@@ -155,6 +161,53 @@ describe('main transcript projection', () => {
     ]);
   });
 
+  it('extracts uploaded files from persisted user messages and hides the inlined markup', () => {
+    const projected = apiMessageToChat({
+      id: 'file-message',
+      role: 'user',
+      created_at: '2026-07-15T00:00:00.000Z',
+      content: [
+        { type: 'text', text: 'Please inspect this.\n<uploaded-file name="notes.txt" media-type="text/plain" size="12">\nhello world\n</uploaded-file>' },
+        { type: 'file', name: 'diagram.pdf', file_id: 'f_pdf', media_type: 'application/pdf', size: 2048 },
+      ],
+    });
+
+    expect(projected?.text).toBe('Please inspect this.');
+    expect(projected?.files).toEqual([
+      { name: 'diagram.pdf', mediaType: 'application/pdf', size: 2048 },
+      { name: 'notes.txt', mediaType: 'text/plain', size: 12 },
+    ]);
+  });
+
+  it('keeps a file-only user message instead of dropping it', () => {
+    const projected = apiMessageToChat({
+      id: 'file-only',
+      role: 'user',
+      created_at: '2026-07-15T00:00:00.000Z',
+      content: [
+        { type: 'text', text: '<uploaded-file name="notes.txt" media-type="text/plain" size="5">\nhello\n</uploaded-file>' },
+      ],
+    });
+
+    expect(projected).toMatchObject({
+      id: 'file-only',
+      role: 'user',
+      text: '',
+      files: [{ name: 'notes.txt', mediaType: 'text/plain', size: 5 }],
+    });
+  });
+
+  it('maps prompt file attachments into chat file chips', () => {
+    expect(chatFilesFromPromptAttachments([
+      { kind: 'file', name: 'notes.txt', file_id: 'f_1', media_type: 'text/plain', size: 12 },
+      { kind: 'image', name: 'shot.png', source: { kind: 'base64', media_type: 'image/png', data: 'aGVsbG8=' } },
+    ])).toEqual([{ name: 'notes.txt', mediaType: 'text/plain', size: 12 }]);
+    expect(splitUploadedFileMarkup('see <uploaded-file name="a.txt" media-type="text/plain" size="1">x</uploaded-file>')).toEqual({
+      text: 'see',
+      files: [{ name: 'a.txt', mediaType: 'text/plain', size: 1 }],
+    });
+  });
+
   it('confirms an optimistic user message with the authoritative server identity', () => {
     const confirmed = confirmOptimisticUserMessage([
       {
@@ -193,6 +246,57 @@ describe('main transcript projection', () => {
     expect(confirmed[0]?.id).toBe('server-user-1');
   });
 
+  it('drops the optimistic row when history already has the derived transcript id', () => {
+    expect(isTransientChatMessageId('msg_sess_pending_prompt_abc')).toBe(true);
+    expect(isTransientChatMessageId('msg_sess_000003')).toBe(false);
+
+    const confirmed = confirmOptimisticUserMessage([
+      {
+        id: 'msg_sess_000003',
+        role: 'user',
+        text: 'Only show this once.',
+        createdAt: '2026-07-15T00:00:05.000Z',
+      },
+      {
+        id: 'local-user-1',
+        role: 'user',
+        text: 'Only show this once.',
+        createdAt: '2026-07-15T00:00:00.000Z',
+      },
+    ], 'local-user-1', 'msg_sess_pending_prompt_abc', '2026-07-15T00:00:05.000Z');
+
+    expect(confirmed).toEqual([{
+      id: 'msg_sess_000003',
+      role: 'user',
+      text: 'Only show this once.',
+      createdAt: '2026-07-15T00:00:05.000Z',
+    }]);
+  });
+
+  it('collapses a pending user_message_id when history arrives with the derived id', () => {
+    const merged = mergeHistory(
+      [{
+        id: 'msg_sess_pending_prompt_abc',
+        role: 'user',
+        text: 'Only show this once.',
+        createdAt: '2026-07-15T00:00:00.000Z',
+      }],
+      [{
+        id: 'msg_sess_000003',
+        role: 'user',
+        text: 'Only show this once.',
+        createdAt: '2026-07-15T00:00:01.000Z',
+      }],
+    );
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      id: 'msg_sess_000003',
+      role: 'user',
+      text: 'Only show this once.',
+    });
+  });
+
   it('preserves local image data when confirming an optimistic message', () => {
     const confirmed = confirmOptimisticUserMessage([
       {
@@ -210,10 +314,29 @@ describe('main transcript projection', () => {
     });
   });
 
-  it('ignores subagent transcript events but keeps shared code changes', () => {
+  it('preserves local file chips when confirming an optimistic message', () => {
+    const confirmed = confirmOptimisticUserMessage([
+      {
+        id: 'local-user-file',
+        role: 'user',
+        text: 'Please inspect this file.',
+        files: [{ name: 'notes.txt', mediaType: 'text/plain', size: 12 }],
+        createdAt: '2026-07-15T00:00:00.000Z',
+      },
+    ], 'local-user-file', 'server-user-file', '2026-07-15T00:00:01.000Z');
+
+    expect(confirmed[0]).toMatchObject({
+      id: 'server-user-file',
+      files: [{ name: 'notes.txt', mediaType: 'text/plain', size: 12 }],
+    });
+  });
+
+  it('routes transcript events to the selected agent without leaking them to main', () => {
     expect(shouldIgnoreTranscriptEvent('assistant.delta', 'agent-2')).toBe(true);
     expect(shouldIgnoreTranscriptEvent('turn.ended', 'agent-2')).toBe(true);
     expect(shouldIgnoreTranscriptEvent('prompt.aborted', 'agent-2')).toBe(true);
+    expect(shouldIgnoreTranscriptEvent('assistant.delta', 'agent-2', 'agent-2')).toBe(false);
+    expect(shouldIgnoreTranscriptEvent('assistant.delta', 'main', 'agent-2')).toBe(true);
     expect(shouldIgnoreTranscriptEvent('code.change', 'agent-2')).toBe(false);
     expect(shouldIgnoreTranscriptEvent('subagent.started', 'agent-2')).toBe(false);
     expect(shouldIgnoreTranscriptEvent('assistant.delta', 'main')).toBe(false);
@@ -256,11 +379,36 @@ describe('main transcript projection', () => {
     expect(shouldFinishAbortedPrompt('prompt-active', undefined)).toBe(true);
   });
 
-  it('turns every hidden trigger into an assistant turn boundary', () => {
-    for (const kind of ['background_task', 'system_trigger', 'cron_job', 'retry']) {
+  it('turns silent wake-ups into an assistant turn boundary', () => {
+    for (const kind of ['background_task', 'cron_job', 'cron_missed', 'retry']) {
       const projected = apiMessageToChat(message({ role: 'user', text: '<system-reminder>continue</system-reminder>', originKind: kind }));
       expect(projected).toMatchObject({ role: 'system', text: '', turnBoundary: true });
     }
+  });
+
+  it('projects loop, skill, and other context injections as visible system rows', () => {
+    expect(contextInjectionSource({ kind: 'system_trigger', name: 'goal_intake' })).toBe('goal_intake');
+    expect(contextInjectionSource({ kind: 'skill_activation', skillName: 'skill-catalog' })).toBe('skill-catalog');
+    expect(contextInjectionSource({ kind: 'injection', variant: '@deepseek-ai/dsh-system-prompt' })).toBe('@deepseek-ai/dsh-system-prompt');
+
+    const loop = apiMessageToChat(message({ role: 'user', text: 'Continue the goal.', originKind: 'system_trigger' }));
+    expect(loop).toMatchObject({
+      role: 'system',
+      text: '',
+      workBlocks: [{ type: 'context_injection', source: 'system_trigger' }],
+    });
+    expect(loop).not.toHaveProperty('turnBoundary', true);
+
+    const skill = apiMessageToChat({
+      id: 'skill-1',
+      role: 'user',
+      content: [{ type: 'text', text: 'Available skills' }],
+      created_at: '2026-07-14T00:00:00.000Z',
+      metadata: { origin: { kind: 'skill_activation', skillName: 'skill-catalog' } },
+    });
+    expect(skill).toMatchObject({
+      workBlocks: [{ type: 'context_injection', source: 'skill-catalog' }],
+    });
   });
 
   it('keeps one assistant turn around a hidden wake-up trigger', () => {
@@ -276,19 +424,19 @@ describe('main transcript projection', () => {
 
   it('merges a background wake-up answer into the live assistant turn without a refresh', () => {
     const previous = [
-      { id: 'u1', role: 'user' as const, text: 'Run a swarm', createdAt: '2026-07-14T00:00:00.000Z' },
-      { id: 'a1', role: 'assistant' as const, text: 'The swarm is running.', createdAt: '2026-07-14T00:00:01.000Z' },
+      { id: 'u1', role: 'user' as const, text: 'Run a SubAgent', createdAt: '2026-07-14T00:00:00.000Z' },
+      { id: 'a1', role: 'assistant' as const, text: 'The SubAgent is running.', createdAt: '2026-07-14T00:00:01.000Z' },
     ];
     const completedAfterWake = [
-      { id: 'a2', role: 'assistant' as const, text: 'The swarm finished.', createdAt: '2026-07-14T00:00:02.000Z' },
+      { id: 'a2', role: 'assistant' as const, text: 'The SubAgent finished.', createdAt: '2026-07-14T00:00:02.000Z' },
     ];
 
     expect(mergeHistory(previous, completedAfterWake)).toMatchObject([
-      { role: 'user', text: 'Run a swarm' },
+      { role: 'user', text: 'Run a SubAgent' },
       {
         role: 'assistant',
-        text: 'The swarm finished.',
-        workBlocks: [{ type: 'progress', text: 'The swarm is running.' }],
+        text: 'The SubAgent finished.',
+        workBlocks: [{ type: 'progress', text: 'The SubAgent is running.' }],
       },
     ]);
   });
@@ -321,6 +469,22 @@ describe('main transcript projection', () => {
     expect(folded[0]?.thinking).toBeUndefined();
   });
 
+  it('keeps a retried assistant answer after the visible system error that caused it', () => {
+    const folded = foldConversationTurns([
+      { id: 'u', role: 'user', text: 'question' },
+      { id: 'a1', role: 'assistant', text: 'first answer' },
+      { id: 'error', role: 'system', text: 'turn failed' },
+      { id: 'a2', role: 'assistant', text: 'retry answer' },
+    ]);
+
+    expect(folded.map(message => [message.id, message.role, message.text])).toEqual([
+      ['u', 'user', 'question'],
+      ['a1', 'assistant', 'first answer'],
+      ['error', 'system', 'turn failed'],
+      ['a2', 'assistant', 'retry answer'],
+    ]);
+  });
+
   it('projects text before a tool call into the ordered work process', () => {
     const projected = apiMessageToChat({
       id: 'step-with-progress',
@@ -339,6 +503,28 @@ describe('main transcript projection', () => {
       { type: 'progress', text: 'I am updating the event projector now.' },
       { type: 'tool', tool: { id: 'edit-1', name: 'Edit' } },
     ]);
+  });
+
+  it('preserves failed tool status from persisted aggregate tool calls', () => {
+    const projected = apiMessageToChat({
+      id: 'failed-edit',
+      role: 'assistant',
+      created_at: '2026-07-14T00:00:01.000Z',
+      content: [],
+      tool_calls: [{
+        id: 'edit-1',
+        name: 'Edit',
+        args: { path: 'src/a.ts', expected_tag: 'A1B2', line_ops: [{ op: 'del', start: 1, end: 1 }] },
+        result: 'Content tag mismatch',
+        is_error: true,
+      }],
+    });
+
+    expect(projected?.toolCalls).toMatchObject([{
+      id: 'edit-1',
+      result: 'Content tag mismatch',
+      isError: true,
+    }]);
   });
 
   it('keeps a folded final summary stable when history is reconciled again', () => {
@@ -365,14 +551,14 @@ describe('main transcript projection', () => {
       created_at: '2026-07-14T00:00:01.000Z',
       content: [
         { type: 'thinking', thinking: 'Inspect the target.' },
-        { type: 'tool_use', tool_call_id: 'edit-1', tool_name: 'Edit', input: { path: 'src/a.ts', old_string: 'a', new_string: 'b' } },
+        { type: 'tool_use', tool_call_id: 'edit-1', tool_name: 'Edit', input: { path: 'src/a.ts', expected_tag: 'A1B2', line_ops: [{ op: 'swap', start: 1, end: 1, content: 'b' }] } },
       ],
     })!;
     const result = apiMessageToChat({
       id: 'tool-1',
       role: 'tool',
       created_at: '2026-07-14T00:00:02.000Z',
-      content: [{ type: 'tool_result', tool_call_id: 'edit-1', output: 'Updated src/a.ts' }],
+      content: [{ type: 'tool_result', tool_call_id: 'edit-1', output: 'Content tag mismatch', is_error: true }],
     })!;
     const second = apiMessageToChat({
       id: 'step-2',
@@ -385,7 +571,7 @@ describe('main transcript projection', () => {
     expect(folded[0]?.workBlocks?.map(block => block.type)).toEqual(['thinking', 'tool', 'thinking']);
     expect(folded[0]?.workBlocks?.[1]).toMatchObject({
       type: 'tool',
-      tool: { id: 'edit-1', name: 'Edit', result: 'Updated src/a.ts' },
+      tool: { id: 'edit-1', name: 'Edit', result: 'Content tag mismatch', isError: true },
     });
   });
 });

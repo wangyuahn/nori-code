@@ -37,7 +37,7 @@ Type `@` to trigger file-path completion. Selecting a path inserts its relative 
 
 ## Approval flow
 
-When the agent calls a tool that has side effects — modifying files, running commands — the TUI displays an approval panel for your confirmation. Approvals are not triggered in YOLO mode, nor for writes to plan files in Plan mode.
+When the agent calls a tool that has side effects — modifying files, running commands — the TUI displays an approval panel for your confirmation. Discuss blocks file writes and command execution until the team enters Code; after that, approvals follow the selected permission mode.
 
 Use the arrow keys to select an option and press `Enter` to confirm, or press `1` / `2` / `3` to select by number directly. `Esc`, `Ctrl-C`, and `Ctrl-D` are all equivalent to rejecting.
 
@@ -45,18 +45,18 @@ The panel typically includes an **Approve for this session** option; selecting i
 
 ## Mode switching
 
-### Plan mode
+### Discuss
 
-In Plan mode the agent first outputs an action plan and waits for your approval before modifying any files — useful for complex or high-risk tasks.
+Discuss is a read-only team meeting. Use `TeamCreate` and `TeamDecide` to gather partner statements, then `TeamAssign` to enter Code and begin execution.
 
-- Toggle: `Shift-Tab` or `/plan`
-- Clear the current plan: `/plan clear` (only while idle)
+- Toggle: `Shift-Tab` or `/plan` (the command name is retained for compatibility)
+- Clear legacy plan state: `/plan clear` (only while idle)
 
-After producing a plan the agent pauses for your review — you can approve it, reject it, or ask for revisions. Exiting Plan mode always requires your confirmation, even if YOLO mode is also active.
+Discuss has no session-file approval workflow. The UI toggle or `TeamAssign` leaves Discuss; YOLO does not add a separate exit approval.
 
 ### YOLO / Auto mode
 
-**YOLO mode** (`/yolo`) skips the approval confirmation for almost all tool calls, making it suitable for batch tasks you know are safe. The one exception is the exit-confirmation for Plan mode.
+**YOLO mode** (`/yolo`) skips the approval confirmation for almost all tool calls, making it suitable for batch tasks you know are safe. It does not change the read-only restrictions of Discuss.
 
 **Auto mode** (`/auto`) is more restrained: tool approvals are handled automatically, but the agent does not ask the user clarifying questions — useful when you want unattended operation without fully disabling approvals.
 

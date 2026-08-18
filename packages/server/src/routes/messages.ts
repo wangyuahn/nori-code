@@ -83,6 +83,11 @@ const sessionIdParamSchema = z.object({
   session_id: z.string().min(1),
 });
 
+const sessionAgentIdParamSchema = z.object({
+  session_id: z.string().min(1),
+  agent_id: z.string().min(1),
+});
+
 const messageIdParamSchema = z.object({
   session_id: z.string().min(1),
   message_id: z.string().min(1),
@@ -119,6 +124,34 @@ export function registerMessagesRoutes(
     },
   );
   app.get(listRoute.path, listRoute.options, listRoute.handler as Parameters<MessageRouteHost['get']>[2]);
+
+  const listAgentRoute = defineRoute(
+    {
+      method: 'GET',
+      path: '/sessions/{session_id}/agents/{agent_id}/messages',
+      params: sessionAgentIdParamSchema,
+      querystring: messagesListQueryCoercion,
+      success: { data: listMessagesResponseSchema },
+      description: 'List messages for an agent within a session',
+      tags: ['messages'],
+    },
+    async (req, reply) => {
+      try {
+        const { session_id, agent_id } = req.params;
+        const page = await ix.invokeFunction((a) =>
+          a.get(IMessageService).list(session_id, req.query, agent_id),
+        );
+        reply.send(okEnvelope(page, req.id));
+      } catch (err) {
+        sendMappedError(reply, req.id, err);
+      }
+    },
+  );
+  app.get(
+    listAgentRoute.path,
+    listAgentRoute.options,
+    listAgentRoute.handler as Parameters<MessageRouteHost['get']>[2],
+  );
 
   // GET /sessions/{session_id}/messages/{message_id} -------------------
   const getRoute = defineRoute(

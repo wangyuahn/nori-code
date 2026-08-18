@@ -342,26 +342,26 @@ describe('ToolCallComponent', () => {
     expect(out).not.toContain('do not show');
   });
 
-  it('renders AgentSwarm results as a one-line summary without raw XML', () => {
+  it('renders SubAgent results as a one-line summary without raw XML', () => {
     const output = [
-      '<agent_swarm_result>',
+      '<subagent_result>',
       '<summary>completed: 1, failed: 1, aborted: 1</summary>',
       '<subagent index="1" outcome="completed">Reviewed src/a.ts.</subagent>',
       '<subagent index="2" outcome="failed">Agent timed out.</subagent>',
       '<subagent index="3" outcome="aborted">User aborted.</subagent>',
-      '</agent_swarm_result>',
+      '</subagent_result>',
     ].join('\n');
     const component = new ToolCallComponent(
       {
-        id: 'call_swarm',
-        name: 'AgentSwarm',
+        id: 'call_subagent',
+        name: 'SubAgent',
         args: {
           description: 'Review changed files',
           items: ['src/a.ts', 'src/b.ts', 'src/c.ts'],
         },
       },
       {
-        tool_call_id: 'call_swarm',
+        tool_call_id: 'call_subagent',
         output,
         is_error: false,
       },
@@ -369,21 +369,21 @@ describe('ToolCallComponent', () => {
 
     const out = strip(component.render(120).join('\n'));
 
-    expect(out).toContain('Agent swarm: ✓ 1 completed · ✗ 1 failed · ⊘ 1 aborted');
-    expect(out).not.toContain('<agent_swarm_result>');
+    expect(out).toContain('SubAgent: ✓ 1 completed · ✗ 1 failed · ⊘ 1 aborted');
+    expect(out).not.toContain('<subagent_result>');
     expect(out).not.toContain('Reviewed src/a.ts.');
     expect(out).not.toContain('Agent timed out.');
   });
 
-  it('renders an AgentSwarm fallback summary when the result is not structured', () => {
+  it('renders an SubAgent fallback summary when the result is not structured', () => {
     const component = new ToolCallComponent(
       {
-        id: 'call_swarm_failed',
-        name: 'AgentSwarm',
+        id: 'call_subagent_failed',
+        name: 'SubAgent',
         args: { description: 'Review changed files' },
       },
       {
-        tool_call_id: 'call_swarm_failed',
+        tool_call_id: 'call_subagent_failed',
         output: 'provider request failed',
         is_error: true,
       },
@@ -391,7 +391,7 @@ describe('ToolCallComponent', () => {
 
     const out = strip(component.render(120).join('\n'));
 
-    expect(out).toContain('Agent swarm: ✗ Failed.');
+    expect(out).toContain('SubAgent: ✗ Failed.');
     expect(out).not.toContain('provider request failed');
   });
 
@@ -411,242 +411,6 @@ describe('ToolCallComponent', () => {
 
     const out = strip(component.render(100).join('\n'));
     expect(out).toContain('first line');
-  });
-
-  it('renders ExitPlanMode plan from result output when args.plan is absent', () => {
-    const component = new ToolCallComponent(
-      {
-        id: 'call_exit',
-        name: 'ExitPlanMode',
-        args: {},
-      },
-      {
-        tool_call_id: 'call_exit',
-        output:
-          'Exited plan mode. Plan mode deactivated. All tools are now available.\n' +
-          'Plan saved to: /tmp/plan.md\n\n' +
-          '## Approved Plan:\n# File Plan\n\n1. Do the focused fix.',
-        is_error: false,
-      },
-    );
-
-    const out = strip(component.render(100).join('\n'));
-    expect(out).toContain('Current plan');
-    expect(out).toContain('File Plan');
-    expect(out).toContain('1. Do the focused fix.');
-    expect(out).not.toContain('Plan saved to: /tmp/plan.md');
-  });
-
-  it('setPlanInfo injects plan body when args.plan is empty (plan-file mode)', () => {
-    const component = new ToolCallComponent(
-      {
-        id: 'call_exit_async',
-        name: 'ExitPlanMode',
-        args: {},
-      },
-      undefined,
-      undefined,
-    );
-
-    // A fresh tool card only shows the 'Current plan' title; no plan box renders yet.
-    const before = strip(component.render(100).join('\n'));
-    expect(before).toContain('Current plan');
-    expect(before).not.toContain('Refactor session');
-
-    component.setPlanInfo({ plan: '# Refactor session\n\n- step', path: '/tmp/refactor.md' });
-
-    const after = strip(component.render(100).join('\n'));
-    expect(after).toContain('Refactor session');
-    expect(after).toContain('plan:');
-    expect(after).toContain('refactor.md');
-    // Directory portion of the path must not leak into the visible header.
-    expect(after).not.toContain('/tmp/refactor.md');
-  });
-
-  it('renders the full plan preview', () => {
-    const longPlan = `# Refactor session\n\n${Array.from({ length: 40 }, (_, i) => `- step ${String(i + 1)}`).join('\n')}`;
-    const component = new ToolCallComponent(
-      {
-        id: 'call_exit_long',
-        name: 'ExitPlanMode',
-        args: { plan: longPlan },
-      },
-      undefined,
-      stubTui(24),
-    );
-
-    const out = strip(component.render(100).join('\n'));
-    expect(out).toContain('step 1');
-    expect(out).toContain('step 40');
-    expect(out).not.toContain('more lines');
-  });
-
-  it('plan preview controls are no-ops for non-ExitPlanMode tool calls', () => {
-    const component = new ToolCallComponent(
-      {
-        id: 'call_bash_plan',
-        name: 'Bash',
-        args: { command: 'echo hi' },
-      },
-      undefined,
-      undefined,
-    );
-
-    component.setPlanInfo({ plan: 'should be ignored', path: '/etc/hosts' });
-
-    const out = strip(component.render(100).join('\n'));
-    expect(out).not.toContain('should be ignored');
-    expect(out).not.toContain('plan:');
-  });
-
-  it('ctrl+o does not affect the full plan preview', () => {
-    const longPlan = `# P\n\n${Array.from({ length: 40 }, (_, i) => `- step ${String(i + 1)}`).join('\n')}`;
-    const component = new ToolCallComponent(
-      {
-        id: 'call_exit_isolation',
-        name: 'ExitPlanMode',
-        args: { plan: longPlan },
-      },
-      undefined,
-      stubTui(24),
-    );
-    component.setExpanded(true);
-    const out = strip(component.render(100).join('\n'));
-    expect(out).toContain('step 40');
-    expect(out).not.toContain('more lines');
-  });
-
-  it('header chips an Approved status when ExitPlanMode result indicates approval', () => {
-    const component = new ToolCallComponent(
-      {
-        id: 'call_exit_approved',
-        name: 'ExitPlanMode',
-        args: {},
-      },
-      {
-        tool_call_id: 'call_exit_approved',
-        output:
-          'Exited plan mode. Plan mode deactivated. All tools are now available.\n' +
-          'Plan saved to: /tmp/plan.md\n\n' +
-          '## Approved Plan:\n# Plan body',
-        is_error: false,
-      },
-    );
-
-    const header = strip(component.render(100).join('\n')).split('\n')[1] ?? '';
-    expect(header).toMatch(/Current plan · Approved\s*$/);
-  });
-
-  it('header chips approved option label when the user picked one', () => {
-    const component = new ToolCallComponent(
-      {
-        id: 'call_exit_chosen',
-        name: 'ExitPlanMode',
-        args: {},
-      },
-      {
-        tool_call_id: 'call_exit_chosen',
-        output:
-          'Exited plan mode. Selected approach: Pragmatic refactor\n' +
-          'Execute ONLY the selected approach. Do not execute any unselected alternatives.\n\n' +
-          'Plan mode deactivated. All tools are now available.\n' +
-          'Plan saved to: /tmp/plan.md\n\n' +
-          '## Approved Plan:\n# body',
-        is_error: false,
-      },
-    );
-
-    const header = strip(component.render(100).join('\n')).split('\n')[1] ?? '';
-    expect(header).toContain('Current plan · Approved: Pragmatic refactor');
-  });
-
-  it('renders Rejected in the plan box title and keeps revise feedback visible', () => {
-    const component = new ToolCallComponent(
-      {
-        id: 'call_exit_reject_fb',
-        name: 'ExitPlanMode',
-        args: { plan: '# Rework Plan\n\n- step 1' },
-      },
-      {
-        tool_call_id: 'call_exit_reject_fb',
-        output: 'User rejected the plan. Feedback:\n\nplease rethink step 2',
-        is_error: false,
-      },
-      undefined,
-    );
-
-    const out = strip(component.render(100).join('\n'));
-    expect(out).toContain('plan · Rejected');
-    expect(out).toContain('↪ Suggestion');
-    expect(out).toContain('please rethink step 2');
-  });
-
-  it('renders is_error ExitPlanMode reject in the plan box title without raw error text', () => {
-    const component = new ToolCallComponent(
-      {
-        id: 'call_exit_reject',
-        name: 'ExitPlanMode',
-        args: { plan: '# Rejected Plan\n\n- keep investigating' },
-      },
-      {
-        tool_call_id: 'call_exit_reject',
-        output: 'Plan rejected by user. Plan mode remains active.',
-        is_error: true,
-      },
-      undefined,
-    );
-
-    const out = strip(component.render(100).join('\n'));
-    expect(out).toContain('plan · Rejected');
-    expect(out).toContain('Rejected Plan');
-    expect(out).not.toContain('Plan rejected by user.');
-    expect(out).not.toContain('Plan mode remains active.');
-  });
-
-  it('suppresses EnterPlanMode success body so prompt scaffolding does not leak into the transcript', () => {
-    const component = new ToolCallComponent(
-      {
-        id: 'call_enter',
-        name: 'EnterPlanMode',
-        args: { reason: 'plan a refactor' },
-      },
-      {
-        tool_call_id: 'call_enter',
-        output:
-          'Plan mode is now active. Your workflow:\n\n' +
-          'Plan file: /tmp/plan.md\n\n' +
-          '1. Use read-only tools (Read, Grep, Glob) to investigate the codebase.\n' +
-          '2. Design a concrete, step-by-step plan.\n' +
-          '3. Write the plan to the plan file with Write or Edit.\n' +
-          '4. When the plan is ready, call ExitPlanMode for user approval.\n\n' +
-          'Do NOT edit files other than the plan file while plan mode is active.',
-        is_error: false,
-      },
-    );
-
-    const out = strip(component.render(100).join('\n'));
-    expect(out).toContain('Used EnterPlanMode');
-    expect(out).not.toContain('Plan mode is now active');
-    expect(out).not.toContain('Plan file:');
-    expect(out).not.toContain('read-only tools');
-  });
-
-  it('still surfaces EnterPlanMode error output', () => {
-    const component = new ToolCallComponent(
-      {
-        id: 'call_enter_err',
-        name: 'EnterPlanMode',
-        args: {},
-      },
-      {
-        tool_call_id: 'call_enter_err',
-        output: 'Plan mode is already active. Use ExitPlanMode when the plan is ready.',
-        is_error: true,
-      },
-    );
-
-    const out = strip(component.render(100).join('\n'));
-    expect(out).toContain('Plan mode is already active');
   });
 
   it('renders AskUserQuestion with a friendly header instead of the raw tool name', () => {
@@ -894,7 +658,7 @@ describe('ToolCallComponent', () => {
 
     const out = strip(component.render(100).join('\n'));
     const expectedReadPath =
-      process.platform === 'win32' ? 'apps\\kimi-code\\src\\main.ts' : 'apps/nori-code/src/main.ts';
+      process.platform === 'win32' ? 'apps\\nori-code\\src\\main.ts' : 'apps/nori-code/src/main.ts';
     expect(out).toContain(`Used Read (${expectedReadPath})`);
     expect(out).not.toContain('/tmp/proj-a/apps');
     expect(component.getReadSnapshot().filePath).toBe(expectedReadPath);
@@ -1569,23 +1333,20 @@ describe('ToolCallComponent', () => {
   it('renders a stable Edit progress placeholder during the streaming delta window', () => {
     vi.useFakeTimers();
     vi.setSystemTime(4000);
-    const oldLines: string[] = [];
     const newLines: string[] = [];
     for (let i = 1; i <= 20; i++) {
-      oldLines.push(`old${String(i)}`);
       newLines.push(`new${String(i)}`);
     }
-    const oldEscaped = oldLines.join('\\n');
     const newEscaped = newLines.join('\\n');
-    const streaming = `{"file_path":"foo.ts","old_string":"${oldEscaped}","new_string":"${newEscaped}`;
+    const streaming = `{"file_path":"foo.ts","expected_tag":"A1B2","line_ops":[{"op":"swap","start":1,"end":20,"content":"${newEscaped}`;
     const component = new ToolCallComponent(
       {
         id: 'call_edit_stream',
         name: 'Edit',
         args: {
           file_path: 'foo.ts',
-          old_string: oldLines.join('\n'),
-          new_string: newLines.join('\n'),
+          expected_tag: 'A1B2',
+          line_ops: [{ op: 'swap', start: 1, end: 20, content: newLines.join('\n') }],
         },
         streamingArguments: streaming,
         streamingStartedAtMs: 0,
@@ -1599,7 +1360,6 @@ describe('ToolCallComponent', () => {
     expect(out).toContain('Preparing changes for foo.ts...');
     expect(out).toContain('4s elapsed');
     expect(out).toMatch(/\d+(?:\.\d+)? (?:B|KB|MB)/);
-    expect(out).not.toContain('old20');
     expect(out).not.toContain('new20');
     expect(out).not.toMatch(/^\s*\d+\s+[+-]\s/m);
     expect(out).not.toContain('ctrl+o to expand');
@@ -1712,13 +1472,13 @@ describe('ToolCallComponent', () => {
     expect(out).toMatch(/^\s*2\s+b\s*$/m);
   });
 
-  it('builds the Edit diff when finalized args arrive after streaming', () => {
+  it('builds the Edit line-operation preview when finalized args arrive after streaming', () => {
     const component = new ToolCallComponent(
       {
         id: 'call_edit_seq',
         name: 'Edit',
         args: { file_path: 'foo.ts' },
-        streamingArguments: '{"file_path":"foo.ts","old_string":"a\\nb","new_string":"a\\nB',
+        streamingArguments: '{"file_path":"foo.ts","expected_tag":"A1B2","line_ops":[{"op":"swap","start":2,"end":2,"content":"B',
         streamingStartedAtMs: Date.now(),
       },
       undefined,
@@ -1729,12 +1489,16 @@ describe('ToolCallComponent', () => {
     component.updateToolCall({
       id: 'call_edit_seq',
       name: 'Edit',
-      args: { file_path: 'foo.ts', old_string: 'a\nb', new_string: 'a\nB' },
+      args: {
+        file_path: 'foo.ts',
+        expected_tag: 'A1B2',
+        line_ops: [{ op: 'swap', start: 2, end: 2, content: 'B' }],
+      },
     });
     const out = strip(component.render(100).join('\n'));
     expect(out).toContain('foo.ts');
-    expect(out).toMatch(/^\s*2\s+- b\s*$/m);
-    expect(out).toMatch(/^\s*2\s+\+ B\s*$/m);
+    expect(out).toContain('replace lines 2-2');
+    expect(out).toMatch(/^\s*\+ B\s*$/m);
   });
 
   it('refreshes and stops the Edit streaming progress timer', () => {
@@ -1746,7 +1510,7 @@ describe('ToolCallComponent', () => {
         id: 'call_edit_timer',
         name: 'Edit',
         args: { file_path: 'foo.ts' },
-        streamingArguments: '{"file_path":"foo.ts","old_string":"a',
+        streamingArguments: '{"file_path":"foo.ts","expected_tag":"A1B2","line_ops":[{"op":"swap","start":1,"end":1,"content":"a',
         streamingStartedAtMs: 0,
       },
       undefined,
@@ -1772,7 +1536,7 @@ describe('ToolCallComponent', () => {
         id: 'call_edit_dispose',
         name: 'Edit',
         args: { file_path: 'bar.ts' },
-        streamingArguments: '{"file_path":"bar.ts","old_string":"a',
+        streamingArguments: '{"file_path":"bar.ts","expected_tag":"A1B2","line_ops":[{"op":"swap","start":1,"end":1,"content":"a',
         streamingStartedAtMs: 0,
       },
       undefined,

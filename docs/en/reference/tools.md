@@ -2,7 +2,7 @@
 
 Built-in tools are the tool set provided by Kimi Code CLI alongside its core engine — no MCP server installation required. The Agent automatically selects and calls these tools based on the task at hand during each conversation; users can inspect the details of each tool call through the approval interface.
 
-Compared to MCP tools, built-in tools are managed directly by the runtime, their lifecycle is bound to the session, and no external process is required. Both follow the same unified approval mechanism: **read-only tools** (such as `Read`, `Grep`, `Glob`) are automatically allowed by default, while **write and execution tools** (such as `Write`, `Edit`, `Bash`) require user approval by default. Nori's session-level read-only setting blocks direct `Write` and `Edit` calls, but it does not remove file-reading tools or block `Bash`; `Bash` still follows the current permission mode and rules. In YOLO mode, approval for regular tool calls is skipped; Plan mode exit approval is not affected.
+Compared to MCP tools, built-in tools are managed directly by the runtime, their lifecycle is bound to the session, and no external process is required. Both follow the same unified approval mechanism: **read-only tools** (such as `Read`, `Grep`, `Glob`) are automatically allowed by default, while **write and execution tools** (such as `Write`, `Edit`, `Bash`) require user approval by default. Nori's session-level read-only setting blocks direct `Write` and `Edit` calls, but it does not remove file-reading tools or block `Bash`; `Bash` still follows the current permission mode and rules. In YOLO mode, approval for regular tool calls is skipped; Discuss exit approval is not affected.
 
 ## File Tools
 
@@ -12,16 +12,16 @@ File tools handle reading, writing, and searching the local filesystem — the f
 | --- | --- | --- |
 | `Read` | Auto-allow | Read a text file's contents |
 | `Write` | Requires approval | Create or overwrite a file |
-| `Edit` | Requires approval | Precise string replacement |
+| `Edit` | Requires approval | Hash-anchored line editing |
 | `Grep` | Auto-allow | Full-text search powered by ripgrep |
 | `Glob` | Auto-allow | Find files by glob pattern |
 | `ReadMediaFile` | Auto-allow | Read an image or video file |
 
-**`Read`** accepts a file path (`path`) plus optional `line_offset` (starting line number; negative values count from the end) and `n_lines` (maximum number of lines to read). Returns at most 1000 lines or 100 KB per call; content beyond that limit is accompanied by a truncation notice. If the file is an image or video, the tool suggests using `ReadMediaFile` instead.
+**`Read`** accepts a file path (`path`) plus optional `line_offset` (starting line number; negative values count from the end) and `n_lines` (maximum number of lines to read). Returns at most 1000 lines or 100 KB per call; content beyond that limit is accompanied by a truncation notice. Text output starts with `[path#TAG]`, where `TAG` is the four-hex snapshot anchor required by `Edit`. If the file is an image or video, the tool suggests using `ReadMediaFile` instead.
 
 **`Write`** accepts `path`, `content`, and an optional `mode` (`overwrite` or `append`; defaults to overwrite). Missing parent directories are created automatically; `append` mode appends content to the end of the file without automatically adding a newline.
 
-**`Edit`** accepts `path`, `old_string` (the exact text to replace), and `new_string` (the replacement text). By default it replaces only one unique match; if the same content appears multiple times in the file, the tool returns an error and suggests using `replace_all: true`. `old_string` and `new_string` must not be identical.
+**`Edit`** accepts `path`, `expected_tag` (the latest four-hex tag returned by `Read`), and a non-empty `line_ops` array. Operations use line numbers from that tagged snapshot: `swap` replaces an inclusive range, `del` deletes one, and `insert_pre` / `insert_post` insert around an original line. The full operation list is validated before one write; a stale tag or invalid/overlapping range fails without modifying the file.
 
 **`Grep`** invokes ripgrep to search file contents, supporting regular expressions (`pattern`), a search path (`path`), file type filtering (`type`, e.g., `ts`, `py`), glob filtering (`glob`), and output mode (`output_mode`: `files_with_matches` / `content` / `count_matches`; defaults to `files_with_matches`). `content` mode supports context lines (`-A`, `-B`, `-C`), case-insensitive matching (`-i`), line numbers (`-n`, default true), and multiline matching (`multiline`). All modes support `offset` + `head_limit` pagination; `head_limit` defaults to 250 and `0` means unlimited. Sensitive files such as `.env` files and private keys are automatically filtered out; set `include_ignored=true` to search files ignored by `.gitignore`, though sensitive files remain filtered.
 
@@ -59,18 +59,15 @@ In the default Nori read-only posture, the main Agent can still use `Bash` for b
 
 **`FetchURL`** accepts a single `url` parameter and returns the page content. For HTML pages, the host extracts the body text rather than returning the full HTML; plain text or Markdown pages are passed through directly. Also requires a host-provided implementation.
 
-## Plan Mode
+## Discuss
 
 | Tool | Default Approval | Description |
 | --- | --- | --- |
-| `EnterPlanMode` | Auto-allow | Enter Plan mode |
-| `ExitPlanMode` | Auto-allow (requires user to confirm the plan) | Exit Plan mode and submit the plan |
+| `EnterDiscussMode` | Auto-allow | Enter Discuss |
 
-Plan mode is a constrained working state: once entered, `Write` and `Edit` are restricted to writing the current plan file only, and `TaskStop` is blocked entirely. All other tools (including `Bash`) are still governed by the current permission rules.
+Discuss is a read-only team meeting. New sessions start here unless the user turned that default off. While Discuss is active, `Write`, `Edit`, `Bash`, `SubAgent`, `TaskStop`, `CronCreate`, and `CronDelete` are blocked. There is no session-file workflow and no `ExitDiscussMode` model exit.
 
-**`EnterPlanMode`** accepts no parameters; upon success it returns workflow guidance and the plan file path.
-
-**`ExitPlanMode`** reads the current plan file, presents the plan to the user for approval, then exits Plan mode. The optional `options` parameter lets the Agent offer 1–3 alternative approaches (each with a `label` and `description`; `label` max 80 characters) for the user to choose from during approval. Labels must be unique and cannot use reserved words such as `Approve`, `Reject`, `Reject and Exit`, or `Revise`.
+**`EnterDiscussMode`** accepts no parameters. After it succeeds, create partners with `TeamCreate`, run `TeamDecide` (lead statement first, members use `TeamSpeak`; no call records a skipped turn), then `TeamAssign` to enter Code. The UI Discuss/Code toggle can also leave or re-enter this stage.
 
 ## State Management
 
@@ -86,14 +83,17 @@ Collaboration tools handle inter-Agent coordination, user interaction, and Skill
 
 | Tool | Default Approval | Description |
 | --- | --- | --- |
-| `Agent` | Auto-allow | Spawn a sub-Agent to execute a subtask |
-| `AgentSwarm` | Auto-allow in swarm mode; otherwise requires approval | Launch item-based subagents or resume existing subagents |
+| `SubAgent` | Auto-allow in SubAgent mode; otherwise requires approval | Launch one or many temporary SubAgents |
+| `TeamCreate` | Auto-allow | Create durable team partners |
+| `TeamDecide` | Auto-allow | Start/continue discussion, or vote after execution |
+| `TeamSpeak` | Auto-allow | Publish a discussion statement; not calling it records the turn as skipped (abstention) |
+| `TeamAssign` | Auto-allow | Assign work; success leaves Discuss and enters Code |
 | `AskUserQuestion` | Auto-allow | Ask the user a question to gather structured input |
 | `Skill` | Auto-allow | Invoke a registered inline Skill |
 
-**`Agent`** delegates a subtask to a sub-Agent. Required parameters: `prompt` (complete task description) and `description` (a 3–5 word short summary). Optional parameters: `subagent_type` (defaults to `nori-coder`), `resume` (ID of an existing Agent to resume; mutually exclusive with `subagent_type`), and `run_in_background` (defaults to false). Agent tasks have a fixed 30-minute timeout. In foreground mode the parent Agent waits for the sub-Agent to complete before continuing; in background mode a task ID is returned immediately and the result is automatically delivered back to the main Agent via a synthetic User message when done. When several foreground `Agent` calls run in the same step, the TUI groups them and shows each subagent's running, waiting, completed, or failed status with elapsed time. See [Agent & Sub-Agents](../customization/agents.md) for details.
+**`SubAgent`** is the unified temporary-delegation tool. Launch one or many full child transcripts with `prompt_template` + `items`, `tasks` (including `depends_on` DAGs), or `resume_agent_ids`. Completed SubAgents are archived in the parent session. If a model response calls `SubAgent`, that call must be the only tool call in the response. Do not use SubAgent during Discuss; call TeamAssign first.
 
-**`AgentSwarm`** launches subagents from a shared `prompt_template` and an `items` array, from a concrete `tasks` array, from existing `resume_agent_ids`, or from a combination of these inputs. Use `prompt_template` + `items` for uniform parallel work; the template must contain the `{{item}}` placeholder, and each item launches one new subagent. Use `tasks` for real engineering workflows, including single delegated tasks and DAGs (directed dependency graphs): each task can set `id`, `description`, `subagent_type`, `prompt`, and `depends_on`. Tasks in the same dependency layer run in parallel; downstream tasks receive dependency results before starting. Pass top-level `subagent_type` to choose the default profile for spawned subagents, or omit it to use `nori-coder`; an individual task can override that profile with its own `subagent_type`. The tool supports up to 128 total subagents, waits for all subagents to finish, and returns an aggregated report. In the TUI, foreground swarms show a live `Agent swarm` progress panel above the input box. If a model response calls `AgentSwarm`, that call must be the only tool call in the response; to run multiple swarms, call one `AgentSwarm`, wait for its result, then call the next, or combine the work into one swarm when a single template can cover it. In `manual` permission mode, `AgentSwarm` calls outside active swarm mode request approval unless a permission rule allows them; while swarm mode is active, `AgentSwarm` itself is auto-approved. Permission rules match `AgentSwarm` by tool name only — argument patterns such as `AgentSwarm(swarm)` are not supported. By default the tool ramps up concurrency without an upper limit (5 subagents start immediately, then 1 more every 700 ms); set `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY` to a positive integer to cap how many subagents run at the same time during that ramp, or leave it unset for no cap. If it is set to a value that is not a positive integer, the AgentSwarm call fails fast.
+**`TeamCreate`** requires `name`, `title`, `intro`, `mandate`, and `role` for every member. **`TeamDecide`** `action=start` requires `topic` and the lead `statement`. Members publish only with `TeamSpeak`. After execution, `action=vote` does not require Discuss; every team member votes (`discuss_again` / `proceed` / `abstain`), including members left idle with `task=null`.
 
 **`AskUserQuestion`** asks the user a structured multiple-choice question — useful for disambiguation or option selection. The `questions` parameter accepts 1–4 questions; each question requires `question` (ending with `?`), `options` (2–4 choices, each with a `label` and `description`), and optional `header` (max 12 characters) and `multi_select` (defaults to false). An "Other" option is appended automatically. Setting `background` to true starts a background question task and returns a task ID immediately. When the host does not support interactive questioning, a failure message is returned and the Agent should ask the user directly in a text reply instead.
 
@@ -101,29 +101,22 @@ Collaboration tools handle inter-Agent coordination, user interaction, and Skill
 
 ## Nori Tools
 
-Nori-specific tools extend the built-in tool set with shared memory, documentation writes, and configured swarm templates. They appear only when the matching provider or runtime feature is available.
+Nori-specific tools extend the built-in tool set with shared memory, documentation writes, and configured DAG templates. They appear only when the matching provider or runtime feature is available.
 
 | Tool | Default Approval | Description |
 | --- | --- | --- |
 | `nori_memory_search` | Follows permission rules | Search the Obsidian shared memory vault |
 | `nori_memory_write` | Follows permission rules | Write analysis, decision, task, or review notes to the vault |
-| `nori_plan_write` | Follows permission rules; not blocked by read-only mode | Write plan, design, or analysis documents in approved workspace directories |
-| `nori_swarm_launch` | Follows permission rules | Launch a configured DAG swarm template |
-| `nori_swarm_status` | Follows permission rules | Check a configured swarm's status |
-| `nori_swarm_result` | Follows permission rules | Retrieve a configured swarm's result |
 | `nori_ask_parent` | Subagent only | Let a subagent ask its parent Agent for guidance |
 
 **`nori_memory_search`** accepts concrete `keywords`, optional `note_types`, `top_k`, `include_linked`, `link_depth`, `chain_depth`, and `follow_up_keywords`. Use chained retrieval (`chain_depth: 1` or `2`) when the first results reveal better terms or linked notes.
 
 **`nori_memory_write`** records structured notes in the shared vault. Use it for durable task progress, architecture analysis, review findings, and decisions that future turns or subagents should retrieve.
 
-**`nori_plan_write`** writes only documentation-like files under approved directories such as `docs/`, `plans/`, `.nori-code/`, `design/`, or `specs/`, with extensions such as `.md`, `.txt`, `.yaml`, `.json`, and `.toml`. It is meant for plans and design documents, not source-code edits.
-
-**`nori_swarm_launch`**, **`nori_swarm_status`**, and **`nori_swarm_result`** are compatibility APIs for configured swarm templates. Prefer `AgentSwarm.tasks` for ordinary model-driven coding loops, and use configured templates when the project defines a repeatable DAG workflow.
 
 ## Background Tasks
 
-Background task tools manage tasks started via `Bash`, `Agent`, or `AskUserQuestion`. When a task reaches a terminal state, its status and saved output path are automatically delivered back to the Agent; use `TaskOutput` to check progress early.
+Background task tools manage tasks started via `Bash`, `SubAgent`, or `AskUserQuestion`. When a task reaches a terminal state, its status and saved output path are automatically delivered back to the Agent; use `TaskOutput` to check progress early.
 
 | Tool | Default Approval | Description |
 | --- | --- | --- |
@@ -153,7 +146,7 @@ To prevent all users from firing at the same time on the hour, the scheduler app
 
 **`CronList`** is a read-only tool that accepts no parameters. It returns one record per active task with fields: `id`, `cron`, `humanSchedule`, `nextFireAt`, `recurring`, `ageDays`, and `stale`. Records are separated by `---` and sorted by schedule time.
 
-**`CronDelete`** accepts a single `id`. For recurring tasks, all future fires stop immediately; for one-time tasks, the pending fire is cancelled. One-time tasks that have already fired are auto-deleted, so calling `CronDelete` on an already-fired one-time task returns `No cron job with id ...`. Deletion is irreversible — use `CronCreate` again to restore. `CronDelete` is also blocked in Plan mode.
+**`CronDelete`** accepts a single `id`. For recurring tasks, all future fires stop immediately; for one-time tasks, the pending fire is cancelled. One-time tasks that have already fired are auto-deleted, so calling `CronDelete` on an already-fired one-time task returns `No cron job with id ...`. Deletion is irreversible — use `CronCreate` again to restore. `CronDelete` is also blocked in Discuss.
 
 ## Next steps
 

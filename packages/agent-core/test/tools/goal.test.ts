@@ -271,7 +271,7 @@ describe('UpdateGoalTool', () => {
   });
 
   // Terminal paths append follow-up reminders, so the agent needs a context
-  // exposing appendSystemReminder.
+  // exposing appendSystemReminder and a turn that accepts the sticky outcome flag.
   function agentWithContext(
     store: GoalMode,
     reminders: Array<{ readonly content: string; readonly origin: unknown }> = [],
@@ -283,6 +283,9 @@ describe('UpdateGoalTool', () => {
         appendSystemReminder: (content: string, origin: unknown) => {
           reminders.push({ content, origin });
         },
+      },
+      turn: {
+        notePendingGoalOutcomeContinuation: () => undefined,
       },
     } as unknown as Agent;
   }
@@ -312,6 +315,41 @@ describe('UpdateGoalTool', () => {
     expect(reminders[0]?.origin).toEqual({ kind: 'system_trigger', name: 'goal_completion' });
     expect(reminders[0]?.content).toContain('Goal completed successfully.');
     expect(reminders[0]?.content).toContain('Write a concise final message for the user');
+    expect(reminders[0]?.content).not.toContain('nori_memory_remove');
+  });
+
+  it('`complete` reminds the model to optionally clean memory when memory tools are active', async () => {
+    const store = makeStore();
+    const reminders: Array<{ readonly content: string; readonly origin: unknown }> = [];
+    await store.createGoal({ objective: 'work' });
+    const agent = {
+      ...agentWithContext(store, reminders),
+      obsidianMemory: { removeNote: async () => false },
+      tools: {
+        data: () => [{ name: 'nori_memory_remove', active: true }],
+      },
+    } as unknown as Agent;
+    const result = await executeTool(new UpdateGoalTool(agent), ctx({ status: 'complete' }));
+    expect(result.stopTurn).toBe(true);
+    expect(reminders).toHaveLength(1);
+    expect(reminders[0]?.origin).toEqual({ kind: 'system_trigger', name: 'goal_completion' });
+    expect(reminders[0]?.content).toContain('nori_memory_remove');
+    expect(reminders[0]?.content).toContain('skip memory tools entirely');
+  });
+
+  it('`complete` omits memory cleanup when nori_memory_remove is inactive', async () => {
+    const store = makeStore();
+    const reminders: Array<{ readonly content: string; readonly origin: unknown }> = [];
+    await store.createGoal({ objective: 'work' });
+    const agent = {
+      ...agentWithContext(store, reminders),
+      obsidianMemory: { removeNote: async () => false },
+      tools: {
+        data: () => [{ name: 'nori_memory_remove', active: false }],
+      },
+    } as unknown as Agent;
+    await executeTool(new UpdateGoalTool(agent), ctx({ status: 'complete' }));
+    expect(reminders[0]?.content).not.toContain('nori_memory_remove');
   });
 
   it('`blocked` marks the goal blocked (resumable) and asks for a blocker reason', async () => {
@@ -350,6 +388,49 @@ describe('UpdateGoalTool', () => {
     expect(result.isError).toBeFalsy();
     expect(result.output).toBe('Goal resumed.');
     expect(store.getGoal().goal?.status).toBe('active');
+  });
+
+  it('`complete` on a non-active goal errors instead of claiming success', async () => {
+    const store = makeStore();
+    await store.createGoal({ objective: 'work' });
+    await store.pauseGoal();
+    const reminders: Array<{ readonly content: string; readonly origin: unknown }> = [];
+    const result = await executeTool(
+      new UpdateGoalTool(agentWithContext(store, reminders)),
+      ctx({ status: 'complete' }),
+    );
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('No active goal to mark complete');
+    expect(store.getGoal().goal?.status).toBe('paused');
+    expect(reminders).toHaveLength(0);
+  });
+
+  it('`blocked` on a missing goal errors instead of claiming success', async () => {
+    const store = makeStore();
+    const reminders: Array<{ readonly content: string; readonly origin: unknown }> = [];
+    const result = await executeTool(
+      new UpdateGoalTool(agentWithContext(store, reminders)),
+      ctx({ status: 'blocked' }),
+    );
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('No active goal to mark blocked');
+    expect(reminders).toHaveLength(0);
+  });
+
+  it('`complete` marks the sticky turn flag for outcome continuation', async () => {
+    const store = makeStore();
+    await store.createGoal({ objective: 'work' });
+    let noted = false;
+    const agent = {
+      ...agentWithContext(store),
+      turn: {
+        notePendingGoalOutcomeContinuation: () => {
+          noted = true;
+        },
+      },
+    } as unknown as Agent;
+    await executeTool(new UpdateGoalTool(agent), ctx({ status: 'complete' }));
+    expect(noted).toBe(true);
   });
 });
 

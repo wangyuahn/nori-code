@@ -286,7 +286,7 @@ export class CustomEditor extends Editor {
       }
     }
     // `this.borderColor` is pi-tui's per-render paint function. The host may
-    // overwrite it (e.g. plan-mode / slash-context highlight via
+    // overwrite it (e.g. Discuss / slash-context highlight via
     // `editor.borderColor = chalk.hex(primary)`), so we route corners and
     // side bars through the same hook to stay in sync.
     return wrapWithSideBorders(lines, (s) => this.borderColor(s), {

@@ -48,6 +48,51 @@ const CATALOGUED_MODEL_CAPABILITIES = {
 const MICRO_COMPACTION_FLAG_ENV = getMicroCompactionFlagEnv();
 
 describe('FullCompaction', () => {
+  it('uses raw speaker content for compaction while preserving the model-only envelope', async () => {
+    const ctx = testAgent();
+    ctx.configure({
+      provider: CATALOGUED_PROVIDER,
+      modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
+    });
+    ctx.appendExchange(1, 'Earlier user context one.', 'Earlier assistant context one.', 20);
+    ctx.appendExchange(2, 'Earlier user context two.', 'Earlier assistant context two.', 40);
+    ctx.appendExchange(3, 'Earlier user context three.', 'Earlier assistant context three.', 120);
+    const input = 'Inspect the stable prompt-cache prefix.';
+    ctx.agent.context.appendUserMessage([{ type: 'text', text: input }], {
+      kind: 'system_trigger',
+      name: 'subagent',
+      speaker: { from: 'lead', speakerId: 'main', speakerName: 'Lead' },
+    });
+    const rawMessage = ctx.agent.context.history.find((message) =>
+      message.content.some((part) => part.type === 'text' && part.text === input),
+    );
+    const projectedMessage = ctx.agent.context.messages.find((message) =>
+      message.content.some((part) => part.type === 'text' && part.text.includes(input)),
+    );
+    expect(rawMessage?.content).toEqual([{ type: 'text', text: input }]);
+    expect(projectedMessage?.content).toEqual([
+      {
+        type: 'text',
+        text: '<message from="lead:main" name="Lead">Inspect the stable prompt-cache prefix.</message>',
+      },
+    ]);
+    await ctx.expectResumeMatches();
+
+    const completed = ctx.once('compaction.completed');
+    ctx.mockNextResponse({ type: 'text', text: 'Compacted cache context.' });
+    await ctx.rpc.beginCompaction({ instruction: 'Keep the cache-relevant facts.' });
+    await completed;
+
+    const compactionHistory = ctx.llmCalls[0]?.history;
+    const compactionText = compactionHistory
+      ?.flatMap((message) => message.content)
+      .filter((part) => part.type === 'text')
+      .map((part) => part.text)
+      .join('\n');
+    expect(compactionText).toContain(input);
+    expect(compactionText).not.toContain('<message from="lead:main"');
+  });
+
   it('runs manual compaction and applies the compacted context', async () => {
     const records: TelemetryRecord[] = [];
     const ctx = testAgent({ telemetry: recordingTelemetry(records) });
@@ -71,15 +116,15 @@ describe('FullCompaction', () => {
     await completed;
 
     expect(ctx.newEvents()).toMatchInlineSnapshot(`
-      [wire] context.append_message     { "message": { "role": "user", "content": [ { "type": "text", "text": "old user one" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
-      [wire] context.append_message     { "message": { "role": "user", "content": [ { "type": "text", "text": "old user two" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
-      [wire] context.append_message     { "message": { "role": "user", "content": [ { "type": "text", "text": "recent user three" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [wire] context.append_message     { "message": { "role": "user", "content": [ { "type": "text", "text": "old user one" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
+      [wire] context.append_message     { "message": { "role": "user", "content": [ { "type": "text", "text": "old user two" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
+      [wire] context.append_message     { "message": { "role": "user", "content": [ { "type": "text", "text": "recent user three" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
       [wire] full_compaction.begin      { "source": "manual", "instruction": "Keep the important test facts.", "time": "<time>" }
       [emit] compaction.started         { "trigger": "manual", "instruction": "Keep the important test facts." }
       [wire] usage.record               { "model": "kimi-code", "usage": { "inputOther": 537, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
-      [emit] agent.status.updated       { "model": "kimi-code", "contextTokens": 120, "maxContextTokens": 256000, "contextUsage": 0.00046875, "planMode": false, "swarmMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "kimi-code": { "inputOther": 537, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 537, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [emit] agent.status.updated       { "model": "kimi-code", "contextTokens": 120, "maxContextTokens": 256000, "contextUsage": 0.00046875, "discussMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "kimi-code": { "inputOther": 537, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 537, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] context.apply_compaction   { "summary": "Compacted summary.", "contextSummary": "The conversation so far has been compacted to free up context. What follows is your own working summary of this task — use it to continue your train of thought rather than starting over. Treat it as notes, not proof: where it says a step was done, tests passed, or a fix worked, verify that yourself before relying on it.\\nCompacted summary.", "compactedCount": 6, "tokensBefore": 39, "tokensAfter": 100, "keptUserMessageCount": 3, "time": "<time>" }
-      [emit] agent.status.updated       { "model": "kimi-code", "contextTokens": 100, "maxContextTokens": 256000, "contextUsage": 0.000390625, "planMode": false, "swarmMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "kimi-code": { "inputOther": 537, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 537, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [emit] agent.status.updated       { "model": "kimi-code", "contextTokens": 100, "maxContextTokens": 256000, "contextUsage": 0.000390625, "discussMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "kimi-code": { "inputOther": 537, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 537, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] full_compaction.complete   { "time": "<time>" }
       [emit] compaction.completed       { "result": { "summary": "Compacted summary.", "compactedCount": 6, "tokensBefore": 39, "tokensAfter": 100, "keptUserMessageCount": 3 } }
     `);
@@ -1023,15 +1068,15 @@ describe('FullCompaction', () => {
     await completed;
 
     expect(ctx.newEvents()).toMatchInlineSnapshot(`
-      [wire] context.append_message     { "message": { "role": "user", "content": [ { "type": "text", "text": "old user one" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
-      [wire] context.append_message     { "message": { "role": "user", "content": [ { "type": "text", "text": "recent user two" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [wire] context.append_message     { "message": { "role": "user", "content": [ { "type": "text", "text": "old user one" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
+      [wire] context.append_message     { "message": { "role": "user", "content": [ { "type": "text", "text": "recent user two" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
       [wire] full_compaction.begin      { "source": "manual", "time": "<time>" }
       [emit] compaction.started         { "trigger": "manual" }
-      [wire] context.append_message     { "message": { "role": "user", "content": [ { "type": "text", "text": "new user while compacting" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [wire] context.append_message     { "message": { "role": "user", "content": [ { "type": "text", "text": "new user while compacting" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
       [wire] usage.record               { "model": "kimi-code", "usage": { "inputOther": 508, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
-      [emit] agent.status.updated       { "model": "kimi-code", "contextTokens": 80, "maxContextTokens": 256000, "contextUsage": 0.0003125, "planMode": false, "swarmMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "kimi-code": { "inputOther": 508, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 508, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [emit] agent.status.updated       { "model": "kimi-code", "contextTokens": 80, "maxContextTokens": 256000, "contextUsage": 0.0003125, "discussMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "kimi-code": { "inputOther": 508, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 508, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] context.apply_compaction   { "summary": "Compacted prefix.", "contextSummary": "The conversation so far has been compacted to free up context. What follows is your own working summary of this task — use it to continue your train of thought rather than starting over. Treat it as notes, not proof: where it says a step was done, tests passed, or a fix worked, verify that yourself before relying on it.\\nCompacted prefix.", "compactedCount": 4, "tokensBefore": 25, "tokensAfter": 103, "keptUserMessageCount": 3, "time": "<time>" }
-      [emit] agent.status.updated       { "model": "kimi-code", "contextTokens": 103, "maxContextTokens": 256000, "contextUsage": 0.00040234375, "planMode": false, "swarmMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "kimi-code": { "inputOther": 508, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 508, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [emit] agent.status.updated       { "model": "kimi-code", "contextTokens": 103, "maxContextTokens": 256000, "contextUsage": 0.00040234375, "discussMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "kimi-code": { "inputOther": 508, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 508, "output": 8, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] full_compaction.complete   { "time": "<time>" }
       [emit] compaction.completed       { "result": { "summary": "Compacted prefix.", "compactedCount": 4, "tokensBefore": 25, "tokensAfter": 103, "keptUserMessageCount": 3 } }
     `);
@@ -1086,14 +1131,14 @@ describe('FullCompaction', () => {
     await canceled;
 
     expect(ctx.newEvents()).toMatchInlineSnapshot(`
-      [wire] context.append_message   { "message": { "role": "user", "content": [ { "type": "text", "text": "old user one" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
-      [wire] context.append_message   { "message": { "role": "user", "content": [ { "type": "text", "text": "recent user two" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [wire] context.append_message   { "message": { "role": "user", "content": [ { "type": "text", "text": "old user one" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
+      [wire] context.append_message   { "message": { "role": "user", "content": [ { "type": "text", "text": "recent user two" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
       [wire] full_compaction.begin    { "source": "manual", "time": "<time>" }
       [emit] compaction.started       { "trigger": "manual" }
       [wire] context.clear            { "time": "<time>" }
-      [emit] agent.status.updated     { "model": "kimi-code", "contextTokens": 0, "maxContextTokens": 256000, "contextUsage": 0, "planMode": false, "swarmMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3 }
+      [emit] agent.status.updated     { "model": "kimi-code", "contextTokens": 0, "maxContextTokens": 256000, "contextUsage": 0, "discussMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false }
       [wire] usage.record             { "model": "kimi-code", "usage": { "inputOther": 508, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
-      [emit] agent.status.updated     { "model": "kimi-code", "contextTokens": 0, "maxContextTokens": 256000, "contextUsage": 0, "planMode": false, "swarmMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "kimi-code": { "inputOther": 508, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 508, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [emit] agent.status.updated     { "model": "kimi-code", "contextTokens": 0, "maxContextTokens": 256000, "contextUsage": 0, "discussMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "kimi-code": { "inputOther": 508, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 508, "output": 7, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] full_compaction.cancel   { "time": "<time>" }
       [emit] compaction.cancelled     {}
     `);
@@ -1127,29 +1172,30 @@ describe('FullCompaction', () => {
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Answer after compacting' }] });
 
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "old user one" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "old user two" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "recent user three" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
-      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Answer after compacting" } ], "origin": { "kind": "user" }, "time": "<time>" }
-      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Answer after compacting" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "old user one" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "old user two" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "recent user three" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
+      [wire] goal.rewind_checkpoint      { "snapshot": null, "time": "<time>" }
+      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Answer after compacting" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
+      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Answer after compacting" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
       [wire] full_compaction.begin       { "source": "auto", "time": "<time>" }
       [emit] compaction.started          { "trigger": "auto" }
       [emit] compaction.blocked          { "turnId": 0 }
       [wire] usage.record                { "model": "kimi-code", "usage": { "inputOther": 529, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "kimi-code", "contextTokens": 950000, "maxContextTokens": 256000, "contextUsage": 3.7109375, "planMode": false, "swarmMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "kimi-code": { "inputOther": 529, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 529, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [emit] agent.status.updated        { "model": "kimi-code", "contextTokens": 950000, "maxContextTokens": 256000, "contextUsage": 3.7109375, "discussMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "kimi-code": { "inputOther": 529, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 529, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] context.apply_compaction    { "summary": "Auto compacted summary.", "contextSummary": "The conversation so far has been compacted to free up context. What follows is your own working summary of this task — use it to continue your train of thought rather than starting over. Treat it as notes, not proof: where it says a step was done, tests passed, or a fix worked, verify that yourself before relying on it.\\nAuto compacted summary.", "compactedCount": 7, "tokensBefore": 46, "tokensAfter": 108, "keptUserMessageCount": 4, "time": "<time>" }
-      [emit] agent.status.updated        { "model": "kimi-code", "contextTokens": 108, "maxContextTokens": 256000, "contextUsage": 0.000421875, "planMode": false, "swarmMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "kimi-code": { "inputOther": 529, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 529, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [emit] agent.status.updated        { "model": "kimi-code", "contextTokens": 108, "maxContextTokens": 256000, "contextUsage": 0.000421875, "discussMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "kimi-code": { "inputOther": 529, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 529, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] full_compaction.complete    { "time": "<time>" }
       [emit] compaction.completed        { "result": { "summary": "Auto compacted summary.", "compactedCount": 7, "tokensBefore": 46, "tokensAfter": 108, "keptUserMessageCount": 4 } }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
       [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
       [emit] assistant.delta             { "turnId": 0, "delta": "I can answer after compaction." }
       [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I can answer after compaction." } }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 107, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
-      [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 107, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
-      [wire] usage.record                { "model": "kimi-code", "usage": { "inputOther": 107, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "kimi-code", "contextTokens": 118, "maxContextTokens": 256000, "contextUsage": 0.0004609375, "planMode": false, "swarmMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "kimi-code": { "inputOther": 636, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 636, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 107, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 361, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 361, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "end_turn" }
+      [wire] usage.record                { "model": "kimi-code", "usage": { "inputOther": 361, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "model": "kimi-code", "contextTokens": 372, "maxContextTokens": 256000, "contextUsage": 0.001453125, "discussMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "kimi-code": { "inputOther": 890, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 890, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 361, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.ended                  { "turnId": 0, "reason": "completed" }
     `);
     expect(ctx.llmInputs()).toMatchInlineSnapshot(`
@@ -1168,8 +1214,9 @@ describe('FullCompaction', () => {
 
       call 2:
         messages:
-          user: text "old user one\\n\\nold user two\\n\\nrecent user three\\n\\nAnswer after compacting"
+          user: text "<message from=\\"user\\" name=\\"用户\\">old user one</message>\\n\\n<message from=\\"user\\" name=\\"用户\\">old user two</message>\\n\\n<message from=\\"user\\" name=\\"用户\\">recent user three</message>\\n\\n<message from=\\"user\\" name=\\"用户\\">Answer after compacting</message>"
           user: text "The conversation so far has been compacted to free up context. What follows is your own working summary of this task — use it to continue your train of thought rather than starting over. Treat it as notes, not proof: where it says a step was done, tests passed, or a fix worked, verify that yourself before relying on it.\\nAuto compacted summary."
+          user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
     expect(records).toContainEqual({
       event: 'compaction_finished',
@@ -1340,92 +1387,6 @@ describe('FullCompaction', () => {
     await ctx.expectResumeMatches();
   });
 
-  it('reinjects the plan-mode reminder after manual compaction', async () => {
-    const ctx = testAgent();
-    ctx.configure({
-      provider: CATALOGUED_PROVIDER,
-      modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
-    });
-    await ctx.agent.planMode.enter('compact-plan', false);
-    const planFilePath = ctx.agent.planMode.planFilePath;
-    if (planFilePath === null) throw new Error('plan file path missing');
-    ctx.agent.context.appendUserMessage([{ type: 'text', text: 'draft the plan' }]);
-    await ctx.agent.injection.inject();
-    expect(ctx.compactHistory().at(-1)?.text).toContain(`Plan file: ${planFilePath}`);
-    const completed = ctx.once('compaction.completed');
-
-    ctx.mockNextResponse({ type: 'text', text: 'Plan-mode compacted summary.' });
-    await ctx.rpc.beginCompaction({});
-    await completed;
-
-    await vi.waitFor(() => {
-      const planReminders = ctx.agent.context.history.filter(
-        (message) => message.origin?.kind === 'injection' && message.origin.variant === 'plan_mode',
-      );
-      expect(planReminders).toHaveLength(1);
-      expect(messageText(planReminders[0])).toContain(`Plan file: ${planFilePath}`);
-    });
-    expect(ctx.compactHistory().at(-1)?.text).toContain(`Plan file: ${planFilePath}`);
-    await ctx.expectResumeMatches();
-  });
-
-  it('includes the plan-mode reminder in the answer request after auto compaction', async () => {
-    const ctx = testAgent();
-    ctx.configure({
-      provider: CATALOGUED_PROVIDER,
-      modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
-    });
-    await ctx.agent.planMode.enter('auto-compact-plan', false);
-    const planFilePath = ctx.agent.planMode.planFilePath;
-    if (planFilePath === null) throw new Error('plan file path missing');
-    ctx.appendExchange(1, 'old user one', 'old assistant one', 100);
-    ctx.appendExchange(2, 'recent user two', 'recent assistant two', 950_000);
-    await ctx.agent.injection.inject();
-
-    ctx.mockNextResponse({ type: 'text', text: 'Auto plan compacted summary.' });
-    ctx.mockNextResponse({ type: 'text', text: 'I can answer with the plan path.' });
-    await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Continue the plan' }] });
-    await ctx.untilTurnEnd();
-
-    expect(ctx.llmCalls).toHaveLength(2);
-    const answerTexts = ctx.llmCalls[1]?.history.map(messageText) ?? [];
-    expect(answerTexts.some((text) => text.includes(`Plan file: ${planFilePath}`))).toBe(true);
-    await ctx.expectResumeMatches();
-  });
-
-  it('reinjects reminders before a turn deferred during manual compaction', async () => {
-    const ctx = testAgent();
-    ctx.configure({
-      provider: CATALOGUED_PROVIDER,
-      modelCapabilities: CATALOGUED_MODEL_CAPABILITIES,
-    });
-    await ctx.agent.planMode.enter('deferred-plan', false);
-    const planFilePath = ctx.agent.planMode.planFilePath;
-    if (planFilePath === null) throw new Error('plan file path missing');
-    ctx.appendExchange(1, 'old user one', 'old assistant one', 100);
-    await ctx.agent.injection.inject();
-
-    ctx.mockNextResponse({ type: 'text', text: 'Compacted summary.' }); // summarizer
-    ctx.mockNextResponse({ type: 'text', text: 'answer for the deferred turn' }); // deferred turn
-
-    // A prompt arriving mid-compaction is deferred, then replayed once compaction
-    // finishes. It must run AFTER reinjection, so its request carries the plan-mode
-    // reminder — the post-compaction state is resurfaced on the very first turn.
-    void ctx.rpc.beginCompaction({});
-    expect(ctx.agent.fullCompaction.isCompacting).toBe(true);
-    const turnId = ctx.agent.turn.prompt([{ type: 'text', text: 'Continue the plan' }]);
-    expect(turnId).toBeNull();
-
-    await ctx.once('compaction.completed');
-    await ctx.agent.turn.waitForCurrentTurn();
-
-    // Two generate calls: the summarizer, then the deferred turn — proving the
-    // deferred prompt ran (not stuck) and saw the reinjected reminder.
-    expect(ctx.llmCalls).toHaveLength(2);
-    const answerTexts = ctx.llmCalls[1]?.history.map(messageText) ?? [];
-    expect(answerTexts.some((text) => text.includes(`Plan file: ${planFilePath}`))).toBe(true);
-  });
-
   it('does not auto compact small contexts when reserved size exceeds the model window', async () => {
     const ctx = testAgent({
       initialConfig: {
@@ -1449,7 +1410,10 @@ describe('FullCompaction', () => {
     expect(eventIndex(events, 'compaction.started')).toBe(-1);
     expect(ctx.llmCalls).toHaveLength(1);
     expect(ctx.llmCalls[0]?.history.map(messageText)).toContain('old assistant one');
-    expect(messageText(ctx.llmCalls[0]?.history.at(-1))).toBe('small prompt');
+    expect(ctx.llmCalls[0]?.history.map(messageText)).toContainEqual(
+      expect.stringContaining('small prompt'),
+    );
+    expect(messageText(ctx.llmCalls[0]?.history.at(-1))).toContain('standalone summary');
     await ctx.expectResumeMatches();
   });
 
@@ -1619,9 +1583,14 @@ describe('FullCompaction', () => {
     expect(inputs).toMatchInlineSnapshot(`
       [
         [
-          "user: old user one",
+          "user: <message from="user" name="用户">old user one</message>",
           "assistant: old assistant one",
-          "user: Retry after provider overflow",
+          "user: <message from="user" name="用户">Retry after provider overflow</message>",
+          "user: <system-reminder>
+      Treat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.
+
+      After all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.
+      </system-reminder>",
         ],
         [
           "user: old user one",
@@ -1630,11 +1599,16 @@ describe('FullCompaction', () => {
           "user: <compaction-instruction>",
         ],
         [
-          "user: old user one
+          "user: <message from="user" name="用户">old user one</message>
 
-      Retry after provider overflow",
+      <message from="user" name="用户">Retry after provider overflow</message>",
           "user: The conversation so far has been compacted to free up context. What follows is your own working summary of this task — use it to continue your train of thought rather than starting over. Treat it as notes, not proof: where it says a step was done, tests passed, or a fix worked, verify that yourself before relying on it.
       Overflow compacted summary.",
+          "user: <system-reminder>
+      Treat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.
+
+      After all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.
+      </system-reminder>",
         ],
       ]
     `);
@@ -1882,7 +1856,7 @@ describe('FullCompaction', () => {
       event: 'compaction_finished',
       properties: expect.objectContaining({
         source: 'auto',
-        thinking_effort: 'high',
+        thinking_effort: 'on',
       }),
     });
   });
@@ -2167,16 +2141,17 @@ describe('FullCompaction', () => {
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Trigger repeated compaction' }] });
 
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
-      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Trigger repeated compaction" } ], "origin": { "kind": "user" }, "time": "<time>" }
-      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user" } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Trigger repeated compaction" } ], "toolCalls": [], "origin": { "kind": "user" } }, "time": "<time>" }
+      [wire] goal.rewind_checkpoint      { "snapshot": null, "time": "<time>" }
+      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Trigger repeated compaction" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
+      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }
+      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Trigger repeated compaction" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
       [wire] full_compaction.begin       { "source": "auto", "time": "<time>" }
       [emit] compaction.started          { "trigger": "auto" }
       [emit] compaction.blocked          { "turnId": 0 }
       [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 491, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "session", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "planMode": false, "swarmMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "mock-model": { "inputOther": 491, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 491, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "discussMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "mock-model": { "inputOther": 491, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 491, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] context.apply_compaction    { "summary": "First compacted summary.", "contextSummary": "The conversation so far has been compacted to free up context. What follows is your own working summary of this task — use it to continue your train of thought rather than starting over. Treat it as notes, not proof: where it says a step was done, tests passed, or a fix worked, verify that yourself before relying on it.\\nFirst compacted summary.", "compactedCount": 1, "tokensBefore": 8, "tokensAfter": 96, "keptUserMessageCount": 1, "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 96, "maxContextTokens": 1000000, "contextUsage": 0.000096, "planMode": false, "swarmMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "mock-model": { "inputOther": 491, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 491, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 96, "maxContextTokens": 1000000, "contextUsage": 0.000096, "discussMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "mock-model": { "inputOther": 491, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 491, "output": 9, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [wire] full_compaction.complete    { "time": "<time>" }
       [emit] compaction.completed        { "result": { "summary": "First compacted summary.", "compactedCount": 1, "tokensBefore": 8, "tokensAfter": 96, "keptUserMessageCount": 1 } }
       [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
@@ -2188,10 +2163,10 @@ describe('FullCompaction', () => {
       [emit] tool.call.started           { "turnId": 0, "toolCallId": "call_missing", "name": "MissingTool", "args": {} }
       [wire] context.append_loop_event   { "event": { "type": "tool.result", "parentUuid": "call_missing", "toolCallId": "call_missing", "result": { "output": "Tool \\"MissingTool\\" not found", "isError": true } }, "time": "<time>" }
       [emit] tool.result                 { "turnId": 0, "toolCallId": "call_missing", "output": "Tool \\"MissingTool\\" not found", "isError": true }
-      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 97, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
-      [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 97, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
-      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 97, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 108, "maxContextTokens": 1000000, "contextUsage": 0.000108, "planMode": false, "swarmMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "maxSwarmDepth": 3, "usage": { "byModel": { "mock-model": { "inputOther": 588, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 588, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 97, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
+      [wire] context.append_loop_event   { "event": { "type": "step.end", "uuid": "<uuid-1>", "turnId": "0", "step": 1, "usage": { "inputOther": 316, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }, "time": "<time>" }
+      [emit] turn.step.completed         { "turnId": 0, "step": 1, "stepId": "<uuid-1>", "usage": { "inputOther": 316, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "finishReason": "tool_use" }
+      [wire] usage.record                { "model": "mock-model", "usage": { "inputOther": 316, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 }, "usageScope": "turn", "time": "<time>" }
+      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 327, "maxContextTokens": 1000000, "contextUsage": 0.000327, "discussMode": false, "permission": "manual", "coderWriteEnabled": false, "toolsReadonly": false, "usage": { "byModel": { "mock-model": { "inputOther": 807, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 } }, "total": { "inputOther": 807, "output": 20, "inputCacheRead": 0, "inputCacheCreation": 0 }, "currentTurn": { "inputOther": 316, "output": 11, "inputCacheRead": 0, "inputCacheCreation": 0 } } }
       [emit] turn.step.interrupted       { "turnId": 0, "step": 2, "reason": "error", "message": "Compaction limit exceeded (1)" }
       [emit] turn.ended                  { "turnId": 0, "reason": "failed", "error": { "code": "context.overflow", "message": "Compaction limit exceeded (1)", "name": "KimiError", "details": { "maxCompactions": 1, "turnId": 0 }, "retryable": true } }
     `);
@@ -2208,10 +2183,43 @@ describe('FullCompaction', () => {
 
       call 2:
         messages:
-          user: text "Trigger repeated compaction"
+          user: text "<message from=\\"user\\" name=\\"用户\\">Trigger repeated compaction</message>"
           user: text "The conversation so far has been compacted to free up context. What follows is your own working summary of this task — use it to continue your train of thought rather than starting over. Treat it as notes, not proof: where it says a step was done, tests passed, or a fix worked, verify that yourself before relying on it.\\nFirst compacted summary."
+          user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
     await ctx.expectResumeMatches();
+  });
+
+  it('runs automatic compaction for a non-main agent at its own turn boundary', async () => {
+    const ctx = testAgent({ type: 'sub', compactionStrategy: alwaysCompactOnce });
+    ctx.configure();
+    expect(ctx.agent.type).toBe('sub');
+
+    ctx.mockNextResponse({ type: 'text', text: 'Subagent handoff summary.' });
+    ctx.mockNextResponse({ type: 'text', text: 'Subagent continued response.' });
+    await ctx.rpc.prompt({
+      input: [{ type: 'text', text: 'Continue this temporary subagent task.' }],
+    });
+    const events = await ctx.untilTurnEnd();
+
+    expect(events).toContainEqual(
+      expect.objectContaining({ event: 'turn.ended', args: { turnId: 0, reason: 'completed' } }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ event: 'compaction.started', args: { trigger: 'auto' } }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        event: 'context.apply_compaction',
+        args: expect.objectContaining({ summary: 'Subagent handoff summary.' }),
+      }),
+    );
+    expect(ctx.llmCalls).toHaveLength(2);
+    expect(ctx.agent.context.history.some((message) =>
+      message.content.some((part) =>
+        part.type === 'text' && part.text.includes('Subagent handoff summary.'),
+      ),
+    )).toBe(true);
   });
 
 });
@@ -2406,7 +2414,7 @@ function hookPayloadLoggerCommand(logPath: string): string {
     '});',
   ].join('');
   writeFileSync(scriptPath, script);
-  return `${process.execPath} ${scriptPath}`;
+  return `"${process.execPath}" "${scriptPath}"`;
 }
 
 function readHookPayloads(logPath: string): Array<Record<string, unknown>> {

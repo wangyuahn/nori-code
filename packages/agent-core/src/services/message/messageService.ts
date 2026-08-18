@@ -66,8 +66,12 @@ export class MessageService extends Disposable implements IMessageService {
     super();
   }
 
-  async list(sid: string, query: MessageListQuery): Promise<PageResponse<Message>> {
-    const all = await this._getProtocolMessages(sid);
+  async list(
+    sid: string,
+    query: MessageListQuery,
+    agentId = MAIN_AGENT_ID,
+  ): Promise<PageResponse<Message>> {
+    const all = await this._getProtocolMessages(sid, agentId);
     // SCHEMAS §1.3: "缺省返回最近 N 条 (created_at desc)" — newest first.
     const desc = [...all].reverse();
 
@@ -101,10 +105,10 @@ export class MessageService extends Disposable implements IMessageService {
     return { items: filtered, has_more: hasMore };
   }
 
-  async get(sid: string, mid: string): Promise<Message> {
+  async get(sid: string, mid: string, agentId = MAIN_AGENT_ID): Promise<Message> {
     // Resolve the session first: unknown sid must map to 40401 even when the
     // message id is malformed or belongs to another session (40403).
-    const all = await this._getProtocolMessages(sid);
+    const all = await this._getProtocolMessages(sid, agentId);
     const parsed = parseMessageId(mid);
     if (parsed === undefined || parsed.sessionId !== sid) {
       throw new MessageNotFoundError(sid, mid);
@@ -134,9 +138,9 @@ export class MessageService extends Disposable implements IMessageService {
    * `created_at` uses the wire record time when known, nudged to stay
    * strictly increasing so cursor consumers keep a stable total order.
    */
-  private async _getProtocolMessages(sid: string): Promise<Message[]> {
+  private async _getProtocolMessages(sid: string, agentId: string): Promise<Message[]> {
     const summary = await this._requireSession(sid);
-    const entries = await this._getTranscriptEntries(sid, summary);
+    const entries = await this._getTranscriptEntries(sid, agentId, summary);
     let previousMs = Number.NEGATIVE_INFINITY;
     return entries.map((entry, idx) => {
       const baseMs = entry.time ?? summary.createdAt + idx;
@@ -154,13 +158,14 @@ export class MessageService extends Disposable implements IMessageService {
    */
   private async _getTranscriptEntries(
     sid: string,
+    agentId: string,
     summary: SessionSummary,
   ): Promise<readonly TranscriptEntry[]> {
     await this._resumeSession(sid);
-    const transcript = await this._readTranscriptCached(sid, summary.sessionDir);
+    const transcript = await this._readTranscriptCached(sid, agentId, summary.sessionDir);
     const context = await this.core.rpc.getContext({
       sessionId: sid,
-      agentId: MAIN_AGENT_ID,
+      agentId,
     });
     if (transcript === undefined) {
       return context.history.map((message) => ({ message }));
@@ -189,21 +194,23 @@ export class MessageService extends Disposable implements IMessageService {
    */
   private async _readTranscriptCached(
     sid: string,
+    agentId: string,
     sessionDir: string,
   ): Promise<WireTranscript | undefined> {
     try {
-      const wirePath = path.join(sessionDir, 'agents', MAIN_AGENT_ID, 'wire.jsonl');
+      const cacheKey = `${sid}\u0000${agentId}`;
+      const wirePath = path.join(sessionDir, 'agents', agentId, 'wire.jsonl');
       const info = await stat(wirePath);
-      const cached = this.transcriptCache.get(sid);
+      const cached = this.transcriptCache.get(cacheKey);
       if (cached !== undefined && cached.size === info.size && cached.mtimeMs === info.mtimeMs) {
         // Refresh LRU position.
-        this.transcriptCache.delete(sid);
-        this.transcriptCache.set(sid, cached);
+        this.transcriptCache.delete(cacheKey);
+        this.transcriptCache.set(cacheKey, cached);
         return cached.transcript;
       }
-      const transcript = await readWireTranscript(sessionDir, MAIN_AGENT_ID);
-      this.transcriptCache.delete(sid);
-      this.transcriptCache.set(sid, { size: info.size, mtimeMs: info.mtimeMs, transcript });
+      const transcript = await readWireTranscript(sessionDir, agentId);
+      this.transcriptCache.delete(cacheKey);
+      this.transcriptCache.set(cacheKey, { size: info.size, mtimeMs: info.mtimeMs, transcript });
       while (this.transcriptCache.size > TRANSCRIPT_CACHE_LIMIT) {
         const oldest = this.transcriptCache.keys().next().value;
         if (oldest === undefined) break;

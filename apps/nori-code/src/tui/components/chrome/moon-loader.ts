@@ -21,10 +21,10 @@ export class MoonLoader extends Text {
   private label: string;
   private displayText = '';
   // Inline text used when the spinner is embedded into another line (e.g. the
-  // agent-swarm progress status line). It intentionally excludes the tip: the
+  // subagent progress status line). It intentionally excludes the tip: the
   // tip is only rendered when the loader sits on its own row in the activity
   // pane, otherwise it would get squeezed against whatever follows the inline
-  // spinner (like the swarm progress bar).
+  // spinner (like the SubAgent progress bar).
   private inlineText = '';
   private tip: string = '';
   private availableWidth = 0;

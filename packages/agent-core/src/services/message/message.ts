@@ -77,7 +77,11 @@ export interface IMessageService {
    *
    * Throws `SessionNotFoundError` (→ 40401) when `sid` doesn't exist.
    */
-  list(sid: string, query: MessageListQuery): Promise<PageResponse<Message>>;
+  list(
+    sid: string,
+    query: MessageListQuery,
+    agentId?: string,
+  ): Promise<PageResponse<Message>>;
 
   /**
    * `GET /v1/sessions/{sid}/messages/{mid}` — single message by id.
@@ -86,7 +90,7 @@ export interface IMessageService {
    * Throws `MessageNotFoundError` (→ 40403) when the session is known but
    * no message with `mid` lives in its history.
    */
-  get(sid: string, mid: string): Promise<Message>;
+  get(sid: string, mid: string, agentId?: string): Promise<Message>;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare

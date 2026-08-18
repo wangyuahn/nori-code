@@ -7,13 +7,13 @@
 // === TypeScript Interfaces ===
 
 export interface MessageContent {
-  type: 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'swarm_status' | 'image' | 'video' | 'file';
+  type: 'text' | 'thinking' | 'tool_use' | 'tool_result' | 'image' | 'video' | 'file';
   text?: string;
   thinking?: string;
   name?: string;
   input?: unknown;
   output?: string;
-  swarm_id?: string;
+  is_error?: boolean;
   status?: string;
   tool_call_id?: string;
   tool_name?: string;
@@ -66,7 +66,7 @@ export interface Message {
   created_at: string;
   session_id?: string;
   thinking?: string;
-  tool_calls?: Array<{ id?: string; name: string; args?: unknown; result?: string }>;
+  tool_calls?: Array<{ id?: string; name: string; args?: unknown; result?: string; is_error?: boolean }>;
   metadata?: {
     origin?: { kind?: string; [key: string]: unknown };
     [key: string]: unknown;
@@ -77,7 +77,7 @@ export interface SessionAgentConfig {
   model?: string;
   thinking?: string;
   permission_mode?: 'manual' | 'yolo' | 'auto';
-  plan_mode?: boolean;
+  discuss_mode?: boolean;
   main_write_enabled?: boolean;
   [key: string]: unknown;
 }
@@ -104,6 +104,54 @@ export interface Session {
     turn_count: number;
   };
   archived?: boolean;
+}
+
+/** A live or archived agent transcript owned by a parent session. */
+export interface SessionAgent {
+  agent_id: string;
+  kind: string;
+  parent_agent_id?: string;
+  name?: string;
+  title?: string;
+  intro?: string;
+  status: string;
+  tokens?: number;
+  last_active?: string;
+  summary?: string;
+  archived?: boolean;
+}
+
+interface SessionAgentTreeWireNode {
+  id: string;
+  kind: string;
+  parent_agent_id: string | null;
+  name: string;
+  title?: string;
+  intro?: string;
+  summary?: string;
+  status: string;
+  usage?: TokenUsage;
+  last_active: string;
+  archived: boolean;
+}
+
+function toSessionAgent(node: SessionAgentTreeWireNode): SessionAgent {
+  const usage = node.usage;
+  return {
+    agent_id: node.id,
+    kind: node.kind,
+    parent_agent_id: node.parent_agent_id ?? undefined,
+    name: node.name,
+    title: node.title,
+    intro: node.intro,
+    summary: node.summary,
+    status: node.status,
+    tokens: usage === undefined
+      ? undefined
+      : usage.input_other + usage.output + usage.input_cache_read + usage.input_cache_creation,
+    last_active: node.last_active,
+    archived: node.archived,
+  };
 }
 
 export interface TokenUsage {
@@ -143,9 +191,8 @@ export interface SessionRealtimeStatus {
   model?: string;
   thinking_level: string;
   permission: string;
-  plan_mode: boolean;
+  discuss_mode: boolean;
   main_write_enabled: boolean;
-  swarm_mode: boolean;
   goal: GoalSnapshot | null;
   context_tokens: number;
   max_context_tokens: number;
@@ -331,6 +378,11 @@ export interface ProviderPreset {
   base_url?: string;
   env: string[];
   model_count: number;
+  builtin?: boolean;
+  auth?: 'api_key' | 'none';
+  required_fields?: string[];
+  default_model?: string;
+  catalog_id?: string;
 }
 
 export interface ProviderRefreshResult {
@@ -378,46 +430,13 @@ export interface Note {
   path: string;
   content?: string;
   links?: string[];
-}
-
-export interface SwarmStatus {
-  swarm_id: string;
-  status: 'pending' | 'running' | 'paused' | 'done' | 'failed' | 'stopped';
-  task_count: number;
-  completed_count: number;
-  session_id?: string;
-  task_id?: string;
-  description?: string;
-  owner_agent_id?: string;
-  parent_swarm_id?: string;
-  round?: number;
-  started_at?: string;
-  usage?: {
-    input: number;
-    output: number;
-    cache_read: number;
-    cache_write: number;
-    total: number;
-  };
-  tasks?: Array<{
-    id: string;
-    label: string;
-    status: string;
-    agent_id?: string;
-    parent_agent_id?: string;
-    profile?: string;
-    output?: string;
-    output_bytes?: number;
-    usage?: {
-      input: number;
-      output: number;
-      cache_read: number;
-      cache_write: number;
-      total: number;
-    };
-    live_output_tokens?: number;
-    context_tokens?: number;
-  }>;
+  tags?: string[];
+  /** Write/create instant as ISO-8601 UTC from note frontmatter. */
+  created_at?: string;
+  /** Last modification instant as ISO-8601 UTC from frontmatter or file mtime. */
+  updated_at?: string;
+  /** Opaque version of the raw Markdown file, used for optimistic Vault saves. */
+  content_hash?: string;
 }
 
 export interface BackgroundTask {
@@ -465,10 +484,10 @@ export interface PromptResponse {
 }
 
 export interface PromptExecutionOptions {
+  agentId?: string;
   model?: string;
   thinking?: string;
   goalObjective?: string;
-  swarmMode?: boolean;
   loopMode?: boolean;
 }
 
@@ -546,7 +565,7 @@ interface Envelope<T> {
 interface RequestOptions {
   signal?: AbortSignal;
   timeout?: number;
-  method?: 'GET' | 'POST' | 'DELETE';
+  method?: 'GET' | 'POST' | 'DELETE' | 'PATCH' | 'PUT';
   body?: unknown;
   acceptedCodes?: number[];
 }
@@ -635,7 +654,7 @@ export function createClient(
         currentToken = undefined;
       }
       if (currentToken) headers['Authorization'] = `Bearer ${currentToken}`;
-      if (method === 'POST' && options?.body !== undefined) {
+      if (options?.body !== undefined && method !== 'GET') {
         headers['Content-Type'] = 'application/json';
       }
 
@@ -644,7 +663,7 @@ export function createClient(
         signal: controller.signal,
         headers,
       };
-      if (method === 'POST' && options?.body !== undefined) {
+      if (options?.body !== undefined && method !== 'GET') {
         init.body = JSON.stringify(options.body);
       }
 
@@ -711,17 +730,21 @@ export function createClient(
           undefined,
           { signal },
         ),
-    },
-
-    // --- Swarm ---
-    swarm: {
-      status: (swarmId: string, signal?: AbortSignal) =>
-        request<SwarmStatus>(`/swarm/status/${encodeURIComponent(swarmId)}`, undefined, { signal }),
-      control: (swarmId: string, action: 'stop' | 'pause' | 'guide' | 'resume', prompt?: string) =>
-        request<{ swarm_id: string; status: SwarmStatus['status'] }>(
-          `/swarm/${encodeURIComponent(swarmId)}/${action}`,
+      update: (
+        noteId: string,
+        patch: {
+          title?: string;
+          content?: string;
+          tags?: string[];
+          expected_updated_at?: string;
+          expected_content_hash?: string;
+        },
+        signal?: AbortSignal,
+      ) =>
+        request<Note & { content: string }>(
+          `/vault/notes/${encodeURIComponent(noteId)}`,
           undefined,
-          { method: 'POST', body: prompt?.trim() ? { prompt: prompt.trim() } : {} },
+          { method: 'PATCH', body: patch, signal },
         ),
     },
 
@@ -756,17 +779,39 @@ export function createClient(
           exclude_empty: params?.exclude_empty,
         }),
 
+      getActivity: () => request<{ items: Array<{
+        session_id: string;
+        agent_id: string;
+        kind: 'agent' | 'background';
+        task_id?: string;
+        status: string;
+        last_active?: string;
+      }> }>('/sessions/activity'),
+
       get: (id: string) =>
         request<Session>(`/sessions/${encodeURIComponent(id)}`),
 
-      getStatus: (id: string) =>
-        request<SessionRealtimeStatus>(`/sessions/${encodeURIComponent(id)}/status`),
+      getAgents: async (id: string) => {
+        const response = await request<{ agents: SessionAgentTreeWireNode[] }>(
+          `/sessions/${encodeURIComponent(id)}/agents`,
+        );
+        return { items: response.agents.map(toSessionAgent) };
+      },
 
-      getSnapshot: (id: string) =>
-        request<Snapshot>(`/sessions/${encodeURIComponent(id)}/snapshot`),
+      getStatus: (id: string, agentId?: string) =>
+        request<SessionRealtimeStatus>(`/sessions/${encodeURIComponent(id)}/status`, {
+          agent_id: agentId,
+        }),
 
-      getMessages: (id: string, params?: { before_id?: string; page_size?: number }) =>
-        request<{ items: Message[] }>(`/sessions/${encodeURIComponent(id)}/messages`, {
+      getSnapshot: (id: string, agentId?: string) =>
+        request<Snapshot>(`/sessions/${encodeURIComponent(id)}/snapshot`, {
+          agent_id: agentId,
+        }),
+
+      getMessages: (id: string, params?: { before_id?: string; page_size?: number; agent_id?: string }) =>
+        request<{ items: Message[] }>(params?.agent_id && params.agent_id !== 'main'
+          ? `/sessions/${encodeURIComponent(id)}/agents/${encodeURIComponent(params.agent_id)}/messages`
+          : `/sessions/${encodeURIComponent(id)}/messages`, {
           before_id: params?.before_id,
           page_size: params?.page_size,
         }),
@@ -785,10 +830,10 @@ export function createClient(
             method: 'POST',
             signal,
             body: {
+              agent_id: options.agentId,
               model: options.model,
               thinking: options.thinking,
               goal_objective: options.goalObjective,
-              swarm_mode: options.swarmMode,
               loop_mode: options.loopMode,
               content: [
                 ...(text ? [{ type: 'text' as const, text }] : []),
@@ -800,7 +845,7 @@ export function createClient(
           },
         ),
 
-      updateProfile: (id: string, patch: { title?: string; agent_config?: SessionAgentConfig }) =>
+      updateProfile: (id: string, patch: { title?: string; agent_config?: SessionAgentConfig; agent_id?: string }) =>
         request<Session>(
           `/sessions/${encodeURIComponent(id)}/profile`,
           undefined,
@@ -820,25 +865,31 @@ export function createClient(
         { method: 'POST', body: title?.trim() ? { title: title.trim() } : {} },
       ),
 
-      abort: (id: string) =>
+      abort: (id: string, agentId?: string) =>
         request<void>(
           `/sessions/${encodeURIComponent(id)}:abort`,
           undefined,
-          { method: 'POST' },
+          { method: 'POST', body: { agent_id: agentId } },
         ),
 
-      compact: (id: string, instruction?: string) =>
+      compact: (id: string, instruction?: string, agentId?: string) =>
         request<Record<string, never>>(
           `/sessions/${encodeURIComponent(id)}:compact`,
           undefined,
-          { method: 'POST', body: instruction?.trim() ? { instruction: instruction.trim() } : {} },
+          {
+            method: 'POST',
+            body: {
+              instruction: instruction?.trim(),
+              agent_id: agentId,
+            },
+          },
         ),
 
-      undo: (id: string, count: number) =>
+      undo: (id: string, count: number, agentId?: string) =>
         request<UndoSessionResponse>(
           `/sessions/${encodeURIComponent(id)}:undo`,
           undefined,
-          { method: 'POST', body: { count, page_size: 100 } },
+          { method: 'POST', body: { count, page_size: 100, agent_id: agentId } },
         ),
 
       archive: (id: string) =>
@@ -937,15 +988,16 @@ export function createClient(
       },
 
       approvals: {
-        list: (id: string) => request<{ items: ApprovalRequest[] }>(
+        list: (id: string, agentId?: string) => request<{ items: ApprovalRequest[] }>(
           `/sessions/${encodeURIComponent(id)}/approvals`,
-          { status: 'pending' },
+          { status: 'pending', agent_id: agentId },
         ),
-        resolve: (id: string, approvalId: string, input: { decision: 'approved' | 'rejected' | 'cancelled'; remember?: boolean; feedback?: string; selected_label?: string }) => request<{ resolved: true }>(
+        resolve: (id: string, approvalId: string, input: { decision: 'approved' | 'rejected' | 'cancelled'; remember?: boolean; feedback?: string; selected_label?: string; agent_id?: string }) => request<{ resolved: true }>(
           `/sessions/${encodeURIComponent(id)}/approvals/${encodeURIComponent(approvalId)}`,
           undefined,
           { method: 'POST', body: {
             decision: input.decision,
+            agent_id: input.agent_id,
             ...(input.remember ? { scope: 'session' } : {}),
             ...(input.feedback?.trim() ? { feedback: input.feedback.trim() } : {}),
             ...(input.selected_label ? { selected_label: input.selected_label } : {}),
@@ -954,32 +1006,32 @@ export function createClient(
       },
 
       questions: {
-        list: (id: string) => request<{ items: QuestionRequest[] }>(
+        list: (id: string, agentId?: string) => request<{ items: QuestionRequest[] }>(
           `/sessions/${encodeURIComponent(id)}/questions`,
-          { status: 'pending' },
+          { status: 'pending', agent_id: agentId },
         ),
-        resolve: (id: string, questionId: string, answers: Record<string, QuestionAnswer>) => request<{ resolved: true; resolved_at: string }>(
+        resolve: (id: string, questionId: string, answers: Record<string, QuestionAnswer>, agentId?: string) => request<{ resolved: true; resolved_at: string }>(
           `/sessions/${encodeURIComponent(id)}/questions/${encodeURIComponent(questionId)}`,
           undefined,
-          { method: 'POST', body: { answers, method: 'click' } },
+          { method: 'POST', body: { answers, method: 'click', agent_id: agentId } },
         ),
-        dismiss: (id: string, questionId: string) => request<{ dismissed: true; dismissed_at: string }>(
+        dismiss: (id: string, questionId: string, agentId?: string) => request<{ dismissed: true; dismissed_at: string }>(
           `/sessions/${encodeURIComponent(id)}/questions/${encodeURIComponent(questionId)}:dismiss`,
           undefined,
-          { method: 'POST', body: {}, acceptedCodes: [40909] },
+          { method: 'POST', body: { agent_id: agentId }, acceptedCodes: [40909] },
         ),
       },
 
       prompts: {
-        list: (id: string) => request<PromptListResponse>(`/sessions/${encodeURIComponent(id)}/prompts`),
-        steer: (id: string, promptIds: string[]) => request<{ steered: true; prompt_ids: string[] }>(
+        list: (id: string, agentId?: string) => request<PromptListResponse>(`/sessions/${encodeURIComponent(id)}/prompts`, { agent_id: agentId }),
+        steer: (id: string, promptIds: string[], agentId?: string) => request<{ steered: true; prompt_ids: string[] }>(
           `/sessions/${encodeURIComponent(id)}/prompts:steer`,
           undefined,
-          { method: 'POST', body: { prompt_ids: promptIds } },
+          { method: 'POST', body: { prompt_ids: promptIds, agent_id: agentId } },
         ),
-        abort: (id: string, promptId: string) => request<{ aborted: boolean }>(
+        abort: (id: string, promptId: string, agentId?: string) => request<{ aborted: boolean }>(
           `/sessions/${encodeURIComponent(id)}/prompts/${encodeURIComponent(promptId)}:abort`,
-          undefined,
+          { agent_id: agentId },
           { method: 'POST' },
         ),
       },
@@ -1115,8 +1167,10 @@ export function createClient(
     getSnapshot: (id: string) =>
       request<Snapshot>(`/sessions/${encodeURIComponent(id)}/snapshot`),
 
-    getMessages: (id: string, params?: { before_id?: string; page_size?: number }) =>
-      request<{ items: Message[] }>(`/sessions/${encodeURIComponent(id)}/messages`, {
+    getMessages: (id: string, params?: { before_id?: string; page_size?: number; agent_id?: string }) =>
+      request<{ items: Message[] }>(params?.agent_id && params.agent_id !== 'main'
+        ? `/sessions/${encodeURIComponent(id)}/agents/${encodeURIComponent(params.agent_id)}/messages`
+        : `/sessions/${encodeURIComponent(id)}/messages`, {
         before_id: params?.before_id,
         page_size: params?.page_size,
       }),
@@ -1135,10 +1189,10 @@ export function createClient(
           method: 'POST',
           signal,
           body: {
+            agent_id: options.agentId,
             model: options.model,
             thinking: options.thinking,
             goal_objective: options.goalObjective,
-            swarm_mode: options.swarmMode,
             loop_mode: options.loopMode,
             content: [
               ...(text ? [{ type: 'text' as const, text }] : []),
@@ -1160,11 +1214,11 @@ export function createClient(
         },
       ),
 
-    abortSession: (id: string) =>
+    abortSession: (id: string, agentId?: string) =>
       request<void>(
         `/sessions/${encodeURIComponent(id)}:abort`,
         undefined,
-        { method: 'POST' },
+        { method: 'POST', body: { agent_id: agentId } },
       ),
 
     archiveSession: (id: string) =>

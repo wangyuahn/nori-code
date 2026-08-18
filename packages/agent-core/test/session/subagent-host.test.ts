@@ -42,70 +42,463 @@ afterEach(async () => {
 });
 
 describe('SessionSubagentHost', () => {
-  it('aggregates swarms across session agent metadata and routes controls to the owner', async () => {
-    const main = testAgent();
-    const child = testAgent({ type: 'sub' });
-    const nested = testAgent({ type: 'sub' });
-    const childSwarm = swarmTaskInfo('swarm-child', 'Child swarm');
-    const nestedSwarm = swarmTaskInfo('swarm-nested', 'Nested swarm');
+  it('treats a member response without TeamSpeak as a private abstention', async () => {
+    const transcript = testAgent({ type: 'sub' });
+    const member = testAgent({ type: 'sub' });
+    member.configure();
+    member.mockNextResponse({ type: 'text', text: 'private model output that must not be shared' });
+    const discussionMeta = {
+      homedir: '/discussion',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'sub' as const,
+      teamLeaderAgentId: 'main',
+      discussion: {
+        participantAgentIds: ['agent-review'],
+        status: 'active' as const,
+        topic: 'Review the cache path',
+        startedAt: '2026-08-17T00:00:00.000Z',
+        updatedAt: '2026-08-17T00:00:00.000Z',
+      },
+    };
+    const memberMeta = {
+      homedir: '/review',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'team' as const,
+      teamLeaderAgentId: 'main',
+      name: 'Reviewer',
+    };
+    const session = {
+      metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-review': memberMeta } },
+      activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
+      getAgentMetadata: vi.fn((id: string) =>
+        id === 'agent-discussion' ? discussionMeta : id === 'agent-review' ? memberMeta : undefined,
+      ),
+      ensureAgentResumed: vi.fn(async (id: string) =>
+        id === 'agent-discussion' ? transcript.agent : member.agent,
+      ),
+      unreadTeamDiscussionStatements: vi.fn(async () => ({ statements: [], cursor: 0 })),
+      acknowledgeTeamDiscussionStatements: vi.fn(async () => undefined),
+      beginTeamDiscussionTurn: vi.fn(),
+      endTeamDiscussionTurn: vi.fn(),
+      consumeTeamDiscussionSpeak: vi.fn(() => undefined),
+    } as unknown as Session;
+    const host = new SessionSubagentHost(session, 'main');
 
-    vi.spyOn(main.agent.background, 'list').mockReturnValue([]);
-    vi.spyOn(child.agent.background, 'list').mockReturnValue([childSwarm]);
-    vi.spyOn(nested.agent.background, 'list').mockReturnValue([nestedSwarm]);
-    vi.spyOn(nested.agent.background, 'getTask').mockReturnValue(nestedSwarm);
-    const stop = vi.spyOn(nested.agent.background, 'stop').mockResolvedValue(nestedSwarm);
-    const pause = vi.spyOn(nested.agent.background, 'pause').mockResolvedValue(nestedSwarm);
-    const guide = vi.spyOn(nested.agent.background, 'addGuidance').mockResolvedValue(nestedSwarm);
-    const resume = vi.spyOn(nested.agent.background, 'resume').mockResolvedValue(nestedSwarm);
+    const result = await host.decideTeamDiscussion('continue', undefined, undefined, signal);
 
-    const agents = new Map([
-      ['main', main.agent],
-      ['agent-child', child.agent],
-      ['agent-nested', nested.agent],
-    ]);
-    const ensureAgentResumed = vi.fn(async (id: string) => {
-      const agent = agents.get(id);
-      if (agent === undefined) throw new Error(`Agent "${id}" was not found`);
-      return agent;
+    expect(result.statements).toEqual([{ agentId: 'agent-review', skipped: true }]);
+    const modelInput = JSON.stringify(member.lastLlmInput());
+    expect(modelInput).toContain('Your scheduled discussion turn has started.');
+    expect(modelInput).not.toContain('Discuss this topic as a team partner');
+    expect(modelInput).not.toContain('There are no unread shared statements');
+    expect(transcript.agent.context.history).not.toContainEqual(
+      expect.objectContaining({ content: expect.arrayContaining([
+        expect.objectContaining({ text: expect.stringContaining('private model output') }),
+      ]) }),
+    );
+  });
+
+  it('injects shared discussion deltas only when each participant is scheduled', async () => {
+    const transcript = testAgent({ type: 'sub' });
+    const first = testAgent({ type: 'sub' });
+    const second = testAgent({ type: 'sub' });
+    first.configure();
+    second.configure();
+    first.mockNextResponse({ type: 'text', text: 'The first member abstains.' });
+    second.mockNextResponse({ type: 'text', text: 'The second member abstains.' });
+    const discussionMeta = {
+      homedir: '/discussion',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'sub' as const,
+      teamLeaderAgentId: 'main',
+      discussion: {
+        participantAgentIds: ['agent-first', 'agent-second'],
+        status: 'active' as const,
+        topic: 'Review the cache path',
+        startedAt: '2026-08-17T00:00:00.000Z',
+        updatedAt: '2026-08-17T00:00:00.000Z',
+      },
+    };
+    const memberMeta = (name: string) => ({
+      homedir: `/${name.toLowerCase()}`,
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'team' as const,
+      teamLeaderAgentId: 'main',
+      name,
+    });
+    const firstMeta = memberMeta('First');
+    const secondMeta = memberMeta('Second');
+    const unreadTeamDiscussionStatements = vi.fn(async (
+      _discussionAgentId: string,
+      recipientAgentId: string,
+    ) => recipientAgentId === 'agent-second'
+      ? {
+          statements: [{
+            entryId: 1,
+            agentId: 'agent-first',
+            name: 'First',
+            message: 'Only the scheduled recipient may receive this shared statement.',
+          }],
+          cursor: 1,
+        }
+      : { statements: [], cursor: 0 });
+    const session = {
+      metadata: {
+        agents: {
+          'agent-discussion': discussionMeta,
+          'agent-first': firstMeta,
+          'agent-second': secondMeta,
+        },
+      },
+      activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
+      getAgentMetadata: vi.fn((id: string) =>
+        id === 'agent-discussion'
+          ? discussionMeta
+          : id === 'agent-first'
+            ? firstMeta
+            : id === 'agent-second'
+              ? secondMeta
+              : undefined,
+      ),
+      ensureAgentResumed: vi.fn(async (id: string) =>
+        id === 'agent-discussion'
+          ? transcript.agent
+          : id === 'agent-first'
+            ? first.agent
+            : second.agent,
+      ),
+      unreadTeamDiscussionStatements,
+      acknowledgeTeamDiscussionStatements: vi.fn(async () => undefined),
+      beginTeamDiscussionTurn: vi.fn(),
+      endTeamDiscussionTurn: vi.fn(),
+      consumeTeamDiscussionSpeak: vi.fn(() => undefined),
+    } as unknown as Session;
+    const host = new SessionSubagentHost(session, 'main');
+
+    await host.decideTeamDiscussion('continue', undefined, undefined, signal);
+
+    const firstInput = JSON.stringify(first.lastLlmInput());
+    const secondInput = JSON.stringify(second.lastLlmInput());
+    expect(firstInput).toContain('Your scheduled discussion turn has started.');
+    expect(firstInput).not.toContain('Only the scheduled recipient may receive this shared statement.');
+    expect(secondInput).toContain('Only the scheduled recipient may receive this shared statement.');
+    expect(unreadTeamDiscussionStatements).toHaveBeenNthCalledWith(1, 'agent-discussion', 'agent-first');
+    expect(unreadTeamDiscussionStatements).toHaveBeenNthCalledWith(2, 'agent-discussion', 'agent-second');
+  });
+
+  it('delivers a participant unread discussion suffix when that participant is scheduled to vote', async () => {
+    const transcript = testAgent({ type: 'sub' });
+    const member = testAgent({ type: 'sub' });
+    const idle = testAgent({ type: 'sub' });
+    member.configure();
+    idle.configure();
+    member.mockNextResponse({ type: 'text', text: 'proceed' });
+    idle.mockNextResponse({ type: 'text', text: 'abstain' });
+    const discussionMeta = {
+      homedir: '/discussion',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'sub' as const,
+      teamLeaderAgentId: 'main',
+      discussion: {
+        participantAgentIds: ['agent-review'],
+        status: 'active' as const,
+        topic: 'Verify the cache behavior.',
+        startedAt: '2026-08-18T00:00:00.000Z',
+        updatedAt: '2026-08-18T00:00:00.000Z',
+        nextStatementId: 1,
+      },
+    };
+    const memberMeta = {
+      homedir: '/member',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'team' as const,
+      teamLeaderAgentId: 'main',
+      name: 'Reviewer',
+    };
+    const idleMeta = {
+      homedir: '/idle',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'team' as const,
+      teamLeaderAgentId: 'main',
+      name: 'Idle',
+    };
+    const unreadTeamDiscussionStatements = vi.fn(async () => ({
+      statements: [{
+        entryId: 1,
+        agentId: 'agent-author',
+        name: 'Author',
+        message: 'The cache key must remain stable.',
+      }],
+      cursor: 1,
+    }));
+    const acknowledgeTeamDiscussionStatements = vi.fn(async () => undefined);
+    const assertTeamDiscussionMode = vi.fn(async () => {
+      throw new Error('EnterDiscussMode is required before starting or continuing a team discussion.');
     });
     const session = {
       metadata: {
         agents: {
-          main: { homedir: '/main', type: 'main', parentAgentId: null },
-          'agent-child': { homedir: '/child', type: 'sub', parentAgentId: 'main' },
-          'agent-nested': {
-            homedir: '/nested',
-            type: 'sub',
-            parentAgentId: 'agent-child',
-          },
+          'agent-discussion': discussionMeta,
+          'agent-review': memberMeta,
+          'agent-idle': idleMeta,
         },
       },
-      ensureAgentResumed,
+      activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
+      getAgentMetadata: vi.fn((id: string) =>
+        id === 'agent-discussion'
+          ? discussionMeta
+          : id === 'agent-review'
+            ? memberMeta
+            : id === 'agent-idle'
+              ? idleMeta
+              : undefined,
+      ),
+      teamMemberMetadata: vi.fn(() => [
+        ['agent-review', memberMeta],
+        ['agent-idle', idleMeta],
+      ]),
+      assertTeamDiscussionMode,
+      ensureAgentResumed: vi.fn(async (id: string) =>
+        id === 'agent-discussion' ? transcript.agent : id === 'agent-idle' ? idle.agent : member.agent,
+      ),
+      unreadTeamDiscussionStatements,
+      acknowledgeTeamDiscussionStatements,
     } as unknown as Session;
     const host = new SessionSubagentHost(session, 'main');
 
-    await expect(host.listAgentSwarms()).resolves.toEqual([
-      { ownerAgentId: 'agent-child', task: childSwarm },
-      { ownerAgentId: 'agent-nested', task: nestedSwarm },
-    ]);
-    await expect(host.controlAgentSwarm('swarm-nested', 'stop', 'stop now')).resolves.toBe(
-      nestedSwarm,
-    );
-    await expect(host.controlAgentSwarm('swarm-nested', 'pause', 'hold')).resolves.toBe(
-      nestedSwarm,
-    );
-    await expect(host.controlAgentSwarm('swarm-nested', 'guide', 'focus tests')).resolves.toBe(
-      nestedSwarm,
-    );
-    await expect(host.controlAgentSwarm('swarm-nested', 'resume', 'continue')).resolves.toBe(
-      nestedSwarm,
-    );
+    const result = await host.decideTeamDiscussion('vote', undefined, undefined, signal);
 
-    expect(stop).toHaveBeenCalledWith('swarm-nested', 'stop now');
-    expect(pause).toHaveBeenCalledWith('swarm-nested', 'hold');
-    expect(guide).toHaveBeenCalledWith('swarm-nested', 'focus tests');
-    expect(resume).toHaveBeenCalledWith('swarm-nested', 'continue');
-    expect(ensureAgentResumed).toHaveBeenCalledWith('agent-nested');
+    expect(result.votes).toEqual([
+      { agentId: 'agent-review', vote: 'proceed' },
+    ]);
+    expect(idle.llmCalls).toHaveLength(0);
+    expect(assertTeamDiscussionMode).not.toHaveBeenCalled();
+    expect(JSON.stringify(member.lastLlmInput())).toContain('The cache key must remain stable.');
+    expect(unreadTeamDiscussionStatements).toHaveBeenCalledWith('agent-discussion', 'agent-review');
+    expect(acknowledgeTeamDiscussionStatements).toHaveBeenCalledWith(
+      'agent-discussion',
+      'agent-review',
+      1,
+    );
+  });
+
+  it('does not collect votes while an assigned team turn is still running', async () => {
+    const discussionMeta = {
+      homedir: '/discussion',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'sub' as const,
+      teamLeaderAgentId: 'main',
+      discussion: {
+        participantAgentIds: ['agent-review'],
+        status: 'active' as const,
+        topic: 'Review the cache path',
+        startedAt: '2026-08-18T00:00:00.000Z',
+        updatedAt: '2026-08-18T00:00:00.000Z',
+      },
+    };
+    const memberMeta = {
+      homedir: '/review',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'team' as const,
+      teamLeaderAgentId: 'main',
+      assignedTask: 'Finish the assigned implementation.',
+      name: 'Reviewer',
+    };
+    const session = {
+      metadata: {
+        agents: {
+          'agent-discussion': discussionMeta,
+          'agent-review': memberMeta,
+        },
+      },
+      activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
+      getAgentMetadata: vi.fn((id: string) =>
+        id === 'agent-discussion' ? discussionMeta : id === 'agent-review' ? memberMeta : undefined,
+      ),
+      teamMemberMetadata: vi.fn(() => [['agent-review', memberMeta]]),
+      ensureAgentResumed: vi.fn(async (id: string) =>
+        id === 'agent-review'
+          ? { turn: { hasActiveTurn: true } }
+          : { turn: { hasActiveTurn: false } },
+      ),
+    } as unknown as Session;
+    const host = new SessionSubagentHost(session, 'main');
+
+    await expect(host.decideTeamDiscussion('vote', undefined, undefined, signal))
+      .rejects.toThrow('must wait for team execution turns to finish');
+  });
+
+  it('records the lead statement before members take their TeamSpeak turn', async () => {
+    const transcript = testAgent({ type: 'sub' });
+    const member = testAgent({ type: 'sub' });
+    member.configure();
+    member.mockNextResponse({ type: 'text', text: 'private reasoning' });
+    const discussionMeta = {
+      homedir: '/discussion',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'sub' as const,
+      teamLeaderAgentId: 'main',
+      discussion: {
+        participantAgentIds: ['agent-review'],
+        status: 'active' as const,
+        topic: 'Review the cache path',
+        startedAt: '2026-08-18T00:00:00.000Z',
+        updatedAt: '2026-08-18T00:00:00.000Z',
+      },
+    };
+    const memberMeta = {
+      homedir: '/review',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'team' as const,
+      teamLeaderAgentId: 'main',
+      name: 'Reviewer',
+    };
+    const order: string[] = [];
+    const publishLeadDiscussionStatement = vi.fn(async () => {
+      order.push('lead');
+      return { discussionAgentId: 'agent-discussion', entryId: 1 };
+    });
+    const beginTeamDiscussionTurn = vi.fn(() => {
+      order.push('member');
+    });
+    const session = {
+      metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-review': memberMeta } },
+      activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
+      getAgentMetadata: vi.fn((id: string) =>
+        id === 'agent-discussion' ? discussionMeta : id === 'agent-review' ? memberMeta : undefined,
+      ),
+      ensureAgentResumed: vi.fn(async (id: string) =>
+        id === 'agent-discussion' ? transcript.agent : member.agent,
+      ),
+      unreadTeamDiscussionStatements: vi.fn(async () => ({ statements: [], cursor: 0 })),
+      acknowledgeTeamDiscussionStatements: vi.fn(async () => undefined),
+      publishLeadDiscussionStatement,
+      beginTeamDiscussionTurn,
+      endTeamDiscussionTurn: vi.fn(),
+      consumeTeamDiscussionSpeak: vi.fn(() => undefined),
+    } as unknown as Session;
+    const host = new SessionSubagentHost(session, 'main');
+
+    await host.decideTeamDiscussion('continue', undefined, undefined, signal, 'The cache key stays.');
+
+    expect(publishLeadDiscussionStatement).toHaveBeenCalledWith('main', 'The cache key stays.');
+    expect(order[0]).toBe('lead');
+    expect(order).toContain('member');
+  });
+
+  it('rejects TeamDecide start without a topic even when the field is an empty string', async () => {
+    const session = {
+      metadata: { agents: {} },
+      activeTeamDiscussion: vi.fn(() => undefined),
+      teamMemberMetadata: vi.fn(() => [['agent-review', { kind: 'team' }]]),
+      createTeamDiscussion: vi.fn(),
+    } as unknown as Session;
+    const host = new SessionSubagentHost(session, 'main');
+
+    await expect(host.decideTeamDiscussion('start', '', ['agent-review'], signal, 'Lead first.'))
+      .rejects.toThrow('A discussion topic is required.');
+    await expect(host.decideTeamDiscussion('start', undefined, ['agent-review'], signal, 'Lead first.'))
+      .rejects.toThrow('A discussion topic is required.');
+    expect(session.createTeamDiscussion).not.toHaveBeenCalled();
+  });
+
+  it('wakes TeamBroadcast and TeamDM recipients with turn.prompt', async () => {
+    const first = testAgent({ type: 'sub' });
+    const second = testAgent({ type: 'sub' });
+    first.configure();
+    second.configure();
+    first.mockNextResponse({ type: 'text', text: 'gathered first' });
+    second.mockNextResponse({ type: 'text', text: 'gathered second' });
+    const firstMeta = {
+      homedir: '/first',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'team' as const,
+      teamLeaderAgentId: 'main',
+      name: 'First',
+    };
+    const secondMeta = {
+      homedir: '/second',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'team' as const,
+      teamLeaderAgentId: 'main',
+      name: 'Second',
+    };
+    const session = {
+      metadata: { agents: { 'agent-first': firstMeta, 'agent-second': secondMeta } },
+      teamMemberMetadata: vi.fn(() => [
+        ['agent-first', firstMeta],
+        ['agent-second', secondMeta],
+      ]),
+      getAgentMetadata: vi.fn((id: string) =>
+        id === 'agent-first' ? firstMeta : id === 'agent-second' ? secondMeta : { kind: 'main' as const, type: 'main' as const, parentAgentId: null, homedir: '/main' },
+      ),
+      ensureAgentResumed: vi.fn(async (id: string) =>
+        id === 'agent-first' ? first.agent : second.agent,
+      ),
+    } as unknown as Session;
+    const host = new SessionSubagentHost(session, 'main');
+    const firstPrompt = vi.spyOn(first.agent.turn, 'prompt');
+    const secondPrompt = vi.spyOn(second.agent.turn, 'prompt');
+
+    await expect(host.broadcastTeam('Gather the cache facts.', signal)).resolves.toEqual([
+      'agent-first',
+      'agent-second',
+    ]);
+    expect(firstPrompt).toHaveBeenCalled();
+    expect(secondPrompt).toHaveBeenCalled();
+
+    first.mockNextResponse({ type: 'text', text: 'dm reply' });
+    await host.directMessage('agent-first', 'Private follow-up.', signal);
+    expect(firstPrompt).toHaveBeenCalledTimes(2);
+  });
+
+  it('tags team-spawned SubAgent prompts as from=team', async () => {
+    const partner = testAgent();
+    partner.configure();
+    const child = testAgent();
+    child.mockNextResponse({
+      type: 'text',
+      text: 'Completed the delegated audit with enough detail for the parent partner to continue without repeating the investigation. '.repeat(3),
+    });
+    const metadataAgents: Session['metadata']['agents'] = {
+      'agent-review': {
+        homedir: '/review',
+        type: 'sub',
+        parentAgentId: 'main',
+        kind: 'team',
+        name: 'Reviewer',
+      },
+    };
+    const session = fakeSession(partner.agent, child.agent, metadataAgents);
+    session.agents.set('agent-review', partner.agent);
+    const host = new SessionSubagentHost(session, 'agent-review');
+
+    const handle = await host.spawn({
+      profileName: 'coder',
+      parentToolCallId: 'call_subagent',
+      prompt: 'Audit the cache path',
+      description: 'Audit cache',
+      runInBackground: false,
+      signal,
+    });
+    await handle.completion;
+
+    expect(userTextMessages(child.llmCalls[0]?.history ?? []).some(
+      (text) => text.includes('from="team:agent-review"') && text.includes('Audit the cache path'),
+    )).toBe(true);
   });
 
   it('emits a suspended event for a requeued child', () => {
@@ -223,6 +616,33 @@ describe('SessionSubagentHost', () => {
       { event: 'SubagentStart', childLlmCallCount: 0 },
       { event: 'SubagentStop', childLlmCallCount: 1 },
     ]);
+  });
+
+  it('archives a completed SubAgent in the parent session instead of destroying it', async () => {
+    const parent = testAgent();
+    parent.configure();
+    const child = testAgent();
+    child.mockNextResponse({
+      type: 'text',
+      text: 'Completed the delegated task and returned enough detail for the parent to continue without reopening this temporary worker.'.repeat(2),
+    });
+    const session = fakeSession(parent.agent, child.agent);
+    const host = new SessionSubagentHost(session, 'main');
+    const handle = await host.spawn({
+      profileName: 'coder',
+      parentToolCallId: 'call_subagent',
+      prompt: 'Complete the task',
+      description: 'Complete task',
+      runInBackground: true,
+      signal,
+    });
+
+    await handle.completion;
+    await host.discard(handle.agentId);
+
+    expect(session.archiveCompletedSubagent).toHaveBeenCalledWith(handle.agentId);
+    expect(session.metadata.agents[handle.agentId]).toMatchObject({ archived: true });
+    expect(session.agents.has(handle.agentId)).toBe(true);
   });
 
   it('ignores blocking results from subagent lifecycle hooks', async () => {
@@ -381,12 +801,11 @@ describe('SessionSubagentHost', () => {
       'Read',
       'ReadMediaFile',
       'WebSearch',
-      'nori_plan_write',
     ]);
     expect(child.llmCalls[0]?.history).toMatchObject([
       {
         role: 'user',
-        content: [{ type: 'text', text: 'Find the cause' }],
+        content: [{ type: 'text', text: '<message from="lead:main" name="主代理">Find the cause</message>' }],
       },
     ]);
   });
@@ -538,12 +957,11 @@ describe('SessionSubagentHost', () => {
       'ReadMediaFile',
       'WebSearch',
       'Write',
-      'nori_plan_write',
     ]);
     expect(child.llmCalls[0]?.history).toMatchObject([
       {
         role: 'user',
-        content: [{ type: 'text', text: 'Implement the fix' }],
+        content: [{ type: 'text', text: '<message from="lead:main" name="主代理">Implement the fix</message>' }],
       },
     ]);
   });
@@ -941,7 +1359,7 @@ describe('SessionSubagentHost', () => {
       content: [
         {
           type: 'text',
-          text: '<git-context>\nWorking directory: /repo\nBranch: main\n</git-context>\n\nFind the cause',
+          text: '<message from="lead:main" name="主代理">&lt;git-context&gt;\nWorking directory: /repo\nBranch: main\n&lt;/git-context&gt;\n\nFind the cause</message>',
         },
       ],
     });
@@ -971,7 +1389,7 @@ describe('SessionSubagentHost', () => {
 
     expect(child.llmCalls[0]?.history[0]).toMatchObject({
       role: 'user',
-      content: [{ type: 'text', text: 'Implement the fix' }],
+      content: [{ type: 'text', text: '<message from="lead:main" name="主代理">Implement the fix</message>' }],
     });
   });
 
@@ -1017,8 +1435,6 @@ describe('SessionSubagentHost', () => {
     const session = fakeSession(parent.agent, child.agent);
     const host = new SessionSubagentHost(session, 'main');
     host.setNoriConfig({
-      depth: 0,
-      maxDepth: 3,
       memory,
       retrievalGate: { triggerMode: 'always', maxResults: 5 },
     });
@@ -1035,7 +1451,7 @@ describe('SessionSubagentHost', () => {
 
     expect(child.llmCalls).toHaveLength(2);
     expect(userTextMessages(child.llmCalls[0]?.history ?? [])).toEqual([
-      expect.stringContaining('Output ONLY one <retrieval_query> block'),
+      expect.stringContaining('<message from="lead:main" name="主代理">Output ONLY one &lt;retrieval_query&gt; block'),
     ]);
     expect(memory.multiRetrieve).toHaveBeenCalledWith(
       ['coder_write_enabled'],
@@ -1047,12 +1463,13 @@ describe('SessionSubagentHost', () => {
     );
 
     const taskPrompt = userTextMessages(child.llmCalls[1]?.history ?? []).at(-1) ?? '';
-    expect(taskPrompt).toContain('<retrieved_context unique_count="1" hops="1">');
-    expect(taskPrompt).toContain('<title>Coder write decision</title>');
+    expect(taskPrompt).toContain('<message from="lead:main" name="主代理">');
+    expect(taskPrompt).toContain('&lt;retrieved_context unique_count=&quot;1&quot; hops=&quot;1&quot;&gt;');
+    expect(taskPrompt).toContain('&lt;title&gt;Coder write decision&lt;/title&gt;');
     expect(taskPrompt).toContain(
       'Known subagent context: coder_write_enabled is enabled through runtime settings.',
     );
-    expect(taskPrompt).toContain('</retrieved_context>\n\nInvestigate coder_write_enabled behavior');
+    expect(taskPrompt).toContain('&lt;/retrieved_context&gt;\n\nInvestigate coder_write_enabled behavior</message>');
   });
 
   it('resumes an idle child agent by id', async () => {
@@ -1103,13 +1520,10 @@ describe('SessionSubagentHost', () => {
     });
     expect(session.createAgent).not.toHaveBeenCalled();
     expect(child.agent.permission.mode).toBe('yolo');
-    expect(child.lastLlmInput()).toMatchInlineSnapshot(`
-      system: "explore prompt"
-      tools: Read
-      messages:
-        user: text "Earlier context"
-        user: text "Continue from context"
-    `);
+    expect(userTextMessages(child.llmCalls[0]?.history ?? [])).toEqual([
+      '<message from="user" name="用户">Earlier context</message>',
+      '<message from="lead:main" name="主代理">Continue from context</message>',
+    ]);
     expect(parent.allEvents).toContainEqual(
       expect.objectContaining({
         type: '[rpc]',
@@ -1183,9 +1597,9 @@ describe('SessionSubagentHost', () => {
     child.agent.useProfile(
       profile({ name: 'coder', tools: [], systemPrompt: 'coder prompt' }),
     );
-    child.agent.context.appendUserMessage([{ type: 'text', text: 'Earlier swarm context' }]);
+    child.agent.context.appendUserMessage([{ type: 'text', text: 'Earlier SubAgent context' }]);
     const summary =
-      'Resumed the queued swarm subagent from its prior context, completed the missing work, and returned a detailed enough handoff for the parent to proceed without starting over. '.repeat(
+      'Resumed the queued SubAgent from its prior context, completed the missing work, and returned a detailed enough handoff for the parent to proceed without starting over. '.repeat(
         2,
       );
     child.mockNextResponse({ type: 'text', text: summary });
@@ -1205,7 +1619,7 @@ describe('SessionSubagentHost', () => {
           {
             ...queuedTask(1),
             kind: 'resume',
-            prompt: 'Continue the previous swarm task',
+            prompt: 'Continue the previous SubAgent task',
             resumeAgentId: 'agent-0',
             signal,
           },
@@ -1221,12 +1635,12 @@ describe('SessionSubagentHost', () => {
 
     expect(session.createAgent).not.toHaveBeenCalled();
     expect(userTextMessages(child.llmCalls[0]?.history ?? [])).toEqual([
-      'Earlier swarm context',
-      'Continue the previous swarm task',
+      '<message from="user" name="用户">Earlier SubAgent context</message>',
+      '<message from="lead:main" name="主代理">Continue the previous SubAgent task</message>',
     ]);
   });
 
-  it('runQueued persists swarm item metadata for spawned tasks', async () => {
+  it('runQueued archives completed SubAgent metadata instead of deleting it', async () => {
     const parent = testAgent();
     parent.configure();
     parent.newEvents();
@@ -1234,7 +1648,7 @@ describe('SessionSubagentHost', () => {
     const child = testAgent({ type: 'sub' });
     child.configure();
     const summary =
-      'Completed the queued swarm item and returned a detailed technical handoff so the parent can map the result back to the original swarm input. '.repeat(
+      'Completed the queued SubAgent item and returned a detailed technical handoff so the parent can map the result back to the original SubAgent input. '.repeat(
         2,
       );
     child.mockNextResponse({ type: 'text', text: summary });
@@ -1244,7 +1658,11 @@ describe('SessionSubagentHost', () => {
     const host = new SessionSubagentHost(session, 'main');
 
     await expect(
-      host.runQueued([{ ...queuedTask(1), swarmItem: 'src/a.ts', signal }]),
+      host.runQueuedControlled(
+        [{ ...queuedTask(1), subagentItem: 'src/a.ts', signal }],
+        () => undefined,
+        { discardTerminalAgents: true },
+      ),
     ).resolves.toMatchObject([
       {
         agentId: 'agent-0',
@@ -1257,23 +1675,23 @@ describe('SessionSubagentHost', () => {
       expect.any(Object),
       expect.objectContaining({
         parentAgentId: 'main',
-        swarmItem: 'src/a.ts',
+        subagentItem: 'src/a.ts',
       }),
     );
+    expect(session.archiveCompletedSubagent).toHaveBeenCalledWith('agent-0');
     expect(metadataAgents['agent-0']).toMatchObject({
-      type: 'sub',
-      parentAgentId: 'main',
-      swarmItem: 'src/a.ts',
+      subagentItem: 'src/a.ts',
+      archived: true,
     });
-    expect(host.getSwarmItem('agent-0')).toBe('src/a.ts');
+    expect(host.getSubagentItem('agent-0')).toBe('src/a.ts');
     expect(parent.allEvents).toContainEqual(
       expect.objectContaining({
         type: '[rpc]',
         event: 'subagent.spawned',
         args: expect.objectContaining({
           subagentId: 'agent-0',
-          parentToolCallId: 'call_swarm',
-          swarmIndex: 1,
+          parentToolCallId: 'call_subagent',
+          subagentIndex: 1,
         }),
       }),
     );
@@ -1346,7 +1764,9 @@ describe('SessionSubagentHost', () => {
 
     await expect(retryHandle.completion).resolves.toMatchObject({ result: summary.trim() });
     expect(generateCalls).toBe(2);
-    expect(userTextMessages(histories[1] ?? [])).toEqual(['Implement the retry-safe change']);
+    expect(userTextMessages(histories[1] ?? [])).toEqual([
+      '<message from="lead:main" name="主代理">Implement the retry-safe change</message>',
+    ]);
   });
 
   it('uses the model assigned to a custom agent profile', async () => {
@@ -1882,6 +2302,427 @@ describe('Session.createAgent', () => {
     const sub = await session.createAgent({ type: 'sub' }, { parentAgentId: main.id });
     expect(sub.agent.mcp).toBe(session.mcp);
   });
+
+  it('adds team controls without removing profile tools before builtin registration', async () => {
+    const session = new Session({
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      initializeMainAgent: false,
+    });
+    const main = await session.createAgent(
+      { type: 'main' },
+      {
+        profile: {
+          ...contextProfile(),
+          tools: ['SubAgent', 'GetGoal', 'UpdateGoal', 'mcp__*'],
+        },
+      },
+    );
+
+    expect(main.agent.tools.activeToolNames()).toEqual(expect.arrayContaining([
+      'SubAgent',
+      'GetGoal',
+      'UpdateGoal',
+      'mcp__*',
+      'TeamCreate',
+      'TeamDecide',
+    ]));
+  });
+
+  it('keeps durable team identity in the stable system prefix and speaker envelopes out of history', async () => {
+    const session = new Session({
+      id: 'test-team-identity',
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      initializeMainAgent: false,
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const member = await session.createAgent(
+      { type: 'sub' },
+      {
+        kind: 'team',
+        parentAgentId: main.id,
+        teamLeaderAgentId: main.id,
+        profile: contextProfile(),
+        teamIdentity: {
+          name: 'Reviewer',
+          title: 'Risk reviewer',
+          intro: 'Checks regressions.',
+          mandate: 'Review behavior before changes.',
+          role: 'reviewer',
+        },
+      },
+    );
+
+    expect(member.agent.config.systemPrompt.startsWith('<team_identity>')).toBe(true);
+    expect(member.agent.config.systemPrompt).toContain('Name: Reviewer');
+    await member.agent.refreshSystemPrompt();
+    expect(member.agent.config.systemPrompt.startsWith('<team_identity>')).toBe(true);
+    expect(member.agent.teamWriteLocked).toBe(true);
+    expect(member.agent.teamWriteEnabled).toBe(false);
+
+    const discussion = await session.createTeamDiscussion(
+      main.id,
+      'Keep the prompt cache warm.',
+      [member.id],
+    );
+    expect(discussion.agent.config.systemPrompt).toContain('<team_discussion_transcript>');
+    expect(discussion.agent.config.systemPrompt).toContain('Topic: Keep the prompt cache warm.');
+    expect(discussion.agent.config.systemPrompt).not.toContain(discussion.discussion.startedAt);
+    expect(discussion.agent.config.systemPrompt).not.toContain(discussion.discussion.updatedAt);
+    await discussion.agent.refreshSystemPrompt();
+    expect(discussion.agent.config.systemPrompt).not.toContain(discussion.discussion.startedAt);
+    expect(discussion.agent.config.systemPrompt).not.toContain(discussion.discussion.updatedAt);
+
+    member.agent.context.appendUserMessage(
+      [{ type: 'text', text: 'Inspect the cache behavior.' }],
+      {
+        kind: 'system_trigger',
+        name: 'team_message',
+        speaker: { from: 'lead', speakerId: 'main', speakerName: '主代理' },
+      },
+    );
+    const rawText = member.agent.context.history.at(-1)?.content[0];
+    expect(rawText).toMatchObject({ type: 'text', text: 'Inspect the cache behavior.' });
+    expect(member.agent.context.messages.at(-1)?.content[0]).toMatchObject({
+      type: 'text',
+      text: '<message from="lead:main" name="主代理">Inspect the cache behavior.</message>',
+    });
+  });
+
+  it('preflights TeamCreate so a later duplicate leaves no partial team', async () => {
+    const session = new Session({
+      id: 'test-team-create-atomic',
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      initializeMainAgent: false,
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const host = new SessionSubagentHost(session, main.id);
+    const identity = {
+      name: 'Reviewer',
+      title: 'Risk reviewer',
+      intro: 'Checks regressions.',
+      mandate: 'Review behavior before changes.',
+      role: 'reviewer',
+    };
+
+    await expect(host.createTeam([identity, { ...identity, title: 'Second reviewer' }]))
+      .rejects.toThrow('duplicate member name');
+
+    expect(session.teamMemberMetadata(main.id)).toEqual([]);
+    expect(Object.keys(session.metadata.agents)).toEqual([main.id]);
+  });
+
+  it('keeps Invite, Kick, and Decide exclusive to the main team lead', async () => {
+    const session = new Session({
+      id: 'test-team-lead-boundary',
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      initializeMainAgent: false,
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const member = await session.createAgent(
+      { type: 'sub' },
+      {
+        kind: 'team',
+        parentAgentId: main.id,
+        teamLeaderAgentId: main.id,
+        profile: contextProfile(),
+        teamIdentity: {
+          name: 'Reviewer',
+          title: 'Risk reviewer',
+          intro: 'Checks regressions.',
+          mandate: 'Review behavior before changes.',
+          role: 'reviewer',
+        },
+      },
+    );
+    const host = new SessionSubagentHost(session, member.id);
+
+    await expect(host.inviteToDiscussion([member.id])).rejects.toThrow('main agent');
+    await expect(host.kickFromDiscussion([member.id])).rejects.toThrow('main agent');
+    await expect(host.decideTeamDiscussion('continue', undefined, undefined, signal)).rejects.toThrow('main agent');
+  });
+
+  it('delivers each shared TeamSpeak statement once per participant and blocks unscheduled sends', async () => {
+    const session = new Session({
+      id: 'test-team-discussion-cursors',
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      initializeMainAgent: false,
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const identity = (name: string) => ({
+      name,
+      title: `${name} title`,
+      intro: `${name} intro`,
+      mandate: `${name} mandate`,
+      role: `${name} role`,
+    });
+    const author = await session.createAgent(
+      { type: 'sub' },
+      { kind: 'team', parentAgentId: main.id, teamLeaderAgentId: main.id, profile: contextProfile(), teamIdentity: identity('Author') },
+    );
+    const reader = await session.createAgent(
+      { type: 'sub' },
+      { kind: 'team', parentAgentId: main.id, teamLeaderAgentId: main.id, profile: contextProfile(), teamIdentity: identity('Reader') },
+    );
+    const discussion = await session.createTeamDiscussion(main.id, 'Review the cache path.', [author.id, reader.id]);
+
+    await expect(session.publishTeamDiscussionStatement(author.id, 'Only send this through TeamSpeak.'))
+      .rejects.toThrow('scheduled discussion turn');
+
+    session.beginTeamDiscussionTurn(discussion.id, author.id);
+    await expect(session.publishTeamDiscussionStatement(author.id, 'Only send this through TeamSpeak.'))
+      .resolves.toEqual({ discussionAgentId: discussion.id, entryId: 1 });
+    await expect(session.publishTeamDiscussionStatement(author.id, 'A duplicate must fail.'))
+      .rejects.toThrow('at most once');
+    session.endTeamDiscussionTurn(discussion.id, author.id);
+    expect(session.consumeTeamDiscussionSpeak(discussion.id, author.id)?.message)
+      .toBe('Only send this through TeamSpeak.');
+
+    // The discussion transcript may compact independently from the transport
+    // journal. A recipient that has not been scheduled must still receive the
+    // shared statement exactly once.
+    discussion.agent.context.clear();
+
+    const unread = await session.unreadTeamDiscussionStatements(discussion.id, reader.id);
+    expect(unread).toMatchObject({
+      cursor: 1,
+      statements: [{ entryId: 1, agentId: author.id, name: 'Author', message: 'Only send this through TeamSpeak.' }],
+    });
+    await session.acknowledgeTeamDiscussionStatements(discussion.id, reader.id, unread.cursor);
+    await expect(session.unreadTeamDiscussionStatements(discussion.id, reader.id)).resolves.toMatchObject({
+      cursor: 1,
+      statements: [],
+    });
+    await expect(session.unreadTeamDiscussionStatements(discussion.id, author.id)).resolves.toMatchObject({
+      cursor: 0,
+      statements: [],
+    });
+  });
+
+  it('notifies every historical invitee once without starting extra lifecycle turns', async () => {
+    const session = new Session({
+      id: 'test-team-discussion-lifecycle',
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      initializeMainAgent: false,
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const current = await session.createAgent(
+      { type: 'sub' },
+      {
+        kind: 'team',
+        parentAgentId: main.id,
+        teamLeaderAgentId: main.id,
+        profile: contextProfile(),
+        teamIdentity: {
+          name: 'Reviewer',
+          title: 'Risk reviewer',
+          intro: 'Checks regressions.',
+          mandate: 'Review behavior.',
+          role: 'reviewer',
+        },
+      },
+    );
+    const removed = await session.createAgent(
+      { type: 'sub' },
+      {
+        kind: 'team',
+        parentAgentId: main.id,
+        teamLeaderAgentId: main.id,
+        profile: contextProfile(),
+        teamIdentity: {
+          name: 'Removed',
+          title: 'Former reviewer',
+          intro: 'Checks architecture.',
+          mandate: 'Review the design.',
+          role: 'reviewer',
+        },
+      },
+    );
+    const host = new SessionSubagentHost(session, main.id);
+    await main.agent.discussMode.enter();
+    await host.lockTeamWritesForDiscuss();
+    expect(main.agent.discussMode.isActive).toBe(true);
+
+    const members = [current, removed];
+    const prompts = members.map(({ agent }) => vi.spyOn(agent.turn, 'prompt'));
+    const started = await host.decideTeamDiscussion(
+      'start',
+      'Check the cache key.',
+      members.map(({ id }) => id),
+      signal,
+      'The cache key must stay stable.',
+    );
+    main.agent.discussMode.exit();
+    await expect(host.decideTeamDiscussion('continue', undefined, undefined, signal))
+      .rejects.toThrow('EnterDiscussMode');
+    await main.agent.discussMode.enter();
+    await host.lockTeamWritesForDiscuss();
+    const continued = await host.decideTeamDiscussion('continue', undefined, undefined, signal);
+    expect(continued.discussionAgentId).toBe(started.discussionAgentId);
+    expect(continued.discussion.startedAt).toBe(started.discussion.startedAt);
+    expect(main.agent.discussMode.isActive).toBe(true);
+    main.agent.discussMode.exit();
+    await expect(host.decideTeamDiscussion('continue', undefined, undefined, signal))
+      .rejects.toThrow('EnterDiscussMode');
+    await expect(host.kickFromDiscussion([removed.id]))
+      .rejects.toThrow('EnterDiscussMode');
+    await main.agent.discussMode.enter();
+    await host.lockTeamWritesForDiscuss();
+    for (const [index, { agent }] of members.entries()) {
+      expect(agent.context.history.filter((message) => message.content.some(
+        (part) => part.type === 'text' && part.text.startsWith('You have been invited to a team discussion'),
+      ))).toHaveLength(1);
+      // The one scheduled turn is part of the normal discussion round; the
+      // notification itself must not create another turn.
+      expect(prompts[index]).toHaveBeenCalledTimes(2);
+    }
+
+    await host.kickFromDiscussion([removed.id]);
+    await host.decideTeamDiscussion('archive', undefined, undefined, signal);
+    expect(main.agent.discussMode.isActive).toBe(false);
+    for (const [index, { agent }] of members.entries()) {
+      expect(agent.context.history.filter((message) => message.content.some(
+        (part) => part.type === 'text' && part.text.includes('has ended and is archived'),
+      ))).toHaveLength(1);
+      expect(prompts[index]).toHaveBeenCalledTimes(2);
+    }
+  });
+
+  it('requires explicit complete team assignments and grants writes only to assigned members', async () => {
+    const session = new Session({
+      id: 'test-team-assignments',
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      initializeMainAgent: false,
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const identity = (name: string) => ({
+      name,
+      title: `${name} title`,
+      intro: `${name} intro`,
+      mandate: `${name} mandate`,
+      role: `${name} role`,
+    });
+    const first = await session.createAgent(
+      { type: 'sub' },
+      { kind: 'team', parentAgentId: main.id, teamLeaderAgentId: main.id, profile: contextProfile(), teamIdentity: identity('First') },
+    );
+    const second = await session.createAgent(
+      { type: 'sub' },
+      { kind: 'team', parentAgentId: main.id, teamLeaderAgentId: main.id, profile: contextProfile(), teamIdentity: identity('Second') },
+    );
+
+    await expect(session.assignTeamTasks(main.id, [
+      { agentId: first.id, task: null },
+      { agentId: second.id, task: null },
+    ])).rejects.toThrow('all-null');
+    await expect(session.assignTeamTasks(main.id, [
+      { agentId: first.id, task: 'Implement the focused change.' },
+    ])).rejects.toThrow('explicitly include every team member');
+
+    await main.agent.discussMode.enter();
+    await session.lockTeamAssignments(main.id);
+    expect(main.agent.discussMode.isActive).toBe(true);
+    await session.assignTeamTasks(main.id, [
+      { agentId: first.id, task: 'Implement the focused change.' },
+      { agentId: second.id, task: null },
+    ]);
+    expect(main.agent.discussMode.isActive).toBe(false);
+    expect(first.agent.teamWriteEnabled).toBe(true);
+    expect(first.agent.permission.mode).toBe('auto');
+    expect(second.agent.teamWriteEnabled).toBe(false);
+    expect(second.agent.permission.mode).toBe('manual');
+
+    await session.lockTeamAssignments(main.id);
+    expect(session.getAgentMetadata(first.id)?.assignedTask).toBeUndefined();
+    expect(first.agent.teamWriteEnabled).toBe(false);
+    expect(first.agent.permission.mode).toBe('manual');
+  });
+
+  it('dismisses a team member together with its temporary descendant branch', async () => {
+    const session = new Session({
+      id: 'test-team-dismiss-subtree',
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      initializeMainAgent: false,
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const member = await session.createAgent(
+      { type: 'sub' },
+      {
+        kind: 'team',
+        parentAgentId: main.id,
+        teamLeaderAgentId: main.id,
+        profile: contextProfile(),
+        teamIdentity: {
+          name: 'Builder',
+          title: 'Implementation partner',
+          intro: 'Builds the assigned change.',
+          mandate: 'Implement only assigned work.',
+          role: 'builder',
+        },
+      },
+    );
+    const temporary = await session.createAgent(
+      { type: 'sub' },
+      {
+        parentAgentId: member.id,
+        profile: contextProfile(),
+      },
+    );
+    const unrelated = await session.createAgent(
+      { type: 'sub' },
+      {
+        parentAgentId: main.id,
+        profile: contextProfile(),
+      },
+    );
+
+    await session.dismissTeamMembers(main.id, [member.id], 'No longer needed.', true);
+
+    expect(session.getAgentMetadata(member.id)).toBeUndefined();
+    expect(session.getAgentMetadata(temporary.id)).toBeUndefined();
+    expect(session.agents.has(member.id)).toBe(false);
+    expect(session.agents.has(temporary.id)).toBe(false);
+    expect(session.getAgentMetadata(unrelated.id)).toBeDefined();
+  });
 });
 
 function fakeSession(
@@ -1905,8 +2746,18 @@ function fakeSession(
       custom: {},
     },
     writeMetadata: vi.fn(async () => {}),
+    archiveCompletedSubagent: vi.fn(async (id: string) => {
+      const meta = metadataAgents[id];
+      if (meta === undefined) return;
+      metadataAgents[id] = {
+        ...meta,
+        archived: true,
+        completedAt: '2026-08-18T00:00:00.000Z',
+      };
+    }),
     systemContextKaos: vi.fn((cwd: string) => parent.kaos.withCwd(cwd)),
     getReadyAgent: vi.fn((id: string) => agents.get(id)),
+    getAgentMetadata: vi.fn((id: string) => metadataAgents[id]),
     ensureAgentResumed: vi.fn(async (id: string) => {
       const agent = agents.get(id);
       if (agent === undefined) {
@@ -1926,7 +2777,7 @@ function fakeSession(
             homedir: '/tmp/kimi-session/agents/agent-0',
             type: config.type ?? 'main',
             parentAgentId,
-            swarmItem: options.swarmItem,
+            subagentItem: options.subagentItem,
           };
         }
         if (options.profile !== undefined) {
@@ -1936,18 +2787,6 @@ function fakeSession(
       },
     ),
   } as unknown as Session;
-}
-
-function swarmTaskInfo(taskId: string, description: string): BackgroundTaskInfo {
-  return {
-    taskId,
-    description,
-    status: 'running',
-    startedAt: 1,
-    endedAt: null,
-    kind: 'agent',
-    subagentType: 'swarm:2',
-  };
 }
 
 function contextProfile(): ResolvedAgentProfile {
@@ -2015,10 +2854,10 @@ function queuedTask(index: number): QueuedSubagentTask<number> {
     kind: 'spawn',
     data: index,
     profileName: 'coder',
-    parentToolCallId: 'call_swarm',
+    parentToolCallId: 'call_subagent',
     prompt: `Review item-${String(index)}`,
     description: `Review #${String(index)}`,
-    swarmIndex: index,
+    subagentIndex: index,
     runInBackground: false,
   };
 }

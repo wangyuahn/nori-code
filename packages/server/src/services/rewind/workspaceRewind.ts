@@ -18,10 +18,14 @@ interface RewindManifest {
   checkpoints: WorkspaceCheckpoint[];
 }
 
-export async function captureWorkspaceCheckpoint(sessionId: string, cwd: string): Promise<boolean> {
+export async function captureWorkspaceCheckpoint(
+  sessionId: string,
+  cwd: string,
+  agentId?: string,
+): Promise<boolean> {
   const root = await gitRoot(cwd);
   if (!root) return false;
-  const manifestPath = rewindManifestPath(sessionId);
+  const manifestPath = rewindManifestPath(sessionId, agentId);
   const tree = await createWorkspaceTree(root, dirname(manifestPath));
   const manifest = await readManifest(manifestPath);
   manifest.checkpoints.push({ tree, root, createdAt: new Date().toISOString() });
@@ -31,8 +35,12 @@ export async function captureWorkspaceCheckpoint(sessionId: string, cwd: string)
   return true;
 }
 
-export async function restoreWorkspaceCheckpoint(sessionId: string, count: number): Promise<boolean> {
-  const manifestPath = rewindManifestPath(sessionId);
+export async function restoreWorkspaceCheckpoint(
+  sessionId: string,
+  count: number,
+  agentId?: string,
+): Promise<boolean> {
+  const manifestPath = rewindManifestPath(sessionId, agentId);
   const manifest = await readManifest(manifestPath);
   const targetIndex = manifest.checkpoints.length - count;
   const target = manifest.checkpoints[targetIndex];
@@ -49,8 +57,11 @@ export async function restoreWorkspaceCheckpoint(sessionId: string, count: numbe
   return true;
 }
 
-export async function discardLatestWorkspaceCheckpoint(sessionId: string): Promise<void> {
-  const manifestPath = rewindManifestPath(sessionId);
+export async function discardLatestWorkspaceCheckpoint(
+  sessionId: string,
+  agentId?: string,
+): Promise<void> {
+  const manifestPath = rewindManifestPath(sessionId, agentId);
   const manifest = await readManifest(manifestPath);
   if (manifest.checkpoints.length === 0) return;
   manifest.checkpoints.pop();
@@ -117,7 +128,11 @@ async function readManifest(path: string): Promise<RewindManifest> {
   }
 }
 
-function rewindManifestPath(sessionId: string): string {
+function rewindManifestPath(sessionId: string, agentId?: string): string {
   const safeId = sessionId.replaceAll(/[^A-Za-z0-9_.-]/g, '_');
-  return join(homedir(), '.nori-code', 'rewind', safeId, 'manifest.json');
+  if (agentId === undefined || agentId === 'main') {
+    return join(homedir(), '.nori-code', 'rewind', safeId, 'manifest.json');
+  }
+  const safeAgentId = agentId.replaceAll(/[^A-Za-z0-9_.-]/g, '_');
+  return join(homedir(), '.nori-code', 'rewind', `${safeId}--${safeAgentId}`, 'manifest.json');
 }

@@ -21,6 +21,14 @@ async function makePlugin(
   return realpath(root);
 }
 
+function isWindowsSymlinkPrivilegeError(error: unknown): boolean {
+  return process.platform === 'win32'
+    && typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && error.code === 'EPERM';
+}
+
 describe('parseManifest', () => {
   it('reads a minimal nori.plugin.json at the plugin root', async () => {
     const root = await makePlugin({
@@ -163,12 +171,17 @@ describe('parseManifest', () => {
     );
   });
 
-  it('rejects a skills path that escapes via a symlink', async () => {
+  it('rejects a skills path that escapes via a symlink', async (ctx) => {
     const root = await makePlugin({
       'nori.plugin.json': JSON.stringify({ name: 'demo', skills: './sym' }),
     });
     const outside = await mkdtemp(path.join(tmpdir(), 'nori-plugin-outside-'));
-    await symlink(outside, path.join(root, 'sym'));
+    try {
+      await symlink(outside, path.join(root, 'sym'));
+    } catch (error) {
+      if (isWindowsSymlinkPrivilegeError(error)) return ctx.skip('Windows symlink privilege is unavailable');
+      throw error;
+    }
     const result = await parseManifest(root);
     expect(result.diagnostics).toContainEqual(
       expect.objectContaining({

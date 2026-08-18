@@ -61,18 +61,18 @@ function makeInMemoryStreamPair(): {
 
 interface FakeSessionOverrides {
   /**
-   * If set, `setPlanMode` will throw this `Error` on every call instead
-   * of recording into `planModeCalls`. Used by the SDK-error-propagation
+ * If set, `setDiscussMode` will throw this `Error` on every call instead
+ * of recording into `discussModeCalls`. Used by the SDK-error-propagation
    * test to verify `setPermission` and the notification are suppressed.
    * Typed as `Error` (rather than `unknown`) so the lint rule
    * `only-throw-error` is satisfied without an inline disable.
    */
-  setPlanModeError?: Error;
+  setDiscussModeError?: Error;
 }
 
 interface FakeSessionHandle {
   session: Session;
-  planModeCalls: boolean[];
+  discussModeCalls: boolean[];
   setPermissionCalls: PermissionMode[];
   setModelCalls: string[];
   setThinkingCalls: string[];
@@ -82,7 +82,7 @@ function makeFakeSession(
   sessionId: string,
   overrides: FakeSessionOverrides = {},
 ): FakeSessionHandle {
-  const planModeCalls: boolean[] = [];
+  const discussModeCalls: boolean[] = [];
   const setPermissionCalls: PermissionMode[] = [];
   const setModelCalls: string[] = [];
   const setThinkingCalls: string[] = [];
@@ -92,11 +92,11 @@ function makeFakeSession(
     cancel: async () => undefined,
     onEvent: (_fn: (event: Event) => void) => () => undefined,
     setApprovalHandler: (_handler: ApprovalHandler | undefined) => undefined,
-    setPlanMode: async (enabled: boolean) => {
-      if (overrides.setPlanModeError !== undefined) {
-        throw overrides.setPlanModeError;
+    setDiscussMode: async (enabled: boolean) => {
+      if (overrides.setDiscussModeError !== undefined) {
+        throw overrides.setDiscussModeError;
       }
-      planModeCalls.push(enabled);
+      discussModeCalls.push(enabled);
     },
     setPermission: async (mode: PermissionMode) => {
       setPermissionCalls.push(mode);
@@ -108,7 +108,7 @@ function makeFakeSession(
       setThinkingCalls.push(effort);
     },
   } as unknown as Session;
-  return { session, planModeCalls, setPermissionCalls, setModelCalls, setThinkingCalls };
+  return { session, discussModeCalls, setPermissionCalls, setModelCalls, setThinkingCalls };
 }
 
 function makeHarness(handle: FakeSessionHandle): KimiHarness {
@@ -136,31 +136,31 @@ async function openSession(
 }
 
 describe('AcpServer session/set_mode', () => {
-  // Parameterized table over the four canonical modes (PLAN D9). Each
+  // Parameterized table over the four canonical modes. Each
   // arm verifies both SDK toggles fire in the documented order
-  // (setPlanMode → setPermission) AND that the server emits exactly one
+  // (setDiscussMode → setPermission) AND that the server emits exactly one
   // `config_option_update` notification (Phase 14.3) carrying a snapshot
   // whose mode picker `currentValue` matches the requested modeId.
   const MODE_CASES: ReadonlyArray<{
-    modeId: 'default' | 'plan' | 'auto' | 'yolo';
-    expectedPlan: boolean;
+    modeId: 'default' | 'discuss' | 'auto' | 'yolo';
+    expectedDiscuss: boolean;
     expectedPermission: PermissionMode;
   }> = [
-    { modeId: 'default', expectedPlan: false, expectedPermission: 'manual' },
-    { modeId: 'plan', expectedPlan: true, expectedPermission: 'manual' },
-    { modeId: 'auto', expectedPlan: false, expectedPermission: 'auto' },
-    { modeId: 'yolo', expectedPlan: false, expectedPermission: 'yolo' },
+    { modeId: 'default', expectedDiscuss: true, expectedPermission: 'manual' },
+    { modeId: 'discuss', expectedDiscuss: true, expectedPermission: 'manual' },
+    { modeId: 'auto', expectedDiscuss: false, expectedPermission: 'auto' },
+    { modeId: 'yolo', expectedDiscuss: false, expectedPermission: 'yolo' },
   ];
 
-  for (const { modeId, expectedPlan, expectedPermission } of MODE_CASES) {
-    it(`forwards "${modeId}" → setPlanMode(${expectedPlan}) + setPermission(${expectedPermission}) + emits config_option_update`, async () => {
+  for (const { modeId, expectedDiscuss, expectedPermission } of MODE_CASES) {
+    it(`forwards "${modeId}" → setDiscussMode(${expectedDiscuss}) + setPermission(${expectedPermission}) + emits config_option_update`, async () => {
       const handle = makeFakeSession(`sess-${modeId}`);
       const harness = makeHarness(handle);
       const { client, capturing, sessionId } = await openSession(harness);
 
       await client.setSessionMode({ sessionId, modeId });
 
-      expect(handle.planModeCalls).toEqual([expectedPlan]);
+      expect(handle.discussModeCalls).toEqual([expectedDiscuss]);
       expect(handle.setPermissionCalls).toEqual([expectedPermission]);
 
       const updates = capturing.notifications.filter(
@@ -194,7 +194,7 @@ describe('AcpServer session/set_mode', () => {
       client.setSessionMode({ sessionId, modeId: 'turbo' }),
     ).rejects.toMatchObject({ code: -32602 });
 
-    expect(handle.planModeCalls).toEqual([]);
+    expect(handle.discussModeCalls).toEqual([]);
     expect(handle.setPermissionCalls).toEqual([]);
     const updates = capturing.notifications.filter(
       (n) => n.update.sessionUpdate === 'config_option_update',
@@ -202,22 +202,22 @@ describe('AcpServer session/set_mode', () => {
     expect(updates).toEqual([]);
   });
 
-  it('rejects unknown sessionId with invalid_params and does not call setPlanMode', async () => {
+  it('rejects unknown sessionId with invalid_params and does not call setDiscussMode', async () => {
     const handle = makeFakeSession('sess-known');
     const harness = makeHarness(handle);
     const { client } = await openSession(harness);
 
     await expect(
-      client.setSessionMode({ sessionId: 'sess-unknown', modeId: 'plan' }),
+      client.setSessionMode({ sessionId: 'sess-unknown', modeId: 'discuss' }),
     ).rejects.toMatchObject({ code: -32602 });
 
-    expect(handle.planModeCalls).toEqual([]);
+    expect(handle.discussModeCalls).toEqual([]);
     expect(handle.setPermissionCalls).toEqual([]);
   });
 
-  it('propagates SDK errors from setPlanMode, skipping setPermission and the notification', async () => {
-    const handle = makeFakeSession('sess-plan-error', {
-      setPlanModeError: new Error('boom: setPlanMode failed'),
+  it('propagates SDK errors from setDiscussMode, skipping setPermission and the notification', async () => {
+    const handle = makeFakeSession('sess-discuss-error', {
+      setDiscussModeError: new Error('boom: setDiscussMode failed'),
     });
     const harness = makeHarness(handle);
     const { client, capturing, sessionId } = await openSession(harness);
@@ -230,7 +230,7 @@ describe('AcpServer session/set_mode', () => {
       client.setSessionMode({ sessionId, modeId: 'auto' }),
     ).rejects.toBeDefined();
 
-    expect(handle.planModeCalls).toEqual([]); // setPlanMode threw before push
+    expect(handle.discussModeCalls).toEqual([]); // setDiscussMode threw before push
     expect(handle.setPermissionCalls).toEqual([]); // never reached
     const updates = capturing.notifications.filter(
       (n) => n.update.sessionUpdate === 'config_option_update',

@@ -77,8 +77,7 @@ Inside each session directory:
 - **`state.json`**: session metadata including title, `lastPrompt`, creation/update timestamps, and `forkedFrom`.
 - **`upcoming-goals.json`**: the TUI-only queue created by `/goal next <objective>`. It is not part of the agent conversation until a queued goal is promoted after the current goal completes.
 - **`agents/main/wire.jsonl`**: the main Agent's complete communication record, used for session resumption and replay.
-- **`agents/main/plans/`**: plan files written in Plan mode, named by plan id (`<id>.md`).
-- **`agents/agent-0/` etc.**: sub-Agent instance directories, each containing their own `wire.jsonl`.
+- **`agents/agent-0/` etc.**: main, team, and SubAgent transcript directories, each containing its own `wire.jsonl`. Completed temporary SubAgents remain reopenable in the session archive rather than being deleted.
 - **`logs/kimi-code.log`**: diagnostic log for this session; only present when a diagnostic event occurs.
 - **`tasks/`**: background task persistence — `tasks/<task_id>.json` stores status/pid/exit code; `tasks/<task_id>/output.log` stores output.
 - **`cron/`**: scheduled task persistence; reloaded into the scheduler when `kimi resume` runs. See [Scheduled tasks](../reference/tools.md#scheduled-tasks).

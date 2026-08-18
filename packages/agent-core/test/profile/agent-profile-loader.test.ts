@@ -193,9 +193,6 @@ describe('default agent profiles', () => {
     expect(DEFAULT_AGENT_PROFILES['agent']?.subagents?.['explore']).toBe(
       DEFAULT_AGENT_PROFILES['explore'],
     );
-    expect(DEFAULT_AGENT_PROFILES['agent']?.subagents?.['plan']).toBe(
-      DEFAULT_AGENT_PROFILES['plan'],
-    );
 
     expect(DEFAULT_AGENT_PROFILES['agent']?.tools).toEqual(
       expect.arrayContaining([
@@ -203,7 +200,7 @@ describe('default agent profiles', () => {
         'Write',
         'Edit',
         'Bash',
-        'Agent',
+        'SubAgent',
         'Skill',
         'TaskList',
         'TaskOutput',
@@ -214,7 +211,6 @@ describe('default agent profiles', () => {
       expect.arrayContaining(['Read', 'Write', 'Edit', 'Bash']),
     );
     expect(DEFAULT_AGENT_PROFILES['explore']?.tools).not.toContain('Write');
-    expect(DEFAULT_AGENT_PROFILES['plan']?.tools).not.toContain('Bash');
   });
 
   it('renders the model-invocable skill listing for bundled prompts', () => {

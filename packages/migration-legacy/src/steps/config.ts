@@ -20,7 +20,7 @@ import {
 
 // `theme` / `default_editor` belong in tui.toml, not config.toml.
 const TUI_TOP_LEVEL_KEYS = new Set(['theme', 'default_editor']);
-const TOP_LEVEL_KEYS_TO_DROP = new Set(['plan_mode', 'yolo']);
+const TOP_LEVEL_KEYS_TO_DROP = new Set(['yolo']);
 const LOOP_CONTROL_FIELDS_TO_KEEP = new Set([
   'max_retries_per_step',
   'reserved_context_size',

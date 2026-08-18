@@ -27,7 +27,7 @@ const KIND_LABEL: Record<Issue['kind'], string> = {
   model_max_tokens: 'hit max_tokens',
   incomplete_step: 'incomplete step',
   incomplete_compaction: 'incomplete compaction',
-  active_plan_mode: 'plan mode active',
+  active_discuss_mode: 'Discuss mode active',
   rejected_approval: 'approval rejected',
   wire_warning: 'wire warning',
 };

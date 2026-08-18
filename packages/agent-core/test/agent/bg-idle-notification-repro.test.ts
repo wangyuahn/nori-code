@@ -56,12 +56,12 @@ describe('background notification → main agent (real Agent instance)', () => {
     // BackgroundManager injected via `turn.steer`.
     const lastCall = ctx.llmCalls.at(-1)!;
     const flatHistoryText = JSON.stringify(lastCall.history);
-    expect(flatHistoryText).toContain('<notification');
+    expect(flatHistoryText).toContain('&lt;notification');
     expect(flatHistoryText).toContain('task.completed');
     expect(flatHistoryText).toContain(taskId);
     expect(flatHistoryText).toContain('idle-state repro completed');
     expect(flatHistoryText).toContain('background agent finished its job');
-    expect(flatHistoryText).toContain('<output-preview');
+    expect(flatHistoryText).toContain('&lt;output-preview');
   });
 
   it('BUSY: completed bg agent during an active turn is flushed before the next LLM call', async () => {
@@ -176,7 +176,7 @@ describe('background notification → main agent (real Agent instance)', () => {
     expect(flatHistoryText).toContain('bg #1 result');
     expect(flatHistoryText).toContain('bg #2 result');
     expect(flatHistoryText).toContain('bg #3 result');
-    expect(flatHistoryText).toContain('<output-preview');
+    expect(flatHistoryText).toContain('&lt;output-preview');
   });
 
   it('RACE: bg completion fires AFTER LLM returns but BEFORE activeTurn is cleared', async () => {

@@ -1,5 +1,9 @@
 import { z } from 'zod';
 
+import {
+  compareMemoryNotesByWrittenAtDesc,
+  formatMemoryWrittenAtUtc,
+} from './memory-note-meta';
 import type { NoriMemoryNote, NoriMemoryProvider } from './types';
 
 const MAX_KEYWORDS = 16;
@@ -133,7 +137,10 @@ export function formatNoriMemoryChainResult(result: NoriMemoryChainResult): stri
     for (const note of hop.results) {
       const score = note.score === undefined ? 'N/A' : note.score.toFixed(2);
       const body = truncateText(note.excerpt ?? note.content ?? '', 700);
-      lines.push(`- **${note.title}** (${note.path}) [score: ${score}]`);
+      const written = formatMemoryWrittenAtUtc(note.created_at)
+        ?? (note.date !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(note.date) ? note.date : undefined);
+      const writtenLabel = written === undefined ? '' : ` [written: ${written}]`;
+      lines.push(`- **${note.title}** (${note.path}) [score: ${score}]${writtenLabel}`);
       if (body.length > 0) lines.push(`  ${body}`);
     }
   }
@@ -179,7 +186,9 @@ function uniqueNotes(notes: readonly NoriMemoryNote[]): NoriMemoryNote[] {
       byPath.set(note.path, note);
     }
   }
-  return [...byPath.values()].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  return [...byPath.values()].sort(
+    (a, b) => (b.score ?? 0) - (a.score ?? 0) || compareMemoryNotesByWrittenAtDesc(a, b),
+  );
 }
 
 function collectCandidateTerms(text: string): string[] {

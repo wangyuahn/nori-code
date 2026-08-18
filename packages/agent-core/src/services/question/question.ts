@@ -90,7 +90,7 @@ export interface IQuestionService {
    * Returns the protocol-shaped pending question requests for a session.
    * Used by the session status lifecycle to detect `awaiting_question`.
    */
-  listPending(sessionId: string): readonly ProtocolQuestionRequest[];
+  listPending(sessionId: string, agentId?: string): readonly ProtocolQuestionRequest[];
 }
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare

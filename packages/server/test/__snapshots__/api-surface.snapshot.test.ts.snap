@@ -35,6 +35,10 @@ exports[`API surface snapshot > matches the documented v1 route table and meta e
     ],
     [
       "DELETE",
+      "/api/v1/providers/{provider_id}",
+    ],
+    [
+      "DELETE",
       "/api/v1/sessions/{session_id}/cron/{cron_id}",
     ],
     [
@@ -115,11 +119,23 @@ exports[`API surface snapshot > matches the documented v1 route table and meta e
     ],
     [
       "GET",
+      "/api/v1/providers/{provider_id}/secret",
+    ],
+    [
+      "GET",
       "/api/v1/sessions",
     ],
     [
       "GET",
       "/api/v1/sessions/{session_id}",
+    ],
+    [
+      "GET",
+      "/api/v1/sessions/{session_id}/agents",
+    ],
+    [
+      "GET",
+      "/api/v1/sessions/{session_id}/agents/{agent_id}/messages",
     ],
     [
       "GET",
@@ -191,7 +207,7 @@ exports[`API surface snapshot > matches the documented v1 route table and meta e
     ],
     [
       "GET",
-      "/api/v1/swarm/status/{swarm_id}",
+      "/api/v1/sessions/activity",
     ],
     [
       "GET",
@@ -220,6 +236,10 @@ exports[`API surface snapshot > matches the documented v1 route table and meta e
     [
       "GET",
       "/openapi.json",
+    ],
+    [
+      "PATCH",
+      "/api/v1/vault/notes/{note_id}",
     ],
     [
       "PATCH",
@@ -364,10 +384,6 @@ exports[`API surface snapshot > matches the documented v1 route table and meta e
     [
       "POST",
       "/api/v1/shutdown",
-    ],
-    [
-      "POST",
-      "/api/v1/swarm/{swarm_id}/{action}",
     ],
     [
       "POST",

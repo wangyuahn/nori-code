@@ -74,7 +74,7 @@ describe('HookEngine integration', () => {
 
     const HookEngine = await importEngine();
     const engine = new HookEngine(
-      [{ event: 'PreToolUse', matcher: 'Shell', command: `${process.execPath} ${script}`, timeout: 5 }],
+      [{ event: 'PreToolUse', matcher: 'Shell', command: `"${process.execPath}" "${script}"`, timeout: 5 }],
       { cwd: dir },
     );
 

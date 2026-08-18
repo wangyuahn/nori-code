@@ -45,6 +45,10 @@
       "types": "./src/session/store/index.ts",
       "default": "./src/session/store/index.ts"
     },
+    "./tools/builtin/nori/memory-note-meta": {
+      "types": "./src/tools/builtin/nori/memory-note-meta.ts",
+      "default": "./src/tools/builtin/nori/memory-note-meta.ts"
+    },
     "./*": {
       "types": "./src/*.ts",
       "default": "./src/*.ts"

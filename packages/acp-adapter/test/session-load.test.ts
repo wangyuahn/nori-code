@@ -259,7 +259,7 @@ describe('AcpServer session/load replay', () => {
     expect(server?.getSession(sessionId)?.id).toBe(sessionId);
   });
 
-  it('advertises configOptions (PLAN D11 + Phase 15 thinking toggle) on loadSession too — model + thinking + mode under the unified surface', async () => {
+  it('advertises configOptions on loadSession too — model + thinking + mode under the unified surface', async () => {
     const sessionId = 'sess-modes-load';
     const session = makeSessionWithHistory(sessionId, []);
     const harness = makeHarness({ hasUsableToken: true, session });
@@ -273,7 +273,7 @@ describe('AcpServer session/load replay', () => {
       mcpServers: [],
     });
 
-    // Phase 14 (PLAN D11): the dedicated `modes:` field is gone; the
+    // The dedicated `modes:` field is gone; the
     // four-mode taxonomy now lives under `configOptions[id='mode']`.
     // Mode is still session-scoped and not persisted, so a resumed
     // session re-starts in `default`.
@@ -300,7 +300,7 @@ describe('AcpServer session/load replay', () => {
     expect(modeOpt!.currentValue).toBe('default');
     expect(modeOpt!.options).toHaveLength(4);
     const modeIds = modeOpt!.options.map((o) => 'value' in o ? o.value : '');
-    expect(modeIds).toEqual(['default', 'plan', 'auto', 'yolo']);
+    expect(modeIds).toEqual(['default', 'discuss', 'auto', 'yolo']);
     for (const entry of modeOpt!.options) {
       if ('value' in entry) {
         expect(typeof entry.name).toBe('string');

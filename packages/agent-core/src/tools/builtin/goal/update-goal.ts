@@ -62,22 +62,41 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
           // provider request ends with a user message after the UpdateGoal tool
           // result. Anthropic-compatible providers reject trailing assistant
           // messages as unsupported prefill.
-          if (completed !== null) {
-            this.agent.context.appendSystemReminder(buildGoalCompletionSummaryPrompt(completed), {
+          // When memory tools are active, the same goal_completion reminder also
+          // asks the model whether optional vault cleanup is warranted (never auto-deletes).
+          if (completed === null) {
+            return {
+              output:
+                'No active goal to mark complete (missing, already finished, or not active).',
+              isError: true,
+            };
+          }
+          this.agent.context.appendSystemReminder(
+            buildGoalCompletionSummaryPrompt(completed, {
+              includeMemoryCleanup: memoryCleanupReminderEnabled(this.agent),
+            }),
+            {
               kind: 'system_trigger',
               name: GOAL_COMPLETION_REMINDER_NAME,
-            });
-          }
+            },
+          );
+          this.agent.turn.notePendingGoalOutcomeContinuation();
           return { output: 'Goal marked complete.', stopTurn: true };
         }
         if (args.status === 'blocked') {
           const blocked = await goal.markBlocked({}, 'model');
-          if (blocked !== null) {
-            this.agent.context.appendSystemReminder(buildGoalBlockedReasonPrompt(blocked), {
-              kind: 'system_trigger',
-              name: GOAL_BLOCKED_REMINDER_NAME,
-            });
+          if (blocked === null) {
+            return {
+              output:
+                'No active goal to mark blocked (missing, already finished, or not active).',
+              isError: true,
+            };
           }
+          this.agent.context.appendSystemReminder(buildGoalBlockedReasonPrompt(blocked), {
+            kind: 'system_trigger',
+            name: GOAL_BLOCKED_REMINDER_NAME,
+          });
+          this.agent.turn.notePendingGoalOutcomeContinuation();
           return { output: 'Goal marked blocked.', stopTurn: true };
         }
         await goal.pauseGoal({}, 'model');
@@ -85,4 +104,16 @@ export class UpdateGoalTool implements BuiltinTool<UpdateGoalToolInput> {
       },
     };
   }
+}
+
+/**
+ * Memory cleanup guidance must only appear when `nori_memory_remove` is actually
+ * callable. Prefer the live tool list; fall back to the provider when tools are
+ * unavailable (e.g. unit stubs that only inject `obsidianMemory`).
+ */
+function memoryCleanupReminderEnabled(agent: Agent): boolean {
+  if (agent.obsidianMemory === undefined) return false;
+  const tools = agent.tools?.data();
+  if (tools === undefined) return true;
+  return tools.some((tool) => tool.name === 'nori_memory_remove' && tool.active);
 }

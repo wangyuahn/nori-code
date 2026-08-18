@@ -23,6 +23,7 @@ const INSPECTOR_CHAT_GAP = 14;
 
 interface CodeViewProps {
   session: Session | null;
+  agentId?: string;
   allSessions?: Session[];
   messages: ChatMessage[];
   messagesLoading?: boolean;
@@ -41,7 +42,7 @@ interface CodeViewProps {
   onModelChange: (model: string) => void | Promise<void>;
   onThinkingChange: (effort: string) => void | Promise<void>;
   onPermissionChange: (mode: 'auto' | 'yolo' | 'manual') => void | Promise<void>;
-  onTaskModeChange: (mode: 'plan' | 'code') => void | Promise<void>;
+  onTaskModeChange: (mode: 'discuss' | 'code') => void | Promise<void>;
   onRunSlashCommand: ChatViewProps['onRunSlashCommand'];
   onMainWriteChange: (enabled: boolean) => void | Promise<void>;
   onGoalControl?: (action: 'pause' | 'resume' | 'cancel') => void | Promise<void>;
@@ -66,6 +67,7 @@ interface CodeViewProps {
 
 export function CodeView({
   session,
+  agentId = 'main',
   allSessions,
   messages,
   messagesLoading,
@@ -217,6 +219,7 @@ export function CodeView({
     >
       <ChatView
         session={session}
+        agentId={agentId}
         allSessions={allSessions}
         messages={messages}
         messagesLoading={messagesLoading}

@@ -33,7 +33,7 @@ export interface ReplayRenderContext {
   completedToolCallIds: Set<string>;
   skillActivationIds: Set<string>;
   pluginCommandActivationIds: Set<string>;
-  suppressNextPlanModeOffNotice: boolean;
+  suppressNextDiscussOffNotice: boolean;
 }
 
 export interface SkillActivationProjection {
@@ -64,8 +64,7 @@ export function appStateFromResumeAgent(agent: ResumedAgentState): Partial<AppSt
     contextTokens,
     maxContextTokens,
     contextUsage,
-    planMode: agent.plan !== null,
-    swarmDepth: agent.swarmMode ? 1 : 0,
+    discussMode: agent.discussMode,
     permissionMode: agent.permission.mode,
   };
 }
@@ -124,7 +123,7 @@ export function createReplayRenderContext(): ReplayRenderContext {
     completedToolCallIds: new Set(),
     skillActivationIds: new Set(),
     pluginCommandActivationIds: new Set(),
-    suppressNextPlanModeOffNotice: false,
+    suppressNextDiscussOffNotice: false,
   };
 }
 

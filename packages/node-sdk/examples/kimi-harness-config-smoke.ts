@@ -19,7 +19,7 @@ async function main(): Promise<void> {
     defaultModel: 'kimi-code/kimi-for-coding',
     thinking: { enabled: true },
     defaultPermissionMode: 'manual',
-    defaultPlanMode: false,
+    defaultDiscussMode: false,
     providers: {
       'managed:kimi-code': {
         type: 'kimi',

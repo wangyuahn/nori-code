@@ -105,7 +105,7 @@ describe('HarnessAPI session skills', () => {
     expect(mcpConfig?.path).toBe('builtin://mcp-config');
     expect(importer).toMatchObject({
       name: 'import-from-cc-codex',
-      description: 'Import Claude Code and Codex instructions, skills, and MCP settings into Kimi Code.',
+      description: 'Import Claude Code and Codex instructions, skills, and MCP settings into Nori Code.',
       source: 'builtin',
       disableModelInvocation: true,
     });

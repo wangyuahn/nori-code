@@ -27,7 +27,7 @@ const MEMORY_API_FORMATS: Array<{ value: MemoryProviderType; label: string }> = 
 export function SettingsPanel() {
   const { locale, setLocale, tr } = useI18n();
   const [permissionMode, setPermissionMode] = useState('auto');
-  const [planMode, setPlanMode] = useState(false);
+  const [discussMode, setDiscussMode] = useState(true);
   const [autoUpdate, setAutoUpdate] = useState(false);
   const [themeColor, setThemeColor] = useState(loadThemeColor);
   const [theme, setTheme] = useState<ThemeMode>(loadThemeMode);
@@ -43,6 +43,7 @@ export function SettingsPanel() {
   const [soundPreferences, setSoundPreferences] = useState(loadSoundPreferences);
   const [maxStepsPerTurn, setMaxStepsPerTurn] = useState(0);
   const [goalMaxTurns, setGoalMaxTurns] = useState(0);
+  const [goalBackgroundIdleMinutes, setGoalBackgroundIdleMinutes] = useState(5);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -54,10 +55,16 @@ export function SettingsPanel() {
     try {
       const config = await api.getConfig();
       if (typeof config.default_permission_mode === 'string') setPermissionMode(config.default_permission_mode);
-      if (typeof config.default_plan_mode === 'boolean') setPlanMode(config.default_plan_mode);
+      if (typeof config.default_discuss_mode === 'boolean') setDiscussMode(config.default_discuss_mode);
       const loopControl = typeof config.loop_control === 'object' && config.loop_control !== null ? config.loop_control as Record<string, unknown> : {};
       setMaxStepsPerTurn(nonNegativeInteger(loopControl.maxStepsPerTurn ?? loopControl.max_steps_per_turn));
       setGoalMaxTurns(nonNegativeInteger(loopControl.goalMaxTurns ?? loopControl.goal_max_turns));
+      const idleRaw = loopControl.goalBackgroundIdleMinutes ?? loopControl.goal_background_idle_minutes;
+      setGoalBackgroundIdleMinutes(
+        idleRaw === undefined || idleRaw === null || idleRaw === ''
+          ? 5
+          : nonNegativeInteger(idleRaw),
+      );
       const experimental = config.experimental as Record<string, unknown> | undefined;
       if (typeof experimental?.auto_update === 'boolean') setAutoUpdate(experimental.auto_update);
       const memory = typeof config.memory === 'object' && config.memory !== null
@@ -111,10 +118,14 @@ export function SettingsPanel() {
       if (memoryApiKeyTouched && memoryApiKey.trim()) memoryPatch.api_key = memoryApiKey.trim();
       const patch: Record<string, unknown> = {
         default_permission_mode: permissionMode,
-        default_plan_mode: planMode,
+        default_discuss_mode: discussMode,
         experimental: { auto_update: autoUpdate },
         memory: memoryPatch,
-        loop_control: { max_steps_per_turn: maxStepsPerTurn, goal_max_turns: goalMaxTurns },
+        loop_control: {
+          max_steps_per_turn: maxStepsPerTurn,
+          goal_max_turns: goalMaxTurns,
+          goal_background_idle_minutes: goalBackgroundIdleMinutes,
+        },
       };
       await api.updateConfig(patch);
       if (memoryApiKeyTouched && memoryApiKey.trim()) setMemoryHasApiKey(true);
@@ -140,9 +151,10 @@ export function SettingsPanel() {
       <SettingRow label={tr('Notification sounds', '通知音效')} desc={tr('Play sounds for main responses, agents, approvals, and errors.', '为主回复、智能体、授权和错误播放提示音。')}><Toggle checked={soundPreferences.enabled} onChange={enabled => changeSoundPreferences({ enabled })} ariaLabel={tr('Enable notification sounds', '启用通知音效')} /></SettingRow>
       <SettingRow label={tr('Sound volume', '音效音量')} desc={tr('Only affects Nori notification sounds.', '仅影响 Nori 的通知音效。')}><div className="sound-volume-control"><input aria-label={tr('Sound volume', '音效音量')} type="range" min="0" max="100" value={Math.round(soundPreferences.volume * 100)} disabled={!soundPreferences.enabled} onChange={event => changeSoundPreferences({ volume: Number(event.target.value) / 100 })}/><span>{Math.round(soundPreferences.volume * 100)}%</span><button type="button" className="sound-preview" disabled={!soundPreferences.enabled} onClick={() => playNotificationSound('complete', true)} title={tr('Preview sound', '试听音效')} aria-label={tr('Preview sound', '试听音效')}><Icon name="play" size={12}/></button></div></SettingRow>
     </div></section>
-    <section className="settings-card"><div className="settings-card-heading"><span>Loop / Goal</span><h2>{tr('Execution limits', '执行轮次限制')}</h2><p>{tr('Control runaway tool loops and long-running goals. Enter 0 for unlimited.', '控制工具循环和长期 Goal 的轮次；填写 0 表示无限。')}</p></div><div className="settings-card-body">
+    <section className="settings-card"><div className="settings-card-heading"><span>Loop / Goal</span><h2>{tr('Execution limits', '执行轮次限制')}</h2><p>{tr('Control runaway tool loops and long-running goals. Enter 0 for unlimited turns, or to disable idle force-wake while still waiting on background agents.', '控制工具循环和长期 Goal。轮次填 0 表示无限；后台空闲强制唤醒填 0 表示只抑制无效续跑、不超时唤醒。')}</p></div><div className="settings-card-body">
       <SettingRow label={tr('Steps per turn', '单轮最大步骤')} desc={tr('Maximum model/tool steps in one turn. 0 disables the limit.', '每轮模型与工具的最大步骤数；0 表示不限制。')}><input aria-label={tr('Steps per turn', '单轮最大步骤')} type="number" min="0" step="1" className="input settings-control" value={maxStepsPerTurn} onChange={event => setMaxStepsPerTurn(nonNegativeInteger(event.target.value))}/></SettingRow>
       <SettingRow label={tr('Goal turns', 'Goal 最大轮次')} desc={tr('Default continuation-turn budget for new goals. 0 means unlimited.', '新 Goal 默认允许的连续轮次；0 表示无限。')}><input aria-label={tr('Goal turns', 'Goal 最大轮次')} type="number" min="0" step="1" className="input settings-control" value={goalMaxTurns} onChange={event => setGoalMaxTurns(nonNegativeInteger(event.target.value))}/></SettingRow>
+      <SettingRow label={tr('Goal background idle (minutes)', 'Goal 后台空闲上限（分钟）')} desc={tr('While a goal is active and background agents/tasks are unfinished, suppress immediate goal wake. After this many minutes with no background progress, force-wake once. Default 5. 0 disables timeout wake only.', 'Goal 开启且后台未完成时抑制立即续跑；该分钟数内无后台进展则强制唤醒一次。默认 5；0 仅关闭超时唤醒。')}><input aria-label={tr('Goal background idle minutes', 'Goal 后台空闲分钟')} type="number" min="0" step="1" className="input settings-control" value={goalBackgroundIdleMinutes} onChange={event => setGoalBackgroundIdleMinutes(nonNegativeInteger(event.target.value))}/></SettingRow>
     </div></section>
     {loadError && <div className="settings-notice"><Icon name="alert" size={17} /><div><strong>{tr('Server settings are unavailable', '服务器设置不可用')}</strong><p>{loadError}</p></div><button className="btn btn-secondary btn-compact" onClick={() => void load()}>{tr('Retry', '重试')}</button></div>}
 
@@ -160,7 +172,7 @@ export function SettingsPanel() {
 
     <section className="settings-card"><div className="settings-card-heading"><span>{tr('Behavior', '行为')}</span><h2>{tr('Agent defaults', '智能体默认设置')}</h2></div><div className="settings-card-body">
       <SettingRow label={tr('Permission mode', '权限模式')} desc={tr('Choose how tool actions are approved.', '选择工具操作的审批方式。')}><select className="input settings-control" value={permissionMode} onChange={e => { setPermissionMode(e.target.value); }}><option value="auto">{tr('Automatic', '自动')}</option><option value="manual">{tr('Manual', '手动')}</option><option value="yolo">YOLO</option></select></SettingRow>
-      <SettingRow label={tr('Plan mode', '规划模式')} desc={tr('Ask for a plan before code changes.', '修改代码前先生成计划。')}><Toggle checked={planMode} onChange={setPlanMode} /></SettingRow>
+      <SettingRow label={tr('Default Discuss', '默认讨论')} desc={tr('Discuss before code changes.', '编码前先讨论。')}><Toggle checked={discussMode} onChange={setDiscussMode} /></SettingRow>
       <SettingRow label={tr('Rewind history', '回溯轮数')} desc={tr(`Keep between 1 and ${MAX_REWIND_LIMIT} prompt checkpoints.`, `保留 1-${MAX_REWIND_LIMIT} 轮对话与代码快照。`)}><input type="number" min={1} max={MAX_REWIND_LIMIT} className="input settings-control settings-number-input" value={rewindLimit} onChange={event => { const value = saveRewindLimit(Number(event.target.value)); setRewindLimit(value); }} /></SettingRow>
       <SettingRow label={tr('Auto update', '自动更新')} desc={tr('Automatically apply available updates.', '自动应用可用更新。')}><Toggle checked={autoUpdate} onChange={setAutoUpdate} /></SettingRow>
     </div></section>

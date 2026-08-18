@@ -22,6 +22,7 @@ class PendingApproval implements IDisposable {
   constructor(
     readonly approvalId: string,
     readonly sessionId: string,
+    readonly agentId: string,
     readonly toolCallId: string,
     readonly createdAt: string,
     readonly expiresAt: string,
@@ -86,15 +87,16 @@ export class ApprovalService extends Disposable implements IApprovalService {
         if (reason !== 'cancelled' && reason !== 'failed' && reason !== 'filtered') return;
         const sessionId = (event as { sessionId?: string }).sessionId;
         if (sessionId === undefined || sessionId === '') return;
-        this.dismissForSession(sessionId);
+        const agentId = (event as { agentId?: string }).agentId ?? 'main';
+        this.dismissForAgent(sessionId, agentId);
       }),
     );
   }
 
-  private dismissForSession(sessionId: string): void {
+  private dismissForAgent(sessionId: string, agentId: string): void {
     const ids: string[] = [];
     for (const p of this._pending.values()) {
-      if (p.sessionId === sessionId) ids.push(p.approvalId);
+      if (p.sessionId === sessionId && p.agentId === agentId) ids.push(p.approvalId);
     }
     for (const id of ids) {
       // Reuse resolve(): clears `_pending` / `_byToolCallId` and publishes
@@ -151,6 +153,7 @@ export class ApprovalService extends Disposable implements IApprovalService {
         new PendingApproval(
           approvalId,
           req.sessionId,
+          req.agentId,
           req.toolCallId,
           createdAt,
           expiresAt,
@@ -175,7 +178,7 @@ export class ApprovalService extends Disposable implements IApprovalService {
     const resolvedEvent: Event = {
       type: 'event.approval.resolved',
       sessionId: p.sessionId,
-      agentId: 'main',
+      agentId: p.agentId,
       approval_id: p.approvalId,
       decision: response.decision,
       scope: response.scope,
@@ -188,13 +191,14 @@ export class ApprovalService extends Disposable implements IApprovalService {
     p.resolve(response);
   }
 
-  isPending(approvalId: string): boolean {
-    return this._pending.has(approvalId);
+  isPending(approvalId: string, agentId?: string): boolean {
+    const pending = this._pending.get(approvalId);
+    return pending !== undefined && (agentId === undefined || pending.agentId === agentId);
   }
 
-  listPending(sessionId: string): ProtocolApprovalRequest[] {
+  listPending(sessionId: string, agentId = 'main'): ProtocolApprovalRequest[] {
     return Array.from(this._pending.values())
-      .filter((p) => p.sessionId === sessionId)
+      .filter((p) => p.sessionId === sessionId && p.agentId === agentId)
       .map((p) => p.protocolRequest);
   }
 

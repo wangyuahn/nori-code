@@ -6,7 +6,7 @@ import { api } from '../api';
  *
  * The `/api/sessions/:id/context?agent=<agentId>` route returns the
  * full `ContextProjection` (messages, usage totals, contextTokens,
- * config snapshot, permission mode, plan mode, goal, swarm). Defaults
+ * config snapshot, permission mode, Discuss mode, goal, subagent). Defaults
  * to `main` when no agent id is provided, but callers should pass an
  * explicit id for clarity.
  *

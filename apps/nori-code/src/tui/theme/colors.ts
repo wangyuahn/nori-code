@@ -48,7 +48,7 @@ export interface ColorPalette {
   // ── State ──
   /** Success: ✓ marks, "enabled", completed states. */
   success: string;
-  /** Warning: auto/yolo badges, stale markers, plan-mode hint. */
+  /** Warning: auto/yolo badges, stale markers, Discuss hint. */
   warning: string;
   /** Error: error messages, failed tool output. */
   error: string;
@@ -75,7 +75,7 @@ export interface ColorPalette {
   // ── Shell mode ──
   /** Shell mode (`!`): the `!` prompt symbol, bash-mode editor border, and the
    *  echoed `$ command` line. Its own hue (violet), distinct from
-   *  plan-mode (primary) and the user role (roleUser). */
+   *  Discuss (primary) and the user role (roleUser). */
   shellMode: string;
 }
 

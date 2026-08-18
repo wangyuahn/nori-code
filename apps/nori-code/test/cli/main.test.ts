@@ -143,7 +143,7 @@ function defaultOpts(): CLIOptions {
     session: undefined,
     continue: false,
     permission: undefined,
-    plan: false,
+    discuss: false,
     model: undefined,
     outputFormat: undefined,
     prompt: undefined,

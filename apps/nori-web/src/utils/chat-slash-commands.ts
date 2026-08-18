@@ -1,4 +1,4 @@
-export type ChatSlashCommandName = 'compact' | 'goal' | 'swarm';
+export type ChatSlashCommandName = 'compact' | 'goal';
 
 export interface ChatSlashCommand {
   name: ChatSlashCommandName;
@@ -30,12 +30,6 @@ export const CHAT_SLASH_COMMANDS: readonly ChatSlashCommand[] = [
     descriptionZh: '启动自主目标',
     argumentHint: '<objective>',
   },
-  {
-    name: 'swarm',
-    description: 'Start a coordinated Swarm task',
-    descriptionZh: '启动 Swarm 协作任务',
-    argumentHint: '<task>',
-  },
 ];
 
 export function chatSlashCommandSuggestions(input: string): readonly ChatSlashCommand[] {
@@ -56,7 +50,7 @@ export function resolveChatSlashCommand(input: string): ChatSlashCommandResoluti
   if (!command) return { kind: 'none' };
 
   const args = (match[2] ?? '').trim();
-  if ((command.name === 'goal' || command.name === 'swarm') && args.length === 0) {
+  if (command.name === 'goal' && args.length === 0) {
     return {
       kind: 'error',
       message: `Usage: /${command.name} ${command.argumentHint}`,

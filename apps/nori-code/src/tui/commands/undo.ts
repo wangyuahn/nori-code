@@ -9,7 +9,7 @@ import {
   type UndoChoice,
 } from '../components/dialogs/undo-selector';
 import { AgentGroupComponent } from '../components/messages/agent-group';
-import { AgentSwarmProgressComponent } from '../components/messages/agent-swarm-progress';
+import { SubAgentProgressComponent } from '../components/messages/subagent-progress';
 import { AssistantMessageComponent } from '../components/messages/assistant-message';
 import { BackgroundAgentStatusComponent } from '../components/messages/background-agent-status';
 import { CronMessageComponent } from '../components/messages/cron-message';
@@ -476,7 +476,7 @@ function isUndoContextComponent(child: Component): boolean {
     child instanceof ThinkingComponent ||
     child instanceof ToolCallComponent ||
     child instanceof AgentGroupComponent ||
-    child instanceof AgentSwarmProgressComponent ||
+    child instanceof SubAgentProgressComponent ||
     child instanceof ReadGroupComponent ||
     child instanceof SkillActivationComponent ||
     child instanceof PluginCommandComponent ||

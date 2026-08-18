@@ -20,6 +20,7 @@ import { BufferedReadable, decodeTextWithErrors, globPatternToRegex } from './in
 import type { Kaos } from './kaos';
 import type { KaosProcess } from './process';
 import type { StatResult } from './types';
+import { createContentTagHasher } from './content-tag';
 
 const isWindows: boolean = process.platform === 'win32';
 const READ_CHUNK_SIZE = 64 * 1024;
@@ -37,6 +38,7 @@ interface TextFileScan {
   endsWithNewline: boolean;
   hasNul: boolean;
   lineEndingFlags: LineEndingFlags;
+  contentTag: string;
 }
 
 /**
@@ -494,6 +496,7 @@ export class LocalKaos implements Kaos {
       const buf = Buffer.alloc(READ_CHUNK_SIZE);
       const flags: LineEndingFlags = { hasCrLf: false, hasLf: false, hasLoneCr: false };
       const validator = createUtf8Validator();
+      const tagHasher = createContentTagHasher();
       let totalLines = 0;
       let totalBytes = 0;
       let endsWithNewline = false;
@@ -505,6 +508,7 @@ export class LocalKaos implements Kaos {
         if (bytesRead === 0) break;
         const chunk = buf.subarray(0, bytesRead);
         validator.write(chunk);
+        tagHasher.update(chunk);
         for (let i = 0; i < chunk.length; i += 1) {
           const byte = chunk[i];
           if (byte === undefined) continue;
@@ -519,7 +523,13 @@ export class LocalKaos implements Kaos {
       if (prevWasCr) flags.hasLoneCr = true;
       validator.end();
       if (totalBytes > 0 && !endsWithNewline) totalLines += 1;
-      return { totalLines, endsWithNewline, hasNul, lineEndingFlags: flags };
+      return {
+        totalLines,
+        endsWithNewline,
+        hasNul,
+        lineEndingFlags: flags,
+        contentTag: tagHasher.digest(),
+      };
     } finally {
       await fh.close();
     }

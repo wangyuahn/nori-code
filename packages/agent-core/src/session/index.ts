@@ -20,7 +20,7 @@ import { proxyWithExtraPayload } from '#/rpc/types';
 import { Agent, type AgentOptions, type AgentType } from '../agent';
 import { resolveNoriWorkflowConfig } from '../agent/nori-workflow';
 import type { RuleConfig } from '../agent/turn/rule-engine';
-import type { NoriMemoryProvider, NoriSwarmProvider } from '../tools/builtin/nori/types';
+import type { NoriMemoryProvider } from '../tools/builtin/nori/types';
 import { renderPluginSessionStartReminder } from '../agent/injection/plugin-session-start';
 import { HookEngine, type HookDef } from './hooks';
 import type { PermissionManagerOptions, PermissionRule } from '../agent/permission';
@@ -91,8 +91,6 @@ export interface SessionOptions {
   /** When set, the session will inject these providers into the main agent at creation time. */
   readonly noriProviders?: {
     readonly memory: NoriMemoryProvider;
-    readonly swarm: NoriSwarmProvider;
-    readonly maxSwarmDepth?: number;
     readonly coderWriteEnabled?: boolean;
   };
 }
@@ -112,7 +110,62 @@ export interface AgentMeta {
   readonly homedir: string;
   readonly type: AgentType;
   readonly parentAgentId: string | null;
-  readonly swarmItem?: string;
+  readonly subagentItem?: string;
+  /** `team` agents are durable collaborators; `sub` agents are SubAgent transcripts. */
+  readonly kind?: 'team' | 'sub';
+  readonly name?: string;
+  readonly title?: string;
+  readonly intro?: string;
+  readonly mandate?: string;
+  readonly role?: string;
+  /** The lead that owns this durable team member or discussion transcript. */
+  readonly teamLeaderAgentId?: string;
+  /** A non-empty task grants this team member its otherwise read-only write capability. */
+  readonly assignedTask?: string;
+  readonly assignedAt?: string;
+  /** Present only on an agent-scoped, archived-or-active team discussion transcript. */
+  readonly discussion?: TeamDiscussionMeta;
+  /** Completed SubAgent transcripts stay in the parent session archive. */
+  readonly archived?: boolean;
+  readonly completedAt?: string;
+}
+
+export interface TeamIdentity {
+  readonly name: string;
+  readonly title: string;
+  readonly intro: string;
+  readonly mandate: string;
+  readonly role: string;
+}
+
+export interface TeamDiscussionMeta {
+  readonly participantAgentIds: readonly string[];
+  readonly status: 'active' | 'archived';
+  readonly topic: string;
+  readonly startedAt: string;
+  readonly updatedAt: string;
+  /** Monotonic statement sequence used by participant-specific read cursors. */
+  readonly nextStatementId?: number;
+  /** Last shared statement delivered to each participant. Kept out of model prompts. */
+  readonly readCursors?: Readonly<Record<string, number>>;
+  /**
+   * Durable shared-discussion transport. This remains available after the
+   * discussion transcript is compacted, while model prompts receive only a
+   * participant's unread suffix.
+   */
+  readonly statements?: readonly TeamDiscussionStatementRecord[];
+}
+
+export interface TeamDiscussionStatementRecord {
+  readonly entryId: number;
+  readonly agentId: string;
+  readonly name: string;
+  readonly message: string;
+}
+
+export interface TeamAssignment {
+  readonly agentId: string;
+  readonly task: string | null;
 }
 
 interface ResumedAgent {
@@ -125,8 +178,15 @@ type AgentEntry = Agent | Promise<ResumedAgent>;
 export interface CreateAgentOptions {
   readonly profile?: ResolvedAgentProfile;
   readonly parentAgentId?: string;
-  readonly swarmItem?: string;
+  readonly subagentItem?: string;
   readonly persistMetadata?: boolean;
+  readonly kind?: 'team' | 'sub';
+  readonly teamIdentity?: TeamIdentity;
+  readonly teamLeaderAgentId?: string;
+  readonly assignedTask?: string;
+  readonly discussion?: TeamDiscussionMeta;
+  readonly name?: string;
+  readonly title?: string;
 }
 
 export interface SessionMeta {
@@ -195,6 +255,13 @@ export class Session {
   };
   private writeMetadataPromise = Promise.resolve();
   private agentsMdWarning: string | undefined;
+  /** Explicit TeamSpeak calls awaiting their owning discussion round result. */
+  private readonly teamDiscussionSpeaks = new Map<
+    string,
+    Map<string, TeamDiscussionStatementRecord>
+  >();
+  /** Only the member currently scheduled by the serial discussion loop may publish. */
+  private readonly activeTeamDiscussionTurns = new Map<string, string>();
 
   constructor(public readonly options: SessionOptions) {
     // Attach the per-session log sink up front so the constructor's
@@ -313,7 +380,7 @@ export class Session {
    * Kaos used by session-internal bootstrap (AGENTS.md context, cwd listing)
    * and metadata persistence. Always backed by the persistence sink (typically
    * the local filesystem) so a transient ACP-side failure on system files like
-   * `AGENTS.md` never blocks `bootstrapAgentProfile` 閳?tool calls still route
+   * `AGENTS.md` never blocks `bootstrapAgentProfile`, so tool calls still route
    * through `agent.kaos` and continue to honor the ACP bridge.
    */
   systemContextKaos(cwd: string): Kaos {
@@ -344,19 +411,12 @@ export class Session {
           noriRules,
           noriWorkflow,
           obsidianMemory: effective.memory,
-          swarmManager: effective.swarm,
-          noriSwarmMaxDepth: effective.maxSwarmDepth ?? 3,
           coderWriteEnabled: effective.coderWriteEnabled ?? false,
         };
 
     const { agent } = await this.createAgent(agentConfig, {
       profile: DEFAULT_AGENT_PROFILES['nori-agent'] ?? DEFAULT_AGENT_PROFILES['agent'],
     });
-
-    // Wire swarm provider to the now-created agent (lazy wiring)
-    if (effective?.swarm && 'wireToAgent' in (effective.swarm as object)) {
-      (effective.swarm as unknown as { wireToAgent(a: Agent): void }).wireToAgent(agent);
-    }
 
     await this.persistDefaultNoriRuntimeSettings(agent);
     this.applyNoriRuntimeSettings(this.getNoriRuntimeSettings());
@@ -401,6 +461,7 @@ export class Session {
     if (main !== undefined && profile !== undefined && main.config.systemPrompt === '') {
       await this.bootstrapAgentProfile(main, profile);
     }
+    if (main !== undefined) this.enableTeamLeadTools(main);
     this.applyNoriRuntimeSettings(this.getNoriRuntimeSettings());
     await this.triggerSessionStart('resume');
     return { warning };
@@ -515,12 +576,32 @@ export class Session {
   ): Promise<{ readonly id: string; readonly agent: Agent }> {
     await this.skillsReady;
     const type = config.type ?? 'main';
+    const kind = options.kind ?? 'sub';
+    const identity = options.teamIdentity;
+    if (kind === 'team') {
+      if (type !== 'sub') {
+        throw new KimiError(
+          ErrorCodes.SESSION_STATE_INVALID,
+          'Only sub agents can be persistent team members.',
+        );
+      }
+      validateTeamIdentity(identity);
+    }
+    if (options.discussion !== undefined && kind !== 'sub') {
+      throw new KimiError(
+        ErrorCodes.SESSION_STATE_INVALID,
+        'A discussion transcript must use the sub-agent kind.',
+      );
+    }
     const id = type === 'main' ? 'main' : this.nextGeneratedAgentId();
     const homedir = config.homedir ?? join(this.options.homedir, 'agents', id);
     const parentAgentId = options.parentAgentId ?? null;
     const agent = this.instantiateAgent(id, homedir, type, config, parentAgentId);
-    if (options.profile) {
-      await this.bootstrapAgentProfile(agent, options.profile);
+    const profile = kind === 'team'
+      ? teamProfile(options.profile ?? defaultTeamProfile(), identity!)
+      : options.profile;
+    if (profile) {
+      await this.bootstrapAgentProfile(agent, profile);
     }
     if (type !== 'main' || this.hasPersistedNoriRuntimeSettings()) {
       this.applyNoriRuntimeSettingsToAgent(agent, this.getNoriRuntimeSettings());
@@ -528,16 +609,574 @@ export class Session {
 
     this.agents.set(id, agent);
     if (options.persistMetadata !== false) {
-      this.metadata.agents[id] = {
+      const metadata: AgentMeta = {
         homedir,
         type,
         parentAgentId,
-        swarmItem: options.swarmItem,
+        subagentItem: options.subagentItem,
+        kind,
+        name: identity?.name ?? options.name,
+        title: identity?.title ?? options.title,
+        intro: identity?.intro,
+        mandate: identity?.mandate,
+        role: identity?.role,
+        teamLeaderAgentId: options.teamLeaderAgentId,
+        assignedTask: options.assignedTask,
+        assignedAt: options.assignedTask === undefined ? undefined : new Date().toISOString(),
+        discussion: options.discussion,
       };
+      this.metadata.agents[id] = metadata;
+      if (kind === 'team') this.configureTeamAgentRuntime(agent, metadata);
       void this.writeMetadata();
     }
+    if (type === 'main') this.enableTeamLeadTools(agent);
 
     return { id, agent };
+  }
+
+  /**
+   * Completed SubAgent transcripts stay in the parent session. Mark them
+   * archived so the live tree can drop them without destroying metadata.
+   */
+  async archiveCompletedSubagent(id: string): Promise<void> {
+    const metadata = this.metadata.agents[id];
+    if (
+      metadata === undefined ||
+      metadata.type !== 'sub' ||
+      metadata.kind === 'team' ||
+      metadata.discussion !== undefined ||
+      metadata.archived
+    ) return;
+
+    this.metadata.agents[id] = {
+      ...metadata,
+      archived: true,
+      completedAt: new Date().toISOString(),
+    };
+    await this.writeMetadata();
+  }
+
+  /** Creates a durable team member within this Session, never a child Session. */
+  async createTeamMember(
+    leaderAgentId: string,
+    identity: TeamIdentity,
+  ): Promise<{ readonly id: string; readonly agent: Agent }> {
+    this.assertTeamLead(leaderAgentId);
+    validateTeamIdentity(identity);
+    const duplicates = this.teamMemberMetadata(leaderAgentId).some(
+      ([, meta]) => meta.name?.localeCompare(identity.name, undefined, { sensitivity: 'accent' }) === 0,
+    );
+    if (duplicates) {
+      throw new KimiError(
+        ErrorCodes.SESSION_STATE_INVALID,
+        `A team member named "${identity.name}" already exists.`,
+      );
+    }
+
+    const leader = await this.ensureAgentResumed(leaderAgentId);
+    const result = await this.createAgent(
+      { type: 'sub', generate: leader.rawGenerate },
+      {
+        kind: 'team',
+        teamIdentity: identity,
+        teamLeaderAgentId: leaderAgentId,
+        parentAgentId: leaderAgentId,
+        profile: defaultTeamProfile(),
+      },
+    );
+    result.agent.config.update({
+      cwd: leader.config.cwd,
+      modelAlias: leader.config.modelAlias,
+      thinkingEffort: leader.config.thinkingEffort,
+    });
+    result.agent.tools.inheritUserTools(leader.tools);
+    return result;
+  }
+
+  getAgentMetadata(id: string): AgentMeta | undefined {
+    return this.metadata.agents[id];
+  }
+
+  teamMemberMetadata(leaderAgentId: string): Array<readonly [string, AgentMeta]> {
+    return Object.entries(this.metadata.agents).filter(([, meta]) =>
+      meta.kind === 'team' && meta.teamLeaderAgentId === leaderAgentId,
+    );
+  }
+
+  async dismissTeamMembers(
+    leaderAgentId: string,
+    agentIds: readonly string[],
+    reason: string,
+    confirmActive: boolean,
+  ): Promise<void> {
+    this.assertTeamLead(leaderAgentId);
+    if (reason.trim().length === 0) {
+      throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'TeamDismiss requires a reason.');
+    }
+    const uniqueIds = [...new Set(agentIds)];
+    if (uniqueIds.length === 0 || uniqueIds.length !== agentIds.length) {
+      throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'Specify each team member once.');
+    }
+    const members = uniqueIds.map((id) => {
+      const meta = this.metadata.agents[id];
+      if (meta?.kind !== 'team' || meta.teamLeaderAgentId !== leaderAgentId) {
+        throw new KimiError(ErrorCodes.AGENT_NOT_FOUND, `Team member "${id}" was not found.`);
+      }
+      return [id, meta] as const;
+    });
+    // A dismissal owns the whole member branch. A direct member turn is not
+    // the only in-flight work: an assigned partner can have temporary
+    // SubAgent/background work below it. Treat that as active too so the
+    // required confirmation cannot silently orphan live work.
+    const descendantIds = this.descendantAgentIds(uniqueIds);
+    const branchIds = [...uniqueIds, ...descendantIds];
+    const active = branchIds.filter((id) => {
+      const agent = this.getReadyAgent(id);
+      return agent?.turn.hasActiveTurn === true || (agent?.background.list(true).length ?? 0) > 0;
+    });
+    if (active.length > 0 && !confirmActive) {
+      throw new KimiError(
+        ErrorCodes.SESSION_STATE_INVALID,
+        'One or more team members or their temporary subagents are working. Retry TeamDismiss with confirm_active=true.',
+      );
+    }
+
+    const cancellation = abortError(`Dismissed: ${reason.trim()}`);
+    for (const id of branchIds) {
+      const agent = this.getReadyAgent(id);
+      agent?.subagentHost?.cancelAll(cancellation);
+      agent?.turn.cancel(undefined, cancellation);
+      await agent?.background.stopAll(`Dismissed: ${reason.trim()}`);
+      this.agents.delete(id);
+      delete this.metadata.agents[id];
+    }
+    const dismissed = new Set(uniqueIds);
+    for (const [discussionAgentId, meta] of Object.entries(this.metadata.agents)) {
+      const discussion = meta.discussion;
+      if (discussion === undefined) continue;
+      const participantAgentIds = discussion.participantAgentIds.filter((id) => !dismissed.has(id));
+      if (participantAgentIds.length === discussion.participantAgentIds.length) continue;
+      this.metadata.agents[discussionAgentId] = {
+        ...meta,
+        discussion: {
+          ...discussion,
+          participantAgentIds,
+          status: participantAgentIds.length === 0 ? 'archived' : discussion.status,
+          updatedAt: new Date().toISOString(),
+        },
+      };
+    }
+    await this.writeMetadata();
+  }
+
+  /** Returns all live/persisted descendants below the supplied agent roots. */
+  private descendantAgentIds(rootIds: readonly string[]): string[] {
+    const roots = new Set(rootIds);
+    const descendants: string[] = [];
+    const queue = [...roots];
+    while (queue.length > 0) {
+      const parentAgentId = queue.shift()!;
+      for (const [agentId, meta] of Object.entries(this.metadata.agents)) {
+        if (meta.parentAgentId !== parentAgentId || roots.has(agentId)) continue;
+        roots.add(agentId);
+        descendants.push(agentId);
+        queue.push(agentId);
+      }
+    }
+    return descendants;
+  }
+
+  async assignTeamTasks(
+    leaderAgentId: string,
+    assignments: readonly TeamAssignment[],
+  ): Promise<Array<{ readonly agentId: string; readonly task: string | null; readonly agent: Agent }>> {
+    this.assertTeamLead(leaderAgentId);
+    const members = this.teamMemberMetadata(leaderAgentId);
+    if (members.length === 0) {
+      throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'Create a team before assigning work.');
+    }
+    const expected = new Set(members.map(([id]) => id));
+    const seen = new Set<string>();
+    for (const assignment of assignments) {
+      if (seen.has(assignment.agentId) || !expected.delete(assignment.agentId)) {
+        throw new KimiError(
+          ErrorCodes.SESSION_STATE_INVALID,
+          `TeamAssign contains an unknown or duplicate agent id "${assignment.agentId}".`,
+        );
+      }
+      if (assignment.task !== null && assignment.task.trim().length === 0) {
+        throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'Assigned tasks must not be blank.');
+      }
+    }
+    if (expected.size > 0) {
+      throw new KimiError(
+        ErrorCodes.SESSION_STATE_INVALID,
+        `TeamAssign must explicitly include every team member; missing: ${[...expected].join(', ')}.`,
+      );
+    }
+    if (assignments.every((assignment) => assignment.task === null)) {
+      throw new KimiError(
+        ErrorCodes.SESSION_STATE_INVALID,
+        'TeamAssign rejects an all-null assignment. Assign at least one concrete task.',
+      );
+    }
+
+    const resolved = await Promise.all(
+      assignments.map(async (assignment) => ({
+        ...assignment,
+        agent: await this.ensureAgentResumed(assignment.agentId),
+      })),
+    );
+    const busy = resolved.filter(({ agent }) => agent.turn.hasActiveTurn);
+    if (busy.length > 0) {
+      throw new KimiError(
+        ErrorCodes.SESSION_STATE_INVALID,
+        `Cannot assign work while team members are active: ${busy.map(({ agentId }) => agentId).join(', ')}.`,
+      );
+    }
+
+    const assignedAt = new Date().toISOString();
+    for (const assignment of resolved) {
+      const current = this.metadata.agents[assignment.agentId]!;
+      this.metadata.agents[assignment.agentId] = {
+        ...current,
+        assignedTask: assignment.task ?? undefined,
+        assignedAt: assignment.task === null ? undefined : assignedAt,
+      };
+      this.configureTeamAgentRuntime(assignment.agent, this.metadata.agents[assignment.agentId]!);
+    }
+    await this.writeMetadata();
+    const leader = await this.ensureAgentResumed(leaderAgentId);
+    if (leader.discussMode.isActive) leader.discussMode.exit();
+    return resolved;
+  }
+
+  /** Revoke every TeamAssign write lease. Used when re-entering Discuss or archiving. */
+  async lockTeamAssignments(leaderAgentId: string): Promise<void> {
+    this.assertTeamLead(leaderAgentId);
+    const members = this.teamMemberMetadata(leaderAgentId);
+    let changed = false;
+    for (const [agentId, current] of members) {
+      if (current.assignedTask === undefined && current.assignedAt === undefined) continue;
+      this.metadata.agents[agentId] = {
+        ...current,
+        assignedTask: undefined,
+        assignedAt: undefined,
+      };
+      const agent = this.getReadyAgent(agentId);
+      if (agent !== undefined) this.configureTeamAgentRuntime(agent, this.metadata.agents[agentId]!);
+      changed = true;
+    }
+    if (changed) await this.writeMetadata();
+  }
+
+  async assertTeamDiscussionMode(agentId: string): Promise<void> {
+    this.assertTeamLead(agentId);
+    const leader = await this.ensureAgentResumed(agentId);
+    if (!leader.discussMode.isActive) {
+      throw new KimiError(
+        ErrorCodes.SESSION_STATE_INVALID,
+        'EnterDiscussMode is required before starting or continuing a team discussion.',
+      );
+    }
+  }
+
+  async createTeamDiscussion(
+    leaderAgentId: string,
+    topic: string,
+    participantAgentIds: readonly string[],
+  ): Promise<{ readonly id: string; readonly agent: Agent; readonly discussion: TeamDiscussionMeta }> {
+    this.assertTeamLead(leaderAgentId);
+    if (topic.trim().length === 0) {
+      throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'A discussion topic is required.');
+    }
+    if (this.activeTeamDiscussion(leaderAgentId) !== undefined) {
+      throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'A team discussion is already active.');
+    }
+    const members = new Set(this.teamMemberMetadata(leaderAgentId).map(([id]) => id));
+    const participants = [...new Set(participantAgentIds)];
+    if (participants.length === 0 || participants.length !== participantAgentIds.length) {
+      throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'A discussion needs distinct team participants.');
+    }
+    if (participants.some((id) => !members.has(id))) {
+      throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'Discussion participants must belong to the team.');
+    }
+    const now = new Date().toISOString();
+    const discussion: TeamDiscussionMeta = {
+      participantAgentIds: participants,
+      status: 'active',
+      topic: topic.trim(),
+      startedAt: now,
+      updatedAt: now,
+      nextStatementId: 0,
+      readCursors: Object.fromEntries(participants.map((agentId) => [agentId, 0])),
+      statements: [],
+    };
+    const leader = await this.ensureAgentResumed(leaderAgentId);
+    return this.createAgent(
+      { type: 'sub', generate: leader.rawGenerate },
+      {
+        kind: 'sub',
+        parentAgentId: leaderAgentId,
+        teamLeaderAgentId: leaderAgentId,
+        name: 'Discussion',
+        title: discussion.topic,
+        profile: discussionProfile(defaultTeamProfile(), discussion),
+        discussion,
+      },
+    ).then((result) => ({ ...result, discussion }));
+  }
+
+  activeTeamDiscussion(leaderAgentId: string): readonly [string, AgentMeta] | undefined {
+    return Object.entries(this.metadata.agents).find(([, meta]) =>
+      meta.teamLeaderAgentId === leaderAgentId && meta.discussion?.status === 'active',
+    );
+  }
+
+  async updateTeamDiscussion(
+    discussionAgentId: string,
+    update: Pick<TeamDiscussionMeta, 'participantAgentIds' | 'status' | 'topic'>,
+  ): Promise<TeamDiscussionMeta> {
+    const meta = this.metadata.agents[discussionAgentId];
+    if (meta?.discussion === undefined) {
+      throw new KimiError(ErrorCodes.AGENT_NOT_FOUND, `Discussion "${discussionAgentId}" was not found.`);
+    }
+    const discussion: TeamDiscussionMeta = {
+      ...meta.discussion,
+      ...update,
+      participantAgentIds: [...update.participantAgentIds],
+      readCursors: {
+        ...meta.discussion.readCursors,
+        ...Object.fromEntries(
+          update.participantAgentIds
+            .filter((agentId) => meta.discussion!.readCursors?.[agentId] === undefined)
+            .map((agentId) => [agentId, 0]),
+        ),
+      },
+      updatedAt: new Date().toISOString(),
+    };
+    this.metadata.agents[discussionAgentId] = { ...meta, discussion };
+    await this.writeMetadata();
+    if (update.status === 'archived' && meta.teamLeaderAgentId !== undefined) {
+      const leader = await this.ensureAgentResumed(meta.teamLeaderAgentId);
+      if (leader.discussMode.isActive) leader.discussMode.exit();
+    }
+    return discussion;
+  }
+
+  async publishLeadDiscussionStatement(
+    leaderAgentId: string,
+    message: string,
+  ): Promise<{ readonly discussionAgentId: string; readonly entryId: number }> {
+    this.assertTeamLead(leaderAgentId);
+    const trimmed = message.trim();
+    if (trimmed.length === 0) {
+      throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'A lead discussion statement is required.');
+    }
+    const active = this.activeTeamDiscussion(leaderAgentId);
+    if (active === undefined) {
+      throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'There is no active team discussion.');
+    }
+    const [discussionAgentId, discussionMeta] = active;
+    const entryId = (discussionMeta.discussion!.nextStatementId ?? 0) + 1;
+    const record: TeamDiscussionStatementRecord = {
+      entryId,
+      agentId: leaderAgentId,
+      name: '主持',
+      message: trimmed,
+    };
+    const discussion: TeamDiscussionMeta = {
+      ...discussionMeta.discussion!,
+      nextStatementId: entryId,
+      statements: [...(discussionMeta.discussion!.statements ?? []), record],
+      updatedAt: new Date().toISOString(),
+    };
+    this.metadata.agents[discussionAgentId] = { ...discussionMeta, discussion };
+    const transcript = await this.ensureAgentResumed(discussionAgentId);
+    transcript.context.appendUserMessage(
+      [{ type: 'text', text: record.message }],
+      {
+        kind: 'system_trigger',
+        name: 'team_discussion_statement',
+        discussionEntryId: entryId,
+        speaker: { from: 'lead', speakerId: leaderAgentId, speakerName: '主代理' },
+      },
+    );
+    await this.writeMetadata();
+    return { discussionAgentId, entryId };
+  }
+
+  async publishTeamDiscussionStatement(
+    agentId: string,
+    message: string,
+  ): Promise<{ readonly discussionAgentId: string; readonly entryId: number }> {
+    const member = this.metadata.agents[agentId];
+    if (member?.kind !== 'team' || member.teamLeaderAgentId === undefined) {
+      throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'TeamSpeak is available only to a team member.');
+    }
+    const active = this.activeTeamDiscussion(member.teamLeaderAgentId);
+    if (active === undefined || !active[1].discussion!.participantAgentIds.includes(agentId)) {
+      throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'This team member is not in an active discussion.');
+    }
+    const [discussionAgentId, discussionMeta] = active;
+    if (this.activeTeamDiscussionTurns.get(discussionAgentId) !== agentId) {
+      throw new KimiError(
+        ErrorCodes.SESSION_STATE_INVALID,
+        'TeamSpeak is available only during this member\'s scheduled discussion turn.',
+      );
+    }
+    const existing = this.teamDiscussionSpeaks.get(discussionAgentId)?.get(agentId);
+    if (existing !== undefined) {
+      throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'Each participant may call TeamSpeak at most once per discussion turn.');
+    }
+
+    const entryId = (discussionMeta.discussion!.nextStatementId ?? 0) + 1;
+    const record: TeamDiscussionStatementRecord = {
+      entryId,
+      agentId,
+      name: member.name ?? '团队成员',
+      message: message.trim(),
+    };
+    const discussion: TeamDiscussionMeta = {
+      ...discussionMeta.discussion!,
+      nextStatementId: entryId,
+      statements: [...(discussionMeta.discussion!.statements ?? []), record],
+      updatedAt: new Date().toISOString(),
+    };
+    this.metadata.agents[discussionAgentId] = { ...discussionMeta, discussion };
+    const transcript = await this.ensureAgentResumed(discussionAgentId);
+    transcript.context.appendUserMessage(
+      [{ type: 'text', text: record.message }],
+      {
+        kind: 'system_trigger',
+        name: 'team_discussion_statement',
+        discussionEntryId: entryId,
+        speaker: { from: 'team', speakerId: agentId, speakerName: record.name },
+      },
+    );
+    const speaks = this.teamDiscussionSpeaks.get(discussionAgentId) ?? new Map<string, TeamDiscussionStatementRecord>();
+    speaks.set(agentId, record);
+    this.teamDiscussionSpeaks.set(discussionAgentId, speaks);
+    await this.writeMetadata();
+    return { discussionAgentId, entryId };
+  }
+
+  consumeTeamDiscussionSpeak(
+    discussionAgentId: string,
+    agentId: string,
+  ): TeamDiscussionStatementRecord | undefined {
+    const speaks = this.teamDiscussionSpeaks.get(discussionAgentId);
+    const statement = speaks?.get(agentId);
+    if (statement === undefined) return undefined;
+    speaks!.delete(agentId);
+    if (speaks!.size === 0) this.teamDiscussionSpeaks.delete(discussionAgentId);
+    return statement;
+  }
+
+  beginTeamDiscussionTurn(discussionAgentId: string, agentId: string): void {
+    const active = this.activeTeamDiscussionTurns.get(discussionAgentId);
+    if (active !== undefined) {
+      throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'A discussion participant is already speaking.');
+    }
+    this.teamDiscussionSpeaks.get(discussionAgentId)?.delete(agentId);
+    this.activeTeamDiscussionTurns.set(discussionAgentId, agentId);
+  }
+
+  endTeamDiscussionTurn(discussionAgentId: string, agentId: string): void {
+    if (this.activeTeamDiscussionTurns.get(discussionAgentId) === agentId) {
+      this.activeTeamDiscussionTurns.delete(discussionAgentId);
+    }
+  }
+
+  async unreadTeamDiscussionStatements(
+    discussionAgentId: string,
+    recipientAgentId: string,
+  ): Promise<{
+    readonly statements: readonly TeamDiscussionStatementRecord[];
+    readonly cursor: number;
+  }> {
+    const meta = this.metadata.agents[discussionAgentId];
+    if (meta?.discussion === undefined) {
+      throw new KimiError(ErrorCodes.AGENT_NOT_FOUND, `Discussion "${discussionAgentId}" was not found.`);
+    }
+    const discussion = meta.discussion;
+    const recipient = this.metadata.agents[recipientAgentId];
+    const sameTeam = recipient?.kind === 'team' && recipient.teamLeaderAgentId === meta.teamLeaderAgentId;
+    if (!discussion.participantAgentIds.includes(recipientAgentId) && !sameTeam) {
+      throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'Only discussion participants can read shared statements.');
+    }
+    const cursor = discussion.readCursors?.[recipientAgentId] ?? 0;
+    const statements = discussion.statements === undefined
+      ? await this.readLegacyTeamDiscussionStatements(discussionAgentId)
+      : [...discussion.statements];
+    const unread = statements.filter((statement) =>
+      statement.entryId > cursor && statement.agentId !== recipientAgentId,
+    );
+    unread.sort((left, right) => left.entryId - right.entryId);
+    // A read cursor is an acknowledgement of an actual prompt delivery, not
+    // a transcript watermark. A compacted or malformed record must remain
+    // unread instead of being silently skipped forever.
+    return { statements: unread, cursor: unread.at(-1)?.entryId ?? cursor };
+  }
+
+  /** Legacy discussions stored shared statements only in the live transcript. */
+  private async readLegacyTeamDiscussionStatements(
+    discussionAgentId: string,
+  ): Promise<TeamDiscussionStatementRecord[]> {
+    const transcript = await this.ensureAgentResumed(discussionAgentId);
+    const statements: TeamDiscussionStatementRecord[] = [];
+    for (const message of transcript.context.history) {
+      const origin = message.origin;
+      const entryId = origin?.kind === 'system_trigger' && origin.name === 'team_discussion_statement'
+        ? origin.discussionEntryId
+        : undefined;
+      if (message.role !== 'user' || entryId === undefined) continue;
+      const text = message.content
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('')
+        .trim();
+      if (text.length === 0) continue;
+      statements.push({
+        entryId,
+        agentId: origin?.speaker?.speakerId ?? 'unknown',
+        name: origin?.speaker?.speakerName ?? '团队成员',
+        message: text,
+      });
+    }
+    return statements;
+  }
+
+  async acknowledgeTeamDiscussionStatements(
+    discussionAgentId: string,
+    recipientAgentId: string,
+    cursor: number,
+  ): Promise<void> {
+    const meta = this.metadata.agents[discussionAgentId];
+    const discussion = meta?.discussion;
+    if (
+      meta === undefined ||
+      discussion === undefined
+    ) {
+      throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'Only discussion participants can acknowledge shared statements.');
+    }
+    const recipient = this.metadata.agents[recipientAgentId];
+    const sameTeam = recipient?.kind === 'team' && recipient.teamLeaderAgentId === meta.teamLeaderAgentId;
+    if (!discussion.participantAgentIds.includes(recipientAgentId) && !sameTeam) {
+      throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'Only discussion participants can acknowledge shared statements.');
+    }
+    const previous = discussion.readCursors?.[recipientAgentId] ?? 0;
+    if (cursor <= previous) return;
+    const nextCursor = Math.min(cursor, discussion.nextStatementId ?? 0);
+    this.metadata.agents[discussionAgentId] = {
+      ...meta,
+      discussion: {
+        ...discussion,
+        readCursors: { ...discussion.readCursors, [recipientAgentId]: nextCursor },
+        updatedAt: new Date().toISOString(),
+      },
+    };
+    await this.writeMetadata();
   }
 
   async ensureAgentResumed(id: string): Promise<Agent> {
@@ -613,6 +1252,7 @@ export class Session {
     await this.skillsReady;
     const mainAgent = this.requireMainAgent();
 
+    let spawnedAgentId: string | undefined;
     try {
       const handle = await mainAgent.subagentHost!.spawn({
         profileName: 'coder',
@@ -622,6 +1262,7 @@ export class Session {
         runInBackground: false,
         signal: new AbortController().signal,
       });
+      spawnedAgentId = handle.agentId;
       await handle.completion;
 
       const agentsMd = await loadAgentsMd(mainAgent.kaos, this.options.kimiHomeDir);
@@ -636,6 +1277,18 @@ export class Session {
         error instanceof Error ? error.message : 'Init failed',
         { cause: error },
       );
+    } finally {
+      // AGENTS.md generation is a one-shot internal task. Keep its result in
+      // the parent reminder, but never leave the temporary worker in the
+      // session agent tree after completion or failure.
+      if (spawnedAgentId !== undefined) {
+        await mainAgent.subagentHost!.discard(spawnedAgentId).catch((error) => {
+          log.warn('failed to discard AGENTS.md generator', {
+            agentId: spawnedAgentId,
+            error,
+          });
+        });
+      }
     }
   }
 
@@ -806,6 +1459,37 @@ export class Session {
     }
   }
 
+  /** Shared guard for every lead-only team-management operation. */
+  assertTeamLead(leaderAgentId: string): void {
+    if (leaderAgentId !== 'main' || this.metadata.agents['main'] === undefined) {
+      throw new KimiError(
+        ErrorCodes.SESSION_STATE_INVALID,
+        'Team management is available only to the main agent.',
+      );
+    }
+  }
+
+  private configureTeamAgentRuntime(agent: Agent, meta: AgentMeta): void {
+    agent.teamWriteLocked = true;
+    agent.teamWriteEnabled = meta.assignedTask !== undefined;
+    agent.permission.setToolsReadonly(true);
+    agent.permission.setMode(meta.assignedTask === undefined ? 'manual' : 'auto');
+    agent.tools.setActiveTools(
+      meta.assignedTask === undefined ? TEAM_READONLY_TOOLS : TEAM_ASSIGNED_TOOLS,
+    );
+  }
+
+  private enableTeamLeadTools(agent: Agent): void {
+    agent.tools.setActiveTools([
+      // Team controls supplement the lead profile. Replacing the active set
+      // would silently remove normal tools such as SubAgent and user tools.
+      // This must not depend on builtin registration: profiles are selected
+      // before a provider can initialize every builtin tool.
+      ...agent.tools.activeToolNames(),
+      ...TEAM_LEAD_TOOLS,
+    ]);
+  }
+
   private instantiateAgent(
     id: string,
     homedir: string,
@@ -831,7 +1515,13 @@ export class Session {
       homedir,
       skills: this.skills,
       rpc: proxyWithExtraPayload(this.rpc, { agentId: id }),
-      modelProvider: this.options.providerManager,
+      // Keep the established main-session cache key, while each concurrent
+      // sub-transcript gets a stable key of its own rather than evicting it.
+      modelProvider: this.options.id === undefined
+        ? this.options.providerManager
+        : this.options.providerManager?.withPromptCacheKey(
+          id === 'main' ? this.options.id : `${this.options.id}:${id}`,
+        ),
       hookEngine: config.hookEngine ?? this.hookEngine,
       subagentHost: config.subagentHost ?? new SessionSubagentHost(this, id),
       mcp: this.mcp,
@@ -844,8 +1534,6 @@ export class Session {
       additionalDirs: parentAgent?.getAdditionalDirs() ?? this.additionalDirs,
       coderWriteEnabled: parentAgent?.coderWriteEnabled ?? false,
       obsidianMemory: config.obsidianMemory ?? parentAgent?.obsidianMemory,
-      swarmManager: config.swarmManager ?? parentAgent?.swarmManager,
-      noriSwarmMaxDepth: config.noriSwarmMaxDepth ?? parentAgent?.noriSwarmMaxDepth,
       noriWorkflow: config.noriWorkflow ?? parentAgent?.noriWorkflow,
       systemPromptContextProvider: () =>
         prepareSystemPromptContext(
@@ -886,12 +1574,10 @@ export class Session {
 
   getNoriRuntimeSettings(): NoriRuntimeSettings {
     const raw = this.metadata.custom[NORI_RUNTIME_METADATA_KEY];
-    const fallbackMax = this.getReadyAgent('main')?.noriSwarmMaxDepth ?? 3;
     const fallbackReadonly = this.getReadyAgent('main')?.permission.toolsReadonly ?? true;
     return normalizeNoriRuntimeSettings(raw, {
       coderWriteEnabled: false,
       toolsReadonly: fallbackReadonly,
-      maxSwarmDepth: fallbackMax,
     });
   }
 
@@ -928,7 +1614,6 @@ export class Session {
         [NORI_RUNTIME_METADATA_KEY]: {
           coderWriteEnabled: agent.coderWriteEnabled,
           toolsReadonly: agent.permission.toolsReadonly,
-          maxSwarmDepth: agent.noriSwarmMaxDepth,
         },
       },
     };
@@ -946,7 +1631,6 @@ export class Session {
     settings: NoriRuntimeSettings,
   ): void {
     agent.coderWriteEnabled = settings.coderWriteEnabled;
-    agent.noriSwarmMaxDepth = settings.maxSwarmDepth;
     if (agent.type === 'main') {
       agent.permission.setToolsReadonly(settings.toolsReadonly);
     }
@@ -998,9 +1682,8 @@ export class Session {
         ? undefined
         : await this.resumeAgent(parentAgentId, [...stack, id]);
 
-    // Build agent config with nori providers for main agent, consistent with createMain
     let config: Partial<AgentOptions> = {};
-    let effective: { memory: NoriMemoryProvider; swarm: NoriSwarmProvider; maxSwarmDepth?: number; coderWriteEnabled?: boolean } | null = null;
+    let effective: { memory: NoriMemoryProvider; coderWriteEnabled?: boolean } | null = null;
     if (meta.type === 'main') {
       const cwd = this.toolKaos.getcwd();
       const noriConfig = loadNoriYamlConfig(cwd);
@@ -1023,8 +1706,6 @@ export class Session {
         config = {
           ...config,
           obsidianMemory: effective.memory,
-          swarmManager: effective.swarm,
-          noriSwarmMaxDepth: effective.maxSwarmDepth ?? 3,
           coderWriteEnabled: effective.coderWriteEnabled ?? false,
         };
       }
@@ -1034,12 +1715,9 @@ export class Session {
       const agent = this.instantiateAgent(id, meta.homedir, meta.type, config, parentAgentId);
       const result = await agent.resume();
       this.restoreAgentProfileHandle(agent, meta, parent?.agent);
+      if (meta.kind === 'team') this.configureTeamAgentRuntime(agent, meta);
+      if (meta.type === 'main') this.enableTeamLeadTools(agent);
       await this.refreshMainAgentProfileCapabilities(agent, meta, parent?.agent);
-
-      // Wire swarm provider to the resumed agent (lazy wiring), mirroring createMain
-      if (meta.type === 'main' && effective?.swarm && 'wireToAgent' in (effective.swarm as object)) {
-        (effective.swarm as unknown as { wireToAgent(a: Agent): void }).wireToAgent(agent);
-      }
 
       this.agents.set(id, agent);
       return { agent, warning: parent?.warning ?? result.warning };
@@ -1087,10 +1765,13 @@ export class Session {
     if (profileName === undefined) return undefined;
     if (meta.type === 'sub') {
       const parentProfileName = parentAgent?.config.profileName;
-      return (
+      const profile = (
         DEFAULT_AGENT_PROFILES[parentProfileName ?? 'agent']?.subagents?.[profileName] ??
         DEFAULT_AGENT_PROFILES['agent']?.subagents?.[profileName]
       );
+      if (meta.kind === 'team') return teamProfile(profile ?? defaultTeamProfile(), teamIdentityFromMeta(meta));
+      if (meta.discussion !== undefined) return discussionProfile(profile ?? defaultTeamProfile(), meta.discussion);
+      return profile;
     }
     return DEFAULT_AGENT_PROFILES[profileName];
   }
@@ -1129,6 +1810,111 @@ export class Session {
 
 export * from './subagent-host';
 
+const TEAM_LEAD_TOOLS = [
+  'TeamCreate',
+  'TeamDismiss',
+  'TeamAssign',
+  'TeamBroadcast',
+  'TeamDM',
+  'TeamDiscussInvite',
+  'TeamDiscussKick',
+  'TeamDecide',
+] as const;
+
+const TEAM_READONLY_TOOLS = [
+  'Read',
+  'Grep',
+  'Glob',
+  'ReadMediaFile',
+  'WebSearch',
+  'FetchURL',
+  'TeamSpeak',
+  'TeamDM',
+] as const;
+
+const TEAM_ASSIGNED_TOOLS = [
+  ...TEAM_READONLY_TOOLS,
+  'Write',
+  'Edit',
+  'Bash',
+  'SubAgent',
+] as const;
+
+function validateTeamIdentity(identity: TeamIdentity | undefined): asserts identity is TeamIdentity {
+  if (identity === undefined) {
+    throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'A team identity is required.');
+  }
+  for (const [field, value] of Object.entries(identity)) {
+    if (value.trim().length === 0) {
+      throw new KimiError(
+        ErrorCodes.SESSION_STATE_INVALID,
+        `Team identity field "${field}" must not be blank.`,
+      );
+    }
+  }
+}
+
+function teamIdentityFromMeta(meta: AgentMeta): TeamIdentity {
+  return {
+    name: meta.name ?? 'Team member',
+    title: meta.title ?? 'Team partner',
+    intro: meta.intro ?? '',
+    mandate: meta.mandate ?? '',
+    role: meta.role ?? '',
+  };
+}
+
+function defaultTeamProfile(): ResolvedAgentProfile {
+  const profile = DEFAULT_AGENT_PROFILES['nori-agent'] ?? DEFAULT_AGENT_PROFILES['agent'];
+  if (profile === undefined) {
+    throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'The default team agent profile is unavailable.');
+  }
+  return profile;
+}
+
+function teamProfile(
+  profile: ResolvedAgentProfile,
+  identity: TeamIdentity,
+): ResolvedAgentProfile {
+  return {
+    ...profile,
+    systemPrompt: (context) => [
+      '<team_identity>',
+      `Name: ${escapeTeamIdentity(identity.name)}`,
+      `Title: ${escapeTeamIdentity(identity.title)}`,
+      `Introduction: ${escapeTeamIdentity(identity.intro)}`,
+      `Mandate: ${escapeTeamIdentity(identity.mandate)}`,
+      `Role: ${escapeTeamIdentity(identity.role)}`,
+      'You are a durable team partner in the current parent session. Keep this identity across every turn. During a discussion, publish only a concise final position with TeamSpeak when scheduled. Not calling TeamSpeak records the turn as skipped (abstention).',
+      '</team_identity>',
+      profile.systemPrompt(context),
+    ].join('\n'),
+  };
+}
+
+function discussionProfile(
+  profile: ResolvedAgentProfile,
+  discussion: TeamDiscussionMeta,
+): ResolvedAgentProfile {
+  return {
+    ...profile,
+    systemPrompt: (context) => [
+      profile.systemPrompt(context),
+      '<team_discussion_transcript>',
+      `Topic: ${escapeTeamIdentity(discussion.topic)}`,
+      'This is the durable shared transcript for a team discussion. Preserve actual participant statements. Do not fabricate statements for participants who did not call TeamSpeak.',
+      '</team_discussion_transcript>',
+    ].join('\n'),
+  };
+}
+
+function escapeTeamIdentity(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+}
+
 const MAIN_PROFILE_REQUIRED_TOOLS = ['Read', 'Grep', 'Glob', 'Bash', 'Write', 'Edit'] as const;
 
 function mainProfileNeedsCapabilityRefresh(agent: Agent): boolean {
@@ -1160,13 +1946,7 @@ function normalizeNoriRuntimeSettings(
     typeof input['toolsReadonly'] === 'boolean'
       ? input['toolsReadonly']
       : fallback.toolsReadonly;
-  const maxSwarmDepth =
-    typeof input['maxSwarmDepth'] === 'number' &&
-    Number.isInteger(input['maxSwarmDepth']) &&
-    input['maxSwarmDepth'] >= 1
-      ? input['maxSwarmDepth']
-      : fallback.maxSwarmDepth;
-  return { coderWriteEnabled, toolsReadonly, maxSwarmDepth };
+  return { coderWriteEnabled, toolsReadonly };
 }
 
 function normalizeNoriRuleDefinitions(raw: unknown): RuleConfig[] {

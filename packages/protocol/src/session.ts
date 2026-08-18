@@ -66,9 +66,8 @@ export const sessionAgentConfigSchema = z.object({
   mcp_servers: z.array(z.string()).optional(),
   thinking: promptThinkingSchema.optional(),
   permission_mode: promptPermissionModeSchema.optional(),
-  plan_mode: z.boolean().optional(),
+  discuss_mode: z.boolean().optional(),
   main_write_enabled: z.boolean().optional(),
-  swarm_mode: z.boolean().optional(),
   goal_objective: z.string().optional(),
   goal_control: z.enum(['pause', 'resume', 'cancel']).optional(),
 });

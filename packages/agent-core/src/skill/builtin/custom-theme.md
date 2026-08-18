@@ -70,7 +70,7 @@ Only set tokens from this set — unknown keys are silently ignored at load. If 
 | `border` | Pane and editor borders, Markdown horizontal rule |
 | `borderFocus` | Focus / attention border (currently only the approval panel) |
 | `success` | Success state: `✓`, "enabled", completed |
-| `warning` | Warning state: auto/yolo badges, stale markers, plan-mode hint |
+| `warning` | Warning state: auto/yolo badges, stale markers, Discuss hint |
 | `error` | Error state: error messages, failed tool output |
 | `diffAdded` | Diff added lines |
 | `diffRemoved` | Diff removed lines |

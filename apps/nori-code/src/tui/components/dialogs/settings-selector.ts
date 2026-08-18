@@ -9,7 +9,6 @@ export type SettingsSelection =
   | 'upgrade'
   | 'usage'
   | 'coder-write'
-  | 'swarm-depth'
   | 'note-rules'
   | 'read-only'
   | 'workflow';
@@ -56,11 +55,6 @@ const SETTINGS_OPTIONS: readonly ChoiceOption[] = [
     description: 'Allow nori-coder agents to write code directly.',
   },
   {
-    value: 'swarm-depth',
-    label: 'Swarm Depth',
-    description: 'Set max recursive depth for AgentSwarm.',
-  },
-  {
     value: 'note-rules',
     label: 'Note Rules',
     description: 'Require analysis/decision notes before proceeding.',
@@ -87,7 +81,6 @@ function isSettingsSelection(value: string): value is SettingsSelection {
     value === 'upgrade' ||
     value === 'usage' ||
     value === 'coder-write' ||
-    value === 'swarm-depth' ||
     value === 'note-rules' ||
     value === 'read-only' ||
     value === 'workflow'

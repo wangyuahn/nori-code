@@ -28,7 +28,6 @@ export interface RuleConfig {
 }
 
 export interface RulesConfig {
-  preSwarmDocRequired: boolean;
   requireAnalysisNote: boolean;
   requireDecisionNote: boolean;
   requirePatternNote: boolean;

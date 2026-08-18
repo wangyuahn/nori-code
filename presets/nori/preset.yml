@@ -1,0 +1,2 @@
+name: Nori Harness
+description: DeepSeek Harness 组合：nori 记忆 vault + loop 规则/相位机 prompt 编排 + SubAgent 子代理体系，带右侧 agent 面板。基于 shipped `code` 预设复制增改。

@@ -8,6 +8,7 @@
  *   POST    /v1/sessions/{id}:btw         -                     data: StartBtwSession
  *   GET     /v1/sessions/{id}/children    query: ListSessions   data: Page<Session>
  *   POST    /v1/sessions/{id}/children    body: SessionChild    data: Session
+ *   GET     /v1/sessions/{id}/agents      -                     data: SessionAgentTree
  *   GET     /v1/sessions/{id}/status      -                     data: SessionStatus
  *   POST    /v1/sessions/{id}:compact     body: CompactSession  data: {}
  *   POST    /v1/sessions/{id}:undo        body: UndoSession     data: UndoSession
@@ -58,7 +59,15 @@ export type GetSessionResponse = z.infer<typeof getSessionResponseSchema>;
 export const getSessionProfileResponseSchema = sessionSchema;
 export type GetSessionProfileResponse = z.infer<typeof getSessionProfileResponseSchema>;
 
-export const updateSessionProfileRequestSchema = sessionUpdateSchema;
+export const sessionAgentIdSchema = z.string().min(1);
+
+/**
+ * Runtime controls may target a transcript inside the parent session. The
+ * target is transport-only; it is never persisted in session metadata.
+ */
+export const updateSessionProfileRequestSchema = sessionUpdateSchema.extend({
+  agent_id: sessionAgentIdSchema.optional(),
+});
 export type UpdateSessionProfileRequest = z.infer<typeof updateSessionProfileRequestSchema>;
 
 export const updateSessionProfileResponseSchema = sessionSchema;
@@ -70,7 +79,7 @@ export type UpdateSessionMetaRequest = UpdateSessionProfileRequest;
 export const updateSessionMetaResponseSchema = updateSessionProfileResponseSchema;
 export type UpdateSessionMetaResponse = UpdateSessionProfileResponse;
 
-export const updateSessionRequestSchema = sessionUpdateSchema;
+export const updateSessionRequestSchema = updateSessionProfileRequestSchema;
 export type UpdateSessionRequest = z.infer<typeof updateSessionRequestSchema>;
 
 export const updateSessionResponseSchema = sessionSchema;
@@ -106,6 +115,11 @@ export type CreateSessionChildRequest = z.infer<typeof createSessionChildRequest
 export const createSessionChildResponseSchema = sessionSchema;
 export type CreateSessionChildResponse = z.infer<typeof createSessionChildResponseSchema>;
 
+export const sessionAgentQuerySchema = z.object({
+  agent_id: sessionAgentIdSchema.optional(),
+});
+export type SessionAgentQuery = z.infer<typeof sessionAgentQuerySchema>;
+
 const realtimeTokenUsageSchema = z.object({
   input_other: z.number().int().nonnegative(),
   output: z.number().int().nonnegative(),
@@ -113,14 +127,50 @@ const realtimeTokenUsageSchema = z.object({
   input_cache_creation: z.number().int().nonnegative(),
 });
 
+export const sessionAgentTreeNodeSchema = z.object({
+  id: sessionAgentIdSchema,
+  kind: z.enum(['main', 'team', 'sub', 'discussion', 'independent']),
+  parent_agent_id: sessionAgentIdSchema.nullable(),
+  name: z.string().min(1),
+  title: z.string().min(1).optional(),
+  intro: z.string().min(1).optional(),
+  summary: z.string().min(1).optional(),
+  subagent_item: z.string().min(1).optional(),
+  status: sessionStatusSchema,
+  usage: realtimeTokenUsageSchema.optional(),
+  last_active: z.string().datetime(),
+  archived: z.boolean(),
+});
+export type SessionAgentTreeNode = z.infer<typeof sessionAgentTreeNodeSchema>;
+
+export const sessionAgentTreeResponseSchema = z.object({
+  agents: z.array(sessionAgentTreeNodeSchema),
+});
+export type SessionAgentTreeResponse = z.infer<typeof sessionAgentTreeResponseSchema>;
+
+/** Lightweight cross-session activity used by global UI indicators. */
+export const sessionActivityItemSchema = z.object({
+  session_id: z.string().min(1),
+  agent_id: sessionAgentIdSchema,
+  kind: z.enum(['agent', 'background']).default('agent'),
+  task_id: z.string().optional(),
+  status: sessionStatusSchema,
+  last_active: z.string().datetime().optional(),
+});
+export type SessionActivityItem = z.infer<typeof sessionActivityItemSchema>;
+
+export const sessionActivityResponseSchema = z.object({
+  items: z.array(sessionActivityItemSchema),
+});
+export type SessionActivityResponse = z.infer<typeof sessionActivityResponseSchema>;
+
 export const sessionStatusResponseSchema = z.object({
   status: sessionStatusSchema,
   model: z.string().optional(),
   thinking_level: z.string(),
   permission: z.string(),
-  plan_mode: z.boolean(),
+  discuss_mode: z.boolean(),
   main_write_enabled: z.boolean(),
-  swarm_mode: z.boolean(),
   goal: goalSnapshotSchema.nullable(),
   context_tokens: z.number().int().nonnegative(),
   max_context_tokens: z.number().int().nonnegative(),
@@ -149,6 +199,7 @@ export const compactSessionRequestSchema = z.preprocess(
   (value) => value === undefined ? {} : value,
   z.object({
     instruction: z.string().optional(),
+    agent_id: sessionAgentIdSchema.optional(),
   }),
 );
 export type CompactSessionRequest = z.infer<typeof compactSessionRequestSchema>;
@@ -161,6 +212,7 @@ export const undoSessionRequestSchema = z.preprocess(
   z.object({
     count: z.number().int().positive().default(1),
     page_size: z.number().int().min(1).max(100).optional(),
+    agent_id: sessionAgentIdSchema.optional(),
   }),
 );
 export type UndoSessionRequest = z.infer<typeof undoSessionRequestSchema>;

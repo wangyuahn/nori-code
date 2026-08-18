@@ -4,9 +4,9 @@
  * Walks the user through 6 sequential steps:
  *   1. Permission mode (yolo / auto / manual)
  *   2. Model selection
- *   3. Swarm depth
+ *   3. SubAgent depth
  *   4. Coder write permission
- *   5. Plan mode
+ *   5. Discuss
  *   6. Notification toggle
  *
  * Each step shows a title, description, and a list of choices. Enter
@@ -33,9 +33,8 @@ import type { AppState } from '../../types';
 export interface WizardAnswers {
   permission: PermissionMode;
   model: string;
-  swarmDepth: number;
   coderWrite: boolean;
-  planMode: boolean;
+  discussMode: boolean;
   notifications: boolean;
 }
 
@@ -81,20 +80,12 @@ const PERMISSION_OPTIONS: StepOption[] = [
   },
 ];
 
-const SWARM_DEPTH_OPTIONS: StepOption[] = [
-  { value: '1', label: '1', description: 'No nesting — sub-agents cannot spawn their own sub-agents. Safest, fastest.' },
-  { value: '2', label: '2', description: 'One level of nesting. Sub-agents can delegate one level deeper. Good balance.' },
-  { value: '3', label: '3', description: 'Two levels of nesting. Suitable for complex multi-file refactors.' },
-  { value: '4', label: '4', description: 'Three levels of nesting. For deeply layered tasks.' },
-  { value: '5', label: '5', description: 'Maximum depth. Full recursive delegation. Use for the most complex projects.' },
-];
-
 const ON_OFF_OPTIONS: StepOption[] = [
   { value: 'on', label: 'On', description: 'Enabled.' },
   { value: 'off', label: 'Off', description: 'Disabled.' },
 ];
 
-const TOTAL_STEPS = 6;
+const TOTAL_STEPS = 5;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -173,38 +164,26 @@ export class SettingAutoWizardComponent extends Container implements Focusable {
         currentValue: appState.model || '',
       },
       {
-        key: 'swarmDepth',
-        title: 'Swarm Depth',
-        description:
-          'How many levels of recursive sub-agent nesting are allowed?\n\n' +
-          '• Depth 1 — No nesting. Sub-agents cannot spawn more sub-agents.\n' +
-          '• Depth 2–3 — Good for typical multi-file work.\n' +
-          '• Depth 4–5 — For very complex, deeply-layered projects.\n\n' +
-          'Recommended: 2 for most use cases.',
-        options: SWARM_DEPTH_OPTIONS,
-        currentValue: String(appState.maxSwarmDepth),
-      },
-      {
         key: 'coderWrite',
         title: 'Coder Write Permission',
         description:
           'Can the nori-coder sub-agent directly write files and run commands?\n\n' +
           '• On  — Coder can use Write/Edit/Bash directly. Faster, less back-and-forth.\n' +
-          '• Off — Coder is read-only and must delegate writes via swarm.\n\n' +
+          '• Off — Coder is read-only and must delegate writes via SubAgent.\n\n' +
           'Recommended: On for most projects.',
         options: ON_OFF_OPTIONS,
         currentValue: appState.coderWriteEnabled ? 'on' : 'off',
       },
       {
-        key: 'planMode',
-        title: 'Plan Mode',
+        key: 'discussMode',
+        title: 'Discuss',
         description:
-          'Should Nori create a structured plan before implementing changes?\n\n' +
-          '• On  — Nori writes a plan file first, then implements. Better for complex tasks.\n' +
-          '• Off — Nori acts directly without pre-planning. Faster for simple tasks.\n\n' +
+          'Should new sessions start in Discuss?\n\n' +
+          '• On  — Nori starts in a read-only team meeting (TeamCreate / TeamDecide), then TeamAssign enters Code.\n' +
+          '• Off — Nori starts in Code. Faster for simple tasks.\n\n' +
           'Recommended: On for multi-step work, Off for quick fixes.',
         options: ON_OFF_OPTIONS,
-        currentValue: appState.planMode ? 'on' : 'off',
+        currentValue: appState.discussMode ? 'on' : 'off',
       },
       {
         key: 'notifications',
@@ -213,7 +192,7 @@ export class SettingAutoWizardComponent extends Container implements Focusable {
           'Should Nori send desktop notifications when tasks complete?\n\n' +
           '• On  — Get notified when long-running tasks finish.\n' +
           '• Off — No notifications. Check manually.\n\n' +
-          'Recommended: On, especially for longer swarms.',
+          'Recommended: On, especially for longer SubAgent runs.',
         options: ON_OFF_OPTIONS,
         currentValue: appState.notifications.enabled ? 'on' : 'off',
       },
@@ -278,14 +257,11 @@ export class SettingAutoWizardComponent extends Container implements Focusable {
       case 'model':
         this.answers.model = value;
         break;
-      case 'swarmDepth':
-        this.answers.swarmDepth = Number(value);
-        break;
       case 'coderWrite':
         this.answers.coderWrite = value === 'on';
         break;
-      case 'planMode':
-        this.answers.planMode = value === 'on';
+      case 'discussMode':
+        this.answers.discussMode = value === 'on';
         break;
       case 'notifications':
         this.answers.notifications = value === 'on';

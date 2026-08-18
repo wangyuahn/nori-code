@@ -18,7 +18,7 @@ Kimi Code CLI 有三个地方可以影响运行参数：配置文件、命令行
 
 ## 普通运行参数的优先级
 
-对模型别名、Plan 模式、yolo 模式、Skills 目录等普通运行参数，优先级从高到低：
+对模型别名、Discuss 模式、yolo 模式、Skills 目录等普通运行参数，优先级从高到低：
 
 1. **命令行选项**（`-m`、`--plan`、`--yolo` 等）：仅对本次启动生效
 2. **用户配置文件**（`~/.kimi-code/config.toml`）：保存长期偏好
@@ -56,7 +56,7 @@ Kimi Code CLI 有三个地方可以影响运行参数：配置文件、命令行
 | `-S, --session [id]` | 恢复指定会话；不带 id 时进入交互式选择 |
 | `-c, --continue` | 续上当前目录的上一次会话 |
 | `-y, --yolo` | 自动批准所有工具调用 |
-| `--plan` | 以 Plan 模式启动 |
+| `--plan` | 以 Discuss 启动（flag 为兼容性保留） |
 | `-m, --model <model>` | 指定本次使用的模型别名 |
 | `-p, --prompt <prompt>` | 非交互模式：执行单条提示词后退出 |
 | `--output-format <format>` | `-p` 模式的输出格式：`text` 或 `stream-json` |
@@ -94,10 +94,10 @@ KIMI_API_KEY = "sk-test"
 kimi --yolo -p "批量重命名以下文件..."
 ```
 
-**临时进入 Plan 模式**（若想永久生效，在配置文件设 `default_plan_mode = true`）：
+**临时进入 Discuss**：
 
 ```sh
-kimi --plan
+kimi --discuss
 ```
 
 ## 下一步

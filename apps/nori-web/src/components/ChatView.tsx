@@ -14,9 +14,12 @@ import { QuestionPanel } from './QuestionPanel';
 import { SkillPicker } from './SkillPicker';
 import { UsageOverview } from './UsageOverview';
 import { detectImageMime, isLikelyImageFile } from '../utils/image-mime';
+import { toolCallDetailFields } from '../utils/tool-call-detail';
+import { editLineOperationStats } from '../utils/edit-line-ops';
 
 export interface ChatViewProps {
   session: Session | null;
+  agentId?: string;
   allSessions?: Session[];
   messages: ChatMessage[];
   messagesLoading?: boolean;
@@ -37,7 +40,7 @@ export interface ChatViewProps {
   onModelChange: (model: string) => void | Promise<void>;
   onThinkingChange: (effort: string) => void | Promise<void>;
   onPermissionChange: (mode: 'auto' | 'yolo' | 'manual') => void | Promise<void>;
-  onTaskModeChange: (mode: 'plan' | 'code') => void | Promise<void>;
+  onTaskModeChange: (mode: 'discuss' | 'code') => void | Promise<void>;
   onRunSlashCommand: (command: ChatSlashCommandName, args: string, options?: PromptExecutionOptions) => boolean | void | Promise<boolean | void>;
   onMainWriteChange: (enabled: boolean) => void | Promise<void>;
   onGoalControl?: (action: 'pause' | 'resume' | 'cancel') => void | Promise<void>;
@@ -161,7 +164,7 @@ function ComposerSettingPicker({ id, label, ariaLabel, value, choices, open, dis
 }
 
 export function ChatView(props: ChatViewProps) {
-  const { session, allSessions = [], messages, messagesLoading = false, streaming, thinking, workBlocks = [], isStreaming, sessionStatus, compacting = false, models, modelsLoading, modelError, onSendMessage, onAbort, onRefreshModels, onModelChange, onThinkingChange, onPermissionChange, onTaskModeChange, onRunSlashCommand, onMainWriteChange, pendingApprovals = [], onResolveApproval, pendingQuestions = [], onResolveQuestion, onDismissQuestion, queuedPrompts = [], onCancelQueuedPrompt, draftAgentConfig, rewindLimit = 10, onRewind } = props;
+  const { session, agentId = 'main', allSessions = [], messages, messagesLoading = false, streaming, thinking, workBlocks = [], isStreaming, sessionStatus, compacting = false, models, modelsLoading, modelError, onSendMessage, onAbort, onRefreshModels, onModelChange, onThinkingChange, onPermissionChange, onTaskModeChange, onRunSlashCommand, onMainWriteChange, pendingApprovals = [], onResolveApproval, pendingQuestions = [], onResolveQuestion, onDismissQuestion, queuedPrompts = [], onCancelQueuedPrompt, draftAgentConfig, rewindLimit = 10, onRewind } = props;
   const { tr } = useI18n();
   const browserPermissions = useBrowserPermissions();
   const [input, setInput] = useState('');
@@ -183,7 +186,7 @@ export function ChatView(props: ChatViewProps) {
   const [followOutput, setFollowOutput] = useState(true);
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [hoveredTurnId, setHoveredTurnId] = useState<string | null>(null);
-  const [taskModeOverride, setTaskModeOverride] = useState<'plan' | 'code' | null>(null);
+  const [taskModeOverride, setTaskModeOverride] = useState<'discuss' | 'code' | null>(null);
   const [modelOverride, setModelOverride] = useState<string | null>(null);
   const [mainWriteOverride, setMainWriteOverride] = useState<boolean | null>(null);
   const [permissionMenuOpen, setPermissionMenuOpen] = useState(false);
@@ -200,13 +203,15 @@ export function ChatView(props: ChatViewProps) {
   const rewindCaretRef = useRef<number | null>(null);
   const rewindSessionIdRef = useRef<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const previousScopeRef = useRef<string | null>(null);
   const permissionMenuRef = useRef<HTMLDivElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const currentSessionId = session?.id ?? null;
-  rewindSessionIdRef.current = currentSessionId;
-  const activeModelOverride = modelOverrideSessionRef.current === currentSessionId ? modelOverride : null;
-  const activeTaskModeOverride = taskModeOverrideSessionRef.current === currentSessionId ? taskModeOverride : null;
-  const activeMainWriteOverride = mainWriteOverrideSessionRef.current === currentSessionId ? mainWriteOverride : null;
+  const currentScope = currentSessionId === null ? null : `${currentSessionId}\u0000${agentId}`;
+  rewindSessionIdRef.current = currentScope;
+  const activeModelOverride = modelOverrideSessionRef.current === currentScope ? modelOverride : null;
+  const activeTaskModeOverride = taskModeOverrideSessionRef.current === currentScope ? taskModeOverride : null;
+  const activeMainWriteOverride = mainWriteOverrideSessionRef.current === currentScope ? mainWriteOverride : null;
   const runtimeModelValue = sessionStatus?.model?.trim();
   const runtimeModelId = runtimeModelValue === '' ? undefined : runtimeModelValue;
   const selectedModelId = activeModelOverride ?? runtimeModelId ?? session?.agent_config?.model ?? draftAgentConfig?.model ?? '';
@@ -214,7 +219,7 @@ export function ChatView(props: ChatViewProps) {
   const thinkingOptions = modelThinkingOptions(selectedModel);
   const requestedThinking = session?.agent_config?.thinking ?? draftAgentConfig?.thinking ?? thinkingOptions.defaultValue;
   const selectedPermission = session?.agent_config?.permission_mode ?? draftAgentConfig?.permission_mode ?? 'manual';
-  const persistedTaskMode = (sessionStatus?.plan_mode ?? session?.agent_config?.plan_mode ?? draftAgentConfig?.plan_mode) ? 'plan' : 'code';
+  const persistedTaskMode = (sessionStatus?.discuss_mode ?? session?.agent_config?.discuss_mode ?? draftAgentConfig?.discuss_mode) ? 'discuss' : 'code';
   const selectedTaskMode = activeTaskModeOverride ?? persistedTaskMode;
   const persistedMainWrite = sessionStatus?.main_write_enabled ?? session?.agent_config?.main_write_enabled ?? draftAgentConfig?.main_write_enabled ?? false;
   const selectedMainWrite = activeMainWriteOverride ?? persistedMainWrite;
@@ -239,6 +244,8 @@ export function ChatView(props: ChatViewProps) {
   const commandSuggestions = chatSlashCommandSuggestions(input);
   const commandMenuOpen = !commandMenuDismissed && commandSuggestions.length > 0;
   const imageCapable = modelSupportsImageInput(selectedModel);
+  const imageCapableRef = useRef(imageCapable);
+  imageCapableRef.current = imageCapable;
   const streamingContinuesAssistant = messages.at(-1)?.role === 'assistant';
   const standaloneLiveProgressId = streaming.trim() ? 'standalone-live-progress' : undefined;
   const standaloneLiveBlocks: WorkBlock[] = [
@@ -342,17 +349,25 @@ export function ChatView(props: ChatViewProps) {
   }, []);
 
   useLayoutEffect(() => {
-    if (!followOutputRef.current) return;
     const scrollContainer = messagesScrollRef.current;
-    if (scrollContainer) scrollContainer.scrollTop = scrollContainer.scrollHeight;
+    if (!scrollContainer) return;
+    // The welcome screen can be taller than the transcript viewport. It has no
+    // turn to follow, so bottom-scrolling would hide its heading above the fold.
+    if (messages.length === 0 && !isStreaming) {
+      scrollContainer.scrollTop = 0;
+      setActiveTurnId(current => current === null ? current : null);
+      return;
+    }
+    if (!followOutputRef.current) return;
+    scrollContainer.scrollTop = scrollContainer.scrollHeight;
     setActiveTurnId(current => current === latestTurnId ? current : latestTurnId);
-  }, [latestTurnId, messages, streaming, thinking, workBlocks]);
+  }, [isStreaming, latestTurnId, messages, streaming, thinking, workBlocks]);
   useLayoutEffect(() => {
     followOutputRef.current = true;
     setFollowOutput(true);
     setHoveredTurnId(null);
     setActiveTurnId(latestTurnId);
-  }, [session?.id]);
+  }, [currentScope]);
   const resizeComposer = useCallback(() => {
     const element = inputRef.current;
     if (!element) return;
@@ -425,15 +440,15 @@ export function ChatView(props: ChatViewProps) {
       if (frame !== 0) cancelAnimationFrame(frame);
     };
   }, [composerRevision, restoreRewindFocus]);
-  useEffect(() => { setModelNotice(false); }, [selectedModelId, session?.id]);
-  useEffect(() => { setTaskModeOverride(null); }, [session?.id]);
-  useEffect(() => { setModelOverride(null); }, [session?.id]);
-  useEffect(() => { setMainWriteOverride(null); }, [session?.id]);
+  useEffect(() => { setModelNotice(false); }, [currentScope, selectedModelId]);
+  useEffect(() => { setTaskModeOverride(null); }, [currentScope]);
+  useEffect(() => { setModelOverride(null); }, [currentScope]);
+  useEffect(() => { setMainWriteOverride(null); }, [currentScope]);
   useEffect(() => {
     setRewindRequest(null);
     setRewinding(false);
     setRewindError(null);
-  }, [session?.id]);
+  }, [currentScope]);
   useEffect(() => {
     if (rewindRequest === null) return;
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
@@ -446,7 +461,7 @@ export function ChatView(props: ChatViewProps) {
     setPermissionMenuOpen(false);
     setModelMenuOpen(false);
     setModelSettingOpen(null);
-  }, [session?.id]);
+  }, [currentScope]);
   useEffect(() => {
     if (activeTaskModeOverride === persistedTaskMode) setTaskModeOverride(null);
   }, [activeTaskModeOverride, persistedTaskMode]);
@@ -478,13 +493,16 @@ export function ChatView(props: ChatViewProps) {
     return () => window.removeEventListener(BROWSER_REFERENCE_EVENT, reference);
   }, []);
   useEffect(() => {
+    const previousScope = previousScopeRef.current;
+    previousScopeRef.current = currentScope;
     setAttachments([]);
     setAttachmentsLoading(false);
     setAttachmentError(null);
     setCommandNotice(null);
     setCommandMenuDismissed(false);
     setCommandSelection(0);
-  }, [session?.id]);
+    if (!previousScope && currentScope) setInput('');
+  }, [currentScope]);
   const addFiles = useCallback(async (files: FileList | File[]) => {
     const available = Math.max(0, 6 - attachments.length);
     const selected = Array.from(files).slice(0, available);
@@ -504,8 +522,17 @@ export function ChatView(props: ChatViewProps) {
         : uploadFileAttachment(file)));
       const loaded = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
       const failed = results.filter(result => result.status === 'rejected');
-      if (loaded.length > 0) setAttachments(previous => [...previous, ...loaded].slice(0, 6));
-      if (failed.length > 0 && (imageCapable || imageCandidates.length === 0)) {
+      const stillImageCapable = imageCapableRef.current;
+      const accepted = stillImageCapable
+        ? loaded
+        : loaded.filter(item => item.attachment.kind !== 'image');
+      if (accepted.length > 0) setAttachments(previous => [...previous, ...accepted].slice(0, 6));
+      if (!stillImageCapable && loaded.some(item => item.attachment.kind === 'image')) {
+        setAttachmentError(tr(
+          'That model does not support image input. Attached images were removed.',
+          '该模型不支持图片输入，已移除附加的图片。',
+        ));
+      } else if (failed.length > 0 && (stillImageCapable || imageCandidates.length === 0)) {
         setAttachmentError(tr(
           `${failed.length} file${failed.length === 1 ? '' : 's'} could not be attached.`,
           `${failed.length} 个文件添加失败。`,
@@ -545,9 +572,6 @@ export function ChatView(props: ChatViewProps) {
         setInput('');
         setAttachments([]);
         setAttachmentError(null);
-        for (const item of attachments) {
-          if (item.attachment.kind === 'file') void api.files.delete(item.attachment.file_id).catch(() => undefined);
-        }
       }
     } finally {
       if (behavior === 'steer') setSteering(false);
@@ -615,7 +639,6 @@ export function ChatView(props: ChatViewProps) {
             model: selectedModelId,
             thinking: selectedThinking,
             goalObjective: resolution.value.command.name === 'goal' ? resolution.value.args : undefined,
-            swarmMode: resolution.value.command.name === 'swarm' ? true : undefined,
           };
       const accepted = await onRunSlashCommand(
         resolution.value.command.name,
@@ -666,7 +689,7 @@ export function ChatView(props: ChatViewProps) {
     }
     if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && !isStreaming && pendingApprovals.length === 0 && browserPermissions.pending.length === 0 && pendingQuestions.length === 0) {
       event.preventDefault();
-      void changeTaskMode(selectedTaskMode === 'plan' ? 'code' : 'plan');
+      void changeTaskMode(selectedTaskMode === 'discuss' ? 'code' : 'discuss');
       return;
     }
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -676,13 +699,13 @@ export function ChatView(props: ChatViewProps) {
     }
   };
 
-  async function changeTaskMode(mode: 'plan' | 'code') {
-    taskModeOverrideSessionRef.current = currentSessionId;
+  async function changeTaskMode(mode: 'discuss' | 'code') {
+    taskModeOverrideSessionRef.current = currentScope;
     setTaskModeOverride(mode);
     try {
       await onTaskModeChange(mode);
     } catch {
-      setTaskModeOverride(current => taskModeOverrideSessionRef.current === currentSessionId && current === mode ? null : current);
+      setTaskModeOverride(current => taskModeOverrideSessionRef.current === currentScope && current === mode ? null : current);
     }
   }
 
@@ -699,7 +722,7 @@ export function ChatView(props: ChatViewProps) {
   };
 
   const handleModelChange = async (modelId: string) => {
-    modelOverrideSessionRef.current = currentSessionId;
+    modelOverrideSessionRef.current = currentScope;
     setModelOverride(modelId);
     const nextModel = models.find(model => model.model === modelId);
     if (!modelSupportsImageInput(nextModel) && attachments.some(item => item.attachment.kind === 'image')) {
@@ -714,17 +737,17 @@ export function ChatView(props: ChatViewProps) {
     try {
       await onModelChange(modelId);
     } catch {
-      setModelOverride(current => modelOverrideSessionRef.current === currentSessionId && current === modelId ? null : current);
+      setModelOverride(current => modelOverrideSessionRef.current === currentScope && current === modelId ? null : current);
     }
   };
 
   const handleMainWriteChange = async (enabled: boolean) => {
-    mainWriteOverrideSessionRef.current = currentSessionId;
+    mainWriteOverrideSessionRef.current = currentScope;
     setMainWriteOverride(enabled);
     try {
       await onMainWriteChange(enabled);
     } catch {
-      setMainWriteOverride(current => mainWriteOverrideSessionRef.current === currentSessionId && current === enabled ? null : current);
+      setMainWriteOverride(current => mainWriteOverrideSessionRef.current === currentScope && current === enabled ? null : current);
     }
   };
 
@@ -844,10 +867,10 @@ export function ChatView(props: ChatViewProps) {
         <div className="composer-toolbar-left">
           <input ref={imageInputRef} className="composer-image-input" type="file" multiple onChange={event => { if (event.target.files) void addFiles(event.target.files); event.target.value = ''; }}/>
           <button type="button" className="composer-image-button" onClick={() => imageInputRef.current?.click()} disabled={attachmentsLoading || attachments.length >= 6 || commandRunning} title={tr('Attach files', '添加文件')} aria-label={tr('Attach files', '添加文件')}><Icon name="plus" size={18}/></button>
-          <button type="button" className="composer-task-cycle" data-mode={selectedTaskMode} onClick={() => void changeTaskMode(selectedTaskMode === 'plan' ? 'code' : 'plan')} disabled={isStreaming} title={tr('Switch planning and execution mode', '切换规划和执行模式')} aria-label={tr(`Task mode: ${selectedTaskMode === 'plan' ? 'Plan' : 'Execute'}`, `任务模式：${selectedTaskMode === 'plan' ? '规划' : '执行'}`)}>
+          <button type="button" className="composer-task-cycle" data-mode={selectedTaskMode} onClick={() => void changeTaskMode(selectedTaskMode === 'discuss' ? 'code' : 'discuss')} disabled={isStreaming} title={tr('Switch discussion and execution mode', '切换讨论和执行模式')} aria-label={tr(`Task mode: ${selectedTaskMode === 'discuss' ? 'Discuss' : 'Execute'}`, `任务模式：${selectedTaskMode === 'discuss' ? '讨论' : '执行'}`)}>
             <span className={selectedTaskMode === 'code' ? 'active' : ''}>{tr('Execute', '执行')}</span>
             <i aria-hidden="true">|</i>
-            <span className={selectedTaskMode === 'plan' ? 'active' : ''}>{tr('Plan', '规划')}</span>
+            <span className={selectedTaskMode === 'discuss' ? 'active' : ''}>{tr('Discuss', '讨论')}</span>
           </button>
           <div className={`composer-control-popover composer-permission-menu${permissionMenuOpen ? ' open' : ''}`} ref={permissionMenuRef}>
             <button type="button" className={`composer-icon-trigger permission-${selectedPermission}`} onClick={() => { setPermissionMenuOpen(previous => !previous); setModelMenuOpen(false); setModelSettingOpen(null); }} title={tr(`Permission: ${selectedPermissionLabel}`, `权限：${selectedPermissionLabel}`)} aria-label={tr(`Permission: ${selectedPermissionLabel}`, `权限：${selectedPermissionLabel}`)} aria-expanded={permissionMenuOpen}><Icon name="shield" size={16}/></button>
@@ -929,6 +952,10 @@ function formatElapsedDuration(durationMs: number): string {
 
 function MessageBubble({ message, workStartedAt, rewindCount, rewindDisabled = false, onRewind, live }: { message: ChatMessage; workStartedAt?: number; rewindCount?: number; rewindDisabled?: boolean; onRewind?: (count: number) => void | Promise<void>; live?: LiveAssistantContinuation }) {
   const { tr } = useI18n();
+  const injectionBlocks = (message.workBlocks ?? []).filter((block): block is Extract<WorkBlock, { type: 'context_injection' }> => block.type === 'context_injection');
+  if (injectionBlocks.length > 0 && message.role === 'system' && !message.text) {
+    return <div className="chat-context-injection-list">{injectionBlocks.map(block => <ContextInjectionRow key={block.id} source={block.source} text={block.text}/>)}</div>;
+  }
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
   const tools = message.toolCalls ?? [];
@@ -968,6 +995,7 @@ function MessageBubble({ message, workStartedAt, rewindCount, rewindDisabled = f
           ? <WorkProcess blocks={storedBlocks} startedAt={workStartedAt} durationMs={workDurationMs}/>
           : null}
       {message.images && message.images.length > 0 && <div className="chat-message-images">{message.images.map((image, index) => <img key={`${image.src.slice(0, 80)}-${String(index)}`} src={image.src} alt={image.alt} loading="lazy" />)}</div>}
+      {message.files && message.files.length > 0 && <div className="composer-attachments chat-message-attachments">{message.files.map((file, index) => <div className="composer-attachment attachment-file" key={`${file.name}-${String(file.size ?? 0)}-${String(index)}`}><span className="composer-file-icon"><Icon name="files" size={19}/></span><span title={file.name}>{file.name}</span></div>)}</div>}
       {(text || (live && !hasWork)) && <div className="chat-message-content">{text ? (isUser || isSystem ? text : <MarkdownView content={text} />) : <span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span>}{live && !hasWork && <span className="streaming-cursor"/>}</div>}{message.usage && <TokenUsageLine usage={message.usage} />}{live?.streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(live.streaming))} tokens</div>}{live && <button className="chat-abort-btn" onClick={() => void live.onAbort()} disabled={live.stopping}><Icon name="stop" size={13}/> {live.stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button>}{message.createdAt && <time className="chat-message-time">{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>}
     </div>
   </article>;
@@ -1016,6 +1044,9 @@ function WorkProcess({ blocks, live = false, activeProgressId, startedAt, durati
         const isActive = live && block.id === activeProgressId;
         return <TranscriptOutput key={block.id} text={block.text} streaming={isActive}/>;
       }
+      if (block.type === 'context_injection') {
+        return <ContextInjectionRow key={block.id} source={block.source} text={block.text}/>;
+      }
       return <CompactToolCall key={block.id} tool={block.tool}/>;
     })}</div>
   </details>;
@@ -1036,6 +1067,7 @@ function LiveWorkStream({ blocks, activeProgressId, startedAt }: { blocks: WorkB
     {blocks.map(block => {
       if (block.type === 'thinking') return <ThoughtDisclosure key={block.id} text={block.text} live/>;
       if (block.type === 'tool') return <CompactToolCall key={block.id} tool={block.tool}/>;
+      if (block.type === 'context_injection') return <ContextInjectionRow key={block.id} source={block.source} text={block.text}/>;
       const active = block.id === activeProgressId;
       return <TranscriptOutput key={block.id} text={block.text} streaming={active}/>;
     })}
@@ -1057,17 +1089,53 @@ function ThoughtDisclosure({ text, live = false }: { text: string; live?: boolea
 function CompactToolCall({ tool }: { tool: ToolCall }) {
   const { tr } = useI18n();
   const summary = summarizeToolCall(tool, tr);
-  return <div className={`compact-tool-call tool-${tool.name.toLowerCase()}`} title={tool.result?.slice(0, 600)}>
-    <span className="compact-tool-icon"><Icon name={toolCallIcon(tool.name)} size={12}/></span>
-    <span className="compact-tool-copy"><strong>{tool.name}</strong>{summary && <span>{summary}</span>}</span>
-    <small className={tool.result === undefined ? 'running' : 'done'}>{tool.result === undefined ? tr('Running', '运行中') : tr('Done', '完成')}</small>
-  </div>;
+  const running = tool.result === undefined && tool.endedAt === undefined && tool.isError !== true;
+  const statusLabel = tool.isError === true
+    ? tr('Failed', '失败')
+    : running
+      ? tr('Running', '运行中')
+      : tr('Done', '完成');
+  const fields = toolCallDetailFields(tool, tr);
+  const isEdit = tool.name.toLowerCase() === 'edit';
+  return <details className={`compact-tool-call tool-${tool.name.toLowerCase()}${tool.isError ? ' error' : ''}`}>
+    <summary title={tool.result?.slice(0, 600)}>
+      <span className="compact-tool-icon"><Icon name={toolCallIcon(tool.name)} size={12}/></span>
+      <span className="compact-tool-copy"><strong>{tool.name}</strong>{summary && <span>{summary}</span>}</span>
+      <small className={running ? 'running' : tool.isError ? 'error' : 'done'}>{statusLabel}</small>
+    </summary>
+    <dl className="compact-tool-detail">
+      {fields.map(field => (
+        <div key={field.key} className={`compact-tool-detail-row${isEdit && (field.key === 'before' || field.key === 'after' || field.key === 'diff') ? ` tool-edit-${field.key}` : ''}`}>
+          <dt>{field.label}</dt>
+          <dd>{field.value}</dd>
+        </div>
+      ))}
+    </dl>
+  </details>;
+}
+
+function ContextInjectionRow({ source, text }: { source: string; text?: string }) {
+  const { tr } = useI18n();
+  const label = `${tr('Context injection', '上下文注入')} · ${source}`;
+  if (text === undefined || text.trim() === '') {
+    return <div className="compact-tool-call compact-context-injection">
+      <span className="compact-tool-icon"><Icon name="document" size={12}/></span>
+      <span className="compact-tool-copy"><strong>{label}</strong></span>
+    </div>;
+  }
+  return <details className="compact-tool-call compact-context-injection">
+    <summary>
+      <span className="compact-tool-icon"><Icon name="document" size={12}/></span>
+      <span className="compact-tool-copy"><strong>{label}</strong></span>
+    </summary>
+    <pre className="compact-context-injection-body">{text}</pre>
+  </details>;
 }
 
 function toolCallIcon(name: string): IconName {
   const normalized = name.toLowerCase();
   if (normalized.includes('bash') || normalized.includes('terminal') || normalized.includes('command')) return 'terminal';
-  if (normalized.includes('swarm') || normalized === 'agent') return 'swarm';
+  if (normalized === 'subagent' || normalized === 'agent') return 'git-branch';
   if (normalized.includes('browser') || normalized.includes('web')) return 'globe';
   if (normalized.includes('read') || normalized.includes('write') || normalized.includes('edit') || normalized.includes('file')) return 'files';
   return 'settings';
@@ -1081,15 +1149,22 @@ function summarizeToolCall(tool: ToolCall, tr: (english: string, chinese: string
     const oldText = firstString(args.old_string, args.old_text) ?? '';
     const newText = firstString(args.new_string, args.content, args.new_text) ?? '';
     const resultCounts = diffCounts(tool.result);
-    const additions = resultCounts?.additions ?? countLines(newText);
-    const deletions = resultCounts?.deletions ?? (normalized === 'edit' ? countLines(oldText) : 0);
+    const operationCounts = normalized === 'edit' ? editLineOperationStats(args.line_ops) : undefined;
+    const additions = resultCounts?.additions
+      ?? (operationCounts !== undefined && (operationCounts.additions > 0 || operationCounts.deletions > 0)
+        ? operationCounts.additions
+        : countLines(newText));
+    const deletions = resultCounts?.deletions
+      ?? (operationCounts !== undefined && (operationCounts.additions > 0 || operationCounts.deletions > 0)
+        ? operationCounts.deletions
+        : normalized === 'edit' ? countLines(oldText) : 0);
     return [path, `+${additions} -${deletions}`].filter(Boolean).join(' · ');
   }
-  if (normalized === 'agentswarm' || normalized === 'agent_swarm') {
+  if (normalized === 'subagent') {
     const tasks = Array.isArray(args.tasks) ? args.tasks : Array.isArray(args.items) ? args.items : [];
     const resumed = Array.isArray(args.resume_agent_ids) ? args.resume_agent_ids.length : 0;
     const count = tasks.length + resumed;
-    return count > 0 ? tr(`${count} agents launched`, `调用 ${count} 个智能体`) : tr('Agent collaboration', '智能体协作');
+    return count > 0 ? tr(`${count} SubAgents launched`, `调用 ${count} 个 SubAgent`) : tr('SubAgent task', 'SubAgent 任务');
   }
   return path ?? firstString(args.description, args.query, args.command) ?? '';
 }

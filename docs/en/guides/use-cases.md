@@ -4,7 +4,7 @@ This page collects typical Kimi Code CLI scenarios along with ready-to-use promp
 
 ## Understanding an unfamiliar project
 
-When taking over an unfamiliar repository, a good first step is to use `kimi --plan` or press `Shift-Tab` to enter Plan mode, so the agent outputs a research plan before touching anything:
+When taking over an unfamiliar repository, a good first step is to use `kimi --plan` or press `Shift-Tab` to enter Discuss, a read-only team meeting for research before execution:
 
 ```
 Give me an overview of this repository's architecture. Specifically:
@@ -28,7 +28,7 @@ For large-scale investigations, you can have the main agent dispatch **sub-agent
 
 ## Implementing a new feature
 
-Describe the requirement and acceptance criteria clearly. For complex changes, use Plan mode to confirm the approach before execution:
+Describe the requirement and acceptance criteria clearly. For complex changes, use Discuss to collect the team's statements before execution:
 
 ```
 Add a retry utility under src/utils:
@@ -81,7 +81,7 @@ src/parser/markdown.ts currently has almost no tests. Please add a unit test sui
 Extract the repeated "read body → validate → log → respond" pattern in src/handlers into a middleware. Run the tests afterwards to make sure existing behavior is unchanged.
 ```
 
-For multi-file refactors, use Plan mode first to confirm the approach. You can also use `/fork` to create an experimental branch — if you don't like the result, just switch back to the original session.
+For multi-file refactors, use Discuss first to collect the team's statements. You can also use `/fork` to create an experimental branch — if you don't like the result, just switch back to the original session.
 
 ## One-off scripts and automation
 

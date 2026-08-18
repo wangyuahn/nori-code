@@ -153,10 +153,14 @@ describe('model catalog adapters', () => {
     const alias = catalogConfig().models!['k2']!;
     expect(toProtocolModel('k2', alias)).toEqual({
       provider: 'kimi',
+      provider_name: 'kimi',
       model: 'k2',
       display_name: 'Kimi K2',
       max_context_size: 131072,
       capabilities: ['thinking'],
+      supports_thinking: true,
+      support_efforts: undefined,
+      default_effort: undefined,
     });
   });
 
@@ -174,11 +178,15 @@ describe('model catalog adapters', () => {
       }),
     ).toEqual({
       id: 'kimi',
+      name: 'kimi',
       type: 'kimi',
       base_url: 'https://api.example.test/v1',
       default_model: 'k2',
       has_api_key: true,
       status: 'connected',
+      disabled: undefined,
+      auto_discover: undefined,
+      custom_models: undefined,
       models: ['k2', 'turbo'],
     });
   });
@@ -278,9 +286,14 @@ describe('ModelCatalogService', () => {
       default_model: 'turbo',
       model: {
         provider: 'kimi',
+        provider_name: 'kimi',
         model: 'turbo',
         display_name: 'kimi-turbo',
         max_context_size: 32768,
+        capabilities: undefined,
+        supports_thinking: undefined,
+        support_efforts: undefined,
+        default_effort: undefined,
       },
     });
     expect(setCalls).toEqual([{ defaultModel: 'turbo' }]);

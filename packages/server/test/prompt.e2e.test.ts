@@ -283,7 +283,7 @@ describe('POST /api/v1/sessions/{sid}/prompts — submit validation (W7.2 / Chai
         model: 'x',
         thinking: 'off',
         permission_mode: 'manual',
-        plan_mode: false,
+        discuss_mode: false,
       },
     });
     const env = envelopeOf<unknown>(res.json());

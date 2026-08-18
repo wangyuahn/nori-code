@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   promptAbortResponseSchema,
+  promptAgentQuerySchema,
   promptListResponseSchema,
   promptSubmissionSchema,
   promptSubmitResultSchema,
@@ -18,7 +19,7 @@ describe('promptSubmissionSchema', () => {
     expect(parsed.model).toBeUndefined();
     expect(parsed.thinking).toBeUndefined();
     expect(parsed.permission_mode).toBeUndefined();
-    expect(parsed.plan_mode).toBeUndefined();
+    expect(parsed.discuss_mode).toBeUndefined();
   });
 
   it('accepts metadata', () => {
@@ -65,13 +66,13 @@ describe('promptSubmissionSchema', () => {
       model: 'kimi-code/k2',
       thinking: 'off',
       permission_mode: 'manual',
-      plan_mode: false,
+      discuss_mode: false,
       loop_mode: true,
     });
     expect(parsed.model).toBe('kimi-code/k2');
     expect(parsed.thinking).toBe('off');
     expect(parsed.permission_mode).toBe('manual');
-    expect(parsed.plan_mode).toBe(false);
+    expect(parsed.discuss_mode).toBe(false);
     expect(parsed.loop_mode).toBe(true);
   });
 
@@ -175,6 +176,16 @@ describe('promptSteerRequestSchema', () => {
     expect(promptSteerRequestSchema.parse({ prompt_ids: ['prompt_a'] }).prompt_ids)
       .toEqual(['prompt_a']);
     expect(promptSteerRequestSchema.safeParse({ prompt_ids: [] }).success).toBe(false);
+  });
+
+  it('keeps an optional target agent', () => {
+    expect(promptSteerRequestSchema.parse({
+      prompt_ids: ['prompt_a'],
+      agent_id: 'agent_reviewer',
+    })).toEqual({ prompt_ids: ['prompt_a'], agent_id: 'agent_reviewer' });
+    expect(promptAgentQuerySchema.parse({ agent_id: 'agent_reviewer' })).toEqual({
+      agent_id: 'agent_reviewer',
+    });
   });
 });
 

@@ -3,6 +3,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { computeContentTag } from '#/content-tag';
 import { KaosFileExistsError } from '#/errors';
 import { LocalKaos } from '#/local';
 import { afterEach, beforeEach, describe, expect, it, test } from 'vitest';
@@ -256,6 +257,7 @@ describe('LocalKaos', () => {
         endsWithNewline: false,
         hasNul: false,
         lineEndingFlags: { hasCrLf: false, hasLf: true, hasLoneCr: false },
+        contentTag: computeContentTag('a\nb'),
       });
 
       const crlf = join(tempDir, 'crlf.txt');
@@ -264,6 +266,7 @@ describe('LocalKaos', () => {
         totalLines: 2,
         endsWithNewline: true,
         lineEndingFlags: { hasCrLf: true, hasLf: false, hasLoneCr: false },
+        contentTag: computeContentTag('a\r\nb\r\n'),
       });
 
       const loneCr = join(tempDir, 'lone-cr.txt');
@@ -271,7 +274,26 @@ describe('LocalKaos', () => {
       await expect(kaos.scanTextFile(loneCr)).resolves.toMatchObject({
         totalLines: 1,
         lineEndingFlags: { hasCrLf: false, hasLf: true, hasLoneCr: true },
+        contentTag: computeContentTag('a\rB\n'),
       });
+    });
+
+    it('normalizes a leading UTF-8 BOM and all line endings for content tags', async () => {
+      const variants = [
+        Buffer.from('a\nb\n', 'utf8'),
+        Buffer.from('a\r\nb\r\n', 'utf8'),
+        Buffer.from('a\rb\r', 'utf8'),
+        Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('a\nb\n', 'utf8')]),
+      ];
+      const tags: string[] = [];
+
+      for (const [index, content] of variants.entries()) {
+        const filePath = join(tempDir, `tag-${String(index)}.txt`);
+        await kaos.writeBytes(filePath, content);
+        tags.push((await kaos.scanTextFile(filePath)).contentTag);
+      }
+
+      expect(new Set(tags)).toEqual(new Set([computeContentTag('a\nb\n')]));
     });
 
     it('detects NUL and invalid UTF-8', async () => {

@@ -752,6 +752,7 @@ export class AgentTestContext {
       microCompaction: this.options.microCompaction,
       subagentHost: this.options.subagentHost,
       experimentalFlags: this.options.experimentalFlags,
+      homedir: this.options.homedir,
       persistence: new InMemoryAgentRecordPersistence(
         withMetadata(this.recordHistory.map(cloneRecord)),
       ),

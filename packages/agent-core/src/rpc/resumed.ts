@@ -9,7 +9,6 @@ import type {
   PermissionData,
   PermissionMode,
 } from '#/agent/permission';
-import type { PlanData } from '#/agent/plan';
 import type { ToolInfo } from '#/agent/tool';
 import type { SessionSummary } from '#/rpc/core-api';
 import type { UsageStatus } from '#/rpc/events';
@@ -23,7 +22,7 @@ export type AgentReplayRecordPayload =
       snapshot: GoalSnapshot;
       change: GoalChange | { readonly kind: 'created' };
     }
-  | { type: 'plan_updated'; enabled: boolean }
+  | { type: 'discuss_updated'; enabled: boolean }
   | { type: 'config_updated'; config: AgentConfigUpdateData }
   | { type: 'permission_updated'; mode: PermissionMode }
   | { type: 'approval_result'; record: PermissionApprovalResultRecord };
@@ -36,8 +35,7 @@ export interface ResumedAgentState {
   readonly context: AgentContextData;
   readonly replay: readonly AgentReplayRecord[];
   readonly permission: PermissionData;
-  readonly plan: PlanData;
-  readonly swarmMode?: boolean | undefined;
+  readonly discussMode: boolean;
   readonly usage: UsageStatus;
   readonly tools: readonly ToolInfo[];
   readonly toolStore?: Readonly<Record<string, unknown>>;

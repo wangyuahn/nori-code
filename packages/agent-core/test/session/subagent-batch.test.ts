@@ -10,7 +10,7 @@ import {
 } from '../../src/session/subagent-host';
 import {
   SubagentBatch,
-  resolveSwarmMaxConcurrency,
+  resolveSubagentMaxConcurrency,
   type SubagentBatchLauncher,
   type SubagentResult,
   type SubagentSuspendedEvent,
@@ -20,6 +20,76 @@ import { userCancellationReason } from '../../src/utils/abort';
 const signal = new AbortController().signal;
 
 describe('SubagentBatch scheduling contract', () => {
+  it('discards a completed temporary agent before resolving the batch', async () => {
+    const discard = vi.fn(async () => {});
+    const launcher: SubagentBatchLauncher = {
+      spawn: async (options) => {
+        options.onReady?.();
+        return {
+          agentId: 'agent-temporary',
+          profileName: options.profileName,
+          resumed: false,
+          completion: Promise.resolve({ result: 'finished' }),
+        };
+      },
+      resume: async () => { throw new Error('resume was not expected'); },
+      retry: async () => { throw new Error('retry was not expected'); },
+      discard,
+    };
+
+    await expect(new SubagentBatch(launcher, [queuedTask(1)], { discardTerminalAgents: true }).run()).resolves.toMatchObject([
+      { status: 'completed', result: 'finished' },
+    ]);
+    expect(discard).toHaveBeenCalledTimes(1);
+    expect(discard).toHaveBeenCalledWith('agent-temporary');
+  });
+
+  it('rejects the batch when temporary-agent cleanup fails', async () => {
+    const discard = vi.fn(async () => {
+      throw new Error('temporary agent cleanup failed');
+    });
+    const launcher: SubagentBatchLauncher = {
+      spawn: async (options) => {
+        options.onReady?.();
+        return {
+          agentId: 'agent-temporary',
+          profileName: options.profileName,
+          resumed: false,
+          completion: Promise.resolve({ result: 'finished' }),
+        };
+      },
+      resume: async () => { throw new Error('resume was not expected'); },
+      retry: async () => { throw new Error('retry was not expected'); },
+      discard,
+    };
+
+    await expect(
+      new SubagentBatch(launcher, [queuedTask(1)], { discardTerminalAgents: true }).run(),
+    ).rejects.toThrow('temporary agent cleanup failed');
+    expect(discard).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains terminal agents unless the caller marks the batch temporary', async () => {
+    const discard = vi.fn(async () => {});
+    const launcher: SubagentBatchLauncher = {
+      spawn: async (options) => {
+        options.onReady?.();
+        return {
+          agentId: 'agent-persistent',
+          profileName: options.profileName,
+          resumed: false,
+          completion: Promise.resolve({ result: 'finished' }),
+        };
+      },
+      resume: async () => { throw new Error('resume was not expected'); },
+      retry: async () => { throw new Error('retry was not expected'); },
+      discard,
+    };
+
+    await new SubagentBatch(launcher, [queuedTask(1)]).run();
+    expect(discard).not.toHaveBeenCalled();
+  });
+
   it('normal phase starts five tasks immediately, then one task every 700ms', async () => {
     vi.useFakeTimers();
     try {
@@ -689,31 +759,31 @@ describe('SubagentBatch scheduling contract', () => {
   });
 });
 
-describe('resolveSwarmMaxConcurrency', () => {
+describe('resolveSubagentMaxConcurrency', () => {
   it('returns undefined when the variable is unset', () => {
-    expect(resolveSwarmMaxConcurrency({})).toBeUndefined();
+    expect(resolveSubagentMaxConcurrency({})).toBeUndefined();
   });
 
   it('returns undefined for empty or whitespace-only values', () => {
     expect(
-      resolveSwarmMaxConcurrency({ NORI_CODE_AGENT_SWARM_MAX_CONCURRENCY: '' }),
+      resolveSubagentMaxConcurrency({ NORI_CODE_SUBAGENT_MAX_CONCURRENCY: '' }),
     ).toBeUndefined();
     expect(
-      resolveSwarmMaxConcurrency({ NORI_CODE_AGENT_SWARM_MAX_CONCURRENCY: '   ' }),
+      resolveSubagentMaxConcurrency({ NORI_CODE_SUBAGENT_MAX_CONCURRENCY: '   ' }),
     ).toBeUndefined();
   });
 
   it('throws for non-positive, non-integer, or non-numeric values', () => {
     for (const raw of ['0', '-1', '2.5', 'abc']) {
       expect(() =>
-        resolveSwarmMaxConcurrency({ NORI_CODE_AGENT_SWARM_MAX_CONCURRENCY: raw }),
-      ).toThrow(/NORI_CODE_AGENT_SWARM_MAX_CONCURRENCY.*positive integer/);
+        resolveSubagentMaxConcurrency({ NORI_CODE_SUBAGENT_MAX_CONCURRENCY: raw }),
+      ).toThrow(/NORI_CODE_SUBAGENT_MAX_CONCURRENCY.*positive integer/);
     }
   });
 
   it('returns the integer for a positive integer value', () => {
-    expect(resolveSwarmMaxConcurrency({ NORI_CODE_AGENT_SWARM_MAX_CONCURRENCY: '3' })).toBe(3);
-    expect(resolveSwarmMaxConcurrency({ NORI_CODE_AGENT_SWARM_MAX_CONCURRENCY: ' 8 ' })).toBe(8);
+    expect(resolveSubagentMaxConcurrency({ NORI_CODE_SUBAGENT_MAX_CONCURRENCY: '3' })).toBe(3);
+    expect(resolveSubagentMaxConcurrency({ NORI_CODE_SUBAGENT_MAX_CONCURRENCY: ' 8 ' })).toBe(8);
   });
 });
 
@@ -943,7 +1013,7 @@ function queuedTask(index: number): QueuedSubagentTask<number> {
     kind: 'spawn',
     data: index,
     profileName: 'coder',
-    parentToolCallId: 'call_swarm',
+    parentToolCallId: 'call_subagent',
     prompt: `Review item-${String(index)}`,
     description: `Review #${String(index)}`,
     runInBackground: false,

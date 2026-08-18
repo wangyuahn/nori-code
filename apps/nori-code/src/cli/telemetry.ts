@@ -71,7 +71,7 @@ export interface InitializeServerTelemetryOptions {
  * sink with `ui_mode = "web"`, and returns a {@link TelemetryClient} the
  * caller hands to `startServer` via `coreProcessOptions.telemetry`. That wires
  * the same real client into `KimiCore`, so agent-core events emitted inside the
- * server process (`mcp_connected`, `session_load_failed`, plan-mode / cron
+ * server process (`mcp_connected`, `session_load_failed`, Discuss / cron
  * events, …) actually leave the process carrying the enriched context
  * (`app_name` / `version` / `ui_mode` / `model` / platform fields).
  *

@@ -132,11 +132,11 @@ export interface AgentInfo {
   wireExists: boolean;
   wireRecordCount: number;
   wireProtocolVersion: string | null;
-  /** Per-item swarm work label persisted by agent-core for swarm-spawned
-   *  sub-agents (`AgentMeta.swarmItem`). `null` when the agent is not a
-   *  swarm item or when the value cannot be recovered (e.g. disk-only
+  /** Per-item subagent work label persisted by agent-core for subagent-spawned
+   *  sub-agents (`AgentMeta.subagentTask`). `null` when the agent is not a
+   *  subagent item or when the value cannot be recovered (e.g. disk-only
    *  inventory of a session with a corrupt `state.json`). */
-  swarmItem: string | null;
+  subagentTask: string | null;
 }
 
 export interface SessionDetail {

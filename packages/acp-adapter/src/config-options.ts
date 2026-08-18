@@ -134,7 +134,7 @@ export function buildThinkingOption(
 
 /**
  * Project the locked 4-mode taxonomy ({@link ACP_MODES}) into the
- * `SessionConfigOption` `mode` arm. Order is preserved (default → plan →
+ * `SessionConfigOption` `mode` arm. Order is preserved (default → discuss →
  * auto → yolo) so the client renders the dropdown the same way Phase 12
  * did via the dedicated `modes:` field.
  */

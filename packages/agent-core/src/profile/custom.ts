@@ -55,10 +55,10 @@ function filterTools(baseTools: string[], toolPool: string[], permissions: Custo
   if (!permissions) return [...baseTools];
   const groups: Record<keyof NonNullable<CustomAgentConfig['permissions']>, Set<string>> = {
     read: new Set(['Read', 'Grep', 'Glob', 'ReadMediaFile', 'nori_memory_search']),
-    write: new Set(['Write', 'Edit', 'nori_memory_write', 'nori_memory_remove', 'nori_plan_write']),
+    write: new Set(['Write', 'Edit', 'nori_memory_write', 'nori_memory_remove']),
     shell: new Set(['Bash', 'TaskList', 'TaskOutput', 'TaskStop']),
     web: new Set(['WebSearch', 'FetchURL', 'Browser']),
-    delegate: new Set(['Agent', 'AgentSwarm', 'AgentSwarmControl', 'nori_swarm_launch', 'nori_swarm_status', 'nori_swarm_result']),
+    delegate: new Set(['SubAgent']),
   };
   const category = (tool: string) => Object.entries(groups).find(([, names]) => names.has(tool))?.[0] as keyof NonNullable<CustomAgentConfig['permissions']> | undefined;
   return toolPool.filter(tool => {

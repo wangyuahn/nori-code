@@ -23,8 +23,17 @@ describe('goal outcome prompts', () => {
     const text = buildGoalCompletionSummaryPrompt(snapshot());
     expect(text).toContain('Goal completed successfully: all tests pass.');
     expect(text).toContain('Write a concise final message for the user');
+    expect(text).not.toContain('nori_memory_remove');
     expect(text).not.toContain('✓');
     expect(text).not.toContain('—');
+  });
+
+  it('appends optional memory cleanup guidance only when requested', () => {
+    const text = buildGoalCompletionSummaryPrompt(snapshot(), { includeMemoryCleanup: true });
+    expect(text).toContain('nori_memory_search');
+    expect(text).toContain('nori_memory_remove');
+    expect(text).toContain('skip memory tools entirely');
+    expect(text).toContain('Write a concise final message for the user');
   });
 
   it('uses stronger wording in the blocked prompt sent to the model', () => {

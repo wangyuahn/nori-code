@@ -35,10 +35,6 @@ import { MoonLoader } from '../components/chrome/moon-loader';
 import { buildGoalMarker } from '../components/messages/goal-markers';
 import { StatusMessageComponent } from '../components/messages/status-message';
 import {
-  SwarmModeMarkerComponent,
-  type SwarmModeMarkerState,
-} from '../components/messages/swarm-markers';
-import {
   OAUTH_LOGIN_REQUIRED_CODE,
   OAUTH_LOGIN_REQUIRED_STARTUP_NOTICE,
 } from '../constant/kimi-tui';
@@ -165,16 +161,16 @@ export class SessionEventHandler {
     this.stopAllMcpServerStatusSpinners();
   }
 
-  clearAgentSwarmProgress(): void {
-    this.subAgentEventHandler.clearAgentSwarmProgress();
+  clearSubAgentProgress(): void {
+    this.subAgentEventHandler.clearSubAgentProgress();
   }
 
-  hasActiveAgentSwarmToolCall(): boolean {
-    return this.subAgentEventHandler.hasActiveAgentSwarmToolCall();
+  hasActiveSubAgentToolCall(): boolean {
+    return this.subAgentEventHandler.hasActiveSubAgentToolCall();
   }
 
-  syncAgentSwarmActivitySpinner(spinner: MoonLoader | undefined): void {
-    this.subAgentEventHandler.syncAgentSwarmActivitySpinner(spinner);
+  syncSubAgentActivitySpinner(spinner: MoonLoader | undefined): void {
+    this.subAgentEventHandler.syncSubAgentActivitySpinner(spinner);
   }
 
   startSubscription(): void {
@@ -296,7 +292,7 @@ export class SessionEventHandler {
   private handleTurnBegin(_event: TurnStartedEvent): void {
     void _event;
     this.currentTurnHasAssistantText = false;
-    this.clearAgentSwarmProgress();
+    this.clearSubAgentProgress();
     this.host.streamingUI.resetToolUi();
     this.host.streamingUI.setStep(0);
     this.host.patchLivePane({
@@ -331,7 +327,7 @@ export class SessionEventHandler {
   private handleTurnEnd(event: TurnEndedEvent, sendQueued: (item: QueuedMessage) => void): void {
     this.host.streamingUI.flushNow();
     if (event.reason === 'cancelled') {
-      this.markActiveAgentSwarmsCancelled();
+      this.markActiveSubAgentsCancelled();
     }
     if (event.reason === 'filtered') {
       this.host.showStatus('Turn stopped: provider safety policy blocked the response.', 'error');
@@ -406,8 +402,8 @@ export class SessionEventHandler {
     });
   }
 
-  private markActiveAgentSwarmsCancelled(): void {
-    this.subAgentEventHandler.markActiveAgentSwarmsCancelled();
+  private markActiveSubAgentsCancelled(): void {
+    this.subAgentEventHandler.markActiveSubAgentsCancelled();
   }
 
   private isAnthropicSessionActive(): boolean {
@@ -425,7 +421,7 @@ export class SessionEventHandler {
     const reason = event.reason;
     if (reason === 'error') return;
     if (reason === 'aborted' || reason === undefined || reason === '') {
-      this.markActiveAgentSwarmsCancelled();
+      this.markActiveSubAgentsCancelled();
       this.host.showStatus('Interrupted by user', 'error');
       return;
     }
@@ -515,8 +511,8 @@ export class SessionEventHandler {
       turnId,
     };
     streamingUI.registerToolCall(toolCall);
-    if (event.name === 'AgentSwarm') {
-      this.subAgentEventHandler.handleAgentSwarmToolCallStarted(event.toolCallId, toolCall.args);
+    if (event.name === 'SubAgent' || event.name === 'SubAgent') {
+      this.subAgentEventHandler.handleSubAgentToolCallStarted(event.toolCallId, toolCall.args);
     }
     this.host.patchLivePane({
       mode: 'tool',
@@ -532,9 +528,9 @@ export class SessionEventHandler {
     const preview = streamingUI.getStreamingToolCallPreview(event.toolCallId);
     if (
       preview !== undefined &&
-      (preview.name === 'AgentSwarm' || this.subAgentEventHandler.hasAgentSwarmProgress(event.toolCallId))
+      (preview.name === 'SubAgent' || this.subAgentEventHandler.hasSubAgentProgress(event.toolCallId))
     ) {
-      this.subAgentEventHandler.handleAgentSwarmToolCallDelta(event.toolCallId, preview.args, {
+      this.subAgentEventHandler.handleSubAgentToolCallDelta(event.toolCallId, preview.args, {
         streamingArguments: preview.argumentsText,
       });
     }
@@ -574,7 +570,7 @@ export class SessionEventHandler {
       synthetic: event.synthetic,
     };
     const matchedCall = streamingUI.completeToolResult(event.toolCallId, resultData);
-    this.subAgentEventHandler.handleAgentSwarmToolResult(
+    this.subAgentEventHandler.handleSubAgentToolResult(
       event.toolCallId,
       resultData,
       event.isError === true,
@@ -597,40 +593,21 @@ export class SessionEventHandler {
     const runtimeEvent = event as AgentStatusUpdatedEvent & {
       readonly coderWriteEnabled?: boolean;
       readonly toolsReadonly?: boolean;
-      readonly maxSwarmDepth?: number;
     };
-    const shouldRenderSwarmEnded =
-      event.swarmMode === false &&
-      this.host.state.appState.swarmDepth > 0 &&
-      this.host.state.swarmModeEntry === 'task';
     const patch: Partial<AppState> = {};
     if (event.contextUsage !== undefined) patch.contextUsage = event.contextUsage;
     if (event.contextTokens !== undefined) patch.contextTokens = event.contextTokens;
     if (event.maxContextTokens !== undefined) patch.maxContextTokens = event.maxContextTokens;
-    if (event.planMode !== undefined) patch.planMode = event.planMode;
-    if (event.swarmMode !== undefined) patch.swarmDepth = event.swarmMode ? 1 : 0;
+    if (event.discussMode !== undefined) patch.discussMode = event.discussMode;
     if (event.permission !== undefined) {
       patch.permissionMode = event.permission;
     }
     if (runtimeEvent.coderWriteEnabled !== undefined) patch.coderWriteEnabled = runtimeEvent.coderWriteEnabled;
     if (runtimeEvent.toolsReadonly !== undefined) patch.toolsReadonly = runtimeEvent.toolsReadonly;
-    if (runtimeEvent.maxSwarmDepth !== undefined) patch.maxSwarmDepth = runtimeEvent.maxSwarmDepth;
     if (event.model !== undefined) patch.model = event.model;
     if (Object.keys(patch).length > 0) this.host.setAppState(patch);
-    if (event.swarmMode === false) {
-      this.host.state.swarmModeEntry = undefined;
-      if (shouldRenderSwarmEnded) {
-        this.renderSwarmModeMarker('ended');
-      }
-    }
   }
 
-  private renderSwarmModeMarker(state: SwarmModeMarkerState): void {
-    this.host.state.transcriptContainer.addChild(
-      new SwarmModeMarkerComponent(state),
-    );
-    this.host.state.ui.requestRender();
-  }
 
   private handleGoalUpdated(event: GoalUpdatedEvent): void {
     this.host.setAppState({ goal: event.snapshot });

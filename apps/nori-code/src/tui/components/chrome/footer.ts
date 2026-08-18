@@ -255,8 +255,7 @@ export class FooterComponent implements Component {
     const modes: string[] = [];
     if (state.permissionMode === 'auto') modes.push(chalk.hex(colors.warning).bold('auto'));
     if (state.permissionMode === 'yolo') modes.push(chalk.hex(colors.warning).bold('yolo'));
-    if (state.planMode) modes.push(chalk.hex(colors.primary).bold('plan'));
-    if (state.swarmDepth > 0) modes.push(chalk.hex(colors.accent).bold('swarm'));
+    if (state.discussMode) modes.push(chalk.hex(colors.primary).bold('discuss'));
     if (modes.length > 0) left.push(modes.join(' '));
 
     const goalBadge = formatGoalBadge(state.goal, colors, this.goalWallClockMs(state.goal));
@@ -294,7 +293,7 @@ export class FooterComponent implements Component {
       );
     }
     if (this.backgroundAgentCount > 0) {
-      const noun = this.backgroundAgentCount === 1 ? 'agent' : 'agents';
+      const noun = this.backgroundAgentCount === 1 ? 'SubAgent' : 'SubAgents';
       left.push(
         chalk.hex(colors.primary)(`[${String(this.backgroundAgentCount)} ${noun} running]`),
       );

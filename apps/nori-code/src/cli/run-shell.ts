@@ -69,7 +69,7 @@ export async function runShell(
         reason: outcome.reason,
       });
     },
-    sessionStartedProperties: { permission: opts.permission, plan: opts.plan, afk: false },
+    sessionStartedProperties: { permission: opts.permission, discuss: opts.discuss, afk: false },
   });
   log.info('nori-code starting', {
     version,

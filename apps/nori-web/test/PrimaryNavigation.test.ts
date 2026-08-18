@@ -2,8 +2,8 @@ import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { countActiveAgents, PrimaryNavigation, WindowControls } from '../src/App';
-import type { BackgroundTask, SwarmStatus } from '../src/api/client';
+import { countActiveAgents, effectiveGlobalActiveAgentCountFor, PrimaryNavigation, WindowControls } from '../src/App';
+import type { BackgroundTask } from '../src/api/client';
 import { I18nProvider } from '../src/i18n';
 import type { NoriDesktopAPI } from '../src/types/nori-desktop';
 
@@ -24,11 +24,9 @@ describe('PrimaryNavigation', () => {
       root.render(createElement(PrimaryNavigation, {
         activeView: 'chat',
         labels: {
-          chat: 'Chat', dashboard: 'Dashboard', swarm: 'Swarm', cron: 'Cron Job',
+          chat: 'Chat', dashboard: 'Dashboard', cron: 'Cron Job',
           account: 'My profile',
         },
-        activeAgentCount: 0,
-        hasSwarmActivity: false,
         cronJobCount: 3,
         onSelect: () => undefined,
       }));
@@ -49,11 +47,9 @@ describe('PrimaryNavigation', () => {
       root.render(createElement(PrimaryNavigation, {
         activeView: 'chat',
         labels: {
-          chat: 'Chat', dashboard: 'Dashboard', swarm: 'Swarm', cron: 'Cron Job',
+          chat: 'Chat', dashboard: 'Dashboard', cron: 'Cron Job',
           account: 'My profile',
         },
-        activeAgentCount: 0,
-        hasSwarmActivity: false,
         cronJobCount: 0,
         onSelect: () => undefined,
       }));
@@ -66,32 +62,7 @@ describe('PrimaryNavigation', () => {
     await act(async () => { root.unmount(); });
   });
 
-  it('keeps Swarm yellow while an agent is active, including on the Swarm page', async () => {
-    const container = document.createElement('div');
-    document.body.append(container);
-    const root = createRoot(container);
-    await act(async () => {
-      root.render(createElement(PrimaryNavigation, {
-        activeView: 'swarm',
-        labels: {
-          chat: 'Chat', dashboard: 'Dashboard', swarm: 'Swarm', cron: 'Cron Job',
-          account: 'My profile',
-        },
-        activeAgentCount: 2,
-        hasSwarmActivity: false,
-        cronJobCount: 0,
-        onSelect: () => undefined,
-      }));
-    });
-
-    const swarmButton = container.querySelector<HTMLButtonElement>('button[title="Swarm"]');
-    expect(swarmButton?.classList.contains('activity-pending')).toBe(true);
-    expect(swarmButton?.querySelector('.sidebar-activity-count')?.textContent).toBe('2');
-
-    await act(async () => { root.unmount(); });
-  });
-
-  it('keeps Swarm yellow for global queued activity before an agent count exists', async () => {
+  it('does not render the deprecated collaboration navigation item', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -99,42 +70,25 @@ describe('PrimaryNavigation', () => {
       root.render(createElement(PrimaryNavigation, {
         activeView: 'chat',
         labels: {
-          chat: 'Chat', dashboard: 'Dashboard', swarm: 'Swarm', cron: 'Cron Job',
+          chat: 'Chat', dashboard: 'Dashboard', cron: 'Cron Job',
           account: 'My profile',
         },
-        activeAgentCount: 0,
-        hasSwarmActivity: true,
         cronJobCount: 0,
         onSelect: () => undefined,
       }));
     });
 
-    const swarmButton = container.querySelector<HTMLButtonElement>('button[title="Swarm"]');
-    expect(swarmButton?.classList.contains('activity-pending')).toBe(true);
-    expect(swarmButton?.querySelector('.sidebar-activity-count')).toBeNull();
+    expect(container.querySelector('button[title="SubAgent"]')).toBeNull();
 
     await act(async () => { root.unmount(); });
   });
 
-  it('recovers custom background-agent activity without double-counting swarm tasks', () => {
-    const run: SwarmStatus = {
-      swarm_id: 'swarm-custom',
-      status: 'running',
-      task_count: 1,
-      completed_count: 0,
-      tasks: [{
-        id: 'swarm-task',
-        agent_id: 'custom-agent-id',
-        profile: 'deepseek-reviewer',
-        label: 'Review changes',
-        status: 'running',
-      }],
-    };
+  it('counts realtime and polled subagents without adding duplicate snapshots', () => {
     const tasks: BackgroundTask[] = [{
-      id: 'swarm-task',
+      id: 'subagent-task',
       session_id: 'session-a',
       kind: 'subagent',
-      description: 'Swarm projection',
+      description: 'SubAgent projection',
       status: 'running',
       created_at: '2026-07-17T00:00:00.000Z',
     }, {
@@ -146,63 +100,15 @@ describe('PrimaryNavigation', () => {
       created_at: '2026-07-17T00:00:01.000Z',
     }];
 
-    expect(countActiveAgents(['custom-agent-id'], [run], tasks)).toBe(2);
-    expect(countActiveAgents([], [], tasks.slice(1))).toBe(1);
+    expect(countActiveAgents(['custom-agent-id'], tasks)).toBe(2);
+    expect(countActiveAgents(['custom-agent-id'], tasks.slice(0, 1))).toBe(1);
+    expect(countActiveAgents([], tasks.slice(1))).toBe(1);
   });
 
-  it('does not resurrect a terminated swarm agent from a stale live event id', () => {
-    const stopped: SwarmStatus = {
-      swarm_id: 'swarm-stopped',
-      status: 'stopped',
-      task_count: 1,
-      completed_count: 0,
-      tasks: [{
-        id: 'swarm-task',
-        agent_id: 'agent-stopped',
-        profile: 'reviewer',
-        label: 'Review changes',
-        status: 'stopped',
-      }],
-    };
-
-    expect(countActiveAgents(['agent-stopped'], [stopped], [])).toBe(0);
-  });
-
-  it('counts collaboration activity from every session', () => {
-    const runs: SwarmStatus[] = [
-      {
-        swarm_id: 'agent-session-a',
-        session_id: 'session-a',
-        status: 'running',
-        task_count: 1,
-        completed_count: 0,
-        tasks: [{ id: 'task-a', agent_id: 'agent-a', label: 'Review A', status: 'running' }],
-      },
-      {
-        swarm_id: 'agent-session-b',
-        session_id: 'session-b',
-        status: 'running',
-        task_count: 1,
-        completed_count: 0,
-        tasks: [{ id: 'task-b', agent_id: 'agent-b', label: 'Review B', status: 'running' }],
-      },
-    ];
-
-    expect(countActiveAgents([], runs.filter(run => run.session_id === 'session-a'), [])).toBe(1);
-    expect(countActiveAgents([], runs, [])).toBe(2);
-  });
-
-  it('keeps paused collaboration visible when it belongs to another session', () => {
-    const paused: SwarmStatus = {
-      swarm_id: 'agent-session-b-paused',
-      session_id: 'session-b',
-      status: 'paused',
-      task_count: 1,
-      completed_count: 0,
-      tasks: [{ id: 'task-paused', agent_id: 'agent-paused', label: 'Paused review', status: 'paused' }],
-    };
-
-    expect(countActiveAgents([], [paused], [])).toBe(1);
+  it('uses only live current-session and server activity counts', () => {
+    expect(effectiveGlobalActiveAgentCountFor(0, 0)).toBe(0);
+    expect(effectiveGlobalActiveAgentCountFor(2, 0)).toBe(2);
+    expect(effectiveGlobalActiveAgentCountFor(0, 3)).toBe(3);
   });
 });
 

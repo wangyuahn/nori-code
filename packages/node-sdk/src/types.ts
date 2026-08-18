@@ -98,7 +98,7 @@ export interface CreateSessionOptions {
   readonly model?: string | undefined;
   readonly thinking?: string | undefined;
   readonly permission?: PermissionMode | undefined;
-  readonly planMode?: boolean;
+  readonly discussMode?: boolean;
   readonly metadata?: JsonObject | undefined;
   readonly kaos?: Kaos | undefined;
   readonly persistenceKaos?: Kaos | undefined;
@@ -175,14 +175,6 @@ export interface ReloadSessionOptions {
   readonly forcePluginSessionStartReminder?: boolean;
 }
 
-export interface PlanInfo {
-  readonly id: string;
-  readonly content: string;
-  readonly path: string;
-}
-
-export type SessionPlan = PlanInfo | null;
-
 export interface TokenUsage {
   readonly inputOther: number;
   readonly output: number;
@@ -200,11 +192,9 @@ export interface SessionStatus {
   readonly model?: string;
   readonly thinkingEffort: string;
   readonly permission: PermissionMode;
-  readonly planMode: boolean;
-  readonly swarmMode?: boolean | undefined;
+  readonly discussMode: boolean;
   readonly coderWriteEnabled: boolean;
   readonly toolsReadonly: boolean;
-  readonly maxSwarmDepth: number;
   readonly contextTokens: number;
   readonly maxContextTokens: number;
   readonly contextUsage: number;
@@ -214,13 +204,11 @@ export interface SessionStatus {
 export interface NoriRuntimeSettings {
   readonly coderWriteEnabled: boolean;
   readonly toolsReadonly: boolean;
-  readonly maxSwarmDepth: number;
 }
 
 export interface SetNoriRuntimeSettingsInput {
   readonly coderWriteEnabled?: boolean;
   readonly toolsReadonly?: boolean;
-  readonly maxSwarmDepth?: number;
 }
 
 export interface SessionSummary {

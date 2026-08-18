@@ -127,7 +127,7 @@ You can also describe a more concrete task directly:
 Add a function in src/utils that converts any string to kebab-case, and add a unit test for it.
 ```
 
-Kimi Code CLI plans the steps, delegates implementation through `AgentSwarm` when the task needs code changes, runs the relevant checks, and tells you what it did at each step. Use `/setting readonly off` if you want the main Agent to edit files directly after approval.
+Kimi Code CLI plans the steps, delegates implementation through `SubAgent` when the task needs code changes, runs the relevant checks, and tells you what it did at each step. Use `/setting readonly off` if you want the main Agent to edit files directly after approval.
 
 ::: tip Not sure what to do? Type `/help`
 Type `/help` at any time to open the built-in command and keyboard shortcut panel. Use `↑`/`↓` to browse and `Esc` to close. To exit, type `/exit`, press `Ctrl-C` twice, or press `Ctrl-D` with the input box empty.
@@ -153,7 +153,7 @@ For a first-time user, the following is all you need to know:
 | --- | --- |
 | `Esc` | Interrupt streaming output / close a popup |
 | `Ctrl-C` | Interrupt output; press twice while idle to exit |
-| `Shift-Tab` | Toggle Plan mode |
+| `Shift-Tab` | Toggle Discuss |
 | `Ctrl-S` | Inject a message mid-stream without waiting for the current response to finish |
 | `Ctrl-O` | Collapse / expand tool output |
 
@@ -165,6 +165,6 @@ Kimi Code CLI stores its local data under `~/.kimi-code/` by default — config 
 
 ## Next steps
 
-- [Interaction and input](./interaction.md) — input box operations, approval flow, Plan mode, and YOLO mode explained
+- [Interaction and input](./interaction.md) — input box operations, approval flow, Discuss, and YOLO mode explained
 - [Sessions and context](./sessions.md) — resuming sessions, compressing context, exporting sessions
 - [Common use cases](./use-cases.md) — prompt examples for typical tasks

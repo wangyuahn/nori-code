@@ -357,21 +357,21 @@ describe("CombinedAutocompleteProvider", () => {
 
 		test("returns the same @ suggestions when the cwd path contains the query", async () => {
 			const normalBaseDir = join(rootDir, "cwd-normal");
-			const queryInPathBaseDir = join(rootDir, "cwd-plan-repro");
+			const queryInPathBaseDir = join(rootDir, "cwd-discuss-repro");
 			mkdirSync(normalBaseDir, { recursive: true });
 			mkdirSync(queryInPathBaseDir, { recursive: true });
 
 			const structure = {
-				dirs: ["packages/coding-agent/examples/extensions/plan-mode"],
+				dirs: ["packages/coding-agent/examples/extensions/discussion-mode"],
 				files: {
-					"packages/coding-agent/examples/extensions/plan-mode/README.md": "readme",
-					"packages/tui/docs/plan.md": "plan",
+					"packages/coding-agent/examples/extensions/discussion-mode/README.md": "readme",
+					"packages/tui/docs/discussion.md": "discussion",
 				},
 			};
 			setupFolder(normalBaseDir, structure);
 			setupFolder(queryInPathBaseDir, structure);
 
-			const query = "@plan";
+			const query = "@discuss";
 			const normalProvider = new CombinedAutocompleteProvider([], normalBaseDir, requireFdPath());
 			const queryInPathProvider = new CombinedAutocompleteProvider([], queryInPathBaseDir, requireFdPath());
 
@@ -383,9 +383,11 @@ describe("CombinedAutocompleteProvider", () => {
 
 			assert.deepStrictEqual(normalize(queryInPathResult), normalize(normalResult));
 			assert.ok(
-				normalize(normalResult).includes("plan-mode/ :: packages/coding-agent/examples/extensions/plan-mode"),
+				normalize(normalResult).includes(
+					"discussion-mode/ :: packages/coding-agent/examples/extensions/discussion-mode",
+				),
 			);
-			assert.ok(normalize(normalResult).includes("plan.md :: packages/tui/docs/plan.md"));
+			assert.ok(normalize(normalResult).includes("discussion.md :: packages/tui/docs/discussion.md"));
 		});
 
 		test("continues autocomplete inside quoted @ paths", async () => {

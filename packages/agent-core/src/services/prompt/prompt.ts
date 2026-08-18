@@ -86,7 +86,7 @@ export interface PromptAbortResult {
 /**
  * Partial bag of runtime controls accepted by `applyAgentState`. Mirrors the
  * four fields the per-session shadow tracks (`model`, `thinking`,
- * `permission_mode`, `plan_mode`) on protocol's wire vocabulary. Every key is
+ * `permission_mode`, `discuss_mode`) on protocol's wire vocabulary. Every key is
  * optional: only present keys diff-dispatch a setter.
  *
  * Used by both `PromptService.submit` (when the caller carries per-turn
@@ -97,8 +97,7 @@ export interface AgentStatePatch {
   model?: string;
   thinking?: string;
   permission_mode?: string;
-  plan_mode?: boolean;
-  swarm_mode?: boolean;
+  discuss_mode?: boolean;
   goal_objective?: string;
   goal_control?: 'pause' | 'resume' | 'cancel';
 }
@@ -120,7 +119,7 @@ export interface IPromptService {
    * scheduler view: one active prompt, plus queued prompts waiting for the
    * current turn to finish or for a steer action.
    */
-  list(sid: string): Promise<PromptListResponse>;
+  list(sid: string, agentId?: string): Promise<PromptListResponse>;
 
   /**
    * `POST /v1/sessions/{sid}/prompts` — submit a prompt for execution.
@@ -145,7 +144,7 @@ export interface IPromptService {
    * Throws `SessionNotFoundError` (→ 40401) for unknown `sid`.
    * Throws `PromptNotFoundError`  (→ 40402) when any pid is not queued.
    */
-  steer(sid: string, promptIds: readonly string[]): Promise<PromptSteerResult>;
+  steer(sid: string, promptIds: readonly string[], agentId?: string): Promise<PromptSteerResult>;
 
   /**
    * `POST /v1/sessions/{sid}/prompts/{pid}:abort` — cancel an in-flight or
@@ -165,7 +164,7 @@ export interface IPromptService {
    * Throws `PromptNotFoundError`  (→ 40402) when `pid` is neither active nor
    * queued for `sid`.
    */
-  abort(sid: string, pid: string): Promise<PromptAbortResult>;
+  abort(sid: string, pid: string, agentId?: string): Promise<PromptAbortResult>;
 
   /**
    * `POST /v1/sessions/{sid}:abort` — cancel whatever is currently running in
@@ -180,7 +179,7 @@ export interface IPromptService {
    * when the session was idle. Throws `SessionNotFoundError` (→ 40401) for
    * unknown `sid`.
    */
-  abortBySession(sid: string): Promise<PromptAbortResult>;
+  abortBySession(sid: string, agentId?: string): Promise<PromptAbortResult>;
 
   /**
    * Return the daemon prompt_id currently active for a session, if any.
@@ -188,7 +187,7 @@ export interface IPromptService {
    * already completed/aborted. Used by the snapshot route to expose the
    * authoritative id for reconnecting clients.
    */
-  getCurrentPromptId(sid: string): string | undefined;
+  getCurrentPromptId(sid: string, agentId?: string): string | undefined;
 
   /**
    * Apply a partial runtime-controls patch to a session's shadow,
@@ -210,6 +209,7 @@ export interface IPromptService {
     patch: AgentStatePatch,
     source: AgentStateSource,
     promptId?: string,
+    agentId?: string,
   ): Promise<void>;
 
   /**
@@ -235,7 +235,7 @@ export interface IPromptService {
    * Read the current runtime-controls shadow for a session, if it has been
    * bootstrapped. Returns a copy so callers cannot mutate internal state.
    */
-  getAgentStateSnapshot(sid: string): AgentStateSnapshot | undefined;
+  getAgentStateSnapshot(sid: string, agentId?: string): AgentStateSnapshot | undefined;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare
@@ -342,8 +342,7 @@ export interface AgentStateSnapshot {
   model?: string;
   thinking?: string;
   permissionMode?: string;
-  planMode?: boolean;
-  swarmMode?: boolean;
+  discussMode?: boolean;
 }
 
 /**
@@ -362,10 +361,8 @@ export interface PromptDispatchLogEntry {
     | 'setModel'
     | 'setThinking'
     | 'setPermission'
-    | 'enterPlan'
-    | 'cancelPlan'
-    | 'enterSwarm'
-    | 'exitSwarm'
+    | 'enterDiscuss'
+    | 'cancelDiscuss'
     | 'createGoal'
     | 'pauseGoal'
     | 'resumeGoal'

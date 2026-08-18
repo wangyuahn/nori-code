@@ -149,14 +149,14 @@ describe('events / display re-exports', () => {
       sessionId: 'sess_1',
       info: {
         kind: 'agent',
-        taskId: 'swarm-deadbeef',
+        taskId: 'subagent-deadbeef',
         description: 'Review changes',
         status: 'running',
         detached: true,
         paused: true,
         startedAt: 1,
         endedAt: null,
-        subagentType: 'swarm:2',
+        subagentType: 'subagent:2',
       },
     });
 

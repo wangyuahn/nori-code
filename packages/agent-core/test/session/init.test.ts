@@ -39,6 +39,89 @@ afterEach(async () => {
 });
 
 describe('Session.init', () => {
+  it('keeps prompt-cache affinity stable per parent-session transcript', async () => {
+    const workDir = await makeTempDir();
+    const sessionDir = await makeTempDir();
+    const session = new Session({
+      id: 'cache-session',
+      kaos: testKaos.withCwd(workDir),
+      homedir: sessionDir,
+      rpc: createSessionRpc([]),
+      providerManager: testProviderManager('cache-session'),
+    });
+    try {
+      const { agent: main } = await session.createAgent({ type: 'main' }, { profile: testProfile() });
+      const { agent: child } = await session.createAgent(
+        { type: 'sub' },
+        { parentAgentId: 'main', profile: testProfile() },
+      );
+      main.config.update({ modelAlias: 'mock-model', thinkingEffort: 'off' });
+      child.config.update({ modelAlias: 'mock-model', thinkingEffort: 'off' });
+
+      expect(main.config.providerConfig).toMatchObject({
+        generationKwargs: { prompt_cache_key: 'cache-session' },
+      });
+      expect(child.config.providerConfig).toMatchObject({
+        generationKwargs: { prompt_cache_key: 'cache-session:agent-0' },
+      });
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('rebuilds stable per-agent prompt-cache keys when a session resumes', async () => {
+    const workDir = await makeTempDir();
+    const sessionDir = await makeTempDir();
+    const mainDir = join(sessionDir, 'agents', 'main');
+    const childDir = join(sessionDir, 'agents', 'agent-0');
+    await mkdir(workDir, { recursive: true });
+    await mkdir(mainDir, { recursive: true });
+    await mkdir(childDir, { recursive: true });
+    await writeFile(
+      join(sessionDir, 'state.json'),
+      JSON.stringify({
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        title: 'Cache affinity resume',
+        isCustomTitle: false,
+        agents: {
+          main: { homedir: mainDir, type: 'main', parentAgentId: null },
+          'agent-0': { homedir: childDir, type: 'sub', parentAgentId: 'main' },
+        },
+        custom: {},
+      }),
+      'utf-8',
+    );
+    await writeFile(join(mainDir, 'wire.jsonl'), '', 'utf-8');
+    await writeFile(join(childDir, 'wire.jsonl'), '', 'utf-8');
+
+    const session = new Session({
+      id: 'cache-session-resumed',
+      kaos: testKaos.withCwd(workDir),
+      homedir: sessionDir,
+      rpc: createSessionRpc([]),
+      providerManager: testProviderManager('cache-session-resumed'),
+      initializeMainAgent: false,
+    });
+
+    try {
+      await session.resume();
+      const main = await session.ensureAgentResumed('main');
+      const child = await session.ensureAgentResumed('agent-0');
+      main.config.update({ modelAlias: 'mock-model', thinkingEffort: 'off' });
+      child.config.update({ modelAlias: 'mock-model', thinkingEffort: 'off' });
+
+      expect(main.config.providerConfig).toMatchObject({
+        generationKwargs: { prompt_cache_key: 'cache-session-resumed' },
+      });
+      expect(child.config.providerConfig).toMatchObject({
+        generationKwargs: { prompt_cache_key: 'cache-session-resumed:agent-0' },
+      });
+    } finally {
+      await session.close();
+    }
+  });
+
   it('runs an isolated system-trigger turn and records the latest AGENTS as a system reminder', async () => {
     const workDir = await makeTempDir();
     const sessionDir = await makeTempDir();
@@ -72,8 +155,11 @@ describe('Session.init', () => {
 
     await session.generateAgentsMd();
 
-    expect(session.agents.size).toBe(2);
+    // AGENTS.md generation uses a temporary SubAgent. Its result is folded into
+    // the parent reminder, then the worker is archived in the parent session.
     expect(session.agents.get('main')).toBe(mainAgent);
+    expect(session.getAgentMetadata('agent-0')?.archived).toBe(true);
+    expect(session.agents.has('agent-0')).toBe(true);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'subagent.spawned',
@@ -87,7 +173,7 @@ describe('Session.init', () => {
       expect.objectContaining({
         type: 'turn.started',
         agentId: 'agent-0',
-        origin: { kind: 'system_trigger', name: 'subagent' },
+        origin: expect.objectContaining({ kind: 'system_trigger', name: 'subagent' }),
       }),
     );
     expect(events).toContainEqual(
@@ -235,15 +321,13 @@ describe('Session.init', () => {
           profile: {
             name: 'custom-agent-aware',
             systemPrompt: context => context.customAgentsInfo ?? '',
-            tools: ['Agent'],
+            tools: [],
           },
         },
       );
       agent.config.update({ modelAlias: 'mock-model', thinkingEffort: 'off' });
       agent.tools.initializeBuiltinTools();
       expect(agent.config.systemPrompt).not.toContain('hot-reviewer');
-      expect(agent.tools.loopTools.find(tool => tool.name === 'Agent')?.description)
-        .not.toContain('hot-reviewer');
 
       await session.updateCustomAgents({
         'hot-reviewer': {
@@ -256,8 +340,6 @@ describe('Session.init', () => {
 
       expect(config.customAgents?.['hot-reviewer']).toBeDefined();
       expect(agent.config.systemPrompt).toContain('<agent name="hot-reviewer"');
-      expect(agent.tools.loopTools.find(tool => tool.name === 'Agent')?.description)
-        .toContain('hot-reviewer');
     } finally {
       await session.close();
     }
@@ -444,7 +526,7 @@ describe('AgentAPI.startBtw', () => {
           expect.objectContaining({
             type: 'turn.started',
             agentId: 'agent-0',
-            origin: { kind: 'user' },
+            origin: expect.objectContaining({ kind: 'user' }),
           }),
         );
       expect(scripted.calls).toHaveLength(1);
@@ -623,7 +705,7 @@ describe('AgentAPI.startBtw', () => {
           expect.objectContaining({
             type: 'turn.started',
             agentId: 'agent-0',
-            origin: { kind: 'user' },
+            origin: expect.objectContaining({ kind: 'user' }),
           }),
         );
       });
@@ -709,7 +791,7 @@ async function makeTempDir(): Promise<string> {
   return dir;
 }
 
-function testProviderManager(): ProviderManager {
+function testProviderManager(promptCacheKey?: string): ProviderManager {
   return new ProviderManager({
     config: {
       providers: {
@@ -726,6 +808,7 @@ function testProviderManager(): ProviderManager {
         },
       },
     },
+    promptCacheKey,
   });
 }
 

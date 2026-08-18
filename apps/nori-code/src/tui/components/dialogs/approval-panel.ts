@@ -136,7 +136,9 @@ function renderDisplayBlock(
       const op = s.accent(block.operation.padEnd(5));
       const lines = [`${op} ${s.strong(block.path)}`];
       if (block.detail !== undefined && block.detail.length > 0) {
-        lines.push(s.dim(block.detail));
+        for (const detailLine of block.detail.split('\n')) {
+          appendWrappedLine(lines, '  ', '  ', s.dim(detailLine), contentWidth);
+        }
       }
       return lines;
     }
@@ -198,8 +200,6 @@ function headerFor(toolName: string): string {
       return 'Apply these edits?';
     case 'TaskStop':
       return 'Stop this task?';
-    case 'ExitPlanMode':
-      return 'Ready to build with this plan?';
     default:
       return `Approve ${toolName}?`;
   }

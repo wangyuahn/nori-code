@@ -11,10 +11,8 @@ function fakeInitialAppState(): AppState {
     additionalDirs: [],
     sessionId: 'sess-1',
     permissionMode: 'manual',
-    planMode: false,
+    discussMode: false,
     inputMode: 'prompt',
-    swarmDepth: 0,
-    maxSwarmDepth: 3,
     coderWriteEnabled: false,
     toolsReadonly: true,
     thinkingEffort: 'off',
@@ -44,7 +42,7 @@ describe('createTUIState', () => {
       startup: {
         continueLast: false,
         permission: undefined,
-        plan: false,
+        discuss: false,
       },
     };
     const state = createTUIState(opts);

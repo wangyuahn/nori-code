@@ -30,7 +30,7 @@ Take a look at this project and explain the main directories.
 
 ## Key Features
 
-- **Multi-agent DAG orchestration.** AgentSwarm decomposes tasks into parallel sub-agents with dependency scheduling — plan, implement, verify, and review run concurrently.
+- **Parallel SubAgents.** `SubAgent` launches one or many child transcripts in a single call, with optional dependency scheduling for plan, implement, verify, and review.
 - **Persistent memory.** Architecture decisions, code reviews, and patterns persist in a bidirectional-link vault via `nori_memory_search` / `nori_memory_write`. Cross-session knowledge means Nori learns your project over time.
 - **Policy-as-Code.** `nori.yaml` enforces deterministic rules: search vault before coding, run tests before exit, require review before merge.
 - **Sub-agents.** Dispatch `coder`, `explore`, and `plan` sub-agents with isolated context. The main conversation stays clean.

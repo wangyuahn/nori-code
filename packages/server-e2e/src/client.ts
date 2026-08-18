@@ -98,7 +98,7 @@ const DEFAULT_CONTROL_ACK_TIMEOUT_MS = 5_000;
  * Per-request stateless session controls that the server REST surface
  * requires on every prompt submission. Scenarios that don't care about
  * these can leave them at the defaults; tests that exercise switching
- * model / thinking / permission / plan mode override only the field
+ * model / thinking / permission / Discuss mode override only the field
  * they need.
  *
  * `model` matches what the existing server-e2e scenarios assume (the
@@ -108,7 +108,7 @@ export const DEFAULT_PROMPT_CONTROLS = {
   model: 'kimi-code/kimi-for-coding',
   thinking: 'off' as PromptThinking,
   permission_mode: 'manual' as PromptPermissionMode,
-  plan_mode: false,
+  discuss_mode: false,
 } as const;
 
 /**
@@ -119,7 +119,7 @@ export const DEFAULT_PROMPT_CONTROLS = {
  */
 export type PromptSubmitInput =
   Pick<PromptSubmission, 'content'>
-  & Partial<Pick<PromptSubmission, 'metadata' | 'model' | 'thinking' | 'permission_mode' | 'plan_mode'>>;
+  & Partial<Pick<PromptSubmission, 'metadata' | 'model' | 'thinking' | 'permission_mode' | 'discuss_mode'>>;
 
 export interface TerminalAttachOptions {
   sinceSeq?: number;

@@ -42,6 +42,7 @@ const TOOL_INTERRUPTED_ON_RESUME_OUTPUT =
 // later messages in deferredMessages until those ids are resolved.
 export class ContextMemory {
   private _history: ContextMessage[] = [];
+  private transientSystemReminder: ContextMessage | undefined;
   private _tokenCount = 0;
   private tokenCountCoveredMessageCount = 0;
   private openSteps: Map<string, ContextMessage> = new Map();
@@ -79,6 +80,20 @@ export class ContextMemory {
       toolCalls: [],
       origin,
     });
+  }
+
+  setTransientSystemReminder(content: string, origin: PromptOrigin): void {
+    const text = `<system-reminder>\n${content.trim()}\n</system-reminder>`;
+    this.transientSystemReminder = {
+      role: 'user',
+      content: [{ type: 'text', text }],
+      toolCalls: [],
+      origin,
+    };
+  }
+
+  clearTransientSystemReminder(): void {
+    this.transientSystemReminder = undefined;
   }
 
   /**
@@ -154,6 +169,7 @@ export class ContextMemory {
     this.openSteps.clear();
     this.pendingToolResultIds.clear();
     this.deferredMessages = [];
+    this.clearTransientSystemReminder();
     this._lastAssistantAt = null;
     this.agent.microCompaction.reset();
     this.agent.injection.onContextClear();
@@ -165,6 +181,7 @@ export class ContextMemory {
     if (this._history.length === 0) return;
 
     this.agent.records.logRecord({ type: 'context.undo', count });
+    this.clearTransientSystemReminder();
 
     let removedUserCount = 0;
     const removedMessages = new Set<ContextMessage>();
@@ -198,6 +215,7 @@ export class ContextMemory {
     this.openSteps.clear();
     this.pendingToolResultIds.clear();
     this.deferredMessages = [];
+    this.clearTransientSystemReminder();
     this.agent.microCompaction.reset(this._history.length);
     this.agent.emitStatusUpdated();
 
@@ -394,7 +412,7 @@ export class ContextMemory {
   }
 
   get messages(): Message[] {
-    return this.project(this.history);
+    return this.project(this.historyForModel());
   }
 
   // Last-resort projection for the post-400 strict resend: close every open tool
@@ -403,7 +421,7 @@ export class ContextMemory {
   // matter how the history was mangled. Only used when the provider has already
   // rejected the normal projection — see the adjacency fallback in `turn-step`.
   get strictMessages(): Message[] {
-    return this.project(this.history, {
+    return this.project(this.historyForModel(), {
       synthesizeMissing: true,
       dropOrphanResults: true,
       dropLeadingNonUser: true,
@@ -562,6 +580,25 @@ export class ContextMemory {
     return this.pendingToolResultIds.size > 0;
   }
 
+  private historyWithTransientSystemReminder(): readonly ContextMessage[] {
+    return this.transientSystemReminder === undefined
+      ? this.history
+      : [...this.history, this.transientSystemReminder];
+  }
+
+  /**
+   * Speaker labels are a request projection, never a transcript mutation. That
+   * keeps replay, compaction source data, and cacheable historical prefixes
+   * stable while still making the model-facing role explicit.
+   */
+  private historyForModel(): readonly ContextMessage[] {
+    return this.historyWithTransientSystemReminder().map((message) => {
+      if (message.role !== 'user' || message.origin === undefined) return message;
+      const content = wrapSpeakerContent(message.content, message.origin);
+      return content === undefined ? message : { ...message, content };
+    });
+  }
+
   private pushHistory(...messages: ContextMessage[]): void {
     this._history.push(...messages);
     for (const message of messages) {
@@ -577,6 +614,35 @@ export class ContextMemory {
       });
     }
   }
+}
+
+function wrapSpeakerContent(
+  content: readonly ContentPart[],
+  origin: PromptOrigin,
+): ContentPart[] | undefined {
+  const speaker = speakerDetails(origin);
+  if (speaker === undefined) return undefined;
+  return content.map((part) => {
+    if (part.type !== 'text') return part;
+    return {
+      ...part,
+      text: `<message from="${escapeXml(speaker.from)}" name="${escapeXml(speaker.name)}">${escapeXml(part.text)}</message>`,
+    };
+  });
+}
+
+function speakerDetails(origin: PromptOrigin): { readonly from: string; readonly name: string } | undefined {
+  // A missing speaker is a legacy persisted record. Do not retroactively
+  // project an envelope for it: that would rewrite its cached model prefix
+  // on the first request after an upgrade. New human submissions always set
+  // `speaker` at the REST/RPC boundary.
+  const identity = origin.speaker;
+  if (identity === undefined) return undefined;
+  const speakerId = identity.speakerId?.trim();
+  return {
+    from: speakerId === undefined || speakerId.length === 0 ? identity.from : `${identity.from}:${speakerId}`,
+    name: identity.speakerName?.trim() || (identity.from === 'user' ? '用户' : identity.from),
+  };
 }
 
 function toolResultOutputForModel(result: ExecutableToolResult): string | ContentPart[] {

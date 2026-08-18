@@ -25,15 +25,15 @@ const ADD_DIR_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
   { value: 'list', description: 'Show configured additional workspace directories' },
 ];
 
-const SWARM_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
-  { value: 'on', description: 'Turn swarm mode on' },
-  { value: 'off', description: 'Turn swarm mode off' },
+const SUBAGENT_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
+  { value: 'on', description: 'Turn SubAgent mode on' },
+  { value: 'off', description: 'Turn SubAgent mode off' },
 ];
 
 /** Argument autocompletion for the `/goal` command (subcommands). */
-/** Argument autocompletion for the `/swarm` command. */
-export function swarmArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
-  return completeLeadingArg(SWARM_ARG_COMPLETIONS, argumentPrefix);
+/** Argument autocompletion for the `/subagent` command. */
+export function subagentArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
+  return completeLeadingArg(SUBAGENT_ARG_COMPLETIONS, argumentPrefix);
 }
 
 export function goalArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
@@ -162,11 +162,11 @@ export const BUILTIN_SLASH_COMMANDS = [
     availability: 'always',
   },
   {
-    name: 'plan',
+    name: 'discuss',
     aliases: [],
-    description: 'Toggle plan mode',
+    description: 'Toggle Discuss mode',
     priority: 100,
-    availability: (args) => (args.trim().toLowerCase() === 'clear' ? 'idle-only' : 'always'),
+    availability: 'always',
   },
   {
     name: 'model',
@@ -274,12 +274,12 @@ export const BUILTIN_SLASH_COMMANDS = [
     argumentHint: '<instruction>',
   },
   {
-    name: 'swarm',
+    name: 'subagent',
     aliases: [],
-    description: 'Enable swarm mode or start a coordinated swarm task',
+    description: 'Enable SubAgent mode or start a coordinated SubAgent task',
     priority: 80,
     argumentHint: '[on|off] | <task>',
-    completeArgs: swarmArgumentCompletions,
+    completeArgs: subagentArgumentCompletions,
     availability: 'idle-only',
   },
   {

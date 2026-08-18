@@ -315,7 +315,7 @@ export class StreamingUIController {
       existingComponent.updateToolCall(toolCall);
     } else if (existing === undefined) {
       this.finalizeLiveTextBuffers('tool');
-      if (toolCall.name !== 'Agent' && toolCall.name !== 'AgentSwarm') {
+      if (toolCall.name !== 'SubAgent') {
         this.onToolCallStart(toolCall);
       }
     }
@@ -666,17 +666,6 @@ export class StreamingUIController {
       state.ui.requestRender();
     }
 
-    if (toolCall.name === 'ExitPlanMode' && typeof toolCall.args['plan'] !== 'string') {
-      const session = this.host.requireSession();
-      void (async () => {
-        try {
-          const plan = await session.getPlan();
-          tc.setPlanInfo(plan === null ? {} : { plan: plan.content, path: plan.path });
-        } catch {
-          tc.setPlanInfo({});
-        }
-      })();
-    }
   }
 
   onToolCallEnd(toolCallId: string, result: ToolResultBlockData): void {
@@ -768,7 +757,7 @@ export class StreamingUIController {
     const existingComponent = this._pendingToolComponents.get(id);
     if (existingComponent !== undefined) {
       existingComponent.updateToolCall(toolCall);
-    } else if (toolCall.name !== 'Agent' && toolCall.name !== 'AgentSwarm') {
+    } else if (toolCall.name !== 'SubAgent') {
       this.onToolCallStart(toolCall);
     }
   }

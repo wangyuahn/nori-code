@@ -18,7 +18,6 @@ import {
   type ISessionClientsService as ISessionClientsServiceT,
 } from '#/services/gateway';
 import { WSBroadcastService } from '#/services/gateway/wsBroadcastService';
-import { clearSwarmStatus, getSwarmStatus } from '#/routes/swarmStatus';
 import type { WsConnection } from '../src/ws/connection';
 
 class TestLogger implements ILoggerT {
@@ -87,7 +86,15 @@ class FakeConnectionRegistry {
   }
 }
 
-function fakeConn(id = 'conn_x'): { id: string; sent: unknown[]; send(m: unknown): void } & WsConnection {
+function fakeConn(
+  id = 'conn_x',
+  agentIds?: readonly string[],
+): {
+  id: string;
+  sent: unknown[];
+  send(m: unknown): void;
+  acceptsAgentEvent(sessionId: string, agentId: string): boolean;
+} & WsConnection {
   const sent: unknown[] = [];
   return {
     id,
@@ -95,7 +102,15 @@ function fakeConn(id = 'conn_x'): { id: string; sent: unknown[]; send(m: unknown
     send(m: unknown): void {
       sent.push(m);
     },
-  } as unknown as { id: string; sent: unknown[]; send(m: unknown): void } & WsConnection;
+    acceptsAgentEvent(_sessionId: string, agentId: string): boolean {
+      return agentIds === undefined || agentIds.includes(agentId);
+    },
+  } as unknown as {
+    id: string;
+    sent: unknown[];
+    send(m: unknown): void;
+    acceptsAgentEvent(sessionId: string, agentId: string): boolean;
+  } & WsConnection;
 }
 
 function captureThrown(fn: () => void): unknown {
@@ -510,10 +525,12 @@ describe('WSBroadcastService (WS transport pump)', () => {
     bus.dispose();
   });
 
-  it('keeps subagent transcript traffic out of the main session stream', async () => {
+  it('filters subagent transcript traffic by agent for live delivery and replay', async () => {
     const clients = new FakeSessionClients();
-    const connection = fakeConn();
-    clients.subscribe(connection, 'sid_swarm');
+    const connection = fakeConn('conn_subagent', ['agent-2']);
+    const otherAgent = fakeConn('conn_main', ['main']);
+    clients.subscribe(connection, 'sid_subagent');
+    clients.subscribe(otherAgent, 'sid_subagent');
     const bus = new EventService();
     const broadcast = new WSBroadcastService(
       bus,
@@ -525,21 +542,21 @@ describe('WSBroadcastService (WS transport pump)', () => {
 
     bus.publish({
       type: 'turn.started',
-      sessionId: 'sid_swarm',
+      sessionId: 'sid_subagent',
       agentId: 'agent-2',
       turnId: 1,
       origin: { kind: 'background_task' },
     } as unknown as Event);
     bus.publish({
       type: 'assistant.delta',
-      sessionId: 'sid_swarm',
+      sessionId: 'sid_subagent',
       agentId: 'agent-2',
       turnId: 1,
       delta: 'high-volume subagent output',
     } as unknown as Event);
     bus.publish({
       type: 'tool.result',
-      sessionId: 'sid_swarm',
+      sessionId: 'sid_subagent',
       agentId: 'agent-2',
       turnId: 1,
       toolCallId: 'tool-1',
@@ -549,385 +566,31 @@ describe('WSBroadcastService (WS transport pump)', () => {
     } as unknown as Event);
     bus.publish({
       type: 'code.change',
-      sessionId: 'sid_swarm',
+      sessionId: 'sid_subagent',
       agentId: 'agent-2',
       path: 'src/app.ts',
       operation: 'edit',
       diff: '+changed',
       occurredAt: new Date().toISOString(),
     } as unknown as Event);
-    await broadcast._drainForTest('sid_swarm');
+    await broadcast._drainForTest('sid_subagent');
 
-    expect(connection.sent).toHaveLength(1);
-    expect(connection.sent[0]).toMatchObject({
-      type: 'code.change',
-      seq: 1,
-      payload: { agentId: 'agent-2', path: 'src/app.ts' },
-    });
-    expect((await broadcast.getCursor('sid_swarm')).seq).toBe(1);
+    expect(connection.sent).toHaveLength(4);
+    expect(connection.sent).toMatchObject([
+      { type: 'turn.started', seq: 1, payload: { agentId: 'agent-2' } },
+      { type: 'assistant.delta', seq: 1, volatile: true, payload: { agentId: 'agent-2' } },
+      { type: 'tool.result', seq: 2, payload: { agentId: 'agent-2' } },
+      { type: 'code.change', seq: 3, payload: { agentId: 'agent-2', path: 'src/app.ts' } },
+    ]);
+    expect(otherAgent.sent).toHaveLength(0);
+
+    const replay = await broadcast.getBufferedSince('sid_subagent', { seq: 0 }, ['agent-2']);
+    expect(replay.events.map(entry => entry.seq)).toEqual([1, 2, 3]);
+    expect(replay.currentSeq).toBe(3);
     broadcast.dispose();
     bus.dispose();
   });
 
-  it('tracks swarm rounds, nested wake-ups, live agent output, and token usage outside the main stream', async () => {
-    const bus = new EventService();
-    const broadcast = new WSBroadcastService(
-      bus,
-      testLogger,
-      new FakeSessionClients(),
-      new FakeConnectionRegistry(),
-      makeEnv(),
-    );
-    const sessionId = 'sid_swarm_status';
-    const swarmId = 'swarm-status-1';
-
-    bus.publish({
-      type: 'tool.call.started',
-      sessionId,
-      agentId: 'main',
-      turnId: 1,
-      toolCallId: 'call-swarm-1',
-      name: 'AgentSwarm',
-      args: { tasks: [{ prompt: 'inspect' }] },
-      description: 'Inspect the project',
-    } as unknown as Event);
-    bus.publish({
-      type: 'background.task.started',
-      sessionId,
-      agentId: 'main',
-      info: {
-        taskId: swarmId,
-        description: 'Inspect the project',
-        status: 'running',
-        detached: true,
-        startedAt: Date.now(),
-        endedAt: null,
-        kind: 'agent',
-        subagentType: 'swarm:1',
-      },
-    } as unknown as Event);
-    bus.publish({
-      type: 'subagent.spawned',
-      sessionId,
-      agentId: 'main',
-      subagentId: 'agent-status-1',
-      subagentName: 'deepseek-reviewer',
-      parentToolCallId: 'call-swarm-1',
-      parentAgentId: 'main',
-      description: 'Inspect streaming',
-      swarmIndex: 0,
-      runInBackground: true,
-    } as unknown as Event);
-    bus.publish({
-      type: 'subagent.spawned',
-      sessionId,
-      agentId: 'main',
-      subagentId: 'agent-status-1',
-      subagentName: 'deepseek-reviewer',
-      parentToolCallId: 'call-swarm-1',
-      parentAgentId: 'main',
-      description: 'Inspect streaming',
-      swarmIndex: 0,
-      runInBackground: true,
-    } as unknown as Event);
-    expect(getSwarmStatus(swarmId)?.tasks).toHaveLength(1);
-    bus.publish({
-      type: 'subagent.started',
-      sessionId,
-      agentId: 'main',
-      subagentId: 'agent-status-1',
-    } as unknown as Event);
-    bus.publish({
-      type: 'subagent.suspended',
-      sessionId,
-      agentId: 'main',
-      subagentId: 'agent-status-1',
-      reason: 'Waiting for nested agent work.',
-    } as unknown as Event);
-    expect(getSwarmStatus(swarmId)).toMatchObject({
-      tasks: [{ status: 'paused' }],
-    });
-    bus.publish({
-      type: 'turn.started',
-      sessionId,
-      agentId: 'agent-status-1',
-      turnId: 2,
-    } as unknown as Event);
-    expect(getSwarmStatus(swarmId)).toMatchObject({
-      tasks: [{ status: 'running' }],
-    });
-    bus.publish({
-      type: 'assistant.delta',
-      sessionId,
-      agentId: 'agent-status-1',
-      turnId: 0,
-      delta: 'live preview',
-    } as unknown as Event);
-
-    expect(getSwarmStatus(swarmId)).toMatchObject({
-      tasks: [{
-        profile: 'deepseek-reviewer',
-        status: 'running',
-        output: 'live preview',
-        live_output_tokens: 3,
-      }],
-    });
-
-    bus.publish({
-      type: 'turn.step.completed',
-      sessionId,
-      agentId: 'agent-status-1',
-      turnId: 0,
-      step: 1,
-      stepId: 'step-1',
-      usage: { inputOther: 10, output: 5, inputCacheRead: 2, inputCacheCreation: 1 },
-      finishReason: 'end_turn',
-    } as unknown as Event);
-
-    expect(getSwarmStatus(swarmId)).toMatchObject({
-      session_id: sessionId,
-      owner_agent_id: 'main',
-      tool_call_id: 'call-swarm-1',
-      round: 1,
-      usage: { input: 13, output: 5, total: 18 },
-      tasks: [{
-        id: 'agent-status-1',
-        status: 'running',
-        output: 'live preview',
-        usage: { input: 13, output: 5, total: 18 },
-        live_output_tokens: 0,
-      }],
-    });
-
-    bus.publish({
-      type: 'subagent.completed',
-      sessionId,
-      agentId: 'main',
-      subagentId: 'agent-status-1',
-      resultSummary: 'final result',
-      usage: { inputOther: 20, output: 7, inputCacheRead: 3, inputCacheCreation: 0 },
-      contextTokens: 23,
-    } as unknown as Event);
-    expect(getSwarmStatus(swarmId)).toMatchObject({
-      status: 'done',
-      task_count: 1,
-      completed_count: 1,
-      usage: { input: 23, output: 7, total: 30 },
-      tasks: [{ status: 'completed', output: 'final result', context_tokens: 23 }],
-    });
-
-    clearSwarmStatus(swarmId);
-    broadcast.dispose();
-    bus.dispose();
-  });
-
-  it('synchronizes child states when a swarm is paused, resumed, and stopped', () => {
-    const bus = new EventService();
-    const broadcast = new WSBroadcastService(
-      bus,
-      testLogger,
-      new FakeSessionClients(),
-      new FakeConnectionRegistry(),
-      makeEnv(),
-    );
-    const sessionId = 'sid_swarm_control_status';
-    const swarmId = 'swarm-control-1';
-
-    bus.publish({
-      type: 'tool.call.started', sessionId, agentId: 'main', turnId: 1,
-      toolCallId: 'call-control-1', name: 'AgentSwarm', args: {}, description: 'Controlled review',
-    } as unknown as Event);
-    bus.publish({
-      type: 'background.task.started', sessionId, agentId: 'main',
-      info: {
-        taskId: swarmId, description: 'Controlled review', status: 'running', detached: true,
-        startedAt: Date.now(), endedAt: null, kind: 'agent', subagentType: 'swarm:2', paused: false,
-      },
-    } as unknown as Event);
-    for (const [index, agentId] of ['agent-control-1', 'agent-control-2'].entries()) {
-      bus.publish({
-        type: 'subagent.spawned', sessionId, agentId: 'main', subagentId: agentId,
-        subagentName: 'nori-coder', parentToolCallId: 'call-control-1', parentAgentId: 'main',
-        description: `Task ${String(index + 1)}`, swarmIndex: index, runInBackground: true,
-      } as unknown as Event);
-      bus.publish({ type: 'subagent.started', sessionId, agentId: 'main', subagentId: agentId } as unknown as Event);
-    }
-
-    bus.publish({
-      type: 'background.task.updated', sessionId, agentId: 'main',
-      info: {
-        taskId: swarmId, description: 'Controlled review', status: 'running', detached: true,
-        startedAt: Date.now(), endedAt: null, kind: 'agent', subagentType: 'swarm:2', paused: true,
-      },
-    } as unknown as Event);
-    expect(getSwarmStatus(swarmId)).toMatchObject({
-      status: 'paused',
-      tasks: [{ status: 'paused' }, { status: 'paused' }],
-    });
-
-    bus.publish({
-      type: 'background.task.updated', sessionId, agentId: 'main',
-      info: {
-        taskId: swarmId, description: 'Controlled review', status: 'running', detached: true,
-        startedAt: Date.now(), endedAt: null, kind: 'agent', subagentType: 'swarm:2', paused: false,
-      },
-    } as unknown as Event);
-    expect(getSwarmStatus(swarmId)).toMatchObject({
-      status: 'running',
-      tasks: [{ status: 'pending' }, { status: 'pending' }],
-    });
-
-    bus.publish({ type: 'subagent.started', sessionId, agentId: 'main', subagentId: 'agent-control-1' } as unknown as Event);
-    bus.publish({
-      type: 'background.task.terminated', sessionId, agentId: 'main',
-      info: {
-        taskId: swarmId, description: 'Controlled review', status: 'killed', detached: true,
-        startedAt: Date.now(), endedAt: Date.now(), kind: 'agent', subagentType: 'swarm:2', paused: false,
-      },
-    } as unknown as Event);
-    expect(getSwarmStatus(swarmId)).toMatchObject({
-      status: 'stopped',
-      completed_count: 2,
-      tasks: [{ status: 'cancelled' }, { status: 'cancelled' }],
-    });
-
-    clearSwarmStatus(swarmId);
-    broadcast.dispose();
-    bus.dispose();
-  });
-
-  it('projects regular background agents into the global collaboration status store', () => {
-    const bus = new EventService();
-    const broadcast = new WSBroadcastService(
-      bus,
-      testLogger,
-      new FakeSessionClients(),
-      new FakeConnectionRegistry(),
-      makeEnv(),
-    );
-    const sessionId = 'sid_regular_agent_status';
-    const taskId = 'task-regular-agent';
-    const agentId = 'agent-regular-agent';
-
-    bus.publish({
-      type: 'background.task.started', sessionId, agentId: 'main',
-      info: {
-        taskId,
-        agentId,
-        description: 'Review the current changes',
-        status: 'running',
-        detached: true,
-        startedAt: Date.now(),
-        endedAt: null,
-        kind: 'agent',
-        subagentType: 'reviewer',
-        paused: false,
-      },
-    } as unknown as Event);
-
-    expect(getSwarmStatus(taskId)).toMatchObject({
-      status: 'running',
-      session_id: sessionId,
-      task_count: 1,
-      tasks: [{ id: taskId, agent_id: agentId, profile: 'reviewer', status: 'running' }],
-    });
-
-    bus.publish({
-      type: 'background.task.terminated', sessionId, agentId: 'main',
-      info: {
-        taskId,
-        agentId,
-        description: 'Review the current changes',
-        status: 'completed',
-        detached: true,
-        startedAt: Date.now(),
-        endedAt: Date.now(),
-        kind: 'agent',
-        subagentType: 'reviewer',
-        paused: false,
-      },
-    } as unknown as Event);
-
-    expect(getSwarmStatus(taskId)).toMatchObject({
-      status: 'done',
-      completed_count: 1,
-      tasks: [{ status: 'completed' }],
-    });
-
-    clearSwarmStatus(taskId);
-    broadcast.dispose();
-    bus.dispose();
-  });
-
-  it('keeps swarms launched by child agents in their parent round', () => {
-    const bus = new EventService();
-    const broadcast = new WSBroadcastService(
-      bus,
-      testLogger,
-      new FakeSessionClients(),
-      new FakeConnectionRegistry(),
-      makeEnv(),
-    );
-    const sessionId = 'sid_nested_swarm_status';
-
-    const startSwarm = (ownerAgentId: string, toolCallId: string, taskId: string) => {
-      bus.publish({
-        type: 'tool.call.started',
-        sessionId,
-        agentId: ownerAgentId,
-        turnId: 1,
-        toolCallId,
-        name: 'AgentSwarm',
-        args: { tasks: [{ prompt: taskId }] },
-        description: taskId,
-      } as unknown as Event);
-      bus.publish({
-        type: 'background.task.started',
-        sessionId,
-        agentId: ownerAgentId,
-        info: {
-          taskId,
-          description: taskId,
-          status: 'running',
-          detached: true,
-          startedAt: Date.now(),
-          endedAt: null,
-          kind: 'agent',
-          subagentType: 'swarm:1',
-        },
-      } as unknown as Event);
-    };
-
-    startSwarm('main', 'call-root', 'swarm-root');
-    bus.publish({
-      type: 'subagent.spawned',
-      sessionId,
-      agentId: 'main',
-      subagentId: 'agent-parent',
-      subagentName: 'nori-coder',
-      parentToolCallId: 'call-root',
-      parentAgentId: 'main',
-      description: 'Parent agent',
-      swarmIndex: 0,
-      runInBackground: true,
-    } as unknown as Event);
-    startSwarm('agent-parent', 'call-child', 'swarm-child');
-    startSwarm('main', 'call-second-root', 'swarm-second-root');
-
-    expect(getSwarmStatus('swarm-root')).toMatchObject({ round: 1 });
-    expect(getSwarmStatus('swarm-child')).toMatchObject({
-      owner_agent_id: 'agent-parent',
-      parent_swarm_id: 'swarm-root',
-      round: 1,
-    });
-    expect(getSwarmStatus('swarm-second-root')).toMatchObject({ round: 2 });
-
-    clearSwarmStatus('swarm-root');
-    clearSwarmStatus('swarm-child');
-    clearSwarmStatus('swarm-second-root');
-    broadcast.dispose();
-    bus.dispose();
-  });
 
   it('getSnapshotState clears the in-flight turn after turn.ended', async () => {
     const bus = new EventService();

@@ -6,7 +6,7 @@ describe('context route', () => {
   let cleanup: (() => Promise<void>) | null = null;
   afterEach(async () => { if (cleanup) await cleanup(); cleanup = null; });
 
-  it('echoes the new projection fields (contextTokens, goal, swarm)', async () => {
+  it('echoes the new projection fields (contextTokens, goal, subagent)', async () => {
     const { home, cleanup: c } = await buildSessionFixture('sample-main');
     cleanup = c;
 
@@ -16,16 +16,16 @@ describe('context route', () => {
     const body = (await res.json()) as Record<string, unknown>;
 
     // The route must pass these projection fields straight through (it used to
-    // cherry-pick only messages/usage/config/permission/planMode).
+    // cherry-pick only messages/usage/config/permission/discussMode).
     expect(body).toHaveProperty('contextTokens');
     expect(body).toHaveProperty('goal');
-    expect(body).toHaveProperty('swarm');
+    expect(body).toHaveProperty('subagent');
 
     // The sample fixture's only step.end carries usage 10+5 → contextTokens=15,
-    // and has no goal / swarm records.
+    // and has no goal / subagent records.
     expect(body['contextTokens']).toBe(15);
     expect(body['goal']).toBeNull();
-    expect(body['swarm']).toEqual({ active: false });
+    expect(body['subagent']).toEqual({ active: false });
   });
 
   it('still echoes the existing fields', async () => {
@@ -43,7 +43,7 @@ describe('context route', () => {
     expect(body).toHaveProperty('usage');
     expect(body).toHaveProperty('config');
     expect(body).toHaveProperty('permission');
-    expect(body).toHaveProperty('planMode');
+    expect(body).toHaveProperty('discussMode');
   });
 
   it('returns 404 for missing session', async () => {

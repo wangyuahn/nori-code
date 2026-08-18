@@ -479,6 +479,38 @@ importers:
         specifier: ^3.3.1
         version: 3.3.1
 
+  packages/dsh-nori-loop:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: '*'
+        version: 4.0.1
+    devDependencies:
+      tsdown:
+        specifier: 0.22.0
+        version: 0.22.0(@arethetypeswrong/core@0.18.2)(publint@0.3.18)(tsx@4.21.0)(typescript@5.9.3)(unrun@0.2.34)(vue-tsc@3.2.9(typescript@5.9.3))
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.4
+        version: 4.1.4(@types/node@22.19.17)(@vitest/coverage-v8@4.1.4)(jsdom@25.0.1)(vite@8.0.8(@types/node@22.19.17)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
+
+  packages/dsh-nori-memory:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: '*'
+        version: 4.0.1
+    devDependencies:
+      tsdown:
+        specifier: 0.22.0
+        version: 0.22.0(@arethetypeswrong/core@0.18.2)(publint@0.3.18)(tsx@4.21.0)(typescript@5.9.3)(unrun@0.2.34)(vue-tsc@3.2.9(typescript@5.9.3))
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.4
+        version: 4.1.4(@types/node@22.19.17)(@vitest/coverage-v8@4.1.4)(jsdom@25.0.1)(vite@8.0.8(@types/node@22.19.17)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
+
   packages/kaos:
     dependencies:
       pathe:
@@ -613,6 +645,9 @@ importers:
       '@nori-code/agent-core':
         specifier: workspace:^
         version: link:../agent-core
+      '@nori-code/oauth':
+        specifier: workspace:^
+        version: link:../oauth
       '@nori-code/protocol':
         specifier: workspace:^
         version: link:../protocol
@@ -951,6 +986,21 @@ packages:
   '@csstools/css-tokenizer@3.0.4':
     resolution: {integrity: sha512-Vd/9EVDiu6PPJt9yAh6roZP6El1xHrdvIVGjyBsHR0RYwNHgL7FJPyIIW4fANJNG6FtyZfvlRPpFI4ZM/lubvw==}
     engines: {node: '>=18'}
+
+  '@deepseek-ai/cordis@4.0.1':
+    resolution: {integrity: sha512-YBdskTU2Po1kru3GgcUWUbkTsPMA9LkSQDAY8rBkFJeajdgcQad3QPJZE26JyK99Xb6HaASvoXg2DSUTeN/0Nw==}
+    hasBin: true
+    peerDependencies:
+      '@deepseek-ai/cordis-plugin-include': ^1.0.6
+      '@deepseek-ai/cordis-plugin-loader': ^1.0.2
+    peerDependenciesMeta:
+      '@deepseek-ai/cordis-plugin-include':
+        optional: true
+      '@deepseek-ai/cordis-plugin-loader':
+        optional: true
+
+  '@deepseek-ai/cosmokit@1.8.2':
+    resolution: {integrity: sha512-muBOKtSrUKU5m/xpq8ZXWL6hQ/jgd4PhU2PqH97bcxIiLEJfNwZOGQEx4t/aS/GgxRAR+ra9pMHPMtTHU4sqqA==}
 
   '@develar/schema-utils@2.6.5':
     resolution: {integrity: sha512-0cp4PsWQ/9avqTVMCtZ+GirikIA36ikvjtHweU4/j8yLtgObI0+JUPhYFScgwlteveGB1rt3Cm8UhN04XayDig==}
@@ -7207,6 +7257,13 @@ snapshots:
   '@csstools/css-tokenizer@3.0.4':
     optional: true
 
+  '@deepseek-ai/cordis@4.0.1':
+    dependencies:
+      '@deepseek-ai/cosmokit': 1.8.2
+      '@standard-schema/spec': 1.1.0
+
+  '@deepseek-ai/cosmokit@1.8.2': {}
+
   '@develar/schema-utils@2.6.5':
     dependencies:
       ajv: 6.15.0
@@ -12026,6 +12083,23 @@ snapshots:
       sprintf-js: 1.1.3
     optional: true
 
+  rolldown-plugin-dts@0.25.1(rolldown@1.0.1)(typescript@5.9.3)(vue-tsc@3.2.9(typescript@5.9.3)):
+    dependencies:
+      '@babel/generator': 8.0.0-rc.5
+      '@babel/helper-validator-identifier': 8.0.0-rc.5
+      '@babel/parser': 8.0.0-rc.4
+      ast-kit: 3.0.0-beta.1
+      birpc: 4.0.0
+      dts-resolver: 3.0.0
+      get-tsconfig: 5.0.0-beta.5
+      obug: 2.1.1
+      rolldown: 1.0.1
+    optionalDependencies:
+      typescript: 5.9.3
+      vue-tsc: 3.2.9(typescript@5.9.3)
+    transitivePeerDependencies:
+      - oxc-resolver
+
   rolldown-plugin-dts@0.25.1(rolldown@1.0.1)(typescript@6.0.2)(vue-tsc@3.2.9(typescript@6.0.2)):
     dependencies:
       '@babel/generator': 8.0.0-rc.5
@@ -12773,6 +12847,35 @@ snapshots:
 
   ts-algebra@2.0.0: {}
 
+  tsdown@0.22.0(@arethetypeswrong/core@0.18.2)(publint@0.3.18)(tsx@4.21.0)(typescript@5.9.3)(unrun@0.2.34)(vue-tsc@3.2.9(typescript@5.9.3)):
+    dependencies:
+      ansis: 4.2.0
+      cac: 7.0.0
+      defu: 6.1.7
+      empathic: 2.0.0
+      hookable: 6.1.1
+      import-without-cache: 0.4.0
+      obug: 2.1.1
+      picomatch: 4.0.4
+      rolldown: 1.0.1
+      rolldown-plugin-dts: 0.25.1(rolldown@1.0.1)(typescript@5.9.3)(vue-tsc@3.2.9(typescript@5.9.3))
+      semver: 7.7.4
+      tinyexec: 1.1.2
+      tinyglobby: 0.2.16
+      tree-kill: 1.2.2
+      unconfig-core: 7.5.0
+    optionalDependencies:
+      '@arethetypeswrong/core': 0.18.2
+      publint: 0.3.18
+      tsx: 4.21.0
+      typescript: 5.9.3
+      unrun: 0.2.34
+    transitivePeerDependencies:
+      - '@ts-macro/tsc'
+      - '@typescript/native-preview'
+      - oxc-resolver
+      - vue-tsc
+
   tsdown@0.22.0(@arethetypeswrong/core@0.18.2)(publint@0.3.18)(tsx@4.21.0)(typescript@6.0.2)(unrun@0.2.34(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0))(vue-tsc@3.2.9(typescript@6.0.2)):
     dependencies:
       ansis: 4.2.0
@@ -13293,6 +13396,13 @@ snapshots:
       path-browserify: 1.0.1
     optionalDependencies:
       typescript: 6.0.2
+
+  vue-tsc@3.2.9(typescript@5.9.3):
+    dependencies:
+      '@volar/typescript': 2.4.28
+      '@vue/language-core': 3.2.9
+      typescript: 5.9.3
+    optional: true
 
   vue-tsc@3.2.9(typescript@6.0.2):
     dependencies:

@@ -38,7 +38,7 @@ export interface StatusReportOptions {
   readonly sessionTitle: string | null;
   readonly thinkingEffort: ThinkingEffort;
   readonly permissionMode: PermissionMode;
-  readonly planMode: boolean;
+  readonly discussMode: boolean;
   readonly contextUsage: number;
   readonly contextTokens: number;
   readonly maxContextTokens: number;
@@ -100,13 +100,13 @@ export function buildStatusReportLines(options: StatusReportOptions): string[] {
     sev === 'danger' ? 'error' : sev === 'warn' ? 'warning' : 'success';
 
   const permission = options.status?.permission ?? options.permissionMode;
-  const planMode = options.status?.planMode ?? options.planMode;
+  const discussMode = options.status?.discussMode ?? options.discussMode;
   const sessionId = options.sessionId.trim().length > 0 ? options.sessionId : 'none';
   const rows: FieldRow[] = [
     { label: 'Model', value: formatModelStatus(options) },
     { label: 'Directory', value: options.workDir },
     { label: 'Permissions', value: permission },
-    { label: 'Plan mode', value: planMode ? 'on' : 'off' },
+    { label: 'Discuss', value: discussMode ? 'on' : 'off' },
     { label: 'Session', value: sessionId },
   ];
   const title = options.sessionTitle?.trim();

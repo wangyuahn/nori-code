@@ -62,9 +62,9 @@ export interface ContextProjection {
   contextTokens: number;
   config: ConfigSnapshot;
   permission: { mode: PermissionMode | null };
-  planMode: { active: boolean; id?: string };
+  discussMode: { active: boolean; id?: string };
   goal: GoalSnapshot | null;
-  swarm: { active: boolean; trigger?: string };
+  subagent: { active: boolean; trigger?: string };
 }
 
 const ZERO: TokenUsage = { inputOther: 0, output: 0, inputCacheRead: 0, inputCacheCreation: 0 };
@@ -98,7 +98,7 @@ const ZERO: TokenUsage = { inputOther: 0, output: 0, inputCacheRead: 0, inputCac
  *    list, so messages compacted/undone/cleared away stay visible and
  *    micro-compacted tool results keep their original content.
  *
- *  Everything else (append_message, loop events, goal/swarm/permission/
+ *  Everything else (append_message, loop events, goal/subagent/permission/
  *  plan/config/usage/contextTokens derived state) is identical in both
  *  modes — `mode` only affects the `messages` array and which markers
  *  appear. */
@@ -113,11 +113,11 @@ export function projectContext(
   };
   const config: ConfigSnapshot = {};
   let permissionMode: PermissionMode | null = null;
-  let planActive = false;
-  let planId: string | undefined;
+  let discussActive = false;
+  let discussId: string | undefined;
   let contextTokens = 0;
   let goal: GoalSnapshot | null = null;
-  let swarm: { active: boolean; trigger?: string } = { active: false };
+  let subagent: { active: boolean; trigger?: string } = { active: false };
   let microCutoff = 0;
   // Maps step.uuid → the assistant ProjectedMessage that step is filling in.
   // Cleared on context.clear / context.apply_compaction.
@@ -355,11 +355,11 @@ export function projectContext(
       case 'permission.set_mode':
         permissionMode = rec.mode;
         break;
-      case 'plan_mode.enter':
-        planActive = true; planId = rec.id; break;
-      case 'plan_mode.cancel':
-      case 'plan_mode.exit':
-        planActive = false; planId = undefined; break;
+      case 'discuss_mode.enter':
+        discussActive = true; discussId = rec.id; break;
+      case 'discuss_mode.cancel':
+      case 'discuss_mode.exit':
+        discussActive = false; discussId = undefined; break;
       case 'context.undo': {
         // Mirror agent-core `undo` (`agent/context/index.ts`): walk from the
         // end, skip `origin.kind === 'injection'`, stop at
@@ -440,11 +440,8 @@ export function projectContext(
       case 'goal.clear':
         goal = null;
         break;
-      case 'swarm_mode.enter':
-        swarm = { active: true, trigger: rec.trigger };
-        break;
-      case 'swarm_mode.exit':
-        swarm = { active: false };
+      case 'goal.rewind_checkpoint':
+      case 'goal.rewind_checkpoint_discard':
         break;
       // Kinds that don't affect the projected timeline / derived state:
       case 'metadata':
@@ -501,9 +498,9 @@ export function projectContext(
     contextTokens,
     config,
     permission: { mode: permissionMode },
-    planMode: { active: planActive, id: planId },
+    discussMode: { active: discussActive, id: discussId },
     goal,
-    swarm,
+    subagent,
   };
 }
 

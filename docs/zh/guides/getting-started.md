@@ -127,7 +127,7 @@ Kimi Code CLI 会自动调用文件读取、搜索等工具浏览相关内容后
 在 src/utils 里新增一个函数，用来把任意字符串转成 kebab-case，并补一个单元测试
 ```
 
-Kimi Code CLI 会规划步骤，在需要代码改动时通过 `AgentSwarm` 委派实现，运行相关检查，并在每一步告诉你它做了什么。如果希望主 Agent 在审批后直接编辑文件，可使用 `/setting readonly off`。
+Kimi Code CLI 会规划步骤，在需要代码改动时通过 `SubAgent` 委派实现，运行相关检查，并在每一步告诉你它做了什么。如果希望主 Agent 在审批后直接编辑文件，可使用 `/setting readonly off`。
 
 ::: tip 不知道能做什么？输入 `/help`
 随时在输入框输入 `/help`，可以打开内置的命令和快捷键面板，按 `↑`/`↓` 翻看，`Esc` 关闭。退出时输入 `/exit`，或按 `Ctrl-C` 两次，或在输入框为空时按 `Ctrl-D`。
@@ -153,7 +153,7 @@ Kimi Code CLI 会规划步骤，在需要代码改动时通过 `AgentSwarm` 委�
 | --- | --- |
 | `Esc` | 中断流式输出 / 关闭弹窗 |
 | `Ctrl-C` | 中断输出；空闲时连按两次退出 |
-| `Shift-Tab` | 切换 Plan 模式 |
+| `Shift-Tab` | 切换 Discuss |
 | `Ctrl-S` | 输出中途插入消息，无需等待结束 |
 | `Ctrl-O` | 折叠 / 展开工具输出 |
 
@@ -165,6 +165,6 @@ Kimi Code CLI 的本地数据默认保存在 `~/.kimi-code/` 下，包含配置�
 
 ## 下一步
 
-- [交互与输入](./interaction.md) — 输入框操作、审批流程、Plan 模式和 YOLO 模式详解
+- [交互与输入](./interaction.md) — 输入框操作、审批流程、Discuss 和 YOLO 模式详解
 - [会话与上下文](./sessions.md) — 恢复会话、上下文压缩、导出会话
 - [常见使用案例](./use-cases.md) — 典型任务的 prompt 示例

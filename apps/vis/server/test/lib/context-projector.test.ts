@@ -32,7 +32,7 @@ describe('context-projector', () => {
     expect(proj.config.systemPrompt).toBe('You are Kimi.');
     expect(proj.config.profileName).toBe('agent');
     expect(proj.permission.mode).toBe('manual');
-    expect(proj.planMode.active).toBe(false);
+    expect(proj.discussMode.active).toBe(false);
   });
 
   it('reconstructs assistant tool-call messages and separates tool results', async () => {
@@ -719,16 +719,6 @@ describe('context-projector', () => {
 
     const cleared = projectContext([...base, { lineNo: 3, data: { type: 'goal.clear' as const }, raw: {} }] as any);
     expect(cleared.goal).toBeNull();
-  });
-
-  it('tracks swarm mode enter/exit', () => {
-    const enter = projectContext([{ lineNo: 1, data: { type: 'swarm_mode.enter' as const, trigger: 'task' }, raw: {} }] as any);
-    expect(enter.swarm).toEqual({ active: true, trigger: 'task' });
-    const exit = projectContext([
-      { lineNo: 1, data: { type: 'swarm_mode.enter' as const, trigger: 'task' }, raw: {} },
-      { lineNo: 2, data: { type: 'swarm_mode.exit' as const }, raw: {} },
-    ] as any);
-    expect(exit.swarm.active).toBe(false);
   });
 
   it('uses the latest step.end usage as the absolute context-token snapshot', () => {

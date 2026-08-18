@@ -1,0 +1,95 @@
+# `nori` agent preset — nori 三大系统移植到 DeepSeek Harness 的组合
+#
+# 本文件基于 shipped `code` 预设（见部署内 agent-presets/code/agent.cordis.yml）
+# 复制后增改，规则同其头部注释：
+# - 本文件是 AGENT-PLANE 组合；注册表（tools/systemPrompt/subagents/sessions）、
+#   沙箱/审批栈、持久化、模型路由都在 host 组合，不得搬进预设。
+# - 预设里发布服务的行必须放在带 `isolate` realm 的 group 内（见 delegation）。
+# - 三个 nori 插件行是消费者（只注册工具/prompt 段），可安全放在顶层。
+
+# ---- 身份与基础 ----
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: >-
+      You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+# ---- shell / 文件 / 后台任务 / 技能 / goal / plan（同 code 预设） ----
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+
+- id: tool-jobs
+  name: '@deepseek-ai/dsh-tool-jobs'
+
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+
+- id: tool-goal
+  name: '@deepseek-ai/dsh-tool-goal'
+
+# ---- nori 三插件（本预设的核心增量） ----
+# 运行时契约与 @deepseek-ai/dsh-tools 兼容；包体零 @deepseek-ai 运行时依赖，
+# 部署提供 cordis 运行时。
+- id: nori-memory
+  name: '@nori-code/dsh-nori-memory'
+
+- id: nori-loop
+  name: '@nori-code/dsh-nori-loop'
+
+# ---- delegation（同 code 预设：subagent 注册表在 host，这里只放工具行） ----
+# 对话/暂停复用 shipped send_message / interrupt_agent / list_agents，
+# SubAgent 生命周期由 agent-core 提供。
+- id: delegation
+  name: cordis:group
+  group: true
+  isolate:
+    workflowEngine: true
+  config:
+    - id: tool-subagent-control
+      name: '@deepseek-ai/dsh-tool-subagent-control'
+
+    - id: tool-subagent-list-agents
+      name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+
+    - id: tool-subagent
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: spawn
+        toolName: subagent
+        backgroundMode: continuable
+
+    - id: tool-subagent-fork
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: fork
+        toolName: subagent_fork
+        backgroundMode: continuable
+
+    - id: workflow-worker-thread
+      name: '@deepseek-ai/dsh-workflow-worker-thread'
+      config:
+        provider: spawn
+
+    - id: tool-workflow
+      name: '@deepseek-ai/dsh-tool-workflow'

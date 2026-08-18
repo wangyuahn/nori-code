@@ -121,7 +121,7 @@ export async function runPrompt(
       }
       track('oauth_refresh', { outcome: 'error', reason: outcome.reason });
     },
-    sessionStartedProperties: { permission: undefined, plan: false, afk: true },
+    sessionStartedProperties: { permission: undefined, discuss: false, afk: true },
   });
   log.info('nori-code starting', {
     version,

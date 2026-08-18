@@ -12,8 +12,16 @@ const DEFAULT_APPROVE_TOOLS = new Set([
   'CronList',
   'WebSearch',
   'FetchURL',
-  'Agent',
   'AskUserQuestion',
+  'TeamCreate',
+  'TeamDismiss',
+  'TeamAssign',
+  'TeamBroadcast',
+  'TeamDM',
+  'TeamDiscussInvite',
+  'TeamDiscussKick',
+  'TeamDecide',
+  'TeamSpeak',
   'Skill',
   // Goal control tools have no side effects on the world: GetGoal reads, and
   // mutation tools only record the goal's own runtime state.

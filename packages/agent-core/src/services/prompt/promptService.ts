@@ -55,8 +55,7 @@ function hasAnyAgentStateField(patch: AgentStatePatch): boolean {
     patch.model !== undefined ||
     patch.thinking !== undefined ||
     patch.permission_mode !== undefined ||
-    patch.plan_mode !== undefined ||
-    patch.swarm_mode !== undefined ||
+    patch.discuss_mode !== undefined ||
     patch.goal_objective !== undefined ||
     patch.goal_control !== undefined
   );
@@ -73,8 +72,7 @@ function pickAgentStatePatch(body: PromptSubmission): AgentStatePatch | undefine
   if (body.model !== undefined) patch.model = body.model;
   if (body.thinking !== undefined) patch.thinking = body.thinking;
   if (body.permission_mode !== undefined) patch.permission_mode = body.permission_mode;
-  if (body.plan_mode !== undefined) patch.plan_mode = body.plan_mode;
-  if (body.swarm_mode !== undefined) patch.swarm_mode = body.swarm_mode;
+  if (body.discuss_mode !== undefined) patch.discuss_mode = body.discuss_mode;
   if (body.goal_objective !== undefined) patch.goal_objective = body.goal_objective;
   if (body.goal_control !== undefined) patch.goal_control = body.goal_control;
   return hasAnyAgentStateField(patch) ? patch : undefined;
@@ -213,7 +211,7 @@ function isTurnEnded(e: Event): e is Event & {
 /**
  * Type guard for `agent.status.updated` agent-core events. Carries the
  * subset of fields we mirror into the per-session shadow on every live
- * change (model / permission / planMode). `thinkingEffort` is NOT on this
+ * change (model / permission / discussMode). `thinkingEffort` is NOT on this
  * event — bootstrap seeds it from `getConfig` and per-request diff dispatch
  * keeps it in sync from there.
  */
@@ -221,14 +219,14 @@ function isAgentStatusUpdated(e: Event): e is Event & {
   type: 'agent.status.updated';
   model?: string;
   permission?: PermissionMode;
-  planMode?: boolean;
+  discussMode?: boolean;
 } {
   return (e as { type?: string }).type === 'agent.status.updated';
 }
 
 /**
  * Per-session shadow of `model` / `thinking` / `permissionMode` /
- * `planMode`. Type re-exported from `./prompt` so the daemon debug route
+ * `discussMode`. Type re-exported from `./prompt` so the daemon debug route
  * can consume it without reaching into `PromptService` internals.
  * Absent until first `submit` bootstraps. See `_bootstrapAgentState` +
  * `_applyAgentState`.
@@ -247,7 +245,7 @@ export class PromptService
 
   /**
    * Per-session shadow of `model` / `thinking` / `permissionMode` /
-   * `planMode`. Absent until first `submit` bootstraps. See
+   * `discussMode`. Absent until first `submit` bootstraps. See
    * `_bootstrapAgentState` + `_applyAgentState`.
    */
   private readonly _agentState = new Map<string, AgentStateSnapshot>();
@@ -305,7 +303,9 @@ export class PromptService
     // submit for a freshly-recreated session re-bootstraps cleanly.
     this._register(
       this.sessionService.onDidClose(({ sessionId }) => {
-        this._agentState.delete(sessionId);
+        for (const key of this._agentState.keys()) {
+          if (key.startsWith(`${sessionId}\u0000`)) this._agentState.delete(key);
+        }
         this._dispatchLog.delete(sessionId);
         for (const key of this._queued.keys()) {
           if (key.startsWith(`${sessionId}\u0000`)) this._queued.delete(key);
@@ -316,9 +316,9 @@ export class PromptService
 
   // --- IPromptService --------------------------------------------------------
 
-  async list(sid: string): Promise<PromptListResponse> {
+  async list(sid: string, agentId = MAIN_AGENT_ID): Promise<PromptListResponse> {
     await this._requireSession(sid);
-    const key = promptKey(sid, MAIN_AGENT_ID);
+    const key = promptKey(sid, agentId);
     const active = this._active.get(key);
     return {
       active:
@@ -338,7 +338,7 @@ export class PromptService
     // Readiness gate. Throws AuthProvisioningRequired /
     // AuthTokenMissing / AuthModelNotResolved before we mint a prompt_id and
     // hand off to agent-core. Daemon route layer maps to 40110/40111/40113.
-    await this.auth.ensureReady();
+    await this.auth.ensureReady(body.model);
 
     const promptId = `prompt_${ulid()}`;
     const state = this._createPromptState(sid, promptId, body);
@@ -365,16 +365,21 @@ export class PromptService
   async startBtw(sid: string): Promise<string> {
     await this._requireSession(sid);
     await this.core.rpc.resumeSession({ sessionId: sid });
-    await this.auth.ensureReady();
+    const sessionConfig = await this.core.rpc.getConfig({ sessionId: sid, agentId: MAIN_AGENT_ID });
+    await this.auth.ensureReady(sessionConfig.modelAlias);
     return this.core.rpc.startBtw({ sessionId: sid, agentId: MAIN_AGENT_ID });
   }
 
-  async steer(sid: string, promptIds: readonly string[]): Promise<PromptSteerResult> {
+  async steer(
+    sid: string,
+    promptIds: readonly string[],
+    agentId = MAIN_AGENT_ID,
+  ): Promise<PromptSteerResult> {
     await this._requireSession(sid);
     if (promptIds.length === 0) {
       throw new PromptNotFoundError(sid, '');
     }
-    const key = promptKey(sid, MAIN_AGENT_ID);
+    const key = promptKey(sid, agentId);
     const active = this._active.get(key);
     if (active === undefined || active.completed || active.aborted) {
       throw new PromptNotFoundError(sid, promptIds[0]!);
@@ -392,31 +397,32 @@ export class PromptService
 
     const selectedIds = new Set(promptIds);
     const remaining = queue.filter((item) => !selectedIds.has(item.promptId));
-    this._replaceQueue(sid, MAIN_AGENT_ID, remaining);
+    this._replaceQueue(sid, agentId, remaining);
 
     try {
       await this.core.rpc.captureRewindCheckpoint({
         sessionId: sid,
-        agentId: MAIN_AGENT_ID,
+        agentId,
       });
       await this.core.rpc.steer({
         sessionId: sid,
-        agentId: MAIN_AGENT_ID,
+        agentId,
         input: steerContentToCoreParts(selected),
-        ...(selected.some((item) => item.body.loop_mode === true) ? { goalIntake: true } : {}),
+        goalIntake: selected.some((item) => item.body.loop_mode === true) ? true : undefined,
+        speaker: { from: 'user', speakerName: '用户' },
       });
     } catch (error) {
       await this.core.rpc.discardRewindCheckpoint({
         sessionId: sid,
-        agentId: MAIN_AGENT_ID,
+        agentId,
       }).catch(() => undefined);
-      this._restoreSteeredQueueItems(sid, selected);
+      this._restoreSteeredQueueItems(sid, agentId, selected);
       throw error;
     }
 
     const event: SyntheticPromptSteeredEvent = {
       type: 'prompt.steered',
-      agentId: MAIN_AGENT_ID,
+      agentId,
       sessionId: sid,
       activePromptId: active.promptId,
       promptIds: [...promptIds],
@@ -440,10 +446,10 @@ export class PromptService
     // The submit RPC returns synchronously (PromptPayload → void); errors
     // would manifest as later `error` events, not as a rejection here.
     try {
-      const overridePatch = state.agentId === MAIN_AGENT_ID ? pickAgentStatePatch(state.body) : undefined;
+      const overridePatch = pickAgentStatePatch(state.body);
       if (overridePatch !== undefined) {
-        await this._ensureAgentStateBootstrapped(sid);
-        await this._applyAgentStateInternal(sid, overridePatch, 'prompt', state.promptId);
+        await this._ensureAgentStateBootstrapped(sid, state.agentId);
+        await this._applyAgentStateInternal(sid, overridePatch, 'prompt', state.promptId, state.agentId);
       }
 
       this._active.set(key, state);
@@ -457,7 +463,8 @@ export class PromptService
         sessionId: sid,
         agentId: state.agentId,
         input,
-        ...(state.body.loop_mode === true ? { goalIntake: true } : {}),
+        goalIntake: state.body.loop_mode === true ? true : undefined,
+        speaker: { from: 'user', speakerName: '用户' },
       });
       this._logger.debug(
         { sid, promptId: state.promptId },
@@ -510,9 +517,9 @@ export class PromptService
     this.eventService.publish(ev as unknown as Event);
   }
 
-  async abort(sid: string, pid: string): Promise<PromptAbortResult> {
+  async abort(sid: string, pid: string, agentId = MAIN_AGENT_ID): Promise<PromptAbortResult> {
     await this._requireSession(sid);
-    const key = promptKey(sid, MAIN_AGENT_ID);
+    const key = promptKey(sid, agentId);
     const state = this._active.get(key);
     if (state !== undefined && state.promptId === pid) {
       if (state.completed || state.aborted) {
@@ -548,26 +555,26 @@ export class PromptService
     if (queue.length === 0) {
       this._queued.delete(key);
     }
-    this._publishAborted(sid, MAIN_AGENT_ID, pid);
+    this._publishAborted(sid, agentId, pid);
     return { aborted: true };
   }
 
-  async abortBySession(sid: string): Promise<PromptAbortResult> {
+  async abortBySession(sid: string, agentId = MAIN_AGENT_ID): Promise<PromptAbortResult> {
     await this._requireSession(sid);
-    const state = this._active.get(promptKey(sid, MAIN_AGENT_ID));
+    const state = this._active.get(promptKey(sid, agentId));
     if (state !== undefined && !state.completed && !state.aborted) {
       // Normal prompt path: let abort() handle turnId mapping and event synthesis.
-      return this.abort(sid, state.promptId);
+      return this.abort(sid, state.promptId, agentId);
     }
     // No daemon-managed active prompt. Cancel whatever agent-core turn is
     // running (e.g. a skill activation) without requiring a turnId.
     // TurnFlow.cancel(undefined) is a safe no-op when idle.
-    await this.core.rpc.cancel({ sessionId: sid, agentId: MAIN_AGENT_ID });
+    await this.core.rpc.cancel({ sessionId: sid, agentId });
     return { aborted: true };
   }
 
-  getCurrentPromptId(sid: string): string | undefined {
-    const state = this._active.get(promptKey(sid, MAIN_AGENT_ID));
+  getCurrentPromptId(sid: string, agentId = MAIN_AGENT_ID): string | undefined {
+    const state = this._active.get(promptKey(sid, agentId));
     if (state === undefined || state.completed || state.aborted) {
       return undefined;
     }
@@ -594,11 +601,12 @@ export class PromptService
     patch: AgentStatePatch,
     source: AgentStateSource,
     promptId?: string,
+    agentId = MAIN_AGENT_ID,
   ): Promise<void> {
     if (!hasAnyAgentStateField(patch)) return;
     await this._requireSession(sid);
-    await this._ensureAgentStateBootstrapped(sid);
-    await this._applyAgentStateInternal(sid, patch, source, promptId ?? '');
+    await this._ensureAgentStateBootstrapped(sid, agentId);
+    await this._applyAgentStateInternal(sid, patch, source, promptId ?? '', agentId);
   }
 
   // --- IPromptService typed event accessors ---------------------------------
@@ -612,18 +620,18 @@ export class PromptService
 
   /**
    * Seed the per-session shadow from `getConfig` / `getPermission` /
-   * `getPlan` if not yet bootstrapped. Idempotent across submits within a
+   * `getDiscussMode` if not yet bootstrapped. Idempotent across submits within a
    * session lifetime; cleared on `ISessionService.onDidClose`.
    *
    * The three RPCs run in parallel — they share no preconditions.
    */
-  private async _ensureAgentStateBootstrapped(sid: string): Promise<void> {
-    if (this._agentState.has(sid)) return;
-    const [config, permission, plan, swarmMode] = await Promise.all([
-      this.core.rpc.getConfig({ sessionId: sid, agentId: MAIN_AGENT_ID }),
-      this.core.rpc.getPermission({ sessionId: sid, agentId: MAIN_AGENT_ID }),
-      this.core.rpc.getPlan({ sessionId: sid, agentId: MAIN_AGENT_ID }),
-      this.core.rpc.getSwarmMode({ sessionId: sid, agentId: MAIN_AGENT_ID }),
+  private async _ensureAgentStateBootstrapped(sid: string, agentId: string): Promise<void> {
+    const key = promptKey(sid, agentId);
+    if (this._agentState.has(key)) return;
+    const [config, permission, discussMode] = await Promise.all([
+      this.core.rpc.getConfig({ sessionId: sid, agentId }),
+      this.core.rpc.getPermission({ sessionId: sid, agentId }),
+      this.core.rpc.getDiscussMode({ sessionId: sid, agentId }),
     ]);
     const snapshot: AgentStateSnapshot = {};
     if (config.modelAlias !== undefined) snapshot.model = config.modelAlias;
@@ -633,9 +641,8 @@ export class PromptService
     // protocol to import from agent-core.
     snapshot.thinking = config.thinkingEffort as PromptThinking;
     snapshot.permissionMode = permission.mode;
-    snapshot.planMode = plan !== null;
-    snapshot.swarmMode = swarmMode;
-    this._agentState.set(sid, snapshot);
+    snapshot.discussMode = discussMode;
+    this._agentState.set(key, snapshot);
   }
 
   /**
@@ -654,8 +661,9 @@ export class PromptService
     patch: AgentStatePatch,
     source: AgentStateSource,
     promptId: string,
+    agentId: string,
   ): Promise<void> {
-    const shadow = this._agentState.get(sid);
+    const shadow = this._agentState.get(promptKey(sid, agentId));
     if (shadow === undefined) {
       // Bootstrap is a precondition; a missing shadow here is a bug,
       // not a recoverable state.
@@ -663,8 +671,6 @@ export class PromptService
         `PromptService._applyAgentStateInternal: shadow not bootstrapped for sid=${sid}`,
       );
     }
-    const agentId = MAIN_AGENT_ID;
-
     if (patch.model !== undefined && patch.model !== shadow.model) {
       const payload = { sessionId: sid, agentId, model: patch.model };
       await this.core.rpc.setModel(payload);
@@ -690,35 +696,19 @@ export class PromptService
       shadow.permissionMode = patch.permission_mode as PermissionMode;
       this._recordDispatch(sid, 'setPermission', payload, promptId, source);
     }
-    if (patch.plan_mode !== undefined && patch.plan_mode !== shadow.planMode) {
+    if (patch.discuss_mode !== undefined && patch.discuss_mode !== shadow.discussMode) {
       const payload = { sessionId: sid, agentId };
-      if (patch.plan_mode) {
-        await this.core.rpc.enterPlan(payload);
-        this._recordDispatch(sid, 'enterPlan', payload, promptId, source);
+      if (patch.discuss_mode) {
+        await this.core.rpc.enterDiscuss(payload);
+        this._recordDispatch(sid, 'enterDiscuss', payload, promptId, source);
       } else {
-        // `cancelPlan({id?})` accepts an omitted id — `PlanMode.cancel`
+        // `cancelDiscuss({id?})` accepts an omitted id — `DiscussMode.cancel`
         // clears whatever id is currently active. Shadow doesn't track
         // ids, so we always omit.
-        await this.core.rpc.cancelPlan(payload);
-        this._recordDispatch(sid, 'cancelPlan', payload, promptId, source);
+        await this.core.rpc.cancelDiscuss(payload);
+        this._recordDispatch(sid, 'cancelDiscuss', payload, promptId, source);
       }
-      shadow.planMode = patch.plan_mode;
-    }
-
-    // Swarm mode toggle. enterSwarm/exitSwarm are idempotent no-throw on
-    // the agent side; we still guard with the shadow to avoid redundant
-    // dispatch-log entries.
-    if (patch.swarm_mode !== undefined && patch.swarm_mode !== shadow.swarmMode) {
-      const payload = { sessionId: sid, agentId };
-      if (patch.swarm_mode) {
-        const enterPayload = { ...payload, trigger: 'manual' as const };
-        await this.core.rpc.enterSwarm(enterPayload);
-        this._recordDispatch(sid, 'enterSwarm', enterPayload, promptId, source);
-      } else {
-        await this.core.rpc.exitSwarm(payload);
-        this._recordDispatch(sid, 'exitSwarm', payload, promptId, source);
-      }
-      shadow.swarmMode = patch.swarm_mode;
+      shadow.discussMode = patch.discuss_mode;
     }
 
     // Goal creation. createGoal throws KimiError on invalid input
@@ -801,16 +791,17 @@ export class PromptService
 
     // Mirror live `agent.status.updated` into the per-session shadow. This
     // keeps the shadow honest when out-of-band callers (TUI / SDK / agent
-    // itself) mutate `model` / `permission` / `planMode` between prompts.
+    // itself) mutate `model` / `permission` / `discussMode` between prompts.
     // Only fields present on the event update the shadow — `thinking` is
     // not carried here and stays whatever the last `setThinking` (or
     // bootstrap getConfig) put there.
     if (isAgentStatusUpdated(event)) {
-      const shadow = this._agentState.get(sid);
+      const agentId = (event as { agentId?: string }).agentId ?? MAIN_AGENT_ID;
+      const shadow = this._agentState.get(promptKey(sid, agentId));
       if (shadow !== undefined) {
         if (event.model !== undefined) shadow.model = event.model;
         if (event.permission !== undefined) shadow.permissionMode = event.permission;
-        if (event.planMode !== undefined) shadow.planMode = event.planMode;
+        if (event.discussMode !== undefined) shadow.discussMode = event.discussMode;
       }
       // status events are also published normally; fall through to allow
       // other event-type handlers below — but there's no overlap today.
@@ -893,8 +884,8 @@ export class PromptService
    * Read the current runtime-controls shadow for a session, if it has been
    * bootstrapped. Returns a copy so callers cannot mutate internal state.
    */
-  getAgentStateSnapshot(sid: string): AgentStateSnapshot | undefined {
-    const snap = this._agentState.get(sid);
+  getAgentStateSnapshot(sid: string, agentId = MAIN_AGENT_ID): AgentStateSnapshot | undefined {
+    const snap = this._agentState.get(promptKey(sid, agentId));
     return snap === undefined ? undefined : { ...snap };
   }
 
@@ -902,8 +893,8 @@ export class PromptService
    * Test helper — peek at the per-session stateless-controls shadow.
    * Undefined before first submit on a session.
    */
-  _agentStateForTest(sid: string): Readonly<AgentStateSnapshot> | undefined {
-    return this.getAgentStateSnapshot(sid);
+  _agentStateForTest(sid: string, agentId = MAIN_AGENT_ID): Readonly<AgentStateSnapshot> | undefined {
+    return this.getAgentStateSnapshot(sid, agentId);
   }
 
   /**
@@ -979,11 +970,15 @@ export class PromptService
     this._queued.set(key, queue);
   }
 
-  private _restoreSteeredQueueItems(sid: string, selected: readonly PromptState[]): void {
-    const queue = this._queued.get(promptKey(sid, MAIN_AGENT_ID)) ?? [];
+  private _restoreSteeredQueueItems(
+    sid: string,
+    agentId: string,
+    selected: readonly PromptState[],
+  ): void {
+    const queue = this._queued.get(promptKey(sid, agentId)) ?? [];
     const queueIds = new Set(queue.map((state) => state.promptId));
     const missing = selected.filter((state) => !queueIds.has(state.promptId));
-    this._replaceQueue(sid, MAIN_AGENT_ID, [...missing, ...queue]);
+    this._replaceQueue(sid, agentId, [...missing, ...queue]);
   }
 
   private async _startNextQueued(sid: string, agentId = MAIN_AGENT_ID): Promise<void> {

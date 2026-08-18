@@ -90,7 +90,7 @@ export class KimiHarness {
   }
 
   async createSession(options: CreateSessionOptions): Promise<Session> {
-    const { planMode, kaos, persistenceKaos, sessionStartedProperties, ...coreOptions } = options;
+    const { kaos, persistenceKaos, sessionStartedProperties, ...coreOptions } = options;
     const summary =
       kaos === undefined && persistenceKaos === undefined
         ? await this.rpc.createSession(coreOptions)
@@ -105,9 +105,6 @@ export class KimiHarness {
       },
     });
     this.activeSessions.set(session.id, session);
-    if (planMode === true) {
-      await session.setPlanMode(true);
-    }
     this.trackSessionStarted(summary.id, false, sessionStartedProperties);
     this.trackSessionEvent(session.id, 'session_new');
     return session;
