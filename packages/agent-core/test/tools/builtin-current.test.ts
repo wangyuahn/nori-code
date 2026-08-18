@@ -36,6 +36,7 @@ import {
   TeamSpeakInputSchema,
   TeamSpeakTool,
 } from '../../src/tools/builtin/collaboration/team';
+import { TeamStatusInputSchema, TeamStatusTool } from '../../src/tools/builtin/collaboration/team-status';
 import { compileToolArgsValidator, validateToolArgs } from '../../src/tools/args-validator';
 import { EditInputSchema, EditTool } from '../../src/tools/builtin/file/edit';
 import { GlobInputSchema, GlobTool } from '../../src/tools/builtin/file/glob';
@@ -310,6 +311,22 @@ describe('current builtin collaboration tools', () => {
     const create = new TeamCreateTool(host);
     const assign = new TeamAssignTool(host);
     const speak = new TeamSpeakTool(host);
+    const getTeamStatus = vi.fn(async () => ({
+      agent_id: 'main',
+      member_count: 1,
+      message: 'Direct persistent Team Agent status.',
+      members: [{
+        agent_id: 'agent-review',
+        name: 'Reviewer',
+        title: 'Risk reviewer',
+        intro: 'Checks regressions.',
+        role: 'reviewer',
+        mandate: 'Review behavior.',
+        status: 'idle' as const,
+        assigned_task: 'Review tests.',
+      }],
+    }));
+    const status = new TeamStatusTool(mockSubagentHost({ getTeamStatus }));
     const members = [{
       name: 'Reviewer',
       title: 'Risk reviewer',
@@ -356,12 +373,14 @@ describe('current builtin collaboration tools', () => {
       assignments: [{ agent_id: 'agent-review', task: 'Review tests.' }],
     }).success).toBe(true);
     expect(TeamSpeakInputSchema.safeParse({ message: 'The cache key is stable.' }).success).toBe(true);
+    expect(TeamStatusInputSchema.safeParse({}).success).toBe(true);
 
     const created = await executeTool(create, context({ members }));
     const assigned = await executeTool(assign, context({
       assignments: [{ agent_id: 'agent-review', task: 'Review tests.' }],
     }));
     const spoken = await executeTool(speak, context({ message: 'The cache key is stable.' }));
+    const currentStatus = await executeTool(status, context({}));
 
     expect(created.output).toContain('agent-review');
     expect(assigned.output).toContain('turnId');
@@ -371,6 +390,12 @@ describe('current builtin collaboration tools', () => {
     );
     expect(spoken.output).toBe('Statement published.');
     expect(speakInDiscussion).toHaveBeenCalledWith('The cache key is stable.');
+    const statusOutput = typeof currentStatus.output === 'string' ? currentStatus.output : '';
+    expect(JSON.parse(statusOutput)).toMatchObject({
+      member_count: 1,
+      members: [{ agent_id: 'agent-review', status: 'idle', assigned_task: 'Review tests.' }],
+    });
+    expect(getTeamStatus).toHaveBeenCalledWith();
   });
 
   it('AskUserQuestion exposes parameters and asks through rpc in yolo mode', async () => {
@@ -576,12 +601,11 @@ describe('current builtin collaboration tools', () => {
 
   it('SubAgent description states the enforced input requirements', () => {
     const description = new SubAgentTool(mockSubagentHost({})).description;
-    // Mirrors the throws in createSubAgentSpecs (subagent.ts): min-1,
-    // prompt_template required + must contain {{item}}, distinct resulting prompts.
+    // Mirrors the current SubAgent input guidance.
     expect(description).toContain('at least one');
-    expect(description).toContain('depends_on');
-    expect(description).toContain('{{item}}');
-    expect(description.toLowerCase()).toContain('distinct');
+    expect(description).toContain('dependencies');
+    expect(description).toContain('prompt_template');
+    expect(description).toContain('items');
   });
 
   it('SubAgent runs heterogeneous task DAGs by dependency layer', async () => {

@@ -42,6 +42,7 @@ tools:
   - TeamAssign
   - TeamBroadcast
   - TeamDM
+  - TeamStatus
   - TeamDiscussInvite
   - TeamDiscussKick
   - TeamDecide

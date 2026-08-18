@@ -8,6 +8,7 @@ export * from './collaboration/subagent';
 export * from './collaboration/ask-user';
 export * from './collaboration/skill-tool';
 export * from './collaboration/team';
+export * from './collaboration/team-status';
 export * from './file/edit';
 export * from './file/change-summary';
 export * from './file/glob';

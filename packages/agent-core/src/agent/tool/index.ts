@@ -541,6 +541,7 @@ export class ToolManager {
         this.agent.subagentHost && new b.TeamAssignTool(this.agent.subagentHost),
         this.agent.subagentHost && new b.TeamBroadcastTool(this.agent.subagentHost),
         this.agent.subagentHost && new b.TeamDMTool(this.agent.subagentHost),
+        this.agent.subagentHost && new b.TeamStatusTool(this.agent.subagentHost),
         this.agent.subagentHost && new b.TeamDiscussInviteTool(this.agent.subagentHost),
         this.agent.subagentHost && new b.TeamDiscussKickTool(this.agent.subagentHost),
         this.agent.subagentHost && new b.TeamDecideTool(this.agent.subagentHost),

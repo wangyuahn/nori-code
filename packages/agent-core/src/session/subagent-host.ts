@@ -49,6 +49,10 @@ import {
   type NoriMemoryChainResult,
 } from '../tools/builtin/nori/memory-chain';
 import type { NoriMemoryProvider } from '../tools/builtin/nori/types';
+import type {
+  TeamStatusMember,
+  TeamStatusResult,
+} from '../tools/builtin/collaboration/team-status';
 import SUMMARY_CONTINUATION_PROMPT from './summary-continuation.md?raw';
 import TEAM_AGENT_EXECUTION_PROMPT from './team-agent-execution.md?raw';
 
@@ -301,11 +305,39 @@ export class SessionSubagentHost {
       ? recipient.turn.steer(input, origin)
       : recipient.turn.prompt(input, origin);
     if (turnId === null) {
-      if (recipientBusy) return 'buffered';
+      if (recipientBusy) {
+        return 'buffered';
+      }
       throw new Error(`TeamDM target "${targetAgentId}" could not start a turn.`);
     }
     await runChildTurnToCompletion(recipient, signal);
     return 'completed';
+  }
+
+  async getTeamStatus(): Promise<TeamStatusResult> {
+    const directMembers = this.session.teamMemberMetadata(this.ownerAgentId);
+    const members: TeamStatusMember[] = [];
+    for (const [agentId, meta] of directMembers) {
+      const agent = await this.session.ensureAgentResumed(agentId);
+      members.push({
+        agent_id: agentId,
+        name: meta.name ?? null,
+        title: meta.title ?? null,
+        intro: meta.intro ?? null,
+        role: meta.role ?? null,
+        mandate: meta.mandate ?? null,
+        status: agent.turn.hasActiveTurn ? 'running' : 'idle',
+        assigned_task: meta.assignedTask ?? null,
+      });
+    }
+    return {
+      agent_id: this.ownerAgentId,
+      member_count: members.length,
+      message: members.length === 0
+        ? 'No direct persistent Team Agents.'
+        : 'Direct persistent Team Agent status.',
+      members,
+    };
   }
 
   async inviteToDiscussion(agentIds: readonly string[]): Promise<TeamDiscussionMeta> {

@@ -68,6 +68,7 @@ describe('default agent profiles', () => {
       expect(tools).toContain('TeamDecide');
       expect(tools).toContain('TeamAssign');
       expect(tools).toContain('TeamSpeak');
+      expect(tools).toContain('TeamStatus');
       expect(tools).not.toContain('ExitDiscussMode');
     }
     expect(DEFAULT_AGENT_PROFILES['nori-agent']?.systemPrompt(promptContext)).toContain('TeamDecide');

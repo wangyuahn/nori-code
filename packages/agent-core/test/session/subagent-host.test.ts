@@ -2413,6 +2413,7 @@ describe('Session.createAgent', () => {
       'mcp__*',
       'TeamCreate',
       'TeamDecide',
+      'TeamStatus',
     ]));
   });
 
@@ -2828,6 +2829,110 @@ describe('Session.createAgent', () => {
     expect(session.agents.has(member.id)).toBe(false);
     expect(session.agents.has(temporary.id)).toBe(false);
     expect(session.getAgentMetadata(unrelated.id)).toBeDefined();
+  });
+
+  it('reports direct Team Agent identity, observable status, and assigned task', async () => {
+    const session = new Session({
+      id: 'test-team-status',
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      initializeMainAgent: false,
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const member = await session.createAgent(
+      { type: 'sub' },
+      {
+        kind: 'team',
+        parentAgentId: main.id,
+        teamLeaderAgentId: main.id,
+        profile: contextProfile(),
+        teamIdentity: {
+          name: 'Builder',
+          title: 'Implementation partner',
+          intro: 'Builds changes.',
+          mandate: 'Implement assigned work.',
+          role: 'builder',
+        },
+      },
+    );
+    await session.assignTeamTasks(main.id, [{ agentId: member.id, task: 'Implement TeamStatus.' }]);
+
+    const status = await new SessionSubagentHost(session, main.id).getTeamStatus();
+
+    expect(status).toMatchObject({
+      agent_id: main.id,
+      member_count: 1,
+      members: [{
+        agent_id: member.id,
+        name: 'Builder',
+        title: 'Implementation partner',
+        intro: 'Builds changes.',
+        mandate: 'Implement assigned work.',
+        role: 'builder',
+        status: 'idle',
+        assigned_task: 'Implement TeamStatus.',
+      }],
+    });
+  });
+
+  it('returns empty direct reports for a Team Agent and a lead without members', async () => {
+    const session = new Session({
+      id: 'test-empty-team-status',
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      initializeMainAgent: false,
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const member = await session.createAgent(
+      { type: 'sub' },
+      {
+        kind: 'team',
+        parentAgentId: main.id,
+        teamLeaderAgentId: main.id,
+        profile: contextProfile(),
+        teamIdentity: {
+          name: 'Reader',
+          title: 'Reader',
+          intro: 'Reads status.',
+          mandate: 'Report status.',
+          role: 'reader',
+        },
+      },
+    );
+
+    await expect(new SessionSubagentHost(session, main.id).getTeamStatus()).resolves.toMatchObject({
+      member_count: 1,
+    });
+    await expect(new SessionSubagentHost(session, member.id).getTeamStatus()).resolves.toMatchObject({
+      agent_id: member.id,
+      member_count: 0,
+      message: 'No direct persistent Team Agents.',
+      members: [],
+    });
+
+    const emptySession = new Session({
+      id: 'test-empty-main-team-status',
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      initializeMainAgent: false,
+    });
+    const emptyMain = await emptySession.createAgent({ type: 'main' }, { profile: contextProfile() });
+    await expect(new SessionSubagentHost(emptySession, emptyMain.id).getTeamStatus()).resolves.toMatchObject({
+      member_count: 0,
+      members: [],
+    });
   });
 });
 

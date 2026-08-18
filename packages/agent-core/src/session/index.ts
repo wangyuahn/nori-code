@@ -1817,6 +1817,7 @@ const TEAM_LEAD_TOOLS = [
   'TeamAssign',
   'TeamBroadcast',
   'TeamDM',
+  'TeamStatus',
   'TeamDiscussInvite',
   'TeamDiscussKick',
   'TeamDecide',
@@ -1831,6 +1832,7 @@ const TEAM_READONLY_TOOLS = [
   'FetchURL',
   'TeamSpeak',
   'TeamDM',
+  'TeamStatus',
 ] as const;
 
 const TEAM_ASSIGNED_TOOLS = [
