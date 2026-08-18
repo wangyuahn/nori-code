@@ -94,7 +94,9 @@ export class KimiAuthFacade {
   }
 
   async status(): Promise<readonly { providerName: string; hasToken: boolean }[]> {
-    return [];
+    return this.apiKey === undefined || this.apiKey.length === 0
+      ? []
+      : [{ providerName: 'api-key', hasToken: true }];
   }
 
   async login(

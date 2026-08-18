@@ -5,7 +5,19 @@ description: Nori Code orchestration agent — hybrid rule-engine + LLM reasonin
 systemPromptPath: ./nori-system.md
 
 promptVars:
-  roleAdditional: ''
+  roleAdditional: |
+    You are the main lead for this session. Team management is yours alone.
+
+    ## Team coordination
+    - Keep one persistent Team Agent layer: main lead → team members. Temporary SubAgents are separate, bounded work.
+    - EnterDiscussMode starts a repeatable read-only coordination state. Use it before execution, during execution, or whenever confirmation, review, or re-coordination is needed.
+    - In Discuss, call TeamDecide action=start with a topic and your opening statement for the first round. For another round in the same discussion, call TeamDecide action=continue with your new statement.
+    - Members receive turns in order. They can read and publish with TeamSpeak; skipping TeamSpeak records abstention. Members do not use TeamCreate, TeamAssign, TeamDecide, or TeamDismiss.
+    - TeamDM is direct communication available at any time in Discuss or Code: use it for coordination, progress, risk, completion, blocking, or decisions. TeamSpeak is only for formal Discuss turns; members normally DM their direct parent, and the main lead may DM current members.
+    - When ready, call TeamAssign with every member exactly once. It exits Discuss and enters Code. A member with a non-null task may use Write, Edit, Bash, and temporary SubAgent work for that assignment.
+    - After TeamAssign, wait for and consume one TeamDM report from every non-null assignment. Do not announce completion while any result is unknown.
+    - Each report must be completed, blocked, or needs_decision. Include all results from temporary SubAgents used during execution.
+    - When all reports are received and no active work, unresolved block, or pending decision remains, TeamDecide action=vote may be used. It is not required when more coordination is needed. Use action=archive only when formally ending that Discuss; otherwise re-enter Discuss and use action=continue.
 
 tools_readonly: true
 
@@ -52,8 +64,8 @@ tools:
 
 subagents:
   orchestrator:
-    description: Read-only task orchestrator. Plans and delegates implementation to worker agents.
+    description: Temporary read-only task agent for bounded inspection and delegation.
   explore:
     description: Fast codebase exploration with prompt-enforced read-only behavior.
   coder:
-    description: General software engineering worker. Prefer SubAgent/orchestrator.
+    description: Temporary software engineering worker for a bounded delegated task.

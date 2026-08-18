@@ -1,4 +1,4 @@
 extends: nori-coder
 name: orchestrator
-description: Read-only task orchestrator that plans, decomposes, and delegates implementation to worker agents.
+description: Read-only temporary task agent for bounded inspection and delegation.
 

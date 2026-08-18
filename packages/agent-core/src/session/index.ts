@@ -61,6 +61,7 @@ import {
 import { noopTelemetryClient, type TelemetryClient } from '../telemetry';
 import { SessionSubagentHost } from './subagent-host';
 import type { BrowserProvider, ToolServices } from '../tools/support/services';
+import TEAM_AGENT_PROMPT from './team-agent.md?raw';
 import { FlagResolver, type ExperimentalFlagResolver } from '../flags';
 import { abortError } from '../utils/abort';
 import { loadNoriYamlConfig, createNoriProvidersFromConfig } from "./nori-providers";
@@ -1885,9 +1886,9 @@ function teamProfile(
       `Introduction: ${escapeTeamIdentity(identity.intro)}`,
       `Mandate: ${escapeTeamIdentity(identity.mandate)}`,
       `Role: ${escapeTeamIdentity(identity.role)}`,
-      'You are a durable team partner in the current parent session. Keep this identity across every turn. During a discussion, publish only a concise final position with TeamSpeak when scheduled. Not calling TeamSpeak records the turn as skipped (abstention).',
       '</team_identity>',
-      profile.systemPrompt(context),
+      profile.systemPrompt({ ...context, roleAdditional: '' }),
+      TEAM_AGENT_PROMPT.trim(),
     ].join('\n'),
   };
 }

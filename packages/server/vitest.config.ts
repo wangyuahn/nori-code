@@ -72,6 +72,11 @@ export default defineConfig({
   test: {
     name: 'server',
     include: ['test/**/*.{test,e2e}.ts'],
+    // Real HTTP and git-backed rewind tests compete for process and filesystem
+    // resources on Windows. Serial file execution keeps request completion and
+    // temporary-directory cleanup deterministic without hiding hangs behind a
+    // larger timeout.
+    fileParallelism: process.platform !== 'win32',
     // The server e2e tests pull in the full agent-core tree, which makes module
     // import very slow on Windows runners and destabilizes the test-windows job
     // (flaky timeouts and worker crashes). Skip them on Windows; they still run

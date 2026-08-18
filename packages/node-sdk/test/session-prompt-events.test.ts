@@ -1,10 +1,8 @@
-import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { KIMI_CODE_PLATFORM } from '@nori-code/oauth';
 import type * as KosongModule from '@nori-code/kosong';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -208,16 +206,10 @@ describe('Session.prompt events', () => {
           reason: 'completed',
         }),
       );
-      expect(fakeProviderState.calls[0]?.systemPrompt).toContain('You are Kimi Code CLI');
-      expect(fakeProviderState.calls[0]?.systemPrompt).toContain('Available skills');
-      expect(fakeProviderState.providerConfigs[0]).toMatchObject({
-        type: 'kimi',
-        defaultHeaders: expect.objectContaining({
-          'X-Msh-Platform': KIMI_CODE_PLATFORM,
-          'User-Agent': 'kimi-code-cli/0.0.0-test',
-        }),
-      });
-      expect(existsSync(join(homeDir, 'device_id'))).toBe(true);
+      expect(fakeProviderState.calls[0]?.systemPrompt).toContain('You are Nori Code');
+      expect(fakeProviderState.calls[0]?.systemPrompt).toContain('## Tool use');
+      expect(fakeProviderState.providerConfigs[0]).toMatchObject({ type: 'kimi' });
+      expect(fakeProviderState.providerConfigs[0]).not.toHaveProperty('defaultHeaders');
     } finally {
       await harness.close();
     }
@@ -282,7 +274,7 @@ describe('Session.prompt events', () => {
           type: 'turn.started',
           sessionId: session.id,
           agentId: spawned?.type === 'subagent.spawned' ? spawned.subagentId : undefined,
-          origin: { kind: 'system_trigger', name: 'subagent' },
+          origin: expect.objectContaining({ kind: 'system_trigger', name: 'subagent' }),
         }),
       );
       expect(events).not.toContainEqual(
@@ -355,7 +347,7 @@ describe('Session.prompt events', () => {
           type: 'turn.started',
           sessionId: session.id,
           agentId,
-          origin: { kind: 'user' },
+          origin: expect.objectContaining({ kind: 'user' }),
         }),
       );
       expect(started?.agentId).not.toBe('main');

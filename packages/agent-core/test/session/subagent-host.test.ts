@@ -463,6 +463,89 @@ describe('SessionSubagentHost', () => {
     first.mockNextResponse({ type: 'text', text: 'dm reply' });
     await host.directMessage('agent-first', 'Private follow-up.', signal);
     expect(firstPrompt).toHaveBeenCalledTimes(2);
+    const directMessageCall = firstPrompt.mock.calls[1]!;
+    expect(directMessageCall[0]).toEqual([{
+      type: 'text',
+      text: '<system-reminder>\nPrivate follow-up.\n</system-reminder>',
+    }]);
+    expect(directMessageCall[1]).toMatchObject({
+      kind: 'system_trigger',
+      name: 'team_lead',
+      speaker: { from: 'lead', speakerId: 'main' },
+    });
+  });
+
+  it('buffers TeamDM as a system reminder when the recipient is active', async () => {
+    const steer = vi.fn(() => null);
+    const recipient = {
+      turn: {
+        hasActiveTurn: true,
+        prompt: vi.fn(),
+        steer,
+      },
+    } as unknown as Agent;
+    const memberMeta = {
+      homedir: '/member',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'team' as const,
+      teamLeaderAgentId: 'main',
+      name: 'Member',
+    };
+    const mainMeta = {
+      homedir: '/main',
+      type: 'main' as const,
+      parentAgentId: null,
+      kind: 'main' as const,
+    };
+    const session = {
+      getAgentMetadata: vi.fn((id: string) => id === 'main' ? mainMeta : memberMeta),
+      ensureAgentResumed: vi.fn(async () => recipient),
+    } as unknown as Session;
+    const host = new SessionSubagentHost(session, 'agent-member');
+
+    await expect(host.directMessage('main', 'The parent is still running.', signal))
+      .resolves.toBe('buffered');
+    expect(steer).toHaveBeenCalledWith(
+      [{
+        type: 'text',
+        text: '<system-reminder>\nThe parent is still running.\n</system-reminder>',
+      }],
+      expect.objectContaining({
+        kind: 'system_trigger',
+        name: 'team_member',
+        speaker: { from: 'team', speakerId: 'agent-member', speakerName: 'Member' },
+      }),
+    );
+  });
+
+  it('does not claim delivery when an idle TeamDM cannot start or is cancelled', async () => {
+    const prompt = vi.fn(() => null);
+    const recipient = {
+      turn: {
+        hasActiveTurn: false,
+        prompt,
+        steer: vi.fn(),
+      },
+    } as unknown as Agent;
+    const mainMeta = {
+      homedir: '/main',
+      type: 'main' as const,
+      parentAgentId: null,
+      kind: 'main' as const,
+    };
+    const session = {
+      getAgentMetadata: vi.fn(() => mainMeta),
+      ensureAgentResumed: vi.fn(async () => recipient),
+    } as unknown as Session;
+    const host = new SessionSubagentHost(session, 'main');
+
+    await expect(host.directMessage('main', 'Cannot start.', signal))
+      .rejects.toThrow('could not start a turn');
+    const controller = new AbortController();
+    controller.abort(new Error('cancelled'));
+    await expect(host.directMessage('main', 'Cancelled.', controller.signal))
+      .rejects.toThrow('cancelled');
   });
 
   it('tags team-spawned SubAgent prompts as from=team', async () => {
@@ -2364,6 +2447,10 @@ describe('Session.createAgent', () => {
 
     expect(member.agent.config.systemPrompt.startsWith('<team_identity>')).toBe(true);
     expect(member.agent.config.systemPrompt).toContain('Name: Reviewer');
+    expect(member.agent.config.systemPrompt).toContain('You are not the main lead');
+    expect(member.agent.config.systemPrompt).toContain('Do not call `TeamCreate`, `TeamAssign`, `TeamDecide`, or `TeamDismiss`.');
+    expect(member.agent.config.systemPrompt).toContain('temporary `SubAgent` tool');
+    expect(member.agent.config.systemPrompt).not.toContain('You are the main lead');
     await member.agent.refreshSystemPrompt();
     expect(member.agent.config.systemPrompt.startsWith('<team_identity>')).toBe(true);
     expect(member.agent.teamWriteLocked).toBe(true);
@@ -2644,6 +2731,9 @@ describe('Session.createAgent', () => {
       { type: 'sub' },
       { kind: 'team', parentAgentId: main.id, teamLeaderAgentId: main.id, profile: contextProfile(), teamIdentity: identity('Second') },
     );
+    const host = new SessionSubagentHost(session, main.id);
+    const firstPrompt = vi.spyOn(first.agent.turn, 'prompt').mockReturnValue(1);
+    const secondPrompt = vi.spyOn(second.agent.turn, 'prompt').mockReturnValue(2);
 
     await expect(session.assignTeamTasks(main.id, [
       { agentId: first.id, task: null },
@@ -2656,15 +2746,31 @@ describe('Session.createAgent', () => {
     await main.agent.discussMode.enter();
     await session.lockTeamAssignments(main.id);
     expect(main.agent.discussMode.isActive).toBe(true);
-    await session.assignTeamTasks(main.id, [
+    await host.assignTeam([
       { agentId: first.id, task: 'Implement the focused change.' },
       { agentId: second.id, task: null },
-    ]);
+    ], signal);
     expect(main.agent.discussMode.isActive).toBe(false);
     expect(first.agent.teamWriteEnabled).toBe(true);
     expect(first.agent.permission.mode).toBe('auto');
     expect(second.agent.teamWriteEnabled).toBe(false);
     expect(second.agent.permission.mode).toBe('manual');
+    expect(firstPrompt).toHaveBeenCalledTimes(1);
+    const assignedPrompt = firstPrompt.mock.calls[0]?.[0]?.[0];
+    expect(assignedPrompt?.type).toBe('text');
+    const assignedText = assignedPrompt?.type === 'text' ? assignedPrompt.text : '';
+    expect(assignedText).toContain('Implement the focused change.');
+    expect(assignedText).toContain('TeamSpeak');
+    expect(assignedText).toContain('TeamDM');
+    expect(assignedText).toContain('completed');
+    expect(assignedText).toContain('blocked');
+    expect(assignedText).toContain('needs_decision');
+    expect(assignedText).toContain('results from temporary SubAgents');
+    expect(assignedText).toContain('Result summary');
+    expect(assignedText).toContain('Files changed or behavior verified');
+    expect(assignedText).toContain('Verification actually run');
+    expect(assignedText).toContain('Remaining risks or blockers');
+    expect(secondPrompt).not.toHaveBeenCalled();
 
     await session.lockTeamAssignments(main.id);
     expect(session.getAgentMetadata(first.id)?.assignedTask).toBeUndefined();

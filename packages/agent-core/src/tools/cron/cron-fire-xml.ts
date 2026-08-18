@@ -15,6 +15,7 @@
  * double-escaping would be noisier than literal punctuation.
  */
 import type { CronJobOrigin } from '../../agent/context/types';
+import CRON_RESULT_GUIDANCE from './cron-result-guidance.md?raw';
 
 export function renderCronFireXml(
   origin: CronJobOrigin,
@@ -30,6 +31,8 @@ export function renderCronFireXml(
     `<cron-fire jobId="${jobId}" cron="${cron}" recurring="${recurring}" coalescedCount="${coalescedCount}" stale="${stale}">`,
     '<prompt>',
     prompt,
+    '',
+    `<result-guidance>\n${CRON_RESULT_GUIDANCE.trim()}\n</result-guidance>`,
     '</prompt>',
     '</cron-fire>',
   ].join('\n');

@@ -23,6 +23,10 @@ describe('renderCronFireXml', () => {
       "<cron-fire jobId="deadbeef" cron="*/5 * * * *" recurring="true" coalescedCount="3" stale="false">
       <prompt>
       check the deploy
+
+      <result-guidance>
+      After handling this Cron task, give the user a concise result summary. State whether the task completed or was blocked, summarize the result, and include any remaining risk or blocker. Keep the existing Cron origin and envelope intact.
+      </result-guidance>
       </prompt>
       </cron-fire>"
     `);
@@ -41,7 +45,8 @@ describe('renderCronFireXml', () => {
     expect(out).toContain(
       '<cron-fire jobId="cafebabe" cron="30 14 28 2 *" recurring="false" coalescedCount="1" stale="false">',
     );
-    expect(out).toContain('<prompt>\none-shot ping\n</prompt>');
+    expect(out).toContain('<prompt>\none-shot ping\n\n<result-guidance>');
+    expect(out).toContain('give the user a concise result summary');
   });
 
   it('escapes `&` and `"` in attribute values; leaves prompt body verbatim', () => {
@@ -73,7 +78,7 @@ describe('renderCronFireXml', () => {
     };
     const prompt = 'line one\nline two\n\nline four';
     const out = renderCronFireXml(origin, prompt);
-    expect(out).toContain(`<prompt>\n${prompt}\n</prompt>`);
+    expect(out).toContain(`<prompt>\n${prompt}\n\n<result-guidance>`);
   });
 
   it('renders stale="true" when origin.stale is true', () => {

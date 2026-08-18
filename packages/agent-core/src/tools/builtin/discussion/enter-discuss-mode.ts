@@ -24,7 +24,7 @@ export class EnterDiscussModeTool implements BuiltinTool<EnterDiscussModeInput> 
         if (this.agent.discussMode.isActive) {
           return {
             isError: true,
-            output: 'Discuss is already active. Use TeamAssign to enter Code, or continue the meeting with TeamDecide.',
+            output: 'Discuss is already active. Continue with TeamDecide, or call TeamAssign when ready for Code.',
           };
         }
 
@@ -39,15 +39,12 @@ export class EnterDiscussModeTool implements BuiltinTool<EnterDiscussModeInput> 
         this.agent.telemetry.track('discuss_enter_resolved', { outcome: 'auto_approved' });
         return {
           output: [
-            'Discuss is now active. This is a read-only team meeting.',
-            '',
-            '1. Use Read, Grep, and Glob for context. Do not Write, Edit, Bash, or launch SubAgent.',
-            '2. Create partners with TeamCreate when needed.',
-            '3. Call TeamDecide action=start with a topic and your opening statement.',
-            '4. Members publish only with TeamSpeak; not calling it records abstention.',
-            '5. Call TeamAssign when ready to execute. That leaves Discuss and enters Code.',
-            '',
-            'Do not write a session file or ask the user to approve a document.',
+            'Discuss is active for main-lead team coordination.',
+            'Use TeamDecide action=start with a topic and opening statement for the first round.',
+            'Use TeamDecide action=continue with a new statement for later rounds.',
+            'Members use TeamSpeak or abstain by skipping it.',
+            'Use TeamAssign when ready: it exits Discuss and enters Code.',
+            'Re-enter Discuss whenever more confirmation, review, or coordination is needed.',
           ].join('\n'),
         };
       },

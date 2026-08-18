@@ -29,7 +29,7 @@ describe('DiscussMode', () => {
     });
   });
 
-  it('rejects re-entry and exits without owning a file or plan payload', async () => {
+  it('rejects re-entry and exits without owning an external payload', async () => {
     const agent = makeAgent();
     const mode = new DiscussMode(agent);
 

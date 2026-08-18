@@ -98,7 +98,7 @@ describe('CronManager', () => {
       expect(call.content).toHaveLength(1);
       const text = (call.content[0] as { type: 'text'; text: string }).text;
       expect(text).toContain('<cron-fire ');
-      expect(text).toContain('<prompt>\ncheck the deploy\n</prompt>');
+      expect(text).toContain('<prompt>\ncheck the deploy\n\n<result-guidance>');
       // Exactly one envelope — guards against an accidental double-wrap
       // (e.g. handleFire calling renderCronFireXml on already-rendered
       // content from a future refactor).
@@ -160,7 +160,7 @@ describe('CronManager', () => {
       const text = (content[0] as { type: 'text'; text: string }).text;
       expect(text).toContain('<cron-fire ');
       expect(text).toContain('recurring="false"');
-      expect(text).toContain('<prompt>\none-shot ping\n</prompt>');
+      expect(text).toContain('<prompt>\none-shot ping\n\n<result-guidance>');
 
       const tc = stub.telemetryCalls[0]!;
       expect(tc.props).toMatchObject({ recurring: false });

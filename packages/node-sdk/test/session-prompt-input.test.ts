@@ -6,10 +6,6 @@ import { Session } from '../src/session';
 
 class CapturingRpc extends SDKRpcClientBase {
   readonly promptCalls: unknown[] = [];
-  readonly enterPlanCalls: unknown[] = [];
-  readonly cancelPlanCalls: unknown[] = [];
-  readonly getPlanCalls: unknown[] = [];
-  readonly clearPlanCalls: unknown[] = [];
   readonly setModelCalls: unknown[] = [];
   private getRpcDelay: Promise<void> | undefined;
   private getRpcCallCount = 0;
@@ -42,19 +38,6 @@ class CapturingRpc extends SDKRpcClientBase {
       setModel: async (input: unknown) => {
         this.setModelCalls.push(input);
         return { model: 'captured-model' };
-      },
-      enterPlan: async (input: unknown) => {
-        this.enterPlanCalls.push(input);
-      },
-      cancelPlan: async (input: unknown) => {
-        this.cancelPlanCalls.push(input);
-      },
-      getPlan: async (input: unknown) => {
-        this.getPlanCalls.push(input);
-        return null;
-      },
-      clearPlan: async (input: unknown) => {
-        this.clearPlanCalls.push(input);
       },
     } as unknown as RPCMethods<CoreAPI>;
   }
@@ -118,10 +101,6 @@ describe('Session.prompt input normalization', () => {
         input: [{ type: 'text', text: 'side question' }],
       },
     ]);
-    expect(rpc.enterPlanCalls).toEqual([{ sessionId: 'ses_scoped_agent', agentId: 'agent-btw' }]);
-    expect(rpc.getPlanCalls).toEqual([{ sessionId: 'ses_scoped_agent', agentId: 'agent-btw' }]);
-    expect(rpc.clearPlanCalls).toEqual([{ sessionId: 'ses_scoped_agent', agentId: 'agent-btw' }]);
-    expect(rpc.cancelPlanCalls).toEqual([{ sessionId: 'ses_scoped_agent', agentId: 'agent-btw' }]);
   });
 
   it('isolates overlapping interactive agent scopes while RPC resolution is pending', async () => {

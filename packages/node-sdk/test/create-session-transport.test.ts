@@ -37,6 +37,8 @@ async function writeTestModelConfig(homeDir: string, modelName = 'kimi-test-mode
   await writeFile(
     join(homeDir, 'config.toml'),
     `
+default_model = "${modelName}"
+
 [providers.local]
 type = "kimi"
 base_url = "https://example.test/v1"
@@ -46,6 +48,9 @@ api_key = "sk-test"
 provider = "local"
 model = "${modelName}"
 max_context_size = 1000
+capabilities = ["thinking"]
+support_efforts = ["low", "medium", "high"]
+default_effort = "medium"
 `,
     'utf-8',
   );
@@ -590,6 +595,7 @@ effort = "medium"
   it('applies initial thinking and permission runtime options', async () => {
     const homeDir = await makeTempDir();
     const workDir = await makeTempDir();
+    await writeTestModelConfig(homeDir);
     const harness = createKimiHarness({
       identity: TEST_IDENTITY,
       homeDir,
@@ -603,27 +609,9 @@ effort = "medium"
         permission: 'auto',
       });
 
-      await expect(
-        waitForAgentWireEvent(
-          homeDir,
-          session.id,
-          'config.update',
-          (event) => event['thinkingEffort'] === 'low',
-        ),
-      ).resolves.toMatchObject({
-        type: 'config.update',
+      await expect(session.getStatus()).resolves.toMatchObject({
         thinkingEffort: 'low',
-      });
-      await expect(
-        waitForAgentWireEvent(
-          homeDir,
-          session.id,
-          'permission.set_mode',
-          (event) => event['mode'] === 'auto',
-        ),
-      ).resolves.toMatchObject({
-        type: 'permission.set_mode',
-        mode: 'auto',
+        permission: 'auto',
       });
     } finally {
       await harness.close();

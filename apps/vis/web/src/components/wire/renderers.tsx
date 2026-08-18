@@ -571,6 +571,27 @@ export const WIRE_RENDERERS: RendererMap = {
     label: 'goal×',
     headline: () => ({ main: <Dim>goal cleared</Dim> }),
   },
+
+  'goal.rewind_checkpoint': {
+    tone: 'lifecycle',
+    label: 'goal↶',
+    headline: (r) => ({
+      main: (
+        <span className="flex items-center gap-2">
+          <Pill tone="lifecycle" variant="soft">
+            checkpoint
+          </Pill>
+          <Dim>{r.snapshot === null ? 'empty' : 'saved'}</Dim>
+        </span>
+      ),
+    }),
+  },
+
+  'goal.rewind_checkpoint_discard': {
+    tone: 'warning',
+    label: 'goal↶×',
+    headline: () => ({ main: <Dim>checkpoint discarded</Dim> }),
+  },
 };
 
 /** Look up a renderer by a runtime `type` string. Returns `undefined` for kinds

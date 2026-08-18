@@ -50,6 +50,7 @@ import {
 } from '../tools/builtin/nori/memory-chain';
 import type { NoriMemoryProvider } from '../tools/builtin/nori/types';
 import SUMMARY_CONTINUATION_PROMPT from './summary-continuation.md?raw';
+import TEAM_AGENT_EXECUTION_PROMPT from './team-agent-execution.md?raw';
 
 export const DEFAULT_SUBAGENT_TIMEOUT_MS = 30 * 60 * 1000;
 export const DEFAULT_SUBAGENT_TIMEOUT_DESCRIPTION = '30 minutes';
@@ -239,7 +240,10 @@ export class SessionSubagentHost {
         continue;
       }
       const turnId = assignment.agent.turn.prompt(
-        [{ type: 'text', text: assignment.task }],
+        [{
+          type: 'text',
+          text: `${assignment.task}\n\n${TEAM_AGENT_EXECUTION_PROMPT.trim()}`,
+        }],
         this.teamLeadPromptOrigin(),
       );
       if (turnId === null) {
@@ -267,7 +271,12 @@ export class SessionSubagentHost {
     return members.map(([agentId]) => agentId);
   }
 
-  async directMessage(targetAgentId: string, message: string, signal: AbortSignal): Promise<void> {
+  async directMessage(
+    targetAgentId: string,
+    message: string,
+    signal: AbortSignal,
+  ): Promise<'completed' | 'buffered'> {
+    signal.throwIfAborted();
     const sender = this.session.getAgentMetadata(this.ownerAgentId);
     const leaderAgentId = this.ownerAgentId === 'main'
       ? 'main'
@@ -283,17 +292,20 @@ export class SessionSubagentHost {
       throw new Error(`TeamDM target "${targetAgentId}" is not in this team.`);
     }
     const recipient = await this.session.ensureAgentResumed(targetAgentId);
-    if (recipient.turn.hasActiveTurn) {
-      throw new Error(`TeamDM target "${targetAgentId}" is already working.`);
-    }
     const origin = this.ownerAgentId === leaderAgentId
       ? this.teamLeadPromptOrigin()
       : this.teamMemberPromptOrigin(sender);
-    const turnId = recipient.turn.prompt([{ type: 'text', text: message }], origin);
+    const input = [{ type: 'text' as const, text: wrapTeamDirectMessage(message) }];
+    const recipientBusy = recipient.turn.hasActiveTurn;
+    const turnId = recipientBusy
+      ? recipient.turn.steer(input, origin)
+      : recipient.turn.prompt(input, origin);
     if (turnId === null) {
+      if (recipientBusy) return 'buffered';
       throw new Error(`TeamDM target "${targetAgentId}" could not start a turn.`);
     }
     await runChildTurnToCompletion(recipient, signal);
+    return 'completed';
   }
 
   async inviteToDiscussion(agentIds: readonly string[]): Promise<TeamDiscussionMeta> {
@@ -1486,6 +1498,10 @@ function escapeXmlText(value: string): string {
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;');
+}
+
+function wrapTeamDirectMessage(message: string): string {
+  return `<system-reminder>\n${message.trim()}\n</system-reminder>`;
 }
 
 function escapeXmlAttribute(value: string): string {

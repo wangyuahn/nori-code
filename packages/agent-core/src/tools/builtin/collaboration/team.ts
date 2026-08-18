@@ -21,7 +21,7 @@ export type TeamCreateInput = z.infer<typeof TeamCreateInputSchema>;
 
 export class TeamCreateTool implements BuiltinTool<TeamCreateInput> {
   readonly name = 'TeamCreate' as const;
-  readonly description = 'Create durable team partners in this parent session. Every member requires name, title, intro, mandate, and role. Use SubAgent instead for temporary parallel work.';
+  readonly description = 'Main lead only: create durable Team Agents in this parent session. Every member requires name, title, intro, mandate, and role. SubAgent remains temporary work.';
   readonly parameters = toInputJsonSchema(TeamCreateInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}
@@ -44,7 +44,7 @@ export type TeamDismissInput = z.infer<typeof TeamDismissInputSchema>;
 
 export class TeamDismissTool implements BuiltinTool<TeamDismissInput> {
   readonly name = 'TeamDismiss' as const;
-  readonly description = 'Dismiss durable team members. When a member is working, first call with confirm_active=false; retry with confirm_active=true only after confirming the interruption.';
+  readonly description = 'Main lead only: dismiss durable Team Agents. When a member is working, first call with confirm_active=false; retry with confirm_active=true only after confirming the interruption.';
   readonly parameters = toInputJsonSchema(TeamDismissInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}
@@ -78,7 +78,7 @@ export type TeamAssignInput = z.infer<typeof TeamAssignInputSchema>;
 
 export class TeamAssignTool implements BuiltinTool<TeamAssignInput> {
   readonly name = 'TeamAssign' as const;
-  readonly description = 'Assign execution work to every current team member. Include every member exactly once; use task=null to explicitly leave one idle. At least one task must be non-null. A successful assignment leaves Discuss and enters Code. Write access lasts for the whole execution phase until the next Assign, Discuss, or discussion archive.';
+  readonly description = 'Main lead only: assign execution work to every current Team Agent. Include every member exactly once; use task=null to leave one idle. At least one task must be non-null. Success exits Discuss and enters Code; a non-null assignment grants Write, Edit, Bash, and temporary SubAgent access for that execution.';
   readonly parameters = toInputJsonSchema(TeamAssignInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}
@@ -131,7 +131,7 @@ export type TeamDMInput = z.infer<typeof TeamDMInputSchema>;
 
 export class TeamDMTool implements BuiltinTool<TeamDMInput> {
   readonly name = 'TeamDM' as const;
-  readonly description = 'Send a private prompt between the lead and one team member so the recipient actually runs a turn.';
+  readonly description = 'Main lead or Team Agent: send direct private communication at any time in Discuss or Code for coordination, progress, risk, completion, blocking, or decisions. The main lead may contact current members; a Team Agent normally contacts its direct parent. TeamSpeak is only for formal Discuss turns.';
   readonly parameters = toInputJsonSchema(TeamDMInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}
@@ -141,8 +141,8 @@ export class TeamDMTool implements BuiltinTool<TeamDMInput> {
       description: 'Sending a team direct message',
       approvalRule: this.name,
       execute: async (context) => {
-        await this.host.directMessage(args.agent_id, args.message, context.signal);
-        return { output: JSON.stringify({ recipient: args.agent_id }) };
+        const delivery = await this.host.directMessage(args.agent_id, args.message, context.signal);
+        return { output: JSON.stringify({ recipient: args.agent_id, delivery }) };
       },
     };
   }
@@ -155,7 +155,7 @@ export type DiscussionMembersInput = z.infer<typeof DiscussionMembersSchema>;
 
 export class TeamDiscussInviteTool implements BuiltinTool<DiscussionMembersInput> {
   readonly name = 'TeamDiscussInvite' as const;
-  readonly description = 'Invite existing team members to the active discussion without creating a new discussion transcript.';
+  readonly description = 'Main lead only: invite existing Team Agents to the active discussion.';
   readonly parameters = toInputJsonSchema(DiscussionMembersSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}
@@ -171,7 +171,7 @@ export class TeamDiscussInviteTool implements BuiltinTool<DiscussionMembersInput
 
 export class TeamDiscussKickTool implements BuiltinTool<DiscussionMembersInput> {
   readonly name = 'TeamDiscussKick' as const;
-  readonly description = 'Remove team members from the active discussion only. This does not dismiss them from the durable team.';
+  readonly description = 'Main lead only: remove Team Agents from the active discussion without dismissing them.';
   readonly parameters = toInputJsonSchema(DiscussionMembersSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}
@@ -236,7 +236,7 @@ function teamDecideJsonSchema(): Record<string, unknown> {
 
 export class TeamDecideTool implements BuiltinTool<TeamDecideInput> {
   readonly name = 'TeamDecide' as const;
-  readonly description = 'Run one serial discussion round, collect a vote, or archive the active discussion. Start/continue require the lead statement first, then members may TeamSpeak. Vote runs after Assign in Code and does not require Discuss. Use continue for later rounds so the same transcript is retained.';
+  readonly description = 'Main lead only: run a discussion round, collect a vote, or archive. In Discuss, start requires topic + lead statement; continue requires a new lead statement and keeps the same discussion. Members then use TeamSpeak or abstain by skipping it. After execution, vote may be used when all assigned results are received and no active work, unresolved block, or pending decision remains; archive only formally ends that Discuss.';
   readonly parameters = teamDecideJsonSchema();
 
   constructor(private readonly host: SessionSubagentHost) {}
@@ -264,7 +264,7 @@ export type TeamSpeakInput = z.infer<typeof TeamSpeakInputSchema>;
 /** Publishes a single intentional contribution from the scheduled team member. */
 export class TeamSpeakTool implements BuiltinTool<TeamSpeakInput> {
   readonly name = 'TeamSpeak' as const;
-  readonly description = 'Publish your concise final position to the active team discussion. This is available only during your scheduled discussion turn; no call records the turn as skipped (abstention).';
+  readonly description = 'Publish your concise final position during your scheduled Team Agent discussion turn. No call records the turn as skipped (abstention).';
   readonly parameters = toInputJsonSchema(TeamSpeakInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}

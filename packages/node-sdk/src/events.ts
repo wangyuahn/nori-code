@@ -14,6 +14,7 @@ export { MCP_OAUTH_AUTHORIZATION_URL_TOOL_UPDATE } from '@nori-code/agent-core';
 export type {
   AgentStatusUpdatedEvent,
   SessionMetaUpdatedEvent,
+  CodeChangeEvent,
   GoalUpdatedEvent,
   SkillActivatedEvent,
   PluginCommandActivatedEvent,
@@ -102,6 +103,7 @@ export type {
 // bash (`bash-*`) and agent (`agent-*`) tasks under one wire format.
 export type {
   BackgroundTaskStartedEvent,
+  BackgroundTaskUpdatedEvent,
   BackgroundTaskTerminatedEvent,
 } from '@nori-code/agent-core';
 

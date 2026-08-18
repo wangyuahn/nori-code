@@ -5,8 +5,6 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { KimiConfig } from '@nori-code/agent-core';
-import { createKimiDefaultHeaders, KIMI_CODE_PLATFORM } from '@nori-code/oauth';
-
 import { ProviderManager } from '../../agent-core/src/session/provider-manager';
 import { SDKRpcClient } from '#/index';
 import { TEST_IDENTITY } from './test-identity';
@@ -42,7 +40,7 @@ afterEach(async () => {
 });
 
 describe('runtime provider identity headers', () => {
-  it('preserves the host user agent suffix in SDK RPC headers', async () => {
+  it('does not synthesize removed host identity headers', async () => {
     const homeDir = await makeTempDir();
     const client = new SDKRpcClient({
       homeDir,
@@ -56,18 +54,14 @@ describe('runtime provider identity headers', () => {
     };
 
     try {
-      expect(core.kimiRequestHeaders).toMatchObject({
-        'User-Agent': 'kimi-code-cli/0.0.0-test (web-runtime)',
-        'X-Msh-Version': '0.0.0-test',
-      });
+      expect(core.kimiRequestHeaders).toEqual({});
     } finally {
       await client.close();
     }
   });
 
-  it('adds kimi-code-cli User-Agent and complete X-Msh headers to the default Kimi provider', async () => {
+  it('does not add removed identity headers to the Kimi provider', async () => {
     const homeDir = await makeTempDir();
-    const kimiRequestHeaders = createKimiDefaultHeaders({ homeDir, ...TEST_IDENTITY });
     const resolved = resolveRuntimeProvider({
       config: {
         defaultModel: 'kimi-model',
@@ -85,26 +79,16 @@ describe('runtime provider identity headers', () => {
           },
         },
       },
-      kimiRequestHeaders,
     });
 
     expect(resolved.provider).toMatchObject({
       type: 'kimi',
-      defaultHeaders: expect.objectContaining({
-        'User-Agent': 'kimi-code-cli/0.0.0-test',
-        'X-Msh-Platform': KIMI_CODE_PLATFORM,
-        'X-Msh-Version': '0.0.0-test',
-        'X-Msh-Device-Name': expect.any(String),
-        'X-Msh-Device-Model': expect.any(String),
-        'X-Msh-Os-Version': expect.any(String),
-        'X-Msh-Device-Id': expect.stringMatching(/^[0-9a-f-]+$/),
-      }),
     });
+    expect(resolved.provider).not.toHaveProperty('defaultHeaders');
   });
 
   it('lets Kimi provider customHeaders override default identity headers', async () => {
     const homeDir = await makeTempDir();
-    const kimiRequestHeaders = createKimiDefaultHeaders({ homeDir, ...TEST_IDENTITY });
     const config: KimiConfig = {
       providers: {
         kimi: {
@@ -129,7 +113,6 @@ describe('runtime provider identity headers', () => {
 
     const resolved = resolveRuntimeProvider({
       config,
-      kimiRequestHeaders,
     });
 
     expect(resolved.provider).toMatchObject({
@@ -137,14 +120,12 @@ describe('runtime provider identity headers', () => {
       defaultHeaders: expect.objectContaining({
         'User-Agent': 'Custom/1',
         'X-Msh-Version': 'override-version',
-        'X-Msh-Platform': KIMI_CODE_PLATFORM,
       }),
     });
   });
 
   it('applies only the User-Agent (no device identity headers) to non-Kimi providers', async () => {
     const homeDir = await makeTempDir();
-    const kimiRequestHeaders = createKimiDefaultHeaders({ homeDir, ...TEST_IDENTITY });
     const config: KimiConfig = {
       providers: {
         openai: {
@@ -166,21 +147,16 @@ describe('runtime provider identity headers', () => {
 
     const resolved = resolveRuntimeProvider({
       config,
-      kimiRequestHeaders,
     });
 
     expect(resolved.provider).toMatchObject({
       type: 'openai',
       model: 'gpt-test',
-      defaultHeaders: {
-        'User-Agent': `kimi-code-cli/${TEST_IDENTITY.version}`,
-      },
     });
     // Device identity headers (`X-Msh-*`) stay Kimi-only — must not leak to
     // third-party providers.
     const headers = (resolved.provider as { defaultHeaders?: Record<string, string> })
       .defaultHeaders;
-    expect(headers).toBeDefined();
-    expect(headers).not.toHaveProperty('X-Msh-Platform');
+    expect(headers).toBeUndefined();
   });
 });

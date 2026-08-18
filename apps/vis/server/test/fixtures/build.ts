@@ -1,6 +1,7 @@
 import { cp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 /** Copy a fixture session into a temp dir, rewriting state.json.agents.*.homedir
  *  to the real path so wire-reader / agent-tree can resolve them. */
@@ -9,7 +10,10 @@ export async function buildSessionFixture(name: string): Promise<{
   sessionDir: string;
   cleanup: () => Promise<void>;
 }> {
-  const src = new URL(`./sessions/${name}`, import.meta.url).pathname;
+  // `URL.pathname` keeps the leading slash from a Windows drive URL
+  // (`/C:/...`), which makes filesystem calls resolve to `C:\C:\...`.
+  // Convert the file URL through Node's platform-aware helper instead.
+  const src = fileURLToPath(new URL(`./sessions/${name}`, import.meta.url));
   const home = await mkdtemp();
   const sessionsDir = join(home, 'sessions', 'wd_test_000000000000');
   const sessionDir = join(sessionsDir, 'session_fixture');

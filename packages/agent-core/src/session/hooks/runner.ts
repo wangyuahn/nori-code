@@ -13,6 +13,7 @@ export interface RunHookOptions {
 
 const DEFAULT_TIMEOUT_SECONDS = 30;
 const KILL_GRACE_MS = 100;
+const TERMINATION_FALLBACK_MS = 2_000;
 const OptionalStringSchema = z.preprocess(
   (value) => {
     if (value === undefined || value === null) return undefined;
@@ -61,10 +62,13 @@ export async function runHook(
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let pendingTermination: HookResult | undefined;
+    let terminationFallback: ReturnType<typeof setTimeout> | undefined;
     const timeoutMs = timeoutSeconds(options.timeout) * 1000;
 
     const cleanup = () => {
       clearTimeout(timeout);
+      if (terminationFallback !== undefined) clearTimeout(terminationFallback);
       options.signal?.removeEventListener('abort', onAbort);
     };
 
@@ -75,14 +79,25 @@ export async function runHook(
       resolve(result);
     };
 
-    const timeout = setTimeout(() => {
+    const terminate = (result: HookResult): void => {
+      if (settled || pendingTermination !== undefined) return;
+      pendingTermination = result;
       killProcess(child);
-      settle(allowResult({ stdout, stderr, timedOut: true }));
+      // `taskkill` is itself asynchronous on Windows. Normally `close` arrives
+      // after the process tree is gone; the fallback prevents a broken child
+      // process from hanging the hook forever while still giving it time to
+      // release its cwd and stdio handles before the result is observed.
+      terminationFallback = setTimeout(() => {
+        if (pendingTermination !== undefined) settle(pendingTermination);
+      }, TERMINATION_FALLBACK_MS);
+    };
+
+    const timeout = setTimeout(() => {
+      terminate(allowResult({ stdout, stderr, timedOut: true }));
     }, timeoutMs);
 
     const onAbort = (): void => {
-      killProcess(child);
-      settle(allowResult({ stdout, stderr }));
+      terminate(allowResult({ stdout, stderr }));
     };
 
     options.signal?.addEventListener('abort', onAbort, { once: true });
@@ -100,10 +115,10 @@ export async function runHook(
       stderr += chunk;
     });
     child.on('error', (error) => {
-      settle(allowResult({ stdout, stderr: stderr + errorMessage(error) }));
+      terminate(allowResult({ stdout, stderr: stderr + errorMessage(error) }));
     });
     child.on('close', (code) => {
-      settle(resultFromExitCode(code ?? 0, stdout, stderr));
+      settle(pendingTermination ?? resultFromExitCode(code ?? 0, stdout, stderr));
     });
 
     child.stdin.on('error', () => {});

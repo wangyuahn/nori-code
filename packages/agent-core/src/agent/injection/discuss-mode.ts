@@ -1,4 +1,5 @@
 import { DynamicInjector } from './injector';
+import DISCUSS_MODE_PROMPT from './discuss-mode.md?raw';
 
 const DISCUSS_MODE_DEDUP_MIN_TURNS = 2;
 const DISCUSS_MODE_FULL_REFRESH_TURNS = 5;
@@ -51,24 +52,13 @@ export class DiscussModeInjector extends DynamicInjector {
 }
 
 function fullReminder(): string {
-  return `Discuss is active. This is a read-only team meeting. You MUST NOT use Write, Edit, Bash, or SubAgent. Prefer Read, Grep, and Glob. TaskStop, CronCreate, and CronDelete are also blocked.
-
-Workflow:
-  1. If durable partners do not exist yet, call TeamCreate with name, title, intro, mandate, and role for every member.
-  2. Call TeamDecide action=start with a topic and your opening statement. You speak first; that statement is stored in the discussion sub-session.
-  3. Members take turns. They publish only by calling TeamSpeak. Not calling TeamSpeak records the turn as skipped (abstention); their private reasoning stays out of the shared transcript.
-  4. Use TeamDiscussInvite / TeamDiscussKick to change who is in this discussion without dismissing them from the team.
-  5. When the team is ready to execute, call TeamAssign. That leaves Discuss and enters Code. Write access lasts for the whole execution phase.
-  6. After execution, call TeamDecide action=vote. Voting does not require Discuss. Every team member votes, including members left idle with task=null. Votes are discuss_again, proceed, or abstain.
-  7. If the team votes discuss_again, call EnterDiscussMode and continue the same discussion sub-session.
-
-Do not write a session file or ask the user to approve a document.`;
+  return DISCUSS_MODE_PROMPT.trim();
 }
 
 function sparseReminder(): string {
-  return 'Discuss is still active. Read-only team meeting: no Write, Edit, Bash, or SubAgent. Lead with TeamDecide (statement first), members with TeamSpeak or abstain by not calling it. TeamAssign enters Code.';
+  return 'Discuss is active for the main lead: read-only coordination. Use TeamDecide start for the first round or continue for later rounds, with your statement first. Members use TeamSpeak or abstain by skipping it. TeamAssign exits Discuss and starts Code.';
 }
 
 function exitReminder(): string {
-  return 'Discuss is no longer active. Code/execution tools follow normal permission rules. Assigned team members keep write access until the next TeamAssign, Discuss, or discussion archive.';
+  return 'Discuss ended. TeamAssign starts Code for assigned members; re-enter Discuss when more coordination is needed.';
 }

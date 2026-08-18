@@ -56,8 +56,8 @@ describe('default agent profiles', () => {
       expect(profile?.tools).toContain('SubAgent');
       expect(profile?.systemPrompt(promptContext)).toContain('SubAgent');
     }
-    expect(DEFAULT_AGENT_PROFILES['nori-agent']?.systemPrompt(promptContext)).toContain('Completed SubAgents are archived');
-    expect(DEFAULT_AGENT_PROFILES['nori-agent']?.systemPrompt(promptContext)).toContain('failure notifications arrive automatically');
+    expect(DEFAULT_AGENT_PROFILES['nori-agent']?.systemPrompt(promptContext)).toContain('temporary delegated agent');
+    expect(DEFAULT_AGENT_PROFILES['nori-agent']?.systemPrompt(promptContext)).toContain('Team Agent layer');
   });
 
   it('exposes Discuss names to default model profiles', () => {
@@ -69,9 +69,9 @@ describe('default agent profiles', () => {
       expect(tools).toContain('TeamAssign');
       expect(tools).toContain('TeamSpeak');
       expect(tools).not.toContain('ExitDiscussMode');
-      expect(DEFAULT_AGENT_PROFILES[name]?.systemPrompt(promptContext)).toContain('TeamCreate');
-      expect(DEFAULT_AGENT_PROFILES[name]?.systemPrompt(promptContext)).toContain('TeamDecide');
     }
+    expect(DEFAULT_AGENT_PROFILES['nori-agent']?.systemPrompt(promptContext)).toContain('TeamDecide');
+    expect(DEFAULT_AGENT_PROFILES['nori-coder']?.systemPrompt(promptContext)).toContain('TeamAssign');
   });
 
   it('fails loudly when an embedded system prompt source is missing', () => {
@@ -142,12 +142,25 @@ describe('default agent profiles', () => {
     }
   });
 
-  it('renders current collaboration wording without a session-file workflow', () => {
+  it('renders the current lead collaboration contract', () => {
     for (const name of ['agent', 'nori-agent', 'nori-coder']) {
       const prompt = DEFAULT_AGENT_PROFILES[name]?.systemPrompt(promptContext) ?? '';
       expect(prompt).toContain('SubAgent');
       expect(prompt).toContain('Discuss');
-      expect(prompt).toContain('Do not write a session file');
+      expect(prompt).toContain('TeamAssign');
+      expect(prompt).toMatch(/enter(?:s)? Code/);
+      expect(prompt).toContain('TeamDecide action=vote');
+      expect(prompt).toContain('TeamDM');
+      expect(prompt).toContain('available at any time');
+      expect(prompt).toMatch(/(?:re-enter|enter) Discuss/);
+      expect(prompt).toContain('wait for and consume one TeamDM report');
+      expect(prompt).toContain('Do not announce completion while any result is unknown');
+      expect(prompt).toContain('temporary SubAgents');
+      expect(prompt).toMatch(/archive.*formally ending/);
+      expect(prompt).not.toContain('Plan mode');
+      expect(prompt).not.toContain('plan file');
+      expect(prompt).not.toContain('Swarm');
+      expect(prompt).not.toContain('Graph');
     }
   });
 });

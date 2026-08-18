@@ -326,8 +326,8 @@ describe('KimiHarness config API', () => {
   });
 
   it('returns experimental feature metadata through the harness', async () => {
-    vi.stubEnv('KIMI_CODE_EXPERIMENTAL_FLAG', '0');
-    vi.stubEnv('KIMI_CODE_EXPERIMENTAL_MICRO_COMPACTION', '');
+    vi.stubEnv('NORI_CODE_EXPERIMENTAL_FLAG', '0');
+    vi.stubEnv('NORI_CODE_EXPERIMENTAL_MICRO_COMPACTION', '');
     const homeDir = await makeTempDir();
     await writeFile(
       join(homeDir, 'config.toml'),
@@ -348,7 +348,7 @@ micro_compaction = false
       enabled: false,
       source: 'config',
       configValue: false,
-      env: 'KIMI_CODE_EXPERIMENTAL_MICRO_COMPACTION',
+      env: 'NORI_CODE_EXPERIMENTAL_MICRO_COMPACTION',
     });
     expect(features).toEqual([
       expect.objectContaining({ id: 'micro_compaction', enabled: false }),
@@ -363,7 +363,7 @@ micro_compaction = false
     await harness.ensureConfigFile();
 
     const text = await readFile(configPath, 'utf-8');
-    expect(text).toContain('Runtime settings for Kimi Code.');
+    expect(text).toContain('Runtime settings for Nori Code.');
     expect(text).not.toMatch(/^default_thinking =/m);
     expect(text).not.toMatch(/^default_model =/m);
 

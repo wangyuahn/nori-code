@@ -153,7 +153,11 @@ export class AcpSession {
   // abort, so it flips every token and each affected `prompt()` returns
   // `cancelled` instead of launching. A set (not a single field) so concurrent
   // prompts are all covered rather than only the most recent.
-  private readonly pendingPromptAborts = new Set<{ aborted: boolean }>();
+  private readonly pendingPromptAborts = new Set<{
+    aborted: boolean;
+    resolveAbort: () => void;
+  }>();
+  private cancelGeneration = 0;
 
   /**
    * The most recent command palette advertised to the ACP client. Used by
@@ -276,10 +280,12 @@ export class AcpSession {
    * acceptable.
    */
   async cancel(): Promise<void> {
+    this.cancelGeneration += 1;
     // If any prompt is mid-compression (no turn yet), mark them aborted so they
     // do not launch once compression finishes.
     for (const pending of this.pendingPromptAborts) {
       pending.aborted = true;
+      pending.resolveAbort();
     }
     await this.session.cancel();
   }
@@ -730,15 +736,25 @@ export class AcpSession {
     // Compression happens before any turn exists, so honor a `session/cancel`
     // that arrives during it: flip the flag from cancel() and bail out here
     // rather than launching a turn the client already asked to stop.
-    const pending = { aborted: false };
+    const generation = this.cancelGeneration;
+    let resolveAbort!: () => void;
+    const abort = new Promise<void>((resolve) => {
+      resolveAbort = resolve;
+    });
+    const pending = { aborted: false, resolveAbort };
     this.pendingPromptAborts.add(pending);
     let parts: readonly PromptPart[];
     try {
-      parts = await compressPromptImageParts(acpBlocksToPromptParts(blocks));
+      const compressed = await Promise.race([
+        compressPromptImageParts(acpBlocksToPromptParts(blocks)),
+        abort.then(() => undefined),
+      ]);
+      if (compressed === undefined) return { stopReason: 'cancelled' };
+      parts = compressed;
     } finally {
       this.pendingPromptAborts.delete(pending);
     }
-    if (pending.aborted) {
+    if (pending.aborted || generation !== this.cancelGeneration) {
       return { stopReason: 'cancelled' };
     }
     const sessionId = this.id;

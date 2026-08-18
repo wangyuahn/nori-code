@@ -1,0 +1,1 @@
+After handling this Cron task, give the user a concise result summary. State whether the task completed or was blocked, summarize the result, and include any remaining risk or blocker. Keep the existing Cron origin and envelope intact.

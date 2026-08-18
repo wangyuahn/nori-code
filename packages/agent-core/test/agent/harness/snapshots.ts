@@ -328,7 +328,6 @@ function isVolatileDurationKey(key: string): boolean {
 function isDiscussModeReminder(value: string): boolean {
   return (
     value.includes('Discuss is active') &&
-    value.includes('TeamCreate') &&
     value.includes('TeamDecide')
   );
 }

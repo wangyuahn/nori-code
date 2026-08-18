@@ -68,6 +68,7 @@ describe('Event public types', () => {
       switch (event.type) {
         case 'agent.status.updated':
         case 'session.meta.updated':
+        case 'code.change':
         case 'event.session.created':
         case 'event.session.status_changed':
         case 'event.workspace.created':
@@ -107,6 +108,7 @@ describe('Event public types', () => {
         case 'compaction.cancelled':
         case 'compaction.completed':
         case 'background.task.started':
+        case 'background.task.updated':
         case 'background.task.terminated':
         case 'cron.fired':
         case 'prompt.submitted':
