@@ -33,6 +33,7 @@ import {
   TeamCreateTool,
   TeamDecideInputSchema,
   TeamDecideTool,
+  TeamDMInputSchema,
   TeamSpeakInputSchema,
   TeamSpeakTool,
 } from '../../src/tools/builtin/collaboration/team';
@@ -298,8 +299,6 @@ describe('current builtin collaboration tools', () => {
       agentId: 'agent-review',
       identity: {
         name: 'Reviewer',
-        title: 'Risk reviewer',
-        intro: 'Checks regressions.',
         mandate: 'Review behavior.',
         role: 'reviewer',
       },
@@ -318,8 +317,6 @@ describe('current builtin collaboration tools', () => {
       members: [{
         agent_id: 'agent-review',
         name: 'Reviewer',
-        title: 'Risk reviewer',
-        intro: 'Checks regressions.',
         role: 'reviewer',
         mandate: 'Review behavior.',
         status: 'idle' as const,
@@ -329,13 +326,13 @@ describe('current builtin collaboration tools', () => {
     const status = new TeamStatusTool(mockSubagentHost({ getTeamStatus }));
     const members = [{
       name: 'Reviewer',
-      title: 'Risk reviewer',
-      intro: 'Checks regressions.',
       mandate: 'Review behavior.',
       role: 'reviewer',
     }];
     expect(TeamCreateInputSchema.safeParse({ members }).success).toBe(true);
-    expect(TeamCreateInputSchema.safeParse({ members: [{ ...members[0], intro: '' }] }).success).toBe(false);
+    expect(TeamCreateInputSchema.safeParse({ members: [{ ...members[0], title: 'legacy' }] }).success).toBe(false);
+    expect(TeamCreateInputSchema.safeParse({ members: [{ name: 'Reviewer', role: '', mandate: 'Review behavior.' }] }).success).toBe(false);
+    expect(TeamCreateInputSchema.safeParse({ members: [{ name: 'Reviewer', role: 'reviewer' }] }).success).toBe(false);
     expect(TeamDecideInputSchema.safeParse({
       action: 'start',
       topic: 'Review the cache path',
@@ -374,6 +371,26 @@ describe('current builtin collaboration tools', () => {
     }).success).toBe(true);
     expect(TeamSpeakInputSchema.safeParse({ message: 'The cache key is stable.' }).success).toBe(true);
     expect(TeamStatusInputSchema.safeParse({}).success).toBe(true);
+    expect(assign.description).toContain('stay within its non-null assigned task');
+    expect(assign.description).toContain('TeamDM');
+    expect(speak.description).toContain('Only TeamSpeak is a formal statement');
+    expect(status.description).toContain('latest explicit TeamDM report status');
+    expect(status.description).toContain('Ordinary TeamDM messages are not classified as reports');
+    expect(TeamDMInputSchema.safeParse({
+      agent_id: 'agent-review',
+      message: 'ordinary coordination',
+    }).success).toBe(true);
+    expect(TeamDMInputSchema.safeParse({
+      agent_id: 'agent-review',
+      message: 'done',
+      report_status: 'completed',
+    }).success).toBe(false);
+    expect(TeamDMInputSchema.safeParse({
+      agent_id: 'agent-review',
+      message: 'done',
+      report_status: 'completed',
+      report_summary: 'Checks passed.',
+    }).success).toBe(true);
 
     const created = await executeTool(create, context({ members }));
     const assigned = await executeTool(assign, context({
@@ -395,6 +412,13 @@ describe('current builtin collaboration tools', () => {
     expect(JSON.parse(statusOutput)).toMatchObject({
       member_count: 1,
       members: [{ agent_id: 'agent-review', status: 'idle', assigned_task: 'Review tests.' }],
+    });
+    expect(JSON.parse(statusOutput).members[0]).not.toHaveProperty('title');
+    expect(JSON.parse(statusOutput).members[0]).not.toHaveProperty('intro');
+    expect(JSON.parse(statusOutput).members[0]).toMatchObject({
+      name: 'Reviewer',
+      role: 'reviewer',
+      mandate: 'Review behavior.',
     });
     expect(getTeamStatus).toHaveBeenCalledWith();
   });

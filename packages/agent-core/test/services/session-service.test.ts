@@ -1063,6 +1063,11 @@ describe('SessionService agent tree', () => {
           type: 'sub',
           parentAgentId: 'main',
           subagentItem: 'src/review.ts',
+          name: 'Reviewer',
+          role: 'reviewer',
+          mandate: 'Review behavior',
+          title: 'Legacy title',
+          intro: 'Legacy intro',
         },
       },
       custom: {},
@@ -1090,10 +1095,15 @@ describe('SessionService agent tree', () => {
         id: 'agent_reviewer',
         kind: 'sub',
         parent_agent_id: 'main',
-        name: 'src/review.ts',
+        name: 'Reviewer',
+        role: 'reviewer',
+        mandate: 'Review behavior',
         status: 'running',
       }),
     ]));
+    const reviewer = tree.agents.find(agent => agent.id === 'agent_reviewer');
+    expect(reviewer).not.toHaveProperty('title');
+    expect(reviewer).not.toHaveProperty('intro');
     expect(tree.agents.find(agent => agent.id === 'agent_reviewer')?.last_active).toMatch(/Z$/);
   });
 });

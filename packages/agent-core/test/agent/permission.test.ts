@@ -18,6 +18,7 @@ import {
   type PermissionRuleMatchExecution,
 } from '../../src/agent/permission/matches-rule';
 import { AutoModeAskUserQuestionDenyPermissionPolicy } from '../../src/agent/permission/policies/auto-mode-ask-user-question-deny';
+import { DiscussModeGuardDenyPermissionPolicy } from '../../src/agent/permission/policies/discuss-mode-guard-deny';
 import { FallbackAskPermissionPolicy } from '../../src/agent/permission/policies/fallback-ask';
 import { createPermissionDecisionPolicies } from '../../src/agent/permission/policies';
 import { ModeApprovePermissionPolicy } from '../../src/agent/permission/policies/mode-approve';
@@ -66,6 +67,20 @@ describe('Agent permission', () => {
         coderWriteEnabled: false,
       } as unknown as Agent).evaluate(contextFor('Bash')),
     ).toBeUndefined();
+  });
+
+  it('keeps Discuss read-only for Team members while their normal Code tools remain active', () => {
+    const contextFor = (toolName: string) =>
+      ({ toolCall: { name: toolName } }) as PermissionPolicyContext;
+    const policy = new DiscussModeGuardDenyPermissionPolicy({
+      discussMode: { isActive: false },
+      teamWriteLocked: true,
+    } as unknown as Agent);
+
+    expect(policy.evaluate(contextFor('Write'))?.kind).toBe('deny');
+    expect(policy.evaluate(contextFor('Bash'))?.kind).toBe('deny');
+    expect(policy.evaluate(contextFor('SubAgent'))?.kind).toBe('deny');
+    expect(policy.evaluate(contextFor('Read'))).toBeUndefined();
   });
 
   it('auto mode bypasses approval for ordinary builtin tools', async () => {
@@ -800,7 +815,6 @@ describe('Permission policy chain', () => {
       'user-configured-ask',
       'user-configured-allow',
       'goal-start-review-ask',
-      'discuss-mode-tool-approve',
       'sensitive-file-access-ask',
       'git-control-path-access-ask',
       'default-tool-approve',
@@ -1465,34 +1479,6 @@ describe('User-configured permission policies', () => {
       );
     },
   );
-});
-
-describe('Discuss mode tool approve policy', () => {
-  it('approves EnterDiscussMode in manual mode without requesting approval', async () => {
-    const { manager, requestApproval, telemetryTrack } = makePermissionManager(async () => ({
-      decision: 'approved',
-    }));
-
-    await expect(
-      manager.beforeToolCall(
-        hookContext({
-          id: 'call_enter_discuss',
-          toolName: 'EnterDiscussMode',
-          args: {},
-        }),
-      ),
-    ).resolves.toBeUndefined();
-
-    expect(requestApproval).not.toHaveBeenCalled();
-    expect(telemetryTrack).toHaveBeenCalledWith(
-      'permission_policy_decision',
-      expect.objectContaining({
-        policy_name: 'discuss-mode-tool-approve',
-        tool_name: 'EnterDiscussMode',
-        decision: 'approve',
-      }),
-    );
-  });
 });
 
 describe('Discuss Bash permission policy', () => {

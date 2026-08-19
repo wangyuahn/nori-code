@@ -15,9 +15,9 @@ describe('SessionAgentTree', () => {
     document.body.append(container);
     const root = createRoot(container);
     const agents = [
-      { agent_id: 'main', kind: 'main', title: 'Main', status: 'idle' },
-      { agent_id: 'team', kind: 'team', title: 'Team Engineering', status: 'idle', parent_agent_id: 'main' },
-      { agent_id: 'child', kind: 'sub', title: 'Protocol trace', status: 'running', parent_agent_id: 'team' },
+      { agent_id: 'main', kind: 'main', name: 'Main', status: 'idle' },
+      { agent_id: 'team', kind: 'team', name: 'Team Engineering', status: 'idle', parent_agent_id: 'main' },
+      { agent_id: 'child', kind: 'sub', name: 'Protocol trace', status: 'running', parent_agent_id: 'team' },
     ];
     try {
       await act(async () => {
@@ -63,7 +63,7 @@ describe('SessionAgentTree', () => {
         {
           agent_id: 'team-review',
           kind: 'team',
-          title: 'Review partner',
+          name: 'Review partner',
           status: 'idle',
           summary: '<message from="sub">Reviewing the streaming boundary</message>',
           tokens: 120,
@@ -162,7 +162,7 @@ describe('SessionAgentTree', () => {
   });
 
   it('shows Discuss only for an active discussion agent', async () => {
-    let agents = [{ agent_id: 'main', kind: 'main', title: 'Main', status: 'idle' }];
+    let agents = [{ agent_id: 'main', kind: 'main', name: 'Main', status: 'idle' }];
     vi.spyOn(api.sessions, 'getAgents').mockImplementation(async () => ({ items: agents }));
     const container = document.createElement('div');
     document.body.append(container);
@@ -204,7 +204,7 @@ describe('SessionAgentTree', () => {
 
       agents = [
         ...agents,
-        { agent_id: 'discussion-live', kind: 'discussion', title: 'Live Discuss', status: 'idle' },
+        { agent_id: 'discussion-live', kind: 'discussion', name: 'Live Discuss', status: 'idle' },
       ];
       await act(async () => {
         root.render(createElement(I18nProvider, null, createElement(SessionAgentTree, {
@@ -236,8 +236,53 @@ describe('SessionAgentTree', () => {
     }
   });
 
+  it('highlights only the member whose Discuss turn is currently scheduled', async () => {
+    vi.spyOn(api.sessions, 'getAgents').mockResolvedValue({
+      items: [
+        { agent_id: 'main', kind: 'main', name: 'Main', status: 'running' },
+        { agent_id: 'wing-smith', kind: 'team', name: 'WING_SMITH', role: '机翼工程师', parent_agent_id: 'main', status: 'running' },
+        { agent_id: 'fuselage-smith', kind: 'team', name: 'FUSELAGE_SMITH', role: '机身工程师', parent_agent_id: 'main', status: 'idle' },
+        {
+          agent_id: 'discussion-live',
+          kind: 'discussion',
+          name: 'Discussion',
+          parent_agent_id: 'main',
+          status: 'running',
+          discussion_turn_agent_id: 'wing-smith',
+        },
+      ],
+    });
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(SessionAgentTree, {
+          sessionId: 'session-current-speaker',
+          selectedAgentId: 'main',
+          backgroundTasks: [],
+          discussionTurnAgentId: 'wing-smith',
+          onSelectAgent: () => undefined,
+        })));
+      });
+      await vi.waitFor(() => expect(container.textContent).toContain('Team'));
+      await act(async () => { container.querySelector<HTMLElement>('.session-agent-tree > summary')?.click(); });
+      await vi.waitFor(() => expect(document.body.textContent).toContain('机翼工程师'));
+
+      expect(document.body.querySelector('[data-agent-id="wing-smith"]')?.classList.contains('discussion-current-turn')).toBe(true);
+      expect(document.body.querySelector('[data-agent-id="wing-smith"]')?.getAttribute('aria-current')).toBe('true');
+      expect(document.body.querySelector('[data-agent-id="wing-smith"]')?.textContent).toContain('Speaking');
+      expect(document.body.querySelector('[data-agent-id="fuselage-smith"]')?.classList.contains('discussion-current-turn')).toBe(false);
+      expect(document.body.querySelector('.session-agent-tree-turn-chip')?.textContent).toContain('WING_SMITH');
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      vi.restoreAllMocks();
+    }
+  });
+
   it('refreshes the tree when a discussion lifecycle revision arrives', async () => {
-    let agents = [{ agent_id: 'main', kind: 'main', title: 'Main', status: 'idle' }];
+    let agents = [{ agent_id: 'main', kind: 'main', name: 'Main', status: 'idle' }];
     vi.spyOn(api.sessions, 'getAgents').mockImplementation(async () => ({ items: agents }));
     const container = document.createElement('div');
     document.body.append(container);
@@ -257,7 +302,7 @@ describe('SessionAgentTree', () => {
 
       agents = [
         ...agents,
-        { agent_id: 'discussion-live', kind: 'discussion', title: 'Live Discuss', status: 'running' },
+        { agent_id: 'discussion-live', kind: 'discussion', name: 'Live Discuss', status: 'running' },
       ];
       await act(async () => root.render(renderTree(1)));
       await vi.waitFor(() => expect(document.body.querySelector('[data-agent-id="discussion-live"]')).not.toBeNull());
@@ -272,9 +317,9 @@ describe('SessionAgentTree', () => {
     vi.spyOn(api.sessions, 'getAgents').mockResolvedValue({
       items: [
         { agent_id: 'main', kind: 'main', name: 'Main', status: 'idle' },
-        { agent_id: 'team', kind: 'team', title: 'Team', status: 'running' },
-        { agent_id: 'child', kind: 'sub', parent_agent_id: 'team', title: 'Child', status: 'running' },
-        { agent_id: 'archived', kind: 'sub', parent_agent_id: 'team', title: 'Archived child', status: 'archived', archived: true },
+        { agent_id: 'team', kind: 'team', name: 'Team', status: 'running' },
+        { agent_id: 'child', kind: 'sub', parent_agent_id: 'team', name: 'Child', status: 'running' },
+        { agent_id: 'archived', kind: 'sub', parent_agent_id: 'team', name: 'Archived child', status: 'archived', archived: true },
       ],
     });
     const container = document.createElement('div');
@@ -320,9 +365,9 @@ describe('SessionAgentTree', () => {
 
   it('keeps the Team section collapsed under Main across a deferred refresh', async () => {
     let agents = [
-      { agent_id: 'main', kind: 'main', title: 'Main', status: 'idle' },
-      { agent_id: 'team', kind: 'team', title: 'Team', status: 'running', parent_agent_id: 'main' },
-      { agent_id: 'child', kind: 'sub', title: 'Child', status: 'running', parent_agent_id: 'team' },
+      { agent_id: 'main', kind: 'main', name: 'Main', status: 'idle' },
+      { agent_id: 'team', kind: 'team', name: 'Team', status: 'running', parent_agent_id: 'main' },
+      { agent_id: 'child', kind: 'sub', name: 'Child', status: 'running', parent_agent_id: 'team' },
     ];
     const getAgents = vi.spyOn(api.sessions, 'getAgents').mockImplementation(async () => ({ items: agents }));
     const container = document.createElement('div');
@@ -369,11 +414,11 @@ describe('SessionAgentTree', () => {
   it('keeps sibling branches independent and renders the Main → Team → SubAgent hierarchy', async () => {
     vi.spyOn(api.sessions, 'getAgents').mockResolvedValue({
       items: [
-        { agent_id: 'main', kind: 'main', title: 'Main', status: 'idle' },
-        { agent_id: 'team-a', kind: 'team', title: 'Team A', status: 'running', parent_agent_id: 'main' },
-        { agent_id: 'sub-a', kind: 'sub', title: 'Sub A', status: 'running', parent_agent_id: 'team-a' },
-        { agent_id: 'team-b', kind: 'team', title: 'Team B', status: 'running', parent_agent_id: 'main' },
-        { agent_id: 'sub-b', kind: 'sub', title: 'Sub B', status: 'running', parent_agent_id: 'team-b' },
+        { agent_id: 'main', kind: 'main', name: 'Main', status: 'idle' },
+        { agent_id: 'team-a', kind: 'team', name: 'Team A', status: 'running', parent_agent_id: 'main' },
+        { agent_id: 'sub-a', kind: 'sub', name: 'Sub A', status: 'running', parent_agent_id: 'team-a' },
+        { agent_id: 'team-b', kind: 'team', name: 'Team B', status: 'running', parent_agent_id: 'main' },
+        { agent_id: 'sub-b', kind: 'sub', name: 'Sub B', status: 'running', parent_agent_id: 'team-b' },
       ],
     });
     const container = document.createElement('div');
@@ -417,10 +462,10 @@ describe('SessionAgentTree', () => {
   it('falls back safely for missing parents and cyclic parent data', async () => {
     vi.spyOn(api.sessions, 'getAgents').mockResolvedValue({
       items: [
-        { agent_id: 'main', kind: 'main', title: 'Main', status: 'idle' },
-        { agent_id: 'cycle-a', kind: 'sub', title: 'Cycle A', status: 'running', parent_agent_id: 'cycle-b' },
-        { agent_id: 'cycle-b', kind: 'sub', title: 'Cycle B', status: 'running', parent_agent_id: 'cycle-a' },
-        { agent_id: 'missing', kind: 'sub', title: 'Missing parent', status: 'running', parent_agent_id: 'does-not-exist' },
+        { agent_id: 'main', kind: 'main', name: 'Main', status: 'idle' },
+        { agent_id: 'cycle-a', kind: 'sub', name: 'Cycle A', status: 'running', parent_agent_id: 'cycle-b' },
+        { agent_id: 'cycle-b', kind: 'sub', name: 'Cycle B', status: 'running', parent_agent_id: 'cycle-a' },
+        { agent_id: 'missing', kind: 'sub', name: 'Missing parent', status: 'running', parent_agent_id: 'does-not-exist' },
       ],
     });
     const container = document.createElement('div');
@@ -456,7 +501,7 @@ describe('SessionAgentTree', () => {
           items: [{
             agent_id: 'old-child',
             kind: 'team',
-            title: 'Old session branch',
+            name: 'Old session branch',
             status: 'running',
           }],
         };
@@ -498,7 +543,7 @@ describe('SessionAgentTree', () => {
 
   it('keeps background work out of the subagent count while showing activity', async () => {
     vi.spyOn(api.sessions, 'getAgents').mockResolvedValue({
-      items: [{ agent_id: 'main', kind: 'main', title: 'Main session', status: 'idle' }],
+      items: [{ agent_id: 'main', kind: 'main', name: 'Main session', status: 'idle' }],
     });
     const container = document.createElement('div');
     document.body.append(container);

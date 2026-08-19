@@ -14,6 +14,7 @@ import {
   type CompactionResult,
 } from '../compaction';
 import {
+  expandContextInjection,
   project,
   type ProjectionAnomaly,
   type ProjectOptions,
@@ -341,7 +342,10 @@ export class ContextMemory {
 
   project(messages: readonly ContextMessage[], options?: ProjectOptions): Message[] {
     const anomalies: ProjectionAnomaly[] = [];
-    const result = project(this.agent.microCompaction.compact(messages), {
+    const expandedMessages = messages.flatMap((message, index) =>
+      expandContextInjection(message, index),
+    );
+    const result = project(this.agent.microCompaction.compact(expandedMessages), {
       ...options,
       onAnomaly: (anomaly) => {
         anomalies.push(anomaly);

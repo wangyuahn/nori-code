@@ -96,6 +96,8 @@ export interface AgentOptions {
   readonly obsidianMemory?: NoriMemoryProvider;
   readonly noriWorkflow?: NoriWorkflowConfig;
   readonly coderWriteEnabled?: boolean;
+  /** Persistent Team members share the lead's complete runtime tool set. */
+  readonly teamMember?: boolean;
   readonly noriRules?: RuleConfig[];
 }
 
@@ -148,9 +150,11 @@ export class Agent {
    *  whose profile is nori-coder/coder.  Toggled via /setting coder write. */
   coderWriteEnabled: boolean;
 
-  /** Persistent team members stay read-only until TeamAssign explicitly grants work. */
+  /** True while a persistent Team member is held in Discuss's read-only state. */
   teamWriteLocked = false;
-  teamWriteEnabled = false;
+  /** Kept as a lifecycle marker; assignment never changes this capability flag. */
+  teamWriteEnabled = true;
+  readonly isTeamMember: boolean;
 
   /** Custom rule definitions loaded from nori.yaml. */
   readonly noriRules: RuleConfig[];
@@ -183,6 +187,7 @@ export class Agent {
     this.obsidianMemory = options.obsidianMemory;
     this.noriWorkflow = options.noriWorkflow;
     this.coderWriteEnabled = options.coderWriteEnabled ?? false;
+    this.isTeamMember = options.teamMember ?? false;
     this.noriRules = options.noriRules ?? [];
     this.ruleEngine = new RuleEngine(this.noriRules);
 
@@ -217,7 +222,7 @@ export class Agent {
       this,
       this.homedir === undefined ? undefined : new BackgroundTaskPersistence(this.homedir),
     );
-    this.cron = this.type === 'sub' ? null : new CronManager(this);
+    this.cron = this.type === 'main' || this.isTeamMember ? new CronManager(this) : null;
     this.goal = new GoalMode(this);
     this.replayBuilder = new ReplayBuilder(this, options.replay);
   }

@@ -4,7 +4,7 @@ import { useBackgroundTasks } from './hooks/useBackgroundTasks';
 import { CronJobPanel } from './components/CronJobPanel';
 import { AccountCenter } from './components/AccountCenter';
 import { CodeView } from './components/CodeView';
-import { activeDiscussionForAgent, SessionAgentTree } from './components/SessionAgentTree';
+import { SessionAgentTree } from './components/SessionAgentTree';
 import { Icon, type IconName } from './components/Icon';
 import { useSessions, usePhaseStatus, useServerStatus } from './hooks/useApi';
 import { useChatMessages } from './hooks/useChatMessages';
@@ -13,6 +13,7 @@ import { FileTree } from './components/FileTree';
 import { ProjectFolderPicker } from './components/ProjectFolderPicker';
 import { useI18n } from './i18n';
 import { modelThinkingOptions } from './utils/model-thinking';
+import { sessionAgentDisplayName } from './utils/session-agent';
 import { loadRewindLimit } from './rewindPreferences';
 import type { ChatSlashCommandName } from './utils/chat-slash-commands';
 import { installSoundUnlock } from './notificationSounds';
@@ -77,7 +78,6 @@ export function App() {
     thinking: 'off',
     permission_mode: 'manual',
     discuss_mode: false,
-    main_write_enabled: true,
   });
   const [rewindLimit, setRewindLimit] = useState(loadRewindLimit);
   const [cronJobCount, setCronJobCount] = useState(0);
@@ -180,8 +180,7 @@ export function App() {
     sessions: tr('Sessions', '会话'),
     files: tr('Files', '文件'),
   };
-  const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, agentTreeRevision, refreshSessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort } = useChatMessages(sessionId, activeAgentId, activeSession?.title);
-  const activeDiscussion = activeDiscussionForAgent(sessionAgents, activeAgentId, sessionStatus);
+  const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, agentTreeRevision, discussionTurnAgentId, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort } = useChatMessages(sessionId, activeAgentId, activeSession?.title);
   const globalApprovals = useGlobalApprovals();
   const browserPermissions = useBrowserPermissions();
   const sessionActiveAgentCount = countActiveAgents(activeSubagentIds, backgroundTasks.tasks);
@@ -283,24 +282,6 @@ export function App() {
     if (request) await globalApprovals.resolveApproval(request, decision, options);
   };
 
-  const changeTaskMode = async (taskMode: 'discuss' | 'code') => {
-    const discussMode = taskMode === 'discuss';
-    if (!activeSession) {
-      setDraftAgentConfig(previous => ({ ...previous, discuss_mode: discussMode }));
-      return;
-    }
-    await updateActiveAgentProfile({ discuss_mode: discussMode });
-    void refreshSessionStatus().catch(error => console.error('Task mode status refresh failed:', error));
-  };
-
-  const changeMainWrite = async (enabled: boolean) => {
-    if (!activeSession) {
-      setDraftAgentConfig(previous => ({ ...previous, main_write_enabled: enabled }));
-      return;
-    }
-    await updateActiveAgentProfile({ main_write_enabled: enabled });
-  };
-
   const controlGoal = async (action: 'pause' | 'resume' | 'cancel') => {
     if (!activeSession) return;
     await updateActiveAgentProfile({ goal_control: action });
@@ -316,7 +297,6 @@ export function App() {
         thinking: draftAgentConfig.thinking,
         permission_mode: draftAgentConfig.permission_mode,
         discuss_mode: draftAgentConfig.discuss_mode,
-        main_write_enabled: draftAgentConfig.main_write_enabled,
       },
     });
     if (createdId && firstMessage) setQueuedFirstMessage({ sessionId: createdId, ...firstMessage });
@@ -429,7 +409,7 @@ export function App() {
             isStreaming={isStreaming}
             activeAgentCount={sessionActiveAgentCount}
             activeAgentTokens={sessionTreeTokens}
-            activeDiscussion={activeDiscussion}
+            sessionAgents={sessionAgents}
             sessionStatus={sessionStatus}
             compacting={compacting}
             models={models}
@@ -439,9 +419,7 @@ export function App() {
             onModelChange={changeModel}
             onThinkingChange={changeThinking}
             onPermissionChange={changePermission}
-            onTaskModeChange={changeTaskMode}
             onRunSlashCommand={handleRunSlashCommand}
-            onMainWriteChange={changeMainWrite}
             onGoalControl={controlGoal}
             onSendMessage={handleSendMessage}
             onAbort={abort}
@@ -512,7 +490,7 @@ export function App() {
 
         <div className="sidebar-content">
           {sidebarTab === 'sessions' && (
-            <SessionsList sessions={sessions} sessionId={sessionId} sessionsLoading={sessionsLoading} sessionsError={sessionsError} sessionsCreating={sessionsCreating} onRefresh={refreshSessions} onCreateSession={() => void startNewConversation()} onSwitchSession={id => { switchSession(id); setActiveView('chat'); closeSidebarOnNarrowViewport(); }} onArchiveSession={archiveSession} onDeleteSession={deleteSession} onRenameSession={renameSession} onForkSession={async (id, title) => { await forkSession(id, title); setActiveView('chat'); closeSidebarOnNarrowViewport(); }} />
+            <SessionsList sessions={sessions} sessionId={sessionId} sessionsLoading={sessionsLoading} sessionsError={sessionsError} sessionsCreating={sessionsCreating} onRefresh={refreshSessions} onCreateSession={() => { startNewConversation(); }} onSwitchSession={id => { switchSession(id); setActiveView('chat'); closeSidebarOnNarrowViewport(); }} onArchiveSession={archiveSession} onDeleteSession={deleteSession} onRenameSession={renameSession} onForkSession={async (id, title) => { await forkSession(id, title); setActiveView('chat'); closeSidebarOnNarrowViewport(); }} />
           )}
           {sidebarTab === 'files' && <FilesSidebar session={activeSession} selectedFile={selectedProjectFile} onSelectFile={setSelectedProjectFile} />}
         </div>
@@ -569,6 +547,7 @@ export function App() {
               hasGlobalActivity={effectiveGlobalActiveAgentCount > 0}
               sessionStatus={sessionStatus}
               agentTreeRevision={agentTreeRevision}
+              discussionTurnAgentId={discussionTurnAgentId}
               onSelectAgent={selectSessionAgent}
               onAgentsChange={updateSessionAgents}
               onBackgroundTaskCancelled={backgroundTasks.markCancelled}
@@ -724,7 +703,7 @@ export function AgentBreadcrumb({
       : <strong>{viewLabel}</strong>}
     {activeView === 'chat' && visibleAgents.map(agent => <span className="workspace-breadcrumb-agent" key={agent.agent_id}>
       <Icon name="chevron-right" size={13}/>
-      <button type="button" className={`workspace-breadcrumb-link${agent.agent_id === activeAgentId ? ' current' : ''}`} onClick={() => onSelectAgent(agent)} aria-current={agent.agent_id === activeAgentId ? 'page' : undefined} title={agent.title || agent.name || agent.agent_id}>{agent.title || agent.name || agent.agent_id}</button>
+      <button type="button" className={`workspace-breadcrumb-link${agent.agent_id === activeAgentId ? ' current' : ''}`} onClick={() => onSelectAgent(agent)} aria-current={agent.agent_id === activeAgentId ? 'page' : undefined} title={sessionAgentDisplayName(agent)}>{sessionAgentDisplayName(agent)}</button>
     </span>)}
   </div>;
 }

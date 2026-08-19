@@ -21,7 +21,6 @@ export * from './goal/get-goal';
 export * from './goal/set-goal-budget';
 export * from './goal/update-goal';
 export * from './nori';
-export * from './discussion/enter-discuss-mode';
 export * from './shell/bash';
 export * from './state/todo-list';
 export * from './web/fetch-url';

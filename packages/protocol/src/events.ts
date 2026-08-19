@@ -362,6 +362,13 @@ export interface AgentStatusUpdatedEvent {
   readonly coderWriteEnabled?: boolean;
   readonly toolsReadonly?: boolean;
   readonly usage?: UsageStatus;
+  readonly team?: {
+    readonly assignedTask: string | null;
+    readonly status: 'idle' | 'running';
+    readonly reportStatus: 'unreported' | 'completed' | 'blocked' | 'needs_decision';
+    readonly reportSummary: string | null;
+    readonly reportReceived: boolean;
+  };
 }
 
 export interface SessionMetaUpdatedEvent {
@@ -427,6 +434,8 @@ export interface DiscussionUpdatedEvent {
   readonly type: 'discussion.updated';
   readonly discussionAgentId: string;
   readonly kind: 'message' | 'round' | 'skip' | 'vote' | 'lifecycle';
+  /** Present for incremental Discuss turn changes; null clears the speaker. */
+  readonly currentTurnAgentId?: string | null;
 }
 
 export interface SkillActivatedEvent {
@@ -1106,6 +1115,13 @@ export const agentStatusUpdatedEventSchema = z.object({
   coderWriteEnabled: z.boolean().optional(),
   toolsReadonly: z.boolean().optional(),
   usage: usageStatusSchema.optional(),
+  team: z.object({
+    assignedTask: z.string().nullable(),
+    status: z.enum(['idle', 'running']),
+    reportStatus: z.enum(['unreported', 'completed', 'blocked', 'needs_decision']),
+    reportSummary: z.string().nullable(),
+    reportReceived: z.boolean(),
+  }).optional(),
 }) satisfies z.ZodType<AgentStatusUpdatedEvent>;
 
 export const sessionMetaUpdatedEventSchema = z.object({
@@ -1165,6 +1181,7 @@ export const discussionUpdatedEventSchema = z.object({
   type: z.literal('discussion.updated'),
   discussionAgentId: z.string().min(1),
   kind: z.enum(['message', 'round', 'skip', 'vote', 'lifecycle']),
+  currentTurnAgentId: z.string().min(1).nullable().optional(),
 }) satisfies z.ZodType<DiscussionUpdatedEvent>;
 
 export const skillActivatedEventSchema = z.object({

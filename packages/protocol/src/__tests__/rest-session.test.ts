@@ -528,7 +528,11 @@ describe('session agent tree schemas', () => {
         id: 'agent_reviewer',
         kind: 'sub',
         parent_agent_id: 'main',
-        name: 'src/review.ts',
+        name: 'Reviewer',
+        role: 'reviewer',
+        mandate: 'Review behavior',
+        title: 'Legacy title',
+        intro: 'Legacy intro',
         status: 'running',
         usage: {
           input_other: 10,
@@ -541,6 +545,10 @@ describe('session agent tree schemas', () => {
       }],
     });
     expect(parsed.agents[0]?.parent_agent_id).toBe('main');
+    expect(parsed.agents[0]?.role).toBe('reviewer');
+    expect(parsed.agents[0]?.mandate).toBe('Review behavior');
+    expect(parsed.agents[0]).not.toHaveProperty('title');
+    expect(parsed.agents[0]).not.toHaveProperty('intro');
   });
 });
 

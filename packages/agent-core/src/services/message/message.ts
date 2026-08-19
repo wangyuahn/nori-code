@@ -45,6 +45,7 @@
 
 import { createDecorator } from '../../di';
 import type { ContextMessage } from '../../agent/context';
+import { expandContextInjection } from '../../agent/context/projector';
 import type {
   CursorQuery,
   Message,
@@ -136,8 +137,9 @@ export function parseMessageId(
   if (lastUnderscore <= 0) return undefined;
   const sessionId = rest.slice(0, lastUnderscore);
   const indexStr = rest.slice(lastUnderscore + 1);
-  if (!/^\d+$/.test(indexStr)) return undefined;
-  const index = Number.parseInt(indexStr, 10);
+  const match = /^(\d+)(?::result)?$/.exec(indexStr);
+  if (match === null) return undefined;
+  const index = Number.parseInt(match[1]!, 10);
   if (!Number.isFinite(index) || index < 0) return undefined;
   return { sessionId, index };
 }
@@ -297,4 +299,45 @@ export function toProtocolMessage(
     created_at: new Date(createdAtMs).toISOString(),
     ...(metadata !== undefined ? { metadata } : {}),
   };
+}
+
+/**
+ * Project one durable history entry to the protocol messages it represents.
+ * ContextInjection deliberately expands to an assistant `tool_use` followed
+ * by a tool `tool_result`; ordinary entries retain their existing one-message
+ * shape. The result id is a deterministic suffix of the durable entry id.
+ */
+export function toProtocolMessages(
+  sessionId: string,
+  index: number,
+  msg: ContextMessage,
+  sessionCreatedAtMs: number,
+  createdAtMsOverride?: number,
+): Message[] {
+  const expanded = expandContextInjection(msg, index);
+  if (expanded.length === 1) {
+    return [toProtocolMessage(sessionId, index, msg, sessionCreatedAtMs, createdAtMsOverride)];
+  }
+  const createdAtMs = createdAtMsOverride ?? sessionCreatedAtMs + index;
+  const assistant = toProtocolMessage(
+    sessionId,
+    index,
+    expanded[0]!,
+    sessionCreatedAtMs,
+    createdAtMs,
+  );
+  const result = toProtocolMessage(
+    sessionId,
+    index,
+    expanded[1]!,
+    sessionCreatedAtMs,
+    createdAtMs + 1,
+  );
+  return [
+    assistant,
+    {
+      ...result,
+      id: `${assistant.id}:result`,
+    },
+  ];
 }

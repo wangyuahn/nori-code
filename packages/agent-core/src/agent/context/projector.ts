@@ -78,9 +78,70 @@ export type ProjectionAnomaly =
   /** A non-empty but all-whitespace text block was dropped (always). */
   | { readonly kind: 'whitespace_text_dropped'; readonly role: string };
 
+export const CONTEXT_INJECTION_TOOL_NAME = 'ContextInjection';
+
+/**
+ * Convert an internal system injection into the same assistant-tool/tool-result
+ * exchange used by ordinary model tools. The source message remains unchanged
+ * in the durable context; this helper is only used at model/protocol
+ * projection boundaries.
+ *
+ * The id is content-derived rather than counter-derived, so compaction and
+ * replay do not change it. The ordinal only disambiguates two identical
+ * injections in one projection.
+ */
+export function expandContextInjection(
+  message: ContextMessage,
+  ordinal: number,
+): ContextMessage[] {
+  if (message.role !== 'user' || message.origin?.kind !== 'injection') {
+    return [message];
+  }
+
+  const payload = message.content
+    .map((part) => part.type === 'text' ? part.text : JSON.stringify(part))
+    .join('\u0000');
+  let hash = 2166136261;
+  for (const char of `${message.origin.variant}\u0000${payload}`) {
+    hash ^= char.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16777619);
+  }
+  const toolCallId = `context-injection-${(hash >>> 0).toString(36)}-${String(ordinal)}`;
+  return [
+    {
+      role: 'assistant',
+      content: [],
+      toolCalls: [
+        {
+          type: 'function',
+          id: toolCallId,
+          name: CONTEXT_INJECTION_TOOL_NAME,
+          arguments: JSON.stringify({
+            source: message.origin.variant,
+            variant: message.origin.variant,
+          }),
+        },
+      ],
+      origin: message.origin,
+    },
+    {
+      role: 'tool',
+      content: message.content.map((part) => ({ ...part })) as ContextMessage['content'],
+      toolCalls: [],
+      toolCallId,
+      isError: message.isError,
+      origin: message.origin,
+    },
+  ];
+}
+
 export function project(history: readonly ContextMessage[], options?: ProjectOptions): Message[] {
+  const expandedHistory = history.flatMap((message, index) =>
+    expandContextInjection(message, index),
+  );
+  const providerReadyHistory = moveLeadingContextInjectionsAfterFirstUser(expandedHistory);
   let result = repairToolExchangeAdjacency(
-    mergeAdjacentUserMessages(history, options?.onAnomaly),
+    mergeAdjacentUserMessages(providerReadyHistory, options?.onAnomaly),
     options,
   );
   if (options?.mergeConsecutiveAssistants === true) {
@@ -93,6 +154,39 @@ export function project(history: readonly ContextMessage[], options?: ProjectOpt
     result = dropLeadingNonUserMessages(result, options.onAnomaly);
   }
   return result;
+}
+
+/**
+ * Strict providers require a conversation to start with a user turn. An
+ * internal reminder can be appended before the first prompt during startup,
+ * so keep its standard exchange but move it behind that first user message
+ * instead of dropping it in strict resend.
+ */
+function moveLeadingContextInjectionsAfterFirstUser(
+  messages: readonly ContextMessage[],
+): ContextMessage[] {
+  const firstUserIndex = messages.findIndex((message) => message.role === 'user');
+  if (firstUserIndex <= 0) return [...messages];
+
+  const leading: ContextMessage[] = [];
+  let cursor = 0;
+  while (
+    cursor + 1 < firstUserIndex
+    && messages[cursor]?.role === 'assistant'
+    && messages[cursor]?.origin?.kind === 'injection'
+    && messages[cursor + 1]?.role === 'tool'
+    && messages[cursor + 1]?.origin?.kind === 'injection'
+  ) {
+    leading.push(messages[cursor]!, messages[cursor + 1]!);
+    cursor += 2;
+  }
+  if (leading.length === 0) return [...messages];
+
+  return [
+    ...messages.slice(cursor, firstUserIndex + 1),
+    ...leading,
+    ...messages.slice(firstUserIndex + 1),
+  ];
 }
 
 // Strict providers (Anthropic) require every assistant `tool_use` to be answered

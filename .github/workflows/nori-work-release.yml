@@ -100,8 +100,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          version="${RELEASE_TAG#nori-work-v}"
+          prerelease_args=()
+          if [[ "$version" == *-* ]]; then
+            prerelease_args+=(--prerelease)
+          fi
           gh release create "$RELEASE_TAG" release-artifacts/* \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
-            --title "Nori Work ${RELEASE_TAG#nori-work-v}" \
+            --title "Nori Work $version" \
+            "${prerelease_args[@]}" \
             --generate-notes

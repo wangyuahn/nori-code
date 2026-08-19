@@ -132,14 +132,20 @@ export const sessionAgentTreeNodeSchema = z.object({
   kind: z.enum(['main', 'team', 'sub', 'discussion', 'independent']),
   parent_agent_id: sessionAgentIdSchema.nullable(),
   name: z.string().min(1),
-  title: z.string().min(1).optional(),
-  intro: z.string().min(1).optional(),
+  role: z.string().min(1).optional(),
+  mandate: z.string().min(1).optional(),
+  assigned_task: z.string().min(1).optional(),
+  team_report_status: z.enum(['unreported', 'completed', 'blocked', 'needs_decision']).nullable().optional(),
+  team_report_summary: z.string().min(1).optional(),
+  team_report_received: z.boolean().optional(),
   summary: z.string().min(1).optional(),
   subagent_item: z.string().min(1).optional(),
   status: sessionStatusSchema,
   usage: realtimeTokenUsageSchema.optional(),
   last_active: z.string().datetime(),
   archived: z.boolean(),
+  /** The team member whose serial Discuss turn is currently running. */
+  discussion_turn_agent_id: sessionAgentIdSchema.optional(),
 });
 export type SessionAgentTreeNode = z.infer<typeof sessionAgentTreeNodeSchema>;
 

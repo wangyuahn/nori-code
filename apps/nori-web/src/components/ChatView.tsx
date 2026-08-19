@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type UIEvent } from 'react';
-import { api, type ApprovalRequest, type ModelCatalogItem, type PromptAttachment, type PromptExecutionOptions, type QuestionAnswer, type QuestionRequest, type Session, type SessionAgentConfig, type SessionRealtimeStatus, type TokenUsage } from '../api/client';
+import { api, type ApprovalRequest, type ModelCatalogItem, type PromptAttachment, type PromptExecutionOptions, type QuestionAnswer, type QuestionRequest, type Session, type SessionAgent, type SessionAgentConfig, type SessionRealtimeStatus, type TokenUsage } from '../api/client';
 import type { ChatMessage, QueuedPrompt, TodoItem, ToolCall, WorkBlock } from '../hooks/useChatMessages';
 import { useBrowserPermissions, type BrowserPermissionRequest, type BrowserPermissionDecision } from '../hooks/useBrowser';
 import { useI18n } from '../i18n';
@@ -16,10 +16,12 @@ import { UsageOverview } from './UsageOverview';
 import { detectImageMime, isLikelyImageFile } from '../utils/image-mime';
 import { toolCallDetailFields } from '../utils/tool-call-detail';
 import { editLineOperationStats } from '../utils/edit-line-ops';
+import { sessionAgentDisplayName } from '../utils/session-agent';
 
 export interface ChatViewProps {
   session: Session | null;
   agentId?: string;
+  sessionAgents?: readonly SessionAgent[];
   allSessions?: Session[];
   messages: ChatMessage[];
   messagesLoading?: boolean;
@@ -29,7 +31,6 @@ export interface ChatViewProps {
   isStreaming: boolean;
   activeAgentCount?: number;
   activeAgentTokens?: number;
-  activeDiscussion?: boolean;
   sessionStatus?: SessionRealtimeStatus | null;
   compacting?: boolean;
   models: ModelCatalogItem[];
@@ -41,9 +42,7 @@ export interface ChatViewProps {
   onModelChange: (model: string) => void | Promise<void>;
   onThinkingChange: (effort: string) => void | Promise<void>;
   onPermissionChange: (mode: 'auto' | 'yolo' | 'manual') => void | Promise<void>;
-  onTaskModeChange: (mode: 'discuss' | 'code') => void | Promise<void>;
   onRunSlashCommand: (command: ChatSlashCommandName, args: string, options?: PromptExecutionOptions) => boolean | void | Promise<boolean | void>;
-  onMainWriteChange: (enabled: boolean) => void | Promise<void>;
   onGoalControl?: (action: 'pause' | 'resume' | 'cancel') => void | Promise<void>;
   pendingApprovals?: ApprovalRequest[];
   onResolveApproval?: (approvalId: string, decision: 'approved' | 'rejected' | 'cancelled', options?: { remember?: boolean; feedback?: string; selectedLabel?: string }) => void | Promise<void>;
@@ -175,7 +174,7 @@ function ComposerSettingPicker({ id, label, ariaLabel, value, choices, open, dis
 }
 
 export function ChatView(props: ChatViewProps) {
-  const { session, agentId = 'main', allSessions = [], messages, messagesLoading = false, streaming, thinking, workBlocks = [], isStreaming, activeAgentTokens, activeDiscussion, sessionStatus, compacting = false, models, modelsLoading, modelError, onSendMessage, onAbort, onRefreshModels, onModelChange, onThinkingChange, onPermissionChange, onTaskModeChange, onRunSlashCommand, onMainWriteChange, pendingApprovals = [], onResolveApproval, globalApprovals = [], onResolveGlobalApproval, onApprovalPermissionChange, approvalSessionTitles = {}, approvalResolvingIds = new Set(), approvalErrors = {}, onOpenApprovalSession, showApprovalPanel = true, pendingQuestions = [], onResolveQuestion, onDismissQuestion, queuedPrompts = [], onCancelQueuedPrompt, draftAgentConfig, rewindLimit = 10, onRewind, browserPermissionsOverride, onResolveBrowserPermissionOverride } = props;
+  const { session, agentId = 'main', sessionAgents = [], allSessions = [], messages, messagesLoading = false, streaming, thinking, workBlocks = [], isStreaming, activeAgentTokens, sessionStatus, compacting = false, models, modelsLoading, modelError, onSendMessage, onAbort, onRefreshModels, onModelChange, onThinkingChange, onPermissionChange, onRunSlashCommand, pendingApprovals = [], onResolveApproval, globalApprovals = [], onResolveGlobalApproval, onApprovalPermissionChange, approvalSessionTitles = {}, approvalResolvingIds = new Set(), approvalErrors = {}, onOpenApprovalSession, showApprovalPanel = true, pendingQuestions = [], onResolveQuestion, onDismissQuestion, queuedPrompts = [], onCancelQueuedPrompt, draftAgentConfig, rewindLimit = 10, onRewind, browserPermissionsOverride, onResolveBrowserPermissionOverride } = props;
   const { tr } = useI18n();
   const localBrowserPermissions = useBrowserPermissions();
   const browserPermissions = browserPermissionsOverride === undefined
@@ -210,15 +209,13 @@ export function ChatView(props: ChatViewProps) {
   const [followOutput, setFollowOutput] = useState(true);
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [hoveredTurnId, setHoveredTurnId] = useState<string | null>(null);
-  const [taskModeError, setTaskModeError] = useState<string | null>(null);
   const [modelOverride, setModelOverride] = useState<string | null>(null);
-  const [mainWriteOverride, setMainWriteOverride] = useState<boolean | null>(null);
+  const [permissionMenuOpen, setPermissionMenuOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [modelSettingOpen, setModelSettingOpen] = useState<'model' | 'thinking' | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const modelOverrideSessionRef = useRef<string | null>(null);
-  const mainWriteOverrideSessionRef = useRef<string | null>(null);
   const followOutputRef = useRef(true);
   const turnSyncFrameRef = useRef(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -226,12 +223,12 @@ export function ChatView(props: ChatViewProps) {
   const rewindSessionIdRef = useRef<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const previousScopeRef = useRef<string | null>(null);
+  const permissionMenuRef = useRef<HTMLDivElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const currentSessionId = session?.id ?? null;
   const currentScope = currentSessionId === null ? null : `${currentSessionId}\u0000${agentId}`;
   rewindSessionIdRef.current = currentScope;
   const activeModelOverride = modelOverrideSessionRef.current === currentScope ? modelOverride : null;
-  const activeMainWriteOverride = mainWriteOverrideSessionRef.current === currentScope ? mainWriteOverride : null;
   const runtimeModelValue = sessionStatus?.model?.trim();
   const runtimeModelId = runtimeModelValue === '' ? undefined : runtimeModelValue;
   const selectedModelId = activeModelOverride ?? runtimeModelId ?? session?.agent_config?.model ?? draftAgentConfig?.model ?? '';
@@ -239,15 +236,7 @@ export function ChatView(props: ChatViewProps) {
   const thinkingOptions = modelThinkingOptions(selectedModel);
   const requestedThinking = session?.agent_config?.thinking ?? draftAgentConfig?.thinking ?? thinkingOptions.defaultValue;
   const selectedPermission = session?.agent_config?.permission_mode ?? draftAgentConfig?.permission_mode ?? 'manual';
-  const persistedTaskMode = activeDiscussion !== undefined
-    ? (activeDiscussion ? 'discuss' : 'code')
-    : (
-      sessionStatus?.discuss_mode
-      ?? (agentId === 'main' ? session?.agent_config?.discuss_mode ?? draftAgentConfig?.discuss_mode : false)
-    ) ? 'discuss' : 'code';
-  const selectedTaskMode = persistedTaskMode;
-  const persistedMainWrite = sessionStatus?.main_write_enabled ?? session?.agent_config?.main_write_enabled ?? draftAgentConfig?.main_write_enabled ?? false;
-  const selectedMainWrite = activeMainWriteOverride ?? persistedMainWrite;
+  const selectedPermissionLabel = selectedPermission === 'auto' ? 'AUTO' : selectedPermission === 'yolo' ? 'YOLO' : tr('Manual', '手动');
   const selectedModelLabel = selectedModel
     ? `${selectedModel.display_name || selectedModel.model} · ${selectedModel.provider_name || selectedModel.provider}`
     : selectedModelId || tr('Select model', '选择模型');
@@ -270,7 +259,10 @@ export function ChatView(props: ChatViewProps) {
   const imageCapable = modelSupportsImageInput(selectedModel);
   const imageCapableRef = useRef(imageCapable);
   imageCapableRef.current = imageCapable;
-  const streamingContinuesAssistant = messages.at(-1)?.role === 'assistant';
+  // A live turn is a new message, never a continuation of the last persisted
+  // assistant row. Keeping this false ensures process output cannot be
+  // rendered inside an already-completed final answer.
+  const streamingContinuesAssistant = false;
   const standaloneLiveProgressId = streaming.trim() ? 'standalone-live-progress' : undefined;
   const standaloneLiveBlocks: WorkBlock[] = [
     ...(workBlocks.length > 0
@@ -309,9 +301,10 @@ export function ChatView(props: ChatViewProps) {
     }
   }, [browserPermissions.pending, browserPermissions.resolvePermission, selectedPermission]);
   useEffect(() => {
-    if (!modelMenuOpen) return;
+    if (!permissionMenuOpen && !modelMenuOpen) return;
     const closeMenus = (event: PointerEvent) => {
       const target = event.target as Node;
+      if (!permissionMenuRef.current?.contains(target)) setPermissionMenuOpen(false);
       if (!modelMenuRef.current?.contains(target)) {
         setModelMenuOpen(false);
         setModelSettingOpen(null);
@@ -319,6 +312,7 @@ export function ChatView(props: ChatViewProps) {
     };
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      setPermissionMenuOpen(false);
       setModelMenuOpen(false);
       setModelSettingOpen(null);
     };
@@ -328,7 +322,7 @@ export function ChatView(props: ChatViewProps) {
       document.removeEventListener('pointerdown', closeMenus);
       window.removeEventListener('keydown', closeOnEscape);
     };
-  }, [modelMenuOpen]);
+  }, [modelMenuOpen, permissionMenuOpen]);
   const rewindCounts = new Map<string, number>();
   let promptsFromEnd = 0;
   for (let index = messages.length - 1; index >= 0; index--) {
@@ -463,9 +457,12 @@ export function ChatView(props: ChatViewProps) {
     };
   }, [composerRevision, restoreRewindFocus]);
   useEffect(() => { setModelNotice(false); }, [currentScope, selectedModelId]);
-  useEffect(() => { setTaskModeError(null); }, [currentScope, persistedTaskMode]);
   useEffect(() => { setModelOverride(null); }, [currentScope]);
-  useEffect(() => { setMainWriteOverride(null); }, [currentScope]);
+  useEffect(() => {
+    setPermissionMenuOpen(false);
+    setModelMenuOpen(false);
+    setModelSettingOpen(null);
+  }, [currentScope]);
   useEffect(() => {
     setRewindRequest(null);
     setRewinding(false);
@@ -480,15 +477,8 @@ export function ChatView(props: ChatViewProps) {
     return () => window.removeEventListener('keydown', closeOnEscape);
   }, [rewindRequest]);
   useEffect(() => {
-    setModelMenuOpen(false);
-    setModelSettingOpen(null);
-  }, [currentScope]);
-  useEffect(() => {
     if (activeModelOverride !== null && runtimeModelId === activeModelOverride) setModelOverride(null);
   }, [activeModelOverride, runtimeModelId]);
-  useEffect(() => {
-    if (activeMainWriteOverride !== null && persistedMainWrite === activeMainWriteOverride) setMainWriteOverride(null);
-  }, [activeMainWriteOverride, persistedMainWrite]);
   useEffect(() => {
     const reference = (event: Event) => {
       const path = (event as CustomEvent<{ path?: string }>).detail?.path;
@@ -705,27 +695,12 @@ export function ChatView(props: ChatViewProps) {
         return;
       }
     }
-    if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && !isStreaming && pendingApprovals.length === 0 && browserPermissions.pending.length === 0 && pendingQuestions.length === 0) {
-      event.preventDefault();
-      void changeTaskMode(selectedTaskMode === 'discuss' ? 'code' : 'discuss');
-      return;
-    }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       if (input.trim().startsWith('/')) void runSlashCommand();
       else void handleSend(undefined, isStreaming ? 'steer' : 'queue');
     }
   };
-
-  async function changeTaskMode(mode: 'discuss' | 'code') {
-    if (mode === selectedTaskMode || isStreaming) return;
-    setTaskModeError(null);
-    try {
-      await onTaskModeChange(mode);
-    } catch (error) {
-      setTaskModeError(error instanceof Error ? error.message : tr('Unable to change task mode.', '无法切换任务模式。'));
-    }
-  }
 
   const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     if (event.clipboardData.files.length === 0) return;
@@ -756,16 +731,6 @@ export function ChatView(props: ChatViewProps) {
       await onModelChange(modelId);
     } catch {
       setModelOverride(current => modelOverrideSessionRef.current === currentScope && current === modelId ? null : current);
-    }
-  };
-
-  const handleMainWriteChange = async (enabled: boolean) => {
-    mainWriteOverrideSessionRef.current = currentScope;
-    setMainWriteOverride(enabled);
-    try {
-      await onMainWriteChange(enabled);
-    } catch {
-      setMainWriteOverride(current => mainWriteOverrideSessionRef.current === currentScope && current === enabled ? null : current);
     }
   };
 
@@ -841,7 +806,7 @@ export function ChatView(props: ChatViewProps) {
   return <section className="chat-view" aria-label={tr('Conversation', '对话')}>
     <div className="chat-messages-shell">
     <div className="chat-messages" ref={messagesScrollRef} onScroll={handleMessagesScroll}>
-      {messagesLoading ? <div className="chat-history-loading" role="status"><span className="spinner"/><strong>{tr('Loading conversation…', '正在加载会话…')}</strong></div> : messages.length === 0 ? <div className="chat-welcome"><div className="welcome-mark"><Icon name="sparkles" size={27}/></div><span className="eyebrow">{tr('Your thoughtful coding partner', '你的智能编程伙伴')}</span><h2>{session ? tr('What should we make better?', '我们要改进什么？') : tr('What would you like to work on?', '你想从哪里开始？')}</h2><p>{session ? tr('Ask Nori to inspect code, plan a feature, fix a bug, or validate an API integration.', '让 Nori 检查代码、规划功能、修复缺陷或验证 API 集成。') : tr('Choose a project folder to start a new task, or open an existing conversation from the sidebar. You can also type below now.', '选择一个项目文件夹开始新任务，或从左侧打开已有对话。你也可以直接在下方输入。')}</p><UsageOverview sessions={allSessions} models={models}/><div className="starter-grid">{STARTERS.map(item => <button key={item.title} className="starter-card" onClick={() => void handleSend(tr(item.prompt, item.promptZh))}><Icon name="sparkles" size={16}/><span><strong>{tr(item.title, item.titleZh)}</strong><small>{tr(item.prompt, item.promptZh)}</small></span></button>)}</div></div> : presentedMessages.map(({ message, workStartedAt }, index) => <MessageBubble key={message.id} message={message} workStartedAt={workStartedAt} rewindCount={rewindCounts.get(message.id)} rewindDisabled={isStreaming || rewinding} onRewind={requestRewind} live={isStreaming && index === presentedMessages.length - 1 && message.role === 'assistant' ? { streaming, thinking, workBlocks, stopping, onAbort: handleAbort } : undefined}/>) }
+      {messagesLoading ? <div className="chat-history-loading" role="status"><span className="spinner"/><strong>{tr('Loading conversation…', '正在加载会话…')}</strong></div> : messages.length === 0 ? <div className="chat-welcome"><div className="welcome-mark"><Icon name="sparkles" size={27}/></div><span className="eyebrow">{tr('Your thoughtful coding partner', '你的智能编程伙伴')}</span><h2>{session ? tr('What should we make better?', '我们要改进什么？') : tr('What would you like to work on?', '你想从哪里开始？')}</h2><p>{session ? tr('Ask Nori to inspect code, plan a feature, fix a bug, or validate an API integration.', '让 Nori 检查代码、规划功能、修复缺陷或验证 API 集成。') : tr('Choose a project folder to start a new task, or open an existing conversation from the sidebar. You can also type below now.', '选择一个项目文件夹开始新任务，或打开已有对话。你也可以直接在下方输入。')}</p><UsageOverview sessions={allSessions} models={models}/><div className="starter-grid">{STARTERS.map(item => <button key={item.title} className="starter-card" onClick={() => void handleSend(tr(item.prompt, item.promptZh))}><Icon name="sparkles" size={16}/><span><strong>{tr(item.title, item.titleZh)}</strong><small>{tr(item.prompt, item.promptZh)}</small></span></button>)}</div></div> : presentedMessages.map(({ message, workStartedAt }, index) => <MessageBubble key={message.id} message={message} sessionAgents={sessionAgents} workStartedAt={workStartedAt} rewindCount={rewindCounts.get(message.id)} rewindDisabled={isStreaming || rewinding} onRewind={requestRewind} live={isStreaming && index === presentedMessages.length - 1 && message.role === 'assistant' ? { streaming, thinking, workBlocks, stopping, onAbort: handleAbort } : undefined}/>) }
 
       {isStreaming && !streamingContinuesAssistant && <div className="chat-message chat-message-assistant chat-message-streaming"><div className="message-body"><div className="chat-message-role">Nori <span>{pendingApprovals.length > 0 || browserPermissions.pending.length > 0 ? tr('waiting for permission', '等待授权') : tr('working', '工作中')}</span></div>{standaloneLiveBlocks.length > 0 ? <LiveWorkStream blocks={standaloneLiveBlocks} activeProgressId={standaloneLiveProgressId} startedAt={latestUserStartedAt}/> : <div className="chat-message-content"><span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span><span className="streaming-cursor"/></div>}{streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(streaming))} tokens</div>}<button className="chat-abort-btn" onClick={() => void handleAbort()} disabled={stopping}><Icon name="stop" size={13}/> {stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button></div></div>}
       <div ref={messagesEndRef}/>
@@ -889,19 +854,25 @@ export function ChatView(props: ChatViewProps) {
         <div className="composer-toolbar-left">
           <input ref={imageInputRef} className="composer-image-input" type="file" multiple onChange={event => { if (event.target.files) void addFiles(event.target.files); event.target.value = ''; }}/>
           <button type="button" className="composer-image-button" onClick={() => imageInputRef.current?.click()} disabled={attachmentsLoading || attachments.length >= 6 || commandRunning} title={tr('Attach files', '添加文件')} aria-label={tr('Attach files', '添加文件')}><Icon name="plus" size={18}/></button>
-          <div className="composer-task-mode" role="group" aria-label={tr('Task mode', '任务模式')}>
-            <button type="button" className={selectedTaskMode === 'code' ? 'active' : ''} aria-pressed={selectedTaskMode === 'code'} data-mode="code" onClick={() => void changeTaskMode('code')} disabled={isStreaming} title={tr('Use execution mode', '使用执行模式')}>{tr('Execute', '执行')}</button>
-            <button type="button" className={selectedTaskMode === 'discuss' ? 'active' : ''} aria-pressed={selectedTaskMode === 'discuss'} data-mode="discuss" onClick={() => void changeTaskMode('discuss')} disabled={isStreaming} title={tr('Use discussion mode', '使用讨论模式')}>{tr('Discuss', '讨论')}</button>
+          <div className={`composer-control-popover composer-permission-menu${permissionMenuOpen ? ' open' : ''}`} ref={permissionMenuRef}>
+            <button type="button" className={`composer-icon-trigger permission-${selectedPermission}`} onClick={() => { setPermissionMenuOpen(previous => !previous); setModelMenuOpen(false); setModelSettingOpen(null); }} title={tr(`Permission: ${selectedPermissionLabel}`, `权限：${selectedPermissionLabel}`)} aria-label={tr(`Permission: ${selectedPermissionLabel}`, `权限：${selectedPermissionLabel}`)} aria-expanded={permissionMenuOpen}><Icon name="shield" size={16}/></button>
+            <div className="composer-permission-popover" role="menu" aria-hidden={!permissionMenuOpen}>
+              {([
+                { value: 'auto' as const, label: 'AUTO', detail: tr('Approve routine tools automatically', '自动放行常规工具') },
+                { value: 'yolo' as const, label: 'YOLO', detail: tr('Run without permission prompts', '不显示权限询问') },
+                { value: 'manual' as const, label: tr('Manual', '手动'), detail: tr('Ask before commands and edits', '命令和更改前询问') },
+              ]).map(option => <button type="button" role="menuitemradio" aria-checked={selectedPermission === option.value} key={option.value} disabled={isStreaming} onClick={() => { void onPermissionChange(option.value); setPermissionMenuOpen(false); }}><span className={`permission-option-icon permission-${option.value}`}><Icon name="shield" size={14}/></span><span><strong>{option.label}</strong><small>{option.detail}</small></span>{selectedPermission === option.value && <Icon name="check" size={13}/>}</button>)}
+            </div>
           </div>
           <div className="composer-mode-options">
-            <label className="main-write-toggle loop-mode-toggle" title={tr('Create a goal before this request so Nori continues through the Loop state machine.', '发送后先创建 Goal，并由 Loop 状态机持续执行。')}><input type="checkbox" checked={loopEnabled} onChange={event => setLoopEnabled(event.target.checked)}/><span>Loop</span></label>
+            <label className="loop-mode-toggle" title={tr('Create a goal before this request so Nori continues through the Loop state machine.', '发送后先创建 Goal，并由 Loop 状态机持续执行。')}><input type="checkbox" checked={loopEnabled} onChange={event => setLoopEnabled(event.target.checked)}/><span>Loop</span></label>
           </div>
           <SkillPicker sessionId={session?.id ?? null} disabled={isStreaming}/>
         </div>
         <div className="composer-toolbar-right">
           <div className="composer-model-controls">
             <div className={`composer-control-popover composer-model-menu${modelMenuOpen ? ' open' : ''}`} ref={modelMenuRef}>
-              <button type="button" className={`composer-model-trigger${!selectedModelId ? ' invalid' : ''}`} onClick={() => { setModelMenuOpen(previous => !previous); setModelSettingOpen(null); }} aria-busy={modelsLoading} title={tr('Model and reasoning settings', '模型和推理设置')} aria-label={tr('Model and reasoning settings', '模型和推理设置')} aria-expanded={modelMenuOpen}><span>{selectedModelLabel}</span>{selectedThinkingLabel && <em>{selectedThinkingLabel}</em>}<Icon name="chevron-down" size={13}/></button>
+              <button type="button" className={`composer-model-trigger${!selectedModelId ? ' invalid' : ''}`} onClick={() => { setModelMenuOpen(previous => !previous); setModelSettingOpen(null); setPermissionMenuOpen(false); }} aria-busy={modelsLoading} title={tr('Model and reasoning settings', '模型和推理设置')} aria-label={tr('Model and reasoning settings', '模型和推理设置')} aria-expanded={modelMenuOpen}><span>{selectedModelLabel}</span>{selectedThinkingLabel && <em>{selectedThinkingLabel}</em>}<Icon name="chevron-down" size={13}/></button>
               <div className="composer-model-popover" aria-hidden={!modelMenuOpen}>
                 <ComposerSettingPicker id="model" label={tr('Model', '模型')} ariaLabel={tr('Model', '模型')} value={selectedModelId} choices={modelChoices} open={modelSettingOpen === 'model'} disabled={isStreaming || modelsLoading} invalid={!selectedModelId} nativeClassName="model-select" onToggle={() => setModelSettingOpen(previous => previous === 'model' ? null : 'model')} onChange={value => { void handleModelChange(value); setModelSettingOpen(null); }}/>
                 {thinkingChoices.length > 0 && <ComposerSettingPicker
@@ -920,12 +891,11 @@ export function ChatView(props: ChatViewProps) {
                 <button type="button" className="composer-model-refresh" onClick={onRefreshModels} disabled={modelsLoading}><span>{tr('Refresh model list', '刷新模型列表')}</span><Icon name="refresh" size={14}/></button>
               </div>
             </div>
-            {selectedTaskMode === 'code' && <label className={`main-write-icon-toggle${selectedMainWrite ? ' active' : ''}`} title={tr('Allow the main model to use Edit and Write directly.', '允许主模型直接使用 Edit 和 Write。')}><input type="checkbox" aria-label={tr('Main edits', '主模型编辑')} checked={selectedMainWrite} disabled={isStreaming} onChange={event => void handleMainWriteChange(event.target.checked)}/><Icon name="edit" size={15}/></label>}
           </div>
           <div className="composer-submit-actions"><button className={`chat-send-btn${isStreaming ? ' chat-guide-btn' : ''}`} onClick={() => input.trim().startsWith('/') ? void runSlashCommand() : void handleSend(undefined, isStreaming ? 'steer' : 'queue')} disabled={rewinding || commandRunning || steering || attachmentsLoading || (!input.trim() && attachments.length === 0)} title={isStreaming ? tr('Insert guidance into the current task', '插入引导到当前任务') : tr('Send message', '发送消息')} aria-label={isStreaming ? tr('Guide current task', '引导当前任务') : tr('Send message', '发送消息')}><Icon name={isStreaming ? 'sparkles' : 'send'} size={18}/>{isStreaming && <span>{tr('Guide', '引导')}</span>}</button></div>
         </div>
       </div>
-        {(modelNotice || modelError || attachmentError || taskModeError) && <div className="composer-error" role="status" aria-live="polite">{modelNotice ? tr('Select a model before sending.', '请先选择模型') : attachmentError ?? taskModeError ?? modelError}</div>}
+        {(modelNotice || modelError || attachmentError) && <div className="composer-error" role="status" aria-live="polite">{modelNotice ? tr('Select a model before sending.', '请先选择模型') : attachmentError ?? modelError}</div>}
       {commandNotice && <div className="composer-command-notice" role="status">{commandNotice}</div>}
     </div></div>
     {rewindRequest !== null && <div className="rewind-dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setRewindRequest(null); }}>
@@ -937,17 +907,17 @@ export function ChatView(props: ChatViewProps) {
   </section>;
 }
 
+function parseMessageTimestamp(value: string | undefined): number | undefined {
+  const parsed = Date.parse(value ?? '');
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 interface LiveAssistantContinuation {
   streaming: string;
   thinking: string;
   workBlocks: WorkBlock[];
   stopping: boolean;
   onAbort: () => void | Promise<void>;
-}
-
-function parseMessageTimestamp(value: string | undefined): number | undefined {
-  const parsed = Date.parse(value ?? '');
-  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function formatElapsedDuration(durationMs: number): string {
@@ -961,7 +931,22 @@ function formatElapsedDuration(durationMs: number): string {
   return `${hours}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
 }
 
-function MessageBubble({ message, workStartedAt, rewindCount, rewindDisabled = false, onRewind, live }: { message: ChatMessage; workStartedAt?: number; rewindCount?: number; rewindDisabled?: boolean; onRewind?: (count: number) => void | Promise<void>; live?: LiveAssistantContinuation }) {
+function discussionSpeakerDisplayName(
+  speaker: ChatMessage['speaker'],
+  agents: readonly SessionAgent[],
+  tr: (english: string, chinese: string) => string,
+): string {
+  if (speaker?.id) {
+    const agent = agents.find(candidate => candidate.agent_id === speaker.id);
+    if (agent !== undefined) return sessionAgentDisplayName(agent);
+    return speaker.from === 'lead' ? tr('Main lead', '主代理') : tr('Discussion member', '讨论成员');
+  }
+  return speaker?.from === 'lead' ? tr('Main lead', '主代理') : tr('Discussion member', '讨论成员');
+}
+
+// `live` remains accepted for callers built against the old continuation
+// shape, but is intentionally ignored: a live turn has its own message row.
+function MessageBubble({ message, sessionAgents, workStartedAt, rewindCount, rewindDisabled = false, onRewind, live: _live }: { message: ChatMessage; sessionAgents: readonly SessionAgent[]; workStartedAt?: number; rewindCount?: number; rewindDisabled?: boolean; onRewind?: (count: number) => void | Promise<void>; live?: LiveAssistantContinuation }) {
   const { tr } = useI18n();
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
@@ -971,40 +956,19 @@ function MessageBubble({ message, workStartedAt, rewindCount, rewindDisabled = f
     ...(message.thinking ? [{ id: `${message.id}-thinking`, type: 'thinking' as const, text: message.thinking }] : []),
     ...tools.map((tool, index) => ({ id: tool.id ?? `${message.id}-tool-${index}`, type: 'tool' as const, tool })),
   ];
-  const liveBlocks = live === undefined
-    ? []
-    : live.workBlocks.length > 0
-      ? live.workBlocks
-      : live.thinking
-        ? [{ id: `${message.id}-live-thinking`, type: 'thinking' as const, text: live.thinking }]
-        : [];
-  const priorProgress = live !== undefined && message.text.trim()
-    ? [{ id: `${message.id}-live-prior-progress`, type: 'progress' as const, text: message.text }]
-    : [];
-  const liveProgressId = live?.streaming.trim() ? `${message.id}-live-progress` : undefined;
-  const currentProgress = liveProgressId === undefined
-    ? []
-    : [{ id: liveProgressId, type: 'progress' as const, text: live!.streaming }];
-  const liveTranscriptBlocks = [...storedBlocks, ...priorProgress, ...liveBlocks, ...currentProgress];
-  const text = live === undefined ? message.text : '';
-  const hasWork = !isUser && !isSystem && (storedBlocks.length > 0 || (live !== undefined && liveTranscriptBlocks.length > 0));
-  const hasLiveTranscript = live !== undefined && liveTranscriptBlocks.length > 0;
-  const completedAt = live === undefined ? parseMessageTimestamp(message.createdAt) : undefined;
+  const text = message.text;
+  const hasWork = !isUser && !isSystem && storedBlocks.length > 0;
+  const completedAt = parseMessageTimestamp(message.createdAt);
   const workDurationMs = workStartedAt !== undefined && completedAt !== undefined
     ? Math.max(0, completedAt - workStartedAt)
     : undefined;
-  return <article data-chat-turn-id={isUser ? message.id : undefined} className={'chat-message ' + (isUser ? 'chat-message-user' : isDiscussion ? 'chat-message-discussion' : isSystem ? 'chat-message-system' : 'chat-message-assistant') + (live ? ' chat-message-streaming' : '')}>
-    {isSystem && <div className="message-avatar"><span>{isDiscussion ? '·' : '!'}</span></div>}<div className="message-body">{(!isUser || (rewindCount !== undefined && onRewind !== undefined)) && <div className="chat-message-role">{!isUser && (isDiscussion ? `${message.speaker?.name ?? tr('Discussion', '讨论')} · ${message.speaker?.from === 'team' ? tr('Team', '团队') : tr('Lead', '主持')}` : isSystem ? tr('System', '系统') : 'Nori')}{live && <span>{tr('working', '工作中')}</span>}{isUser && rewindCount && onRewind && <button className="message-rewind-btn" disabled={rewindDisabled} onClick={() => { void onRewind(rewindCount); }} title={tr('Rewind to before this prompt', '回溯到此提问之前')}><Icon name="refresh" size={12}/>{tr('Rewind', '回溯')}</button>}</div>}
-      {live !== undefined
-        ? hasLiveTranscript
-          ? <LiveWorkStream blocks={liveTranscriptBlocks} activeProgressId={liveProgressId} startedAt={workStartedAt}/>
-          : null
-        : hasWork
-          ? <WorkProcess blocks={storedBlocks} startedAt={workStartedAt} durationMs={workDurationMs}/>
-          : null}
+  const discussionName = discussionSpeakerDisplayName(message.speaker, sessionAgents, tr);
+  return <article data-chat-turn-id={isUser ? message.id : undefined} className={'chat-message ' + (isUser ? 'chat-message-user' : isDiscussion ? 'chat-message-discussion' : isSystem ? 'chat-message-system' : 'chat-message-assistant')}>
+    {isSystem && <div className="message-avatar"><span>{isDiscussion ? '·' : '!'}</span></div>}<div className="message-body">{(!isUser || (rewindCount !== undefined && onRewind !== undefined)) && <div className="chat-message-role">{!isUser && (isDiscussion ? `${discussionName} · ${message.speaker?.from === 'team' ? tr('Team', '团队') : tr('Lead', '主持')}` : isSystem ? tr('System', '系统') : 'Nori')}{isUser && rewindCount && onRewind && <button className="message-rewind-btn" disabled={rewindDisabled} onClick={() => { void onRewind(rewindCount); }} title={tr('Rewind to before this prompt', '回溯到此提问之前')}><Icon name="refresh" size={12}/>{tr('Rewind', '回溯')}</button>}</div>}
+      {hasWork ? <WorkProcess blocks={storedBlocks} startedAt={workStartedAt} durationMs={workDurationMs}/> : null}
       {message.images && message.images.length > 0 && <div className="chat-message-images">{message.images.map((image, index) => <img key={`${image.src.slice(0, 80)}-${String(index)}`} src={image.src} alt={image.alt} loading="lazy" />)}</div>}
       {message.files && message.files.length > 0 && <div className="composer-attachments chat-message-attachments">{message.files.map((file, index) => <div className="composer-attachment attachment-file" key={`${file.name}-${String(file.size ?? 0)}-${String(index)}`}><span className="composer-file-icon"><Icon name="files" size={19}/></span><span title={file.name}>{file.name}</span></div>)}</div>}
-      {(text || (live && !hasWork)) && <div className="chat-message-content">{text ? (isUser || isSystem ? text : <MarkdownView content={text} />) : <span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span>}{live && !hasWork && <span className="streaming-cursor"/>}</div>}{message.usage && <TokenUsageLine usage={message.usage} />}{live?.streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(live.streaming))} tokens</div>}{live && <button className="chat-abort-btn" onClick={() => void live.onAbort()} disabled={live.stopping}><Icon name="stop" size={13}/> {live.stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button>}{message.createdAt && <time className="chat-message-time">{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>}
+      {text && <div className="chat-message-content">{isUser || isSystem ? text : <MarkdownView content={text} />}</div>}{message.usage && <TokenUsageLine usage={message.usage} />}{message.createdAt && <time className="chat-message-time">{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>}
     </div>
   </article>;
 }

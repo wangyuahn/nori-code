@@ -12,12 +12,13 @@ export type TeamStatusInput = z.infer<typeof TeamStatusInputSchema>;
 export interface TeamStatusMember {
   readonly agent_id: string;
   readonly name: string | null;
-  readonly title: string | null;
-  readonly intro: string | null;
   readonly role: string | null;
   readonly mandate: string | null;
   readonly status: 'idle' | 'running';
   readonly assigned_task: string | null;
+  readonly report_status?: 'unreported' | 'completed' | 'blocked' | 'needs_decision' | null;
+  readonly report_summary?: string | null;
+  readonly report_received?: boolean;
 }
 
 export interface TeamStatusResult {
@@ -34,7 +35,7 @@ export class TeamStatusTool implements BuiltinTool<TeamStatusInput> {
 
   constructor(private readonly host: SessionSubagentHost) {}
 
-  resolveExecution(args: TeamStatusInput): ToolExecution {
+  resolveExecution(_args: TeamStatusInput): ToolExecution {
     return {
       description: 'Reading direct team status',
       approvalRule: this.name,

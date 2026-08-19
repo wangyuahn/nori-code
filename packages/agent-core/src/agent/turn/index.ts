@@ -124,6 +124,7 @@ export class TurnFlow {
   private readonly telemetryModeByTurn = new Map<number, 'agent' | 'discuss'>();
   private readonly currentStepByTurn = new Map<number, number>();
   private readonly interruptedTelemetryTurnIds = new Set<number>();
+  private readonly turnProgressListeners = new Set<() => void>();
   private readonly stepFailureByTurn = new Map<number, LoopTurnInterruptedEvent>();
   private currentStep = 0;
 
@@ -244,6 +245,8 @@ export class TurnFlow {
       return null;
     }
 
+    this.turnProgressListeners.clear();
+
     // Any real launch means we are no longer idle-waiting on background work.
     this.clearGoalBackgroundIdleWake();
 
@@ -357,6 +360,19 @@ export class TurnFlow {
 
   waitForTurnFirstRequest(): Promise<void> {
     return this.ensureActiveTurn().firstRequest;
+  }
+
+  /**
+   * Subscribe to live progress from the active turn. This is intentionally
+   * separate from the first-request promise: callers such as Discuss need to
+   * extend an inactivity deadline for every meaningful model/tool event.
+   */
+  onTurnProgress(listener: () => void): () => void {
+    this.ensureActiveTurn();
+    this.turnProgressListeners.add(listener);
+    return () => {
+      this.turnProgressListeners.delete(listener);
+    };
   }
 
   private abortTurn(reason: unknown) {
@@ -1163,20 +1179,29 @@ export class TurnFlow {
   }
 
   private noteFirstRequestEvent(event: LoopEvent): void {
+    const active = this.activeTurn;
+    if (active === null || active === 'resuming') return;
     switch (event.type) {
       case 'step.end':
       case 'content.part':
       case 'tool.call':
       case 'text.delta':
       case 'thinking.delta':
-      case 'tool.call.delta': {
-        const active = this.activeTurn;
-        if (active === null || active === 'resuming') return;
+      case 'tool.call.delta':
         active.firstRequest.resolve();
-        return;
-      }
+        break;
       default:
-        return;
+        break;
+    }
+    if (event.type !== 'turn.interrupted') {
+      for (const listener of Array.from(this.turnProgressListeners)) {
+        try {
+          listener();
+        } catch {
+          // Progress observers are control-plane consumers; they must not
+          // break the model/tool event pipeline.
+        }
+      }
     }
   }
 

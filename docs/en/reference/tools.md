@@ -63,11 +63,11 @@ In the default Nori read-only posture, the main Agent can still use `Bash` for b
 
 | Tool | Default Approval | Description |
 | --- | --- | --- |
-| `EnterDiscussMode` | Auto-allow | Enter Discuss |
+| `TeamDecide` | Main agent | Enter Discuss with `action=start`; continue with `action=continue` |
 
 Discuss is a read-only team meeting. New sessions start here unless the user turned that default off. While Discuss is active, `Write`, `Edit`, `Bash`, `SubAgent`, `TaskStop`, `CronCreate`, and `CronDelete` are blocked. There is no session-file workflow and no `ExitDiscussMode` model exit.
 
-**`EnterDiscussMode`** accepts no parameters. After it succeeds, create partners with `TeamCreate`, run `TeamDecide` (lead statement first, members use `TeamSpeak`; no call records a skipped turn), then `TeamAssign` to enter Code. The UI Discuss/Code toggle can also leave or re-enter this stage.
+**`TeamDecide`** uses `action=start` with a topic and opening statement to enter Discuss, then `action=continue` with a new statement for later rounds. Members use `TeamSpeak`; no call records a skipped turn. Use `TeamAssign` to enter Code. The UI Discuss/Code toggle can also leave or re-enter this stage.
 
 ## State Management
 
@@ -93,7 +93,7 @@ Collaboration tools handle inter-Agent coordination, user interaction, and Skill
 
 **`SubAgent`** is the unified temporary-delegation tool. Launch one or many full child transcripts with `prompt_template` + `items`, `tasks` (including `depends_on` DAGs), or `resume_agent_ids`. Completed SubAgents are archived in the parent session. If a model response calls `SubAgent`, that call must be the only tool call in the response. Do not use SubAgent during Discuss; call TeamAssign first.
 
-**`TeamCreate`** requires `name`, `title`, `intro`, `mandate`, and `role` for every member. **`TeamDecide`** `action=start` requires `topic` and the lead `statement`. Members publish only with `TeamSpeak`. After execution, `action=vote` does not require Discuss; every team member votes (`discuss_again` / `proceed` / `abstain`), including members left idle with `task=null`.
+**`TeamCreate`** requires a unique `name`, `role`, and `mandate` for every member. **`TeamDecide`** `action=start` requires `topic` and the lead `statement`. Members publish only with `TeamSpeak`. After execution, `action=vote` does not require Discuss; every team member votes (`discuss_again` / `proceed` / `abstain`), including members left idle with `task=null`.
 
 **`AskUserQuestion`** asks the user a structured multiple-choice question — useful for disambiguation or option selection. The `questions` parameter accepts 1–4 questions; each question requires `question` (ending with `?`), `options` (2–4 choices, each with a `label` and `description`), and optional `header` (max 12 characters) and `multi_select` (defaults to false). An "Other" option is appended automatically. Setting `background` to true starts a background question task and returns a task ID immediately. When the host does not support interactive questioning, a failure message is returned and the Agent should ask the user directly in a text reply instead.
 

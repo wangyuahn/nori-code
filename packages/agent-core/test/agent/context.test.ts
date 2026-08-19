@@ -62,7 +62,7 @@ describe('Agent context', () => {
     await ctx.expectResumeMatches();
   });
 
-  it('serializes context injection as a regular user-context message', () => {
+  it('projects context injection as a standard tool exchange', () => {
     const ctx = testAgent();
     ctx.configure();
 
@@ -109,6 +109,22 @@ describe('Agent context', () => {
       { type: 'text', text: '<system-reminder>\nRemember this.\n</system-reminder>' },
     ]);
     expect(ctx.agent.context.messages.some((message) => 'origin' in message)).toBe(false);
+    const injectionCall = ctx.agent.context.messages[1];
+    const injectionResult = ctx.agent.context.messages[2];
+    expect(injectionCall).toMatchObject({
+      role: 'assistant',
+      content: [],
+      toolCalls: [{
+        name: 'ContextInjection',
+        arguments: JSON.stringify({ source: 'host', variant: 'host' }),
+      }],
+    });
+    expect(injectionResult).toMatchObject({
+      role: 'tool',
+      toolCallId: injectionCall?.toolCalls[0]?.id,
+      content: [{ type: 'text', text: '<system-reminder>\nRemember this.\n</system-reminder>' }],
+    });
+    expect(injectionCall?.toolCalls[0]?.id).toBe(injectionResult?.toolCallId);
   });
 
   it('does not emit tool lifecycle events for a live context injection', async () => {
@@ -590,7 +606,8 @@ describe('Agent context', () => {
         assistant: text "I will call Lookup."  calls call_lookup:Lookup { "query": "moon" }
         tool[call_lookup]: text "lookup result"
         user: text "<message from=\\"user\\" name=\\"用户\\">continue</message>"
-        user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
+        assistant: []  calls context-injection-5vkifk-6:ContextInjection { "source": "response_summary", "variant": "response_summary" }
+        tool[context-injection-5vkifk-6]: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
     `);
     await ctx.expectResumeMatches();
   });
@@ -608,8 +625,22 @@ describe('Agent context', () => {
 
     await ctx.untilTurnEnd();
     const input = ctx.lastLlmInput();
+    const injectionCall = input.input.history.find(
+      (message) => message.role === 'assistant' && message.toolCalls.some(
+        (toolCall) => toolCall.name === 'ContextInjection',
+      ),
+    );
+    expect(injectionCall).toMatchObject({
+      role: 'assistant',
+      content: [],
+      toolCalls: [{
+        name: 'ContextInjection',
+        arguments: JSON.stringify({ source: 'host', variant: 'host' }),
+      }],
+    });
     expect(input.input.history).toContainEqual(expect.objectContaining({
-      role: 'user',
+      role: 'tool',
+      toolCallId: injectionCall?.toolCalls[0]?.id,
       content: [{ type: 'text', text: '<system-reminder>\nRemember the host note.\n</system-reminder>' }],
     }));
     expect(input.input.history).toContainEqual(expect.objectContaining({
@@ -829,9 +860,10 @@ describe('Agent context', () => {
     expect(ctx.agent.context.messages.map((message) => message.role)).toEqual([
       'user',
       'user',
-      'user',
+      'assistant',
+      'tool',
     ]);
-    expect(ctx.agent.context.messages[2]?.content).toEqual([
+    expect(ctx.agent.context.messages[3]?.content).toEqual([
       { type: 'text', text: '<system-reminder>\nsecond reminder\n</system-reminder>' },
     ]);
 
@@ -850,7 +882,8 @@ describe('Agent context', () => {
     expect(ctx.agent.context.messages.map((message) => message.role)).toEqual([
       'user',
       'user',
-      'user',
+      'assistant',
+      'tool',
     ]);
     await ctx.expectResumeMatches();
   });
@@ -897,12 +930,13 @@ describe('Agent context', () => {
 
     await ctx.untilTurnEnd();
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
-      system: <system-prompt>
-      tools: []
-      messages:
-        user: text "<message from=\\"user\\" name=\\"用户\\">fresh prompt</message>"
-        user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
-    `);
+        system: <system-prompt>
+        tools: []
+        messages:
+          user: text "<message from=\\"user\\" name=\\"用户\\">fresh prompt</message>"
+          assistant: []  calls context-injection-5vkifk-1:ContextInjection { "source": "response_summary", "variant": "response_summary" }
+          tool[context-injection-5vkifk-1]: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
+      `);
     await ctx.expectResumeMatches();
   });
 
@@ -923,14 +957,15 @@ describe('Agent context', () => {
 
     await ctx.untilTurnEnd();
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
-      system: <system-prompt>
-      tools: []
-      messages:
-        user: text "<message from=\\"user\\" name=\\"用户\\">old user message</message>\\n\\n<message from=\\"user\\" name=\\"用户\\">recent user message</message>"
-        user: text "summary of old context"
-        user: text "<message from=\\"user\\" name=\\"用户\\">new prompt</message>"
-        user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
-    `);
+    system: <system-prompt>
+    tools: []
+    messages:
+      user: text "<message from=\\"user\\" name=\\"用户\\">old user message</message>\\n\\n<message from=\\"user\\" name=\\"用户\\">recent user message</message>"
+      user: text "summary of old context"
+      user: text "<message from=\\"user\\" name=\\"用户\\">new prompt</message>"
+      assistant: []  calls context-injection-5vkifk-4:ContextInjection { "source": "response_summary", "variant": "response_summary" }
+      tool[context-injection-5vkifk-4]: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
+  `);
     await ctx.expectResumeMatches();
   });
 
@@ -1301,9 +1336,11 @@ describe('Agent context notification projection', () => {
       userMessage('Actual follow-up from the user', { kind: 'user' }),
     ]);
 
-    expect(messages).toHaveLength(2);
-    expect(textOf(messages[0]!)).toBe('Host reminder without an XML prefix');
-    expect(textOf(messages[1]!)).toBe('Actual follow-up from the user');
+    expect(messages).toHaveLength(3);
+    expect(messages[0]?.role).toBe('user');
+    expect(messages[1]?.role).toBe('assistant');
+    expect(messages[1]?.toolCalls[0]?.name).toBe('ContextInjection');
+    expect(textOf(messages[2]!)).toBe('Host reminder without an XML prefix');
   });
 
   it('only merges user-role messages with user origin', () => {

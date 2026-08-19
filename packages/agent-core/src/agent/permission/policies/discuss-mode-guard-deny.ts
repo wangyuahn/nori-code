@@ -17,7 +17,7 @@ export class DiscussModeGuardDenyPermissionPolicy implements PermissionPolicy {
   constructor(private readonly agent: Agent) {}
 
   evaluate(context: PermissionPolicyContext): PermissionPolicyResult | undefined {
-    if (!this.agent.discussMode.isActive) return;
+    if (!this.agent.discussMode.isActive && !this.agent.teamWriteLocked) return;
     const toolName = context.toolCall.name;
     if (!DISCUSS_DENIED_TOOLS.has(toolName)) return;
 

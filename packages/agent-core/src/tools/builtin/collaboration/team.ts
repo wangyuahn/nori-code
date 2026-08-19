@@ -8,10 +8,8 @@ import { toInputJsonSchema } from '../../support/input-schema';
 
 const TeamIdentitySchema: z.ZodType<TeamIdentity> = z.object({
   name: z.string().trim().min(1).max(120),
-  title: z.string().trim().min(1).max(200),
-  intro: z.string().trim().min(1).max(2_000),
-  mandate: z.string().trim().min(1).max(4_000),
   role: z.string().trim().min(1).max(4_000),
+  mandate: z.string().trim().min(1).max(4_000),
 }).strict();
 
 export const TeamCreateInputSchema = z.object({
@@ -21,7 +19,7 @@ export type TeamCreateInput = z.infer<typeof TeamCreateInputSchema>;
 
 export class TeamCreateTool implements BuiltinTool<TeamCreateInput> {
   readonly name = 'TeamCreate' as const;
-  readonly description = 'Main lead only: create durable Team Agents in this parent session. Every member requires name, title, intro, mandate, and role. SubAgent remains temporary work.';
+  readonly description = 'Main lead only: create durable Team Agents in this parent session. Every member requires a unique non-empty name, role, and mandate. SubAgent remains temporary work.';
   readonly parameters = toInputJsonSchema(TeamCreateInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}
@@ -78,7 +76,7 @@ export type TeamAssignInput = z.infer<typeof TeamAssignInputSchema>;
 
 export class TeamAssignTool implements BuiltinTool<TeamAssignInput> {
   readonly name = 'TeamAssign' as const;
-  readonly description = 'Main lead only: assign execution work to every current Team Agent. Include every member exactly once; use task=null to leave one idle. At least one task must be non-null. Success exits Discuss and enters Code; a non-null assignment grants Write, Edit, Bash, and temporary SubAgent access for that execution.';
+  readonly description = 'Main lead only: assign execution work to every current Team Agent. Include every member exactly once; use task=null to leave one idle. At least one task must be non-null. Success exits Discuss and enters Code; each member must stay within its non-null assigned task and report progress, blockers, and the final result through TeamDM.';
   readonly parameters = toInputJsonSchema(TeamAssignInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}
@@ -126,12 +124,22 @@ export class TeamBroadcastTool implements BuiltinTool<TeamBroadcastInput> {
 export const TeamDMInputSchema = z.object({
   agent_id: z.string().trim().min(1),
   message: z.string().trim().min(1).max(8_000),
-}).strict();
+  report_status: z.enum(['completed', 'blocked', 'needs_decision']).optional(),
+  report_summary: z.string().trim().min(1).max(8_000).optional(),
+}).strict().superRefine((value, ctx) => {
+  if (value.report_status !== undefined && value.report_summary === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'report_summary is required when report_status is set.',
+      path: ['report_summary'],
+    });
+  }
+});
 export type TeamDMInput = z.infer<typeof TeamDMInputSchema>;
 
 export class TeamDMTool implements BuiltinTool<TeamDMInput> {
   readonly name = 'TeamDM' as const;
-  readonly description = 'Main lead or Team Agent: send direct private communication at any time in Discuss or Code for coordination, progress, risk, completion, blocking, or decisions. The main lead may contact current members; a Team Agent normally contacts its direct parent. TeamSpeak is only for formal Discuss turns.';
+  readonly description = 'Main lead or Team Agent: send direct private communication at any time in Discuss or Code for coordination or progress. For a task report, set report_status to completed, blocked, or needs_decision and provide report_summary; ordinary messages without report_status are never classified as reports. The main lead may contact current members; a Team Agent normally contacts its direct parent. TeamSpeak is only for formal Discuss turns.';
   readonly parameters = toInputJsonSchema(TeamDMInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}
@@ -141,7 +149,9 @@ export class TeamDMTool implements BuiltinTool<TeamDMInput> {
       description: 'Sending a team direct message',
       approvalRule: this.name,
       execute: async (context) => {
-        const delivery = await this.host.directMessage(args.agent_id, args.message, context.signal);
+        const delivery = await this.host.directMessage(args.agent_id, args.message, context.signal, args.report_status === undefined
+          ? undefined
+          : { status: args.report_status, summary: args.report_summary! });
         return { output: JSON.stringify({ recipient: args.agent_id, delivery }) };
       },
     };
@@ -220,6 +230,8 @@ function teamDecideJsonSchema(): Record<string, unknown> {
           properties: { action: { const: 'start' } },
           required: ['action'],
         },
+        // JSON Schema conditional keyword; intentionally not a Promise handler.
+        // oxlint-disable-next-line unicorn/no-thenable
         then: { required: ['topic', 'statement'] },
       },
       {
@@ -228,6 +240,8 @@ function teamDecideJsonSchema(): Record<string, unknown> {
           properties: { action: { const: 'continue' } },
           required: ['action'],
         },
+        // JSON Schema conditional keyword; intentionally not a Promise handler.
+        // oxlint-disable-next-line unicorn/no-thenable
         then: { required: ['statement'] },
       },
     ],
@@ -264,7 +278,7 @@ export type TeamSpeakInput = z.infer<typeof TeamSpeakInputSchema>;
 /** Publishes a single intentional contribution from the scheduled team member. */
 export class TeamSpeakTool implements BuiltinTool<TeamSpeakInput> {
   readonly name = 'TeamSpeak' as const;
-  readonly description = 'Publish your concise final position during your scheduled Team Agent discussion turn. No call records the turn as skipped (abstention).';
+  readonly description = 'Publish your concise formal position during your scheduled Team Agent discussion turn. Only TeamSpeak is a formal statement; other tool calls do not count. No call records the turn as skipped (abstention).';
   readonly parameters = toInputJsonSchema(TeamSpeakInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}

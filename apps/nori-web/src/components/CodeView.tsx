@@ -10,7 +10,7 @@ import {
 import { ChatView, type ChatViewProps } from './ChatView';
 import { WorkspaceInspector } from './WorkspaceInspector';
 import { useFilesystem } from '../hooks/useFilesystem';
-import type { ApprovalRequest, FsEntry, FsReadResponse, ModelCatalogItem, QuestionAnswer, QuestionRequest, Session, SessionAgentConfig, SessionRealtimeStatus } from '../api/client';
+import type { ApprovalRequest, FsEntry, FsReadResponse, ModelCatalogItem, QuestionAnswer, QuestionRequest, Session, SessionAgent, SessionAgentConfig, SessionRealtimeStatus } from '../api/client';
 import type { BrowserPermissionDecision, BrowserPermissionRequest } from '../hooks/useBrowser';
 import type { ChatMessage, CodeChange, QueuedPrompt, TodoItem, WorkBlock } from '../hooks/useChatMessages';
 import { useI18n } from '../i18n';
@@ -25,6 +25,7 @@ const INSPECTOR_CHAT_GAP = 14;
 interface CodeViewProps {
   session: Session | null;
   agentId?: string;
+  sessionAgents?: readonly SessionAgent[];
   allSessions?: Session[];
   messages: ChatMessage[];
   messagesLoading?: boolean;
@@ -34,7 +35,6 @@ interface CodeViewProps {
   isStreaming: boolean;
   activeAgentCount?: number;
   activeAgentTokens?: number;
-  activeDiscussion?: boolean;
   sessionStatus?: SessionRealtimeStatus | null;
   compacting?: boolean;
   models: ModelCatalogItem[];
@@ -44,9 +44,7 @@ interface CodeViewProps {
   onModelChange: (model: string) => void | Promise<void>;
   onThinkingChange: (effort: string) => void | Promise<void>;
   onPermissionChange: (mode: 'auto' | 'yolo' | 'manual') => void | Promise<void>;
-  onTaskModeChange: (mode: 'discuss' | 'code') => void | Promise<void>;
   onRunSlashCommand: ChatViewProps['onRunSlashCommand'];
-  onMainWriteChange: (enabled: boolean) => void | Promise<void>;
   onGoalControl?: (action: 'pause' | 'resume' | 'cancel') => void | Promise<void>;
   onSendMessage: ChatViewProps['onSendMessage'];
   onAbort: () => boolean | void | Promise<boolean | void>;
@@ -80,6 +78,7 @@ interface CodeViewProps {
 export function CodeView({
   session,
   agentId = 'main',
+  sessionAgents,
   allSessions,
   messages,
   messagesLoading,
@@ -89,7 +88,6 @@ export function CodeView({
   isStreaming,
   activeAgentCount,
   activeAgentTokens,
-  activeDiscussion,
   sessionStatus,
   compacting,
   models,
@@ -99,9 +97,7 @@ export function CodeView({
   onModelChange,
   onThinkingChange,
   onPermissionChange,
-  onTaskModeChange,
   onRunSlashCommand,
-  onMainWriteChange,
   onGoalControl,
   onSendMessage,
   onAbort,
@@ -243,6 +239,7 @@ export function CodeView({
       <ChatView
         session={session}
         agentId={agentId}
+        sessionAgents={sessionAgents}
         allSessions={allSessions}
         messages={messages}
         messagesLoading={messagesLoading}
@@ -252,7 +249,6 @@ export function CodeView({
         isStreaming={isStreaming}
         activeAgentCount={activeAgentCount}
         activeAgentTokens={activeAgentTokens}
-        activeDiscussion={activeDiscussion}
         sessionStatus={sessionStatus}
         compacting={compacting}
         models={models}
@@ -262,9 +258,7 @@ export function CodeView({
         onModelChange={onModelChange}
         onThinkingChange={onThinkingChange}
         onPermissionChange={onPermissionChange}
-        onTaskModeChange={onTaskModeChange}
         onRunSlashCommand={onRunSlashCommand}
-        onMainWriteChange={onMainWriteChange}
         onGoalControl={onGoalControl}
         onSendMessage={onSendMessage}
         onAbort={onAbort}

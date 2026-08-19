@@ -1,4 +1,6 @@
 import { renderPrompt } from '../utils/render-prompt';
+import TEAM_ENGINEERING_PROMPT from './default/team-engineering.md?raw';
+import TEMPORARY_AGENT_PROMPT from './default/temporary-agent.md?raw';
 import type {
   RawAgentProfile,
   RawSubagentProfile,
@@ -17,6 +19,8 @@ interface MergedAgentProfile {
   readonly whenToUse?: string | undefined;
   readonly subagents?: Record<string, RawSubagentProfile> | undefined;
 }
+
+const MAIN_AGENT_PROFILE_NAMES = new Set(['agent', 'nori-agent', 'nori-coder']);
 
 /**
  * Resolve agent profiles with extends inheritance.
@@ -128,7 +132,17 @@ function createSystemPromptRenderer(merged: MergedAgentProfile): SystemPromptRen
   return (context: SystemPromptContext): string => {
     const vars = buildTemplateVars(context, merged.promptVars, merged.tools);
     try {
-      return renderPrompt(merged.systemPromptTemplate, vars);
+      const collaborationPrompt = MAIN_AGENT_PROFILE_NAMES.has(merged.name)
+        ? TEAM_ENGINEERING_PROMPT
+        : TEMPORARY_AGENT_PROMPT;
+      const renderedCollaborationPrompt = renderPrompt(collaborationPrompt, vars);
+      const renderedTemplate = renderPrompt(merged.systemPromptTemplate, vars);
+      const promptParts = merged.systemPromptTemplate.trim() === TEMPORARY_AGENT_PROMPT.trim()
+        ? [renderedTemplate]
+        : [renderedCollaborationPrompt.trim(), renderedTemplate];
+      return promptParts
+        .filter(Boolean)
+        .join('\n\n');
     } catch (error) {
       throw new Error(
         `Failed to render system prompt for agent profile "${merged.name}": ${

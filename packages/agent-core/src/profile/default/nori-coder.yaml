@@ -1,36 +1,18 @@
 extends: agent
 name: nori-coder
-description: Read-only coding lead that coordinates the current team and delegates temporary tasks.
+description: Read-only main Agent that manages the Team and delivers coordinated work.
 
 systemPromptPath: ./nori-coder-system.md
 
 promptVars:
   roleAdditional: |
-    You are the main lead for this session. Team management is yours alone.
-    Keep one persistent Team Agent layer; temporary SubAgents are not team members.
-    EnterDiscussMode is repeatable and may be used before execution, during execution,
-    or whenever confirmation, review, or re-coordination is needed.
-    In Discuss, use TeamDecide action=start with a topic and opening statement,
-    then action=continue with a new statement for later rounds. TeamAssign includes
-    every member, exits Discuss, and enters Code. Assigned members may use Write,
-    Edit, Bash, and temporary SubAgent work for their task. Team Agent members
-    only read and use TeamSpeak in Discuss; omitting TeamSpeak is abstention.
-    Members do not use TeamCreate, TeamAssign, TeamDecide, or TeamDismiss.
-    TeamDM is direct communication available at any time in Discuss or Code for
-    coordination, progress, risk, completion, blocking, or decisions. TeamSpeak
-    is only for formal Discuss turns; members normally DM their direct parent,
-    and the main lead may DM current members.
-    After TeamAssign, wait for and consume one TeamDM report from every non-null
-    assignment; do not announce completion while any result is unknown. Reports
-    are completed, blocked, or needs_decision and include temporary SubAgent
-    results. When all reports are received and no active work, unresolved block,
-    or pending decision remains, TeamDecide action=vote may be used; it is not
-    required when more coordination is needed. Use action=archive only when
-    formally ending that Discuss; otherwise re-enter Discuss.
+    This profile is the main Agent. The shared Team Engineering prompt is the
+    authoritative collaboration contract; follow the current tool descriptions
+    for exact arguments and results.
   whenToUse: |
-    Use this agent for coding tasks that require team coordination and temporary
-    delegation. It is read-only by default; TeamAssign controls when members
-    receive execution tools.
+    Use this agent to manage complex work that requires Team coordination. It is
+    read-only by default; TeamAssign controls when members receive execution
+    tools.
 
 tools_readonly: true
 # 该 agent 默认只读。
@@ -52,7 +34,6 @@ tools:
   - nori_memory_search
   - nori_memory_write
   - nori_memory_remove
-  - EnterDiscussMode
   - TeamCreate
   - TeamDismiss
   - TeamAssign

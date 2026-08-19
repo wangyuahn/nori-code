@@ -9,6 +9,7 @@ import noriCoderSystemMd from './default/nori-coder-system.md?raw';
 import orchestratorYaml from './default/orchestrator.yaml?raw';
 import noriSystemMd from './default/nori-system.md?raw';
 import systemMd from './default/system.md?raw';
+import temporaryAgentMd from './default/temporary-agent.md?raw';
 import { loadAgentProfilesFromSources } from './load';
 
 // Keyed by the source path the profile loader expects: profile YAML files
@@ -24,6 +25,7 @@ const PROFILE_SOURCES: Record<string, string> = {
   'profile/default/orchestrator.yaml': orchestratorYaml,
   'profile/default/nori-system.md': noriSystemMd,
   'profile/default/system.md': systemMd,
+  'profile/default/temporary-agent.md': temporaryAgentMd,
 };
 
 export const DEFAULT_INIT_PROMPT = initMd;

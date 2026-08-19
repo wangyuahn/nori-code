@@ -13,6 +13,7 @@ import type { BuiltinTool } from '../../../agent/tool';
 import { ToolAccesses } from '../../../loop/tool-access';
 import type { ExecutableToolContext, ExecutableToolResult, ToolExecution } from '../../../loop/types';
 import { resolvePathAccessPath } from '../../policies/path-access';
+import { withFileWriteLock } from '../../support/file-write-lock';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
 import type { WorkspaceConfig } from '../../support/workspace';
@@ -129,63 +130,65 @@ export class EditTool implements BuiltinTool<EditInput> {
     safePath: string,
     context: ExecutableToolContext,
   ): Promise<ExecutableToolResult> {
-    try {
-      const raw = await this.kaos.readText(safePath);
-      const currentTag = computeContentTag(raw);
-      if (currentTag !== args.expected_tag.toUpperCase()) {
-        return {
-          isError: true,
-          output:
-            `Content tag mismatch for ${args.path}: expected ${args.expected_tag.toUpperCase()}, ` +
-            `current ${currentTag}. Re-read the file and retry with the new tag and line numbers.`,
-        };
-      }
-
-      const modelView = toModelTextView(raw);
-      let newContent: string;
+    return withFileWriteLock(this.kaos, safePath, async () => {
       try {
-        newContent = applyLineOperations(modelView.text, args.line_ops);
-      } catch (error) {
-        if (error instanceof LineOperationError) {
+        const raw = await this.kaos.readText(safePath);
+        const currentTag = computeContentTag(raw);
+        if (currentTag !== args.expected_tag.toUpperCase()) {
           return {
             isError: true,
-            output: `Invalid line_ops for ${args.path}: ${error.message}`,
+            output:
+              `Content tag mismatch for ${args.path}: expected ${args.expected_tag.toUpperCase()}, ` +
+              `current ${currentTag}. Re-read the file and retry with the new tag and line numbers.`,
           };
         }
-        throw error;
-      }
 
-      if (newContent === modelView.text) {
-        return { isError: true, output: `No changes to make in ${args.path}.` };
-      }
+        const modelView = toModelTextView(raw);
+        let newContent: string;
+        try {
+          newContent = applyLineOperations(modelView.text, args.line_ops);
+        } catch (error) {
+          if (error instanceof LineOperationError) {
+            return {
+              isError: true,
+              output: `Invalid line_ops for ${args.path}: ${error.message}`,
+            };
+          }
+          throw error;
+        }
 
-      const materialized = materializeModelText(newContent, modelView.lineEndingStyle);
-      await this.kaos.writeText(safePath, materialized);
-      this.reportChange?.({
-        operationId: context.toolCallId,
-        operation: 'edit',
-        path: args.path,
-        diff: summarizeChangedLines(modelView.text, newContent),
-        occurredAt: new Date().toISOString(),
-      });
+        if (newContent === modelView.text) {
+          return { isError: true, output: `No changes to make in ${args.path}.` };
+        }
 
-      const newTag = computeContentTag(materialized);
-      const operationWord = args.line_ops.length === 1 ? 'operation' : 'operations';
-      return {
-        output:
-          `[${args.path}#${newTag}]\n` +
-          `Applied ${String(args.line_ops.length)} line ${operationWord} to ${args.path}.`,
-      };
-    } catch (error) {
-      const code = (error as { code?: unknown } | null)?.code;
-      if (code === 'EISDIR') {
-        return { isError: true, output: `${args.path} is not a file.` };
+        const materialized = materializeModelText(newContent, modelView.lineEndingStyle);
+        await this.kaos.writeText(safePath, materialized);
+        this.reportChange?.({
+          operationId: context.toolCallId,
+          operation: 'edit',
+          path: args.path,
+          diff: summarizeChangedLines(modelView.text, newContent),
+          occurredAt: new Date().toISOString(),
+        });
+
+        const newTag = computeContentTag(materialized);
+        const operationWord = args.line_ops.length === 1 ? 'operation' : 'operations';
+        return {
+          output:
+            `[${args.path}#${newTag}]\n` +
+            `Applied ${String(args.line_ops.length)} line ${operationWord} to ${args.path}.`,
+        };
+      } catch (error) {
+        const code = (error as { code?: unknown } | null)?.code;
+        if (code === 'EISDIR') {
+          return { isError: true, output: `${args.path} is not a file.` };
+        }
+        return {
+          isError: true,
+          output: error instanceof Error ? error.message : String(error),
+        };
       }
-      return {
-        isError: true,
-        output: error instanceof Error ? error.message : String(error),
-      };
-    }
+    });
   }
 }
 

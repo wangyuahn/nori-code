@@ -956,7 +956,7 @@ describe('live response controls', () => {
     expect(messageList.scrollTop).toBe(1_000);
   });
 
-  it('merges a wake-up stream into the existing assistant bubble immediately', async () => {
+  it('renders a wake-up stream as a new assistant message', async () => {
     const { container } = await renderChat({
       messages: [
         { id: 'user-1', role: 'user', text: 'Run the SubAgent' },
@@ -967,10 +967,11 @@ describe('live response controls', () => {
     });
 
     const assistantMessages = container.querySelectorAll('.chat-message-assistant');
-    expect(assistantMessages).toHaveLength(1);
+    expect(assistantMessages).toHaveLength(2);
     expect(assistantMessages[0]?.textContent).toContain('The SubAgent is running.');
-    expect(assistantMessages[0]?.textContent).toContain('The SubAgent completed successfully.');
-    expect(assistantMessages[0]?.classList.contains('chat-message-streaming')).toBe(true);
+    expect(assistantMessages[0]?.textContent).not.toContain('The SubAgent completed successfully.');
+    expect(assistantMessages[1]?.textContent).toContain('The SubAgent completed successfully.');
+    expect(assistantMessages[1]?.classList.contains('chat-message-streaming')).toBe(true);
   });
 
   it('serializes immediate guidance and keeps the draft until steering succeeds', async () => {
@@ -1048,180 +1049,41 @@ describe('chat slash commands and task-mode shortcut', () => {
     expect(commands).not.toContain('/plan');
   });
 
-  it('uses Tab to complete an open command menu without changing task mode', async () => {
-    const { container, props } = await renderChat();
+  it('uses Tab to complete an open command menu', async () => {
+    const { container } = await renderChat();
     const input = container.querySelector<HTMLTextAreaElement>('.chat-input')!;
     await enterText(input, '/');
 
     await pressKey(input, 'Tab');
 
     expect(input.value).toBe('/compact ');
-    expect(props.onTaskModeChange).not.toHaveBeenCalled();
   });
 
-  it('toggles Code to Discuss with Tab only when the composer is unobstructed', async () => {
-    const onTaskModeChange = vi.fn();
-    const { container } = await renderChat({ onTaskModeChange });
-    const input = container.querySelector<HTMLTextAreaElement>('.chat-input')!;
-
-    await pressKey(input, 'Tab');
-    expect(onTaskModeChange).toHaveBeenCalledWith('discuss');
-
-    onTaskModeChange.mockClear();
-    const blocked = await renderChat({ onTaskModeChange, pendingApprovals: [{} as ApprovalRequest] });
-    await pressKey(blocked.container.querySelector<HTMLTextAreaElement>('.chat-input')!, 'Tab');
-    expect(onTaskModeChange).not.toHaveBeenCalled();
+  it('does not render the obsolete task mode segmented control', async () => {
+    const { container } = await renderChat();
+    expect(container.querySelector('.composer-task-mode')).toBeNull();
+    expect(container.querySelector('[data-mode="code"]')).toBeNull();
+    expect(container.querySelector('[data-mode="discuss"]')).toBeNull();
   });
 
-  it('renders the server task mode and changes it through the segmented control', async () => {
-    const onTaskModeChange = vi.fn();
-    const { container, props, root } = await renderChat({
-      onTaskModeChange,
-      sessionStatus: {
-        status: 'ready',
-        thinking_level: 'off',
-        permission: 'manual',
-        discuss_mode: false,
-        main_write_enabled: true,
-        goal: null,
-        context_tokens: 0,
-        max_context_tokens: 128_000,
-        context_usage: 0,
-      },
-    });
-    const executeButton = container.querySelector<HTMLButtonElement>('.composer-task-mode [data-mode="code"]')!;
-    const discussButton = container.querySelector<HTMLButtonElement>('.composer-task-mode [data-mode="discuss"]')!;
+  it('keeps the AUTO, YOLO, and Manual permission menu after removing task mode buttons', async () => {
+    const onPermissionChange = vi.fn(async () => undefined);
+    const { container } = await renderChat({ onPermissionChange });
 
-    expect(executeButton.getAttribute('aria-pressed')).toBe('true');
-    expect(discussButton.getAttribute('aria-pressed')).toBe('false');
-    expect(executeButton.classList.contains('active')).toBe(true);
-    expect(discussButton.classList.contains('active')).toBe(false);
-
-    await act(async () => {
-      discussButton.click();
-      await Promise.resolve();
-    });
-
-    expect(onTaskModeChange).toHaveBeenCalledWith('discuss');
-    expect(props.onSendMessage).not.toHaveBeenCalled();
-    // The control follows the server status; a pending request must not create
-    // a second client-only mode.
-    expect(executeButton.classList.contains('active')).toBe(true);
-
-    await act(async () => {
-      root.render(createElement(I18nProvider, null, createElement(ChatView, {
-        ...props,
-        sessionStatus: { ...props.sessionStatus!, discuss_mode: true },
-      })));
-    });
-    expect(discussButton.classList.contains('active')).toBe(true);
-    expect(executeButton.classList.contains('active')).toBe(false);
     expect(container.querySelector('.main-write-icon-toggle')).toBeNull();
+    const trigger = container.querySelector<HTMLButtonElement>('[aria-label="Permission: Manual"]');
+    expect(trigger?.classList.contains('permission-manual')).toBe(true);
 
-    await act(async () => {
-      root.render(createElement(I18nProvider, null, createElement(ChatView, {
-        ...props,
-        sessionStatus: { ...props.sessionStatus!, discuss_mode: false },
-      })));
-    });
-    expect(executeButton.getAttribute('aria-pressed')).toBe('true');
-    expect(discussButton.getAttribute('aria-pressed')).toBe('false');
-  });
+    await act(async () => { trigger?.click(); await Promise.resolve(); });
+    const options = Array.from(container.querySelectorAll<HTMLButtonElement>('.composer-permission-popover [role="menuitemradio"]'));
+    expect(options.map(option => option.textContent)).toEqual([
+      expect.stringContaining('AUTO'),
+      expect.stringContaining('YOLO'),
+      expect.stringContaining('Manual'),
+    ]);
 
-  it('does not carry discussion mode across agent changes', async () => {
-    const { container, props, root } = await renderChat({
-      agentId: 'discussion-agent',
-      sessionStatus: {
-        status: 'ready',
-        thinking_level: 'off',
-        permission: 'manual',
-        discuss_mode: true,
-        main_write_enabled: false,
-        goal: null,
-        context_tokens: 0,
-        max_context_tokens: 128_000,
-        context_usage: 0,
-      },
-    });
-    expect(container.querySelector<HTMLButtonElement>('[data-mode="discuss"]')?.getAttribute('aria-pressed')).toBe('true');
-
-    await act(async () => {
-      root.render(createElement(I18nProvider, null, createElement(ChatView, {
-        ...props,
-        agentId: 'main',
-        sessionStatus: { ...props.sessionStatus!, discuss_mode: false, main_write_enabled: true },
-      })));
-    });
-    expect(container.querySelector<HTMLButtonElement>('[data-mode="code"]')?.getAttribute('aria-pressed')).toBe('true');
-    expect(container.querySelector<HTMLButtonElement>('[data-mode="discuss"]')?.getAttribute('aria-pressed')).toBe('false');
-  });
-
-  it('uses the active discussion snapshot for the composer instead of a stale status flag', async () => {
-    const { container } = await renderChat({
-      activeDiscussion: false,
-      sessionStatus: {
-        status: 'ready',
-        thinking_level: 'off',
-        permission: 'manual',
-        discuss_mode: true,
-        main_write_enabled: true,
-        goal: null,
-        context_tokens: 0,
-        max_context_tokens: 128_000,
-        context_usage: 0,
-      },
-    });
-    expect(container.querySelector<HTMLButtonElement>('[data-mode="code"]')?.getAttribute('aria-pressed')).toBe('true');
-
-    const discussion = await renderChat({
-      activeDiscussion: true,
-      sessionStatus: {
-        status: 'ready',
-        thinking_level: 'off',
-        permission: 'manual',
-        discuss_mode: false,
-        main_write_enabled: false,
-        goal: null,
-        context_tokens: 0,
-        max_context_tokens: 128_000,
-        context_usage: 0,
-      },
-    });
-    expect(discussion.container.querySelector<HTMLButtonElement>('[data-mode="discuss"]')?.getAttribute('aria-pressed')).toBe('true');
-  });
-
-  it('updates the main-write control immediately while the server profile is stale', async () => {
-    let resolveUpdate!: () => void;
-    const onMainWriteChange = vi.fn(() => new Promise<void>(resolve => { resolveUpdate = resolve; }));
-    const { container } = await renderChat({
-      onMainWriteChange,
-      sessionStatus: {
-        status: 'ready',
-        thinking_level: 'off',
-        permission: 'manual',
-        discuss_mode: false,
-        main_write_enabled: true,
-        goal: null,
-        context_tokens: 0,
-        max_context_tokens: 128_000,
-        context_usage: 0,
-      },
-    });
-    const toggle = container.querySelector<HTMLInputElement>('.main-write-icon-toggle input')!;
-
-    await act(async () => {
-      toggle.click();
-      await Promise.resolve();
-    });
-
-    expect(onMainWriteChange).toHaveBeenCalledWith(false);
-    expect(toggle.checked).toBe(false);
-    expect(container.querySelector('.main-write-icon-toggle')?.classList.contains('active')).toBe(false);
-
-    await act(async () => {
-      resolveUpdate();
-      await Promise.resolve();
-    });
+    await act(async () => { options[0]?.click(); await Promise.resolve(); });
+    expect(onPermissionChange).toHaveBeenCalledWith('auto');
   });
 
   it('executes a goal command through the injected application handler', async () => {
@@ -1260,6 +1122,40 @@ describe('chat slash commands and task-mode shortcut', () => {
 });
 
 describe('conversation presentation', () => {
+  it('uses the single stable team name in discussion messages and ignores alternate titles', async () => {
+    const { container } = await renderChat({
+      sessionAgents: [{
+        agent_id: 'wing-smith',
+        kind: 'team',
+        name: 'WING_SMITH',
+        role: '机翼工程师',
+        mandate: '负责翼面载荷评审',
+        title: '机翼与操纵面工程师',
+        status: 'idle',
+      }],
+      messages: [{
+        id: 'discussion-1',
+        role: 'system',
+        kind: 'discussion',
+        text: '建议调整翼面载荷。',
+        speaker: { from: 'team', id: 'wing-smith', name: '旧显示名' },
+      }, {
+        id: 'discussion-2',
+        role: 'system',
+        kind: 'discussion',
+        text: '缺少元数据时保留信封名称。',
+        speaker: { from: 'team', id: 'missing-member', name: 'FALLBACK_NAME' },
+      }],
+    });
+
+    const roles = Array.from(container.querySelectorAll<HTMLElement>('.chat-message-discussion .chat-message-role'));
+    expect(roles[0]?.textContent).toContain('WING_SMITH · Team');
+    expect(roles[0]?.textContent).not.toContain('机翼与操纵面工程师');
+    expect(roles[0]?.textContent).not.toContain('旧显示名');
+    expect(roles[1]?.textContent).toContain('Discussion member · Team');
+    expect(roles[1]?.textContent).not.toContain('FALLBACK_NAME');
+  });
+
   it('uses the application title bar and renders assistant replies without an avatar', async () => {
     const { container } = await renderChat({
       messages: [
@@ -1380,10 +1276,8 @@ describe('conversation presentation', () => {
 
     expect(container.querySelector('.chat-work-process')).toBeNull();
     expect(container.querySelectorAll('.work-progress-block')).toHaveLength(0);
-    const outputs = container.querySelectorAll('.transcript-assistant-output');
-    expect(outputs).toHaveLength(2);
-    expect(outputs[0]?.textContent).toContain('The first inspection pass is complete.');
-    expect(outputs[1]?.textContent).toContain('I am checking the event boundary now.');
+    expect(container.textContent).toContain('The first inspection pass is complete.');
+    expect(container.querySelector('.chat-message-streaming')?.textContent).toContain('I am checking the event boundary now.');
     expect(container.querySelector('.activity-island')).toBeNull();
   });
 });
@@ -1408,9 +1302,7 @@ async function renderChat(overrides: Partial<ChatViewProps> = {}) {
     onModelChange: vi.fn(),
     onThinkingChange: vi.fn(),
     onPermissionChange: vi.fn(),
-    onTaskModeChange: vi.fn(),
     onRunSlashCommand: vi.fn(async () => true),
-    onMainWriteChange: vi.fn(),
     onRewind: vi.fn(async () => 'original prompt'),
     ...overrides,
   };

@@ -56,14 +56,13 @@ describe('default agent profiles', () => {
       expect(profile?.tools).toContain('SubAgent');
       expect(profile?.systemPrompt(promptContext)).toContain('SubAgent');
     }
-    expect(DEFAULT_AGENT_PROFILES['nori-agent']?.systemPrompt(promptContext)).toContain('temporary delegated agent');
-    expect(DEFAULT_AGENT_PROFILES['nori-agent']?.systemPrompt(promptContext)).toContain('Team Agent layer');
+    expect(DEFAULT_AGENT_PROFILES['nori-agent']?.systemPrompt(promptContext)).toContain('bounded temporary work');
+    expect(DEFAULT_AGENT_PROFILES['nori-agent']?.systemPrompt(promptContext)).not.toContain('Team Agent layer');
   });
 
   it('exposes Discuss names to default model profiles', () => {
     for (const name of ['agent', 'nori-agent', 'nori-coder']) {
       const tools = DEFAULT_AGENT_PROFILES[name]?.tools ?? [];
-      expect(tools).toContain('EnterDiscussMode');
       expect(tools).toContain('TeamCreate');
       expect(tools).toContain('TeamDecide');
       expect(tools).toContain('TeamAssign');
@@ -125,21 +124,18 @@ describe('default agent profiles', () => {
     }
   });
 
-  it('renders blast-radius and concrete-example guidance for root and subagents alike', () => {
-    // These additions live in shared, ungated sections, so the root agent AND every
-    // subagent that renders the coding guidelines must carry them verbatim.
-    for (const name of ['agent', 'coder', 'explore']) {
+  it('renders the main Agent as a process coordinator rather than a sole thinker', () => {
+    for (const name of ['agent', 'nori-agent', 'nori-coder']) {
       const prompt = DEFAULT_AGENT_PROFILES[name]?.systemPrompt(promptContext) ?? '';
-      // Reversibility / blast-radius principle generalized beyond the git rule.
-      expect(prompt).toContain('reversibility and blast radius');
-      expect(prompt).toContain('A one-time approval covers that one action');
-      // The "do local work freely" clause is role-scoped: read-only subagents (explore)
-      // render this same paragraph, so it must not tell them editing files is free.
-      expect(prompt).toContain('Local, reversible work your role permits');
-      // Concrete one-line examples anchoring high-frequency abstract rules.
-      expect(prompt).toContain('locate the method in the code'); // ambiguous instruction -> edit code, not echo text
-      expect(prompt).toContain('update the related tests'); // preamble phrasing example
-      expect(prompt).toContain('premature abstraction'); // MINIMAL-changes counterexample
+      expect(prompt).toContain("You are Nori Code's main Agent");
+      expect(prompt).toMatch(/process administrator|process coordinator|project manager/);
+      expect(prompt).toContain('not a coding agent');
+      expect(prompt).toContain('not the sole');
+      expect(prompt).toContain("user's goal");
+      expect(prompt).toContain('record consensus');
+      expect(prompt).toMatch(/deliver verified results|deliver a verified result|verified results/);
+      expect(prompt).toMatch(/(?:Do not default to using Write, Edit, or Bash yourself|Write, Edit, Bash are not the default)/);
+      expect(prompt).not.toContain('interactive coding agent');
     }
   });
 
@@ -149,19 +145,101 @@ describe('default agent profiles', () => {
       expect(prompt).toContain('SubAgent');
       expect(prompt).toContain('Discuss');
       expect(prompt).toContain('TeamAssign');
-      expect(prompt).toMatch(/enter(?:s)? Code/);
-      expect(prompt).toContain('TeamDecide action=vote');
+      expect(prompt).toContain('enters Code');
       expect(prompt).toContain('TeamDM');
       expect(prompt).toContain('available at any time');
-      expect(prompt).toMatch(/(?:re-enter|enter) Discuss/);
-      expect(prompt).toContain('wait for and consume one TeamDM report');
-      expect(prompt).toContain('Do not announce completion while any result is unknown');
-      expect(prompt).toContain('temporary SubAgents');
-      expect(prompt).toMatch(/archive.*formally ending/);
+      expect(prompt).toContain('action=continue');
+      expect(prompt.indexOf('first call `TeamDecide` with `action=start`')).toBeLessThan(
+        prompt.indexOf('After Discuss starts'),
+      );
+      expect(prompt).toContain('only the user\'s goal, background, known constraints, and open questions');
+      expect(prompt).toContain('must not pre-commit a complete');
+      expect(prompt).toContain('independent analysis');
+      expect(prompt).toContain('agreement with the lead alone is not a contribution');
+      expect(prompt).toContain('Discuss converges');
+      expect(prompt).toContain('consume every report');
+      expect(prompt).toContain('before coordinating shared review');
+      expect(prompt).toMatch(/[Bb]ounded temporary work/);
       expect(prompt).not.toContain('Plan mode');
       expect(prompt).not.toContain('plan file');
       expect(prompt).not.toContain('Swarm');
       expect(prompt).not.toContain('Graph');
+    }
+  });
+
+  it('renders the lead-first Discuss gate and current tool permissions', () => {
+    for (const name of ['agent', 'nori-agent', 'nori-coder']) {
+      const prompt = DEFAULT_AGENT_PROFILES[name]?.systemPrompt(promptContext) ?? '';
+      expect(prompt).toContain('main Agent');
+      expect(prompt).toMatch(/process administrator|process coordinator|project administrator/);
+      expect(prompt).toContain('not a coding agent');
+      expect(prompt).toContain('very simple');
+      expect(prompt).toMatch(/joint|shared/);
+      expect(prompt).toContain('TeamDecide');
+      expect(prompt).toContain('action=start');
+      expect(prompt).toContain('action=continue');
+      expect(prompt).toContain('shared scope');
+      expect(prompt).toContain('division of labor');
+      expect(prompt).toContain('completion criteria');
+      expect(prompt).toContain('member proposals');
+      expect(prompt).toMatch(/material disagreement|disagrees on any material point/);
+      expect(prompt).toContain('TeamDM');
+      expect(prompt).toContain('TeamSpeak');
+      expect(prompt).toContain('read-only');
+      expect(prompt).toContain('latest content tag');
+      expect(prompt).toContain('automatic branch or merge');
+      expect(prompt).toContain('`completed`, `blocked`, or `needs_decision`');
+      expect(prompt).toContain('TeamStatus');
+      expect(prompt).toContain('Write');
+      expect(prompt).toContain('Edit');
+      expect(prompt).toContain('Bash');
+      expect(prompt).toContain('SubAgent');
+      expect(prompt).not.toContain('EnterDiscussMode');
+    }
+  });
+
+  it('renders role-specific collaboration overviews for leads and temporary workers', () => {
+    for (const name of ['agent', 'nori-agent', 'nori-coder']) {
+      const prompt = DEFAULT_AGENT_PROFILES[name]?.systemPrompt(promptContext) ?? '';
+      expect(prompt).toContain('## Team Engineering');
+      expect(prompt).toContain('process administrator, discussion host, coordinator, consensus recorder');
+      expect(prompt).toContain('Persistent Team members collaborate in the same parent session');
+      expect(prompt).toContain('TeamSpeak');
+      expect(prompt).toContain('TeamDM');
+      expect(prompt).toContain('first call `TeamDecide` with `action=start`');
+      expect(prompt).toContain('After Discuss starts');
+      expect(prompt).toContain('independent analysis');
+      expect(prompt).toContain('possible division of labor');
+      expect(prompt).toContain('Discuss converges');
+      expect(prompt).toContain('SubAgent');
+      expect(prompt).toContain('preserving their identities and context');
+      expect(prompt).toContain('parent session');
+      expect(prompt).toContain('parallel execution');
+      expect(prompt).toContain('Memory and regular tools may be shared only when');
+      expect(prompt.match(/## Team Engineering/g)).toHaveLength(1);
+      expect(prompt).not.toContain('EnterDiscussMode');
+      expect(prompt).not.toContain('Swarm');
+      expect(prompt).not.toContain('Graph');
+      expect(prompt).toContain('There is no automatic branch or merge workflow');
+    }
+
+    for (const name of ['coder', 'explore', 'orchestrator']) {
+      const profile = DEFAULT_AGENT_PROFILES[name];
+      const prompt = profile?.systemPrompt(promptContext) ?? '';
+      expect(prompt).toContain('## Temporary Execution Partner');
+      expect(prompt).not.toContain('## Team Engineering');
+      expect(prompt).not.toContain('first call `TeamDecide`');
+      expect(prompt).not.toContain('Call `TeamAssign`');
+      expect(prompt).toContain('/workspace');
+    }
+    for (const name of ['coder', 'explore']) {
+      const tools = DEFAULT_AGENT_PROFILES[name]?.tools ?? [];
+      expect(tools).not.toEqual(expect.arrayContaining([
+        'TeamCreate',
+        'TeamAssign',
+        'TeamDM',
+        'TeamDecide',
+      ]));
     }
   });
 });

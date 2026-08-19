@@ -63,11 +63,11 @@
 
 | 工具 | 默认审批 | 说明 |
 | --- | --- | --- |
-| `EnterDiscussMode` | 自动放行 | 进入 Discuss（讨论） |
+| `TeamDecide` | 主代理 | 使用 `action=start` 进入 Discuss，使用 `action=continue` 继续讨论 |
 
 Discuss 是只读团队开会。新会话默认进入该状态（用户可关闭）。期间 `Write`、`Edit`、`Bash`、`SubAgent`、`TaskStop`、`CronCreate`、`CronDelete` 被拦截。没有 session 文件工作流，也没有 `ExitDiscussMode` 模型出口。
 
-**`EnterDiscussMode`** 不接受参数。进入后用 `TeamCreate` 建伙伴，用 `TeamDecide` 开会（主持先发言，成员用 `TeamSpeak`；不调用会记录为 skipped，即弃权），再用 `TeamAssign` 进入 Code。UI 的 Discuss/Code 切换也可离开或再进入。
+**`TeamDecide`** 使用 `action=start` 加主题和开场陈述进入 Discuss；后续使用 `action=continue` 加新陈述继续讨论。成员用 `TeamSpeak` 发言；不调用会记录为 skipped（弃权），再用 `TeamAssign` 进入 Code。UI 的 Discuss/Code 切换也可离开或再进入。
 
 ## 状态管理
 
@@ -93,7 +93,7 @@ Discuss 是只读团队开会。新会话默认进入该状态（用户可关闭
 
 **`SubAgent`** 是统一的临时代理入口。可用 `prompt_template` + `items`、`tasks`（含 `depends_on` DAG）或 `resume_agent_ids` 一次启动一个或多个完整子会话。完成后归档到父会话，可再打开。一次模型响应若调用 `SubAgent`，该调用必须是该响应中的唯一工具调用。Discuss 期间不要用 SubAgent，先 TeamAssign。
 
-**`TeamCreate`** 每个成员必须有 `name`、`title`、`intro`、`mandate`、`role`。**`TeamDecide`** `action=start` 必须有 `topic` 和主持 `statement`。成员只用 `TeamSpeak` 发言。执行后 `action=vote` 不要求 Discuss；全队投票（`discuss_again` / `proceed` / `abstain`），含 `task=null` 的成员。
+**`TeamCreate`** 每个成员必须有唯一的 `name`、`role`、`mandate`。**`TeamDecide`** `action=start` 必须有 `topic` 和主持 `statement`。成员只用 `TeamSpeak` 发言。执行后 `action=vote` 不要求 Discuss；全队投票（`discuss_again` / `proceed` / `abstain`），含 `task=null` 的成员。
 
 **`AskUserQuestion`** 以结构化多选题的形式向用户提问，适用于需要消歧或选择方案的场景。`questions` 参数接受 1–4 道题，每道题需提供 `question`（以 `?` 结尾）、`options`（2–4 个选项，每项含 `label` 和 `description`）以及可选的 `header`（最多 12 字符）和 `multi_select`（默认 false）。系统自动附加"其他"选项。`background` 为 true 时启动后台问题任务并立即返回任务 ID。宿主未实现交互式提问能力时返回失败提示，Agent 应改为在文本回复中直接提问。
 

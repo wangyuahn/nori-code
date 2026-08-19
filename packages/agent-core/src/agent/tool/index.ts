@@ -500,7 +500,7 @@ export class ToolManager {
       this.enabledTools.has('TaskList') &&
       this.enabledTools.has('TaskOutput') &&
       this.enabledTools.has('TaskStop');
-    const goalToolsEnabled = this.agent.type === 'main';
+    const goalToolsEnabled = this.agent.type === 'main' || this.agent.isTeamMember;
     const reportCodeChange: b.CodeChangeReporter = (change) => {
       this.agent.emitEvent({ type: 'code.change', ...change });
     };
@@ -516,8 +516,7 @@ export class ToolManager {
           allowBackground,
         }),
         new b.ReadMediaFileTool(kaos, workspace, modelCapabilities, videoUploader),
-        new b.EnterDiscussModeTool(this.agent),
-        // Goal tools are main-agent-only.
+        // Goal tools are available to the main agent and persistent Team members.
         goalToolsEnabled && new b.CreateGoalTool(this.agent),
         goalToolsEnabled && new b.GetGoalTool(this.agent),
         goalToolsEnabled && new b.SetGoalBudgetTool(this.agent),

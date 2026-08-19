@@ -62,6 +62,7 @@ import { noopTelemetryClient, type TelemetryClient } from '../telemetry';
 import { SessionSubagentHost } from './subagent-host';
 import type { BrowserProvider, ToolServices } from '../tools/support/services';
 import TEAM_AGENT_PROMPT from './team-agent.md?raw';
+import TEAM_ENGINEERING_PROMPT from '../profile/default/team-engineering.md?raw';
 import { FlagResolver, type ExperimentalFlagResolver } from '../flags';
 import { abortError } from '../utils/abort';
 import { loadNoriYamlConfig, createNoriProvidersFromConfig } from "./nori-providers";
@@ -115,15 +116,19 @@ export interface AgentMeta {
   /** `team` agents are durable collaborators; `sub` agents are SubAgent transcripts. */
   readonly kind?: 'team' | 'sub';
   readonly name?: string;
+  /** @deprecated Read legacy metadata only; never emit or display it for new agents. */
   readonly title?: string;
+  /** @deprecated Read legacy metadata only; never emit or display it for new agents. */
   readonly intro?: string;
   readonly mandate?: string;
   readonly role?: string;
   /** The lead that owns this durable team member or discussion transcript. */
   readonly teamLeaderAgentId?: string;
-  /** A non-empty task grants this team member its otherwise read-only write capability. */
+  /** Current scheduling metadata; it does not gate the member's tool permissions. */
   readonly assignedTask?: string;
   readonly assignedAt?: string;
+  /** Latest report for the current or most recent TeamAssign lease. */
+  readonly teamReport?: TeamReportRecord;
   /** Present only on an agent-scoped, archived-or-active team discussion transcript. */
   readonly discussion?: TeamDiscussionMeta;
   /** Completed SubAgent transcripts stay in the parent session archive. */
@@ -133,10 +138,8 @@ export interface AgentMeta {
 
 export interface TeamIdentity {
   readonly name: string;
-  readonly title: string;
-  readonly intro: string;
-  readonly mandate: string;
   readonly role: string;
+  readonly mandate: string;
 }
 
 export interface TeamDiscussionMeta {
@@ -149,6 +152,8 @@ export interface TeamDiscussionMeta {
   readonly nextStatementId?: number;
   /** Number of completed or currently running discussion rounds. */
   readonly round?: number;
+  /** Runtime marker used by the session tree to highlight the current speaker. */
+  readonly currentTurnAgentId?: string;
   /** Last shared statement delivered to each participant. Kept out of model prompts. */
   readonly readCursors?: Readonly<Record<string, number>>;
   /**
@@ -171,6 +176,18 @@ export interface TeamAssignment {
   readonly task: string | null;
 }
 
+export type TeamReportStatus = 'unreported' | 'completed' | 'blocked' | 'needs_decision';
+
+export interface TeamReportRecord {
+  readonly assignmentId: string;
+  readonly task: string;
+  readonly status: TeamReportStatus;
+  readonly summary?: string;
+  readonly reportedAt?: string;
+  readonly receivedAt?: string;
+  readonly missingReminderAt?: string;
+}
+
 interface ResumedAgent {
   readonly agent: Agent;
   readonly warning?: string;
@@ -189,7 +206,6 @@ export interface CreateAgentOptions {
   readonly assignedTask?: string;
   readonly discussion?: TeamDiscussionMeta;
   readonly name?: string;
-  readonly title?: string;
 }
 
 export interface SessionMeta {
@@ -599,7 +615,7 @@ export class Session {
     const id = type === 'main' ? 'main' : this.nextGeneratedAgentId();
     const homedir = config.homedir ?? join(this.options.homedir, 'agents', id);
     const parentAgentId = options.parentAgentId ?? null;
-    const agent = this.instantiateAgent(id, homedir, type, config, parentAgentId);
+    const agent = this.instantiateAgent(id, homedir, type, config, parentAgentId, kind === 'team');
     const profile = kind === 'team'
       ? teamProfile(options.profile ?? defaultTeamProfile(), identity!)
       : options.profile;
@@ -619,8 +635,6 @@ export class Session {
         subagentItem: options.subagentItem,
         kind,
         name: identity?.name ?? options.name,
-        title: identity?.title ?? options.title,
-        intro: identity?.intro,
         mandate: identity?.mandate,
         role: identity?.role,
         teamLeaderAgentId: options.teamLeaderAgentId,
@@ -720,13 +734,12 @@ export class Session {
     if (uniqueIds.length === 0 || uniqueIds.length !== agentIds.length) {
       throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'Specify each team member once.');
     }
-    const members = uniqueIds.map((id) => {
+    for (const id of uniqueIds) {
       const meta = this.metadata.agents[id];
       if (meta?.kind !== 'team' || meta.teamLeaderAgentId !== leaderAgentId) {
         throw new KimiError(ErrorCodes.AGENT_NOT_FOUND, `Team member "${id}" was not found.`);
       }
-      return [id, meta] as const;
-    });
+    }
     // A dismissal owns the whole member branch. A direct member turn is not
     // the only in-flight work: an assigned partner can have temporary
     // SubAgent/background work below it. Treat that as active too so the
@@ -850,12 +863,23 @@ export class Session {
         ...current,
         assignedTask: assignment.task ?? undefined,
         assignedAt: assignment.task === null ? undefined : assignedAt,
+        teamReport: assignment.task === null
+          ? current.teamReport
+          : {
+              assignmentId: assignedAt,
+              task: assignment.task,
+              status: 'unreported',
+            },
       };
       this.configureTeamAgentRuntime(assignment.agent, this.metadata.agents[assignment.agentId]!);
+      this.emitTeamStatus(assignment.agentId);
     }
     await this.writeMetadata();
     const leader = await this.ensureAgentResumed(leaderAgentId);
-    if (leader.discussMode.isActive) leader.discussMode.exit();
+    if (leader.discussMode.isActive) {
+      leader.discussMode.exit();
+      this.configureTeamMembers(leaderAgentId);
+    }
     return resolved.map((assignment) => ({
       ...assignment,
       assignedAt: assignment.task === null ? undefined : assignedAt,
@@ -889,7 +913,137 @@ export class Session {
     const agent = this.getReadyAgent(agentId);
     if (agent !== undefined) this.configureTeamAgentRuntime(agent, this.metadata.agents[agentId]!);
     await this.writeMetadata();
+    this.emitTeamStatus(agentId);
     return true;
+  }
+
+  async recordTeamReport(
+    agentId: string,
+    status: Exclude<TeamReportStatus, 'unreported'>,
+    summary: string,
+  ): Promise<boolean> {
+    const meta = this.metadata.agents[agentId];
+    const current = meta?.teamReport;
+    if (
+      meta?.kind !== 'team'
+      || current === undefined
+      || current.receivedAt !== undefined
+      || summary.trim().length === 0
+    ) {
+      return false;
+    }
+    this.metadata.agents[agentId] = {
+      ...meta,
+      teamReport: {
+        ...current,
+        status,
+        summary: summary.trim(),
+        reportedAt: new Date().toISOString(),
+        missingReminderAt: undefined,
+      },
+    };
+    await this.writeMetadata();
+    this.emitTeamStatus(agentId);
+    return true;
+  }
+
+  async acknowledgeTeamReport(agentId: string): Promise<boolean> {
+    const meta = this.metadata.agents[agentId];
+    const report = meta?.teamReport;
+    if (
+      meta?.kind !== 'team'
+      || report === undefined
+      || report.status === 'unreported'
+      || report.receivedAt !== undefined
+    ) {
+      return false;
+    }
+    this.metadata.agents[agentId] = {
+      ...meta,
+      teamReport: {
+        ...report,
+        receivedAt: new Date().toISOString(),
+      },
+    };
+    await this.writeMetadata();
+    this.emitTeamStatus(agentId);
+    return true;
+  }
+
+  async notifyMissingTeamReport(agentId: string, assignmentId: string): Promise<boolean> {
+    const meta = this.metadata.agents[agentId];
+    const report = meta?.teamReport;
+    if (
+      meta?.kind !== 'team'
+      || meta.teamLeaderAgentId === undefined
+      || report === undefined
+      || report.assignmentId !== assignmentId
+      || report.status !== 'unreported'
+      || report.missingReminderAt !== undefined
+    ) {
+      return false;
+    }
+    const missingReminderAt = new Date().toISOString();
+    this.metadata.agents[agentId] = {
+      ...meta,
+      teamReport: { ...report, missingReminderAt },
+    };
+    await this.writeMetadata();
+    const member = await this.ensureAgentResumed(agentId);
+    const leader = await this.ensureAgentResumed(meta.teamLeaderAgentId);
+    member.context.appendSystemReminder(
+      `Your assigned task "${report.task}" finished its turn without a TeamDM report. Send TeamDM to your parent with report_status set to completed, blocked, or needs_decision and a concrete summary.`,
+      { kind: 'injection', variant: `team_report_required:${assignmentId}` },
+    );
+    leader.context.appendSystemReminder(
+      `Team member "${meta.name ?? agentId}" finished "${report.task}" without a TeamDM report. Wait for the report; do not take over or repeat the work.`,
+      { kind: 'injection', variant: `team_report_pending:${agentId}:${assignmentId}` },
+    );
+    this.emitTeamStatus(agentId);
+    return true;
+  }
+
+  notifyRunningTeamMember(agentId: string, assignmentId: string): void {
+    const meta = this.metadata.agents[agentId];
+    if (
+      meta?.kind !== 'team'
+      || meta.teamLeaderAgentId === undefined
+      || meta.assignedAt !== assignmentId
+      || meta.assignedTask === undefined
+    ) {
+      return;
+    }
+    const leader = this.getReadyAgent(meta.teamLeaderAgentId);
+    if (leader === undefined || leader.context.history.some((message) =>
+      message.origin?.kind === 'injection'
+      && message.origin.variant === `team_member_running:${agentId}:${assignmentId}`
+    )) {
+      return;
+    }
+    leader.context.appendSystemReminder(
+      `Team member "${meta.name ?? agentId}" is still working on "${meta.assignedTask}". Do not take over or repeat the work; query TeamStatus or wait for a TeamDM report.`,
+      { kind: 'injection', variant: `team_member_running:${agentId}:${assignmentId}` },
+    );
+    this.emitTeamStatus(agentId);
+  }
+
+  private emitTeamStatus(agentId: string): void {
+    const meta = this.metadata.agents[agentId];
+    if (meta?.kind !== 'team') return;
+    const report = meta.teamReport;
+    const status = this.getReadyAgent(agentId)?.turn.hasActiveTurn === true ? 'running' : 'idle';
+    const team = {
+      assignedTask: meta.assignedTask ?? null,
+      status,
+      reportStatus: report?.status ?? 'unreported',
+      reportSummary: report?.summary ?? null,
+      reportReceived: report?.receivedAt !== undefined,
+    } as const;
+    this.getReadyAgent(agentId)?.emitEvent({ type: 'agent.status.updated', team });
+    this.getReadyAgent(meta.teamLeaderAgentId ?? 'main')?.emitEvent({
+      type: 'agent.status.updated',
+      team,
+    });
   }
 
   /** Revoke every TeamAssign write lease. Used when re-entering Discuss or archiving. */
@@ -898,15 +1052,19 @@ export class Session {
     const members = this.teamMemberMetadata(leaderAgentId);
     let changed = false;
     for (const [agentId, current] of members) {
-      if (current.assignedTask === undefined && current.assignedAt === undefined) continue;
-      this.metadata.agents[agentId] = {
-        ...current,
-        assignedTask: undefined,
-        assignedAt: undefined,
-      };
+      const next = current.assignedTask === undefined && current.assignedAt === undefined
+        ? current
+        : {
+            ...current,
+            assignedTask: undefined,
+            assignedAt: undefined,
+          };
+      if (next !== current) {
+        this.metadata.agents[agentId] = next;
+        changed = true;
+      }
       const agent = this.getReadyAgent(agentId);
-      if (agent !== undefined) this.configureTeamAgentRuntime(agent, this.metadata.agents[agentId]!);
-      changed = true;
+      if (agent !== undefined) this.configureTeamAgentRuntime(agent, next);
     }
     if (changed) await this.writeMetadata();
   }
@@ -917,9 +1075,23 @@ export class Session {
     if (!leader.discussMode.isActive) {
       throw new KimiError(
         ErrorCodes.SESSION_STATE_INVALID,
-        'EnterDiscussMode is required before starting or continuing a team discussion.',
+        'Discuss mode is required for this team discussion operation.',
       );
     }
+  }
+
+  /**
+   * TeamDecide owns the Discuss lifecycle. Re-enter the mode when a persisted
+   * active discussion is resumed from a non-Discuss UI state, and synchronize
+   * member permissions with the resulting mode.
+   */
+  async ensureTeamDiscussionMode(agentId: string): Promise<void> {
+    this.assertTeamLead(agentId);
+    const leader = await this.ensureAgentResumed(agentId);
+    if (!leader.discussMode.isActive) {
+      await leader.discussMode.enter();
+    }
+    await this.lockTeamAssignments(agentId);
   }
 
   async createTeamDiscussion(
@@ -942,31 +1114,42 @@ export class Session {
     if (participants.some((id) => !members.has(id))) {
       throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'Discussion participants must belong to the team.');
     }
-    const now = new Date().toISOString();
-    const discussion: TeamDiscussionMeta = {
-      participantAgentIds: participants,
-      status: 'active',
-      topic: topic.trim(),
-      startedAt: now,
-      updatedAt: now,
-      nextStatementId: 0,
-      round: 0,
-      readCursors: Object.fromEntries(participants.map((agentId) => [agentId, 0])),
-      statements: [],
-    };
     const leader = await this.ensureAgentResumed(leaderAgentId);
-    return this.createAgent(
-      { type: 'sub', generate: leader.rawGenerate },
-      {
-        kind: 'sub',
-        parentAgentId: leaderAgentId,
-        teamLeaderAgentId: leaderAgentId,
-        name: 'Discussion',
-        title: discussion.topic,
-        profile: discussionProfile(defaultTeamProfile(), discussion),
-        discussion,
-      },
-    ).then((result) => ({ ...result, discussion }));
+    const enteredDiscuss = !leader.discussMode.isActive;
+    if (enteredDiscuss) await leader.discussMode.enter();
+    try {
+      await this.lockTeamAssignments(leaderAgentId);
+      const now = new Date().toISOString();
+      const discussion: TeamDiscussionMeta = {
+        participantAgentIds: participants,
+        status: 'active',
+        topic: topic.trim(),
+        startedAt: now,
+        updatedAt: now,
+        nextStatementId: 0,
+        round: 0,
+        readCursors: Object.fromEntries(participants.map((agentId) => [agentId, 0])),
+        statements: [],
+      };
+      const result = await this.createAgent(
+        { type: 'sub', generate: leader.rawGenerate },
+        {
+          kind: 'sub',
+          parentAgentId: leaderAgentId,
+          teamLeaderAgentId: leaderAgentId,
+          name: 'Discussion',
+          profile: discussionProfile(defaultTeamProfile(), discussion),
+          discussion,
+        },
+      );
+      return { ...result, discussion };
+    } catch (error) {
+      if (enteredDiscuss) {
+        leader.discussMode.exit();
+        this.configureTeamMembers(leaderAgentId);
+      }
+      throw error;
+    }
   }
 
   activeTeamDiscussion(leaderAgentId: string): readonly [string, AgentMeta] | undefined {
@@ -1001,7 +1184,10 @@ export class Session {
     await this.writeMetadata();
     if (update.status === 'archived' && meta.teamLeaderAgentId !== undefined) {
       const leader = await this.ensureAgentResumed(meta.teamLeaderAgentId);
-      if (leader.discussMode.isActive) leader.discussMode.exit();
+      if (leader.discussMode.isActive) {
+        leader.discussMode.exit();
+        this.configureTeamMembers(meta.teamLeaderAgentId);
+      }
     }
     return discussion;
   }
@@ -1132,11 +1318,47 @@ export class Session {
     }
     this.teamDiscussionSpeaks.get(discussionAgentId)?.delete(agentId);
     this.activeTeamDiscussionTurns.set(discussionAgentId, agentId);
+    const meta = this.metadata.agents[discussionAgentId];
+    if (meta?.discussion !== undefined) {
+      this.metadata.agents[discussionAgentId] = {
+        ...meta,
+        discussion: {
+          ...meta.discussion,
+          currentTurnAgentId: agentId,
+          updatedAt: new Date().toISOString(),
+        },
+      };
+      void this.writeMetadata();
+      this.getReadyAgent(discussionAgentId)?.emitEvent({
+        type: 'discussion.updated',
+        discussionAgentId,
+        kind: 'lifecycle',
+        currentTurnAgentId: agentId,
+      });
+    }
   }
 
   endTeamDiscussionTurn(discussionAgentId: string, agentId: string): void {
     if (this.activeTeamDiscussionTurns.get(discussionAgentId) === agentId) {
       this.activeTeamDiscussionTurns.delete(discussionAgentId);
+    }
+    const meta = this.metadata.agents[discussionAgentId];
+    if (meta?.discussion?.currentTurnAgentId === agentId) {
+      this.metadata.agents[discussionAgentId] = {
+        ...meta,
+        discussion: {
+          ...meta.discussion,
+          currentTurnAgentId: undefined,
+          updatedAt: new Date().toISOString(),
+        },
+      };
+      void this.writeMetadata();
+      this.getReadyAgent(discussionAgentId)?.emitEvent({
+        type: 'discussion.updated',
+        discussionAgentId,
+        kind: 'lifecycle',
+        currentTurnAgentId: null,
+      });
     }
   }
 
@@ -1522,13 +1744,33 @@ export class Session {
   }
 
   private configureTeamAgentRuntime(agent: Agent, meta: AgentMeta): void {
-    agent.teamWriteLocked = true;
-    agent.teamWriteEnabled = meta.assignedTask !== undefined;
-    agent.permission.setToolsReadonly(true);
-    agent.permission.setMode(meta.assignedTask === undefined ? 'manual' : 'auto');
+    // Assignment is scheduling metadata, not a capability boundary.
+    agent.teamWriteEnabled = true;
+    const leader = meta.teamLeaderAgentId === undefined
+      ? undefined
+      : this.getReadyAgent(meta.teamLeaderAgentId);
+    const inheritedTools = [
+      ...(leader?.tools.activeToolNames() ?? agent.tools.activeToolNames()),
+      ...TEAM_MEMBER_COLLABORATION_TOOLS,
+    ];
     agent.tools.setActiveTools(
-      meta.assignedTask === undefined ? TEAM_READONLY_TOOLS : TEAM_ASSIGNED_TOOLS,
+      inheritedTools.filter((name) => !TEAM_MEMBER_DISABLED_TOOLS.has(name)),
     );
+    const discussReadonly = leader?.discussMode.isActive ?? false;
+    agent.teamWriteLocked = discussReadonly;
+    agent.permission.setToolsReadonly(
+      discussReadonly || (leader?.permission.toolsReadonly ?? false),
+    );
+    agent.permission.setMode(
+      discussReadonly ? 'manual' : (leader?.permission.mode ?? 'manual'),
+    );
+  }
+
+  private configureTeamMembers(leaderAgentId: string): void {
+    for (const [agentId, meta] of this.teamMemberMetadata(leaderAgentId)) {
+      const agent = this.getReadyAgent(agentId);
+      if (agent !== undefined) this.configureTeamAgentRuntime(agent, meta);
+    }
   }
 
   private enableTeamLeadTools(agent: Agent): void {
@@ -1548,6 +1790,7 @@ export class Session {
     type: AgentType,
     config: Partial<AgentOptions> = {},
     parentAgentId: string | null = null,
+    teamMember = false,
   ): Agent {
     const parentAgent = parentAgentId !== null ? this.getReadyAgent(parentAgentId) : undefined;
     const cwd = parentAgent?.config.cwd ?? this.toolKaos.getcwd();
@@ -1561,6 +1804,7 @@ export class Session {
     agent = new Agent({
       ...config,
       type,
+      teamMember,
       kaos: this.toolKaos.withCwd(cwd),
       toolServices,
       config: this.options.config,
@@ -1764,7 +2008,7 @@ export class Session {
     }
 
     try {
-      const agent = this.instantiateAgent(id, meta.homedir, meta.type, config, parentAgentId);
+      const agent = this.instantiateAgent(id, meta.homedir, meta.type, config, parentAgentId, meta.kind === 'team');
       const result = await agent.resume();
       this.restoreAgentProfileHandle(agent, meta, parent?.agent);
       if (meta.kind === 'team') this.configureTeamAgentRuntime(agent, meta);
@@ -1874,25 +2118,17 @@ const TEAM_LEAD_TOOLS = [
   'TeamDecide',
 ] as const;
 
-const TEAM_READONLY_TOOLS = [
-  'Read',
-  'Grep',
-  'Glob',
-  'ReadMediaFile',
-  'WebSearch',
-  'FetchURL',
-  'TeamSpeak',
-  'TeamDM',
-  'TeamStatus',
-] as const;
-
-const TEAM_ASSIGNED_TOOLS = [
-  ...TEAM_READONLY_TOOLS,
-  'Write',
-  'Edit',
-  'Bash',
-  'SubAgent',
-] as const;
+/** Management tools stay lead-only until nested Team trees are implemented. */
+const TEAM_MEMBER_DISABLED_TOOLS = new Set([
+  'TeamCreate',
+  'TeamDismiss',
+  'TeamAssign',
+  'TeamBroadcast',
+  'TeamDiscussInvite',
+  'TeamDiscussKick',
+  'TeamDecide',
+]);
+const TEAM_MEMBER_COLLABORATION_TOOLS = ['TeamDM', 'TeamSpeak', 'TeamStatus'] as const;
 
 function validateTeamIdentity(identity: TeamIdentity | undefined): asserts identity is TeamIdentity {
   if (identity === undefined) {
@@ -1911,10 +2147,8 @@ function validateTeamIdentity(identity: TeamIdentity | undefined): asserts ident
 function teamIdentityFromMeta(meta: AgentMeta): TeamIdentity {
   return {
     name: meta.name ?? 'Team member',
-    title: meta.title ?? 'Team partner',
-    intro: meta.intro ?? '',
-    mandate: meta.mandate ?? '',
     role: meta.role ?? '',
+    mandate: meta.mandate ?? '',
   };
 }
 
@@ -1932,17 +2166,19 @@ function teamProfile(
 ): ResolvedAgentProfile {
   return {
     ...profile,
-    systemPrompt: (context) => [
-      '<team_identity>',
-      `Name: ${escapeTeamIdentity(identity.name)}`,
-      `Title: ${escapeTeamIdentity(identity.title)}`,
-      `Introduction: ${escapeTeamIdentity(identity.intro)}`,
-      `Mandate: ${escapeTeamIdentity(identity.mandate)}`,
-      `Role: ${escapeTeamIdentity(identity.role)}`,
-      '</team_identity>',
-      profile.systemPrompt({ ...context, roleAdditional: '' }),
-      TEAM_AGENT_PROMPT.trim(),
-    ].join('\n'),
+    systemPrompt: (context) => {
+      const basePrompt = profile.systemPrompt({ ...context, roleAdditional: '' });
+      return [
+        '<team_identity>',
+        `Name: ${escapeTeamIdentity(identity.name)}`,
+        `Role: ${escapeTeamIdentity(identity.role)}`,
+        `Mandate: ${escapeTeamIdentity(identity.mandate)}`,
+        '</team_identity>',
+        basePrompt,
+        basePrompt.includes('## Team Engineering') ? '' : TEAM_ENGINEERING_PROMPT.trim(),
+        TEAM_AGENT_PROMPT.trim(),
+      ].filter(Boolean).join('\n');
+    },
   };
 }
 

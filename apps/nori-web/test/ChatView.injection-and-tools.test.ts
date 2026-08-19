@@ -129,7 +129,7 @@ describe('ChatView tool details and context injection', () => {
     expect(details).not.toBeNull();
     expect(details.open).toBe(false);
     expect(container.querySelector('.chat-message-discussion')?.textContent).toContain('成员建议保留兼容字段。');
-    expect(container.querySelector('.chat-message-discussion')?.textContent).toContain('兼容性成员');
+    expect(container.querySelector('.chat-message-discussion')?.textContent).toContain('Discussion member');
 
     await act(async () => {
       details.open = true;
@@ -162,9 +162,7 @@ async function renderChat(overrides: Partial<ChatViewProps> = {}) {
     onModelChange: vi.fn(),
     onThinkingChange: vi.fn(),
     onPermissionChange: vi.fn(),
-    onTaskModeChange: vi.fn(),
     onRunSlashCommand: vi.fn(async () => true),
-    onMainWriteChange: vi.fn(),
     onRewind: vi.fn(async () => ''),
     ...overrides,
   };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../src/api/client';
-import { apiMessageToChat, applyRealtimeStatusEvent, canApplyGeneratedSessionTitle, chatFilesFromPromptAttachments, chatScopeKey, confirmOptimisticUserMessage, contextInjectionSource, fallbackSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, isTransientChatMessageId, latestTodos, liveAssistantMessage, mergeHistory, mergeInFlightWorkBlocks, promptForRewind, RealtimeSubscriptionGate, removeTerminatedAgent, shouldFinishAbortedPrompt, shouldIgnoreTranscriptEvent, splitUploadedFileMarkup, statusForSession, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
+import { apiMessageToChat, applyRealtimeStatusEvent, canApplyGeneratedSessionTitle, chatFilesFromPromptAttachments, chatScopeKey, confirmOptimisticUserMessage, fallbackSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, isTransientChatMessageId, latestTodos, liveAssistantMessage, mergeHistory, mergeInFlightWorkBlocks, promptForRewind, RealtimeEventDeduper, RealtimeSubscriptionGate, removeTerminatedAgent, shouldFinishAbortedPrompt, shouldIgnoreTranscriptEvent, splitUploadedFileMarkup, statusForSession, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
 
 describe('agent activity events', () => {
   it('removes a manually terminated agent from the live activity set', () => {
@@ -82,6 +82,25 @@ describe('realtime subscription readiness', () => {
   });
 });
 
+describe('realtime event identity', () => {
+  it('drops a replayed durable event but accepts volatile frames sharing its watermark', () => {
+    const deduper = new RealtimeEventDeduper();
+
+    expect(deduper.accept({ seq: 10, epoch: 'epoch-a' })).toBe(true);
+    expect(deduper.accept({ seq: 10, epoch: 'epoch-a' })).toBe(false);
+    expect(deduper.accept({ seq: 10, epoch: 'epoch-a', volatile: true })).toBe(true);
+    expect(deduper.accept({ seq: 11, epoch: 'epoch-a' })).toBe(true);
+  });
+
+  it('starts a new durable sequence when the journal epoch changes', () => {
+    const deduper = new RealtimeEventDeduper();
+
+    expect(deduper.accept({ seq: 42, epoch: 'epoch-a' })).toBe(true);
+    expect(deduper.accept({ seq: 1, epoch: 'epoch-b' })).toBe(true);
+    expect(deduper.accept({ seq: 1, epoch: 'epoch-b' })).toBe(false);
+  });
+});
+
 describe('main transcript projection', () => {
   it('keeps completed tool calls when a reconnect snapshot lists only the currently running tool', () => {
     const merged = mergeInFlightWorkBlocks([
@@ -101,7 +120,7 @@ describe('main transcript projection', () => {
     ]);
   });
 
-  it('places steer guidance between work progress already shown and the final summary', () => {
+  it('keeps steer guidance and the prior assistant message independent', () => {
     const before = [{ id: 'u1', role: 'user' as const, text: 'initial task' }];
     const withGuidance = insertSteerBoundary(
       before,
@@ -113,15 +132,13 @@ describe('main transcript projection', () => {
       { id: 'a2', role: 'assistant', text: 'Second output.' },
     ]);
 
-    expect(completed.map(item => [item.role, item.text])).toEqual([
-      ['user', 'initial task'],
-      ['assistant', ''],
-      ['user', 'Use the parser threshold.'],
-      ['assistant', 'Second output.'],
+    expect(completed.map(item => [item.id, item.role, item.text])).toEqual([
+      ['u1', 'user', 'initial task'],
+      ['a1', 'assistant', 'First output.'],
+      ['u2', 'user', 'Use the parser threshold.'],
+      ['a2', 'assistant', 'Second output.'],
     ]);
-    expect(completed[1]?.workBlocks).toMatchObject([
-      { type: 'progress', text: 'First output.' },
-    ]);
+    expect(completed[1]?.workBlocks).toBeUndefined();
   });
 
   it('asks the main agent for a title without exposing the instruction as the user message', () => {
@@ -395,29 +412,28 @@ describe('main transcript projection', () => {
     }
   });
 
-  it('maps legacy injection messages into the shared tool-call shape', () => {
-    expect(contextInjectionSource({ kind: 'system_trigger', name: 'goal_intake' })).toBe('goal_intake');
-    expect(contextInjectionSource({ kind: 'skill_activation', skillName: 'skill-catalog' })).toBe('skill-catalog');
-    expect(contextInjectionSource({ kind: 'injection', variant: '@deepseek-ai/dsh-system-prompt' })).toBe('@deepseek-ai/dsh-system-prompt');
-
+  it('consumes ContextInjection from the standard tool content shape', () => {
     const loop = apiMessageToChat(message({ role: 'user', text: 'Continue the goal.', originKind: 'system_trigger' }));
     expect(loop).toMatchObject({ role: 'user', text: 'Continue the goal.' });
     expect(loop?.toolCalls).toBeUndefined();
 
     const injection = apiMessageToChat({
       id: 'skill-1',
-      role: 'user',
-      content: [{ type: 'text', text: '<system-reminder>Available skills</system-reminder>' }],
+      role: 'assistant',
+      content: [{
+        type: 'tool_use',
+        tool_call_id: 'context-injection-1',
+        tool_name: 'ContextInjection',
+        input: { source: 'skill-catalog', variant: 'skill-catalog' },
+      }],
       created_at: '2026-07-14T00:00:00.000Z',
-      metadata: { origin: { kind: 'injection', variant: 'skill-catalog' } },
     });
     expect(injection).toMatchObject({
       role: 'assistant',
       text: '',
       toolCalls: [{
         name: 'ContextInjection',
-        args: { source: 'skill-catalog' },
-        result: 'Available skills',
+        args: { source: 'skill-catalog', variant: 'skill-catalog' },
       }],
     });
   });
@@ -425,10 +441,14 @@ describe('main transcript projection', () => {
   it('does not expose internal permission reminders as a callable ContextInjection', () => {
     const permissionReminder = apiMessageToChat({
       id: 'permission-reminder',
-      role: 'user',
-      content: [{ type: 'text', text: '<system-reminder>Auto permission mode is active.</system-reminder>' }],
+      role: 'assistant',
+      content: [{
+        type: 'tool_use',
+        tool_call_id: 'context-injection-permission',
+        tool_name: 'ContextInjection',
+        input: { source: 'permission_mode', variant: 'permission_mode' },
+      }],
       created_at: '2026-07-14T00:00:00.000Z',
-      metadata: { origin: { kind: 'injection', variant: 'permission_mode' } },
     });
     expect(permissionReminder).toBeNull();
   });
@@ -490,18 +510,18 @@ describe('main transcript projection', () => {
     expect(legacyTeamDm).toBeNull();
   });
 
-  it('keeps one assistant turn around a hidden wake-up trigger', () => {
+  it('keeps each assistant message around a hidden wake-up trigger', () => {
     const first = apiMessageToChat(message({ id: 'a1', role: 'assistant', text: 'Agent started in the background.' }))!;
     const boundary = apiMessageToChat(message({ id: 'wake', role: 'user', text: 'done', originKind: 'background_task' }))!;
     const second = apiMessageToChat(message({ id: 'a2', role: 'assistant', text: 'The agent completed successfully.' }))!;
     const folded = foldConversationTurns([first, boundary, second]);
-    expect(folded.map(item => item.text)).toEqual(['The agent completed successfully.']);
-    expect(folded[0]?.workBlocks).toMatchObject([
-      { type: 'progress', text: 'Agent started in the background.' },
+    expect(folded.map(item => item.text)).toEqual([
+      'Agent started in the background.',
+      'The agent completed successfully.',
     ]);
   });
 
-  it('merges a background wake-up answer into the live assistant turn without a refresh', () => {
+  it('keeps a background wake-up answer as a separate assistant message', () => {
     const previous = [
       { id: 'u1', role: 'user' as const, text: 'Run a SubAgent', createdAt: '2026-07-14T00:00:00.000Z' },
       { id: 'a1', role: 'assistant' as const, text: 'The SubAgent is running.', createdAt: '2026-07-14T00:00:01.000Z' },
@@ -512,11 +532,8 @@ describe('main transcript projection', () => {
 
     expect(mergeHistory(previous, completedAfterWake)).toMatchObject([
       { role: 'user', text: 'Run a SubAgent' },
-      {
-        role: 'assistant',
-        text: 'The SubAgent finished.',
-        workBlocks: [{ type: 'progress', text: 'The SubAgent is running.' }],
-      },
+      { role: 'assistant', text: 'The SubAgent is running.' },
+      { role: 'assistant', text: 'The SubAgent finished.' },
     ]);
   });
 
@@ -530,22 +547,110 @@ describe('main transcript projection', () => {
 
     const merged = mergeHistory(previous, incoming);
 
-    expect(merged).toHaveLength(1);
-    expect(merged[0]?.text).toBe('Done.');
-    expect(merged[0]?.workBlocks).toMatchObject([{ type: 'progress', text: 'Done.' }]);
+    expect(merged).toHaveLength(2);
+    expect(merged.map(message => message.id)).toEqual(['assistant-a', 'assistant-b']);
+    expect(merged.every(message => message.text === 'Done.')).toBe(true);
   });
 
-  it('keeps earlier model text as progress and only the last segment as the answer', () => {
+  it('does not fold a live completion into an existing history message', () => {
+    const remote = [{
+      id: 'msg_session_000002',
+      role: 'assistant' as const,
+      text: '最终回答只出现一次。',
+      workBlocks: [
+        { id: 'history-progress', type: 'progress' as const, text: '正在检查文件。' },
+        { id: 'history-tool', type: 'tool' as const, tool: { id: 'tool-1', name: 'Read', args: { path: 'src/a.ts' }, result: 'ok' } },
+      ],
+      createdAt: '2026-08-19T05:00:00.000Z',
+    }];
+    const live = [{
+      id: 'live-session-temporary-id',
+      role: 'assistant' as const,
+      text: '最终回答只出现一次。',
+      workBlocks: [
+        { id: 'live-progress', type: 'progress' as const, text: '正在检查文件。' },
+        { id: 'live-tool', type: 'tool' as const, tool: { id: 'tool-1', name: 'Read', args: { path: 'src/a.ts' } } },
+      ],
+      createdAt: '2026-08-19T05:00:04.000Z',
+    }];
+
+    const merged = mergeHistory(live, remote);
+
+    expect(merged).toHaveLength(2);
+    expect(merged.map(message => message.id)).toEqual(['msg_session_000002', 'live-session-temporary-id']);
+    expect(merged.every(message => message.text === '最终回答只出现一次。')).toBe(true);
+  });
+
+  it('keeps a live process row separate from the stable final history row', () => {
+    const merged = mergeHistory([
+      {
+        id: 'live-session-other-temporary-id',
+        role: 'assistant',
+        text: '',
+        workBlocks: [{ id: 'live-progress', type: 'progress', text: '过程输出。' }],
+        createdAt: '2026-08-19T05:00:04.000Z',
+      },
+    ], [{
+      id: 'msg_session_000002',
+      role: 'assistant',
+      text: '真正的最终回答。',
+      workBlocks: [{ id: 'history-progress', type: 'progress', text: '过程输出。' }],
+      createdAt: '2026-08-19T05:00:00.000Z',
+    }]);
+
+    expect(merged).toHaveLength(2);
+    expect(merged.map(message => message.id)).toEqual(['msg_session_000002', 'live-session-other-temporary-id']);
+    expect(merged[0]).toMatchObject({ text: '真正的最终回答。' });
+    expect(merged[1]?.text).toBe('');
+  });
+
+  it('does not turn an already confirmed final answer into a progress block', () => {
+    const confirmed = {
+      id: 'msg_session_000002',
+      role: 'assistant' as const,
+      text: '最终回答。',
+      workBlocks: [{ id: 'history-progress', type: 'progress' as const, text: '检查完成。' }],
+      createdAt: '2026-08-19T05:00:00.000Z',
+    };
+    const completedLive = {
+      id: 'live-session-completed-temporary-id',
+      role: 'assistant' as const,
+      text: '最终回答。',
+      workBlocks: [{ id: 'live-progress', type: 'progress' as const, text: '检查完成。' }],
+      createdAt: '2026-08-19T05:00:04.000Z',
+    };
+
+    const merged = mergeHistory([confirmed], [completedLive]);
+
+    expect(merged).toHaveLength(2);
+    expect(merged[0]).toMatchObject({ id: 'msg_session_000002', text: '最终回答。' });
+    expect(merged[1]).toMatchObject({ id: 'live-session-completed-temporary-id', text: '最终回答。' });
+  });
+
+  it('does not merge a team member report into an assistant answer', () => {
+    const report = {
+      id: 'team-report-1',
+      role: 'system' as const,
+      kind: 'discussion' as const,
+      text: '成员回报：缓存策略应该保留。',
+      speaker: { from: 'team' as const, id: 'member-1', name: '缓存审查员' },
+    };
+
+    const merged = mergeHistory([report], [report]);
+
+    expect(merged).toEqual([report]);
+  });
+
+  it('keeps consecutive assistant messages as independent transcript rows', () => {
     const folded = foldConversationTurns([
       { id: 'a1', role: 'assistant', text: 'I will inspect the files.' },
       { id: 'a2', role: 'assistant', text: 'The issue is in the event projector.' },
     ]);
-    expect(folded).toHaveLength(1);
-    expect(folded[0]?.text).toBe('The issue is in the event projector.');
-    expect(folded[0]?.workBlocks).toMatchObject([
-      { type: 'progress', text: 'I will inspect the files.' },
+    expect(folded).toHaveLength(2);
+    expect(folded.map(message => message.text)).toEqual([
+      'I will inspect the files.',
+      'The issue is in the event projector.',
     ]);
-    expect(folded[0]?.thinking).toBeUndefined();
   });
 
   it('keeps a retried assistant answer after the visible system error that caused it', () => {
@@ -606,7 +711,7 @@ describe('main transcript projection', () => {
     }]);
   });
 
-  it('keeps a folded final summary stable when history is reconciled again', () => {
+  it('keeps independent messages stable when history is projected again', () => {
     const once = foldConversationTurns([
       {
         id: 'step-1',
@@ -620,10 +725,13 @@ describe('main transcript projection', () => {
     const twice = foldConversationTurns(once);
 
     expect(twice).toEqual(once);
-    expect(twice[0]?.text).toBe('The change is complete and verified.');
+    expect(twice.map(message => message.text)).toEqual([
+      'I am applying the change.',
+      'The change is complete and verified.',
+    ]);
   });
 
-  it('keeps tool calls between the reasoning blocks that surrounded them', () => {
+  it('keeps tool results as their own message', () => {
     const first = apiMessageToChat({
       id: 'step-1',
       role: 'assistant',
@@ -647,11 +755,13 @@ describe('main transcript projection', () => {
     })!;
 
     const folded = foldConversationTurns([first, result, second]);
-    expect(folded[0]?.workBlocks?.map(block => block.type)).toEqual(['thinking', 'tool', 'thinking']);
-    expect(folded[0]?.workBlocks?.[1]).toMatchObject({
-      type: 'tool',
-      tool: { id: 'edit-1', name: 'Edit', result: 'Content tag mismatch', isError: true },
-    });
+    expect(folded[0]?.workBlocks?.map(block => block.type)).toEqual(['thinking', 'tool']);
+    expect(folded[1]?.toolCalls).toMatchObject([{
+      id: 'edit-1',
+      result: 'Content tag mismatch',
+      isError: true,
+    }]);
+    expect(folded[2]?.text).toBe('Done.');
   });
 });
 

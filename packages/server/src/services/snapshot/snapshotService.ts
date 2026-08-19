@@ -52,7 +52,7 @@ import {
   IQuestionService,
   isInternalTeamDirectMessage,
   readWireTranscript,
-  toProtocolMessage,
+  toProtocolMessages,
   toProtocolSession,
   type Event as ProtocolEvent,
   type SessionMeta,
@@ -202,8 +202,9 @@ export class SnapshotService extends Disposable implements ISnapshotService {
       if (isInternalTeamDirectMessage(entry.message)) return [];
       const baseMs = entry.time ?? sessionCreatedAtMs + idx;
       const createdAtMs = Math.max(previousMs + 1, baseMs);
-      previousMs = createdAtMs;
-      return [toProtocolMessage(sid, idx, entry.message, sessionCreatedAtMs, createdAtMs)];
+      const messages = toProtocolMessages(sid, idx, entry.message, sessionCreatedAtMs, createdAtMs);
+      previousMs = createdAtMs + messages.length - 1;
+      return messages;
     });
   }
 

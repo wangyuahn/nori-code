@@ -138,6 +138,7 @@ export {
   isInternalTeamDirectMessage,
   parseMessageId,
   toProtocolMessage,
+  toProtocolMessages,
 } from './message/message';
 export type { MessageListQuery } from './message/message';
 export { MessageService } from './message/messageService';

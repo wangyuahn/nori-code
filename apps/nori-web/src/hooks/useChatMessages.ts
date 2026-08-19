@@ -147,6 +147,7 @@ export interface UseChatMessagesResult {
   currentWorkBlocks: WorkBlock[];
   sessionStatus: SessionRealtimeStatus | null;
   agentTreeRevision: number;
+  discussionTurnAgentId: string | null | undefined;
   refreshSessionStatus: () => Promise<SessionRealtimeStatus | null>;
   compacting: boolean;
   pendingApprovals: ApprovalRequest[];
@@ -186,6 +187,13 @@ interface WsPayload {
   agentId?: string;
   discussMode?: boolean;
   coderWriteEnabled?: boolean;
+  team?: {
+    reportStatus?: string;
+    reportSummary?: string | null;
+    reportReceived?: boolean;
+    assignedTask?: string | null;
+    status?: string;
+  };
   operationId?: string;
   operation?: 'edit' | 'write';
   path?: string;
@@ -201,6 +209,7 @@ interface WsPayload {
   isError?: boolean;
   subagentId?: string;
   discussionAgentId?: string;
+  currentTurnAgentId?: string | null;
   kind?: string;
   runInBackground?: boolean;
   info?: {
@@ -223,10 +232,40 @@ function addTokenUsage(left: TokenUsage | undefined, right: TokenUsage | undefin
 interface WsMessage {
   type: string;
   id?: string;
+  seq?: number;
+  epoch?: string;
+  volatile?: boolean;
   session_id?: string;
   code?: number;
   offset?: number;
   payload?: WsPayload;
+}
+
+/**
+ * Durable WebSocket events are replayable. A reconnect can therefore deliver
+ * the same event once through the live subscription and once through replay.
+ * Volatile frames intentionally share the durable watermark and must not
+ * participate in this comparison.
+ */
+export class RealtimeEventDeduper {
+  private epoch: string | undefined;
+  private lastDurableSeq = 0;
+
+  reset(): void {
+    this.epoch = undefined;
+    this.lastDurableSeq = 0;
+  }
+
+  accept(frame: { seq?: number; epoch?: string; volatile?: boolean }): boolean {
+    if (frame.volatile === true || frame.seq === undefined) return true;
+    if (frame.epoch !== undefined && frame.epoch !== this.epoch) {
+      this.epoch = frame.epoch;
+      this.lastDurableSeq = 0;
+    }
+    if (frame.seq <= this.lastDurableSeq) return false;
+    this.lastDurableSeq = frame.seq;
+    return true;
+  }
 }
 
 function stripLeadingSystemReminders(text: string): string {
@@ -294,31 +333,6 @@ const SILENT_WAKE_ORIGIN_KINDS = new Set([
 
 export function isSilentWakeOrigin(kind: string | undefined): boolean {
   return kind !== undefined && SILENT_WAKE_ORIGIN_KINDS.has(kind);
-}
-
-export function contextInjectionSource(origin: { kind?: string; [key: string]: unknown } | undefined): string {
-  if (origin === undefined || typeof origin.kind !== 'string' || origin.kind.length === 0) return 'unknown';
-  if (origin.kind === 'injection') {
-    return typeof origin.variant === 'string' && origin.variant.trim() !== '' ? origin.variant : 'injection';
-  }
-  if (origin.kind === 'skill_activation') {
-    return typeof origin.skillName === 'string' && origin.skillName.trim() !== '' ? origin.skillName : 'skill';
-  }
-  if (origin.kind === 'plugin_command') {
-    const pluginId = typeof origin.pluginId === 'string' ? origin.pluginId : '';
-    const commandName = typeof origin.commandName === 'string' ? origin.commandName : '';
-    const joined = [pluginId, commandName].filter(part => part.length > 0).join('/');
-    return joined || 'plugin';
-  }
-  if (origin.kind === 'system_trigger') {
-    return typeof origin.name === 'string' && origin.name.trim() !== '' ? origin.name : 'system_trigger';
-  }
-  if (origin.kind === 'hook_result') {
-    return typeof origin.event === 'string' && origin.event.trim() !== '' ? origin.event : 'hook_result';
-  }
-  if (origin.kind === 'compaction_summary') return 'compaction_summary';
-  if (origin.kind === 'shell_command') return 'shell_command';
-  return origin.kind;
 }
 
 function messagePlainText(m: Message): string {
@@ -421,6 +435,9 @@ export function apiMessageToChat(m: Message): ChatMessage | null {
   if (m.role === 'user' && originKind === 'system_trigger' && (origin?.name === 'team_dm' || isLegacyTeamDm)) {
     return null;
   }
+  if (m.role === 'tool' && originKind === 'injection' && origin?.variant === 'permission_mode') {
+    return null;
+  }
   const speaker = toDiscussionSpeaker(origin?.speaker);
   if (m.role === 'user' && originKind !== undefined && originKind !== 'user') {
     if (isSilentWakeOrigin(originKind)) {
@@ -437,26 +454,6 @@ export function apiMessageToChat(m: Message): ChatMessage | null {
           ...(speaker.id ? { id: speaker.id } : {}),
           ...(speaker.name ? { name: speaker.name } : {}),
         },
-        createdAt: m.created_at,
-      };
-    }
-    if (originKind === 'injection') {
-      // Permission-mode reminders are internal control messages, not a model
-      // tool call. Rendering them as ContextInjection falsely advertises a
-      // callable tool to Team Agents and exposes the permission reminder as
-      // its result.
-      if (contextInjectionSource(origin) === 'permission_mode') return null;
-      const injected = unwrapLeadingSystemReminder(messagePlainText(m));
-      return {
-        id: m.id,
-        role: 'assistant',
-        text: '',
-        toolCalls: [{
-          id: `${m.id}-context-injection`,
-          name: 'ContextInjection',
-          args: { source: contextInjectionSource(origin) },
-          result: injected,
-        }],
         createdAt: m.created_at,
       };
     }
@@ -519,6 +516,14 @@ export function apiMessageToChat(m: Message): ChatMessage | null {
       }
     }
   }
+  // Permission-mode reminders remain model context, but are intentionally
+  // omitted from the human transcript. Read the projected tool input instead
+  // of manufacturing a ContextInjection from message origin metadata.
+  toolCalls = toolCalls.filter(tool => {
+    if (tool.name !== 'ContextInjection') return true;
+    if (typeof tool.args !== 'object' || tool.args === null) return true;
+    return (tool.args as { source?: unknown }).source !== 'permission_mode';
+  });
 
   const thinking = m.thinking || thinkingFromContent || undefined;
   const textIsProgress = m.role === 'assistant' && toolCalls.length > 0 && Boolean(text.trim());
@@ -541,50 +546,13 @@ export function apiMessageToChat(m: Message): ChatMessage | null {
   };
 }
 
+/**
+ * Keep persisted message boundaries intact. Process/tool messages and the
+ * final assistant answer are separate messages; combining them here makes the
+ * UI manufacture a final row containing the whole preceding transcript.
+ */
 export function foldConversationTurns(messages: ChatMessage[]): ChatMessage[] {
-  const folded: ChatMessage[] = [];
-  let assistantIndex = -1;
-
-  for (const message of messages) {
-    if (message.turnBoundary) {
-      // Hidden reminders wake the same top-level user turn. They are not a
-      // second visible answer and must not create another Nori avatar.
-      continue;
-    }
-    if (message.role !== 'assistant') {
-      folded.push(message);
-      // A visible non-assistant event is part of the transcript. Never merge a
-      // later retry answer into an assistant message that precedes it.
-      assistantIndex = -1;
-      continue;
-    }
-
-    const incoming = normalizeAssistantMessage(message);
-    if (assistantIndex < 0) {
-      assistantIndex = folded.length;
-      folded.push(incoming);
-      continue;
-    }
-
-    const previous = moveAssistantTextToProgress(
-      folded[assistantIndex]!,
-      `${folded[assistantIndex]!.id}-progress-before-${incoming.id}`,
-    );
-    const toolCalls = mergeToolCalls(previous.toolCalls ?? [], incoming.toolCalls ?? []);
-    const thinking = [previous.thinking, incoming.thinking].filter(Boolean).join('\n\n');
-    const workBlocks = mergeWorkBlocks(materializeWorkBlocks(previous), materializeWorkBlocks(incoming));
-    folded[assistantIndex] = {
-      ...previous,
-      text: incoming.text,
-      thinking: thinking || undefined,
-      workBlocks: workBlocks.length > 0 ? workBlocks : undefined,
-      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-      createdAt: incoming.createdAt ?? previous.createdAt,
-      usage: addTokenUsage(previous.usage, incoming.usage),
-    };
-  }
-
-  return folded;
+  return messages.filter(message => !message.turnBoundary);
 }
 
 export function insertSteerBoundary(
@@ -592,14 +560,11 @@ export function insertSteerBoundary(
   assistant: ChatMessage | null,
   user: ChatMessage,
 ): ChatMessage[] {
-  const progressAssistant = assistant === null
-    ? null
-    : moveAssistantTextToProgress(assistant, `${assistant.id}-steer-progress`);
-  return foldConversationTurns([
+  return [
     ...messages,
-    ...(progressAssistant === null ? [] : [progressAssistant]),
+    ...(assistant === null ? [] : [assistant]),
     user,
-  ]);
+  ];
 }
 
 function workBlocksFromMessage(
@@ -653,41 +618,6 @@ function workBlocksFromMessage(
 function createProgressBlock(id: string, text: string): Extract<WorkBlock, { type: 'progress' }> | undefined {
   const normalized = stripGeneratedSessionTitle(text).trim();
   return normalized ? { id, type: 'progress', text: normalized } : undefined;
-}
-
-function materializeWorkBlocks(message: ChatMessage): WorkBlock[] {
-  if (message.workBlocks !== undefined) return message.workBlocks;
-  return [
-    ...(message.thinking
-      ? [{ id: `${message.id}-thinking`, type: 'thinking' as const, text: message.thinking }]
-      : []),
-    ...(message.toolCalls ?? []).map((tool, index) => ({
-      id: tool.id ?? `${message.id}-tool-${index}`,
-      type: 'tool' as const,
-      tool,
-    })),
-  ];
-}
-
-function moveAssistantTextToProgress(message: ChatMessage, blockId: string): ChatMessage {
-  const progress = createProgressBlock(blockId, message.text);
-  if (progress === undefined) return message;
-
-  const blocks = mergeWorkBlocks([], materializeWorkBlocks(message));
-  const alreadyRepresented = blocks.some(block => block.type === 'progress' && block.text === progress.text);
-  if (!alreadyRepresented) {
-    const firstToolIndex = blocks.findIndex(block => block.type === 'tool');
-    blocks.splice(firstToolIndex < 0 ? blocks.length : firstToolIndex, 0, progress);
-  }
-  return { ...message, text: '', workBlocks: blocks };
-}
-
-function normalizeAssistantMessage(message: ChatMessage): ChatMessage {
-  const hasToolWork = (message.toolCalls?.length ?? 0) > 0
-    || message.workBlocks?.some(block => block.type === 'tool') === true;
-  return hasToolWork && message.workBlocks === undefined
-    ? moveAssistantTextToProgress(message, `${message.id}-progress`)
-    : message;
 }
 
 function mergeWorkBlocks(previous: WorkBlock[], incoming: WorkBlock[]): WorkBlock[] {
@@ -782,7 +712,7 @@ function messageTime(message: ChatMessage): number {
  * Prompt submit returns a synthetic `msg_<sid>_pending_<promptId>` before the
  * transcript assigns the stable `msg_<sid>_<index>` id. Treat both that
  * placeholder and local/live ids as transient so history merge can collapse
- * them by text instead of showing the same user turn twice.
+ * them by their authoritative server id instead of showing the same user turn twice.
  */
 export function isTransientChatMessageId(id: string): boolean {
   return id.startsWith('local-user-') || id.startsWith('live-') || id.includes('_pending_prompt_');
@@ -820,45 +750,36 @@ export function confirmOptimisticUserMessage(
 }
 
 export function mergeHistory(previous: ChatMessage[], remote: ChatMessage[]): ChatMessage[] {
-  const remoteIds = new Set(remote.map(message => message.id));
-  const merged = [...remote];
-
-  for (const local of previous) {
-    if (remoteIds.has(local.id)) continue;
-    const isOptimisticLocal = isTransientChatMessageId(local.id);
-    const duplicateIndex = isOptimisticLocal ? remote.findIndex(serverMessage =>
-      serverMessage.role === local.role &&
-      serverMessage.text === local.text &&
-      Math.abs(messageTime(serverMessage) - messageTime(local)) < 15_000 &&
-      (local.role === 'assistant' || (serverMessage.thinking ?? '') === (local.thinking ?? '')),
-    ) : -1;
-    if (duplicateIndex >= 0) {
-      if (local.usage !== undefined) {
-        merged[duplicateIndex] = { ...merged[duplicateIndex]!, usage: local.usage };
-      }
-    } else {
-      merged.push(local);
-    }
+  // Message ids are the only safe identity here. Process text, Team reports,
+  // and final answers may be identical while representing different events.
+  const byId = new Map<string, ChatMessage>();
+  for (const message of remote) {
+    if (!byId.has(message.id)) byId.set(message.id, message);
   }
-
-  merged.sort((a, b) => messageTime(a) - messageTime(b));
-  return foldConversationTurns(merged);
+  for (const local of previous) {
+    if (byId.has(local.id)) continue;
+    // Legacy prompt submissions used a pending id before the server returned
+    // the authoritative user_message_id. Keep this narrow compatibility path
+    // for user rows only; assistant/process rows are never text-matched.
+    const confirmedUser = local.role === 'user' && local.id.includes('_pending_prompt_')
+      ? remote.find(message =>
+        message.role === local.role
+        && message.text === local.text
+        && message.id.startsWith('msg_')
+        && Math.abs(messageTime(message) - messageTime(local)) < 15_000
+        && (message.thinking ?? '') === (local.thinking ?? ''),
+      )
+      : undefined;
+    if (confirmedUser !== undefined) continue;
+    byId.set(local.id, local);
+  }
+  return foldConversationTurns([...byId.values()].sort((a, b) => messageTime(a) - messageTime(b)));
 }
 
-function reconcileHistory(previous: ChatMessage[], remote: ChatMessage[]): ChatMessage[] {
-  const claimed = new Set<string>();
-  return remote.map(serverMessage => {
-    const local = previous.find(candidate =>
-      !claimed.has(candidate.id)
-      && candidate.role === serverMessage.role
-      && candidate.text === serverMessage.text
-      && (candidate.thinking ?? '') === (serverMessage.thinking ?? '')
-      && Math.abs(messageTime(candidate) - messageTime(serverMessage)) < 15_000,
-    );
-    if (!local) return serverMessage;
-    claimed.add(local.id);
-    return { ...serverMessage, id: local.id, usage: serverMessage.usage ?? local.usage };
-  });
+function reconcileHistory(_previous: ChatMessage[], remote: ChatMessage[]): ChatMessage[] {
+  // A replace is an authoritative REST snapshot. Never rename its stable
+  // message ids to temporary UI ids by matching message text.
+  return foldConversationTurns(remote);
 }
 
 function normalizeEventType(type: string): string {
@@ -950,6 +871,7 @@ export function useChatMessages(
   const [currentWorkBlocks, setCurrentWorkBlocks] = useState<WorkBlock[]>([]);
   const [sessionStatus, setSessionStatus] = useState<SessionRealtimeStatus | null>(null);
   const [agentTreeRevision, setAgentTreeRevision] = useState(0);
+  const [discussionTurnAgentId, setDiscussionTurnAgentId] = useState<string | null | undefined>(undefined);
   const [compacting, setCompacting] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
   const [pendingQuestions, setPendingQuestions] = useState<QuestionRequest[]>([]);
@@ -1140,6 +1062,7 @@ export function useChatMessages(
     sessionStatusScopeRef.current = null;
     setSessionStatus(null);
     setAgentTreeRevision(0);
+    setDiscussionTurnAgentId(undefined);
     setPendingQuestions([]);
     attentionRequestIdsRef.current = new Set([
       ...pendingApprovals.map(request => `approval:${request.approval_id}`),
@@ -1299,6 +1222,7 @@ export function useChatMessages(
     let disposed = false;
     let reconnectAttempt = 0;
     let subscribeRequestId: string | null = null;
+    const eventDeduper = new RealtimeEventDeduper();
 
     const scheduleHistoryRefresh = () => {
       if (historyRefreshTimerRef.current) clearTimeout(historyRefreshTimerRef.current);
@@ -1367,6 +1291,7 @@ export function useChatMessages(
             return;
           }
 
+          if (!eventDeduper.accept(data)) return;
           const type = normalizeEventType(data.type);
           const payload = data.payload ?? {};
           if (data.session_id && data.session_id !== sessionId) return;
@@ -1443,7 +1368,7 @@ export function useChatMessages(
             case 'prompt.completed':
               playNotificationSound(payload.reason === 'failed' ? 'error' : 'complete');
               if (streamingRef.current || thinkingRef.current || liveWorkBlocksRef.current.length > 0) {
-                finishTurn(activeTurnIdRef.current ?? undefined);
+                finishTurn(activeTurnIdRef.current ?? undefined, true);
               }
               else setIsStreaming(false);
               break;
@@ -1452,12 +1377,20 @@ export function useChatMessages(
                 setQueuedPrompts(previous => previous.filter(item => item.id !== payload.promptId));
               }
               if (shouldFinishAbortedPrompt(promptIdRef.current, payload.promptId)) {
-                finishTurn(activeTurnIdRef.current ?? undefined);
+                finishTurn(activeTurnIdRef.current ?? undefined, true);
               }
               break;
             case 'tool.call.started':
               lastStreamActivityAtRef.current = Date.now();
               if (payload.toolCallId && payload.name) {
+                const existingTool = liveWorkBlocksRef.current.find(
+                  block => block.type === 'tool' && block.tool.id === payload.toolCallId,
+                );
+                if (existingTool?.type === 'tool') {
+                  activeToolCallsRef.current.set(payload.toolCallId, existingTool.tool);
+                  setIsStreaming(true);
+                  break;
+                }
                 const tool = { id: payload.toolCallId, name: payload.name, args: payload.args, startedAt: Date.now() };
                 activeToolCallsRef.current.set(payload.toolCallId, tool);
                 const progress = createProgressBlock(
@@ -1539,6 +1472,9 @@ export function useChatMessages(
               break;
             case 'agent.status.updated':
               setSessionStatus(previous => applyRealtimeStatusEvent(previous, type, payload));
+              if (payload.team !== undefined) {
+                setAgentTreeRevision(previous => previous + 1);
+              }
               if (payload.discussMode === undefined && payload.coderWriteEnabled === undefined) {
                 void refreshSessionStatus().catch(error => console.error('Agent status refresh failed:', error));
               }
@@ -1547,7 +1483,11 @@ export function useChatMessages(
               void refreshSessionStatus().catch(error => console.error('Session status refresh failed:', error));
               break;
             case 'discussion.updated':
-              setAgentTreeRevision(previous => previous + 1);
+              if (payload.currentTurnAgentId !== undefined) {
+                setDiscussionTurnAgentId(payload.currentTurnAgentId);
+              } else {
+                setAgentTreeRevision(previous => previous + 1);
+              }
               void refreshSessionStatus()
                 .catch(error => console.error('Discussion status refresh failed:', error));
               if (payload.discussionAgentId === agentId) {
@@ -1893,7 +1833,7 @@ export function useChatMessages(
     await refreshQuestions();
   }, [agentId, refreshQuestions, sessionId]);
 
-  return { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus: statusForSession(sessionStatus, sessionStatusScopeRef.current, chatScopeKey(sessionId, agentId)), agentTreeRevision, refreshSessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort };
+  return { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus: statusForSession(sessionStatus, sessionStatusScopeRef.current, chatScopeKey(sessionId, agentId)), agentTreeRevision, discussionTurnAgentId, refreshSessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort };
 }
 
 export function statusForSession(

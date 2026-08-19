@@ -1,4 +1,9 @@
 extends: nori-coder
 name: orchestrator
 description: Read-only temporary task agent for bounded inspection and delegation.
+systemPromptPath: ./temporary-agent.md
+promptVars:
+  roleAdditional: |
+    This profile is a temporary worker owned by the main Agent. Stay within the
+    bounded task and return a complete handoff to the parent.
 

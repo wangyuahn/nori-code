@@ -2305,6 +2305,8 @@ kbd {
 .session-agent-tree-menu-icon { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid color-mix(in srgb, var(--nori-cyan) 42%, var(--nori-border)); border-radius: 7px; color: var(--nori-cyan); background: var(--nori-cyan-dim); }
 .session-agent-tree-menu-state { display: flex; flex: none; align-items: center; gap: 6px; }
 .session-agent-tree-state-chip, .session-agent-tree-live-chip { display: inline-flex; align-items: center; gap: 4px; min-height: 23px; padding: 3px 6px; border: 1px solid var(--nori-border); border-radius: 5px; color: var(--nori-text-muted); background: var(--nori-control); font-size: calc(9px * var(--nori-ui-font-scale)); font-weight: 700; }
+.session-agent-tree-turn-chip { display: inline-flex; max-width: 190px; align-items: center; gap: 4px; min-height: 23px; padding: 3px 6px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--nori-cyan) 52%, var(--nori-border)); border-radius: 5px; color: var(--nori-cyan); background: var(--nori-cyan-dim); font-size: calc(9px * var(--nori-ui-font-scale)); font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.session-agent-tree-turn-chip i { width: 6px; height: 6px; flex: none; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 20%, transparent); }
 .session-agent-tree-state-chip.discuss { border-color: color-mix(in srgb, var(--nori-purple) 48%, var(--nori-border)); color: var(--nori-purple); background: var(--nori-purple-dim); }
 .session-agent-tree-live-chip { color: var(--nori-success); }
 .session-agent-tree-live-chip i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
@@ -2317,6 +2319,8 @@ kbd {
 .session-agent-tree-node > button:not(.session-agent-tree-toggle) { display: grid; min-height: 48px; min-width: 0; grid-column: 2; grid-row: 1; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px 13px 6px 0; }
 .session-agent-tree-node > button:not(.session-agent-tree-toggle):hover:not(:disabled), .session-agent-tree-node.selected > button:not(.session-agent-tree-toggle) { background: var(--nori-surface-hover); }
 .session-agent-tree-node.selected > button:not(.session-agent-tree-toggle) { box-shadow: inset 2px 0 0 var(--nori-cyan); }
+.session-agent-tree-node.discussion-current-turn > button:not(.session-agent-tree-toggle) { border: 1px solid color-mix(in srgb, var(--nori-cyan) 68%, var(--nori-border)); border-radius: 6px; background: color-mix(in srgb, var(--nori-cyan-dim) 72%, var(--nori-surface-raised)); box-shadow: inset 3px 0 0 var(--nori-cyan), 0 0 0 1px color-mix(in srgb, var(--nori-cyan) 18%, transparent); }
+.session-agent-tree-node.discussion-current-turn .status-dot { background: var(--nori-cyan); box-shadow: 0 0 0 3px var(--nori-cyan-dim); }
 .session-agent-tree-node > button:disabled { cursor: default; opacity: .58; }
 .session-agent-tree-toggle { display: grid; width: 18px; height: 22px; grid-column: 1; grid-row: 1; place-items: center; padding: 0; color: var(--nori-text-muted); }
 .session-agent-tree-toggle:hover { color: var(--nori-cyan); }
@@ -2329,6 +2333,8 @@ kbd {
 .session-agent-tree-copy em { flex: none; overflow: hidden; color: var(--nori-text-secondary); font-size: calc(10px * var(--nori-ui-font-scale)); font-style: normal; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .session-agent-tree-identity { display: inline-flex; align-items: center; gap: 3px; min-width: 0; color: var(--nori-text-secondary); }
 .session-agent-tree-node.discussion .session-agent-tree-identity { color: var(--nori-purple); }
+.session-agent-tree-node.discussion-current-turn .session-agent-tree-identity { color: var(--nori-cyan); }
+.session-agent-tree-identity b { display: inline-flex; align-items: center; padding: 2px 4px; border-radius: 4px; color: var(--nori-cyan); background: var(--nori-cyan-dim); font-size: calc(8px * var(--nori-ui-font-scale)); font-style: normal; font-weight: 750; }
 .session-agent-tree-node.discussion .status-dot.active { background: var(--nori-purple); box-shadow: 0 0 0 3px var(--nori-purple-dim); }
 .session-agent-tree-node.archived-discussion .session-agent-tree-identity { color: var(--nori-text-muted); }
 .session-agent-tree-copy small { color: var(--nori-text-secondary); font-size: calc(11px * var(--nori-ui-font-scale)); }
@@ -3407,15 +3413,11 @@ kbd {
 /* Task controls and multimodal composer */
 .composer-mode-row { display: flex; min-height: 28px; align-items: center; justify-content: space-between; gap: 10px; padding-top: 3px; border-top: 1px solid var(--nori-border); }
 .composer-mode-options { display: flex; min-width: 0; align-items: center; gap: 14px; }
-.composer-task-mode { display: inline-grid; grid-template-columns: repeat(2, minmax(54px, 1fr)); padding: 2px; border: 1px solid var(--nori-border); border-radius: 6px; background: var(--nori-bg); }
-.composer-task-mode button { min-height: 24px; padding: 3px 9px; border: 0; border-radius: 4px; color: var(--nori-text-muted); background: transparent; cursor: pointer; font-size: calc(10px * var(--nori-ui-font-scale)); font-weight: 650; }
-.composer-task-mode button:hover:not(:disabled) { color: var(--nori-text); }
-.composer-task-mode button.active { color: var(--nori-text); background: var(--nori-control-hover); box-shadow: inset 0 0 0 1px var(--nori-border); }
-.main-write-toggle { display: inline-flex; align-items: center; gap: 7px; color: var(--nori-text-secondary); cursor: pointer; font-size: calc(10px * var(--nori-ui-font-scale)); }
-.main-write-toggle input { width: 26px; height: 15px; margin: 0; appearance: none; border: 1px solid var(--nori-border-active); border-radius: 10px; background: var(--nori-control); cursor: pointer; transition: background .15s; }
-.main-write-toggle input::after { content: ''; display: block; width: 9px; height: 9px; margin: 2px; border-radius: 50%; background: var(--nori-text-muted); transition: transform .15s, background .15s; }
-.main-write-toggle input:checked { border-color: color-mix(in srgb, var(--nori-cyan) 70%, var(--nori-border)); background: color-mix(in srgb, var(--nori-cyan) 22%, var(--nori-control)); }
-.main-write-toggle input:checked::after { background: var(--nori-cyan); transform: translateX(11px); }
+.loop-mode-toggle { display: inline-flex; align-items: center; gap: 7px; color: var(--nori-text-secondary); cursor: pointer; font-size: calc(10px * var(--nori-ui-font-scale)); }
+.loop-mode-toggle input { width: 26px; height: 15px; margin: 0; appearance: none; border: 1px solid var(--nori-border-active); border-radius: 10px; background: var(--nori-control); cursor: pointer; transition: background .15s; }
+.loop-mode-toggle input::after { content: ''; display: block; width: 9px; height: 9px; margin: 2px; border-radius: 50%; background: var(--nori-text-muted); transition: transform .15s, background .15s; }
+.loop-mode-toggle input:checked { border-color: color-mix(in srgb, var(--nori-cyan) 70%, var(--nori-border)); background: color-mix(in srgb, var(--nori-cyan) 22%, var(--nori-control)); }
+.loop-mode-toggle input:checked::after { background: var(--nori-cyan); transform: translateX(11px); }
 .loop-mode-toggle input:checked { border-color: color-mix(in srgb, var(--nori-success) 70%, var(--nori-border)); background: color-mix(in srgb, var(--nori-success) 20%, var(--nori-control)); }
 .loop-mode-toggle input:checked::after { background: var(--nori-success); }
 .composer-attachments { display: flex; gap: 7px; padding: 2px 0 5px; overflow-x: auto; }
@@ -4152,7 +4154,11 @@ kbd {
 }
 .composer-toolbar .composer-image-button:hover:not(:disabled) { color: var(--nori-text); background: var(--nori-control-hover); }
 .composer-control-popover { position: relative; flex: none; }
-.composer-model-popover {
+.composer-icon-trigger { display: grid; width: 32px; height: 32px; place-items: center; padding: 0; border: 0; border-radius: 50%; color: var(--nori-warning); background: transparent; cursor: pointer; transition: color 150ms ease, background-color 150ms ease, transform 150ms ease; }
+.composer-icon-trigger:hover, .composer-control-popover.open > .composer-icon-trigger { background: var(--nori-control-hover); transform: scale(1.04); }
+.composer-icon-trigger.permission-auto { color: var(--nori-cyan); }
+.composer-icon-trigger.permission-yolo { color: var(--nori-danger); }
+.composer-permission-popover, .composer-model-popover {
   position: absolute;
   z-index: 18;
   bottom: 40px;
@@ -4167,25 +4173,23 @@ kbd {
   transform-origin: bottom center;
   transition: opacity 160ms ease, transform 190ms cubic-bezier(.2,.82,.2,1), visibility 0s linear 190ms;
 }
+.composer-control-popover.open > .composer-permission-popover,
 .composer-control-popover.open > .composer-model-popover { visibility: visible; opacity: 1; pointer-events: auto; transform: translateY(0) scale(1); transition-delay: 0s; }
-.composer-task-mode { display: inline-grid; width: 140px; height: 32px; flex: none; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; padding: 3px; border: 1px solid var(--nori-border-strong); border-radius: 10px; background: var(--nori-control); }
-.composer-task-mode button { min-width: 0; min-height: 24px; padding: 2px 9px; border: 0; border-radius: 7px; color: var(--nori-text-muted); background: transparent; cursor: pointer; font-size: calc(10px * var(--nori-ui-font-scale)); font-weight: 650; transition: color 150ms ease, background-color 150ms ease, box-shadow 150ms ease; }
-.composer-task-mode button + button { border-left: 1px solid var(--nori-border-active); border-radius: 0 7px 7px 0; }
-.composer-task-mode button:hover:not(:disabled) { color: var(--nori-text); background: var(--nori-control-hover); }
-.composer-task-mode button.active { color: var(--nori-text); background: var(--nori-control-active); box-shadow: inset 0 0 0 1px var(--nori-border); }
-.composer-task-mode button:disabled { opacity: .45; cursor: default; }
-.composer-task-mode button:focus-visible { position: relative; z-index: 1; outline: 2px solid var(--nori-cyan); outline-offset: -1px; }
+.composer-permission-popover { left: 0; display: grid; width: 252px; gap: 3px; padding: 7px; }
+.composer-permission-popover > button { display: grid; min-height: 48px; grid-template-columns: 30px minmax(0, 1fr) 16px; align-items: center; gap: 8px; padding: 5px 8px; border: 0; border-radius: 9px; color: var(--nori-text-secondary); background: transparent; cursor: pointer; text-align: left; transition: color 140ms ease, background-color 140ms ease, transform 140ms ease; }
+.composer-permission-popover > button:hover:not(:disabled) { color: var(--nori-text); background: var(--nori-control-hover); transform: translateX(2px); }
+.composer-permission-popover > button:disabled { opacity: .45; cursor: default; }
+.composer-permission-popover > button > span:nth-child(2) { display: grid; min-width: 0; gap: 2px; }
+.composer-permission-popover strong { font-size: calc(10px * var(--nori-ui-font-scale)); }
+.composer-permission-popover small { overflow: hidden; color: var(--nori-text-muted); font-size: calc(8px * var(--nori-ui-font-scale)); text-overflow: ellipsis; white-space: nowrap; }
+.permission-option-icon { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 8px; color: var(--nori-warning); background: var(--nori-control); }
+.permission-option-icon.permission-auto { color: var(--nori-cyan); }
+.permission-option-icon.permission-yolo { color: var(--nori-danger); }
 .composer-toolbar .composer-mode-options { gap: 11px; }
-.composer-toolbar .main-write-toggle { gap: 6px; white-space: nowrap; }
-.composer-toolbar .main-write-toggle input { width: 25px; height: 14px; border-color: var(--nori-border-strong); }
-.composer-toolbar .main-write-toggle input::after { width: 8px; height: 8px; }
-.composer-toolbar .main-write-toggle input:checked::after { transform: translateX(11px); }
-.main-write-icon-toggle { position: relative; display: grid; width: 32px; height: 32px; flex: none; place-items: center; border-radius: 50%; color: var(--nori-text-muted); cursor: pointer; }
-.main-write-icon-toggle:hover { color: var(--nori-text); background: var(--nori-control-hover); }
-.main-write-icon-toggle.active { color: var(--nori-cyan); background: color-mix(in srgb, var(--nori-cyan) 10%, transparent); }
-.main-write-icon-toggle input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-.main-write-icon-toggle:has(input:focus-visible) { outline: 2px solid var(--nori-cyan); outline-offset: 2px; }
-.main-write-icon-toggle:has(input:disabled) { opacity: .45; cursor: default; }
+.composer-toolbar .loop-mode-toggle { gap: 6px; white-space: nowrap; }
+.composer-toolbar .loop-mode-toggle input { width: 25px; height: 14px; border-color: var(--nori-border-strong); }
+.composer-toolbar .loop-mode-toggle input::after { width: 8px; height: 8px; }
+.composer-toolbar .loop-mode-toggle input:checked::after { transform: translateX(11px); }
 .composer-toolbar .composer-model-controls { min-width: 0; flex: 0 1 auto; justify-content: flex-end; gap: 2px; }
 .composer-model-menu { width: fit-content; min-width: 0; max-width: min(210px, 26vw); flex: 0 1 auto; }
 .composer-model-trigger { display: flex; width: fit-content; min-width: 0; max-width: 100%; height: 32px; align-items: center; gap: 6px; padding: 0 6px 0 9px; border: 0; border-radius: 9px; color: var(--nori-text); background: transparent; cursor: pointer; transition: color 150ms ease, background-color 150ms ease, transform 150ms ease; }
@@ -4360,16 +4364,6 @@ kbd {
 [data-ui-scale] .chat-input-area {
   gap: calc(5px * var(--nori-ui-control-scale));
   padding-block: calc(11px * var(--nori-ui-control-scale)) calc(9px * var(--nori-ui-control-scale));
-}
-
-[data-ui-scale] .main-write-icon-toggle {
-  width: calc(32px * var(--nori-ui-control-scale));
-  height: calc(32px * var(--nori-ui-control-scale));
-}
-
-[data-ui-scale] .composer-task-mode {
-  width: calc(140px * var(--nori-ui-control-scale));
-  height: calc(32px * var(--nori-ui-control-scale));
 }
 
 [data-ui-scale] .composer-toolbar .chat-send-btn {

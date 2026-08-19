@@ -31,7 +31,7 @@ import {
 import { IApprovalService } from '../approval/approval';
 import { ICoreProcessService } from '../coreProcess/coreProcess';
 import { IEventService } from '../event/event';
-import { toProtocolMessage } from '../message/message';
+import { toProtocolMessages } from '../message/message';
 import { IPromptService, type AgentStatePatch } from '../prompt/prompt';
 import { IQuestionService } from '../question/question';
 import {
@@ -138,8 +138,8 @@ function pageContextMessages(
     Math.max(requestedPageSize ?? DEFAULT_UNDO_MESSAGE_PAGE_SIZE, 1),
     MAX_UNDO_MESSAGE_PAGE_SIZE,
   );
-  const all = context.history.map((message, index) =>
-    toProtocolMessage(sessionId, index, message, sessionCreatedAtMs),
+  const all = context.history.flatMap((message, index) =>
+    toProtocolMessages(sessionId, index, message, sessionCreatedAtMs),
   );
   const desc = all.toReversed();
   return {
@@ -598,14 +598,21 @@ export class SessionService extends Disposable implements ISessionService {
             kind: treeAgentKind(agentId, agent),
             parent_agent_id: agent.parentAgentId,
             name: agent.name ?? agent.subagentItem ?? agentId,
-            title: agent.title,
-            intro: agent.intro,
+            role: agent.role,
+            mandate: agent.mandate,
+            assigned_task: agent.assignedTask ?? agent.teamReport?.task,
+            team_report_status: agent.teamReport?.status,
+            team_report_summary: agent.teamReport?.summary,
+            team_report_received: agent.teamReport?.receivedAt !== undefined,
             summary: agent.discussion?.topic ?? agent.assignedTask ?? agent.subagentItem,
             subagent_item: agent.subagentItem,
             status: this._computeStatus(id, agentId),
             usage,
             last_active: this._lastActivityByAgent.get(key) ?? new Date(summary.updatedAt).toISOString(),
             archived: agent.discussion?.status === 'archived' || agent.archived === true,
+            ...(agent.discussion?.currentTurnAgentId === undefined
+              ? {}
+              : { discussion_turn_agent_id: agent.discussion.currentTurnAgentId }),
           };
         }),
     );

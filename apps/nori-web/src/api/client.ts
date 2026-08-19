@@ -120,13 +120,18 @@ export interface SessionAgent {
   kind: string;
   parent_agent_id?: string;
   name?: string;
-  title?: string;
-  intro?: string;
+  role?: string;
+  mandate?: string;
+  assigned_task?: string;
+  team_report_status?: 'unreported' | 'completed' | 'blocked' | 'needs_decision' | null;
+  team_report_summary?: string;
+  team_report_received?: boolean;
   status: string;
   tokens?: number;
   last_active?: string;
   summary?: string;
   archived?: boolean;
+  discussion_turn_agent_id?: string;
 }
 
 interface SessionAgentTreeWireNode {
@@ -134,13 +139,18 @@ interface SessionAgentTreeWireNode {
   kind: string;
   parent_agent_id: string | null;
   name: string;
-  title?: string;
-  intro?: string;
+  role?: string;
+  mandate?: string;
+  assigned_task?: string;
+  team_report_status?: 'unreported' | 'completed' | 'blocked' | 'needs_decision' | null;
+  team_report_summary?: string;
+  team_report_received?: boolean;
   summary?: string;
   status: string;
   usage?: TokenUsage;
   last_active: string;
   archived: boolean;
+  discussion_turn_agent_id?: string;
 }
 
 function toSessionAgent(node: SessionAgentTreeWireNode): SessionAgent {
@@ -150,8 +160,12 @@ function toSessionAgent(node: SessionAgentTreeWireNode): SessionAgent {
     kind: node.kind,
     parent_agent_id: node.parent_agent_id ?? undefined,
     name: node.name,
-    title: node.title,
-    intro: node.intro,
+    role: node.role,
+    mandate: node.mandate,
+    assigned_task: node.assigned_task,
+    team_report_status: node.team_report_status,
+    team_report_summary: node.team_report_summary,
+    team_report_received: node.team_report_received,
     summary: node.summary,
     status: node.status,
     tokens: usage === undefined
@@ -159,6 +173,7 @@ function toSessionAgent(node: SessionAgentTreeWireNode): SessionAgent {
       : usage.input_other + usage.output + usage.input_cache_read + usage.input_cache_creation,
     last_active: node.last_active,
     archived: node.archived,
+    discussion_turn_agent_id: node.discussion_turn_agent_id,
   };
 }
 

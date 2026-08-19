@@ -26,6 +26,7 @@ const TEMPLATED = new Set([
   'profile/default/coder-system.md',
   'profile/default/nori-system.md',
   'profile/default/system.md',
+  'profile/default/temporary-agent.md',
   'tools/builtin/file/read.md',
   'tools/builtin/file/read-media.md',
   'tools/builtin/shell/bash.md',

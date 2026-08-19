@@ -6,7 +6,7 @@
  * Path access policy is resolved before any Kaos I/O.
  */
 
-import type { Kaos } from '@nori-code/kaos';
+import { computeContentTag, type Kaos } from '@nori-code/kaos';
 import { dirname } from 'pathe';
 import { z } from 'zod';
 
@@ -16,6 +16,7 @@ import type { ExecutableToolContext, ExecutableToolResult, ToolExecution } from 
 import { resolvePathAccessPath } from '../../policies/path-access';
 import { toInputJsonSchema } from '../../support/input-schema';
 import { literalRulePattern, matchesPathRuleSubject } from '../../support/rule-match';
+import { withFileWriteLock } from '../../support/file-write-lock';
 import type { WorkspaceConfig } from '../../support/workspace';
 import WRITE_DESCRIPTION from './write.md?raw';
 import { summarizeChangedLines, type CodeChangeReporter } from './change-summary';
@@ -35,6 +36,13 @@ export const WriteInputSchema = z.object({
     .string()
     .describe(
       'Raw full file content to write exactly as provided. This does not use the Read/Edit text view.',
+    ),
+  expected_tag: z
+    .string()
+    .regex(/^[0-9A-Fa-f]{4}$/)
+    .optional()
+    .describe(
+      'Four-hex content tag from the latest Read output for an existing file. When provided, the write fails instead of overwriting a changed file.',
     ),
   mode: z
     .enum(['overwrite', 'append'])
@@ -84,44 +92,87 @@ export class WriteTool implements BuiltinTool<WriteInput> {
     };
   }
 
-  private async execution(args: WriteInput, safePath: string, context: ExecutableToolContext): Promise<ExecutableToolResult> {
-    const parentError = await this.ensureParentDirectory(safePath);
-    if (parentError !== undefined) {
-      return { isError: true, output: parentError };
-    }
-
-    try {
-      const mode = args.mode ?? 'overwrite';
-      const before = await Promise.resolve()
-        .then(() => this.kaos.readText(safePath))
-        .catch(() => '');
-      if (mode === 'append') {
-        await this.kaos.writeText(safePath, args.content, { mode: 'a' });
-      } else {
-        await this.kaos.writeText(safePath, args.content);
+  private async execution(
+    args: WriteInput,
+    safePath: string,
+    context: ExecutableToolContext,
+  ): Promise<ExecutableToolResult> {
+    return withFileWriteLock(this.kaos, safePath, async ({ waited }) => {
+      const parentError = await this.ensureParentDirectory(safePath);
+      if (parentError !== undefined) {
+        return { isError: true, output: parentError };
       }
-      // Report the number of UTF-8 bytes this call wrote to disk. The string
-      // length would only equal the byte count for pure ASCII content, so it
-      // is not used here.
-      const bytesWritten = Buffer.byteLength(args.content, 'utf8');
-      const after = mode === 'append' ? before + args.content : args.content;
-      this.reportChange?.({ operationId: context.toolCallId, operation: 'write', path: args.path, diff: summarizeChangedLines(before, after), occurredAt: new Date().toISOString() });
-      return {
-        output: `${mode === 'append' ? 'Appended' : 'Wrote'} ${String(bytesWritten)} bytes to ${args.path}`,
-      };
-    } catch (error) {
-      const code = (error as { code?: unknown } | null)?.code;
-      if (code === 'ENOENT') {
+
+      try {
+        const mode = args.mode ?? 'overwrite';
+        const before = await Promise.resolve()
+          .then(() => this.kaos.readText(safePath))
+          .catch(() => '');
+
+        if (args.expected_tag !== undefined) {
+          const expectedTag = args.expected_tag.toUpperCase();
+          const currentTag = computeContentTag(before);
+          if (currentTag !== expectedTag) {
+            return {
+              isError: true,
+              output:
+                `Write conflict for ${args.path}: expected content tag ${expectedTag}, ` +
+                `current content tag ${currentTag}. Re-read the file and retry with the new tag.`,
+            };
+          }
+        }
+
+        // A full overwrite cannot safely merge a request queued behind another
+        // overwrite. Reject it instead of silently replacing earlier content.
+        // Append is safe after the lock because the current file was read while
+        // holding that lock.
+        if (waited && mode === 'overwrite') {
+          const currentTag = computeContentTag(before);
+          return {
+            isError: true,
+            output:
+              `Write conflict for ${args.path}: another write completed while this request was waiting; ` +
+              `current content tag ${currentTag}. Re-read the file and retry with the new content tag.`,
+          };
+        }
+
+        if (mode === 'append') {
+          await this.kaos.writeText(safePath, args.content, { mode: 'a' });
+        } else {
+          await this.kaos.writeText(safePath, args.content);
+        }
+        // Report the number of UTF-8 bytes this call wrote to disk. The string
+        // length would only equal the byte count for pure ASCII content, so it
+        // is not used here.
+        const bytesWritten = Buffer.byteLength(args.content, 'utf8');
+        const after = mode === 'append' ? before + args.content : args.content;
+        const newTag = computeContentTag(after);
+        this.reportChange?.({
+          operationId: context.toolCallId,
+          operation: 'write',
+          path: args.path,
+          diff: summarizeChangedLines(before, after),
+          occurredAt: new Date().toISOString(),
+        });
+        return {
+          output:
+            `[${args.path}#${newTag}]\n` +
+            `${mode === 'append' ? 'Appended' : 'Wrote'} ${String(bytesWritten)} bytes to ${args.path}`,
+        };
+      } catch (error) {
+        const code = (error as { code?: unknown } | null)?.code;
+        if (code === 'ENOENT') {
+          return {
+            isError: true,
+            output: `Failed to write ${args.path}: parent directory does not exist.`,
+          };
+        }
         return {
           isError: true,
-          output: `Failed to write ${args.path}: parent directory does not exist.`,
+          output: error instanceof Error ? error.message : String(error),
         };
       }
-      return {
-        isError: true,
-        output: error instanceof Error ? error.message : String(error),
-      };
-    }
+    });
   }
 
   /**

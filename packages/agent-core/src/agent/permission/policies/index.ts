@@ -10,7 +10,6 @@ import {
 import { GitCwdWriteApprovePermissionPolicy } from './git-cwd-write-approve';
 import { GoalStartReviewAskPermissionPolicy } from './goal-start-review-ask';
 import { DiscussModeGuardDenyPermissionPolicy } from './discuss-mode-guard-deny';
-import { DiscussModeToolApprovePermissionPolicy } from './discuss-mode-tool-approve';
 import { PreToolCallHookPermissionPolicy } from './pre-tool-call-hook';
 import { SessionApprovalHistoryPermissionPolicy } from './session-approval-history';
 import {
@@ -49,8 +48,6 @@ export function createPermissionDecisionPolicies(agent: Agent): PermissionPolicy
     // permission mode to run the goal under, or decline. Applies the mode, then
     // lets the tool create the goal.
     new GoalStartReviewAskPermissionPolicy(agent),
-    // EnterDiscussMode auto-approves; TeamAssign is the Discuss→Code exit.
-    new DiscussModeToolApprovePermissionPolicy(),
     // Access touches a sensitive file (.env, SSH key, credentials) → ask.
     new SensitiveFileAccessAskPermissionPolicy(),
     // Access touches .git or a git control-dir path → ask.

@@ -1,5 +1,7 @@
+import { computeContentTag } from '@nori-code/kaos';
 import { describe, expect, it, vi } from 'vitest';
 
+import { EditTool } from '../../src/tools/builtin/file/edit';
 import { type WriteInput, WriteInputSchema, WriteTool } from '../../src/tools/builtin/file/write';
 import { createFakeKaos, PERMISSIVE_WORKSPACE, toolContentString } from './fixtures/fake-kaos';
 import { executeTool } from './fixtures/execute-tool';
@@ -52,6 +54,20 @@ describe('WriteTool', () => {
     ).toBe(true);
     expect(
       WriteInputSchema.safeParse({ path: '/tmp/out.txt', content: 'hello', mode: 'bad' }).success,
+    ).toBe(false);
+    expect(
+      WriteInputSchema.safeParse({
+        path: '/tmp/out.txt',
+        content: 'hello',
+        expected_tag: 'A1B2',
+      }).success,
+    ).toBe(true);
+    expect(
+      WriteInputSchema.safeParse({
+        path: '/tmp/out.txt',
+        content: 'hello',
+        expected_tag: 'stale',
+      }).success,
     ).toBe(false);
     expect(WriteInputSchema.safeParse({ path: '/tmp/out.txt' }).success).toBe(false);
   });
@@ -129,6 +145,142 @@ describe('WriteTool', () => {
       diff: expect.stringContaining('+hello'),
       occurredAt: expect.any(String),
     });
+  });
+
+  it('rejects a concurrent Write after the first Write commits', async () => {
+    const files = new Map([['/tmp/shared.txt', 'base']]);
+    let firstWriteStarted!: () => void;
+    let releaseFirstWrite!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      firstWriteStarted = resolve;
+    });
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirstWrite = resolve;
+    });
+    const writeText = vi.fn(async (path: string, content: string, options?: { mode?: 'w' | 'a' }) => {
+      if (content === 'first') {
+        firstWriteStarted();
+        await firstRelease;
+      }
+      const next = options?.mode === 'a' ? `${files.get(path) ?? ''}${content}` : content;
+      files.set(path, next);
+      return content.length;
+    });
+    const readText = vi.fn(async (path: string) => {
+      const content = files.get(path);
+      if (content === undefined) {
+        throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      }
+      return content;
+    });
+    const kaos = createFakeKaos({ readText, writeText, stat: DIR_STAT });
+    const tool = new WriteTool(kaos, PERMISSIVE_WORKSPACE);
+
+    const first = executeTool(tool, context({ path: '/tmp/shared.txt', content: 'first' }));
+    await firstStarted;
+    const second = executeTool(tool, context({ path: '/tmp/shared.txt', content: 'second' }));
+    releaseFirstWrite();
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    expect(firstResult.isError).toBeFalsy();
+    expect(secondResult).toMatchObject({ isError: true });
+    expect(secondResult.output).toContain('Write conflict');
+    expect(secondResult.output).toContain('Re-read');
+    expect(files.get('/tmp/shared.txt')).toBe('first');
+    expect(writeText).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the same lock for concurrent Write and Edit calls', async () => {
+    const original = 'base\n';
+    const files = new Map([['/tmp/shared.txt', original]]);
+    let releaseWrite!: () => void;
+    const writeGate = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    let writeStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      writeStarted = resolve;
+    });
+    const writeText = vi.fn(async (path: string, content: string) => {
+      writeStarted();
+      await writeGate;
+      files.set(path, content);
+      return content.length;
+    });
+    const readText = vi.fn(async (path: string) => files.get(path) ?? '');
+    const kaos = createFakeKaos({ readText, writeText, stat: DIR_STAT });
+    const writeTool = new WriteTool(kaos, PERMISSIVE_WORKSPACE);
+    const editTool = new EditTool(kaos, PERMISSIVE_WORKSPACE);
+
+    const write = executeTool(
+      writeTool,
+      context({ path: '/tmp/shared.txt', content: 'new content\n' }),
+    );
+    await started;
+    const edit = executeTool(editTool, {
+      turnId: '0',
+      toolCallId: 'call_edit',
+      args: {
+        path: '/tmp/shared.txt',
+        expected_tag: computeContentTag(original),
+        line_ops: [{ op: 'swap', start: 1, end: 1, content: 'edited' }],
+      },
+      signal,
+    });
+    releaseWrite();
+
+    const [writeResult, editResult] = await Promise.all([write, edit]);
+    expect(writeResult.isError).toBeFalsy();
+    expect(editResult).toMatchObject({ isError: true });
+    expect(editResult.output).toContain('Content tag mismatch');
+    expect(editResult.output).toContain(`current ${computeContentTag('new content\n')}`);
+    expect(files.get('/tmp/shared.txt')).toBe('new content\n');
+  });
+
+  it('rejects a Write with an expired expected tag without overwriting', async () => {
+    const files = new Map([['/tmp/shared.txt', 'current']]);
+    const writeText = vi.fn(async (_path: string, content: string) => content.length);
+    const readText = vi.fn(async (path: string) => files.get(path) ?? '');
+    const tool = new WriteTool(
+      createFakeKaos({ readText, writeText, stat: DIR_STAT }),
+      PERMISSIVE_WORKSPACE,
+    );
+
+    const result = await executeTool(
+      tool,
+      context({
+        path: '/tmp/shared.txt',
+        content: 'stale replacement',
+        expected_tag: computeContentTag('old snapshot'),
+      }),
+    );
+
+    expect(result).toMatchObject({ isError: true });
+    expect(result.output).toContain('expected content tag');
+    expect(result.output).toContain(`current content tag ${computeContentTag('current')}`);
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('allows writes to different files to proceed in parallel', async () => {
+    let started = 0;
+    let resolveStartedTwice!: () => void;
+    const startedTwice = new Promise<void>((resolve) => {
+      resolveStartedTwice = resolve;
+    });
+    const writeText = vi.fn(async (_path: string, content: string) => {
+      started += 1;
+      if (started === 2) resolveStartedTwice();
+      if (started < 2) await startedTwice;
+      return content.length;
+    });
+    const kaos = createFakeKaos({ writeText, stat: DIR_STAT });
+    const tool = new WriteTool(kaos, PERMISSIVE_WORKSPACE);
+
+    const first = executeTool(tool, context({ path: '/tmp/one.txt', content: 'one' }));
+    const second = executeTool(tool, context({ path: '/tmp/two.txt', content: 'two' }));
+    const results = await Promise.all([first, second]);
+    expect(results.every((result) => !result.isError)).toBe(true);
+    expect(writeText).toHaveBeenCalledTimes(2);
   });
 
   it('expands leading tilde paths using the kaos home directory', async () => {

@@ -21,6 +21,7 @@ import {
   type ResolvedAgentProfile,
 } from '../profile';
 import {
+  abortError,
   createDeadlineAbortSignal,
   linkAbortSignal,
   userCancellationReason,
@@ -60,7 +61,9 @@ import TEAM_AGENT_EXECUTION_PROMPT from './team-agent-execution.md?raw';
 export const DEFAULT_SUBAGENT_TIMEOUT_MS = 30 * 60 * 1000;
 export const DEFAULT_SUBAGENT_TIMEOUT_DESCRIPTION = '30 minutes';
 export const DEFAULT_TEAM_DISCUSSION_MEMBER_TIMEOUT_MS = 2 * 60 * 1000;
+export const DEFAULT_TEAM_DISCUSSION_FIRST_RESPONSE_TIMEOUT_MS = 10 * 1000;
 const TEAM_DISCUSSION_CANCEL_SETTLE_GRACE_MS = 5_000;
+const TEAM_DISCUSSION_MEMBER_MAX_TIMEOUT_MULTIPLIER = 3;
 
 export type {
   SubagentResult as QueuedSubagentRunResult,
@@ -113,6 +116,8 @@ const ASK_PARENT_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
 export interface SessionSubagentHostOptions {
   /** Maximum time a single member may occupy a scheduled Discuss turn. */
   readonly discussionMemberTimeoutMs?: number;
+  /** Maximum time before a scheduled member must emit its first response event. */
+  readonly discussionMemberFirstResponseTimeoutMs?: number;
 }
 
 export interface RunSubagentOptions {
@@ -159,6 +164,7 @@ export class SessionSubagentHost {
   private _noriMemory?: NoriMemoryProvider;
   private _noriRetrievalGate?: { triggerMode: string; maxResults: number };
   private readonly discussionMemberTimeoutMs: number;
+  private readonly discussionMemberFirstResponseTimeoutMs: number;
 
   setNoriConfig(config: {
     memory?: NoriMemoryProvider;
@@ -178,6 +184,12 @@ export class SessionSubagentHost {
       throw new Error('discussionMemberTimeoutMs must be a positive finite number.');
     }
     this.discussionMemberTimeoutMs = timeout;
+    const firstResponseTimeout =
+      options.discussionMemberFirstResponseTimeoutMs ?? DEFAULT_TEAM_DISCUSSION_FIRST_RESPONSE_TIMEOUT_MS;
+    if (!Number.isFinite(firstResponseTimeout) || firstResponseTimeout <= 0) {
+      throw new Error('discussionMemberFirstResponseTimeoutMs must be a positive finite number.');
+    }
+    this.discussionMemberFirstResponseTimeoutMs = Math.min(firstResponseTimeout, timeout);
   }
 
   async createTeam(
@@ -281,6 +293,7 @@ export class SessionSubagentHost {
         // turn; there is no settlement to observe in that case.
         if (assignment.agent.turn.hasActiveTurn) {
           this.observeTeamAssignmentTurn(assignment.agentId, assignedAt, assignment.agent);
+          this.session.notifyRunningTeamMember?.(assignment.agentId, assignedAt);
         }
         started.push({ agentId: assignment.agentId, task: assignment.task, turnId });
       }
@@ -315,6 +328,9 @@ export class SessionSubagentHost {
         // The write lease is tied to settlement, regardless of turn outcome.
       } finally {
         try {
+          if (typeof this.session.notifyMissingTeamReport === 'function') {
+            await this.session.notifyMissingTeamReport(agentId, assignedAt);
+          }
           await this.session.releaseTeamAssignment(this.ownerAgentId, agentId, assignedAt);
         } catch {
           // Lease cleanup is fire-and-forget after a terminal turn. The
@@ -345,6 +361,7 @@ export class SessionSubagentHost {
     targetAgentId: string,
     message: string,
     signal: AbortSignal,
+    report?: { readonly status: 'completed' | 'blocked' | 'needs_decision'; readonly summary: string },
   ): Promise<TeamDirectMessageDelivery> {
     signal.throwIfAborted();
     const sender = this.session.getAgentMetadata(this.ownerAgentId);
@@ -361,6 +378,13 @@ export class SessionSubagentHost {
     if (!targetIsLead && !targetIsTeamMember) {
       throw new Error(`TeamDM target "${targetAgentId}" is not in this team.`);
     }
+    const reportToParent = report;
+    if (reportToParent !== undefined) {
+      if (this.ownerAgentId === leaderAgentId || !targetIsLead) {
+        throw new Error('Team reports must be sent by a Team Agent to its direct parent.');
+      }
+      await this.session.recordTeamReport(this.ownerAgentId, reportToParent.status, reportToParent.summary);
+    }
     const recipient = await this.session.ensureAgentResumed(targetAgentId);
     // TeamDM is an internal prompt transport. Keep it in the recipient's
     // model context, but tag it distinctly so transcript projections can
@@ -370,18 +394,33 @@ export class SessionSubagentHost {
       this.ownerAgentId === leaderAgentId ? leaderAgentId : this.ownerAgentId,
       this.ownerAgentId === leaderAgentId ? 'lead' : 'team',
     );
-    const input = [{ type: 'text' as const, text: wrapTeamDirectMessage(message) }];
+    const input = [{
+      type: 'text' as const,
+      text: wrapTeamDirectMessage(
+        reportToParent === undefined
+          ? message
+          : `[TeamDM report: ${reportToParent.status}]\n${message}\nReport summary: ${reportToParent.summary}`,
+      ),
+    }];
     const recipientBusy = recipient.turn.hasActiveTurn;
     const turnId = recipientBusy
       ? recipient.turn.steer(input, origin)
       : recipient.turn.prompt(input, origin);
     if (turnId === null) {
       if (recipientBusy) {
+        if (reportToParent !== undefined) {
+          void runChildTurnToCompletion(recipient)
+            .then(() => this.session.acknowledgeTeamReport(this.ownerAgentId))
+            .catch(() => undefined);
+        }
         return { delivered: true, processing: 'queued' };
       }
       throw new Error(`TeamDM target "${targetAgentId}" could not start a turn.`);
     }
     await runChildTurnToCompletion(recipient, signal);
+    if (reportToParent !== undefined) {
+      await this.session.acknowledgeTeamReport(this.ownerAgentId);
+    }
     return { delivered: true, processing: 'completed' };
   }
 
@@ -393,13 +432,17 @@ export class SessionSubagentHost {
       members.push({
         agent_id: agentId,
         name: meta.name ?? null,
-        title: meta.title ?? null,
-        intro: meta.intro ?? null,
         role: meta.role ?? null,
         mandate: meta.mandate ?? null,
         status: agent.turn.hasActiveTurn ? 'running' : 'idle',
-        assigned_task: meta.assignedTask ?? null,
+        assigned_task: meta.assignedTask ?? meta.teamReport?.task ?? null,
+        report_status: meta.teamReport?.status ?? null,
+        report_summary: meta.teamReport?.summary ?? null,
+        report_received: meta.teamReport?.receivedAt !== undefined,
       });
+      if (agent.turn.hasActiveTurn && meta.assignedAt !== undefined) {
+        this.session.notifyRunningTeamMember(agentId, meta.assignedAt);
+      }
     }
     return {
       agent_id: this.ownerAgentId,
@@ -471,10 +514,6 @@ export class SessionSubagentHost {
     statement?: string,
   ): Promise<TeamDiscussionResult> {
     this.assertTeamLead();
-    if ((action === 'start' || action === 'continue')
-      && typeof this.session.assertTeamDiscussionMode === 'function') {
-      await this.session.assertTeamDiscussionMode(this.ownerAgentId);
-    }
     let active = this.session.activeTeamDiscussion(this.ownerAgentId);
     if (action === 'start') {
       if (active !== undefined) throw new Error('A team discussion is already active. Use continue or archive it first.');
@@ -495,6 +534,9 @@ export class SessionSubagentHost {
       active = [created.id, this.session.getAgentMetadata(created.id)!];
     }
     if (active === undefined) throw new Error('There is no active team discussion. Start one first.');
+    if (action === 'continue' && typeof this.session.ensureTeamDiscussionMode === 'function') {
+      await this.session.ensureTeamDiscussionMode(this.ownerAgentId);
+    }
     const activeDiscussion = active[1].discussion;
     if (activeDiscussion === undefined) {
       throw new Error('The active team discussion metadata is unavailable.');
@@ -705,80 +747,116 @@ export class SessionSubagentHost {
       }
       const unread = await this.session.unreadTeamDiscussionStatements(discussionAgentId, agentId);
       this.session.beginTeamDiscussionTurn(discussionAgentId, agentId);
-      const deadline = createDeadlineAbortSignal(signal, this.discussionMemberTimeoutMs);
       const historyStart = participant.context?.history.length ?? 0;
+      let sent: TeamDiscussionStatementRecord | undefined;
+      let failure: unknown;
+      let unavailable = false;
+      let cancelDiscussion = false;
       try {
-        const turnId = participant.turn.prompt(
-          [{ type: 'text', text: discussionRoundPrompt(unread.statements) }],
-          this.teamLeadPromptOrigin(),
-        );
-        if (turnId === null) {
-          const skipped = { agentId, skipped: true, reason: 'unavailable' };
-          statements.push(skipped);
-          await this.appendDiscussionSkip(discussionAgentId, meta.name ?? '团队成员', skipped.reason);
-          continue;
+        let acknowledged = false;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          if (attempt > 0) signal.throwIfAborted();
+          const turnId = participant.turn.prompt(
+            [{ type: 'text', text: discussionRoundPrompt(unread.statements) }],
+            this.teamLeadPromptOrigin(),
+          );
+          if (turnId === null) {
+            if (attempt === 0) {
+              unavailable = true;
+            } else {
+              failure = new DiscussionNoResponseError(this.discussionMemberFirstResponseTimeoutMs, true);
+            }
+            break;
+          }
+          // Mark messages as read only after this agent accepted the turn. That
+          // prevents a rejected prompt from silently losing an unread update,
+          // while keeping accepted messages from being replayed into its cache.
+          if (!acknowledged) {
+            await this.session.acknowledgeTeamDiscussionStatements(discussionAgentId, agentId, unread.cursor);
+            acknowledged = true;
+          }
+          try {
+            await runDiscussionMemberTurn(
+              participant,
+              signal,
+              this.discussionMemberTimeoutMs,
+              this.discussionMemberFirstResponseTimeoutMs,
+            );
+          } catch (error) {
+            sent = this.session.consumeTeamDiscussionSpeak(discussionAgentId, agentId);
+            if (sent !== undefined) break;
+            if (
+              error instanceof DiscussionNoResponseError
+              && attempt === 0
+              && !signal.aborted
+            ) {
+              continue;
+            }
+            failure = error instanceof DiscussionNoResponseError && attempt > 0
+              ? new DiscussionNoResponseError(this.discussionMemberFirstResponseTimeoutMs, true)
+              : error;
+            break;
+          }
+          sent = this.session.consumeTeamDiscussionSpeak(discussionAgentId, agentId);
+          break;
         }
-        // Mark messages as read only after this agent accepted the turn. That
-        // prevents a rejected prompt from silently losing an unread update,
-        // while keeping accepted messages from being replayed into its cache.
-        await this.session.acknowledgeTeamDiscussionStatements(discussionAgentId, agentId, unread.cursor);
-        await runDiscussionChildTurnToCompletion(participant, deadline.signal);
+        if (sent === undefined && failure === undefined && !unavailable) {
+          sent = this.session.consumeTeamDiscussionSpeak(discussionAgentId, agentId);
+        }
       } catch (error) {
-        const sent = this.session.consumeTeamDiscussionSpeak(discussionAgentId, agentId);
+        failure = error;
+      } finally {
         const toolErrors = collectDiscussionToolErrors(participant, historyStart);
         await this.appendDiscussionToolErrors(discussionAgentId, agentId, toolErrors);
-        if (sent === undefined) {
-          const timedOut = deadline.timedOut();
-          const detail = timedOut
-            ? `Member discussion turn timed out after ${this.discussionMemberTimeoutMs}ms.`
-            : discussionFailureDetail(error, toolErrors);
-          const skipped = {
-            agentId,
-            skipped: true,
-            reason: timedOut ? 'timeout' : 'failed',
-            error: detail,
-            ...(toolErrors.length > 0 ? { toolErrors } : {}),
-          };
-          statements.push(skipped);
-          await this.appendDiscussionSkip(discussionAgentId, meta.name ?? '团队成员', skipped.reason, detail);
-        } else {
+        this.session.endTeamDiscussionTurn(discussionAgentId, agentId);
+        if (sent !== undefined) {
           statements.push({
             agentId,
             statement: sent.message,
             skipped: false,
             ...(toolErrors.length > 0 ? { toolErrors } : {}),
           });
+        } else if (failure !== undefined && signal.aborted) {
+          cancelDiscussion = true;
+        } else if (unavailable) {
+          const skipped = { agentId, skipped: true, reason: 'unavailable' };
+          statements.push(skipped);
+          await this.appendDiscussionSkip(discussionAgentId, meta.name ?? '团队成员', skipped.reason);
+        } else if (failure !== undefined) {
+          const reason = failure instanceof DiscussionNoResponseError
+            ? failure.reason
+            : failure instanceof DiscussionTurnTimeoutError
+              ? 'timeout'
+              : isAbortError(failure)
+                ? 'cancelled'
+              : toolErrors.length > 0
+                ? 'tool_failed'
+                : 'failed';
+          const detail = failure instanceof DiscussionNoResponseError || failure instanceof DiscussionTurnTimeoutError
+            ? failure.message
+            : discussionFailureDetail(failure, toolErrors);
+          const skipped = {
+            agentId,
+            skipped: true,
+            reason,
+            error: detail,
+            ...(toolErrors.length > 0 ? { toolErrors } : {}),
+          };
+          statements.push(skipped);
+          await this.appendDiscussionSkip(discussionAgentId, meta.name ?? '团队成员', reason, detail);
+        } else {
+          const detail = toolErrors.length > 0 ? discussionToolErrorText(toolErrors) : undefined;
+          const reason = detail === undefined ? 'abstain' : 'tool_failed';
+          const skipped = {
+            agentId,
+            skipped: true,
+            ...(detail === undefined ? {} : { reason, error: detail, toolErrors }),
+          };
+          statements.push(skipped);
+          await this.appendDiscussionSkip(discussionAgentId, meta.name ?? '团队成员', reason, detail);
         }
-        continue;
-      } finally {
-        deadline.clear();
-        this.session.endTeamDiscussionTurn(discussionAgentId, agentId);
       }
-      const sent = this.session.consumeTeamDiscussionSpeak(discussionAgentId, agentId);
-      const toolErrors = collectDiscussionToolErrors(participant, historyStart);
-      await this.appendDiscussionToolErrors(discussionAgentId, agentId, toolErrors);
-      if (sent === undefined) {
-        const detail = toolErrors.length > 0 ? discussionToolErrorText(toolErrors) : undefined;
-        const skipped = {
-          agentId,
-          skipped: true,
-          ...(detail === undefined ? {} : { reason: 'failed', error: detail, toolErrors }),
-        };
-        statements.push(skipped);
-        await this.appendDiscussionSkip(
-          discussionAgentId,
-          meta.name ?? '团队成员',
-          detail === undefined ? 'abstain' : 'failed',
-          detail,
-        );
-      } else {
-        statements.push({
-          agentId,
-          statement: sent.message,
-          skipped: false,
-          ...(toolErrors.length > 0 ? { toolErrors } : {}),
-        });
-      }
+      if (cancelDiscussion) throw signal.reason;
     }
     return { discussionAgentId, discussion: updatedDiscussion, statements, votes: [] };
   }
@@ -1831,6 +1909,9 @@ async function runChildTurnToCompletion(child: Agent, signal?: AbortSignal): Pro
   const completion = await child.turn.waitForCurrentTurn(signal);
   const turnEnded = completion.event;
   if (turnEnded.reason !== 'completed') {
+    if (turnEnded.reason === 'cancelled') {
+      throw abortError('Member discussion turn was cancelled.');
+    }
     if (turnEnded.reason === 'filtered') {
       throw new Error('Subagent turn blocked by provider safety policy');
     }
@@ -1845,6 +1926,133 @@ async function runChildTurnToCompletion(child: Agent, signal?: AbortSignal): Pro
   }
   if (completion.stopReason === 'max_tokens') {
     throw new Error(`${SUBAGENT_MAX_TOKENS_ERROR}.`);
+  }
+}
+
+class DiscussionNoResponseError extends Error {
+  readonly reason = 'no_response' as const;
+
+  constructor(timeoutMs: number, retryExhausted: boolean) {
+    super(
+      retryExhausted
+        ? `Member discussion turn produced no text, tool call, or response event within ${timeoutMs}ms; retry exhausted (timeout/no_response).`
+        : `Member discussion turn produced no text, tool call, or response event within ${timeoutMs}ms; retrying once.`,
+    );
+    this.name = 'DiscussionNoResponseError';
+  }
+}
+
+class DiscussionTurnTimeoutError extends Error {
+  readonly reason = 'timeout' as const;
+
+  constructor(timeoutMs: number, hardLimit = false) {
+    super(
+      hardLimit
+        ? `Member discussion turn exceeded its maximum duration of ${timeoutMs}ms.`
+        : `Member discussion turn timed out after ${timeoutMs}ms.`,
+    );
+    this.name = 'DiscussionTurnTimeoutError';
+  }
+}
+
+async function runDiscussionMemberTurn(
+  child: Agent,
+  parentSignal: AbortSignal,
+  fullTimeoutMs: number,
+  firstResponseTimeoutMs: number,
+): Promise<void> {
+  const controller = new AbortController();
+  const unlinkParentSignal = linkAbortSignal(parentSignal, controller);
+  let activityTimedOut = false;
+  let hardTimedOut = false;
+  let firstResponseTimedOut = false;
+  let firstResponseTimer: ReturnType<typeof setTimeout> | undefined;
+  let activityTimer: ReturnType<typeof setTimeout> | undefined;
+  let hardTimer: ReturnType<typeof setTimeout> | undefined;
+  let firstResponseObserved = false;
+  let fullPhaseStarted = false;
+  const completion = runDiscussionChildTurnToCompletion(child, controller.signal);
+  void completion.catch(() => undefined);
+
+  // Lightweight test transports may not expose this internal turn signal. The
+  // production Agent does, so only the production path gets the shorter first
+  // response deadline.
+  const waitForFirstResponse = typeof child.turn.waitForTurnFirstRequest === 'function'
+    ? child.turn.waitForTurnFirstRequest()
+    : undefined;
+  const firstResponse = waitForFirstResponse?.then(() => {
+    firstResponseObserved = true;
+  });
+  const maxDurationMs = fullTimeoutMs * TEAM_DISCUSSION_MEMBER_MAX_TIMEOUT_MULTIPLIER;
+  const clearActivityTimer = (): void => {
+    if (activityTimer !== undefined) {
+      clearTimeout(activityTimer);
+      activityTimer = undefined;
+    }
+  };
+  const armActivityTimer = (): void => {
+    clearActivityTimer();
+    if (!fullPhaseStarted) return;
+    activityTimer = setTimeout(() => {
+      activityTimer = undefined;
+      activityTimedOut = true;
+      controller.abort(abortError());
+    }, fullTimeoutMs);
+  };
+  const unsubscribeProgress = typeof child.turn.onTurnProgress === 'function'
+    ? child.turn.onTurnProgress(() => {
+      if (fullPhaseStarted) armActivityTimer();
+    })
+    : undefined;
+
+  try {
+    // The hard cap starts with the member turn and bounds a stream of
+    // continuous progress. The normal full-turn deadline is an inactivity
+    // deadline and starts only after the first response event.
+    hardTimer = setTimeout(() => {
+      hardTimer = undefined;
+      hardTimedOut = true;
+      controller.abort(abortError());
+    }, maxDurationMs);
+    if (firstResponse !== undefined) {
+      const firstResponseTimeout = new Promise<never>((_, reject) => {
+        firstResponseTimer = setTimeout(() => {
+          firstResponseTimedOut = true;
+          controller.abort(abortError());
+          reject(new DiscussionNoResponseError(firstResponseTimeoutMs, false));
+        }, firstResponseTimeoutMs);
+      });
+      await Promise.race([completion, firstResponse, firstResponseTimeout]);
+      if (!firstResponseObserved) {
+        await completion;
+        throw new DiscussionNoResponseError(firstResponseTimeoutMs, false);
+      }
+      if (firstResponseTimer !== undefined) clearTimeout(firstResponseTimer);
+    }
+    fullPhaseStarted = true;
+    armActivityTimer();
+    await completion;
+  } catch (error) {
+    // Always wait for the cancelled attempt to settle before the caller can
+    // launch a retry; otherwise the old turn can become a zombie TeamSpeak
+    // publisher or race the new turn for the same qualification.
+    if (firstResponseTimedOut || activityTimedOut || hardTimedOut) {
+      await completion.catch(() => undefined);
+      if (firstResponseTimedOut) {
+        throw new DiscussionNoResponseError(firstResponseTimeoutMs, false);
+      }
+      throw new DiscussionTurnTimeoutError(
+        hardTimedOut ? maxDurationMs : fullTimeoutMs,
+        hardTimedOut,
+      );
+    }
+    throw error;
+  } finally {
+    if (firstResponseTimer !== undefined) clearTimeout(firstResponseTimer);
+    clearActivityTimer();
+    if (hardTimer !== undefined) clearTimeout(hardTimer);
+    unsubscribeProgress?.();
+    unlinkParentSignal();
   }
 }
 
@@ -1864,7 +2072,9 @@ async function runDiscussionChildTurnToCompletion(child: Agent, signal: AbortSig
       // later participant.
       await Promise.race([
         runChildTurnToCompletion(child).catch(() => undefined),
-        new Promise<void>((resolve) => setTimeout(resolve, TEAM_DISCUSSION_CANCEL_SETTLE_GRACE_MS)),
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, TEAM_DISCUSSION_CANCEL_SETTLE_GRACE_MS);
+        }),
       ]);
     }
     throw error;
