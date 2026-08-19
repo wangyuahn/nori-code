@@ -1100,7 +1100,10 @@ export function shouldFinishAbortedPrompt(
   return abortedPromptId === undefined || abortedPromptId === activePromptId;
 }
 
-export function chatScopeKey(sessionId: string | null, agentId = 'main'): string | null {
+/** The agent every session starts with. Its id is the transcript's default scope. */
+export const MAIN_AGENT_ID = 'main';
+
+export function chatScopeKey(sessionId: string | null, agentId = MAIN_AGENT_ID): string | null {
   return sessionId === null ? null : `${sessionId}\u0000${agentId}`;
 }
 

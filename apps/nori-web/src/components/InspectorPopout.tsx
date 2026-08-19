@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api, type FsReadResponse, type Session } from '../api/client';
-import { useChatMessages } from '../hooks/useChatMessages';
+import { MAIN_AGENT_ID, useChatMessages } from '../hooks/useChatMessages';
 import { useFilesystem } from '../hooks/useFilesystem';
 import { WorkspaceInspector, type InspectorTab } from './WorkspaceInspector';
 
@@ -10,7 +10,11 @@ export function InspectorPopout({ tab, sessionId, path }: { tab: InspectorTab; s
   const [file, setFile] = useState<FsReadResponse | null>(null);
   const [loading, setLoading] = useState(Boolean(path));
   const fileRequestRef = useRef(0);
-  const chat = useChatMessages(sessionId, session?.title);
+  // `useChatMessages(sessionId, agentId, sessionTitle)` — the title is the third
+  // argument. Passing it as the agent id made REST history request `agent_id=<title>`
+  // and made the event filter drop every transcript event, so the popout showed
+  // nothing but whatever streamed in after it was opened.
+  const chat = useChatMessages(sessionId, MAIN_AGENT_ID, session?.title);
   const filesystem = useFilesystem(sessionId, session?.metadata?.cwd);
 
   const refreshFile = useCallback(async () => {
