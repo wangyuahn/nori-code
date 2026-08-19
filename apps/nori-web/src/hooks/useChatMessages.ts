@@ -641,6 +641,8 @@ function contextInjectionSource(args: unknown, fallback: unknown): string {
 /** Fold all persisted steps from one logical model turn into one UI response. */
 export function foldConversationTurns(messages: ChatMessage[]): ChatMessage[] {
   const folded: ChatMessage[] = [];
+  /** Index in `folded` of the row collecting each turn's assistant work. */
+  const rowByTurn = new Map<string, number>();
   for (const message of messages) {
     if (message.turnBoundary) continue;
     if (message.toolResult !== undefined) {
@@ -656,21 +658,54 @@ export function foldConversationTurns(messages: ChatMessage[]): ChatMessage[] {
       // An orphan result is transport noise; never invent a fake `tool` row.
       continue;
     }
-    const previous = folded.at(-1);
-    if (previous !== undefined && canFoldAssistantWork(previous, message)) {
-      folded[folded.length - 1] = mergeAssistantWork(previous, message);
-    } else {
-      folded.push(message);
+    const target = assistantWorkTargetIndex(folded, rowByTurn, message);
+    if (target !== undefined) {
+      folded[target] = mergeAssistantWork(folded[target]!, message);
+      continue;
     }
+    if (message.role === 'assistant' && message.turnId !== undefined) {
+      rowByTurn.set(message.turnId, folded.length);
+    }
+    folded.push(message);
+    // A real user message is always a visual boundary. Steering keeps the server
+    // turn id, so without this the work that follows the interjection would fold
+    // back into the row above it and render before the message that asked for it.
+    if (message.role === 'user') rowByTurn.clear();
   }
   return folded;
 }
 
+/**
+ * Index of the row that `incoming` belongs to, or undefined to start a new row.
+ *
+ * One turn is one work process, so a turn id is looked up directly rather than
+ * inferred from adjacency. Adjacency was the bug: a team discussion statement or
+ * a failed-turn error row is recorded *between* two steps of the same turn and
+ * carries that same turn id, so comparing only against the previous row split
+ * one response into several work processes.
+ *
+ * Rows keep their transcript position, so an interleaved statement still renders
+ * where it happened — it just no longer breaks the turn around it.
+ */
+function assistantWorkTargetIndex(
+  folded: ChatMessage[],
+  rowByTurn: Map<string, number>,
+  incoming: ChatMessage,
+): number | undefined {
+  if (incoming.role !== 'assistant') return undefined;
+  if (incoming.turnId !== undefined) return rowByTurn.get(incoming.turnId);
+  // No turn id to group on. Only a directly adjacent pair of text-free work rows
+  // is safe to join: that is the shape of transcripts recorded before turn ids,
+  // and anything looser would merge two genuinely separate answers.
+  const last = folded.length - 1;
+  const previous = folded[last];
+  return previous !== undefined && canFoldAssistantWork(previous, incoming) ? last : undefined;
+}
+
+/** Adjacency-only fallback for rows that carry no turn id on either side. */
 function canFoldAssistantWork(previous: ChatMessage, incoming: ChatMessage): boolean {
   if (previous.role !== 'assistant' || incoming.role !== 'assistant') return false;
-  if (previous.turnId !== undefined || incoming.turnId !== undefined) {
-    return previous.turnId !== undefined && previous.turnId === incoming.turnId;
-  }
+  if (previous.turnId !== undefined || incoming.turnId !== undefined) return false;
   return previous.text.trim().length === 0
     && incoming.text.trim().length === 0
     && (previous.workBlocks?.length ?? 0) > 0

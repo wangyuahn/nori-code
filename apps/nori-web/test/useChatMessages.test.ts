@@ -674,6 +674,81 @@ describe('main transcript projection', () => {
     ]);
   });
 
+  it('keeps one turn in one work process when a discussion statement lands between its steps', () => {
+    // A team statement is recorded between two steps of the same turn and carries
+    // that turn's id. Folding by adjacency split the turn here, so one response
+    // rendered as several work processes.
+    const folded = foldConversationTurns([
+      { id: 'u', role: 'user', text: '检查缓存策略' },
+      {
+        id: 'step1',
+        role: 'assistant',
+        turnId: '7',
+        text: '',
+        workBlocks: [{ id: 'read-1', type: 'tool', tool: { id: 'read-1', name: 'Read', args: {} } }],
+      },
+      {
+        id: 'statement',
+        role: 'system',
+        kind: 'discussion',
+        turnId: '7',
+        text: '成员回报：缓存策略应该保留。',
+        speaker: { from: 'team', id: 'member-1', name: '缓存审查员' },
+      },
+      {
+        id: 'step2',
+        role: 'assistant',
+        turnId: '7',
+        text: '缓存策略保持不变。',
+        workBlocks: [{ id: 'edit-1', type: 'tool', tool: { id: 'edit-1', name: 'Edit', args: {} } }],
+      },
+    ]);
+
+    expect(folded.map(message => message.id)).toEqual(['u', 'step1', 'statement']);
+    const turn = folded[1];
+    expect(turn?.text).toBe('缓存策略保持不变。');
+    expect(turn?.workBlocks?.map(block => block.id)).toEqual(['read-1', 'edit-1']);
+  });
+
+  it('starts a new work process for work that follows a steer instead of folding it back', () => {
+    // Steering keeps the server turn id. The work after the interjection must not
+    // fold into the row above it, or it would render before the message that
+    // asked for it.
+    const folded = foldConversationTurns([
+      {
+        id: 'pre',
+        role: 'assistant',
+        turnId: '7',
+        text: '',
+        workBlocks: [{ id: 'read-1', type: 'tool', tool: { id: 'read-1', name: 'Read', args: {} } }],
+      },
+      { id: 'steer', role: 'user', text: '先看配置文件' },
+      {
+        id: 'post',
+        role: 'assistant',
+        turnId: '7',
+        text: '配置文件没有问题。',
+        workBlocks: [{ id: 'read-2', type: 'tool', tool: { id: 'read-2', name: 'Read', args: {} } }],
+      },
+    ]);
+
+    expect(folded.map(message => message.id)).toEqual(['pre', 'steer', 'post']);
+    expect(folded[0]?.workBlocks?.map(block => block.id)).toEqual(['read-1']);
+    expect(folded[2]?.workBlocks?.map(block => block.id)).toEqual(['read-2']);
+  });
+
+  it('folds every step of one turn into a single row even across many steps', () => {
+    const folded = foldConversationTurns([
+      { id: 's1', role: 'assistant', turnId: '3', text: '', workBlocks: [{ id: 't1', type: 'tool', tool: { id: 't1', name: 'Read', args: {} } }] },
+      { id: 's2', role: 'assistant', turnId: '3', text: '', workBlocks: [{ id: 't2', type: 'tool', tool: { id: 't2', name: 'Grep', args: {} } }] },
+      { id: 's3', role: 'assistant', turnId: '3', text: '完成。', workBlocks: [] },
+    ]);
+
+    expect(folded).toHaveLength(1);
+    expect(folded[0]?.text).toBe('完成。');
+    expect(folded[0]?.workBlocks?.map(block => block.id)).toEqual(['t1', 't2']);
+  });
+
   it('projects text before a tool call into the ordered work process', () => {
     const projected = apiMessageToChat({
       id: 'step-with-progress',

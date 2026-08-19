@@ -139,6 +139,29 @@ describe('ChatView tool details and context injection', () => {
     expect(details.textContent).toContain('Only the model should see this reminder.');
     expect(container.querySelector('.compact-tool-call')).toBeNull();
   });
+
+  it('streams into the turn it belongs to instead of rendering a second live block', async () => {
+    // The live work of a turn that already has a transcript row must extend that
+    // row. Rendering the standalone live stream as well showed the same turn in
+    // both the history area and the live area at once.
+    const { container } = await renderChat({
+      messages: [{
+        id: 'turn-row',
+        role: 'assistant',
+        turnId: '9',
+        text: '',
+        workBlocks: [{ id: 'read-1', type: 'tool', tool: { id: 'read-1', name: 'Read', args: {} } }],
+      }],
+      isStreaming: true,
+      streamingTurnId: '9',
+      workBlocks: [{ id: 'edit-1', type: 'tool', tool: { id: 'edit-1', name: 'Edit', args: {} } }],
+    });
+
+    expect(container.querySelectorAll('.live-work-stream').length).toBe(0);
+    expect(container.querySelectorAll('.chat-work-process').length).toBe(1);
+    const tools = [...container.querySelectorAll('.compact-tool-call')];
+    expect(tools.length).toBe(2);
+  });
 });
 
 async function renderChat(overrides: Partial<ChatViewProps> = {}) {
