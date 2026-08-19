@@ -235,6 +235,32 @@ describe('ModelCatalogService', () => {
     expect(getCalls).toEqual([{ reload: true }, { reload: true }]);
   });
 
+  it('reports the same key length it will reveal, including env-declared keys', async () => {
+    const configRef: { current: KimiConfig } = {
+      current: {
+        providers: {
+          explicit: { type: 'anthropic', apiKey: 'sk-explicit-0123456789' },
+          fromEnv: { type: 'openai', env: { OPENAI_API_KEY: 'sk-env-0123' } },
+          none: { type: 'openai', env: { OPENAI_BASE_URL: 'https://example.test' } },
+        },
+      },
+    };
+    const { core } = makeCore(configRef);
+    const svc = new ModelCatalogService(makeEnv(), core, makeEventService().svc);
+
+    const byId = new Map((await svc.listProviders()).map(provider => [provider.id, provider]));
+    // The masked placeholder is rendered from api_key_length, so it must agree
+    // with what the reveal endpoint hands back for the very same provider.
+    for (const id of ['explicit', 'fromEnv']) {
+      const secret = await svc.getProviderSecret(id);
+      expect(byId.get(id)?.has_api_key).toBe(true);
+      expect(byId.get(id)?.api_key_length).toBe(secret.api_key.length);
+    }
+    expect(byId.get('none')?.has_api_key).toBe(false);
+    expect(byId.get('none')?.api_key_length).toBeUndefined();
+    await expect(svc.getProviderSecret('none')).resolves.toEqual({ provider_id: 'none', api_key: '' });
+  });
+
   it('advertises official Kimi Coding endpoint input capabilities for stale aliases', async () => {
     const configRef: { current: KimiConfig } = {
       current: {

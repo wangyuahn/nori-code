@@ -124,6 +124,16 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
     return (await this.getAgent(agentId)).steer(payload);
   }
 
+  /**
+   * Live turn/compaction phase read straight off the Agent. It is the single
+   * source of truth for "is this member busy": the persisted agent-tree status
+   * can lag a turn ending, and callers that trusted it treated idle members as
+   * still running.
+   */
+  async getRuntimeState({ agentId, ...payload }: AgentScopedPayload<EmptyPayload>) {
+    return (await this.getAgent(agentId)).getRuntimeState(payload);
+  }
+
   async runShellCommand({ agentId, ...payload }: AgentScopedPayload<RunShellCommandPayload>) {
     return (await this.getAgent(agentId)).runShellCommand(payload);
   }

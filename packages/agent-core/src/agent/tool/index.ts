@@ -14,6 +14,7 @@ import { configuredSubagentProfiles, DEFAULT_AGENT_PROFILES } from '../../profil
 import { extendWorkspaceWithSkillRoots } from '../../skill';
 import * as b from '../../tools/builtin';
 import type { ToolStore, ToolStoreData, ToolStoreKey } from '../../tools/store';
+import { CONTEXT_INJECTION_TOOL_NAME } from '../context/projector';
 import type {
   BuiltinTool,
   McpServerRegistrationResult,
@@ -161,8 +162,8 @@ export class ToolManager {
       // Detached to background (ctrl+b): the BashTool returns the background
       // metadata (task_id / status / output path) — the same payload a normal
       // foreground Bash call returns as its tool result when backgrounded.
-      // Inject it as a user-invisible message and immediately send it to the
-      // model (mirrors the background-task completion notification, but hidden).
+      // Record this automatic harness notification as a visible context row,
+      // then immediately steer the model. It is never a model-callable tool.
       if (typeof result.output === 'string' && result.output.startsWith('task_id: ')) {
         this.agent.context.injectAndNotify(result.output, {
           kind: 'injection',
@@ -424,7 +425,7 @@ export class ToolManager {
     });
     // MCP entries are glob patterns gated separately; the rest are exact
     // builtin/user tool names. The split keeps every caller on one string[].
-    this.enabledTools = new Set(names.filter((name) => !isMcpToolName(name)));
+    this.enabledTools = new Set(names.filter((name) => !isMcpToolName(name) && name !== CONTEXT_INJECTION_TOOL_NAME));
     this.mcpAccessPatterns = names.filter((name) => isMcpToolName(name));
   }
 
@@ -435,7 +436,8 @@ export class ToolManager {
    * profile entries such as the goal tools.
    */
   activeToolNames(): readonly string[] {
-    return [...this.enabledTools, ...this.mcpAccessPatterns];
+    return [...this.enabledTools].filter((name) => name !== CONTEXT_INJECTION_TOOL_NAME)
+      .concat(this.mcpAccessPatterns);
   }
 
   copyLoopToolsFrom(source: ToolManager): void {
@@ -638,7 +640,8 @@ export class ToolManager {
       .toSorted((a, b) => a.localeCompare(b))
       .filter(
         (name) =>
-          !(hideGoalMutationTools && (name === 'SetGoalBudget' || name === 'UpdateGoal')),
+          name !== CONTEXT_INJECTION_TOOL_NAME
+          && !(hideGoalMutationTools && (name === 'SetGoalBudget' || name === 'UpdateGoal')),
       )
       .map(
         (name) =>

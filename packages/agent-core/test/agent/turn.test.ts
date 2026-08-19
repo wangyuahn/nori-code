@@ -471,14 +471,15 @@ describe('Agent turn flow', () => {
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Trigger generate failure' }] });
 
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`
-      [wire] goal.rewind_checkpoint      { "snapshot": null, "time": "<time>" }
-      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Trigger generate failure" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
-      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Trigger generate failure" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
-      [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
-      [emit] turn.step.interrupted       { "turnId": 0, "step": 1, "reason": "error", "message": "Unexpected generate call #1" }
-      [emit] turn.ended                  { "turnId": 0, "reason": "failed", "error": { "code": "internal", "message": "Unexpected generate call #1", "name": "Error", "retryable": false, "details": { "turnId": 0 } } }
+      [wire] goal.rewind_checkpoint              { "snapshot": null, "time": "<time>" }
+      [wire] turn.prompt                         { "input": [ { "type": "text", "text": "Trigger generate failure" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
+      [emit] turn.started                        { "turnId": 0, "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }
+      [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "Trigger generate failure" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
+      [wire] context.append_transcript_message   { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "response_summary" } }, "time": "<time>" }
+      [wire] context.append_loop_event           { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
+      [emit] turn.step.started                   { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
+      [emit] turn.step.interrupted               { "turnId": 0, "step": 1, "reason": "error", "message": "Unexpected generate call #1" }
+      [emit] turn.ended                          { "turnId": 0, "reason": "failed", "error": { "code": "internal", "message": "Unexpected generate call #1", "name": "Error", "retryable": false, "details": { "turnId": 0 } } }
     `);
     expect(ctx.newEvents()).toMatchInlineSnapshot(
       `[emit] error   { "code": "internal", "message": "Unexpected generate call #1", "name": "Error", "retryable": false, "details": { "turnId": 0 } }`,
@@ -1696,16 +1697,17 @@ describe('Agent turn flow', () => {
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Run a command' }] });
 
     expect(await ctx.untilApprovalRequest()).toMatchInlineSnapshot(`
-      [wire] goal.rewind_checkpoint      { "snapshot": null, "time": "<time>" }
-      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Run a command" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
-      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run a command" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
-      [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
-      [emit] assistant.delta             { "turnId": 0, "delta": "I will run Bash." }
-      [emit] tool.call.delta             { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "argumentsPart": "{\\"command\\":\\"printf should-not-run\\",\\"timeout\\":60}" }
-      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will run Bash." } }, "time": "<time>" }
-      [emit] requestApproval             { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }
+      [wire] goal.rewind_checkpoint              { "snapshot": null, "time": "<time>" }
+      [wire] turn.prompt                         { "input": [ { "type": "text", "text": "Run a command" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
+      [emit] turn.started                        { "turnId": 0, "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }
+      [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "Run a command" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
+      [wire] context.append_transcript_message   { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "response_summary" } }, "time": "<time>" }
+      [wire] context.append_loop_event           { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
+      [emit] turn.step.started                   { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
+      [emit] assistant.delta                     { "turnId": 0, "delta": "I will run Bash." }
+      [emit] tool.call.delta                     { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "argumentsPart": "{\\"command\\":\\"printf should-not-run\\",\\"timeout\\":60}" }
+      [wire] context.append_loop_event           { "event": { "type": "content.part", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will run Bash." } }, "time": "<time>" }
+      [emit] requestApproval                     { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       system: <system-prompt>
@@ -1759,16 +1761,17 @@ describe('Agent turn flow', () => {
 
     const approval = await ctx.takeApprovalRequest();
     expect(approval.events).toMatchInlineSnapshot(`
-      [wire] goal.rewind_checkpoint      { "snapshot": null, "time": "<time>" }
-      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Run Bash, then listen" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
-      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Run Bash, then listen" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
-      [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
-      [emit] assistant.delta             { "turnId": 0, "delta": "I will ask first." }
-      [emit] tool.call.delta             { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "argumentsPart": "{\\"command\\":\\"printf approved\\",\\"timeout\\":60}" }
-      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will ask first." } }, "time": "<time>" }
-      [emit] requestApproval             { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf approved", "display": { "kind": "command", "command": "printf approved", "cwd": "<cwd>", "language": "bash" } }
+      [wire] goal.rewind_checkpoint              { "snapshot": null, "time": "<time>" }
+      [wire] turn.prompt                         { "input": [ { "type": "text", "text": "Run Bash, then listen" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
+      [emit] turn.started                        { "turnId": 0, "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }
+      [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "Run Bash, then listen" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
+      [wire] context.append_transcript_message   { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "response_summary" } }, "time": "<time>" }
+      [wire] context.append_loop_event           { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
+      [emit] turn.step.started                   { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
+      [emit] assistant.delta                     { "turnId": 0, "delta": "I will ask first." }
+      [emit] tool.call.delta                     { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "argumentsPart": "{\\"command\\":\\"printf approved\\",\\"timeout\\":60}" }
+      [wire] context.append_loop_event           { "event": { "type": "content.part", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will ask first." } }, "time": "<time>" }
+      [emit] requestApproval                     { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf approved", "display": { "kind": "command", "command": "printf approved", "cwd": "<cwd>", "language": "bash" } }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       system: <system-prompt>
@@ -1855,16 +1858,17 @@ describe('Agent turn flow', () => {
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Start the active turn' }] });
 
     expect(await ctx.untilApprovalRequest()).toMatchInlineSnapshot(`
-      [wire] goal.rewind_checkpoint      { "snapshot": null, "time": "<time>" }
-      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Start the active turn" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
-      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Start the active turn" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
-      [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
-      [emit] assistant.delta             { "turnId": 0, "delta": "I will wait for approval." }
-      [emit] tool.call.delta             { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "argumentsPart": "{\\"command\\":\\"printf should-not-run\\",\\"timeout\\":60}" }
-      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will wait for approval." } }, "time": "<time>" }
-      [emit] requestApproval             { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }
+      [wire] goal.rewind_checkpoint              { "snapshot": null, "time": "<time>" }
+      [wire] turn.prompt                         { "input": [ { "type": "text", "text": "Start the active turn" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
+      [emit] turn.started                        { "turnId": 0, "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }
+      [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "Start the active turn" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
+      [wire] context.append_transcript_message   { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "response_summary" } }, "time": "<time>" }
+      [wire] context.append_loop_event           { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
+      [emit] turn.step.started                   { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
+      [emit] assistant.delta                     { "turnId": 0, "delta": "I will wait for approval." }
+      [emit] tool.call.delta                     { "turnId": 0, "toolCallId": "call_bash", "name": "Bash", "argumentsPart": "{\\"command\\":\\"printf should-not-run\\",\\"timeout\\":60}" }
+      [wire] context.append_loop_event           { "event": { "type": "content.part", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will wait for approval." } }, "time": "<time>" }
+      [emit] requestApproval                     { "turnId": 0, "toolCallId": "call_bash", "toolName": "Bash", "action": "Running: printf should-not-run", "display": { "kind": "command", "command": "printf should-not-run", "cwd": "<cwd>", "language": "bash" } }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       system: <system-prompt>
@@ -1875,11 +1879,7 @@ describe('Agent turn flow', () => {
     `);
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'This should not start a new turn' }] });
 
-    expect(ctx.newEvents()).toMatchInlineSnapshot(`
-      [wire] goal.rewind_checkpoint   { "snapshot": null, "time": "<time>" }
-      [wire] turn.prompt              { "input": [ { "type": "text", "text": "This should not start a new turn" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
-      [emit] error                    { "code": "turn.agent_busy", "message": "Cannot launch a new turn while another turn (ID 0) is active", "details": { "turnId": 0 }, "retryable": true }
-    `);
+    expect(ctx.newEvents()).toMatchInlineSnapshot(`[]`);
     await ctx.rpc.cancel({ turnId: 0 });
     expect(ctx.agent.turn.hasActiveTurn).toBe(true);
     expect(await ctx.untilTurnEnd()).toMatchInlineSnapshot(`

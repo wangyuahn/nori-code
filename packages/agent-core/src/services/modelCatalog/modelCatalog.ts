@@ -89,6 +89,7 @@ export function toProtocolModel(
 
 export interface ProviderCredentialState {
   readonly hasApiKey: boolean;
+  readonly apiKeyLength?: number;
   readonly hasOAuthToken: boolean;
 }
 
@@ -107,6 +108,7 @@ export function toProtocolProvider(
     base_url: provider.baseUrl,
     default_model: defaultModel,
     has_api_key: credential.hasApiKey,
+    ...(credential.apiKeyLength !== undefined ? { api_key_length: credential.apiKeyLength } : {}),
     status: provider.disabled
       ? 'error'
       : credential.hasApiKey || credential.hasOAuthToken ? 'connected' : 'unconfigured',

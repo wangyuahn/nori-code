@@ -45,7 +45,6 @@
 
 import { createDecorator } from '../../di';
 import type { ContextMessage } from '../../agent/context';
-import { expandContextInjection } from '../../agent/context/projector';
 import type {
   CursorQuery,
   Message,
@@ -280,6 +279,7 @@ export function toProtocolMessage(
   msg: ContextMessage,
   sessionCreatedAtMs: number,
   createdAtMsOverride?: number,
+  turnId?: string,
 ): Message {
   const id = deriveMessageId(sessionId, index);
   const role = toProtocolRole(msg.role);
@@ -290,7 +290,12 @@ export function toProtocolMessage(
   // summaries, injections, hook results, retries, system triggers, cron, etc. —
   // the same way the TUI does (see isReplayUserTurnRecord). Absent for plain
   // user/assistant/tool messages with no origin.
-  const metadata = msg.origin !== undefined ? { origin: msg.origin } : undefined;
+  const metadata = msg.origin !== undefined || turnId !== undefined
+    ? {
+        ...(msg.origin !== undefined ? { origin: msg.origin } : {}),
+        ...(turnId !== undefined ? { turn_id: turnId } : {}),
+      }
+    : undefined;
   return {
     id,
     session_id: sessionId,
@@ -303,9 +308,9 @@ export function toProtocolMessage(
 
 /**
  * Project one durable history entry to the protocol messages it represents.
- * ContextInjection deliberately expands to an assistant `tool_use` followed
- * by a tool `tool_result`; ordinary entries retain their existing one-message
- * shape. The result id is a deterministic suffix of the durable entry id.
+ * Every durable or transcript-only context entry maps to one protocol message.
+ * The web client renders injection-origin messages as context rows, rather than
+ * synthesizing a model-callable tool exchange.
  */
 export function toProtocolMessages(
   sessionId: string,
@@ -313,31 +318,7 @@ export function toProtocolMessages(
   msg: ContextMessage,
   sessionCreatedAtMs: number,
   createdAtMsOverride?: number,
+  turnId?: string,
 ): Message[] {
-  const expanded = expandContextInjection(msg, index);
-  if (expanded.length === 1) {
-    return [toProtocolMessage(sessionId, index, msg, sessionCreatedAtMs, createdAtMsOverride)];
-  }
-  const createdAtMs = createdAtMsOverride ?? sessionCreatedAtMs + index;
-  const assistant = toProtocolMessage(
-    sessionId,
-    index,
-    expanded[0]!,
-    sessionCreatedAtMs,
-    createdAtMs,
-  );
-  const result = toProtocolMessage(
-    sessionId,
-    index,
-    expanded[1]!,
-    sessionCreatedAtMs,
-    createdAtMs + 1,
-  );
-  return [
-    assistant,
-    {
-      ...result,
-      id: `${assistant.id}:result`,
-    },
-  ];
+  return [toProtocolMessage(sessionId, index, msg, sessionCreatedAtMs, createdAtMsOverride, turnId)];
 }

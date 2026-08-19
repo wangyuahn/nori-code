@@ -233,7 +233,7 @@ export abstract class SDKRpcClientBase {
   async prompt(input: SessionPromptRpcInput): Promise<void> {
     const agentId = this.interactiveAgentId;
     const rpc = await this.getRpc();
-    return rpc.prompt({
+    await rpc.prompt({
       sessionId: input.sessionId,
       agentId,
       input: input.input,

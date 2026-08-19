@@ -227,7 +227,7 @@ describe('toProtocolMessage content adapter', () => {
     }]);
   });
 
-  it('serializes an injection-origin history entry as adjacent tool messages', () => {
+  it('serializes an injection-origin history entry as one visible user message', () => {
     const m: ContextMessage = {
       role: 'user',
       content: [{ type: 'text', text: '<system-reminder>Available skills</system-reminder>' }],
@@ -236,25 +236,12 @@ describe('toProtocolMessage content adapter', () => {
     } as ContextMessage;
     const first = toProtocolMessages(SESSION_ID, 7, m, SESSION_CREATED_AT);
     const second = toProtocolMessages(SESSION_ID, 7, m, SESSION_CREATED_AT);
-    expect(first).toHaveLength(2);
+    expect(first).toHaveLength(1);
     expect(first[0]).toMatchObject({
-      role: 'assistant',
+      role: 'user',
       content: [{
-        type: 'tool_use',
-        tool_call_id: expect.any(String),
-        tool_name: 'ContextInjection',
-        input: { source: 'skill-catalog', variant: 'skill-catalog' },
-      }],
-    });
-    expect(first[1]).toMatchObject({
-      role: 'tool',
-      id: `${first[0]?.id}:result`,
-      content: [{
-        type: 'tool_result',
-        tool_call_id: first[0]?.content[0]?.type === 'tool_use'
-          ? first[0].content[0].tool_call_id
-          : undefined,
-        output: '<system-reminder>Available skills</system-reminder>',
+        type: 'text',
+        text: '<system-reminder>Available skills</system-reminder>',
       }],
     });
     expect(second.map(message => message.id)).toEqual(first.map(message => message.id));

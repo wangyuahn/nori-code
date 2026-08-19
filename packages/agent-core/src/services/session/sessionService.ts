@@ -183,33 +183,74 @@ export class SessionService extends Disposable implements ISessionService {
   }
 
   /**
-   * Compute the session lifecycle status from live daemon state.
+   * The single status ladder. Both the cheap event-derived read and the
+   * authoritative live read go through here, so the two can never disagree about
+   * priority — they differ only in what they know about the turn.
    *
    * Priority:
    *   1. awaiting_approval — pending approvals exist
    *   2. awaiting_question — pending questions exist
-   *   3. running           — active prompt or active turn
+   *   3. running           — a turn is executing, or a submitted prompt is in flight
    *   4. aborted           — last turn ended as cancelled/failed and no new work started
    *   5. idle              — everything else
+   *
+   * `turnRunning` is the caller's answer to "is a turn executing right now": the
+   * live agent phase where we have it, the event cache where we do not.
    */
-  private _computeStatus(sessionId: string, agentId = MAIN_AGENT_ID): SessionStatus {
-    const key = sessionAgentKey(sessionId, agentId);
+  private _statusFrom(
+    sessionId: string,
+    agentId: string,
+    turnRunning: boolean,
+  ): SessionStatus {
     if (this.approvalService.listPending(sessionId, agentId).length > 0) {
       return 'awaiting_approval';
     }
     if (this.questionService.listPending(sessionId, agentId).length > 0) {
       return 'awaiting_question';
     }
-    if (
-      this.promptService.getCurrentPromptId(sessionId, agentId) !== undefined ||
-      this._activeTurns.has(key)
-    ) {
+    if (turnRunning) return 'running';
+    // A prompt that was accepted but whose turn has not begun yet: the agent is
+    // idle for an instant, and reporting idle here would flicker the UI between
+    // submit and `turn.started`.
+    if (this.promptService.getCurrentPromptId(sessionId, agentId) !== undefined) {
       return 'running';
     }
-    if (this._abortedTurns.has(key)) {
+    if (this._abortedTurns.has(sessionAgentKey(sessionId, agentId))) {
       return 'aborted';
     }
     return 'idle';
+  }
+
+  /** Event-derived status. Cheap: it never resumes an agent, so it is what the
+   *  session list uses. `_readAuthoritativeStatus` corrects it wherever a live
+   *  agent is already at hand. */
+  private _computeStatus(sessionId: string, agentId = MAIN_AGENT_ID): SessionStatus {
+    return this._statusFrom(
+      sessionId,
+      agentId,
+      this._activeTurns.has(sessionAgentKey(sessionId, agentId)),
+    );
+  }
+
+  /**
+   * Reconcile event-derived caches with the target Agent's live state. Events
+   * remain useful for immediate notifications, but they are not authoritative:
+   * a missed terminal event must not leave an idle agent permanently running.
+   */
+  private async _readAuthoritativeStatus(
+    sessionId: string,
+    agentId = MAIN_AGENT_ID,
+  ): Promise<SessionStatus> {
+    const key = sessionAgentKey(sessionId, agentId);
+    const runtime = await this.core.rpc.getRuntimeState({ sessionId, agentId });
+    if (runtime.phase === 'running') {
+      this._activeTurns.add(key);
+    } else {
+      this._activeTurns.delete(key);
+    }
+    const status = this._statusFrom(sessionId, agentId, runtime.phase !== 'idle');
+    this._statusByAgent.set(key, status);
+    return status;
   }
 
   /**
@@ -593,6 +634,7 @@ export class SessionService extends Disposable implements ISessionService {
           } catch {
             usage = undefined;
           }
+          const status = await this._readAuthoritativeStatus(id, agentId);
           return {
             id: agentId,
             kind: treeAgentKind(agentId, agent),
@@ -606,7 +648,7 @@ export class SessionService extends Disposable implements ISessionService {
             team_report_received: agent.teamReport?.receivedAt !== undefined,
             summary: agent.discussion?.topic ?? agent.assignedTask ?? agent.subagentItem,
             subagent_item: agent.subagentItem,
-            status: this._computeStatus(id, agentId),
+            status,
             usage,
             last_active: this._lastActivityByAgent.get(key) ?? new Date(summary.updatedAt).toISOString(),
             archived: agent.discussion?.status === 'archived' || agent.archived === true,
@@ -686,8 +728,9 @@ export class SessionService extends Disposable implements ISessionService {
     const agentState = this.promptService.getAgentStateSnapshot(id, agentId);
 
     const realtimeUsage = mapRealtimeUsage(usage);
+    const status = await this._readAuthoritativeStatus(id, agentId);
     return {
-      status: this._computeStatus(id, agentId),
+      status,
       model: config.modelAlias ?? config.provider?.model,
       thinking_level: config.thinkingEffort,
       permission: permission.mode,

@@ -12,13 +12,11 @@
  * align live deltas against snapshot text exactly (skip duplicates, detect
  * gaps).
  *
- * Only main-agent activity is tracked: subagent deltas share the session id
- * but describe a different stream and would corrupt the accumulation.
+ * State is scoped by session + agent. Main and child chats use the same
+ * accumulator; selecting an agent only changes the lookup key.
  */
 
 import type { Event, InFlightToolCall, InFlightTurn } from '@nori-code/protocol';
-
-const MAIN_AGENT_ID = 'main';
 
 interface ToolAccum {
   tool_call_id: string;
@@ -46,41 +44,44 @@ export interface VolatileAnnotation {
 }
 
 export class InFlightTurnTracker {
-  private readonly bySession = new Map<string, TurnAccum>();
+  private readonly bySession = new Map<string, Map<string, TurnAccum>>();
 
   apply(sessionId: string, event: Event): VolatileAnnotation {
-    if (event.agentId !== MAIN_AGENT_ID) return {};
+    const agentId = event.agentId;
+    const turns = this.bySession.get(sessionId) ?? new Map<string, TurnAccum>();
 
     switch (event.type) {
       case 'turn.started': {
-        this.bySession.set(sessionId, {
+        turns.set(agentId, {
           turnId: event.turnId,
           assistantText: '',
           thinkingText: '',
           tools: new Map(),
         });
+        this.bySession.set(sessionId, turns);
         return {};
       }
       case 'turn.ended': {
-        this.bySession.delete(sessionId);
+        turns.delete(agentId);
+        if (turns.size === 0) this.bySession.delete(sessionId);
         return {};
       }
       case 'assistant.delta': {
-        const turn = this.bySession.get(sessionId);
+        const turn = turns.get(agentId);
         if (!turn || turn.turnId !== event.turnId) return {};
         const offset = turn.assistantText.length;
         turn.assistantText += event.delta;
         return { offset };
       }
       case 'thinking.delta': {
-        const turn = this.bySession.get(sessionId);
+        const turn = turns.get(agentId);
         if (!turn || turn.turnId !== event.turnId) return {};
         const offset = turn.thinkingText.length;
         turn.thinkingText += event.delta;
         return { offset };
       }
       case 'tool.call.started': {
-        const turn = this.bySession.get(sessionId);
+        const turn = turns.get(agentId);
         if (!turn || turn.turnId !== event.turnId) return {};
         turn.tools.set(event.toolCallId, {
           tool_call_id: event.toolCallId,
@@ -92,7 +93,7 @@ export class InFlightTurnTracker {
         return {};
       }
       case 'tool.progress': {
-        const turn = this.bySession.get(sessionId);
+        const turn = turns.get(agentId);
         const tool = turn?.tools.get(event.toolCallId);
         if (!tool) return {};
         const { kind, text, percent } = event.update;
@@ -105,7 +106,7 @@ export class InFlightTurnTracker {
         return {};
       }
       case 'tool.result': {
-        this.bySession.get(sessionId)?.tools.delete(event.toolCallId);
+        turns.get(agentId)?.tools.delete(event.toolCallId);
         return {};
       }
       default:
@@ -113,8 +114,8 @@ export class InFlightTurnTracker {
     }
   }
 
-  get(sessionId: string): InFlightTurn | null {
-    const turn = this.bySession.get(sessionId);
+  get(sessionId: string, agentId: string): InFlightTurn | null {
+    const turn = this.bySession.get(sessionId)?.get(agentId);
     if (!turn) return null;
     const running_tools: InFlightToolCall[] = Array.from(turn.tools.values()).map((t) => ({
       tool_call_id: t.tool_call_id,
@@ -132,7 +133,13 @@ export class InFlightTurnTracker {
     };
   }
 
-  clear(sessionId: string): void {
-    this.bySession.delete(sessionId);
+  clear(sessionId: string, agentId?: string): void {
+    if (agentId === undefined) {
+      this.bySession.delete(sessionId);
+      return;
+    }
+    const turns = this.bySession.get(sessionId);
+    turns?.delete(agentId);
+    if (turns?.size === 0) this.bySession.delete(sessionId);
   }
 }

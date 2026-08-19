@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   type AgentContextData,
+  type AgentRuntimeState,
   type CoreRPC,
   type ContextMessage,
   type CreateSessionPayload,
@@ -55,6 +56,8 @@ interface FakeBridgeState {
   contexts: Map<string, AgentContextData>;
   postUndoContexts: Map<string, AgentContextData>;
   usages: Map<string, UsageStatus>;
+  /** Live per-agent runtime phase, keyed `sessionId:agentId`. Absent = idle. */
+  runtimePhases: Map<string, AgentRuntimeState>;
 }
 
 function makeFakeBridge(state: FakeBridgeState): ICoreProcessService {
@@ -206,6 +209,13 @@ function makeFakeBridge(state: FakeBridgeState): ICoreProcessService {
       thinkingEffort: 'auto',
       modelCapabilities: { max_context_tokens: 100 },
     }),
+    getRuntimeState: vi
+      .fn()
+      .mockImplementation(
+        async ({ sessionId, agentId }: { sessionId: string; agentId: string }): Promise<AgentRuntimeState> => {
+          return state.runtimePhases.get(`${sessionId}:${agentId}`) ?? { phase: 'idle' };
+        },
+      ),
     getPermission: vi.fn().mockResolvedValue({ mode: 'manual' }),
     getDiscussMode: vi.fn().mockResolvedValue(false),
     getUsage: vi
@@ -244,6 +254,7 @@ function freshState(): FakeBridgeState {
     contexts: new Map(),
     postUndoContexts: new Map(),
     usages: new Map(),
+    runtimePhases: new Map(),
   };
 }
 
@@ -1075,6 +1086,7 @@ describe('SessionService agent tree', () => {
     state.usages.set(created.id, {
       total: { inputOther: 10, output: 4, inputCacheRead: 2, inputCacheCreation: 1 },
     });
+    state.runtimePhases.set(`${created.id}:agent_reviewer`, { phase: 'running', turnId: 3 });
     eventBus.eventService.publish({
       type: 'turn.started',
       sessionId: created.id,
@@ -1105,6 +1117,34 @@ describe('SessionService agent tree', () => {
     expect(reviewer).not.toHaveProperty('title');
     expect(reviewer).not.toHaveProperty('intro');
     expect(tree.agents.find(agent => agent.id === 'agent_reviewer')?.last_active).toMatch(/Z$/);
+  });
+
+  it('reports a member idle when a turn.started event was never followed by a turn end', async () => {
+    const created = await svc.create({ metadata: { cwd: '/tmp/stale-status' } });
+    state.metas.set(created.id, {
+      title: 'Stale status',
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      isCustomTitle: true,
+      agents: {
+        main: { homedir: '/tmp/main', type: 'main', parentAgentId: null },
+        agent_member: { homedir: '/tmp/member', type: 'sub', parentAgentId: 'main', kind: 'team' },
+      },
+      custom: {},
+    });
+    // The member's turn ended without the terminal event reaching this service —
+    // a dropped event, a restart, or a turn started by another path. The live
+    // agent is the authority, so the tree must not keep showing `running` and
+    // make Discuss skip the member as busy.
+    eventBus.eventService.publish({
+      type: 'turn.started',
+      sessionId: created.id,
+      agentId: 'agent_member',
+    } as unknown as Event);
+
+    const tree = await svc.listAgents(created.id);
+
+    expect(tree.agents.find(agent => agent.id === 'agent_member')?.status).toBe('idle');
   });
 });
 

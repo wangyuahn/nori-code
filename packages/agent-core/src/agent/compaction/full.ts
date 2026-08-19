@@ -18,6 +18,7 @@ import {
 
 import type { Agent } from '..';
 import { isAbortError } from '../../loop/errors';
+import { abortable } from '../../utils/abort';
 import {
   retryBackoffDelays,
   sleepForRetry,
@@ -101,6 +102,16 @@ export class FullCompaction {
 
   get isCompacting(): boolean {
     return this.compacting !== null;
+  }
+
+  async waitForCompletion(signal?: AbortSignal): Promise<void> {
+    const active = this.compacting;
+    if (active === null) return;
+    if (signal === undefined) {
+      await active.promise;
+      return;
+    }
+    await abortable(active.promise, signal);
   }
 
   getEffectiveMaxContextTokens(): number {

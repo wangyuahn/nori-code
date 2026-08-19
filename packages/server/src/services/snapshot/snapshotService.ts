@@ -74,7 +74,6 @@ import type { QuestionService } from '#/services/question/questionService';
 import { ISnapshotService, SnapshotNotFoundError } from './snapshot';
 import { loadSnapshotConfig, type SnapshotConfig } from './snapshotConfig';
 
-const MAIN_AGENT_ID = 'main';
 const SNAPSHOT_MESSAGE_PAGE_SIZE = 100;
 
 interface TranscriptCacheEntry {
@@ -114,15 +113,15 @@ export class SnapshotService extends Disposable implements ISnapshotService {
     this._register(eventService.onDidPublish((event) => this._handleBusEvent(event)));
   }
 
-  async read(sid: string): Promise<SessionSnapshotResponse> {
+  async read(sid: string, agentId = 'main'): Promise<SessionSnapshotResponse> {
     const startMs = Date.now();
     let cacheTag: 'hit' | 'miss' | 'shrink_invalidate' | 'enoent' = 'miss';
 
     const locator = await this._locateSession(sid);
 
     const [snapState, transcriptResult] = await Promise.all([
-      this.broadcast.getSnapshotState(sid),
-      this._readTranscriptCached(sid, locator.sessionDir),
+      this.broadcast.getSnapshotState(sid, agentId),
+      this._readTranscriptCached(sid, agentId, locator.sessionDir),
     ]);
     cacheTag = transcriptResult.tag;
 
@@ -135,17 +134,18 @@ export class SnapshotService extends Disposable implements ISnapshotService {
 
     const sessionMeta = await this._tryReadStateMeta(locator.sessionDir);
     const session = toProtocolSession(locator.summary, sessionMeta);
-    session.status = this._computeStatus(sid);
+    session.status = this._computeStatus(sid, agentId);
 
-    const inFlightTurn = this._attachPromptIdToInFlight(sid, snapState.inFlightTurn);
+    const inFlightTurn = this._attachPromptIdToInFlight(sid, agentId, snapState.inFlightTurn);
 
-    const approvals = (this.approvalService as ApprovalService).listPending(sid);
-    const questions = (this.questionService as QuestionService).listPending(sid);
+    const approvals = (this.approvalService as ApprovalService).listPending(sid, agentId);
+    const questions = (this.questionService as QuestionService).listPending(sid, agentId);
 
     const durationMs = Date.now() - startMs;
     this.logger.info(
       {
         sid,
+        agent_id: agentId,
         duration_ms: durationMs,
         cache: cacheTag,
         transcript_entries: transcriptResult.transcript.entries.length,
@@ -202,7 +202,7 @@ export class SnapshotService extends Disposable implements ISnapshotService {
       if (isInternalTeamDirectMessage(entry.message)) return [];
       const baseMs = entry.time ?? sessionCreatedAtMs + idx;
       const createdAtMs = Math.max(previousMs + 1, baseMs);
-      const messages = toProtocolMessages(sid, idx, entry.message, sessionCreatedAtMs, createdAtMs);
+      const messages = toProtocolMessages(sid, idx, entry.message, sessionCreatedAtMs, createdAtMs, entry.turnId);
       previousMs = createdAtMs + messages.length - 1;
       return messages;
     });
@@ -210,13 +210,15 @@ export class SnapshotService extends Disposable implements ISnapshotService {
 
   private async _readTranscriptCached(
     sid: string,
+    agentId: string,
     sessionDir: string,
   ): Promise<{
     transcript: WireTranscript;
     tag: 'hit' | 'miss' | 'shrink_invalidate' | 'enoent';
     wireBytes: number;
   }> {
-    const wirePath = path.join(sessionDir, 'agents', MAIN_AGENT_ID, 'wire.jsonl');
+    const cacheKey = `${sid}\u0000${agentId}`;
+    const wirePath = path.join(sessionDir, 'agents', agentId, 'wire.jsonl');
     let info: { size: number; mtimeMs: number } | undefined;
     try {
       info = await fsStat(wirePath);
@@ -226,7 +228,7 @@ export class SnapshotService extends Disposable implements ISnapshotService {
     if (info === undefined) {
       // Fresh session — no wire file yet. Drop any stale cache entry so the
       // first write doesn't get masked.
-      this._transcriptCache.delete(sid);
+      this._transcriptCache.delete(cacheKey);
       return {
         transcript: { entries: [], foldedLength: 0 },
         tag: 'enoent',
@@ -234,21 +236,21 @@ export class SnapshotService extends Disposable implements ISnapshotService {
       };
     }
 
-    const cached = this._transcriptCache.get(sid);
+    const cached = this._transcriptCache.get(cacheKey);
     if (cached !== undefined && cached.size === info.size && cached.mtimeMs === info.mtimeMs) {
-      this._transcriptCache.delete(sid);
-      this._transcriptCache.set(sid, cached);
+      this._transcriptCache.delete(cacheKey);
+      this._transcriptCache.set(cacheKey, cached);
       return { transcript: cached.transcript, tag: 'hit', wireBytes: info.size };
     }
 
     const tag: 'miss' | 'shrink_invalidate' =
       cached !== undefined && info.size < cached.size ? 'shrink_invalidate' : 'miss';
     if (cached !== undefined) {
-      this._transcriptCache.delete(sid);
+      this._transcriptCache.delete(cacheKey);
     }
 
-    const transcript = await readWireTranscript(sessionDir, MAIN_AGENT_ID);
-    this._transcriptCache.set(sid, {
+    const transcript = await readWireTranscript(sessionDir, agentId);
+    this._transcriptCache.set(cacheKey, {
       size: info.size,
       mtimeMs: info.mtimeMs,
       transcript,
@@ -269,20 +271,20 @@ export class SnapshotService extends Disposable implements ISnapshotService {
    *   4. aborted           — last turn ended as cancelled/failed
    *   5. idle              — everything else
    */
-  private _computeStatus(sid: string): SessionStatus {
-    if ((this.approvalService as ApprovalService).listPending(sid).length > 0) {
+  private _computeStatus(sid: string, agentId: string): SessionStatus {
+    if ((this.approvalService as ApprovalService).listPending(sid, agentId).length > 0) {
       return 'awaiting_approval';
     }
-    if ((this.questionService as QuestionService).listPending(sid).length > 0) {
+    if ((this.questionService as QuestionService).listPending(sid, agentId).length > 0) {
       return 'awaiting_question';
     }
     if (
-      this.promptService.getCurrentPromptId(sid) !== undefined ||
-      this._activeTurns.has(sid)
+      this.promptService.getCurrentPromptId(sid, agentId) !== undefined ||
+      this._activeTurns.has(`${sid}\u0000${agentId}`)
     ) {
       return 'running';
     }
-    if (this._abortedTurns.has(sid)) {
+    if (this._abortedTurns.has(`${sid}\u0000${agentId}`)) {
       return 'aborted';
     }
     return 'idle';
@@ -296,26 +298,28 @@ export class SnapshotService extends Disposable implements ISnapshotService {
   private _handleBusEvent(event: ProtocolEvent): void {
     const type = (event as { type?: string }).type;
     const sessionId = (event as { sessionId?: string }).sessionId;
-    if (sessionId === undefined || sessionId === '' || type === undefined) return;
+    const agentId = (event as { agentId?: string }).agentId;
+    if (sessionId === undefined || sessionId === '' || agentId === undefined || type === undefined) return;
+    const key = `${sessionId}\u0000${agentId}`;
 
     switch (type) {
       case 'turn.started': {
-        this._activeTurns.add(sessionId);
-        this._abortedTurns.delete(sessionId);
+        this._activeTurns.add(key);
+        this._abortedTurns.delete(key);
         return;
       }
       case 'turn.ended': {
-        this._activeTurns.delete(sessionId);
+        this._activeTurns.delete(key);
         const reason = (event as { reason?: string }).reason;
         if (reason === 'cancelled' || reason === 'failed') {
-          this._abortedTurns.add(sessionId);
+          this._abortedTurns.add(key);
         } else {
-          this._abortedTurns.delete(sessionId);
+          this._abortedTurns.delete(key);
         }
         return;
       }
       case 'prompt.submitted': {
-        this._abortedTurns.delete(sessionId);
+        this._abortedTurns.delete(key);
         return;
       }
       default:
@@ -325,10 +329,11 @@ export class SnapshotService extends Disposable implements ISnapshotService {
 
   private _attachPromptIdToInFlight(
     sid: string,
+    agentId: string,
     inFlightTurn: InFlightTurn | null,
   ): InFlightTurn | null {
     if (inFlightTurn === null) return null;
-    const currentPromptId = this.promptService.getCurrentPromptId(sid);
+    const currentPromptId = this.promptService.getCurrentPromptId(sid, agentId);
     if (currentPromptId !== undefined) {
       inFlightTurn.current_prompt_id = currentPromptId;
     }

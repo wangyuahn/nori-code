@@ -33,7 +33,7 @@ import {
   type LoopTurnInterruptedEvent,
   type LoopTurnStopReason,
 } from '../../loop/index';
-import type { AgentEvent, TurnEndedEvent, TurnEndReason } from '../../rpc';
+import type { AgentEvent, PromptStartResult, TurnEndedEvent, TurnEndReason } from '../../rpc';
 import type { TelemetryPropertyValue } from '../../telemetry';
 import { abortable, isUserCancellation, userCancellationReason } from '../../utils/abort';
 import { USER_PROMPT_ORIGIN, type PromptOrigin } from '../context';
@@ -196,6 +196,25 @@ export class TurnFlow {
     return this.launch(input, origin);
   }
 
+  /**
+   * Start a turn and report *why* it did not start, which `prompt`'s `null`
+   * cannot express: `busy` means another turn holds the agent and this input was
+   * dropped, while `deferred` means compaction buffered it and
+   * `onCompactionFinished` will replay it. Schedulers (team assignment, a
+   * discussion round) need that distinction — treating `deferred` as a failure
+   * is what made members look like they never woke up.
+   */
+  requestPrompt(
+    input: readonly ContentPart[],
+    origin: PromptOrigin = USER_PROMPT_ORIGIN,
+  ): PromptStartResult {
+    if (this.activeTurn) {
+      return { status: 'busy', activeTurnId: this.turnId };
+    }
+    const turnId = this.prompt(input, origin);
+    return turnId === null ? { status: 'deferred' } : { status: 'started', turnId };
+  }
+
   // Returns the new turnId, or null if the input was buffered as a steer
   // message or the turn was marked as resuming.
   steer(input: readonly ContentPart[], origin: PromptOrigin = USER_PROMPT_ORIGIN): number | null {
@@ -333,6 +352,11 @@ export class TurnFlow {
 
   get hasActiveTurn(): boolean {
     return this.activeTurn !== null && this.activeTurn !== 'resuming';
+  }
+
+  get runtimePhase(): 'idle' | 'restoring' | 'running' {
+    if (this.activeTurn === 'resuming') return 'restoring';
+    return this.activeTurn === null ? 'idle' : 'running';
   }
 
   private ensureActiveTurn(): ActiveTurn {

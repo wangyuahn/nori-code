@@ -203,6 +203,31 @@ export const WIRE_RENDERERS: RendererMap = {
     detail: (r) => <MessageDetail message={r.message} />,
   },
 
+  // Harness injection that is shown to the user but deliberately kept out of the
+  // model context, so it is tagged `ephemeral` to distinguish it at a glance from
+  // a real `context.append_message` the model will see on the next request.
+  'context.append_transcript_message': {
+    tone: 'ephemeral',
+    label: 'transcript',
+    headline: (r) => {
+      const m = r.message;
+      return {
+        main: (
+          <span className="flex items-center gap-2 min-w-0">
+            <Pill tone="ephemeral" variant="soft">
+              {m.role}
+            </Pill>
+            <Dim>
+              ({m.content.length} part{m.content.length === 1 ? '' : 's'})
+            </Dim>
+            <Dim className="truncate">· transcript only, not sent to the model</Dim>
+          </span>
+        ),
+      };
+    },
+    detail: (r) => <MessageDetail message={r.message} />,
+  },
+
   'context.append_loop_event': {
     tone: 'meta',
     label: 'loop',

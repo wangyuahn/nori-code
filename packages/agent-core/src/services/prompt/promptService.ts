@@ -14,6 +14,7 @@ import type {
   PromptThinking,
 } from '@nori-code/protocol';
 import type { PermissionMode } from '../../agent/permission';
+import type { PromptStartResult } from '../../rpc';
 import { ulid } from 'ulid';
 
 import { ICoreProcessService } from '../coreProcess/coreProcess';
@@ -355,10 +356,23 @@ export class PromptService
       return item;
     }
 
+    // `prompt.submitted` must reach clients before any turn event the launch
+    // itself emits, otherwise a `turn.started` arrives for a prompt the client
+    // has never seen and cannot route. So the item is published from inside
+    // `_startPrompt`, immediately before the core call.
     const item = toPromptItem(state, 'running');
-    await this._startPrompt(sid, state, () => {
+    const launch = await this._startPrompt(sid, state, () => {
       this._publishSubmitted(sid, state, item);
     });
+    if (launch.status === 'busy') {
+      // Core already had a turn this service did not know about. The prompt did
+      // not run, so it goes back on the queue — the same silent requeue
+      // `_startNextQueued` performs, with `turn.started` remaining the client's
+      // authority for what is actually executing.
+      this._enqueue(sid, state);
+      void this._startNextQueued(sid, state.agentId);
+      return toPromptItem(state, 'queued');
+    }
     return item;
   }
 
@@ -436,15 +450,13 @@ export class PromptService
   private async _startPrompt(
     sid: string,
     state: PromptState,
-    onStarted?: () => void,
-  ): Promise<void> {
+    /** Runs after the prompt is registered as active and immediately before the
+     *  core call, so a caller can publish before the launch emits turn events. */
+    beforeLaunch?: () => void,
+  ): Promise<PromptStartResult> {
     await this.core.rpc.captureRewindCheckpoint({ sessionId: sid, agentId: state.agentId });
     const key = promptKey(sid, state.agentId);
 
-    // Fire-and-forget. agent-core streams events via the SDK side of the
-    // RPC pair which lands on `BridgeClientAPI.emitEvent → IEventService.publish`.
-    // The submit RPC returns synchronously (PromptPayload → void); errors
-    // would manifest as later `error` events, not as a rejection here.
     try {
       const overridePatch = pickAgentStatePatch(state.body);
       if (overridePatch !== undefined) {
@@ -454,22 +466,32 @@ export class PromptService
 
       this._active.set(key, state);
       const input = contentToCoreParts(state.body.content);
-      onStarted?.();
+      beforeLaunch?.();
       this._logger.debug(
         { sid, promptId: state.promptId, agentId: state.agentId, partCount: input.length },
         '[DBG prompt-service.submit] -> core.rpc.prompt(...)',
       );
-      await this.core.rpc.prompt({
+      const result = await this.core.rpc.prompt({
         sessionId: sid,
         agentId: state.agentId,
         input,
         goalIntake: state.body.loop_mode === true ? true : undefined,
         speaker: { from: 'user', speakerName: '用户' },
       });
+      if (result.status === 'busy') {
+        if (this._active.get(key)?.promptId === state.promptId) {
+          this._active.delete(key);
+        }
+        await this.core.rpc.discardRewindCheckpoint({
+          sessionId: sid,
+          agentId: state.agentId,
+        }).catch(() => undefined);
+      }
       this._logger.debug(
-        { sid, promptId: state.promptId },
+        { sid, promptId: state.promptId, launchStatus: result.status },
         '[DBG prompt-service.submit] core.rpc.prompt(...) resolved',
       );
+      return result;
     } catch (error) {
       // Clear our active-prompt state so the next submit succeeds; surface
       // the error to the route layer.
@@ -811,7 +833,10 @@ export class PromptService
     const agentId = (event as { agentId?: string }).agentId ?? MAIN_AGENT_ID;
     const key = promptKey(sid, agentId);
     const state = this._active.get(key);
-    if (state === undefined) return;
+    if (state === undefined) {
+      if (isTurnEnded(event)) void this._startNextQueued(sid, agentId);
+      return;
+    }
 
     if (isTurnStarted(event)) {
       // Capture the FIRST turn.started after submit as the "top-level" turn.
@@ -991,7 +1016,11 @@ export class PromptService
       this._queued.delete(key);
     }
     if (next === undefined) return;
-    await this._startPrompt(sid, next).catch(() => {
+    await this._startPrompt(sid, next).then((result) => {
+      if (result.status !== 'busy') return;
+      const pending = this._queued.get(key) ?? [];
+      this._replaceQueue(sid, agentId, [next, ...pending]);
+    }).catch(() => {
       void this._startNextQueued(sid, agentId);
     });
   }

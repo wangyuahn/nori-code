@@ -640,6 +640,10 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     return this.sessionApi(sessionId).prompt(payload);
   }
 
+  getRuntimeState({ sessionId, ...payload }: SessionAgentPayload<EmptyPayload>) {
+    return this.sessionApi(sessionId).getRuntimeState(payload);
+  }
+
   runShellCommand({ sessionId, ...payload }: SessionAgentPayload<RunShellCommandPayload>) {
     return this.sessionApi(sessionId).runShellCommand(payload);
   }

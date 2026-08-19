@@ -180,7 +180,7 @@ export function App() {
     sessions: tr('Sessions', '会话'),
     files: tr('Files', '文件'),
   };
-  const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, agentTreeRevision, discussionTurnAgentId, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort } = useChatMessages(sessionId, activeAgentId, activeSession?.title);
+  const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, activeTurnId, sessionStatus, agentTreeRevision, discussionTurnAgentId, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort } = useChatMessages(sessionId, activeAgentId, activeSession?.title);
   const globalApprovals = useGlobalApprovals();
   const browserPermissions = useBrowserPermissions();
   const sessionActiveAgentCount = countActiveAgents(activeSubagentIds, backgroundTasks.tasks);
@@ -407,6 +407,7 @@ export function App() {
             thinking={currentThinking}
             workBlocks={currentWorkBlocks}
             isStreaming={isStreaming}
+            streamingTurnId={activeTurnId}
             activeAgentCount={sessionActiveAgentCount}
             activeAgentTokens={sessionTreeTokens}
             sessionAgents={sessionAgents}

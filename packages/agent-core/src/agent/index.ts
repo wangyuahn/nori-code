@@ -365,7 +365,17 @@ export class Agent {
           goalIntake: payload.goalIntake === true ? true : undefined,
           speaker: payload.speaker ?? { from: 'user', speakerName: '用户' },
         };
-        this.turn.prompt(payload.input, origin);
+        return this.turn.requestPrompt(payload.input, origin);
+      },
+      getRuntimeState: () => {
+        const turnPhase = this.turn.runtimePhase;
+        const phase = turnPhase === 'idle' && this.fullCompaction.isCompacting
+          ? 'compacting' as const
+          : turnPhase;
+        return {
+          phase,
+          ...(turnPhase === 'running' ? { turnId: this.turn.currentId } : {}),
+        };
       },
       runShellCommand: (payload) => this.tools.runShellCommand(payload.command, payload.commandId),
       cancelShellCommand: (payload) => this.tools.cancelShellCommand(payload.commandId),

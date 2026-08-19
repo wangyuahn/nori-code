@@ -17,6 +17,7 @@
  *
  * Mirrored agent-core semantics (packages/agent-core/src/agent/context/index.ts):
  *   - `context.append_message`      → append (deferred while a tool exchange is open)
+ *   - `context.append_transcript_message` → append only to the human transcript
  *   - `context.append_loop_event`   → step.begin/content.part/tool.call mutate the
  *                                     open assistant message; tool.result appends a
  *                                     tool message with the same `<system>` status
@@ -76,6 +77,8 @@ export interface TranscriptEntry {
   readonly message: ContextMessage;
   /** Wall-clock time of the originating wire record, when present. */
   readonly time?: number | undefined;
+  /** Logical model turn that produced this transcript entry, when known. */
+  readonly turnId?: string | undefined;
 }
 
 export interface WireTranscript {
@@ -100,6 +103,7 @@ interface MutableMessage {
 interface MutableEntry {
   message: MutableMessage;
   time?: number | undefined;
+  turnId?: string | undefined;
 }
 
 /**
@@ -117,24 +121,35 @@ export function reduceWireRecords(records: Iterable<AgentRecord>): {
   /** Transcript index `context.undo` may not cross (set by `context.clear`). */
   let clearFloor = 0;
   const openSteps = new Map<string, MutableEntry>();
-  const pendingToolResultIds = new Set<string>();
+  const pendingToolResults = new Map<string, string | undefined>();
   let deferred: MutableEntry[] = [];
+  // Display-only injections may be recorded while a tool is still running.
+  // Keep them out of the middle of the tool call/result pair.
+  let transcriptOnlyDeferred: MutableEntry[] = [];
+  let currentTurnId: string | undefined;
+  let pendingTurnEntries: MutableEntry[] = [];
 
   const push = (...entries: MutableEntry[]): void => {
     transcript.push(...entries);
     foldedLength += entries.length;
   };
   const flushDeferredIfToolExchangeClosed = (): void => {
-    if (pendingToolResultIds.size > 0 || deferred.length === 0) return;
-    push(...deferred);
-    deferred = [];
+    if (pendingToolResults.size > 0) return;
+    if (deferred.length > 0) {
+      push(...deferred);
+      deferred = [];
+    }
+    if (transcriptOnlyDeferred.length > 0) {
+      transcript.push(...transcriptOnlyDeferred);
+      transcriptOnlyDeferred = [];
+    }
   };
   // ContextMemory closes these during replay without persisting the synthetic
   // result, so the reducer must reconstruct it to keep foldedLength aligned.
   const closePendingToolResults = (time: number | undefined): void => {
-    if (pendingToolResultIds.size === 0) return;
-    const interruptedToolCallIds = [...pendingToolResultIds];
-    for (const toolCallId of interruptedToolCallIds) {
+    if (pendingToolResults.size === 0) return;
+    const interruptedToolCalls = [...pendingToolResults];
+    for (const [toolCallId, turnId] of interruptedToolCalls) {
       push({
         message: {
           role: 'tool',
@@ -147,24 +162,32 @@ export function reduceWireRecords(records: Iterable<AgentRecord>): {
           isError: true,
         },
         time,
+        turnId,
       });
-      pendingToolResultIds.delete(toolCallId);
+      pendingToolResults.delete(toolCallId);
     }
     flushDeferredIfToolExchangeClosed();
   };
   const resetOpenState = (): void => {
     openSteps.clear();
-    pendingToolResultIds.clear();
+    pendingToolResults.clear();
     deferred = [];
+    transcriptOnlyDeferred = [];
+    pendingTurnEntries = [];
+    currentTurnId = undefined;
   };
 
   const applyLoopEvent = (event: LoopRecordedEvent, time: number | undefined): void => {
     switch (event.type) {
       case 'step.begin': {
         closePendingToolResults(time);
+        currentTurnId = event.turnId;
+        for (const pending of pendingTurnEntries) pending.turnId = event.turnId;
+        pendingTurnEntries = [];
         const entry: MutableEntry = {
           message: { role: 'assistant', content: [], toolCalls: [] },
           time,
+          turnId: event.turnId,
         };
         push(entry);
         openSteps.set(event.uuid, entry);
@@ -190,13 +213,14 @@ export function reduceWireRecords(records: Iterable<AgentRecord>): {
           name: event.name,
           arguments: event.args === undefined ? null : JSON.stringify(event.args),
         });
-        pendingToolResultIds.add(event.toolCallId);
+        pendingToolResults.set(event.toolCallId, openStep.turnId);
         return;
       }
       case 'tool.result': {
         // Drop a result for an id not awaiting one (already closed in place, or
         // its call is gone) — mirrors ContextMemory.
-        if (!pendingToolResultIds.has(event.toolCallId)) return;
+        const turnId = pendingToolResults.get(event.toolCallId);
+        if (!pendingToolResults.has(event.toolCallId)) return;
         push({
           message: {
             role: 'tool',
@@ -206,8 +230,9 @@ export function reduceWireRecords(records: Iterable<AgentRecord>): {
             isError: event.result.isError,
           },
           time,
+          turnId,
         });
-        pendingToolResultIds.delete(event.toolCallId);
+        pendingToolResults.delete(event.toolCallId);
         flushDeferredIfToolExchangeClosed();
         return;
       }
@@ -233,18 +258,44 @@ export function reduceWireRecords(records: Iterable<AgentRecord>): {
 
   for (const record of records) {
     switch (record.type) {
+      case 'turn.prompt':
+        // A queued prompt starts a new logical turn. Its numeric id is learned
+        // from the following step.begin record.
+        currentTurnId = undefined;
+        pendingTurnEntries = [];
+        break;
       case 'context.append_message': {
+        const realUserInput = isRealUserInput(record.message);
+        if (realUserInput) currentTurnId = undefined;
         const entry: MutableEntry = {
           message: record.message as MutableMessage,
           time: record.time,
+          turnId: currentTurnId,
         };
-        if (pendingToolResultIds.size > 0) {
+        if (currentTurnId === undefined && !realUserInput) pendingTurnEntries.push(entry);
+        if (pendingToolResults.size > 0) {
           deferred.push(entry);
         } else {
           push(entry);
         }
         break;
       }
+      case 'context.append_transcript_message':
+        // Dynamic reminders can be needed by the current request but must not
+        // accumulate in provider history. If a tool is open, hold this row
+        // until its result is recorded so the normal tool exchange stays whole.
+        const entry: MutableEntry = {
+          message: record.message as MutableMessage,
+          time: record.time,
+          turnId: currentTurnId,
+        };
+        if (currentTurnId === undefined) pendingTurnEntries.push(entry);
+        if (pendingToolResults.size > 0) {
+          transcriptOnlyDeferred.push(entry);
+        } else {
+          transcript.push(entry);
+        }
+        break;
       case 'context.append_loop_event':
         applyLoopEvent(record.event, record.time);
         break;

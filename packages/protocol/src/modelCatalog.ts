@@ -27,6 +27,8 @@ export const providerCatalogItemSchema = z.object({
   base_url: z.string().min(1).optional(),
   default_model: z.string().min(1).optional(),
   has_api_key: z.boolean(),
+  /** Length only; the secret value is never included in the catalog response. */
+  api_key_length: z.number().int().min(0).optional(),
   status: providerCatalogStatusSchema,
   disabled: z.boolean().optional(),
   auto_discover: z.boolean().optional(),

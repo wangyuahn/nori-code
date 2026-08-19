@@ -223,6 +223,15 @@ describe('Agent tools', () => {
     expect(names).not.toContain('Agent');
   });
 
+  it('never exposes ContextInjection as a model-callable tool', () => {
+    const ctx = testAgent();
+    ctx.configure({ tools: ['Read', 'ContextInjection'] });
+
+    expect(ctx.agent.tools.activeToolNames()).toContain('Read');
+    expect(ctx.agent.tools.activeToolNames()).not.toContain('ContextInjection');
+    expect(ctx.agent.tools.loopTools.map(tool => tool.name)).not.toContain('ContextInjection');
+  });
+
   it('routes registered user tools through tool.call request/response', async () => {
     const lookupCall: ToolCall = {
       type: 'function',
@@ -254,22 +263,23 @@ describe('Agent tools', () => {
         output: 'moon-result',
       }),
     ).toMatchInlineSnapshot(`
-      [wire] permission.set_mode         { "mode": "auto", "time": "<time>" }
-      [emit] agent.status.updated        { "model": "mock-model", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "discussMode": false, "permission": "auto", "coderWriteEnabled": false, "toolsReadonly": false }
-      [wire] tools.register_user_tool    { "name": "Lookup", "description": "Look up a short test value.", "parameters": { "type": "object", "properties": { "query": { "type": "string" } }, "required": [ "query" ], "additionalProperties": false }, "time": "<time>" }
-      [wire] goal.rewind_checkpoint      { "snapshot": null, "time": "<time>" }
-      [wire] turn.prompt                 { "input": [ { "type": "text", "text": "Look up moon" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
-      [emit] turn.started                { "turnId": 0, "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "Look up moon" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
-      [wire] context.append_message      { "message": { "role": "user", "content": [ { "type": "text", "text": "<auto-mode-enter-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "permission_mode" } }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
-      [emit] turn.step.started           { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
-      [emit] assistant.delta             { "turnId": 0, "delta": "I will look it up." }
-      [emit] tool.call.delta             { "turnId": 0, "toolCallId": "call_lookup", "name": "Lookup", "argumentsPart": "{\\"query\\":\\"moon\\"}" }
-      [wire] context.append_loop_event   { "event": { "type": "content.part", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will look it up." } }, "time": "<time>" }
-      [wire] context.append_loop_event   { "event": { "type": "tool.call", "uuid": "call_lookup", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "toolCallId": "call_lookup", "name": "Lookup", "args": { "query": "moon" } }, "time": "<time>" }
-      [emit] tool.call.started           { "turnId": 0, "toolCallId": "call_lookup", "name": "Lookup", "args": { "query": "moon" } }
-      [emit] toolCall                    { "turnId": 0, "toolCallId": "call_lookup", "args": { "query": "moon" } }
+      [wire] permission.set_mode                 { "mode": "auto", "time": "<time>" }
+      [emit] agent.status.updated                { "model": "mock-model", "contextTokens": 0, "maxContextTokens": 1000000, "contextUsage": 0, "discussMode": false, "permission": "auto", "coderWriteEnabled": false, "toolsReadonly": false }
+      [wire] tools.register_user_tool            { "name": "Lookup", "description": "Look up a short test value.", "parameters": { "type": "object", "properties": { "query": { "type": "string" } }, "required": [ "query" ], "additionalProperties": false }, "time": "<time>" }
+      [wire] goal.rewind_checkpoint              { "snapshot": null, "time": "<time>" }
+      [wire] turn.prompt                         { "input": [ { "type": "text", "text": "Look up moon" } ], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } }, "time": "<time>" }
+      [emit] turn.started                        { "turnId": 0, "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }
+      [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "Look up moon" } ], "toolCalls": [], "origin": { "kind": "user", "speaker": { "from": "user", "speakerName": "用户" } } }, "time": "<time>" }
+      [wire] context.append_transcript_message   { "message": { "role": "user", "content": [ { "type": "text", "text": "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "response_summary" } }, "time": "<time>" }
+      [wire] context.append_message              { "message": { "role": "user", "content": [ { "type": "text", "text": "<auto-mode-enter-reminder>" } ], "toolCalls": [], "origin": { "kind": "injection", "variant": "permission_mode" } }, "time": "<time>" }
+      [wire] context.append_loop_event           { "event": { "type": "step.begin", "uuid": "<uuid-1>", "turnId": "0", "step": 1 }, "time": "<time>" }
+      [emit] turn.step.started                   { "turnId": 0, "step": 1, "stepId": "<uuid-1>" }
+      [emit] assistant.delta                     { "turnId": 0, "delta": "I will look it up." }
+      [emit] tool.call.delta                     { "turnId": 0, "toolCallId": "call_lookup", "name": "Lookup", "argumentsPart": "{\\"query\\":\\"moon\\"}" }
+      [wire] context.append_loop_event           { "event": { "type": "content.part", "uuid": "<uuid-2>", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "part": { "type": "text", "text": "I will look it up." } }, "time": "<time>" }
+      [wire] context.append_loop_event           { "event": { "type": "tool.call", "uuid": "call_lookup", "turnId": "0", "step": 1, "stepUuid": "<uuid-1>", "toolCallId": "call_lookup", "name": "Lookup", "args": { "query": "moon" } }, "time": "<time>" }
+      [emit] tool.call.started                   { "turnId": 0, "toolCallId": "call_lookup", "name": "Lookup", "args": { "query": "moon" } }
+      [emit] toolCall                            { "turnId": 0, "toolCallId": "call_lookup", "args": { "query": "moon" } }
     `);
     expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
       system: <system-prompt>

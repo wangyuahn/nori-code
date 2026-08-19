@@ -17,7 +17,7 @@ import type {
 export interface ProjectedMessage {
   lineNo: number;
   time?: number;
-  source: 'append_message' | 'compaction_summary' | 'undo' | 'clear';
+  source: 'append_message' | 'transcript_injection' | 'compaction_summary' | 'undo' | 'clear';
   message: ContextMessage;
   toolStepUuids: string[];
   /** Set only when source === 'undo'. */
@@ -134,6 +134,20 @@ export function projectContext(
           message: rec.message,
           toolStepUuids: [],
         });
+        break;
+      // A harness transcript injection is human-visible only: it is shown to the
+      // user but deliberately kept out of the model context, so it belongs in
+      // the `full` debugging view and must stay out of the `model` view.
+      case 'context.append_transcript_message':
+        if (mode === 'full') {
+          messages.push({
+            lineNo: entry.lineNo,
+            time: rec.time,
+            source: 'transcript_injection',
+            message: rec.message,
+            toolStepUuids: [],
+          });
+        }
         break;
       case 'context.append_loop_event': {
         const ev = rec.event;

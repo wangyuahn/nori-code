@@ -50,7 +50,7 @@ function rehydrateRecord(
     rehydrateParts(record['input'] as unknown as ContentPart[], sessionId, agentId, baseUrl);
     return;
   }
-  if (type === 'context.append_message') {
+  if (type === 'context.append_message' || type === 'context.append_transcript_message') {
     const message = record['message'] as { content: ContentPart[] };
     rehydrateParts(message.content, sessionId, agentId, baseUrl);
     return;

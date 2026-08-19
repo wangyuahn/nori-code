@@ -586,6 +586,50 @@ describe('OpenAILegacyChatProvider', () => {
         { role: 'user', content: 'Thanks!' },
       ]);
     });
+
+    it('keeps the reasoning field on persisted assistant tool calls in thinking mode', async () => {
+      const provider = createProvider({ model: 'deepseek-reasoner' }).withThinking('max');
+      const history: Message[] = [
+        { role: 'user', content: [{ type: 'text', text: 'Inspect the project.' }], toolCalls: [] },
+        {
+          // This is a valid persisted tool exchange whose reasoning stream was
+          // not retained by an older client. DeepSeek rejects it if the field
+          // is omitted while the continuation is in thinking mode.
+          role: 'assistant',
+          content: [],
+          toolCalls: [
+            {
+              type: 'function',
+              id: 'call_inspect',
+              name: 'Read',
+              arguments: '{"path":"README.md"}',
+            },
+          ],
+        },
+        {
+          role: 'tool',
+          content: [{ type: 'text', text: '# Project' }],
+          toolCallId: 'call_inspect',
+          toolCalls: [],
+        },
+      ];
+
+      const body = await captureRequestBody(provider, '', [ADD_TOOL], history);
+      const messages = body['messages'] as Record<string, unknown>[];
+
+      expect(body['reasoning_effort']).toBe('max');
+      expect(messages[1]).toMatchObject({
+        role: 'assistant',
+        reasoning_content: '',
+      });
+      expect(messages[1]?.['tool_calls']).toEqual([
+        {
+          type: 'function',
+          id: 'call_inspect',
+          function: { name: 'Read', arguments: '{"path":"README.md"}' },
+        },
+      ]);
+    });
   });
 
   describe('generation kwargs', () => {

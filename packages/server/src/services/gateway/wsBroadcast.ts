@@ -83,7 +83,7 @@ export interface IWSBroadcastService {
    * respect to the per-session dispatch queue. Backs
    * `GET /sessions/{sid}/snapshot`.
    */
-  getSnapshotState(sessionId: string): Promise<SessionSnapshotState>;
+  getSnapshotState(sessionId: string, agentId: string): Promise<SessionSnapshotState>;
 
   /**
    * Best-effort sync watermark (0 if the session's journal has not been

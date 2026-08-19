@@ -36,6 +36,7 @@ import { Emitter } from '../../src';
 import type {
   CoreRPC,
   Event,
+  PromptStartResult,
   SessionSummary,
 } from '../../src';
 import type { PromptSubmission, Session } from '@nori-code/protocol';
@@ -121,6 +122,8 @@ interface BridgeStubOptions {
   discussMode?: boolean;
   sessions?: SessionSummary[];
   onPrompt?: (payload: unknown) => void | Promise<void>;
+  /** Overrides what `core.rpc.prompt` reports back about the launch. */
+  promptStart?: PromptStartResult;
 }
 
 function makeBridge(
@@ -168,6 +171,9 @@ function makeBridge(
     prompt: vi.fn().mockImplementation(async (payload) => {
       record.promptCalls.push(payload);
       await opts.onPrompt?.(payload);
+      // `prompt` reports how the turn was accepted. The default is `started`;
+      // tests that need `busy`/`deferred` override it through `opts.promptStart`.
+      return opts.promptStart ?? { status: 'started', turnId: 0 };
     }),
     steer: vi.fn().mockImplementation(async (payload) => {
       record.steerCalls.push(payload);
@@ -633,7 +639,7 @@ describe('PromptService.submit', () => {
     const { bridge } = makeBridge();
     (bridge.rpc.prompt as unknown as ReturnType<typeof vi.fn>)
       .mockRejectedValueOnce(new Error('boom'))
-      .mockResolvedValue(undefined);
+      .mockResolvedValue({ status: 'started', turnId: 0 });
     const { bus } = makeBus();
     const impl = newSvc(bridge, bus);
     await expect(impl.submit(SID, mkBody())).rejects.toThrowError(/boom/);

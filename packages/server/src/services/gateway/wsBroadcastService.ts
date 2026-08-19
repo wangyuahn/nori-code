@@ -26,8 +26,6 @@ interface SessionState {
   queue: Promise<void>;
 }
 
-const MAIN_AGENT_ID = 'main';
-
 export class WSBroadcastService extends Disposable implements IWSBroadcastService {
   readonly _serviceBrand: undefined;
 
@@ -139,14 +137,14 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
     return { seq: journal.seq, epoch: journal.epoch };
   }
 
-  async getSnapshotState(sid: string): Promise<SessionSnapshotState> {
+  async getSnapshotState(sid: string, agentId: string): Promise<SessionSnapshotState> {
     const state = this._getOrCreateSession(sid);
     const journal = await state.ready;
     await state.queue;
     return {
       seq: journal.seq,
       epoch: journal.epoch,
-      inFlightTurn: this._turnTracker.get(sid),
+      inFlightTurn: this._turnTracker.get(sid, agentId),
     };
   }
 

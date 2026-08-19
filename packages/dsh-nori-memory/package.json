@@ -1,0 +1,30 @@
+{
+  "name": "@nori-code/dsh-nori-memory",
+  "version": "0.1.0",
+  "description": "Obsidian-style shared memory vault for DeepSeek Harness: two-phase write, chained multi-hop retrieval, graph-link scoring, trash removal (port of nori memory tools)",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "files": [
+    "lib/**"
+  ],
+  "scripts": {
+    "build": "tsdown && node scripts/rename-ext.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*"
+  },
+  "devDependencies": {
+    "tsdown": "0.22.0",
+    "typescript": "^5.5.0",
+    "vitest": "^4.1.4"
+  }
+}

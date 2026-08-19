@@ -182,6 +182,17 @@ export interface PromptPayload {
   /** Server-assigned model-facing source identity for this input. */
   readonly speaker?: SpeakerOrigin;
 }
+
+export type PromptStartResult =
+  | { readonly status: 'started'; readonly turnId: number }
+  | { readonly status: 'deferred' }
+  | { readonly status: 'busy'; readonly activeTurnId: number };
+
+/** Live execution state read directly from the target Agent. */
+export interface AgentRuntimeState {
+  readonly phase: 'idle' | 'restoring' | 'compacting' | 'running';
+  readonly turnId?: number;
+}
 export interface RunShellCommandPayload {
   readonly command: string;
   /**
@@ -398,7 +409,8 @@ export interface RemoveKimiProviderPayload {
 }
 
 export interface AgentAPI {
-  prompt: (payload: PromptPayload) => void;
+  prompt: (payload: PromptPayload) => PromptStartResult;
+  getRuntimeState: (payload: EmptyPayload) => AgentRuntimeState;
   runShellCommand: (payload: RunShellCommandPayload) => Promise<ShellCommandResult>;
   cancelShellCommand: (payload: CancelShellCommandPayload) => void;
   steer: (payload: SteerPayload) => void;

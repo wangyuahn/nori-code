@@ -92,7 +92,7 @@ export class ModelCatalogService
     const config = await this._readConfig();
     const provider = config.providers?.[providerId];
     if (provider === undefined) throw new ProviderNotFoundError(providerId);
-    return { provider_id: providerId, api_key: provider.apiKey ?? '' };
+    return { provider_id: providerId, api_key: configuredApiKey(provider) ?? '' };
   }
 
   async removeProvider(providerId: string): Promise<{ deleted: true }> {
@@ -214,9 +214,11 @@ export class ModelCatalogService
     provider: ProviderConfig,
   ): Promise<ProviderCatalogItem> {
     const hasApiKey = hasConfiguredApiKey(provider);
+    const apiKeyLength = configuredApiKey(provider)?.length;
     const hasOAuthToken = await this._hasCachedToken(providerId, provider);
     return toProtocolProvider(providerId, provider, config, {
       hasApiKey,
+      apiKeyLength,
       hasOAuthToken,
     });
   }
@@ -255,24 +257,40 @@ function mapRefreshResult(result: RefreshResult): RefreshProviderModelsResponse 
 }
 
 function hasConfiguredApiKey(provider: ProviderConfig): boolean {
-  if (nonEmpty(provider.apiKey) !== undefined) return true;
-  switch (provider.type) {
+  return configuredApiKey(provider) !== undefined;
+}
+
+/**
+ * The single effective API key for a provider: the explicit `apiKey` field, or
+ * the type-specific key declared in the provider's `env` block. Reveal, mask
+ * length, and "is it configured" must all read the same value, otherwise the
+ * masked placeholder length disagrees with the key the user can reveal.
+ */
+function configuredApiKey(provider: ProviderConfig): string | undefined {
+  const explicit = nonEmpty(provider.apiKey);
+  if (explicit !== undefined) return explicit;
+  for (const name of apiKeyEnvNames(provider.type)) {
+    const fromEnv = nonEmpty(provider.env?.[name]);
+    if (fromEnv !== undefined) return fromEnv;
+  }
+  return undefined;
+}
+
+function apiKeyEnvNames(type: ProviderConfig['type']): readonly string[] {
+  switch (type) {
     case 'anthropic':
-      return nonEmpty(provider.env?.['ANTHROPIC_API_KEY']) !== undefined;
+      return ['ANTHROPIC_API_KEY'];
     case 'openai':
     case 'openai_responses':
-      return nonEmpty(provider.env?.['OPENAI_API_KEY']) !== undefined;
+      return ['OPENAI_API_KEY'];
     case 'kimi':
-      return nonEmpty(provider.env?.['KIMI_API_KEY']) !== undefined;
+      return ['KIMI_API_KEY'];
     case 'google-genai':
-      return nonEmpty(provider.env?.['GOOGLE_API_KEY']) !== undefined;
+      return ['GOOGLE_API_KEY'];
     case 'vertexai':
-      return (
-        nonEmpty(provider.env?.['VERTEXAI_API_KEY']) !== undefined ||
-        nonEmpty(provider.env?.['GOOGLE_API_KEY']) !== undefined
-      );
+      return ['VERTEXAI_API_KEY', 'GOOGLE_API_KEY'];
   }
-  return false;
+  return [];
 }
 
 function nonEmpty(value: string | undefined): string | undefined {

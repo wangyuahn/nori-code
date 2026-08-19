@@ -68,6 +68,7 @@ export interface Message {
   thinking?: string;
   tool_calls?: Array<{ id?: string; name: string; args?: unknown; result?: string; is_error?: boolean }>;
   metadata?: {
+    turn_id?: string;
     origin?: {
       kind?: string;
       speaker?: {
@@ -377,6 +378,7 @@ export interface ProviderCatalogItem {
   base_url?: string;
   default_model?: string;
   has_api_key: boolean;
+  api_key_length?: number;
   status: 'connected' | 'error' | 'unconfigured';
   disabled?: boolean;
   auto_discover?: boolean;

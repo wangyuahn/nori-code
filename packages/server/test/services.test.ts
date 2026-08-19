@@ -518,7 +518,7 @@ describe('WSBroadcastService (WS transport pump)', () => {
     expect(replay.currentSeq).toBe(1);
 
     // The in-flight turn snapshot has the accumulated text.
-    const snap = await broadcast.getSnapshotState('sid_v');
+    const snap = await broadcast.getSnapshotState('sid_v', 'main');
     expect(snap.seq).toBe(1);
     expect(snap.inFlightTurn?.assistant_text).toBe('hello');
     broadcast.dispose();
@@ -609,7 +609,7 @@ describe('WSBroadcastService (WS transport pump)', () => {
       turnId: 1,
       reason: 'completed',
     } as unknown as Event);
-    const snap = await broadcast.getSnapshotState('sid_t');
+    const snap = await broadcast.getSnapshotState('sid_t', 'main');
     expect(snap.inFlightTurn).toBeNull();
     expect(snap.seq).toBe(2);
     broadcast.dispose();

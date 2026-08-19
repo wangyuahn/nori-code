@@ -104,7 +104,16 @@ export async function generate(
   }
 
   options?.onRequestStart?.();
-  const stream = await provider.generate(systemPrompt, tools, history, options);
+  const streamPromise = provider.generate(systemPrompt, tools, history, options);
+  let stream: StreamedMessage;
+  try {
+    stream = await waitForAbort(streamPromise, options?.signal);
+  } catch (error) {
+    if (options?.signal?.aborted) {
+      void streamPromise.then(cancelStream, () => undefined);
+    }
+    throw error;
+  }
 
   // Post-await abort check: `provider.generate()` may have resolved before
   // noticing a mid-flight abort. Reject immediately rather than draining
@@ -123,7 +132,7 @@ export async function generate(
   let firstPartAt: number | undefined;
   let lastResumeAt = 0;
 
-  for await (const part of stream) {
+  for await (const part of abortableParts(stream, options?.signal)) {
     const arrivedAt = Date.now();
     if (firstPartAt === undefined) {
       firstPartAt = arrivedAt;
@@ -251,16 +260,53 @@ function throwAbortError(): never {
   throw new DOMException('The operation was aborted.', 'AbortError');
 }
 
-async function cancelStream(stream: StreamedMessage): Promise<void> {
+function cancelStream(stream: StreamedMessage): void {
   const cancelable = stream as CancelableStream;
 
   try {
-    await cancelable.cancel?.();
+    void Promise.resolve(cancelable.cancel?.()).catch(() => undefined);
   } catch {}
 
   try {
-    await cancelable.return?.();
+    void Promise.resolve(cancelable.return?.()).catch(() => undefined);
   } catch {}
+}
+
+function waitForAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (signal === undefined) return promise;
+  if (signal.aborted) return Promise.reject(new DOMException('The operation was aborted.', 'AbortError'));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new DOMException('The operation was aborted.', 'AbortError'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => {
+      signal.removeEventListener('abort', onAbort);
+    });
+  });
+}
+
+async function* abortableParts(
+  stream: StreamedMessage,
+  signal?: AbortSignal,
+): AsyncGenerator<StreamedMessagePart> {
+  const iterator = stream[Symbol.asyncIterator]();
+  let completed = false;
+  try {
+    while (true) {
+      const next = await waitForAbort(iterator.next(), signal);
+      if (next.done === true) {
+        completed = true;
+        return;
+      }
+      yield next.value;
+    }
+  } finally {
+    if (!completed) {
+      try {
+        void Promise.resolve(iterator.return?.()).catch(() => undefined);
+      } catch {}
+      if (signal?.aborted) cancelStream(stream);
+    }
+  }
 }
 
 async function throwIfAborted(signal?: AbortSignal, stream?: StreamedMessage): Promise<void> {
@@ -269,7 +315,7 @@ async function throwIfAborted(signal?: AbortSignal, stream?: StreamedMessage): P
   }
 
   if (stream !== undefined) {
-    await cancelStream(stream);
+    cancelStream(stream);
   }
 
   throwAbortError();

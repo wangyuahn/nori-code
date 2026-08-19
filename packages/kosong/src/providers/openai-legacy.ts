@@ -144,6 +144,7 @@ function convertMessage(
   message: Message,
   reasoningKey: string | undefined,
   toolMessageConversion: ToolMessageConversion,
+  includeEmptyReasoningForToolCalls: boolean,
 ): OpenAIMessage {
   let reasoningContent = '';
   const nonThinkParts: ContentPart[] = [];
@@ -219,7 +220,19 @@ function convertMessage(
   // One API gateways) work without per-provider configuration. Servers that
   // don't understand the field ignore it; servers that require a specific
   // field can override via the explicit `reasoningKey`.
-  if (reasoningContent) {
+  // DeepSeek-compatible thinking endpoints validate historical assistant tool
+  // calls before running the next step. A previously persisted tool call can
+  // legitimately have no recoverable ThinkPart (for example, if an older
+  // client did not record the stream), but omitting the field entirely causes
+  // those endpoints to reject the otherwise valid continuation with a 400.
+  // Emit the explicit empty value only while thinking is active; ordinary
+  // OpenAI-compatible tool calls retain their existing wire format.
+  if (
+    reasoningContent
+    || (includeEmptyReasoningForToolCalls
+      && message.role === 'assistant'
+      && message.toolCalls.length > 0)
+  ) {
     result[reasoningKey ?? DEFAULT_OUTBOUND_REASONING_KEY] = reasoningContent;
   }
 
@@ -281,6 +294,7 @@ function convertHistoryMessages(
   history: readonly Message[],
   reasoningKey: string | undefined,
   toolMessageConversion: ToolMessageConversion,
+  includeEmptyReasoningForToolCalls: boolean,
 ): OpenAIMessage[] {
   const messages: OpenAIMessage[] = [];
   const pendingToolResultMedia: OpenAIContentPart[] = [];
@@ -289,7 +303,9 @@ function convertHistoryMessages(
     if (msg.role !== 'tool') {
       appendToolResultMediaMessage(messages, pendingToolResultMedia);
     }
-    messages.push(convertMessage(msg, reasoningKey, toolMessageConversion));
+    messages.push(
+      convertMessage(msg, reasoningKey, toolMessageConversion, includeEmptyReasoningForToolCalls),
+    );
     if (msg.role === 'tool') {
       pendingToolResultMedia.push(...toolResultImageParts(msg));
     }
@@ -509,16 +525,9 @@ export class OpenAILegacyChatProvider implements ChatProvider {
     history: Message[],
     options?: GenerateOptions,
   ): Promise<StreamedMessage> {
-    const messages: OpenAIMessage[] = [];
-    if (systemPrompt) {
-      messages.push({ role: 'system', content: systemPrompt });
-    }
     const normalizedHistory = normalizeToolCallIdsForProvider(
       history,
       OPENAI_CHAT_TOOL_CALL_ID_POLICY,
-    );
-    messages.push(
-      ...convertHistoryMessages(normalizedHistory, this._reasoningKey, this._toolMessageConversion),
     );
 
     const kwargs: Record<string, unknown> = normalizeGenerationKwargs(
@@ -547,6 +556,23 @@ export class OpenAILegacyChatProvider implements ChatProvider {
         reasoningEffort = 'medium';
       }
     }
+
+    const includeEmptyReasoningForToolCalls =
+      !this._thinkingExplicitlyDisabled
+      && (reasoningEffort !== undefined || kwargs['reasoning_effort'] !== undefined);
+
+    const messages: OpenAIMessage[] = [];
+    if (systemPrompt) {
+      messages.push({ role: 'system', content: systemPrompt });
+    }
+    messages.push(
+      ...convertHistoryMessages(
+        normalizedHistory,
+        this._reasoningKey,
+        this._toolMessageConversion,
+        includeEmptyReasoningForToolCalls,
+      ),
+    );
 
     // Remove undefined values from kwargs
     for (const key of Object.keys(kwargs)) {

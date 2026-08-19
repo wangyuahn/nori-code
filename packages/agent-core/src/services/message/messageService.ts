@@ -147,7 +147,7 @@ export class MessageService extends Disposable implements IMessageService {
       if (isInternalTeamDirectMessage(entry.message)) return [];
       const baseMs = entry.time ?? summary.createdAt + idx;
       const createdAtMs = Math.max(previousMs + 1, baseMs);
-      const messages = toProtocolMessages(sid, idx, entry.message, summary.createdAt, createdAtMs);
+      const messages = toProtocolMessages(sid, idx, entry.message, summary.createdAt, createdAtMs, entry.turnId);
       previousMs = createdAtMs + messages.length - 1;
       return messages;
     });

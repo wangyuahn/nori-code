@@ -180,7 +180,7 @@ describe('project tool_use/tool_result adjacency', () => {
     expect(findMisplacedToolUses(projected)).toEqual([]);
   });
 
-  it('projects ContextInjection as an adjacent provider-valid exchange', () => {
+  it('keeps ContextInjection as a user-role harness reminder', () => {
     const history: ContextMessage[] = [
       {
         role: 'user',
@@ -202,21 +202,11 @@ describe('project tool_use/tool_result adjacency', () => {
     ];
 
     const projected = project(history);
-    expect(projected.map(message => message.role)).toEqual([
-      'user',
-      'assistant',
-      'tool',
-      'assistant',
-    ]);
-    expect(projected[1]?.toolCalls[0]).toMatchObject({
-      name: 'ContextInjection',
-      arguments: JSON.stringify({ source: 'goal', variant: 'goal' }),
-    });
-    expect(projected[2]?.toolCallId).toBe(projected[1]?.toolCalls[0]?.id);
-    expect(projected[2]?.content).toEqual([{ type: 'text', text: 'system payload' }]);
-    expect(projected[3]?.content).toEqual([{ type: 'text', text: 'final answer' }]);
+    expect(projected.map(message => message.role)).toEqual(['user', 'user', 'assistant']);
+    expect(projected[1]?.content).toEqual([{ type: 'text', text: 'system payload' }]);
+    expect(projected[1]?.toolCalls).toEqual([]);
+    expect(projected[2]?.content).toEqual([{ type: 'text', text: 'final answer' }]);
     expect(findMisplacedToolUses(projected)).toEqual([]);
-    expect(projected[1]?.content).toEqual([]);
   });
 
   it('moves a user message sandwiched between tool_use and tool_result to after the result', () => {

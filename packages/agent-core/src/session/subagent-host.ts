@@ -11,6 +11,7 @@ import {
 } from '../agent/background';
 import type { PromptOrigin } from '../agent/context';
 import { ErrorCodes, type KimiErrorPayload } from '../errors';
+import type { PromptStartResult } from '../rpc';
 import { DenyAllPermissionPolicy } from '../agent/permission/policies/deny-all';
 import { InMemoryAgentRecordPersistence } from '../agent/records';
 import { isAbortError } from '../loop/errors';
@@ -263,7 +264,38 @@ export class SessionSubagentHost {
     assignments: readonly TeamAssignment[],
     signal: AbortSignal,
   ): Promise<Array<{ readonly agentId: string; readonly task: string | null; readonly turnId?: number }>> {
+    const requested = new Set(
+      assignments.filter((assignment) => assignment.task !== null).map((assignment) => assignment.agentId),
+    );
+    const busy: string[] = [];
+    for (const [agentId] of this.session.teamMemberMetadata(this.ownerAgentId)) {
+      if (!requested.has(agentId)) continue;
+      signal.throwIfAborted();
+      const agent = await this.session.ensureAgentResumed(agentId);
+      await waitForAgentCompaction(agent, signal);
+      if (agent.turn.hasActiveTurn) busy.push(agentId);
+    }
+    if (busy.length > 0) {
+      throw new Error(`TeamAssign cannot replace active member work: ${busy.join(', ')}.`);
+    }
+
     const assigned = await this.session.assignTeamTasks(this.ownerAgentId, assignments);
+    const unavailable = assigned.filter((assignment) => (
+      assignment.task !== null && assignment.agent.turn.hasActiveTurn
+    ));
+    if (unavailable.length > 0) {
+      await Promise.all(assigned.map(async (assignment) => {
+        if (assignment.assignedAt === undefined) return;
+        await this.session.releaseTeamAssignment(
+          this.ownerAgentId,
+          assignment.agentId,
+          assignment.assignedAt,
+        );
+      }));
+      throw new Error(
+        `TeamAssign cannot replace active member work: ${unavailable.map(({ agentId }) => agentId).join(', ')}.`,
+      );
+    }
     const started: Array<{ readonly agentId: string; readonly task: string | null; readonly turnId?: number }> = [];
     const observedLeases = new Set<string>();
     try {
@@ -277,14 +309,16 @@ export class SessionSubagentHost {
         if (assignedAt === undefined) {
           throw new Error(`Team member "${assignment.agentId}" is missing its assignment lease token.`);
         }
-        const turnId = assignment.agent.turn.prompt(
+        const start = await startAgentPrompt(
+          assignment.agent,
           [{
             type: 'text',
             text: `${assignment.task}\n\n${TEAM_AGENT_EXECUTION_PROMPT.trim()}`,
           }],
           this.teamLeadPromptOrigin(),
+          signal,
         );
-        if (turnId === null) {
+        if (start.kind !== 'started') {
           throw new Error(`Team member "${assignment.agentId}" could not start its assigned turn.`);
         }
         observedLeases.add(assignment.agentId);
@@ -295,7 +329,11 @@ export class SessionSubagentHost {
           this.observeTeamAssignmentTurn(assignment.agentId, assignedAt, assignment.agent);
           this.session.notifyRunningTeamMember?.(assignment.agentId, assignedAt);
         }
-        started.push({ agentId: assignment.agentId, task: assignment.task, turnId });
+        started.push({
+          agentId: assignment.agentId,
+          task: assignment.task,
+          ...(start.turnId === undefined ? {} : { turnId: start.turnId }),
+        });
       }
       return started;
     } catch (error) {
@@ -346,12 +384,21 @@ export class SessionSubagentHost {
     await Promise.all(members.map(async ([agentId]) => {
       signal.throwIfAborted();
       const agent = await this.session.ensureAgentResumed(agentId);
-      if (agent.turn.hasActiveTurn) return;
-      const turnId = agent.turn.prompt(
-        [{ type: 'text', text: message }],
-        this.teamLeadPromptOrigin(),
-      );
-      if (turnId === null) return;
+      await waitForAgentCompaction(agent, signal);
+      const input = [{ type: 'text' as const, text: message }];
+      if (agent.turn.hasActiveTurn) {
+        agent.turn.steer(input, this.teamLeadPromptOrigin());
+        return;
+      }
+      const start = await startAgentPrompt(agent, input, this.teamLeadPromptOrigin(), signal);
+      if (start.kind === 'busy') {
+        agent.turn.steer(input, this.teamLeadPromptOrigin());
+        return;
+      }
+      // Nothing is carrying the broadcast for this member. A broadcast is
+      // best-effort across the whole team, so one member that could not be woken
+      // is skipped rather than failing the other members' deliveries.
+      if (start.kind === 'unstarted') return;
       await runChildTurnToCompletion(agent, signal);
     }));
     return members.map(([agentId]) => agentId);
@@ -402,19 +449,31 @@ export class SessionSubagentHost {
           : `[TeamDM report: ${reportToParent.status}]\n${message}\nReport summary: ${reportToParent.summary}`,
       ),
     }];
+    await waitForAgentCompaction(recipient, signal);
     const recipientBusy = recipient.turn.hasActiveTurn;
-    const turnId = recipientBusy
-      ? recipient.turn.steer(input, origin)
-      : recipient.turn.prompt(input, origin);
-    if (turnId === null) {
-      if (recipientBusy) {
-        if (reportToParent !== undefined) {
-          void runChildTurnToCompletion(recipient)
-            .then(() => this.session.acknowledgeTeamReport(this.ownerAgentId))
-            .catch(() => undefined);
-        }
-        return { delivered: true, processing: 'queued' };
+    if (recipientBusy) {
+      recipient.turn.steer(input, origin);
+      if (reportToParent !== undefined) {
+        void runChildTurnToCompletion(recipient)
+          .then(() => this.session.acknowledgeTeamReport(this.ownerAgentId))
+          .catch(() => undefined);
       }
+      return { delivered: true, processing: 'queued' };
+    }
+    const start = await startAgentPrompt(recipient, input, origin, signal);
+    if (start.kind === 'busy') {
+      recipient.turn.steer(input, origin);
+      if (reportToParent !== undefined) {
+        void runChildTurnToCompletion(recipient)
+          .then(() => this.session.acknowledgeTeamReport(this.ownerAgentId))
+          .catch(() => undefined);
+      }
+      return { delivered: true, processing: 'queued' };
+    }
+    // An idle recipient that never launched a turn has nothing to steer into and
+    // nothing that will pick the message up later. Reporting delivery here is the
+    // lie that made TeamDM look like it woke a member when it had not.
+    if (start.kind === 'unstarted') {
       throw new Error(`TeamDM target "${targetAgentId}" could not start a turn.`);
     }
     await runChildTurnToCompletion(recipient, signal);
@@ -739,35 +798,33 @@ export class SessionSubagentHost {
       const meta = this.session.getAgentMetadata(agentId);
       if (meta?.kind !== 'team') continue;
       const participant = await this.session.ensureAgentResumed(agentId);
-      if (participant.turn.hasActiveTurn) {
-        const skipped = { agentId, skipped: true, reason: 'active' };
-        statements.push(skipped);
-        await this.appendDiscussionSkip(discussionAgentId, meta.name ?? '团队成员', skipped.reason);
-        continue;
-      }
-      const unread = await this.session.unreadTeamDiscussionStatements(discussionAgentId, agentId);
-      this.session.beginTeamDiscussionTurn(discussionAgentId, agentId);
-      const historyStart = participant.context?.history.length ?? 0;
+      let historyStart = participant.context?.history.length ?? 0;
       let sent: TeamDiscussionStatementRecord | undefined;
       let failure: unknown;
-      let unavailable = false;
       let cancelDiscussion = false;
       try {
+        // A member may still be finishing an assigned execution turn. Wait that
+        // turn out instead of reading a status flag and abstaining on the
+        // member's behalf — but cap the wait, so one wedged member is skipped
+        // (and its turn cancelled) rather than stalling the whole round.
+        await waitForAgentAvailabilityWithTimeout(
+          participant,
+          signal,
+          this.discussionMemberTimeoutMs,
+        );
+        historyStart = participant.context?.history.length ?? 0;
+        const unread = await this.session.unreadTeamDiscussionStatements(discussionAgentId, agentId);
+        this.session.beginTeamDiscussionTurn(discussionAgentId, agentId);
         let acknowledged = false;
         for (let attempt = 0; attempt < 2; attempt += 1) {
           if (attempt > 0) signal.throwIfAborted();
-          const turnId = participant.turn.prompt(
+          await startScheduledAgentPrompt(
+            participant,
             [{ type: 'text', text: discussionRoundPrompt(unread.statements) }],
             this.teamLeadPromptOrigin(),
+            signal,
+            this.discussionMemberTimeoutMs,
           );
-          if (turnId === null) {
-            if (attempt === 0) {
-              unavailable = true;
-            } else {
-              failure = new DiscussionNoResponseError(this.discussionMemberFirstResponseTimeoutMs, true);
-            }
-            break;
-          }
           // Mark messages as read only after this agent accepted the turn. That
           // prevents a rejected prompt from silently losing an unread update,
           // while keeping accepted messages from being replayed into its cache.
@@ -800,7 +857,7 @@ export class SessionSubagentHost {
           sent = this.session.consumeTeamDiscussionSpeak(discussionAgentId, agentId);
           break;
         }
-        if (sent === undefined && failure === undefined && !unavailable) {
+        if (sent === undefined && failure === undefined) {
           sent = this.session.consumeTeamDiscussionSpeak(discussionAgentId, agentId);
         }
       } catch (error) {
@@ -818,10 +875,6 @@ export class SessionSubagentHost {
           });
         } else if (failure !== undefined && signal.aborted) {
           cancelDiscussion = true;
-        } else if (unavailable) {
-          const skipped = { agentId, skipped: true, reason: 'unavailable' };
-          statements.push(skipped);
-          await this.appendDiscussionSkip(discussionAgentId, meta.name ?? '团队成员', skipped.reason);
         } else if (failure !== undefined) {
           const reason = failure instanceof DiscussionNoResponseError
             ? failure.reason
@@ -872,6 +925,9 @@ export class SessionSubagentHost {
     const activeVoterIds: string[] = [];
     for (const [agentId] of voters) {
       const participant = await this.session.ensureAgentResumed(agentId);
+      // A pure precondition read: a member still executing an assigned turn means
+      // "come back later", so this must not wait on compaction first. The per-voter
+      // loop below does the real availability wait.
       if (participant.turn.hasActiveTurn) activeVoterIds.push(agentId);
     }
     if (activeVoterIds.length > 0) {
@@ -883,40 +939,35 @@ export class SessionSubagentHost {
     for (const [agentId] of voters) {
       signal.throwIfAborted();
       const participant = await this.session.ensureAgentResumed(agentId);
-      if (participant.turn.hasActiveTurn) {
-        votes.push({ agentId, vote: 'abstain' });
-        await this.appendDiscussionVote(discussionAgentId, agentId, 'abstain');
-        continue;
-      }
-      // Voting is a scheduled participant turn too. Deliver only this
-      // participant's unread statement suffix, then acknowledge it only after
-      // the prompt was accepted so a failed/unavailable vote can retry without
-      // losing discussion context.
-      const unread = await this.session.unreadTeamDiscussionStatements(discussionAgentId, agentId);
-      const turnId = participant.turn.prompt(
-        [{
-          type: 'text',
-          text: discussionVotePrompt(unread.statements),
-        }],
-        this.teamLeadPromptOrigin(),
-      );
-      if (turnId === null) {
-        votes.push({ agentId, vote: 'abstain' });
-        await this.appendDiscussionVote(discussionAgentId, agentId, 'abstain');
-        continue;
-      }
-      await this.session.acknowledgeTeamDiscussionStatements(discussionAgentId, agentId, unread.cursor);
+      // One deadline covers waiting the member out, claiming its turn, and the
+      // vote turn itself, so a member that never frees its turn abstains instead
+      // of failing the whole vote — and its wedged turn is cancelled on the way.
       const deadline = createDeadlineAbortSignal(signal, this.discussionMemberTimeoutMs);
+      let vote: TeamVote['vote'];
       try {
+        await waitForAgentAvailability(participant, deadline.signal);
+        // Voting is a scheduled participant turn too. Deliver only this
+        // participant's unread statement suffix, then acknowledge it only after
+        // the prompt was accepted so a failed vote can retry without losing
+        // discussion context.
+        const unread = await this.session.unreadTeamDiscussionStatements(discussionAgentId, agentId);
+        await startScheduledAgentPrompt(
+          participant,
+          [{ type: 'text', text: discussionVotePrompt(unread.statements) }],
+          this.teamLeadPromptOrigin(),
+          deadline.signal,
+        );
+        await this.session.acknowledgeTeamDiscussionStatements(discussionAgentId, agentId, unread.cursor);
         await runDiscussionChildTurnToCompletion(participant, deadline.signal);
-      } catch {
-        votes.push({ agentId, vote: 'abstain' });
-        await this.appendDiscussionVote(discussionAgentId, agentId, 'abstain');
-        continue;
+        vote = parseTeamVote(lastAssistantText(participant));
+      } catch (error) {
+        // A session-level cancel must not be laundered into an abstention.
+        if (signal.aborted) throw signal.reason;
+        void error;
+        vote = 'abstain';
       } finally {
         deadline.clear();
       }
-      const vote = parseTeamVote(lastAssistantText(participant));
       votes.push({ agentId, vote });
       await this.appendDiscussionVote(discussionAgentId, agentId, vote);
     }
@@ -1903,6 +1954,143 @@ function wrapTeamDirectMessage(message: string): string {
 
 function escapeXmlAttribute(value: string): string {
   return escapeXmlText(value).replaceAll('"', '&quot;');
+}
+
+/** Compaction defers new prompts, so it is the first thing a scheduler waits out. */
+async function waitForAgentCompaction(agent: Agent, signal: AbortSignal): Promise<void> {
+  await agent.fullCompaction.waitForCompletion(signal);
+}
+
+/**
+ * Waits until `agent` can accept a fresh prompt: no compaction in flight and no
+ * active turn. Team schedulers use this instead of reading a status flag, because
+ * the flag can lag the turn lifecycle and would make a member look permanently
+ * busy. The loop re-checks both conditions because a completing turn may itself
+ * trigger compaction, and a steered turn may roll straight into another one.
+ */
+async function waitForAgentAvailability(agent: Agent, signal: AbortSignal): Promise<void> {
+  await waitForAgentCompaction(agent, signal);
+  while (agent.turn.hasActiveTurn) {
+    try {
+      await agent.turn.waitForCurrentTurn(signal);
+    } catch (error) {
+      if (signal.aborted) throw signal.reason;
+      // The turn ended by failing or was already gone; either way availability
+      // is what we are after, so only a still-active turn is a real error.
+      if (agent.turn.hasActiveTurn) throw error;
+    }
+    await waitForAgentCompaction(agent, signal);
+  }
+}
+
+type AgentPromptStart =
+  | { readonly kind: 'started'; readonly turnId: number }
+  /**
+   * Another turn already holds the agent and this input was dropped. The agent is
+   * alive and working, so steering the input into the running turn is the correct
+   * recovery — never an error.
+   */
+  | { readonly kind: 'busy'; readonly activeTurnId: number }
+  /**
+   * Nothing is carrying this input: compaction deferred it and no turn had
+   * launched by the time compaction finished. There is no running turn to steer
+   * into and nothing will pick it up, so a caller must not claim delivery.
+   */
+  | { readonly kind: 'unstarted' };
+
+/**
+ * Starts one agent turn without collapsing `busy` and compaction-deferred into
+ * the old `null` result. A deferred prompt is already buffered by the turn, so
+ * it is waited through rather than submitted a second time.
+ */
+async function startAgentPrompt(
+  agent: Agent,
+  input: Parameters<Agent['turn']['requestPrompt']>[0],
+  origin: PromptOrigin,
+  signal: AbortSignal,
+): Promise<AgentPromptStart> {
+  signal.throwIfAborted();
+  await waitForAgentCompaction(agent, signal);
+  const start: PromptStartResult = agent.turn.requestPrompt(input, origin);
+  if (start.status === 'started') return { kind: 'started', turnId: start.turnId };
+  if (start.status === 'busy') return { kind: 'busy', activeTurnId: start.activeTurnId };
+  // `deferred` means compaction took the prompt to replay once it finishes.
+  await waitForAgentCompaction(agent, signal);
+  if (!agent.turn.hasActiveTurn) return { kind: 'unstarted' };
+  return { kind: 'started', turnId: agent.turn.currentId };
+}
+
+/**
+ * Waits for `agent` to go idle and then starts a turn, returning its id. This is
+ * how scheduled team work (a discussion round, a vote) claims a member: one that
+ * is momentarily busy gets waited for instead of being recorded as an
+ * abstention. `timeoutMs` bounds the wait *and* the retries, so a member that
+ * keeps re-arming a turn cannot livelock the scheduler.
+ */
+async function startScheduledAgentPrompt(
+  agent: Agent,
+  input: Parameters<Agent['turn']['requestPrompt']>[0],
+  origin: PromptOrigin,
+  signal: AbortSignal,
+  timeoutMs?: number,
+): Promise<number> {
+  if (timeoutMs === undefined || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return startAgentPromptWhenIdle(agent, input, origin, signal);
+  }
+  const deadline = createDeadlineAbortSignal(signal, timeoutMs);
+  try {
+    return await startAgentPromptWhenIdle(agent, input, origin, deadline.signal);
+  } catch (error) {
+    if (deadline.timedOut() && !signal.aborted) throw new DiscussionTurnTimeoutError(timeoutMs);
+    throw error;
+  } finally {
+    deadline.clear();
+  }
+}
+
+async function startAgentPromptWhenIdle(
+  agent: Agent,
+  input: Parameters<Agent['turn']['requestPrompt']>[0],
+  origin: PromptOrigin,
+  signal: AbortSignal,
+): Promise<number> {
+  while (true) {
+    await waitForAgentAvailability(agent, signal);
+    const start = await startAgentPrompt(agent, input, origin, signal);
+    if (start.kind === 'started') return start.turnId;
+    // `busy` means the agent re-armed a turn in the gap after the availability
+    // wait, so looping is real progress. `unstarted` means it accepted nothing at
+    // all — retrying would spin against a member that cannot be woken, so it is
+    // reported and the caller records a skip.
+    if (start.kind === 'unstarted') {
+      throw new Error('Agent accepted no turn for the scheduled prompt.');
+    }
+  }
+}
+
+async function waitForAgentAvailabilityWithTimeout(
+  agent: Agent,
+  signal: AbortSignal,
+  timeoutMs?: number,
+): Promise<void> {
+  if (timeoutMs === undefined || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    await waitForAgentAvailability(agent, signal);
+    return;
+  }
+  const deadline = createDeadlineAbortSignal(signal, timeoutMs);
+  try {
+    await waitForAgentAvailability(agent, deadline.signal);
+  } catch (error) {
+    // The deadline cancels the member's in-flight turn on the way out, which is
+    // how a wedged turn's lease gets reclaimed. Report it as a timeout so the
+    // caller records a `timeout` skip rather than an opaque abort.
+    if (deadline.timedOut() && !signal.aborted) {
+      throw new DiscussionTurnTimeoutError(timeoutMs);
+    }
+    throw error;
+  } finally {
+    deadline.clear();
+  }
 }
 
 async function runChildTurnToCompletion(child: Agent, signal?: AbortSignal): Promise<void> {

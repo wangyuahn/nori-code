@@ -431,14 +431,15 @@ describe('main transcript projection', () => {
     expect(injection).toMatchObject({
       role: 'assistant',
       text: '',
-      toolCalls: [{
-        name: 'ContextInjection',
-        args: { source: 'skill-catalog', variant: 'skill-catalog' },
+      toolCalls: undefined,
+      workBlocks: [{
+        type: 'context',
+        source: 'skill-catalog',
       }],
     });
   });
 
-  it('does not expose internal permission reminders as a callable ContextInjection', () => {
+  it('keeps internal permission reminders visible without making them callable', () => {
     const permissionReminder = apiMessageToChat({
       id: 'permission-reminder',
       role: 'assistant',
@@ -450,7 +451,11 @@ describe('main transcript projection', () => {
       }],
       created_at: '2026-07-14T00:00:00.000Z',
     });
-    expect(permissionReminder).toBeNull();
+    expect(permissionReminder).toMatchObject({
+      role: 'assistant',
+      toolCalls: undefined,
+      workBlocks: [{ type: 'context', source: 'permission_mode' }],
+    });
   });
 
   it('keeps ordinary user prompts and team discussion messages out of context injections', () => {
@@ -731,7 +736,7 @@ describe('main transcript projection', () => {
     ]);
   });
 
-  it('keeps tool results as their own message', () => {
+  it('folds tool results into the assistant turn that called them', () => {
     const first = apiMessageToChat({
       id: 'step-1',
       role: 'assistant',
@@ -756,12 +761,47 @@ describe('main transcript projection', () => {
 
     const folded = foldConversationTurns([first, result, second]);
     expect(folded[0]?.workBlocks?.map(block => block.type)).toEqual(['thinking', 'tool']);
-    expect(folded[1]?.toolCalls).toMatchObject([{
+    expect(folded[0]?.toolCalls).toMatchObject([{
       id: 'edit-1',
       result: 'Content tag mismatch',
       isError: true,
     }]);
-    expect(folded[2]?.text).toBe('Done.');
+    expect(folded[1]?.text).toBe('Done.');
+  });
+
+  it('drops an orphan tool result without inventing the name tool', () => {
+    const orphan = apiMessageToChat({
+      id: 'orphan-result',
+      role: 'tool',
+      created_at: '2026-07-14T00:00:00.000Z',
+      content: [{ type: 'tool_result', tool_call_id: 'missing', output: 'stale' }],
+    });
+    expect(orphan?.toolResult?.toolCallId).toBe('missing');
+    expect(foldConversationTurns([orphan!])).toEqual([]);
+  });
+
+  it('groups consecutive tool-only assistant steps into one work process', () => {
+    const first = apiMessageToChat({
+      id: 'step-a', role: 'assistant', created_at: '2026-07-14T00:00:01.000Z',
+      content: [{ type: 'tool_use', tool_call_id: 'read-1', tool_name: 'Read', input: { path: 'a.ts' } }],
+    })!;
+    const firstResult = apiMessageToChat({
+      id: 'result-a', role: 'tool', created_at: '2026-07-14T00:00:02.000Z',
+      content: [{ type: 'tool_result', tool_call_id: 'read-1', output: 'a' }],
+    })!;
+    const second = apiMessageToChat({
+      id: 'step-b', role: 'assistant', created_at: '2026-07-14T00:00:03.000Z',
+      content: [{ type: 'tool_use', tool_call_id: 'grep-1', tool_name: 'Grep', input: { pattern: 'x' } }],
+    })!;
+    const secondResult = apiMessageToChat({
+      id: 'result-b', role: 'tool', created_at: '2026-07-14T00:00:04.000Z',
+      content: [{ type: 'tool_result', tool_call_id: 'grep-1', output: 'b' }],
+    })!;
+
+    const folded = foldConversationTurns([first!, firstResult!, second!, secondResult!]);
+    expect(folded).toHaveLength(1);
+    expect(folded[0]?.workBlocks?.filter(block => block.type === 'tool')).toHaveLength(2);
+    expect(folded[0]?.toolCalls?.map(tool => tool.name)).toEqual(['Read', 'Grep']);
   });
 });
 

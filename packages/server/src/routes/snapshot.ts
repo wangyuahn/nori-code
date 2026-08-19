@@ -1,6 +1,12 @@
 /**
  * `GET /sessions/{session_id}/snapshot` — IM-style initial sync.
  *
+ * **Agent scope**: `?agent_id=` selects which chat in the session is rebuilt and
+ * defaults to `main`. Every leg of the snapshot (transcript, watermark,
+ * in-flight turn, pending approvals/questions) is read at that same
+ * session+agent key, so opening a subagent returns its full history instead of
+ * the main chat's plus whatever arrived live afterwards.
+ *
  * **Reader strategy** (controlled by `NORI_SNAPSHOT_READER`):
  *
  *   - `auto` (default) — delegate to `ISnapshotService`, which reads
@@ -57,6 +63,10 @@ const sessionIdParamSchema = z.object({
   session_id: z.string().min(1),
 });
 
+const snapshotQuerySchema = z.object({
+  agent_id: z.string().min(1).optional(),
+});
+
 /** Messages included in the snapshot page (most recent, ascending order). */
 const SNAPSHOT_MESSAGE_PAGE_SIZE = 100;
 
@@ -75,6 +85,7 @@ export function registerSnapshotRoutes(
       method: 'GET',
       path: '/sessions/{session_id}/snapshot',
       params: sessionIdParamSchema,
+      querystring: snapshotQuerySchema,
       success: { data: sessionSnapshotResponseSchema },
       description:
         'Atomic session snapshot for client rebuild: state + as_of_seq watermark + epoch',
@@ -82,10 +93,11 @@ export function registerSnapshotRoutes(
     },
     async (req, reply) => {
       const { session_id } = req.params;
+      const agentId = req.query.agent_id ?? 'main';
       try {
         const data = useReader
-          ? await readViaSnapshotService(ix, session_id, config.timeoutMs)
-          : await readViaLegacyAssembly(ix, session_id);
+          ? await readViaSnapshotService(ix, session_id, agentId, config.timeoutMs)
+          : await readViaLegacyAssembly(ix, session_id, agentId);
         reply.send(okEnvelope(data, req.id));
       } catch (err) {
         if (err instanceof SnapshotNotFoundError || err instanceof SessionNotFoundError) {
@@ -112,6 +124,7 @@ export function registerSnapshotRoutes(
 async function readViaSnapshotService(
   ix: IInstantiationService,
   sid: string,
+  agentId: string,
   timeoutMs: number,
 ) {
   let timer: NodeJS.Timeout | undefined;
@@ -121,7 +134,7 @@ async function readViaSnapshotService(
   });
   try {
     return await Promise.race([
-      ix.invokeFunction((a) => a.get(ISnapshotService).read(sid)),
+      ix.invokeFunction((a) => a.get(ISnapshotService).read(sid, agentId)),
       timeoutPromise,
     ]);
   } finally {
@@ -129,7 +142,7 @@ async function readViaSnapshotService(
   }
 }
 
-async function readViaLegacyAssembly(ix: IInstantiationService, sid: string) {
+async function readViaLegacyAssembly(ix: IInstantiationService, sid: string, agentId: string) {
   return ix.invokeFunction(async (a) => {
     const broadcast = a.get(IWSBroadcastService);
     const sessionService = a.get(ISessionService);
@@ -138,7 +151,7 @@ async function readViaLegacyAssembly(ix: IInstantiationService, sid: string) {
     const approvals = a.get(IApprovalService) as ApprovalService;
     const questions = a.get(IQuestionService) as QuestionService;
 
-    let snapState = await broadcast.getSnapshotState(sid);
+    let snapState = await broadcast.getSnapshotState(sid, agentId);
     let session: Session | undefined;
     let items: Message[] = [];
     let hasMore = false;
@@ -147,17 +160,17 @@ async function readViaLegacyAssembly(ix: IInstantiationService, sid: string) {
       session = await sessionService.get(sid);
       const page = await messageService.list(sid, {
         page_size: SNAPSHOT_MESSAGE_PAGE_SIZE,
-      });
+      }, agentId);
       items = [...page.items].reverse();
       hasMore = page.has_more;
 
-      const post = await broadcast.getSnapshotState(sid);
+      const post = await broadcast.getSnapshotState(sid, agentId);
       const stable = post.seq === snapState.seq && post.epoch === snapState.epoch;
       snapState = post;
       if (stable) break;
     }
 
-    const currentPromptId = promptService.getCurrentPromptId(sid);
+    const currentPromptId = promptService.getCurrentPromptId(sid, agentId);
     const inFlightTurn = snapState.inFlightTurn;
     if (inFlightTurn !== null && currentPromptId !== undefined) {
       inFlightTurn.current_prompt_id = currentPromptId;
@@ -169,8 +182,8 @@ async function readViaLegacyAssembly(ix: IInstantiationService, sid: string) {
       session: session!,
       messages: { items, has_more: hasMore },
       in_flight_turn: inFlightTurn,
-      pending_approvals: approvals.listPending(sid),
-      pending_questions: questions.listPending(sid),
+      pending_approvals: approvals.listPending(sid, agentId),
+      pending_questions: questions.listPending(sid, agentId),
     };
   });
 }

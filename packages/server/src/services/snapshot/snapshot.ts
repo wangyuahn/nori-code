@@ -13,7 +13,7 @@ export interface ISnapshotService {
   readonly _serviceBrand: undefined;
 
   /** Assemble the atomic snapshot for `sid`. Throws `SnapshotNotFoundError` when the session does not exist on disk. */
-  read(sid: string): Promise<SessionSnapshotResponse>;
+  read(sid: string, agentId?: string): Promise<SessionSnapshotResponse>;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare

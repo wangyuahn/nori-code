@@ -42,6 +42,52 @@ const models: ModelCatalogItem[] = [
 ];
 
 describe('provider model persistence', () => {
+  it('keeps provider keys masked by their real length until the eye is clicked', async () => {
+    const provider: ProviderCatalogItem = {
+      id: 'ds',
+      name: 'DeepSeek',
+      type: 'openai',
+      base_url: 'https://api.example.test/v1',
+      has_api_key: true,
+      api_key_length: 20,
+      status: 'connected',
+      auto_discover: true,
+      custom_models: [],
+    };
+    vi.spyOn(api.providers, 'list').mockResolvedValue({ items: [provider] });
+    vi.spyOn(api.providerPresets, 'list').mockResolvedValue({ items: [], source: 'builtin' });
+    vi.spyOn(api, 'getConfig').mockResolvedValue({ models: {} });
+    const secret = vi.spyOn(api.providers, 'secret').mockResolvedValue({ provider_id: 'ds', api_key: 'sk-live-secret-value' });
+
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(createElement(I18nProvider, null, createElement(ProviderSettings)));
+      await Promise.resolve();
+    });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+    await act(async () => container.querySelector<HTMLButtonElement>('.provider-card-main')!.click());
+    await vi.waitFor(() => expect(container.querySelector('.provider-editor')).not.toBeNull());
+
+    const input = container.querySelector<HTMLInputElement>('.provider-secret-input input')!;
+    expect(input.type).toBe('password');
+    expect(input.value).toBe('•'.repeat(20));
+    await act(async () => input.focus());
+    expect(secret).not.toHaveBeenCalled();
+    expect(input.value).toBe('•'.repeat(20));
+
+    await act(async () => container.querySelector<HTMLButtonElement>('.provider-secret-input button')!.click());
+    await vi.waitFor(() => expect(secret).toHaveBeenCalledWith('ds'));
+    expect(input.type).toBe('text');
+    expect(input.value).toBe('sk-live-secret-value');
+
+    await act(async () => container.querySelector<HTMLButtonElement>('.provider-secret-input button')!.click());
+    expect(input.type).toBe('password');
+    expect(input.value).toBe('•'.repeat(20));
+    await act(async () => root.unmount());
+  });
+
   it('uses arrays for custom_models in both discovery modes', () => {
     expect(providerCustomModelsForPatch(true, ['legacy-model'])).toEqual([]);
     expect(providerCustomModelsForPatch(false, ['deepseek-v4-flash'])).toEqual(['deepseek-v4-flash']);

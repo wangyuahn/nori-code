@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type UIEvent } from 'react';
 import { api, type ApprovalRequest, type ModelCatalogItem, type PromptAttachment, type PromptExecutionOptions, type QuestionAnswer, type QuestionRequest, type Session, type SessionAgent, type SessionAgentConfig, type SessionRealtimeStatus, type TokenUsage } from '../api/client';
-import type { ChatMessage, QueuedPrompt, TodoItem, ToolCall, WorkBlock } from '../hooks/useChatMessages';
+import { mergeWorkBlocks, type ChatMessage, type QueuedPrompt, type TodoItem, type ToolCall, type WorkBlock } from '../hooks/useChatMessages';
 import { useBrowserPermissions, type BrowserPermissionRequest, type BrowserPermissionDecision } from '../hooks/useBrowser';
 import { useI18n } from '../i18n';
 import { chatSlashCommandSuggestions, resolveChatSlashCommand, type ChatSlashCommand, type ChatSlashCommandName } from '../utils/chat-slash-commands';
@@ -29,6 +29,7 @@ export interface ChatViewProps {
   thinking: string;
   workBlocks?: WorkBlock[];
   isStreaming: boolean;
+  streamingTurnId?: string | null;
   activeAgentCount?: number;
   activeAgentTokens?: number;
   sessionStatus?: SessionRealtimeStatus | null;
@@ -80,16 +81,45 @@ const STARTERS = [
   { title: 'Check recent changes', titleZh: '检查最近的更改', prompt: 'Review the current uncommitted changes for bugs, regressions, and missing tests.', promptZh: '审查当前未提交的更改，查找缺陷、回归和缺失的测试。' },
 ];
 
-const LOOP_MODE_STORAGE_KEY = 'nori-composer-loop-mode';
+/**
+ * Loop mode is remembered per chat (`sessionId` + `agentId`), the same scope the
+ * rest of the composer uses. It rewrites the next send into a Goal, so a single
+ * toggle must not stay silently on for every other conversation — which is what
+ * the old single global key did.
+ */
+const LOOP_MODE_STORAGE_PREFIX = 'nori-composer-loop-mode:';
+/**
+ * The pre-scoping key: one value shared by every chat. It is dropped on mount
+ * rather than migrated, because a single global flag holds no per-chat choice to
+ * carry over — seeding every chat from it would just re-create the stickiness.
+ */
+const LEGACY_LOOP_MODE_STORAGE_KEY = 'nori-composer-loop-mode';
 const COMPOSER_MIN_HEIGHT = 42;
 const COMPOSER_MAX_HEIGHT = 260;
 const TURN_PREVIEW_MAX_LENGTH = 220;
 
-function loadLoopMode(): boolean {
+function loopModeStorageKey(sessionId: string, agentId: string): string {
+  return `${LOOP_MODE_STORAGE_PREFIX}${sessionId}:${agentId}`;
+}
+
+function loadLoopMode(sessionId: string | null, agentId: string): boolean {
+  if (sessionId === null) return false;
   try {
-    return localStorage.getItem(LOOP_MODE_STORAGE_KEY) === 'true';
+    return localStorage.getItem(loopModeStorageKey(sessionId, agentId)) === 'true';
   } catch {
     return false;
+  }
+}
+
+/** Only chats with Loop actually on keep a key, so browsing chats cannot litter
+ *  storage with one entry per conversation opened. */
+function persistLoopMode(sessionId: string, agentId: string, enabled: boolean): void {
+  try {
+    const key = loopModeStorageKey(sessionId, agentId);
+    if (enabled) localStorage.setItem(key, 'true');
+    else localStorage.removeItem(key);
+  } catch {
+    // Keep the preference in memory when storage is unavailable.
   }
 }
 
@@ -107,6 +137,9 @@ function workBlockPreview(blocks: WorkBlock[] | undefined): string {
     }
     if (block.type === 'tool') {
       return compactTurnPreview(block.tool.result || block.tool.name);
+    }
+    if (block.type === 'context') {
+      return compactTurnPreview(block.source);
     }
   }
   return '';
@@ -174,7 +207,7 @@ function ComposerSettingPicker({ id, label, ariaLabel, value, choices, open, dis
 }
 
 export function ChatView(props: ChatViewProps) {
-  const { session, agentId = 'main', sessionAgents = [], allSessions = [], messages, messagesLoading = false, streaming, thinking, workBlocks = [], isStreaming, activeAgentTokens, sessionStatus, compacting = false, models, modelsLoading, modelError, onSendMessage, onAbort, onRefreshModels, onModelChange, onThinkingChange, onPermissionChange, onRunSlashCommand, pendingApprovals = [], onResolveApproval, globalApprovals = [], onResolveGlobalApproval, onApprovalPermissionChange, approvalSessionTitles = {}, approvalResolvingIds = new Set(), approvalErrors = {}, onOpenApprovalSession, showApprovalPanel = true, pendingQuestions = [], onResolveQuestion, onDismissQuestion, queuedPrompts = [], onCancelQueuedPrompt, draftAgentConfig, rewindLimit = 10, onRewind, browserPermissionsOverride, onResolveBrowserPermissionOverride } = props;
+  const { session, agentId = 'main', sessionAgents = [], allSessions = [], messages, messagesLoading = false, streaming, thinking, workBlocks = [], isStreaming, streamingTurnId = null, activeAgentTokens, sessionStatus, compacting = false, models, modelsLoading, modelError, onSendMessage, onAbort, onRefreshModels, onModelChange, onThinkingChange, onPermissionChange, onRunSlashCommand, pendingApprovals = [], onResolveApproval, globalApprovals = [], onResolveGlobalApproval, onApprovalPermissionChange, approvalSessionTitles = {}, approvalResolvingIds = new Set(), approvalErrors = {}, onOpenApprovalSession, showApprovalPanel = true, pendingQuestions = [], onResolveQuestion, onDismissQuestion, queuedPrompts = [], onCancelQueuedPrompt, draftAgentConfig, rewindLimit = 10, onRewind, browserPermissionsOverride, onResolveBrowserPermissionOverride } = props;
   const { tr } = useI18n();
   const localBrowserPermissions = useBrowserPermissions();
   const browserPermissions = browserPermissionsOverride === undefined
@@ -205,7 +238,7 @@ export function ChatView(props: ChatViewProps) {
   const [commandSelection, setCommandSelection] = useState(0);
   const [commandRunning, setCommandRunning] = useState(false);
   const [composerRevision, setComposerRevision] = useState(0);
-  const [loopEnabled, setLoopEnabled] = useState(loadLoopMode);
+  const [loopEnabled, setLoopEnabled] = useState(() => loadLoopMode(session?.id ?? null, agentId));
   const [followOutput, setFollowOutput] = useState(true);
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [hoveredTurnId, setHoveredTurnId] = useState<string | null>(null);
@@ -223,6 +256,7 @@ export function ChatView(props: ChatViewProps) {
   const rewindSessionIdRef = useRef<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const previousScopeRef = useRef<string | null>(null);
+  const loopScopeRef = useRef<string | null>(null);
   const permissionMenuRef = useRef<HTMLDivElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const currentSessionId = session?.id ?? null;
@@ -259,10 +293,10 @@ export function ChatView(props: ChatViewProps) {
   const imageCapable = modelSupportsImageInput(selectedModel);
   const imageCapableRef = useRef(imageCapable);
   imageCapableRef.current = imageCapable;
-  // A live turn is a new message, never a continuation of the last persisted
-  // assistant row. Keeping this false ensures process output cannot be
-  // rendered inside an already-completed final answer.
-  const streamingContinuesAssistant = false;
+  const continuationMessageId = isStreaming && streamingTurnId !== null
+    ? [...messages].reverse().find(message => message.role === 'assistant' && message.turnId === streamingTurnId)?.id
+    : undefined;
+  const streamingContinuesAssistant = continuationMessageId !== undefined;
   const standaloneLiveProgressId = streaming.trim() ? 'standalone-live-progress' : undefined;
   const standaloneLiveBlocks: WorkBlock[] = [
     ...(workBlocks.length > 0
@@ -586,13 +620,34 @@ export function ChatView(props: ChatViewProps) {
     }
   }, [attachments, attachmentsLoading, imageCapable, input, loopEnabled, onSendMessage, selectedModelId, selectedThinking, steering, tr]);
 
+  const handleLoopToggle = useCallback((enabled: boolean) => {
+    setLoopEnabled(enabled);
+    if (currentSessionId !== null) persistLoopMode(currentSessionId, agentId, enabled);
+  }, [agentId, currentSessionId]);
+
+  useEffect(() => {
+    const previousScope = loopScopeRef.current;
+    // Same chat: the toggle handler already persisted, so there is nothing to
+    // reconcile and reloading here would fight the click that just happened.
+    if (previousScope === currentScope) return;
+    loopScopeRef.current = currentScope;
+    if (previousScope === null) {
+      // Either the first render of an existing chat (value already loaded) or a
+      // draft composer that just became a real chat. Give the toggle the user
+      // set before the session existed a home instead of resetting it on send.
+      if (currentSessionId !== null) persistLoopMode(currentSessionId, agentId, loopEnabled);
+      return;
+    }
+    setLoopEnabled(loadLoopMode(currentSessionId, agentId));
+  }, [agentId, currentScope, currentSessionId, loopEnabled]);
+
   useEffect(() => {
     try {
-      localStorage.setItem(LOOP_MODE_STORAGE_KEY, String(loopEnabled));
+      localStorage.removeItem(LEGACY_LOOP_MODE_STORAGE_KEY);
     } catch {
-      // Keep the preference in memory when storage is unavailable.
+      // Nothing to clean up when storage is unavailable.
     }
-  }, [loopEnabled]);
+  }, []);
 
   useEffect(() => {
     if (!isStreaming) setStopping(false);
@@ -806,7 +861,7 @@ export function ChatView(props: ChatViewProps) {
   return <section className="chat-view" aria-label={tr('Conversation', '对话')}>
     <div className="chat-messages-shell">
     <div className="chat-messages" ref={messagesScrollRef} onScroll={handleMessagesScroll}>
-      {messagesLoading ? <div className="chat-history-loading" role="status"><span className="spinner"/><strong>{tr('Loading conversation…', '正在加载会话…')}</strong></div> : messages.length === 0 ? <div className="chat-welcome"><div className="welcome-mark"><Icon name="sparkles" size={27}/></div><span className="eyebrow">{tr('Your thoughtful coding partner', '你的智能编程伙伴')}</span><h2>{session ? tr('What should we make better?', '我们要改进什么？') : tr('What would you like to work on?', '你想从哪里开始？')}</h2><p>{session ? tr('Ask Nori to inspect code, plan a feature, fix a bug, or validate an API integration.', '让 Nori 检查代码、规划功能、修复缺陷或验证 API 集成。') : tr('Choose a project folder to start a new task, or open an existing conversation from the sidebar. You can also type below now.', '选择一个项目文件夹开始新任务，或打开已有对话。你也可以直接在下方输入。')}</p><UsageOverview sessions={allSessions} models={models}/><div className="starter-grid">{STARTERS.map(item => <button key={item.title} className="starter-card" onClick={() => void handleSend(tr(item.prompt, item.promptZh))}><Icon name="sparkles" size={16}/><span><strong>{tr(item.title, item.titleZh)}</strong><small>{tr(item.prompt, item.promptZh)}</small></span></button>)}</div></div> : presentedMessages.map(({ message, workStartedAt }, index) => <MessageBubble key={message.id} message={message} sessionAgents={sessionAgents} workStartedAt={workStartedAt} rewindCount={rewindCounts.get(message.id)} rewindDisabled={isStreaming || rewinding} onRewind={requestRewind} live={isStreaming && index === presentedMessages.length - 1 && message.role === 'assistant' ? { streaming, thinking, workBlocks, stopping, onAbort: handleAbort } : undefined}/>) }
+      {messagesLoading ? <div className="chat-history-loading" role="status"><span className="spinner"/><strong>{tr('Loading conversation…', '正在加载会话…')}</strong></div> : messages.length === 0 ? <div className="chat-welcome"><div className="welcome-mark"><Icon name="sparkles" size={27}/></div><span className="eyebrow">{tr('Your thoughtful coding partner', '你的智能编程伙伴')}</span><h2>{session ? tr('What should we make better?', '我们要改进什么？') : tr('What would you like to work on?', '你想从哪里开始？')}</h2><p>{session ? tr('Ask Nori to inspect code, plan a feature, fix a bug, or validate an API integration.', '让 Nori 检查代码、规划功能、修复缺陷或验证 API 集成。') : tr('Choose a project folder to start a new task, or open an existing conversation from the sidebar. You can also type below now.', '选择一个项目文件夹开始新任务，或打开已有对话。你也可以直接在下方输入。')}</p><UsageOverview sessions={allSessions} models={models}/><div className="starter-grid">{STARTERS.map(item => <button key={item.title} className="starter-card" onClick={() => void handleSend(tr(item.prompt, item.promptZh))}><Icon name="sparkles" size={16}/><span><strong>{tr(item.title, item.titleZh)}</strong><small>{tr(item.prompt, item.promptZh)}</small></span></button>)}</div></div> : presentedMessages.map(({ message, workStartedAt }) => <MessageBubble key={message.id} message={message} sessionAgents={sessionAgents} workStartedAt={workStartedAt} rewindCount={rewindCounts.get(message.id)} rewindDisabled={isStreaming || rewinding} onRewind={requestRewind} live={message.id === continuationMessageId ? { streaming, thinking, workBlocks, stopping, onAbort: handleAbort } : undefined}/>) }
 
       {isStreaming && !streamingContinuesAssistant && <div className="chat-message chat-message-assistant chat-message-streaming"><div className="message-body"><div className="chat-message-role">Nori <span>{pendingApprovals.length > 0 || browserPermissions.pending.length > 0 ? tr('waiting for permission', '等待授权') : tr('working', '工作中')}</span></div>{standaloneLiveBlocks.length > 0 ? <LiveWorkStream blocks={standaloneLiveBlocks} activeProgressId={standaloneLiveProgressId} startedAt={latestUserStartedAt}/> : <div className="chat-message-content"><span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span><span className="streaming-cursor"/></div>}{streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(streaming))} tokens</div>}<button className="chat-abort-btn" onClick={() => void handleAbort()} disabled={stopping}><Icon name="stop" size={13}/> {stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button></div></div>}
       <div ref={messagesEndRef}/>
@@ -865,7 +920,7 @@ export function ChatView(props: ChatViewProps) {
             </div>
           </div>
           <div className="composer-mode-options">
-            <label className="loop-mode-toggle" title={tr('Create a goal before this request so Nori continues through the Loop state machine.', '发送后先创建 Goal，并由 Loop 状态机持续执行。')}><input type="checkbox" checked={loopEnabled} onChange={event => setLoopEnabled(event.target.checked)}/><span>Loop</span></label>
+            <label className="loop-mode-toggle" title={tr('Create a goal before this request so Nori continues through the Loop state machine.', '发送后先创建 Goal，并由 Loop 状态机持续执行。')}><input type="checkbox" checked={loopEnabled} onChange={event => handleLoopToggle(event.target.checked)}/><span>Loop</span></label>
           </div>
           <SkillPicker sessionId={session?.id ?? null} disabled={isStreaming}/>
         </div>
@@ -944,20 +999,27 @@ function discussionSpeakerDisplayName(
   return speaker?.from === 'lead' ? tr('Main lead', '主代理') : tr('Discussion member', '讨论成员');
 }
 
-// `live` remains accepted for callers built against the old continuation
-// shape, but is intentionally ignored: a live turn has its own message row.
-function MessageBubble({ message, sessionAgents, workStartedAt, rewindCount, rewindDisabled = false, onRewind, live: _live }: { message: ChatMessage; sessionAgents: readonly SessionAgent[]; workStartedAt?: number; rewindCount?: number; rewindDisabled?: boolean; onRewind?: (count: number) => void | Promise<void>; live?: LiveAssistantContinuation }) {
+function MessageBubble({ message, sessionAgents, workStartedAt, rewindCount, rewindDisabled = false, onRewind, live }: { message: ChatMessage; sessionAgents: readonly SessionAgent[]; workStartedAt?: number; rewindCount?: number; rewindDisabled?: boolean; onRewind?: (count: number) => void | Promise<void>; live?: LiveAssistantContinuation }) {
   const { tr } = useI18n();
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
   const isDiscussion = message.kind === 'discussion';
   const tools = message.toolCalls ?? [];
-  const storedBlocks = message.workBlocks ?? [
+  const storedBlocks = (message.workBlocks ?? [
     ...(message.thinking ? [{ id: `${message.id}-thinking`, type: 'thinking' as const, text: message.thinking }] : []),
     ...tools.map((tool, index) => ({ id: tool.id ?? `${message.id}-tool-${index}`, type: 'tool' as const, tool })),
+  ]).map(normalizeWorkBlock);
+  const liveProgressId = live?.streaming.trim() ? `${message.id}-live-progress` : undefined;
+  const liveBlocks: WorkBlock[] = live === undefined ? [] : [
+    ...(live.workBlocks.length > 0
+      ? live.workBlocks
+      : live.thinking ? [{ id: `${message.id}-live-thinking`, type: 'thinking' as const, text: live.thinking }] : []),
+    ...(liveProgressId === undefined ? [] : [{ id: liveProgressId, type: 'progress' as const, text: live.streaming }]),
   ];
+  const displayedBlocks = mergeWorkBlocks(storedBlocks, liveBlocks).map(normalizeWorkBlock);
   const text = message.text;
-  const hasWork = !isUser && !isSystem && storedBlocks.length > 0;
+  const hasWork = !isUser && !isSystem && displayedBlocks.length > 0;
+  const onlyContext = live === undefined && hasWork && displayedBlocks.every(block => block.type === 'context');
   const completedAt = parseMessageTimestamp(message.createdAt);
   const workDurationMs = workStartedAt !== undefined && completedAt !== undefined
     ? Math.max(0, completedAt - workStartedAt)
@@ -965,12 +1027,35 @@ function MessageBubble({ message, sessionAgents, workStartedAt, rewindCount, rew
   const discussionName = discussionSpeakerDisplayName(message.speaker, sessionAgents, tr);
   return <article data-chat-turn-id={isUser ? message.id : undefined} className={'chat-message ' + (isUser ? 'chat-message-user' : isDiscussion ? 'chat-message-discussion' : isSystem ? 'chat-message-system' : 'chat-message-assistant')}>
     {isSystem && <div className="message-avatar"><span>{isDiscussion ? '·' : '!'}</span></div>}<div className="message-body">{(!isUser || (rewindCount !== undefined && onRewind !== undefined)) && <div className="chat-message-role">{!isUser && (isDiscussion ? `${discussionName} · ${message.speaker?.from === 'team' ? tr('Team', '团队') : tr('Lead', '主持')}` : isSystem ? tr('System', '系统') : 'Nori')}{isUser && rewindCount && onRewind && <button className="message-rewind-btn" disabled={rewindDisabled} onClick={() => { void onRewind(rewindCount); }} title={tr('Rewind to before this prompt', '回溯到此提问之前')}><Icon name="refresh" size={12}/>{tr('Rewind', '回溯')}</button>}</div>}
-      {hasWork ? <WorkProcess blocks={storedBlocks} startedAt={workStartedAt} durationMs={workDurationMs}/> : null}
+      {onlyContext
+        ? displayedBlocks.map(block => block.type === 'context' ? <ContextInjectionRow key={block.id} block={block}/> : null)
+        : hasWork ? <WorkProcess blocks={displayedBlocks} live={live !== undefined} activeProgressId={liveProgressId} startedAt={workStartedAt} durationMs={live === undefined ? workDurationMs : undefined}/> : null}
       {message.images && message.images.length > 0 && <div className="chat-message-images">{message.images.map((image, index) => <img key={`${image.src.slice(0, 80)}-${String(index)}`} src={image.src} alt={image.alt} loading="lazy" />)}</div>}
       {message.files && message.files.length > 0 && <div className="composer-attachments chat-message-attachments">{message.files.map((file, index) => <div className="composer-attachment attachment-file" key={`${file.name}-${String(file.size ?? 0)}-${String(index)}`}><span className="composer-file-icon"><Icon name="files" size={19}/></span><span title={file.name}>{file.name}</span></div>)}</div>}
-      {text && <div className="chat-message-content">{isUser || isSystem ? text : <MarkdownView content={text} />}</div>}{message.usage && <TokenUsageLine usage={message.usage} />}{message.createdAt && <time className="chat-message-time">{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>}
+      {text && <div className="chat-message-content">{isUser || isSystem ? text : <MarkdownView content={text} />}</div>}{message.usage && <TokenUsageLine usage={message.usage} />}{live && <button className="chat-abort-btn" onClick={() => void live.onAbort()} disabled={live.stopping}><Icon name="stop" size={13}/> {live.stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button>}{message.createdAt && <time className="chat-message-time">{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>}
     </div>
   </article>;
+}
+
+function normalizeWorkBlock(block: WorkBlock): WorkBlock {
+  if (block.type !== 'tool' || block.tool.name !== 'ContextInjection') return block;
+  return {
+    id: block.id,
+    type: 'context',
+    source: summarizeContextSource(block.tool.args),
+    content: block.tool.result,
+    isError: block.tool.isError,
+  };
+}
+
+function summarizeContextSource(args: unknown): string {
+  if (typeof args === 'object' && args !== null) {
+    const source = (args as { source?: unknown }).source;
+    if (typeof source === 'string' && source.length > 0) return source;
+    const variant = (args as { variant?: unknown }).variant;
+    if (typeof variant === 'string' && variant.length > 0) return variant;
+  }
+  return 'harness';
 }
 
 function WorkProcess({ blocks, live = false, activeProgressId, startedAt, durationMs }: { blocks: WorkBlock[]; live?: boolean; activeProgressId?: string; startedAt?: number; durationMs?: number }) {
@@ -1016,6 +1101,9 @@ function WorkProcess({ blocks, live = false, activeProgressId, startedAt, durati
         const isActive = live && block.id === activeProgressId;
         return <TranscriptOutput key={block.id} text={block.text} streaming={isActive}/>;
       }
+      if (block.type === 'context') {
+        return <ContextInjectionRow key={block.id} block={block}/>;
+      }
       return <CompactToolCall key={block.id} tool={block.tool}/>;
     })}</div>
   </details>;
@@ -1035,6 +1123,7 @@ function LiveWorkStream({ blocks, activeProgressId, startedAt }: { blocks: WorkB
     <div className="live-work-status"><Icon name="sparkles" size={12}/><span>{tr('Working', '处理中')}</span><time className="live-work-elapsed" title={tr(`Elapsed ${elapsedLabel}`, `耗时 ${elapsedLabel}`)}>{elapsedLabel}</time></div>
     {blocks.map(block => {
       if (block.type === 'thinking') return <ThoughtDisclosure key={block.id} text={block.text} live/>;
+      if (block.type === 'context') return <ContextInjectionRow key={block.id} block={block}/>;
       if (block.type === 'tool') return <CompactToolCall key={block.id} tool={block.tool}/>;
       const active = block.id === activeProgressId;
       return <TranscriptOutput key={block.id} text={block.text} streaming={active}/>;
@@ -1051,6 +1140,21 @@ function ThoughtDisclosure({ text, live = false }: { text: string; live?: boolea
   return <details className={`thought-disclosure${live ? ' live-thinking-block' : ' work-thinking-block'}`}>
     <summary><Icon name="sparkles" size={12}/><span>{tr('Thought', '思考')}</span><Icon name="chevron-right" size={11}/></summary>
     <p>{text}</p>
+  </details>;
+}
+
+function ContextInjectionRow({ block }: { block: Extract<WorkBlock, { type: 'context' }> }) {
+  const { tr } = useI18n();
+  const hasContent = Boolean(block.content?.trim());
+  return <details className={`context-injection-row${block.isError ? ' error' : ''}`}>
+    <summary>
+      <Icon name="document" size={13}/>
+      <span>{tr('Context injection', '上下文注入')}</span>
+      <span className="context-injection-separator">·</span>
+      <span className="context-injection-source">{block.source}</span>
+      {hasContent && <Icon className="context-injection-chevron" name="chevron-right" size={11}/>}
+    </summary>
+    {hasContent && <pre>{block.content}</pre>}
   </details>;
 }
 

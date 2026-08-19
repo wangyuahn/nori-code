@@ -19,8 +19,8 @@ function pngFile(name: string): File {
 }
 
 beforeEach(() => {
+  localStorage.clear();
   localStorage.setItem('nori-ui-language', 'en');
-  localStorage.removeItem('nori-composer-loop-mode');
   Element.prototype.scrollIntoView = vi.fn();
   vi.spyOn(window, 'confirm').mockReturnValue(true);
 });
@@ -1035,7 +1035,53 @@ describe('chat slash commands and task-mode shortcut', () => {
       'queue',
       { model: 'multimodal-model', thinking: 'off', loopMode: true },
     );
-    expect(localStorage.getItem('nori-composer-loop-mode')).toBe('true');
+    expect(localStorage.getItem('nori-composer-loop-mode:session-1:main')).toBe('true');
+  });
+
+  it('keeps Loop scoped to the chat that enabled it and drops the legacy global key', async () => {
+    // The pre-scoping build stored one flag for every chat, so a single toggle
+    // silently armed Goal intake in conversations the user never touched.
+    localStorage.setItem('nori-composer-loop-mode', 'true');
+    const otherSession: Session = { ...session('multimodal-model'), id: 'session-2' };
+    const { container, root, props } = await renderChat();
+    const toggle = container.querySelector<HTMLInputElement>('.loop-mode-toggle input')!;
+
+    expect(toggle.checked).toBe(false);
+    expect(localStorage.getItem('nori-composer-loop-mode')).toBeNull();
+
+    await act(async () => {
+      toggle.click();
+      await Promise.resolve();
+    });
+    expect(localStorage.getItem('nori-composer-loop-mode:session-1:main')).toBe('true');
+
+    // Switching to another chat must start from that chat's own preference...
+    await act(async () => {
+      root.render(createElement(I18nProvider, null, createElement(ChatView, { ...props, session: otherSession })));
+    });
+    expect(container.querySelector<HTMLInputElement>('.loop-mode-toggle input')!.checked).toBe(false);
+    expect(localStorage.getItem('nori-composer-loop-mode:session-2:main')).toBeNull();
+
+    // ...and coming back must restore it rather than having leaked it away.
+    await act(async () => {
+      root.render(createElement(I18nProvider, null, createElement(ChatView, props)));
+    });
+    expect(container.querySelector<HTMLInputElement>('.loop-mode-toggle input')!.checked).toBe(true);
+  });
+
+  it('forgets Loop for a chat once it is switched back off', async () => {
+    localStorage.setItem('nori-composer-loop-mode:session-1:main', 'true');
+    const { container } = await renderChat();
+    const toggle = container.querySelector<HTMLInputElement>('.loop-mode-toggle input')!;
+
+    expect(toggle.checked).toBe(true);
+    await act(async () => {
+      toggle.click();
+      await Promise.resolve();
+    });
+    // Off is the default, so it is stored as an absent key instead of 'false' —
+    // browsing chats then cannot leave one entry per conversation opened.
+    expect(localStorage.getItem('nori-composer-loop-mode:session-1:main')).toBeNull();
   });
 
   it('shows supported commands without duplicating the Plan control', async () => {

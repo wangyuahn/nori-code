@@ -97,6 +97,9 @@ function restoreAgentRecord(
     case 'context.append_message':
       agent.context.appendMessage(input.message);
       return;
+    case 'context.append_transcript_message':
+      agent.context.appendTranscriptMessage(input.message);
+      return;
     case 'context.append_loop_event':
       agent.context.appendLoopEvent(input.event);
       // Advance the turn counter past internally-driven turns (goal

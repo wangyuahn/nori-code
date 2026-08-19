@@ -36,6 +36,7 @@ interface ProviderDraft {
   type: ProviderType;
   baseUrl: string;
   apiKey: string;
+  apiKeyLength: number;
   autoDiscover: boolean;
   customModels: CustomModelDraft[];
   disabled: boolean;
@@ -51,6 +52,7 @@ const EMPTY_DRAFT: ProviderDraft = {
   type: 'openai',
   baseUrl: 'https://api.openai.com/v1',
   apiKey: '',
+  apiKeyLength: 0,
   autoDiscover: true,
   customModels: [emptyCustomModelDraft()],
   disabled: false,
@@ -110,6 +112,7 @@ export function ProviderSettings() {
       type: isProviderType(provider.type) ? provider.type : 'openai',
       baseUrl: provider.base_url ?? '',
       apiKey: '',
+      apiKeyLength: provider.api_key_length ?? 0,
       autoDiscover: provider.auto_discover !== false,
       customModels: parseCustomModelDrafts(provider.custom_models ?? [], aliases, provider.id),
       disabled: provider.disabled === true,
@@ -132,6 +135,7 @@ export function ProviderSettings() {
     setDraft({
       originalId: null,
       ...copied,
+      apiKeyLength: 0,
     });
     setShowApiKey(false);
     setSecretLoaded(false);
@@ -219,6 +223,7 @@ export function ProviderSettings() {
         custom_models: providerCustomModelsForPatch(draft.autoDiscover, customModels),
       };
       if (draft.apiKey.trim()) providerPatch.api_key = draft.apiKey.trim();
+      const submittedApiKey = draft.apiKey.trim() || undefined;
       const source = providerSourcePatch(draft.catalogId);
       if (source !== undefined) providerPatch.source = source;
 
@@ -263,7 +268,7 @@ export function ProviderSettings() {
       await load();
       window.dispatchEvent(new CustomEvent('nori:model-catalog-changed'));
       setExpandedId(id);
-      setDraft(previous => previous ? { ...previous, originalId: id, apiKey: '', fromPreset: false, requiresApiKey: false } : previous);
+      setDraft(previous => previous ? { ...previous, originalId: id, apiKey: '', apiKeyLength: submittedApiKey?.length ?? previous.apiKeyLength, fromPreset: false, requiresApiKey: false } : previous);
       setSecretLoaded(false);
       setShowApiKey(false);
     } catch (error) {
@@ -377,6 +382,11 @@ function ProviderEditor({ draft, saving, isNew = false, onChange, onSave, onCanc
   const updateCustomModel = (index: number, patch: Partial<CustomModelDraft>) => {
     onChange('customModels', draft.customModels.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
   };
+  // A saved provider keeps its key out of the DOM until the eye is clicked. The
+  // placeholder must still be as long as the real key, and must follow an edited
+  // key rather than snapping back to the stored length.
+  const storedKeyMasked = Boolean(draft.originalId) && !showApiKey;
+  const maskLength = Math.max(0, draft.apiKey.length > 0 ? draft.apiKey.length : draft.apiKeyLength);
   return <section className="provider-editor">
     <div className="provider-editor-heading"><div><span>{isNew ? tr('New provider', '新增供应商') : tr('Provider settings', '供应商设置')}</span><strong>{draft.name || draft.id || tr('Unnamed provider', '未命名供应商')}</strong></div><button type="button" className="icon-button" onClick={onCancel} title={tr('Close editor', '关闭编辑')} aria-label={tr('Close editor', '关闭编辑')}><Icon name="close" size={15}/></button></div>
     {draft.fromPreset && <p className="provider-preset-hint">{draft.requiresApiKey ? tr('Copied from a template. Prefills name, API format, and Base URL. API key is required.', '已从模板复制。名称、API 格式和 Base URL 已预填，API Key 必填。') : tr('Copied from a template. Prefills name, API format, and Base URL.', '已从模板复制。名称、API 格式和 Base URL 已预填。')}</p>}
@@ -385,7 +395,7 @@ function ProviderEditor({ draft, saving, isNew = false, onChange, onSave, onCanc
       <label><span>Provider ID</span><input value={draft.id} onChange={event => onChange('id', event.target.value.trim())} placeholder="openrouter" /></label>
       <label><span>{tr('API format', 'API 格式')}</span><select value={draft.type} onChange={event => onChange('type', event.target.value as ProviderType)}>{API_FORMATS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
       <label className="provider-form-wide"><span>Base URL</span><input value={draft.baseUrl} onChange={event => onChange('baseUrl', event.target.value)} placeholder="https://api.example.com/v1" /></label>
-      <label className="provider-form-wide"><span>API Key{draft.requiresApiKey ? ` (${tr('required', '必填')})` : ''}</span><div className="provider-secret-input"><input type={showApiKey ? 'text' : 'password'} value={draft.apiKey || (draft.originalId ? '••••••••' : '')} onFocus={event => { if (event.currentTarget.value === '••••••••') onRevealApiKey(); }} onChange={event => onChange('apiKey', event.target.value)} placeholder="sk-..." aria-required={draft.requiresApiKey}/><button type="button" onClick={onRevealApiKey} title={showApiKey ? tr('Hide API key', '隐藏 API Key') : tr('Show API key', '显示 API Key')} aria-label={showApiKey ? tr('Hide API key', '隐藏 API Key') : tr('Show API key', '显示 API Key')}><Icon name="eye" size={14}/></button><button type="button" onClick={onCopyApiKey} title={tr('Copy API key', '复制 API Key')} aria-label={tr('Copy API key', '复制 API Key')}><Icon name="copy" size={14}/></button></div></label>
+      <label className="provider-form-wide"><span>API Key{draft.requiresApiKey ? ` (${tr('required', '必填')})` : ''}</span><div className="provider-secret-input"><input type={showApiKey ? 'text' : 'password'} value={storedKeyMasked ? '•'.repeat(maskLength) : draft.apiKey} readOnly={storedKeyMasked} onChange={event => onChange('apiKey', event.target.value)} placeholder="sk-..." aria-required={draft.requiresApiKey}/><button type="button" onClick={onRevealApiKey} title={showApiKey ? tr('Hide API key', '隐藏 API Key') : tr('Show API key', '显示 API Key')} aria-label={showApiKey ? tr('Hide API key', '隐藏 API Key') : tr('Show API key', '显示 API Key')}><Icon name="eye" size={14}/></button><button type="button" onClick={onCopyApiKey} title={tr('Copy API key', '复制 API Key')} aria-label={tr('Copy API key', '复制 API Key')}><Icon name="copy" size={14}/></button></div></label>
       <label className="provider-switch"><input type="checkbox" checked={draft.autoDiscover} onChange={event => onChange('autoDiscover', event.target.checked)}/><span><strong>{tr('Automatically fetch models', '自动获取模型')}</strong><small>{tr('When off, only custom models are shown. Configure thinking effort for each custom model.', '关闭后只显示自定义模型，并为每个模型设置推理强度。')}</small></span></label>
       <label className="provider-switch"><input type="checkbox" checked={draft.disabled} onChange={event => onChange('disabled', event.target.checked)}/><span><strong>{tr('Disabled', '禁用')}</strong><small>{tr('Disabled providers disappear from model selection.', '禁用后不会出现在模型选择器中。')}</small></span></label>
       {!draft.autoDiscover && <div className="provider-form-wide custom-model-editor">

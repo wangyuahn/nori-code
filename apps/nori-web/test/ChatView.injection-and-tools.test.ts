@@ -74,7 +74,7 @@ describe('ChatView tool details and context injection', () => {
     expect(container.querySelector('.compact-tool-detail')).not.toBeNull();
   });
 
-  it('renders context injection calls with the shared tool renderer', async () => {
+  it('renders context injections as compact visible transcript rows', async () => {
     const { container } = await renderChat({
       messages: [{
         id: 'inject-1',
@@ -88,16 +88,16 @@ describe('ChatView tool details and context injection', () => {
       }],
     });
 
-    const rows = [...container.querySelectorAll('.compact-tool-call')];
+    const rows = [...container.querySelectorAll('.context-injection-row')];
     expect(rows.map(row => row.textContent)).toEqual([
       expect.stringContaining('@deepseek-ai/dsh-system-prompt'),
       expect.stringContaining('skill-catalog'),
       expect.stringContaining('goal_intake'),
     ]);
-    expect(container.querySelectorAll('.compact-tool-call .compact-tool-icon svg').length).toBe(3);
+    expect(container.querySelectorAll('.context-injection-row > summary svg').length).toBe(4);
   });
 
-  it('expands context injection through the shared tool details', async () => {
+  it('expands visible context injection content without a callable tool card', async () => {
     const { container } = await renderChat({
       messages: [
         {
@@ -125,7 +125,7 @@ describe('ChatView tool details and context injection', () => {
       ],
     });
 
-    const details = container.querySelector<HTMLDetailsElement>('.compact-tool-call')!;
+    const details = container.querySelector<HTMLDetailsElement>('.context-injection-row')!;
     expect(details).not.toBeNull();
     expect(details.open).toBe(false);
     expect(container.querySelector('.chat-message-discussion')?.textContent).toContain('成员建议保留兼容字段。');
@@ -137,8 +137,7 @@ describe('ChatView tool details and context injection', () => {
     });
     expect(details.open).toBe(true);
     expect(details.textContent).toContain('Only the model should see this reminder.');
-    expect(details.textContent).toContain('Arguments');
-    expect(details.textContent).toContain('Result');
+    expect(container.querySelector('.compact-tool-call')).toBeNull();
   });
 });
 

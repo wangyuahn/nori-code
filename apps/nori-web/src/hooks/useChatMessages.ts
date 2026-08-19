@@ -16,9 +16,18 @@ export interface ToolCall {
   endedAt?: number;
 }
 
+export interface ContextInjectionBlock {
+  id: string;
+  type: 'context';
+  source: string;
+  content?: string;
+  isError?: boolean;
+}
+
 export type WorkBlock =
   | { id: string; type: 'thinking'; text: string }
   | { id: string; type: 'progress'; text: string }
+  | ContextInjectionBlock
   | { id: string; type: 'tool'; tool: ToolCall };
 
 export interface TodoItem {
@@ -28,6 +37,8 @@ export interface TodoItem {
 
 export interface ChatMessage {
   id: string;
+  /** Logical model turn shared by all assistant steps in one response. */
+  turnId?: string;
   role: 'user' | 'assistant' | 'system';
   text: string;
   kind?: 'discussion';
@@ -39,6 +50,13 @@ export interface ChatMessage {
   images?: ChatImage[];
   files?: ChatFile[];
   toolCalls?: ToolCall[];
+  /** Internal history marker. Folded into the matching assistant turn. */
+  toolResult?: {
+    toolCallId: string;
+    output?: string;
+    isError?: boolean;
+    contextInjection?: boolean;
+  };
   thinking?: string;
   workBlocks?: WorkBlock[];
   createdAt?: string;
@@ -145,6 +163,7 @@ export interface UseChatMessagesResult {
   currentStreaming: string;
   currentThinking: string;
   currentWorkBlocks: WorkBlock[];
+  activeTurnId: string | null;
   sessionStatus: SessionRealtimeStatus | null;
   agentTreeRevision: number;
   discussionTurnAgentId: string | null | undefined;
@@ -424,6 +443,7 @@ async function releasePromptFileBlobs(attachments: readonly PromptAttachment[]):
 export function apiMessageToChat(m: Message): ChatMessage | null {
   const origin = m.metadata?.origin;
   const originKind = origin?.kind;
+  const turnId = typeof m.metadata?.turn_id === 'string' ? m.metadata.turn_id : undefined;
   const rawText = messagePlainText(m);
   // TeamDM is an internal prompt transport. It remains in the agent's model
   // context, but must not reappear as a human-visible chat message when REST
@@ -435,17 +455,52 @@ export function apiMessageToChat(m: Message): ChatMessage | null {
   if (m.role === 'user' && originKind === 'system_trigger' && (origin?.name === 'team_dm' || isLegacyTeamDm)) {
     return null;
   }
-  if (m.role === 'tool' && originKind === 'injection' && origin?.variant === 'permission_mode') {
-    return null;
+  // Tool-result records are transport entries, not standalone assistant
+  // messages. Keep a private marker until foldConversationTurns can attach
+  // the result to the preceding real tool call or ContextInjection row.
+  if (m.role === 'tool') {
+    const result = m.content.find((content: MessageContent) => content.type === 'tool_result');
+    if (result?.tool_call_id === undefined) return null;
+    return {
+      id: m.id,
+      turnId,
+      role: 'system',
+      text: '',
+      toolResult: {
+        toolCallId: result.tool_call_id,
+        output: result.output,
+        isError: result.is_error === true,
+        contextInjection: originKind === 'injection',
+      },
+      createdAt: m.created_at,
+    };
+  }
+  // Harness injections remain visible in the transcript, but are represented
+  // as context rows rather than user bubbles or callable tools.
+  if (m.role === 'user' && originKind === 'injection') {
+    return {
+      id: m.id,
+      turnId,
+      role: 'assistant',
+      text: '',
+      workBlocks: [{
+        id: m.id,
+        type: 'context',
+        source: typeof origin?.variant === 'string' ? origin.variant : 'harness',
+        content: unwrapLeadingSystemReminder(rawText),
+      }],
+      createdAt: m.created_at,
+    };
   }
   const speaker = toDiscussionSpeaker(origin?.speaker);
   if (m.role === 'user' && originKind !== undefined && originKind !== 'user') {
     if (isSilentWakeOrigin(originKind)) {
-      return { id: m.id, role: 'system', text: '', createdAt: m.created_at, turnBoundary: true };
+      return { id: m.id, turnId, role: 'system', text: '', createdAt: m.created_at, turnBoundary: true };
     }
     if (speaker !== undefined) {
       return {
         id: m.id,
+        turnId,
         role: 'system',
         kind: 'discussion',
         text: unwrapLeadingSystemReminder(messagePlainText(m)),
@@ -487,55 +542,77 @@ export function apiMessageToChat(m: Message): ChatMessage | null {
       })
     : [];
 
-  let toolCalls: ToolCall[] = (m.tool_calls ?? []).map(tc => ({
-    id: tc.id,
-    name: tc.name,
-    args: tc.args,
-    result: tc.result,
-    isError: tc.is_error,
-  }));
+  const contextInjections: ContextInjectionBlock[] = [];
+  let toolCalls: ToolCall[] = [];
+
+  for (const tc of m.tool_calls ?? []) {
+    if (tc.name === 'ContextInjection') {
+      contextInjections.push({
+        id: tc.id ?? `${m.id}-context-${contextInjections.length}`,
+        type: 'context',
+        source: contextInjectionSource(tc.args, origin?.variant),
+        content: tc.result,
+        isError: tc.is_error,
+      });
+      continue;
+    }
+    // `tool` was an old UI fallback, never a real callable tool. Do not
+    // resurrect it from stale protocol data.
+    if (!isRenderableToolName(tc.name)) continue;
+    toolCalls = mergeToolCalls(toolCalls, [{
+      id: tc.id,
+      name: tc.name,
+      args: tc.args,
+      result: tc.result,
+      isError: tc.is_error,
+    }]);
+  }
 
   if (Array.isArray(m.content)) {
     for (const c of m.content) {
       if (c.type === 'tool_use') {
-        toolCalls = mergeToolCalls(toolCalls, [{ id: c.tool_call_id, name: c.tool_name ?? c.name ?? 'tool', args: c.input }]);
+        const name = c.tool_name ?? c.name;
+        if (name === 'ContextInjection') {
+          const id = c.tool_call_id ?? `${m.id}-context-${contextInjections.length}`;
+          const existing = contextInjections.find(block => block.id === id);
+          if (existing === undefined) {
+            contextInjections.push({
+              id,
+              type: 'context',
+              source: contextInjectionSource(c.input, origin?.variant),
+            });
+          }
+        } else if (name !== undefined && isRenderableToolName(name)) {
+          toolCalls = mergeToolCalls(toolCalls, [{ id: c.tool_call_id, name, args: c.input }]);
+        }
       } else if (c.type === 'tool_result') {
         const matching = toolCalls.find(tool => tool.id && tool.id === c.tool_call_id);
         if (matching) {
           matching.result = c.output;
           matching.isError = c.is_error === true;
         } else {
-          toolCalls.push({
-            id: c.tool_call_id,
-            name: 'tool',
-            args: undefined,
-            result: c.output,
-            isError: c.is_error === true,
-          });
+          const context = contextInjections.find(block => block.id === c.tool_call_id);
+          if (context !== undefined) {
+            context.content = c.output;
+            context.isError = c.is_error === true;
+          }
         }
       }
     }
   }
-  // Permission-mode reminders remain model context, but are intentionally
-  // omitted from the human transcript. Read the projected tool input instead
-  // of manufacturing a ContextInjection from message origin metadata.
-  toolCalls = toolCalls.filter(tool => {
-    if (tool.name !== 'ContextInjection') return true;
-    if (typeof tool.args !== 'object' || tool.args === null) return true;
-    return (tool.args as { source?: unknown }).source !== 'permission_mode';
-  });
 
   const thinking = m.thinking || thinkingFromContent || undefined;
   const textIsProgress = m.role === 'assistant' && toolCalls.length > 0 && Boolean(text.trim());
-  const workBlocks = workBlocksFromMessage(m, toolCalls, thinking, textIsProgress ? text : undefined);
+  const workBlocks = workBlocksFromMessage(m, toolCalls, contextInjections, thinking, textIsProgress ? text : undefined);
   const parsedUploads = m.role === 'user' ? splitUploadedFileMarkup(text) : { text, files: [] as ChatFile[] };
   const files = [...contentFileParts(m.content), ...parsedUploads.files];
   const visibleText = textIsProgress ? '' : (m.role === 'user' ? parsedUploads.text : text);
-  if (!visibleText && !thinking && toolCalls.length === 0 && images.length === 0 && files.length === 0) return null;
+  if (!visibleText && !thinking && toolCalls.length === 0 && contextInjections.length === 0 && images.length === 0 && files.length === 0) return null;
 
   return {
     id: m.id,
-    role: m.role === 'tool' ? 'assistant' : m.role,
+    turnId,
+    role: m.role,
     text: visibleText,
     images: images.length > 0 ? images : undefined,
     files: files.length > 0 ? files : undefined,
@@ -543,16 +620,115 @@ export function apiMessageToChat(m: Message): ChatMessage | null {
     workBlocks: workBlocks.length > 0 ? workBlocks : undefined,
     toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
     createdAt: m.created_at,
+};
+}
+
+function isRenderableToolName(name: string): boolean {
+  const normalized = name.trim();
+  return normalized.length > 0 && normalized !== 'tool';
+}
+
+function contextInjectionSource(args: unknown, fallback: unknown): string {
+  if (typeof args === 'object' && args !== null) {
+    const source = (args as { source?: unknown }).source;
+    if (typeof source === 'string' && source.length > 0) return source;
+    const variant = (args as { variant?: unknown }).variant;
+    if (typeof variant === 'string' && variant.length > 0) return variant;
+  }
+  return typeof fallback === 'string' && fallback.length > 0 ? fallback : 'harness';
+}
+
+/** Fold all persisted steps from one logical model turn into one UI response. */
+export function foldConversationTurns(messages: ChatMessage[]): ChatMessage[] {
+  const folded: ChatMessage[] = [];
+  for (const message of messages) {
+    if (message.turnBoundary) continue;
+    if (message.toolResult !== undefined) {
+      for (let index = folded.length - 1; index >= 0; index--) {
+        const target = folded[index];
+        if (target === undefined) continue;
+        if (message.turnId !== undefined && target.turnId !== message.turnId) continue;
+        const merged = mergeToolResultIntoChat(target, message.toolResult);
+        if (merged === undefined) continue;
+        folded[index] = merged;
+        break;
+      }
+      // An orphan result is transport noise; never invent a fake `tool` row.
+      continue;
+    }
+    const previous = folded.at(-1);
+    if (previous !== undefined && canFoldAssistantWork(previous, message)) {
+      folded[folded.length - 1] = mergeAssistantWork(previous, message);
+    } else {
+      folded.push(message);
+    }
+  }
+  return folded;
+}
+
+function canFoldAssistantWork(previous: ChatMessage, incoming: ChatMessage): boolean {
+  if (previous.role !== 'assistant' || incoming.role !== 'assistant') return false;
+  if (previous.turnId !== undefined || incoming.turnId !== undefined) {
+    return previous.turnId !== undefined && previous.turnId === incoming.turnId;
+  }
+  return previous.text.trim().length === 0
+    && incoming.text.trim().length === 0
+    && (previous.workBlocks?.length ?? 0) > 0
+    && (incoming.workBlocks?.length ?? 0) > 0;
+}
+
+function mergeAssistantWork(previous: ChatMessage, incoming: ChatMessage): ChatMessage {
+  const previousText = previous.text.trim();
+  const incomingText = incoming.text.trim();
+  const previousProgress = previousText && incomingText && previousText !== incomingText
+    ? createProgressBlock(`${previous.id}-turn-progress`, previous.text)
+    : undefined;
+  const blocks = mergeWorkBlocks(previous.workBlocks ?? [], [
+    ...(previousProgress === undefined ? [] : [previousProgress]),
+    ...(incoming.workBlocks ?? []),
+  ]);
+  return {
+    ...previous,
+    turnId: previous.turnId ?? incoming.turnId,
+    text: incomingText ? incoming.text : previous.text,
+    thinking: incoming.thinking ?? previous.thinking,
+    workBlocks: blocks,
+    toolCalls: mergeToolCalls(previous.toolCalls ?? [], incoming.toolCalls ?? []),
+    usage: incoming.usage ?? previous.usage,
+    createdAt: incoming.createdAt ?? previous.createdAt,
   };
 }
 
-/**
- * Keep persisted message boundaries intact. Process/tool messages and the
- * final assistant answer are separate messages; combining them here makes the
- * UI manufacture a final row containing the whole preceding transcript.
- */
-export function foldConversationTurns(messages: ChatMessage[]): ChatMessage[] {
-  return messages.filter(message => !message.turnBoundary);
+function mergeToolResultIntoChat(
+  message: ChatMessage,
+  result: NonNullable<ChatMessage['toolResult']>,
+): ChatMessage | undefined {
+  if (result.contextInjection) {
+    const blocks = message.workBlocks ?? [];
+    const index = blocks.findIndex(block => block.type === 'context' && block.id === result.toolCallId);
+    if (index < 0) return undefined;
+    return {
+      ...message,
+      workBlocks: blocks.map((block, blockIndex) => blockIndex === index && block.type === 'context'
+        ? { ...block, content: result.output, isError: result.isError }
+        : block),
+    };
+  }
+
+  const calls = message.toolCalls ?? [];
+  const callIndex = calls.findIndex(call => call.id === result.toolCallId);
+  if (callIndex < 0) return undefined;
+  const nextCalls = calls.map((call, index) => index === callIndex
+    ? { ...call, result: result.output, isError: result.isError }
+    : call);
+  const nextBlocks = (message.workBlocks ?? []).map(block => block.type === 'tool' && block.tool.id === result.toolCallId
+    ? { ...block, tool: { ...block.tool, result: result.output, isError: result.isError } }
+    : block);
+  return {
+    ...message,
+    toolCalls: nextCalls,
+    workBlocks: nextBlocks.length > 0 ? nextBlocks : message.workBlocks,
+  };
 }
 
 export function insertSteerBoundary(
@@ -570,12 +746,14 @@ export function insertSteerBoundary(
 function workBlocksFromMessage(
   message: Message,
   toolCalls: ToolCall[],
+  contextInjections: ContextInjectionBlock[],
   thinking: string | undefined,
   progressText?: string,
 ): WorkBlock[] {
   const blocks: WorkBlock[] = [];
   let thinkingIndex = 0;
   const representedToolIds = new Set<string>();
+  const representedContextIds = new Set<string>();
   let progressInserted = false;
 
   for (const content of message.content) {
@@ -591,6 +769,14 @@ function workBlocksFromMessage(
     }
     if (content.type !== 'tool_use' && content.type !== 'tool_result') continue;
     const id = content.tool_call_id;
+    const context = id ? contextInjections.find(candidate => candidate.id === id) : undefined;
+    if (context !== undefined) {
+      if (!representedContextIds.has(context.id)) {
+        blocks.push({ ...context });
+        representedContextIds.add(context.id);
+      }
+      continue;
+    }
     const tool = id ? toolCalls.find(candidate => candidate.id === id) : undefined;
     if (tool && (!id || !representedToolIds.has(id))) {
       blocks.push({ id: id ?? `${message.id}-tool-${blocks.length}`, type: 'tool', tool });
@@ -608,6 +794,10 @@ function workBlocksFromMessage(
       blocks.splice(firstToolIndex < 0 ? blocks.length : firstToolIndex, 0, progress);
     }
   }
+  for (const context of contextInjections) {
+    if (representedContextIds.has(context.id)) continue;
+    blocks.push({ ...context });
+  }
   for (const tool of toolCalls) {
     if (tool.id && representedToolIds.has(tool.id)) continue;
     blocks.push({ id: tool.id ?? `${message.id}-tool-${blocks.length}`, type: 'tool', tool });
@@ -620,7 +810,7 @@ function createProgressBlock(id: string, text: string): Extract<WorkBlock, { typ
   return normalized ? { id, type: 'progress', text: normalized } : undefined;
 }
 
-function mergeWorkBlocks(previous: WorkBlock[], incoming: WorkBlock[]): WorkBlock[] {
+export function mergeWorkBlocks(previous: WorkBlock[], incoming: WorkBlock[]): WorkBlock[] {
   const merged = previous.map(block => block.type === 'tool'
     ? { ...block, tool: { ...block.tool } }
     : { ...block });
@@ -629,6 +819,27 @@ function mergeWorkBlocks(previous: WorkBlock[], incoming: WorkBlock[]): WorkBloc
       const existing = merged.find(candidate => candidate.type === 'tool' && candidate.tool.id === block.tool.id);
       if (existing?.type === 'tool') {
         existing.tool = mergeToolCalls([existing.tool], [block.tool])[0]!;
+        continue;
+      }
+    }
+    if (block.type === 'context') {
+      const index = merged.findIndex(candidate => candidate.type === 'context' && candidate.id === block.id);
+      if (index >= 0) {
+        merged[index] = { ...block };
+        continue;
+      }
+    }
+    if (block.type === 'thinking' || block.type === 'progress') {
+      const index = merged.findIndex(candidate =>
+        candidate.type === block.type
+        && (candidate.id === block.id
+          || candidate.text === block.text
+          || candidate.text.startsWith(block.text)
+          || block.text.startsWith(candidate.text)),
+      );
+      if (index >= 0) {
+        const existing = merged[index];
+        if (existing?.type === block.type && block.text.length >= existing.text.length) merged[index] = { ...block };
         continue;
       }
     }
@@ -758,6 +969,12 @@ export function mergeHistory(previous: ChatMessage[], remote: ChatMessage[]): Ch
   }
   for (const local of previous) {
     if (byId.has(local.id)) continue;
+    if (local.role === 'assistant' && local.turnId !== undefined && isTransientChatMessageId(local.id)) {
+      const authoritativeTurn = remote.find(message =>
+        message.role === 'assistant' && message.turnId === local.turnId,
+      );
+      if (authoritativeTurn !== undefined) continue;
+    }
     // Legacy prompt submissions used a pending id before the server returned
     // the authoritative user_message_id. Keep this narrow compatibility path
     // for user rows only; assistant/process rows are never text-matched.
@@ -818,6 +1035,7 @@ export function promptForRewind(messages: ChatMessage[], count: number): string 
 
 export function liveAssistantMessage(input: {
   sessionId: string;
+  turnId?: string;
   text: string;
   thinking: string;
   workBlocks: WorkBlock[];
@@ -829,6 +1047,7 @@ export function liveAssistantMessage(input: {
   const toolCalls = input.workBlocks.flatMap(block => block.type === 'tool' ? [block.tool] : []);
   return {
     id: `live-${input.sessionId}-${Date.parse(createdAt) || Date.now()}`,
+    turnId: input.turnId,
     role: 'assistant',
     text: input.text,
     thinking: input.thinking || undefined,
@@ -869,6 +1088,7 @@ export function useChatMessages(
   const [currentStreaming, setCurrentStreaming] = useState('');
   const [currentThinking, setCurrentThinking] = useState('');
   const [currentWorkBlocks, setCurrentWorkBlocks] = useState<WorkBlock[]>([]);
+  const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [sessionStatus, setSessionStatus] = useState<SessionRealtimeStatus | null>(null);
   const [agentTreeRevision, setAgentTreeRevision] = useState(0);
   const [discussionTurnAgentId, setDiscussionTurnAgentId] = useState<string | null | undefined>(undefined);
@@ -899,8 +1119,8 @@ export function useChatMessages(
   const titleAppliedRef = useRef(false);
   const titlePromptRef = useRef<string | null>(null);
   const turnUsageRef = useRef<TokenUsage | undefined>(undefined);
-  const activeTurnIdRef = useRef<number | null>(null);
-  const completedTurnIdsRef = useRef(new Set<number>());
+  const activeTurnIdRef = useRef<string | null>(null);
+  const completedTurnIdsRef = useRef(new Set<string>());
   const historyRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const compactTriggeredRef = useRef(false);
   const compactingRef = useRef(false);
@@ -938,7 +1158,7 @@ export function useChatMessages(
     setCurrentWorkBlocks([]);
   }, []);
 
-  const finishLiveTurn = useCallback((turnId?: number) => {
+  const finishLiveTurn = useCallback((turnId?: string) => {
     if (turnId !== undefined) {
       if (completedTurnIdsRef.current.has(turnId)) return;
       completedTurnIdsRef.current.add(turnId);
@@ -952,6 +1172,7 @@ export function useChatMessages(
     if (sessionId) {
       const completed = liveAssistantMessage({
         sessionId: `${sessionId}-${agentId}`,
+        turnId,
         text: stripGeneratedSessionTitle(streamingRef.current),
         thinking: thinkingRef.current,
         workBlocks: liveWorkBlocksRef.current,
@@ -962,28 +1183,28 @@ export function useChatMessages(
 
     setIsStreaming(false);
     activeTurnIdRef.current = null;
+    setActiveTurnId(null);
     promptIdRef.current = null;
     turnUsageRef.current = undefined;
     clearDraft();
   }, [agentId, applyGeneratedTitle, clearDraft, sessionId]);
 
   const hydrateInFlight = useCallback(async (targetSessionId: string, targetAgentId = agentId) => {
-    // The snapshot endpoint is currently parent-session scoped. Never use a
-    // main-agent snapshot to rebuild a child transcript.
-    if (targetAgentId !== 'main') return false;
     const snapshot = await api.sessions.getSnapshot(targetSessionId, targetAgentId);
     if (!hasCurrentScope(scopeRef, targetSessionId, targetAgentId)) return false;
     setPendingApprovals(previous => preserveEqual(previous, snapshot.pending_approvals ?? []));
     setPendingQuestions(previous => preserveEqual(previous, snapshot.pending_questions ?? []));
     const inFlight = snapshot.in_flight_turn;
     if (!inFlight) return false;
-    const isSameTurn = activeTurnIdRef.current === inFlight.turn_id;
+    const snapshotTurnId = String(inFlight.turn_id);
+    const isSameTurn = activeTurnIdRef.current === snapshotTurnId;
     const restoredProgress = inFlight.running_tools.length > 0
       ? createProgressBlock(`snapshot-progress-${inFlight.turn_id}`, inFlight.assistant_text)
       : undefined;
     assistantRawRef.current = inFlight.assistant_text;
     thinkingRawRef.current = inFlight.thinking_text;
-    activeTurnIdRef.current = inFlight.turn_id;
+    activeTurnIdRef.current = snapshotTurnId;
+    setActiveTurnId(snapshotTurnId);
     activeToolCallsRef.current.clear();
     const snapshotBlocks: WorkBlock[] = [
       ...(inFlight.thinking_text.trim()
@@ -1054,6 +1275,7 @@ export function useChatMessages(
     titlePromptRef.current = null;
     turnUsageRef.current = undefined;
     activeTurnIdRef.current = null;
+    setActiveTurnId(null);
     completedTurnIdsRef.current.clear();
     if (historyRefreshTimerRef.current) clearTimeout(historyRefreshTimerRef.current);
     historyRefreshTimerRef.current = null;
@@ -1234,7 +1456,7 @@ export function useChatMessages(
       }, 300);
     };
 
-    const finishTurn = (turnId?: number, refresh = false) => {
+    const finishTurn = (turnId?: string, refresh = false) => {
       finishLiveTurn(turnId);
       if (refresh) scheduleHistoryRefresh();
     };
@@ -1302,7 +1524,8 @@ export function useChatMessages(
               if (activeTurnIdRef.current === null && liveWorkBlocksRef.current.length === 0) {
                 clearDraft();
               }
-              activeTurnIdRef.current = payload.turnId ?? null;
+              activeTurnIdRef.current = payload.turnId === undefined ? null : String(payload.turnId);
+              setActiveTurnId(activeTurnIdRef.current);
               lastStreamActivityAtRef.current = Date.now();
               turnUsageRef.current = undefined;
               setIsStreaming(true);
@@ -1564,6 +1787,8 @@ export function useChatMessages(
           );
           if (completedAssistant && hasCurrentScope(scopeRef, sessionId, agentId)) {
             setIsStreaming(false);
+            activeTurnIdRef.current = null;
+            setActiveTurnId(null);
             clearDraft();
           }
         })
@@ -1833,7 +2058,7 @@ export function useChatMessages(
     await refreshQuestions();
   }, [agentId, refreshQuestions, sessionId]);
 
-  return { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus: statusForSession(sessionStatus, sessionStatusScopeRef.current, chatScopeKey(sessionId, agentId)), agentTreeRevision, discussionTurnAgentId, refreshSessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort };
+  return { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, activeTurnId, sessionStatus: statusForSession(sessionStatus, sessionStatusScopeRef.current, chatScopeKey(sessionId, agentId)), agentTreeRevision, discussionTurnAgentId, refreshSessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort };
 }
 
 export function statusForSession(

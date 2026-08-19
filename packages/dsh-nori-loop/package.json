@@ -1,0 +1,30 @@
+{
+  "name": "@nori-code/dsh-nori-loop",
+  "version": "0.1.0",
+  "description": "nori loop state-machine prompt orchestration for DeepSeek Harness: rule engine (always/on_phase/on_tool/on_event), discuss/implement/review phase folding, per-agent and per-rule pause control, plugin-source notice injection through agent/pre-step",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "files": [
+    "lib/**"
+  ],
+  "scripts": {
+    "build": "tsdown && node scripts/rename-ext.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*"
+  },
+  "devDependencies": {
+    "tsdown": "0.22.0",
+    "typescript": "^5.5.0",
+    "vitest": "^4.1.4"
+  }
+}

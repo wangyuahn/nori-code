@@ -14,7 +14,6 @@ import {
   type CompactionResult,
 } from '../compaction';
 import {
-  expandContextInjection,
   project,
   type ProjectionAnomaly,
   type ProjectOptions,
@@ -83,14 +82,28 @@ export class ContextMemory {
     });
   }
 
+  /**
+   * Sets the single transient reminder carried at the tail of the next request.
+   *
+   * Dynamic injectors re-run on every step, so this is called repeatedly with the
+   * same text for the same turn. Only a *change* is recorded to the transcript:
+   * re-recording identical content would show the user the same injection once
+   * per step and split one logical injection across the wire log.
+   */
   setTransientSystemReminder(content: string, origin: PromptOrigin): void {
     const text = `<system-reminder>\n${content.trim()}\n</system-reminder>`;
-    this.transientSystemReminder = {
+    const message: ContextMessage = {
       role: 'user',
       content: [{ type: 'text', text }],
       toolCalls: [],
       origin,
     };
+    const unchanged =
+      this.transientSystemReminder !== undefined
+      && transientReminderText(this.transientSystemReminder) === text;
+    this.transientSystemReminder = message;
+    if (unchanged) return;
+    this.appendTranscriptMessage(message);
   }
 
   clearTransientSystemReminder(): void {
@@ -98,17 +111,20 @@ export class ContextMemory {
   }
 
   /**
-   * Inject a user-invisible message and immediately send it to the model by
-   * launching/steering a turn. The content is used as-is (no wrapper tag), so
-   * callers can pass raw tool-result-style text or wrap it themselves. The
-   * message is skipped on replay / transcript (so the user never sees it) but
-   * is included in the context sent to the model. Use this for events the
-   * model must react to right away without surfacing a user-visible message.
+   * Immediately steer a turn with a harness-originated message. It is visible
+   * in the human transcript, but remains outside the model's retained context.
    */
   injectAndNotify(content: string, origin?: PromptOrigin): void {
+    const injectionOrigin = origin ?? { kind: 'injection' as const, variant: 'system_reminder' };
+    this.appendTranscriptMessage({
+      role: 'user',
+      content: [{ type: 'text', text: content }],
+      toolCalls: [],
+      origin: injectionOrigin,
+    });
     this.agent.turn.steer(
       [{ type: 'text', text: content }],
-      origin ?? { kind: 'injection', variant: 'system_reminder' },
+      injectionOrigin,
     );
   }
 
@@ -342,10 +358,7 @@ export class ContextMemory {
 
   project(messages: readonly ContextMessage[], options?: ProjectOptions): Message[] {
     const anomalies: ProjectionAnomaly[] = [];
-    const expandedMessages = messages.flatMap((message, index) =>
-      expandContextInjection(message, index),
-    );
-    const result = project(this.agent.microCompaction.compact(expandedMessages), {
+    const result = project(this.agent.microCompaction.compact(messages), {
       ...options,
       onAnomaly: (anomaly) => {
         anomalies.push(anomaly);
@@ -572,6 +585,21 @@ export class ContextMemory {
     this.pushHistory(message);
   }
 
+  /**
+   * Records a UI/transcript-only message. This deliberately bypasses history:
+   * dynamic harness prompts stay at the request tail and preserve cache reuse.
+   */
+  appendTranscriptMessage(message: ContextMessage): void {
+    this.agent.records.logRecord({
+      type: 'context.append_transcript_message',
+      message,
+    });
+    this.agent.replayBuilder.push({
+      type: 'message',
+      message,
+    });
+  }
+
   private flushDeferredMessagesIfToolExchangeClosed(): void {
     if (this.pendingToolResultIds.size > 0 || this.deferredMessages.length === 0) {
       return;
@@ -698,4 +726,10 @@ function formatUndoUnavailableMessage(
   function formatPromptCount(count: number): string {
     return `${String(count)} ${count === 1 ? 'prompt' : 'prompts'}`;
   }
+}
+
+/** The reminder is always a single text part; anything else is not comparable. */
+function transientReminderText(message: ContextMessage): string | undefined {
+  const [part] = message.content;
+  return message.content.length === 1 && part?.type === 'text' ? part.text : undefined;
 }

@@ -33,6 +33,7 @@ interface CodeViewProps {
   thinking: string;
   workBlocks?: WorkBlock[];
   isStreaming: boolean;
+  streamingTurnId?: string | null;
   activeAgentCount?: number;
   activeAgentTokens?: number;
   sessionStatus?: SessionRealtimeStatus | null;
@@ -86,6 +87,7 @@ export function CodeView({
   thinking,
   workBlocks,
   isStreaming,
+  streamingTurnId,
   activeAgentCount,
   activeAgentTokens,
   sessionStatus,
@@ -247,6 +249,7 @@ export function CodeView({
         thinking={thinking}
         workBlocks={workBlocks}
         isStreaming={isStreaming}
+        streamingTurnId={streamingTurnId}
         activeAgentCount={activeAgentCount}
         activeAgentTokens={activeAgentTokens}
         sessionStatus={sessionStatus}

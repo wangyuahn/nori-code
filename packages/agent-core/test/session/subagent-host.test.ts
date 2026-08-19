@@ -37,6 +37,49 @@ const signal = new AbortController().signal;
 const tempDirs: string[] = [];
 type GenerateFn = NonNullable<AgentOptions['generate']>;
 
+/**
+ * Wraps a hand-rolled turn double in the collaborator surface the team
+ * schedulers call, so each scenario below only has to spell out the behaviour it
+ * is actually asserting.
+ *
+ * - `requestPrompt` is derived from the double's own `prompt` mock, so call-count
+ *   and argument assertions keep working unchanged.
+ * - `fullCompaction` reports "not compacting": these scenarios are about turn
+ *   scheduling, and a scheduler waits compaction out before every prompt.
+ *
+ * Without this the alternative would be defensive optional access in production
+ * code (`agent.fullCompaction?.…`) that only ever guards against test doubles.
+ */
+function agentDouble(parts: { context?: unknown; turn: Record<string, unknown> }): Agent {
+  const turn = parts.turn;
+  let lastTurnId = 0;
+  const requestPrompt = (input: unknown, origin: unknown) => {
+    const prompt = turn['prompt'] as ((i: unknown, o: unknown) => number | null | undefined) | undefined;
+    const turnId = prompt?.(input, origin) ?? null;
+    if (turnId !== null) {
+      lastTurnId = turnId;
+      return { status: 'started', turnId };
+    }
+    // A double reports `busy` only while it claims an active turn. An *idle*
+    // double that refuses the prompt is the "member never woke up" case, which
+    // reaches the scheduler as `deferred` and then resolves to unstarted.
+    return turn['hasActiveTurn'] === true
+      ? { status: 'busy', activeTurnId: lastTurnId }
+      : { status: 'deferred' };
+  };
+  return {
+    ...parts,
+    fullCompaction: { isCompacting: false, waitForCompletion: async () => {} },
+    // Descriptors rather than a spread: several doubles expose `hasActiveTurn` as
+    // a getter over mutable scenario state, and a spread would snapshot it.
+    turn: Object.defineProperties({}, {
+      ...Object.getOwnPropertyDescriptors(turn),
+      requestPrompt: { value: requestPrompt },
+      currentId: { get: () => lastTurnId },
+    }),
+  } as unknown as Agent;
+}
+
 afterEach(async () => {
   for (const dir of tempDirs.splice(0)) {
     await rm(dir, { recursive: true, force: true });
@@ -150,7 +193,7 @@ describe('SessionSubagentHost', () => {
       let firstResponse!: () => void;
       let complete!: () => void;
       let progressListener: (() => void) | undefined;
-      const member = {
+      const member = agentDouble({
         context: { history: [] },
         turn: {
           get hasActiveTurn() {
@@ -185,7 +228,7 @@ describe('SessionSubagentHost', () => {
             }, { once: true });
           })),
         },
-      } as unknown as Agent;
+      });
       const discussionMeta = {
         homedir: '/discussion',
         type: 'sub' as const,
@@ -263,7 +306,7 @@ describe('SessionSubagentHost', () => {
       const transcript = testAgent({ type: 'sub' });
       let active = false;
       let firstResponse!: () => void;
-      const member = {
+      const member = agentDouble({
         context: { history: [] },
         turn: {
           get hasActiveTurn() {
@@ -285,7 +328,7 @@ describe('SessionSubagentHost', () => {
             }, { once: true });
           })),
         },
-      } as unknown as Agent;
+      });
       const discussionMeta = {
         homedir: '/discussion',
         type: 'sub' as const,
@@ -347,7 +390,7 @@ describe('SessionSubagentHost', () => {
     const transcript = testAgent({ type: 'sub' });
     let firstActive = false;
     const firstSignals: AbortSignal[] = [];
-    const first = {
+    const first = agentDouble({
       turn: {
         get hasActiveTurn() { return firstActive; },
         prompt: vi.fn(() => { firstActive = true; return 1; }),
@@ -364,15 +407,15 @@ describe('SessionSubagentHost', () => {
           return { event: { reason: 'cancelled' } };
         }),
       },
-    } as unknown as Agent;
-    const second = {
+    });
+    const second = agentDouble({
       turn: {
         hasActiveTurn: false,
         prompt: vi.fn(() => 2),
         waitForTurnFirstRequest: vi.fn(() => new Promise<void>(() => {})),
         waitForCurrentTurn: vi.fn(async () => ({ event: { reason: 'completed' } })),
       },
-    } as unknown as Agent;
+    });
     const discussionMeta = {
       homedir: '/discussion',
       type: 'sub' as const,
@@ -443,7 +486,7 @@ describe('SessionSubagentHost', () => {
     let attempt = 0;
     let active = false;
     let consumed = false;
-    const member = {
+    const member = agentDouble({
       turn: {
         get hasActiveTurn() {
           return active;
@@ -469,7 +512,7 @@ describe('SessionSubagentHost', () => {
           return { event: { reason: 'completed' } };
         }),
       },
-    } as unknown as Agent;
+    });
     const discussionMeta = {
       homedir: '/discussion',
       type: 'sub' as const,
@@ -536,7 +579,7 @@ describe('SessionSubagentHost', () => {
     const transcript = testAgent({ type: 'sub' });
     const parent = new AbortController();
     let active = false;
-    const member = {
+    const member = agentDouble({
       turn: {
         get hasActiveTurn() {
           return active;
@@ -557,7 +600,7 @@ describe('SessionSubagentHost', () => {
           return { event: { reason: 'cancelled' } };
         }),
       },
-    } as unknown as Agent;
+    });
     const discussionMeta = {
       homedir: '/discussion',
       type: 'sub' as const,
@@ -677,7 +720,7 @@ describe('SessionSubagentHost', () => {
     let spoke = false;
     let activeTurn = false;
     const controller = new AbortController();
-    const member = {
+    const member = agentDouble({
       turn: {
         get hasActiveTurn() {
           return activeTurn;
@@ -697,7 +740,7 @@ describe('SessionSubagentHost', () => {
           return { event: { reason: 'cancelled' } };
         }),
       },
-    } as unknown as Agent;
+    });
     const discussionMeta = {
       homedir: '/discussion',
       type: 'sub' as const,
@@ -809,7 +852,7 @@ describe('SessionSubagentHost', () => {
 
   it('returns the full member failure detail to the lead', async () => {
     const transcript = testAgent({ type: 'sub' });
-    const member = {
+    const member = agentDouble({
       turn: {
         hasActiveTurn: false,
         prompt: vi.fn(() => 1),
@@ -820,7 +863,7 @@ describe('SessionSubagentHost', () => {
           },
         })),
       },
-    } as unknown as Agent;
+    });
     const discussionMeta = {
       homedir: '/discussion',
       type: 'sub' as const,
@@ -870,7 +913,7 @@ describe('SessionSubagentHost', () => {
   it('returns full tool error records when a member tool fails before TeamSpeak', async () => {
     const transcript = testAgent({ type: 'sub' });
     const memberHistory: any[] = [];
-    const member = {
+    const member = agentDouble({
       context: { history: memberHistory },
       turn: {
         hasActiveTurn: false,
@@ -893,7 +936,7 @@ describe('SessionSubagentHost', () => {
         }),
         waitForCurrentTurn: vi.fn(async () => ({ event: { reason: 'failed', error: { code: 'TOOL_FAILED', message: 'member turn failed' } } })),
       },
-    } as unknown as Agent;
+    });
     const discussionMeta = {
       homedir: '/discussion', type: 'sub' as const, parentAgentId: 'main', kind: 'sub' as const, teamLeaderAgentId: 'main',
       discussion: { participantAgentIds: ['agent-review'], status: 'active' as const, topic: 'Surface tool failure', startedAt: '2026-08-18T00:00:00.000Z', updatedAt: '2026-08-18T00:00:00.000Z' },
@@ -1345,13 +1388,13 @@ describe('SessionSubagentHost', () => {
 
   it('buffers TeamDM as a system reminder when the recipient is active', async () => {
     const steer = vi.fn(() => null);
-    const recipient = {
+    const recipient = agentDouble({
       turn: {
         hasActiveTurn: true,
         prompt: vi.fn(),
         steer,
       },
-    } as unknown as Agent;
+    });
     const memberMeta = {
       homedir: '/member',
       type: 'sub' as const,
@@ -1389,13 +1432,13 @@ describe('SessionSubagentHost', () => {
 
   it('does not claim delivery when an idle TeamDM cannot start or is cancelled', async () => {
     const prompt = vi.fn(() => null);
-    const recipient = {
+    const recipient = agentDouble({
       turn: {
         hasActiveTurn: false,
         prompt,
         steer: vi.fn(),
       },
-    } as unknown as Agent;
+    });
     const mainMeta = {
       homedir: '/main',
       type: 'main' as const,

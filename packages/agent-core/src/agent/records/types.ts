@@ -70,6 +70,11 @@ export interface AgentRecordEvents {
   'micro_compaction.apply': { cutoff: number };
 
   'context.append_message': { message: ContextMessage };
+  /**
+   * Human-visible transcript event for a harness injection which must not be
+   * retained in the model context (for example a per-step tail reminder).
+   */
+  'context.append_transcript_message': { message: ContextMessage };
   'context.append_loop_event': { event: LoopRecordedEvent };
   'context.clear': {};
   'context.apply_compaction': CompactionResult;
