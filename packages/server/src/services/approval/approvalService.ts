@@ -124,6 +124,7 @@ export class ApprovalService extends Disposable implements IApprovalService {
     const protocolRequest = approvalToBrokerRequest(req, {
       approvalId,
       sessionId: req.sessionId,
+      agentId: req.agentId,
       createdAt,
       expiresAt,
     });
@@ -200,6 +201,10 @@ export class ApprovalService extends Disposable implements IApprovalService {
     return Array.from(this._pending.values())
       .filter((p) => p.sessionId === sessionId && p.agentId === agentId)
       .map((p) => p.protocolRequest);
+  }
+
+  listPendingAll(): ProtocolApprovalRequest[] {
+    return Array.from(this._pending.values(), (p) => p.protocolRequest);
   }
 
   isRecentlyResolved(approvalId: string): boolean {

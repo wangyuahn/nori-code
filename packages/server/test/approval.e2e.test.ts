@@ -495,6 +495,62 @@ describe('Approval reverse-RPC: WS broadcast → REST resolve → Promise settle
     }
   });
 
+  it('lists and resolves approvals across sessions through the global endpoint', async () => {
+    const r = await bootDaemon();
+    const firstSession = await createSession(r);
+    const secondSession = await createSession(r);
+    const broker = r.services.invokeFunction(
+      (a) => a.get(IApprovalService) as ApprovalService,
+    );
+    const first = broker.request({
+      sessionId: firstSession,
+      agentId: 'main',
+      toolCallId: 'tc_global_first',
+      toolName: 'shell.run',
+      action: 'Run first',
+      display: { kind: 'generic', summary: 'first' } as never,
+    });
+    const second = broker.request({
+      sessionId: secondSession,
+      agentId: 'background_agent',
+      toolCallId: 'tc_global_second',
+      toolName: 'shell.run',
+      action: 'Run second',
+      display: { kind: 'generic', summary: 'second' } as never,
+    });
+
+    try {
+      const listed = await appOf(r).inject({
+        method: 'GET',
+        url: '/api/v1/approvals?status=pending',
+      });
+      const data = envelopeOf<{ items: Array<{ approval_id: string; session_id: string; agent_id?: string }> }>(listed.json()).data;
+      expect(data?.items).toEqual(expect.arrayContaining([
+        expect.objectContaining({ session_id: firstSession, agent_id: 'main' }),
+        expect.objectContaining({ session_id: secondSession, agent_id: 'background_agent' }),
+      ]));
+
+      const secondApproval = data?.items.find(item => item.session_id === secondSession);
+      expect(secondApproval).toBeDefined();
+      const resolved = await appOf(r).inject({
+        method: 'POST',
+        url: `/api/v1/approvals/${secondApproval!.approval_id}`,
+        payload: { decision: 'rejected' },
+      });
+      expect(envelopeOf<{ resolved: boolean }>(resolved.json()).code).toBe(0);
+      await expect(second).resolves.toMatchObject({ decision: 'rejected' });
+      expect(broker.listPending(firstSession, 'main')).toHaveLength(1);
+    } finally {
+      for (const item of broker.listPending(firstSession, 'main')) {
+        broker.resolve(item.approval_id, { decision: 'cancelled' });
+      }
+      for (const item of broker.listPending(secondSession, 'background_agent')) {
+        broker.resolve(item.approval_id, { decision: 'cancelled' });
+      }
+      await Promise.all([first.catch(() => undefined), second.catch(() => undefined)]);
+    }
+  });
+
   it('REST resolve on unknown approval_id returns 40404', async () => {
     const r = await bootDaemon();
     const sid = await createSession(r);

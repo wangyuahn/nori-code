@@ -11,6 +11,8 @@ export type ApprovalScope = z.infer<typeof approvalScopeSchema>;
 export const approvalRequestSchema = z.object({
   approval_id: z.string().min(1),
   session_id: z.string().min(1),
+  /** Agent that owns the request; omitted by older daemon versions. */
+  agent_id: z.string().min(1).optional(),
   turn_id: z.number().int().nonnegative().optional(),
   tool_call_id: z.string().min(1),
   tool_name: z.string().min(1),

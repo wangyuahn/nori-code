@@ -13,6 +13,7 @@ import { AGENT_WIRE_PROTOCOL_VERSION } from '../../src/agent/records';
 import type { ResolvedAgentProfile } from '../../src/profile';
 import type { SDKSessionRPC } from '../../src/rpc';
 import { Session } from '../../src/session';
+import { ProviderManager } from '../../src/session/provider-manager';
 import { collectGitContext } from '../../src/session/git-context';
 import {
   SessionSubagentHost,
@@ -21,6 +22,7 @@ import {
 import type { NoriMemoryProvider } from '../../src/tools/builtin/nori/types';
 import { abortError, userCancellationReason } from '../../src/utils/abort';
 import { testAgent, type AgentTestContext } from '../agent/harness/agent';
+import { createScriptedGenerate } from '../agent/harness/scripted-generate';
 import { createFakeKaos } from '../tools/fixtures/fake-kaos';
 import { executeTool } from '../tools/fixtures/execute-tool';
 
@@ -42,6 +44,187 @@ afterEach(async () => {
 });
 
 describe('SessionSubagentHost', () => {
+  it('keeps the scheduled lease across an ordinary tool call and then accepts TeamSpeak', async () => {
+    const transcript = testAgent({ type: 'sub' });
+    let leaseAgentId: string | undefined;
+    let published: { entryId: number; agentId: string; name: string; message: string } | undefined;
+    const memberHost = {
+      speakInDiscussion: vi.fn(async (message: string) => {
+        if (leaseAgentId !== 'agent-review') throw new Error('scheduled discussion turn lease was released');
+        published = { entryId: 1, agentId: 'agent-review', name: 'Reviewer', message };
+        return { discussionAgentId: 'agent-discussion', entryId: 1 };
+      }),
+      cancelAll: vi.fn(),
+    } as unknown as SessionSubagentHost;
+    const member = testAgent({
+      type: 'sub',
+      subagentHost: memberHost,
+      runtime: {
+        webSearcher: {
+          search: vi.fn(async () => [{
+            title: 'Cache result',
+            url: 'https://example.test/cache',
+            snippet: 'The prompt cache key remains stable.',
+          }]),
+        },
+      },
+    });
+    member.configure({ tools: ['WebSearch', 'TeamSpeak'] });
+    member.mockNextResponse(
+      { type: 'text', text: 'I will verify the cache behavior first.' },
+      {
+        type: 'function',
+        id: 'call_search',
+        name: 'WebSearch',
+        arguments: JSON.stringify({ query: 'prompt cache behavior' }),
+      },
+    );
+    member.mockNextResponse(
+      { type: 'text', text: 'The search confirms the cache key is stable.' },
+      {
+        type: 'function',
+        id: 'call_team_speak',
+        name: 'TeamSpeak',
+        arguments: JSON.stringify({ message: 'The search confirms the cache key is stable.' }),
+      },
+    );
+    const discussionMeta = {
+      homedir: '/discussion',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'sub' as const,
+      teamLeaderAgentId: 'main',
+      discussion: {
+        participantAgentIds: ['agent-review'],
+        status: 'active' as const,
+        topic: 'Review the cache path',
+        startedAt: '2026-08-18T00:00:00.000Z',
+        updatedAt: '2026-08-18T00:00:00.000Z',
+      },
+    };
+    const memberMeta = {
+      homedir: '/review',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'team' as const,
+      teamLeaderAgentId: 'main',
+      name: 'Reviewer',
+    };
+    const session = {
+      metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-review': memberMeta } },
+      activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
+      getAgentMetadata: vi.fn((id: string) => id === 'agent-discussion' ? discussionMeta : id === 'agent-review' ? memberMeta : undefined),
+      ensureAgentResumed: vi.fn(async (id: string) => id === 'agent-discussion' ? transcript.agent : member.agent),
+      unreadTeamDiscussionStatements: vi.fn(async () => ({ statements: [], cursor: 0 })),
+      acknowledgeTeamDiscussionStatements: vi.fn(async () => undefined),
+      beginTeamDiscussionTurn: vi.fn((_discussionAgentId: string, agentId: string) => { leaseAgentId = agentId; }),
+      endTeamDiscussionTurn: vi.fn((_discussionAgentId: string, agentId: string) => {
+        if (leaseAgentId === agentId) leaseAgentId = undefined;
+      }),
+      consumeTeamDiscussionSpeak: vi.fn(() => {
+        const result = published;
+        published = undefined;
+        return result;
+      }),
+    } as unknown as Session;
+    const host = new SessionSubagentHost(session, 'main');
+
+    const result = await host.decideTeamDiscussion('continue', undefined, undefined, signal);
+
+    expect(memberHost.speakInDiscussion).toHaveBeenCalledWith('The search confirms the cache key is stable.');
+    expect(member.llmCalls).toHaveLength(2);
+    expect(result.statements).toEqual([{
+      agentId: 'agent-review',
+      statement: 'The search confirms the cache key is stable.',
+      skipped: false,
+    }]);
+    expect(leaseAgentId).toBeUndefined();
+  });
+
+  it('cancels a timed-out member and continues to the next scheduled participant', async () => {
+    const transcript = testAgent({ type: 'sub' });
+    let firstActive = false;
+    let firstSignal: AbortSignal | undefined;
+    const first = {
+      turn: {
+        get hasActiveTurn() { return firstActive; },
+        prompt: vi.fn(() => { firstActive = true; return 1; }),
+        waitForCurrentTurn: vi.fn(async (waitSignal?: AbortSignal) => {
+          firstSignal = waitSignal;
+          if (waitSignal === undefined) return { event: { reason: 'cancelled' } };
+          await new Promise<void>((_resolve, reject) => {
+            waitSignal.addEventListener('abort', () => {
+              firstActive = false;
+              reject(waitSignal.reason);
+            }, { once: true });
+          });
+          return { event: { reason: 'cancelled' } };
+        }),
+      },
+    } as unknown as Agent;
+    const second = {
+      turn: {
+        hasActiveTurn: false,
+        prompt: vi.fn(() => 2),
+        waitForCurrentTurn: vi.fn(async () => ({ event: { reason: 'completed' } })),
+      },
+    } as unknown as Agent;
+    const discussionMeta = {
+      homedir: '/discussion',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'sub' as const,
+      teamLeaderAgentId: 'main',
+      discussion: {
+        participantAgentIds: ['agent-first', 'agent-second'],
+        status: 'active' as const,
+        topic: 'Bound each member turn',
+        startedAt: '2026-08-18T00:00:00.000Z',
+        updatedAt: '2026-08-18T00:00:00.000Z',
+      },
+    };
+    const memberMeta = (name: string) => ({
+      homedir: `/${name.toLowerCase()}`,
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'team' as const,
+      teamLeaderAgentId: 'main',
+      name,
+    });
+    const firstMeta = memberMeta('First');
+    const secondMeta = memberMeta('Second');
+    const endTeamDiscussionTurn = vi.fn();
+    const session = {
+      metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-first': firstMeta, 'agent-second': secondMeta } },
+      activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
+      getAgentMetadata: vi.fn((id: string) => id === 'agent-discussion' ? discussionMeta : id === 'agent-first' ? firstMeta : id === 'agent-second' ? secondMeta : undefined),
+      ensureAgentResumed: vi.fn(async (id: string) => id === 'agent-discussion' ? transcript.agent : id === 'agent-first' ? first : second),
+      unreadTeamDiscussionStatements: vi.fn(async () => ({ statements: [], cursor: 0 })),
+      acknowledgeTeamDiscussionStatements: vi.fn(async () => undefined),
+      beginTeamDiscussionTurn: vi.fn(),
+      endTeamDiscussionTurn,
+      consumeTeamDiscussionSpeak: vi.fn(() => undefined),
+    } as unknown as Session;
+    const host = new SessionSubagentHost(session, 'main', { discussionMemberTimeoutMs: 10 });
+
+    const result = await host.decideTeamDiscussion('continue', undefined, undefined, signal);
+
+    expect(firstSignal?.aborted).toBe(true);
+    expect(first.turn.waitForCurrentTurn).toHaveBeenCalledTimes(1);
+    expect(second.turn.prompt).toHaveBeenCalledTimes(1);
+    expect(endTeamDiscussionTurn).toHaveBeenNthCalledWith(1, 'agent-discussion', 'agent-first');
+    expect(endTeamDiscussionTurn).toHaveBeenNthCalledWith(2, 'agent-discussion', 'agent-second');
+    expect(result.statements).toEqual([
+      {
+        agentId: 'agent-first',
+        skipped: true,
+        reason: 'timeout',
+        error: 'Member discussion turn timed out after 10ms.',
+      },
+      { agentId: 'agent-second', skipped: true },
+    ]);
+  });
+
   it('treats a member response without TeamSpeak as a private abstention', async () => {
     const transcript = testAgent({ type: 'sub' });
     const member = testAgent({ type: 'sub' });
@@ -98,6 +281,267 @@ describe('SessionSubagentHost', () => {
         expect.objectContaining({ text: expect.stringContaining('private model output') }),
       ]) }),
     );
+    expect(transcript.agent.context.history).toContainEqual(
+      expect.objectContaining({
+        origin: expect.objectContaining({
+          kind: 'system_trigger',
+          name: 'team_discussion_skip',
+        }),
+      }),
+    );
+  });
+
+  it('keeps the TeamSpeak lease until an interrupted member turn actually settles', async () => {
+    const transcript = testAgent({ type: 'sub' });
+    let leaseActive = false;
+    let spoke = false;
+    let activeTurn = false;
+    const controller = new AbortController();
+    const member = {
+      turn: {
+        get hasActiveTurn() {
+          return activeTurn;
+        },
+        prompt: vi.fn(() => {
+          activeTurn = true;
+          return 1;
+        }),
+        waitForCurrentTurn: vi.fn(async (waitSignal?: AbortSignal) => {
+          if (waitSignal !== undefined) {
+            controller.abort(new Error('member tool interrupted'));
+            throw new Error('member tool interrupted');
+          }
+          expect(leaseActive).toBe(true);
+          spoke = true;
+          activeTurn = false;
+          return { event: { reason: 'cancelled' } };
+        }),
+      },
+    } as unknown as Agent;
+    const discussionMeta = {
+      homedir: '/discussion',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'sub' as const,
+      teamLeaderAgentId: 'main',
+      discussion: {
+        participantAgentIds: ['agent-review'],
+        status: 'active' as const,
+        topic: 'Review the cache path',
+        startedAt: '2026-08-18T00:00:00.000Z',
+        updatedAt: '2026-08-18T00:00:00.000Z',
+      },
+    };
+    const memberMeta = {
+      homedir: '/review',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'team' as const,
+      teamLeaderAgentId: 'main',
+      name: 'Reviewer',
+    };
+    const session = {
+      metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-review': memberMeta } },
+      activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
+      getAgentMetadata: vi.fn((id: string) => id === 'agent-discussion' ? discussionMeta : id === 'agent-review' ? memberMeta : undefined),
+      ensureAgentResumed: vi.fn(async (id: string) => id === 'agent-discussion' ? transcript.agent : member),
+      unreadTeamDiscussionStatements: vi.fn(async () => ({ statements: [], cursor: 0 })),
+      acknowledgeTeamDiscussionStatements: vi.fn(async () => undefined),
+      beginTeamDiscussionTurn: vi.fn(() => { leaseActive = true; }),
+      endTeamDiscussionTurn: vi.fn(() => { leaseActive = false; }),
+      consumeTeamDiscussionSpeak: vi.fn(() => spoke ? {
+        entryId: 1,
+        agentId: 'agent-review',
+        name: 'Reviewer',
+        message: 'The cache key is stable.',
+      } : undefined),
+    } as unknown as Session;
+    const host = new SessionSubagentHost(session, 'main');
+
+    const result = await host.decideTeamDiscussion('continue', undefined, undefined, controller.signal);
+
+    expect(member.turn.waitForCurrentTurn).toHaveBeenCalledTimes(2);
+    expect(result.statements).toEqual([{
+      agentId: 'agent-review',
+      statement: 'The cache key is stable.',
+      skipped: false,
+    }]);
+    expect(leaseActive).toBe(false);
+  });
+
+  it('routes a retry round only to the explicitly selected discussion participants', async () => {
+    const transcript = testAgent({ type: 'sub' });
+    const alpha = testAgent({ type: 'sub' });
+    const beta = testAgent({ type: 'sub' });
+    alpha.configure();
+    beta.configure();
+    alpha.mockNextResponse({ type: 'text', text: 'alpha must not be scheduled' });
+    beta.mockNextResponse({ type: 'text', text: 'beta abstains' });
+    const discussionMeta = {
+      homedir: '/discussion',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'sub' as const,
+      teamLeaderAgentId: 'main',
+      discussion: {
+        participantAgentIds: ['agent-alpha', 'agent-beta'],
+        status: 'active' as const,
+        topic: 'Retry the failed member turn',
+        startedAt: '2026-08-18T00:00:00.000Z',
+        updatedAt: '2026-08-18T00:00:00.000Z',
+      },
+    };
+    const memberMeta = (name: string) => ({
+      homedir: `/${name.toLowerCase()}`,
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'team' as const,
+      teamLeaderAgentId: 'main',
+      name,
+    });
+    const alphaMeta = memberMeta('Alpha');
+    const betaMeta = memberMeta('Beta');
+    const session = {
+      metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-alpha': alphaMeta, 'agent-beta': betaMeta } },
+      activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
+      getAgentMetadata: vi.fn((id: string) => id === 'agent-discussion' ? discussionMeta : id === 'agent-alpha' ? alphaMeta : id === 'agent-beta' ? betaMeta : undefined),
+      ensureAgentResumed: vi.fn(async (id: string) => id === 'agent-discussion' ? transcript.agent : id === 'agent-alpha' ? alpha.agent : beta.agent),
+      unreadTeamDiscussionStatements: vi.fn(async () => ({ statements: [], cursor: 0 })),
+      acknowledgeTeamDiscussionStatements: vi.fn(async () => undefined),
+      beginTeamDiscussionTurn: vi.fn(),
+      endTeamDiscussionTurn: vi.fn(),
+      consumeTeamDiscussionSpeak: vi.fn(() => undefined),
+    } as unknown as Session;
+    const host = new SessionSubagentHost(session, 'main');
+
+    const result = await host.decideTeamDiscussion(
+      'continue',
+      undefined,
+      ['agent-beta'],
+      signal,
+      'Please ask beta to provide the missing statement.',
+    );
+
+    expect(alpha.llmCalls).toHaveLength(0);
+    expect(beta.llmCalls).toHaveLength(1);
+    expect(result.statements).toEqual([{ agentId: 'agent-beta', skipped: true }]);
+  });
+
+  it('returns the full member failure detail to the lead', async () => {
+    const transcript = testAgent({ type: 'sub' });
+    const member = {
+      turn: {
+        hasActiveTurn: false,
+        prompt: vi.fn(() => 1),
+        waitForCurrentTurn: vi.fn(async () => ({
+          event: {
+            reason: 'failed',
+            error: { code: 'MEMBER_TOOL_FAILED', message: 'WebSearch returned a malformed response.' },
+          },
+        })),
+      },
+    } as unknown as Agent;
+    const discussionMeta = {
+      homedir: '/discussion',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'sub' as const,
+      teamLeaderAgentId: 'main',
+      discussion: {
+        participantAgentIds: ['agent-review'],
+        status: 'active' as const,
+        topic: 'Surface failure details',
+        startedAt: '2026-08-18T00:00:00.000Z',
+        updatedAt: '2026-08-18T00:00:00.000Z',
+      },
+    };
+    const memberMeta = {
+      homedir: '/review',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'team' as const,
+      teamLeaderAgentId: 'main',
+      name: 'Reviewer',
+    };
+    const session = {
+      metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-review': memberMeta } },
+      activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
+      getAgentMetadata: vi.fn((id: string) => id === 'agent-discussion' ? discussionMeta : id === 'agent-review' ? memberMeta : undefined),
+      ensureAgentResumed: vi.fn(async (id: string) => id === 'agent-discussion' ? transcript.agent : member),
+      unreadTeamDiscussionStatements: vi.fn(async () => ({ statements: [], cursor: 0 })),
+      acknowledgeTeamDiscussionStatements: vi.fn(async () => undefined),
+      beginTeamDiscussionTurn: vi.fn(),
+      endTeamDiscussionTurn: vi.fn(),
+      consumeTeamDiscussionSpeak: vi.fn(() => undefined),
+    } as unknown as Session;
+    const host = new SessionSubagentHost(session, 'main');
+
+    const result = await host.decideTeamDiscussion('continue', undefined, undefined, signal);
+
+    expect(result.statements).toEqual([{
+      agentId: 'agent-review',
+      skipped: true,
+      reason: 'failed',
+      error: '[MEMBER_TOOL_FAILED] WebSearch returned a malformed response.',
+    }]);
+    expect(JSON.stringify(transcript.agent.context.history)).toContain('WebSearch returned a malformed response.');
+  });
+
+  it('returns full tool error records when a member tool fails before TeamSpeak', async () => {
+    const transcript = testAgent({ type: 'sub' });
+    const memberHistory: any[] = [];
+    const member = {
+      context: { history: memberHistory },
+      turn: {
+        hasActiveTurn: false,
+        prompt: vi.fn(() => {
+          memberHistory.push(
+            {
+              role: 'assistant',
+              content: [{ type: 'text', text: '' }],
+              toolCalls: [{ type: 'function', id: 'search-1', name: 'WebSearch', arguments: '{}' }],
+            },
+            {
+              role: 'tool',
+              content: [{ type: 'text', text: '<system>ERROR: Tool execution failed.</system>Search timed out after 10 seconds' }],
+              toolCalls: [],
+              toolCallId: 'search-1',
+              isError: true,
+            },
+          );
+          return 1;
+        }),
+        waitForCurrentTurn: vi.fn(async () => ({ event: { reason: 'failed', error: { code: 'TOOL_FAILED', message: 'member turn failed' } } })),
+      },
+    } as unknown as Agent;
+    const discussionMeta = {
+      homedir: '/discussion', type: 'sub' as const, parentAgentId: 'main', kind: 'sub' as const, teamLeaderAgentId: 'main',
+      discussion: { participantAgentIds: ['agent-review'], status: 'active' as const, topic: 'Surface tool failure', startedAt: '2026-08-18T00:00:00.000Z', updatedAt: '2026-08-18T00:00:00.000Z' },
+    };
+    const memberMeta = { homedir: '/review', type: 'sub' as const, parentAgentId: 'main', kind: 'team' as const, teamLeaderAgentId: 'main', name: 'Reviewer' };
+    const session = {
+      metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-review': memberMeta } },
+      activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
+      getAgentMetadata: vi.fn((id: string) => id === 'agent-discussion' ? discussionMeta : id === 'agent-review' ? memberMeta : undefined),
+      ensureAgentResumed: vi.fn(async (id: string) => id === 'agent-discussion' ? transcript.agent : member),
+      unreadTeamDiscussionStatements: vi.fn(async () => ({ statements: [], cursor: 0 })),
+      acknowledgeTeamDiscussionStatements: vi.fn(async () => undefined),
+      beginTeamDiscussionTurn: vi.fn(),
+      endTeamDiscussionTurn: vi.fn(),
+      consumeTeamDiscussionSpeak: vi.fn(() => undefined),
+    } as unknown as Session;
+    const host = new SessionSubagentHost(session, 'main');
+
+    const result = await host.decideTeamDiscussion('continue', undefined, undefined, signal);
+
+    expect(result.statements).toEqual([{
+      agentId: 'agent-review',
+      skipped: true,
+      reason: 'failed',
+      error: '[TOOL_FAILED] member turn failed\nWebSearch: Search timed out after 10 seconds',
+      toolErrors: [{ toolName: 'WebSearch', message: 'Search timed out after 10 seconds' }],
+    }]);
+    expect(JSON.stringify(transcript.agent.context.history)).toContain('Search timed out after 10 seconds');
   });
 
   it('injects shared discussion deltas only when each participant is scheduled', async () => {
@@ -395,6 +839,14 @@ describe('SessionSubagentHost', () => {
     expect(publishLeadDiscussionStatement).toHaveBeenCalledWith('main', 'The cache key stays.');
     expect(order[0]).toBe('lead');
     expect(order).toContain('member');
+    expect(transcript.agent.context.history).toContainEqual(
+      expect.objectContaining({
+        origin: expect.objectContaining({
+          name: 'team_discussion_round',
+          discussionRound: 1,
+        }),
+      }),
+    );
   });
 
   it('rejects TeamDecide start without a topic even when the field is an empty string', async () => {
@@ -470,7 +922,7 @@ describe('SessionSubagentHost', () => {
     }]);
     expect(directMessageCall[1]).toMatchObject({
       kind: 'system_trigger',
-      name: 'team_lead',
+      name: 'team_dm',
       speaker: { from: 'lead', speakerId: 'main' },
     });
   });
@@ -505,7 +957,7 @@ describe('SessionSubagentHost', () => {
     const host = new SessionSubagentHost(session, 'agent-member');
 
     await expect(host.directMessage('main', 'The parent is still running.', signal))
-      .resolves.toBe('buffered');
+      .resolves.toEqual({ delivered: true, processing: 'queued' });
     expect(steer).toHaveBeenCalledWith(
       [{
         type: 'text',
@@ -513,7 +965,7 @@ describe('SessionSubagentHost', () => {
       }],
       expect.objectContaining({
         kind: 'system_trigger',
-        name: 'team_member',
+        name: 'team_dm',
         speaker: { from: 'team', speakerId: 'agent-member', speakerName: 'Member' },
       }),
     );
@@ -883,7 +1335,6 @@ describe('SessionSubagentHost', () => {
       'Grep',
       'Read',
       'ReadMediaFile',
-      'WebSearch',
     ]);
     expect(child.llmCalls[0]?.history).toMatchObject([
       {
@@ -1038,7 +1489,6 @@ describe('SessionSubagentHost', () => {
       'Grep',
       'Read',
       'ReadMediaFile',
-      'WebSearch',
       'Write',
     ]);
     expect(child.llmCalls[0]?.history).toMatchObject([
@@ -2456,6 +2906,7 @@ describe('Session.createAgent', () => {
     expect(member.agent.config.systemPrompt.startsWith('<team_identity>')).toBe(true);
     expect(member.agent.teamWriteLocked).toBe(true);
     expect(member.agent.teamWriteEnabled).toBe(false);
+    expect(member.agent.tools.activeToolNames()).not.toContain('ContextInjection');
 
     const discussion = await session.createTeamDiscussion(
       main.id,
@@ -2669,6 +3120,14 @@ describe('Session.createAgent', () => {
       signal,
       'The cache key must stay stable.',
     );
+    expect(started.statements[0]).toEqual({
+      agentId: main.id,
+      statement: 'The cache key must stay stable.',
+      skipped: false,
+    });
+    expect(current.agent.context.history.some(message => message.content.some(
+      part => part.type === 'text' && part.text.includes('The cache key must stay stable.'),
+    ))).toBe(true);
     main.agent.discussMode.exit();
     await expect(host.decideTeamDiscussion('continue', undefined, undefined, signal))
       .rejects.toThrow('EnterDiscussMode');
@@ -2695,8 +3154,15 @@ describe('Session.createAgent', () => {
     }
 
     await host.kickFromDiscussion([removed.id]);
+    await session.assignTeamTasks(main.id, [
+      { agentId: current.id, task: 'Apply the accepted cache fix.' },
+      { agentId: removed.id, task: null },
+    ]);
+    expect(current.agent.teamWriteEnabled).toBe(true);
     await host.decideTeamDiscussion('archive', undefined, undefined, signal);
     expect(main.agent.discussMode.isActive).toBe(false);
+    expect(current.agent.teamWriteEnabled).toBe(false);
+    expect(session.getAgentMetadata(current.id)?.assignedTask).toBeUndefined();
     for (const [index, { agent }] of members.entries()) {
       expect(agent.context.history.filter((message) => message.content.some(
         (part) => part.type === 'text' && part.text.includes('has ended and is archived'),
@@ -2777,6 +3243,107 @@ describe('Session.createAgent', () => {
     expect(session.getAgentMetadata(first.id)?.assignedTask).toBeUndefined();
     expect(first.agent.teamWriteEnabled).toBe(false);
     expect(first.agent.permission.mode).toBe('manual');
+  });
+
+  it('reclaims each TeamAssign lease after completed, failed, cancelled, or unstarted turns', async () => {
+    const scripted = createScriptedGenerate();
+    scripted.mockNextResponse({ type: 'text', text: 'completed assignment' });
+    const failedGenerate: GenerateFn = async () => {
+      throw new Error('assigned member failed');
+    };
+    const cancelledGenerate: GenerateFn = async (...args) => {
+      const cancellationSignal = args[5]?.signal;
+      if (cancellationSignal === undefined) return new Promise<never>(() => {});
+      return new Promise<never>((_resolve, reject) => {
+        cancellationSignal.addEventListener('abort', () => reject(cancellationSignal.reason), { once: true });
+      });
+    };
+    const session = new Session({
+      id: 'test-team-assignment-leases',
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      providerManager: new ProviderManager({
+        config: {
+          providers: { test: { type: 'kimi', apiKey: 'test-key' } },
+          models: {
+            'mock-model': {
+              provider: 'test',
+              model: 'mock-model',
+              maxContextSize: 1_000_000,
+              capabilities: ['image_in', 'tool_use'],
+            },
+          },
+        },
+      }),
+      initializeMainAgent: false,
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const identity = (name: string) => ({
+      name,
+      title: `${name} title`,
+      intro: `${name} intro`,
+      mandate: `${name} mandate`,
+      role: `${name} role`,
+    });
+    const completed = await session.createAgent(
+      { type: 'sub', generate: scripted.generate },
+      { kind: 'team', parentAgentId: main.id, teamLeaderAgentId: main.id, profile: contextProfile(), teamIdentity: identity('Completed') },
+    );
+    const failed = await session.createAgent(
+      { type: 'sub', generate: failedGenerate },
+      { kind: 'team', parentAgentId: main.id, teamLeaderAgentId: main.id, profile: contextProfile(), teamIdentity: identity('Failed') },
+    );
+    const cancelled = await session.createAgent(
+      { type: 'sub', generate: cancelledGenerate },
+      { kind: 'team', parentAgentId: main.id, teamLeaderAgentId: main.id, profile: contextProfile(), teamIdentity: identity('Cancelled') },
+    );
+    for (const member of [completed, failed, cancelled]) {
+      member.agent.config.update({ modelAlias: 'mock-model', thinkingEffort: 'off' });
+    }
+    const host = new SessionSubagentHost(session, main.id);
+
+    await host.assignTeam([
+      { agentId: completed.id, task: 'Complete the assigned check.' },
+      { agentId: failed.id, task: 'Fail while running the assigned check.' },
+      { agentId: cancelled.id, task: 'Wait for cancellation.' },
+    ], signal);
+    expect(cancelled.agent.turn.hasActiveTurn).toBe(true);
+    expect(session.getAgentMetadata(cancelled.id)?.assignedTask).toBe('Wait for cancellation.');
+    await vi.waitFor(() => expect(session.getAgentMetadata(completed.id)?.assignedTask).toBeUndefined());
+    await vi.waitFor(() => expect(session.getAgentMetadata(failed.id)?.assignedTask).toBeUndefined());
+    expect(cancelled.agent.teamWriteEnabled).toBe(true);
+
+    cancelled.agent.turn.cancel(cancelled.agent.turn.currentId);
+    await vi.waitFor(() => expect(session.getAgentMetadata(cancelled.id)?.assignedTask).toBeUndefined());
+    expect(cancelled.agent.teamWriteEnabled).toBe(false);
+
+    // A stale completion token cannot revoke a newer assignment for the same
+    // member, even when both turns belong to one durable Team Agent.
+    const reassigned = await session.assignTeamTasks(main.id, [
+      { agentId: completed.id, task: 'A newer assignment.' },
+      { agentId: failed.id, task: null },
+      { agentId: cancelled.id, task: null },
+    ]);
+    const currentToken = reassigned.find(({ agentId }) => agentId === completed.id)?.assignedAt;
+    expect(currentToken).toBeDefined();
+    await expect(session.releaseTeamAssignment(main.id, completed.id, 'stale-token')).resolves.toBe(false);
+    expect(session.getAgentMetadata(completed.id)?.assignedTask).toBe('A newer assignment.');
+    await expect(session.releaseTeamAssignment(main.id, completed.id, currentToken!)).resolves.toBe(true);
+    expect(session.getAgentMetadata(completed.id)?.assignedTask).toBeUndefined();
+
+    // A prompt that returns no turn id must release its lease immediately.
+    const promptNull = vi.spyOn(completed.agent.turn, 'prompt').mockReturnValue(null);
+    await expect(host.assignTeam([
+      { agentId: completed.id, task: 'This turn cannot start.' },
+      { agentId: failed.id, task: null },
+      { agentId: cancelled.id, task: null },
+    ], signal)).rejects.toThrow('could not start its assigned turn');
+    expect(promptNull).toHaveBeenCalledTimes(1);
+    expect(session.getAgentMetadata(completed.id)?.assignedTask).toBeUndefined();
   });
 
   it('dismisses a team member together with its temporary descendant branch', async () => {

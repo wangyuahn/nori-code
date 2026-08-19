@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type UIEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type UIEvent } from 'react';
 import { api, type ApprovalRequest, type ModelCatalogItem, type PromptAttachment, type PromptExecutionOptions, type QuestionAnswer, type QuestionRequest, type Session, type SessionAgentConfig, type SessionRealtimeStatus, type TokenUsage } from '../api/client';
 import type { ChatMessage, QueuedPrompt, TodoItem, ToolCall, WorkBlock } from '../hooks/useChatMessages';
-import { useBrowserPermissions } from '../hooks/useBrowser';
+import { useBrowserPermissions, type BrowserPermissionRequest, type BrowserPermissionDecision } from '../hooks/useBrowser';
 import { useI18n } from '../i18n';
 import { chatSlashCommandSuggestions, resolveChatSlashCommand, type ChatSlashCommand, type ChatSlashCommandName } from '../utils/chat-slash-commands';
 import { modelThinkingOptions } from '../utils/model-thinking';
@@ -29,6 +29,7 @@ export interface ChatViewProps {
   isStreaming: boolean;
   activeAgentCount?: number;
   activeAgentTokens?: number;
+  activeDiscussion?: boolean;
   sessionStatus?: SessionRealtimeStatus | null;
   compacting?: boolean;
   models: ModelCatalogItem[];
@@ -46,6 +47,16 @@ export interface ChatViewProps {
   onGoalControl?: (action: 'pause' | 'resume' | 'cancel') => void | Promise<void>;
   pendingApprovals?: ApprovalRequest[];
   onResolveApproval?: (approvalId: string, decision: 'approved' | 'rejected' | 'cancelled', options?: { remember?: boolean; feedback?: string; selectedLabel?: string }) => void | Promise<void>;
+  globalApprovals?: ApprovalRequest[];
+  onResolveGlobalApproval?: ChatViewProps['onResolveApproval'];
+  onApprovalPermissionChange?: (mode: 'auto' | 'yolo', request?: ApprovalRequest) => void | Promise<void>;
+  approvalSessionTitles?: Readonly<Record<string, string>>;
+  approvalResolvingIds?: ReadonlySet<string>;
+  approvalErrors?: Readonly<Record<string, string>>;
+  onOpenApprovalSession?: (sessionId: string, agentId?: string) => void;
+  browserPermissionsOverride?: BrowserPermissionRequest[];
+  onResolveBrowserPermissionOverride?: (id: string, decision: BrowserPermissionDecision) => void | Promise<void>;
+  showApprovalPanel?: boolean;
   pendingQuestions?: QuestionRequest[];
   onResolveQuestion?: (questionId: string, answers: Record<string, QuestionAnswer>) => void | Promise<void>;
   onDismissQuestion?: (questionId: string) => void | Promise<void>;
@@ -164,9 +175,22 @@ function ComposerSettingPicker({ id, label, ariaLabel, value, choices, open, dis
 }
 
 export function ChatView(props: ChatViewProps) {
-  const { session, agentId = 'main', allSessions = [], messages, messagesLoading = false, streaming, thinking, workBlocks = [], isStreaming, sessionStatus, compacting = false, models, modelsLoading, modelError, onSendMessage, onAbort, onRefreshModels, onModelChange, onThinkingChange, onPermissionChange, onTaskModeChange, onRunSlashCommand, onMainWriteChange, pendingApprovals = [], onResolveApproval, pendingQuestions = [], onResolveQuestion, onDismissQuestion, queuedPrompts = [], onCancelQueuedPrompt, draftAgentConfig, rewindLimit = 10, onRewind } = props;
+  const { session, agentId = 'main', allSessions = [], messages, messagesLoading = false, streaming, thinking, workBlocks = [], isStreaming, activeAgentTokens, activeDiscussion, sessionStatus, compacting = false, models, modelsLoading, modelError, onSendMessage, onAbort, onRefreshModels, onModelChange, onThinkingChange, onPermissionChange, onTaskModeChange, onRunSlashCommand, onMainWriteChange, pendingApprovals = [], onResolveApproval, globalApprovals = [], onResolveGlobalApproval, onApprovalPermissionChange, approvalSessionTitles = {}, approvalResolvingIds = new Set(), approvalErrors = {}, onOpenApprovalSession, showApprovalPanel = true, pendingQuestions = [], onResolveQuestion, onDismissQuestion, queuedPrompts = [], onCancelQueuedPrompt, draftAgentConfig, rewindLimit = 10, onRewind, browserPermissionsOverride, onResolveBrowserPermissionOverride } = props;
   const { tr } = useI18n();
-  const browserPermissions = useBrowserPermissions();
+  const localBrowserPermissions = useBrowserPermissions();
+  const browserPermissions = browserPermissionsOverride === undefined
+    ? localBrowserPermissions
+    : { pending: browserPermissionsOverride, resolvePermission: onResolveBrowserPermissionOverride ?? localBrowserPermissions.resolvePermission };
+  const approvalRequests = useMemo(() => {
+    const byId = new Map<string, ApprovalRequest>();
+    for (const request of [...pendingApprovals, ...globalApprovals]) byId.set(request.approval_id, request);
+    return [...byId.values()];
+  }, [globalApprovals, pendingApprovals]);
+  const resolveDisplayedApproval = useCallback((approvalId: string, decision: 'approved' | 'rejected' | 'cancelled', options?: { remember?: boolean; feedback?: string; selectedLabel?: string }) => {
+    const globalRequest = globalApprovals.find(request => request.approval_id === approvalId);
+    if (globalRequest && onResolveGlobalApproval) return onResolveGlobalApproval(approvalId, decision, options);
+    return onResolveApproval?.(approvalId, decision, options);
+  }, [globalApprovals, onResolveApproval, onResolveGlobalApproval]);
   const [input, setInput] = useState('');
   const [modelNotice, setModelNotice] = useState(false);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
@@ -186,15 +210,13 @@ export function ChatView(props: ChatViewProps) {
   const [followOutput, setFollowOutput] = useState(true);
   const [activeTurnId, setActiveTurnId] = useState<string | null>(null);
   const [hoveredTurnId, setHoveredTurnId] = useState<string | null>(null);
-  const [taskModeOverride, setTaskModeOverride] = useState<'discuss' | 'code' | null>(null);
+  const [taskModeError, setTaskModeError] = useState<string | null>(null);
   const [modelOverride, setModelOverride] = useState<string | null>(null);
   const [mainWriteOverride, setMainWriteOverride] = useState<boolean | null>(null);
-  const [permissionMenuOpen, setPermissionMenuOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [modelSettingOpen, setModelSettingOpen] = useState<'model' | 'thinking' | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
-  const taskModeOverrideSessionRef = useRef<string | null>(null);
   const modelOverrideSessionRef = useRef<string | null>(null);
   const mainWriteOverrideSessionRef = useRef<string | null>(null);
   const followOutputRef = useRef(true);
@@ -204,13 +226,11 @@ export function ChatView(props: ChatViewProps) {
   const rewindSessionIdRef = useRef<string | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const previousScopeRef = useRef<string | null>(null);
-  const permissionMenuRef = useRef<HTMLDivElement>(null);
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const currentSessionId = session?.id ?? null;
   const currentScope = currentSessionId === null ? null : `${currentSessionId}\u0000${agentId}`;
   rewindSessionIdRef.current = currentScope;
   const activeModelOverride = modelOverrideSessionRef.current === currentScope ? modelOverride : null;
-  const activeTaskModeOverride = taskModeOverrideSessionRef.current === currentScope ? taskModeOverride : null;
   const activeMainWriteOverride = mainWriteOverrideSessionRef.current === currentScope ? mainWriteOverride : null;
   const runtimeModelValue = sessionStatus?.model?.trim();
   const runtimeModelId = runtimeModelValue === '' ? undefined : runtimeModelValue;
@@ -219,8 +239,13 @@ export function ChatView(props: ChatViewProps) {
   const thinkingOptions = modelThinkingOptions(selectedModel);
   const requestedThinking = session?.agent_config?.thinking ?? draftAgentConfig?.thinking ?? thinkingOptions.defaultValue;
   const selectedPermission = session?.agent_config?.permission_mode ?? draftAgentConfig?.permission_mode ?? 'manual';
-  const persistedTaskMode = (sessionStatus?.discuss_mode ?? session?.agent_config?.discuss_mode ?? draftAgentConfig?.discuss_mode) ? 'discuss' : 'code';
-  const selectedTaskMode = activeTaskModeOverride ?? persistedTaskMode;
+  const persistedTaskMode = activeDiscussion !== undefined
+    ? (activeDiscussion ? 'discuss' : 'code')
+    : (
+      sessionStatus?.discuss_mode
+      ?? (agentId === 'main' ? session?.agent_config?.discuss_mode ?? draftAgentConfig?.discuss_mode : false)
+    ) ? 'discuss' : 'code';
+  const selectedTaskMode = persistedTaskMode;
   const persistedMainWrite = sessionStatus?.main_write_enabled ?? session?.agent_config?.main_write_enabled ?? draftAgentConfig?.main_write_enabled ?? false;
   const selectedMainWrite = activeMainWriteOverride ?? persistedMainWrite;
   const selectedModelLabel = selectedModel
@@ -231,7 +256,6 @@ export function ChatView(props: ChatViewProps) {
     ?? thinkingOptions.choices[0];
   const selectedThinking = selectedThinkingChoice?.value ?? requestedThinking;
   const selectedThinkingLabel = selectedThinkingChoice?.value ?? '';
-  const selectedPermissionLabel = selectedPermission === 'auto' ? 'AUTO' : selectedPermission === 'yolo' ? 'YOLO' : tr('Manual', '手动');
   const modelChoices: ComposerSettingChoice[] = [
     { value: '', label: modelsLoading ? tr('Loading models…', '正在加载模型…') : tr('Select model', '选择模型'), disabled: true },
     ...(selectedModelId !== '' && !selectedModel ? [{ value: selectedModelId, label: selectedModelId }] : []),
@@ -285,10 +309,9 @@ export function ChatView(props: ChatViewProps) {
     }
   }, [browserPermissions.pending, browserPermissions.resolvePermission, selectedPermission]);
   useEffect(() => {
-    if (!permissionMenuOpen && !modelMenuOpen) return;
+    if (!modelMenuOpen) return;
     const closeMenus = (event: PointerEvent) => {
       const target = event.target as Node;
-      if (!permissionMenuRef.current?.contains(target)) setPermissionMenuOpen(false);
       if (!modelMenuRef.current?.contains(target)) {
         setModelMenuOpen(false);
         setModelSettingOpen(null);
@@ -296,7 +319,6 @@ export function ChatView(props: ChatViewProps) {
     };
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key !== 'Escape') return;
-      setPermissionMenuOpen(false);
       setModelMenuOpen(false);
       setModelSettingOpen(null);
     };
@@ -306,7 +328,7 @@ export function ChatView(props: ChatViewProps) {
       document.removeEventListener('pointerdown', closeMenus);
       window.removeEventListener('keydown', closeOnEscape);
     };
-  }, [modelMenuOpen, permissionMenuOpen]);
+  }, [modelMenuOpen]);
   const rewindCounts = new Map<string, number>();
   let promptsFromEnd = 0;
   for (let index = messages.length - 1; index >= 0; index--) {
@@ -441,7 +463,7 @@ export function ChatView(props: ChatViewProps) {
     };
   }, [composerRevision, restoreRewindFocus]);
   useEffect(() => { setModelNotice(false); }, [currentScope, selectedModelId]);
-  useEffect(() => { setTaskModeOverride(null); }, [currentScope]);
+  useEffect(() => { setTaskModeError(null); }, [currentScope, persistedTaskMode]);
   useEffect(() => { setModelOverride(null); }, [currentScope]);
   useEffect(() => { setMainWriteOverride(null); }, [currentScope]);
   useEffect(() => {
@@ -458,13 +480,9 @@ export function ChatView(props: ChatViewProps) {
     return () => window.removeEventListener('keydown', closeOnEscape);
   }, [rewindRequest]);
   useEffect(() => {
-    setPermissionMenuOpen(false);
     setModelMenuOpen(false);
     setModelSettingOpen(null);
   }, [currentScope]);
-  useEffect(() => {
-    if (activeTaskModeOverride === persistedTaskMode) setTaskModeOverride(null);
-  }, [activeTaskModeOverride, persistedTaskMode]);
   useEffect(() => {
     if (activeModelOverride !== null && runtimeModelId === activeModelOverride) setModelOverride(null);
   }, [activeModelOverride, runtimeModelId]);
@@ -700,12 +718,12 @@ export function ChatView(props: ChatViewProps) {
   };
 
   async function changeTaskMode(mode: 'discuss' | 'code') {
-    taskModeOverrideSessionRef.current = currentScope;
-    setTaskModeOverride(mode);
+    if (mode === selectedTaskMode || isStreaming) return;
+    setTaskModeError(null);
     try {
       await onTaskModeChange(mode);
-    } catch {
-      setTaskModeOverride(current => taskModeOverrideSessionRef.current === currentScope && current === mode ? null : current);
+    } catch (error) {
+      setTaskModeError(error instanceof Error ? error.message : tr('Unable to change task mode.', '无法切换任务模式。'));
     }
   }
 
@@ -846,12 +864,16 @@ export function ChatView(props: ChatViewProps) {
     <div className="chat-composer-wrap">
       {!followOutput && <button className="chat-jump-latest" onClick={jumpToLatest} title={tr('Jump to latest', '回到最新消息')} aria-label={tr('Jump to latest', '回到最新消息')}><Icon name="chevron-down" size={16}/></button>}
       {pendingQuestions.length > 0 && onResolveQuestion && onDismissQuestion && <QuestionPanel requests={pendingQuestions} onSubmit={onResolveQuestion} onDismiss={onDismissQuestion}/>}
-      {((pendingApprovals.length > 0 && onResolveApproval !== undefined) || browserPermissions.pending.length > 0) && <ApprovalPanel
-        requests={onResolveApproval === undefined ? [] : pendingApprovals}
-        onResolve={onResolveApproval}
-        onPermissionChange={onPermissionChange}
+      {showApprovalPanel && ((approvalRequests.length > 0 && (onResolveApproval !== undefined || onResolveGlobalApproval !== undefined)) || browserPermissions.pending.length > 0) && <ApprovalPanel
+        requests={approvalRequests}
+        onResolve={resolveDisplayedApproval}
+        onPermissionChange={onApprovalPermissionChange ?? onPermissionChange}
         browserPermissions={browserPermissions.pending}
         onResolveBrowserPermission={browserPermissions.resolvePermission}
+        sessionTitles={approvalSessionTitles}
+        onOpenSession={onOpenApprovalSession}
+        resolvingIds={approvalResolvingIds}
+        errors={approvalErrors}
       />}
       {rewinding && <div className="chat-rewind-status" role="status" aria-live="polite"><span className="spinner spinner-small"/><span>{tr('Rewinding conversation and workspace…', '正在回溯对话和工作区…')}</span></div>}
       {rewindError && <div className="chat-rewind-status error" role="alert"><Icon name="alert" size={14}/><span>{rewindError}</span><button type="button" onClick={() => setRewindError(null)} aria-label={tr('Dismiss rewind error', '关闭回溯错误')}><Icon name="close" size={12}/></button></div>}
@@ -862,25 +884,14 @@ export function ChatView(props: ChatViewProps) {
         {commandSuggestions.map((command, index) => <button key={command.name} type="button" id={`composer-command-${command.name}`} role="option" aria-selected={index === commandSelection} className={index === commandSelection ? 'active' : ''} onMouseDown={event => event.preventDefault()} onClick={() => selectSlashCommand(command)}><code>/{command.name}{command.argumentHint ? ` ${command.argumentHint}` : ''}</code><span>{tr(command.description, command.descriptionZh)}</span></button>)}
       </div>}
       <textarea ref={inputRef} className="chat-input" placeholder={session ? tr('Ask Nori about this project…', '向 Nori 询问此项目…') : tr('Describe what you want to work on…', '告诉 Nori 你想做什么…')} value={input} onFocus={() => { void restoreRewindFocus(); }} onChange={event => { rewindCaretRef.current = null; setInput(event.target.value); setCommandMenuDismissed(false); setCommandSelection(0); setCommandNotice(null); }} onKeyDown={handleKeyDown} onPaste={handlePaste} rows={1} aria-label={tr('Message Nori', '向 Nori 发送消息')} aria-autocomplete="list" aria-expanded={commandMenuOpen} aria-controls={commandMenuOpen ? 'composer-command-menu' : undefined} aria-activedescendant={commandMenuOpen ? `composer-command-${commandSuggestions[commandSelection]?.name ?? commandSuggestions[0]?.name}` : undefined}/>
-      <SessionUsageBar status={sessionStatus} compacting={compacting} />
+      <SessionUsageBar status={sessionStatus} compacting={compacting} treeTokens={activeAgentTokens} />
       <div className="composer-toolbar">
         <div className="composer-toolbar-left">
           <input ref={imageInputRef} className="composer-image-input" type="file" multiple onChange={event => { if (event.target.files) void addFiles(event.target.files); event.target.value = ''; }}/>
           <button type="button" className="composer-image-button" onClick={() => imageInputRef.current?.click()} disabled={attachmentsLoading || attachments.length >= 6 || commandRunning} title={tr('Attach files', '添加文件')} aria-label={tr('Attach files', '添加文件')}><Icon name="plus" size={18}/></button>
-          <button type="button" className="composer-task-cycle" data-mode={selectedTaskMode} onClick={() => void changeTaskMode(selectedTaskMode === 'discuss' ? 'code' : 'discuss')} disabled={isStreaming} title={tr('Switch discussion and execution mode', '切换讨论和执行模式')} aria-label={tr(`Task mode: ${selectedTaskMode === 'discuss' ? 'Discuss' : 'Execute'}`, `任务模式：${selectedTaskMode === 'discuss' ? '讨论' : '执行'}`)}>
-            <span className={selectedTaskMode === 'code' ? 'active' : ''}>{tr('Execute', '执行')}</span>
-            <i aria-hidden="true">|</i>
-            <span className={selectedTaskMode === 'discuss' ? 'active' : ''}>{tr('Discuss', '讨论')}</span>
-          </button>
-          <div className={`composer-control-popover composer-permission-menu${permissionMenuOpen ? ' open' : ''}`} ref={permissionMenuRef}>
-            <button type="button" className={`composer-icon-trigger permission-${selectedPermission}`} onClick={() => { setPermissionMenuOpen(previous => !previous); setModelMenuOpen(false); setModelSettingOpen(null); }} title={tr(`Permission: ${selectedPermissionLabel}`, `权限：${selectedPermissionLabel}`)} aria-label={tr(`Permission: ${selectedPermissionLabel}`, `权限：${selectedPermissionLabel}`)} aria-expanded={permissionMenuOpen}><Icon name="shield" size={16}/></button>
-            <div className="composer-permission-popover" role="menu" aria-hidden={!permissionMenuOpen}>
-              {([
-                { value: 'auto' as const, label: 'AUTO', detail: tr('Approve routine tools automatically', '自动放行常规工具') },
-                { value: 'yolo' as const, label: 'YOLO', detail: tr('Run without permission prompts', '不显示权限询问') },
-                { value: 'manual' as const, label: tr('Manual', '手动'), detail: tr('Ask before commands and edits', '命令和更改前询问') },
-              ]).map(option => <button type="button" role="menuitemradio" aria-checked={selectedPermission === option.value} key={option.value} disabled={isStreaming} onClick={() => { void onPermissionChange(option.value); setPermissionMenuOpen(false); }}><span className={`permission-option-icon permission-${option.value}`}><Icon name="shield" size={14}/></span><span><strong>{option.label}</strong><small>{option.detail}</small></span>{selectedPermission === option.value && <Icon name="check" size={13}/>}</button>)}
-            </div>
+          <div className="composer-task-mode" role="group" aria-label={tr('Task mode', '任务模式')}>
+            <button type="button" className={selectedTaskMode === 'code' ? 'active' : ''} aria-pressed={selectedTaskMode === 'code'} data-mode="code" onClick={() => void changeTaskMode('code')} disabled={isStreaming} title={tr('Use execution mode', '使用执行模式')}>{tr('Execute', '执行')}</button>
+            <button type="button" className={selectedTaskMode === 'discuss' ? 'active' : ''} aria-pressed={selectedTaskMode === 'discuss'} data-mode="discuss" onClick={() => void changeTaskMode('discuss')} disabled={isStreaming} title={tr('Use discussion mode', '使用讨论模式')}>{tr('Discuss', '讨论')}</button>
           </div>
           <div className="composer-mode-options">
             <label className="main-write-toggle loop-mode-toggle" title={tr('Create a goal before this request so Nori continues through the Loop state machine.', '发送后先创建 Goal，并由 Loop 状态机持续执行。')}><input type="checkbox" checked={loopEnabled} onChange={event => setLoopEnabled(event.target.checked)}/><span>Loop</span></label>
@@ -890,7 +901,7 @@ export function ChatView(props: ChatViewProps) {
         <div className="composer-toolbar-right">
           <div className="composer-model-controls">
             <div className={`composer-control-popover composer-model-menu${modelMenuOpen ? ' open' : ''}`} ref={modelMenuRef}>
-              <button type="button" className={`composer-model-trigger${!selectedModelId ? ' invalid' : ''}`} onClick={() => { setModelMenuOpen(previous => !previous); setModelSettingOpen(null); setPermissionMenuOpen(false); }} aria-busy={modelsLoading} title={tr('Model and reasoning settings', '模型和推理设置')} aria-label={tr('Model and reasoning settings', '模型和推理设置')} aria-expanded={modelMenuOpen}><span>{selectedModelLabel}</span>{selectedThinkingLabel && <em>{selectedThinkingLabel}</em>}<Icon name="chevron-down" size={13}/></button>
+              <button type="button" className={`composer-model-trigger${!selectedModelId ? ' invalid' : ''}`} onClick={() => { setModelMenuOpen(previous => !previous); setModelSettingOpen(null); }} aria-busy={modelsLoading} title={tr('Model and reasoning settings', '模型和推理设置')} aria-label={tr('Model and reasoning settings', '模型和推理设置')} aria-expanded={modelMenuOpen}><span>{selectedModelLabel}</span>{selectedThinkingLabel && <em>{selectedThinkingLabel}</em>}<Icon name="chevron-down" size={13}/></button>
               <div className="composer-model-popover" aria-hidden={!modelMenuOpen}>
                 <ComposerSettingPicker id="model" label={tr('Model', '模型')} ariaLabel={tr('Model', '模型')} value={selectedModelId} choices={modelChoices} open={modelSettingOpen === 'model'} disabled={isStreaming || modelsLoading} invalid={!selectedModelId} nativeClassName="model-select" onToggle={() => setModelSettingOpen(previous => previous === 'model' ? null : 'model')} onChange={value => { void handleModelChange(value); setModelSettingOpen(null); }}/>
                 {thinkingChoices.length > 0 && <ComposerSettingPicker
@@ -914,7 +925,7 @@ export function ChatView(props: ChatViewProps) {
           <div className="composer-submit-actions"><button className={`chat-send-btn${isStreaming ? ' chat-guide-btn' : ''}`} onClick={() => input.trim().startsWith('/') ? void runSlashCommand() : void handleSend(undefined, isStreaming ? 'steer' : 'queue')} disabled={rewinding || commandRunning || steering || attachmentsLoading || (!input.trim() && attachments.length === 0)} title={isStreaming ? tr('Insert guidance into the current task', '插入引导到当前任务') : tr('Send message', '发送消息')} aria-label={isStreaming ? tr('Guide current task', '引导当前任务') : tr('Send message', '发送消息')}><Icon name={isStreaming ? 'sparkles' : 'send'} size={18}/>{isStreaming && <span>{tr('Guide', '引导')}</span>}</button></div>
         </div>
       </div>
-      {(modelNotice || modelError || attachmentError) && <div className="composer-error" role="status">{modelNotice ? tr('Select a model before sending.', '请先选择模型') : attachmentError ?? modelError}</div>}
+        {(modelNotice || modelError || attachmentError || taskModeError) && <div className="composer-error" role="status" aria-live="polite">{modelNotice ? tr('Select a model before sending.', '请先选择模型') : attachmentError ?? taskModeError ?? modelError}</div>}
       {commandNotice && <div className="composer-command-notice" role="status">{commandNotice}</div>}
     </div></div>
     {rewindRequest !== null && <div className="rewind-dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setRewindRequest(null); }}>
@@ -952,12 +963,9 @@ function formatElapsedDuration(durationMs: number): string {
 
 function MessageBubble({ message, workStartedAt, rewindCount, rewindDisabled = false, onRewind, live }: { message: ChatMessage; workStartedAt?: number; rewindCount?: number; rewindDisabled?: boolean; onRewind?: (count: number) => void | Promise<void>; live?: LiveAssistantContinuation }) {
   const { tr } = useI18n();
-  const injectionBlocks = (message.workBlocks ?? []).filter((block): block is Extract<WorkBlock, { type: 'context_injection' }> => block.type === 'context_injection');
-  if (injectionBlocks.length > 0 && message.role === 'system' && !message.text) {
-    return <div className="chat-context-injection-list">{injectionBlocks.map(block => <ContextInjectionRow key={block.id} source={block.source} text={block.text}/>)}</div>;
-  }
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
+  const isDiscussion = message.kind === 'discussion';
   const tools = message.toolCalls ?? [];
   const storedBlocks = message.workBlocks ?? [
     ...(message.thinking ? [{ id: `${message.id}-thinking`, type: 'thinking' as const, text: message.thinking }] : []),
@@ -985,8 +993,8 @@ function MessageBubble({ message, workStartedAt, rewindCount, rewindDisabled = f
   const workDurationMs = workStartedAt !== undefined && completedAt !== undefined
     ? Math.max(0, completedAt - workStartedAt)
     : undefined;
-  return <article data-chat-turn-id={isUser ? message.id : undefined} className={'chat-message ' + (isUser ? 'chat-message-user' : isSystem ? 'chat-message-system' : 'chat-message-assistant') + (live ? ' chat-message-streaming' : '')}>
-    {isSystem && <div className="message-avatar"><span>!</span></div>}<div className="message-body">{(!isUser || (rewindCount !== undefined && onRewind !== undefined)) && <div className="chat-message-role">{!isUser && (isSystem ? tr('System', '系统') : 'Nori')}{live && <span>{tr('working', '工作中')}</span>}{isUser && rewindCount && onRewind && <button className="message-rewind-btn" disabled={rewindDisabled} onClick={() => { void onRewind(rewindCount); }} title={tr('Rewind to before this prompt', '回溯到此提问之前')}><Icon name="refresh" size={12}/>{tr('Rewind', '回溯')}</button>}</div>}
+  return <article data-chat-turn-id={isUser ? message.id : undefined} className={'chat-message ' + (isUser ? 'chat-message-user' : isDiscussion ? 'chat-message-discussion' : isSystem ? 'chat-message-system' : 'chat-message-assistant') + (live ? ' chat-message-streaming' : '')}>
+    {isSystem && <div className="message-avatar"><span>{isDiscussion ? '·' : '!'}</span></div>}<div className="message-body">{(!isUser || (rewindCount !== undefined && onRewind !== undefined)) && <div className="chat-message-role">{!isUser && (isDiscussion ? `${message.speaker?.name ?? tr('Discussion', '讨论')} · ${message.speaker?.from === 'team' ? tr('Team', '团队') : tr('Lead', '主持')}` : isSystem ? tr('System', '系统') : 'Nori')}{live && <span>{tr('working', '工作中')}</span>}{isUser && rewindCount && onRewind && <button className="message-rewind-btn" disabled={rewindDisabled} onClick={() => { void onRewind(rewindCount); }} title={tr('Rewind to before this prompt', '回溯到此提问之前')}><Icon name="refresh" size={12}/>{tr('Rewind', '回溯')}</button>}</div>}
       {live !== undefined
         ? hasLiveTranscript
           ? <LiveWorkStream blocks={liveTranscriptBlocks} activeProgressId={liveProgressId} startedAt={workStartedAt}/>
@@ -1044,9 +1052,6 @@ function WorkProcess({ blocks, live = false, activeProgressId, startedAt, durati
         const isActive = live && block.id === activeProgressId;
         return <TranscriptOutput key={block.id} text={block.text} streaming={isActive}/>;
       }
-      if (block.type === 'context_injection') {
-        return <ContextInjectionRow key={block.id} source={block.source} text={block.text}/>;
-      }
       return <CompactToolCall key={block.id} tool={block.tool}/>;
     })}</div>
   </details>;
@@ -1067,7 +1072,6 @@ function LiveWorkStream({ blocks, activeProgressId, startedAt }: { blocks: WorkB
     {blocks.map(block => {
       if (block.type === 'thinking') return <ThoughtDisclosure key={block.id} text={block.text} live/>;
       if (block.type === 'tool') return <CompactToolCall key={block.id} tool={block.tool}/>;
-      if (block.type === 'context_injection') return <ContextInjectionRow key={block.id} source={block.source} text={block.text}/>;
       const active = block.id === activeProgressId;
       return <TranscriptOutput key={block.id} text={block.text} streaming={active}/>;
     })}
@@ -1114,26 +1118,9 @@ function CompactToolCall({ tool }: { tool: ToolCall }) {
   </details>;
 }
 
-function ContextInjectionRow({ source, text }: { source: string; text?: string }) {
-  const { tr } = useI18n();
-  const label = `${tr('Context injection', '上下文注入')} · ${source}`;
-  if (text === undefined || text.trim() === '') {
-    return <div className="compact-tool-call compact-context-injection">
-      <span className="compact-tool-icon"><Icon name="document" size={12}/></span>
-      <span className="compact-tool-copy"><strong>{label}</strong></span>
-    </div>;
-  }
-  return <details className="compact-tool-call compact-context-injection">
-    <summary>
-      <span className="compact-tool-icon"><Icon name="document" size={12}/></span>
-      <span className="compact-tool-copy"><strong>{label}</strong></span>
-    </summary>
-    <pre className="compact-context-injection-body">{text}</pre>
-  </details>;
-}
-
 function toolCallIcon(name: string): IconName {
   const normalized = name.toLowerCase();
+  if (normalized === 'contextinjection') return 'document';
   if (normalized.includes('bash') || normalized.includes('terminal') || normalized.includes('command')) return 'terminal';
   if (normalized === 'subagent' || normalized === 'agent') return 'git-branch';
   if (normalized.includes('browser') || normalized.includes('web')) return 'globe';
@@ -1144,6 +1131,9 @@ function toolCallIcon(name: string): IconName {
 function summarizeToolCall(tool: ToolCall, tr: (english: string, chinese: string) => string): string {
   const args = typeof tool.args === 'object' && tool.args !== null ? tool.args as Record<string, unknown> : {};
   const normalized = tool.name.toLowerCase();
+  if (normalized === 'contextinjection') {
+    return firstString(args.source) ?? tr('Context injection', '上下文注入');
+  }
   const path = firstString(args.path, args.file_path, args.filename, args.file);
   if (normalized === 'edit' || normalized === 'write') {
     const oldText = firstString(args.old_string, args.old_text) ?? '';
@@ -1270,11 +1260,12 @@ function TokenUsageLine({ usage }: { usage: TokenUsage }) {
   return <div className="message-token-usage">{tr('This response', '本轮')} {formatTokens(input + usage.output)} tokens <span>{tr('input', '输入')} {formatTokens(input)} · {tr('output', '输出')} {formatTokens(usage.output)}</span></div>;
 }
 
-function SessionUsageBar({ status, compacting }: { status?: SessionRealtimeStatus | null; compacting: boolean }) {
+function SessionUsageBar({ status, compacting, treeTokens }: { status?: SessionRealtimeStatus | null; compacting: boolean; treeTokens?: number }) {
   const { tr } = useI18n();
   if (!status) return null;
   const total = status.usage?.total;
-  const totalTokens = total ? total.input_other + total.input_cache_read + total.input_cache_creation + total.output : undefined;
+  const statusTokens = total ? total.input_other + total.input_cache_read + total.input_cache_creation + total.output : undefined;
+  const totalTokens = treeTokens !== undefined && treeTokens > 0 ? treeTokens : statusTokens;
   const percentage = Math.min(100, Math.max(0, Math.round(status.context_usage * 100)));
   return <div className="composer-usage" title={`${formatTokens(status.context_tokens)} / ${formatTokens(status.max_context_tokens)} tokens`}>
     <span>{tr('Session usage', '会话用量')} {totalTokens === undefined ? '--' : `${formatTokens(totalTokens)} tokens`}</span>

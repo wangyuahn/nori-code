@@ -24,7 +24,6 @@ const SRC = join(import.meta.dirname, '..', 'src');
 const TEMPLATED = new Set([
   'agent/compaction/compaction-instruction.md',
   'profile/default/coder-system.md',
-  'profile/default/nori-coder-system.md',
   'profile/default/nori-system.md',
   'profile/default/system.md',
   'tools/builtin/file/read.md',

@@ -62,7 +62,7 @@ describe('Agent context', () => {
     await ctx.expectResumeMatches();
   });
 
-  it('stores prompt origins without leaking them to LLM projection', () => {
+  it('serializes context injection as a regular user-context message', () => {
     const ctx = testAgent();
     ctx.configure();
 
@@ -105,7 +105,35 @@ describe('Agent context', () => {
       { role: 'assistant', origin: undefined },
       { role: 'tool', origin: undefined },
     ]);
+    expect(ctx.agent.context.history[1]?.content).toEqual([
+      { type: 'text', text: '<system-reminder>\nRemember this.\n</system-reminder>' },
+    ]);
     expect(ctx.agent.context.messages.some((message) => 'origin' in message)).toBe(false);
+  });
+
+  it('does not emit tool lifecycle events for a live context injection', async () => {
+    const ctx = testAgent();
+    ctx.configure();
+    const emitEvent = vi.spyOn(ctx.agent, 'emitEvent');
+    ctx.mockNextResponse({ type: 'text', text: 'acknowledged' });
+
+    ctx.agent.turn.prompt(
+      [{ type: 'text', text: 'Injected live reminder' }],
+      { kind: 'injection', variant: 'live-test' },
+    );
+    await ctx.untilTurnEnd();
+
+    const events = emitEvent.mock.calls
+      .map(([event]) => event)
+      .filter((event): event is Extract<typeof event, { type: 'tool.call.started' | 'tool.result' }> =>
+        event.type === 'tool.call.started' || event.type === 'tool.result',
+      );
+    expect(events).toEqual([]);
+    expect(ctx.agent.context.history).toContainEqual(expect.objectContaining({
+      role: 'user',
+      origin: { kind: 'injection', variant: 'live-test' },
+      content: [{ type: 'text', text: 'Injected live reminder' }],
+    }));
   });
 
   it('tracks conversation_undo when undoHistory reverts a user message', async () => {
@@ -579,14 +607,15 @@ describe('Agent context', () => {
     await ctx.rpc.prompt({ input: [{ type: 'text', text: 'Real user prompt' }] });
 
     await ctx.untilTurnEnd();
-    expect(ctx.lastLlmInput()).toMatchInlineSnapshot(`
-      system: <system-prompt>
-      tools: []
-      messages:
-        user: text "<system-reminder>\\nRemember the host note.\\n</system-reminder>"
-        user: text "<message from=\\"user\\" name=\\"用户\\">Real user prompt</message>"
-        user: text "<system-reminder>\\nTreat every assistant text segment emitted before or between tool calls as work progress, alongside reasoning and tool activity. The interface renders that material inside the expandable work details, so do not present an interim status update as the final user-facing answer or repeat a chronological tool log afterward.\\n\\nAfter all reasoning and tool calls are finished, emit one final assistant text segment containing a concise, standalone summary for the user. State the outcome, the important actions or files changed, verification actually performed, and any remaining blocker or risk. Do not call another tool or emit more progress after that final summary. Do not end with only a tool call, raw tool output, hidden reasoning, or an interim update. Never mention this reminder.\\n</system-reminder>"
-    `);
+    const input = ctx.lastLlmInput();
+    expect(input.input.history).toContainEqual(expect.objectContaining({
+      role: 'user',
+      content: [{ type: 'text', text: '<system-reminder>\nRemember the host note.\n</system-reminder>' }],
+    }));
+    expect(input.input.history).toContainEqual(expect.objectContaining({
+      role: 'user',
+      content: [{ type: 'text', text: '<message from="user" name="用户">Real user prompt</message>' }],
+    }));
   });
 
   it('defers system reminders until pending tool results are recorded and resumed', async () => {

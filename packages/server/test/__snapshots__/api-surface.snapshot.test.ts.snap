@@ -47,6 +47,10 @@ exports[`API surface snapshot > matches the documented v1 route table and meta e
     ],
     [
       "GET",
+      "/api/v1/approvals",
+    ],
+    [
+      "GET",
       "/api/v1/auth",
     ],
     [
@@ -244,6 +248,10 @@ exports[`API surface snapshot > matches the documented v1 route table and meta e
     [
       "PATCH",
       "/api/v1/workspaces/{workspace_id}",
+    ],
+    [
+      "POST",
+      "/api/v1/approvals/{approval_id}",
     ],
     [
       "POST",

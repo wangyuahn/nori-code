@@ -169,6 +169,46 @@ function userMessage(text: string): { role: 'user'; content: Array<{ type: 'text
   return { role: 'user', content: [{ type: 'text', text }], toolCalls: [] };
 }
 
+function teamDirectMessage(text: string): object {
+  return {
+    role: 'user',
+    content: [{ type: 'text', text }],
+    toolCalls: [],
+    origin: {
+      kind: 'system_trigger',
+      name: 'team_dm',
+      speaker: { from: 'team', speakerId: 'agent-alpha', speakerName: 'Alpha' },
+    },
+  };
+}
+
+function teamDiscussionMessage(text: string): object {
+  return {
+    role: 'user',
+    content: [{ type: 'text', text }],
+    toolCalls: [],
+    origin: {
+      kind: 'system_trigger',
+      name: 'team_discussion_statement',
+      discussionEntryId: 7,
+      speaker: { from: 'team', speakerId: 'agent-alpha', speakerName: 'Alpha' },
+    },
+  };
+}
+
+function legacyTeamDirectMessage(text: string): object {
+  return {
+    role: 'user',
+    content: [{ type: 'text', text: `<system-reminder>${text}</system-reminder>` }],
+    toolCalls: [],
+    origin: {
+      kind: 'system_trigger',
+      name: 'team_member',
+      speaker: { from: 'team', speakerId: 'agent-alpha', speakerName: 'Alpha' },
+    },
+  };
+}
+
 // ─── tests ───────────────────────────────────────────────────────────────
 
 afterEach(async () => {
@@ -214,6 +254,32 @@ describe('SnapshotService.read', () => {
       'three',
     ]);
     expect(snap.messages.has_more).toBe(false);
+  });
+
+  it('omits internal TeamDM records while retaining ordinary transcript messages', async () => {
+    const f = await makeFixture();
+    const sid = 'sess_team_dm';
+    const summary = await f.store.create({ id: sid, workDir: f.workDir });
+
+    await writeWire(summary.sessionDir, [
+      { type: 'context.append_message', message: userMessage('visible-before') },
+      { type: 'context.append_message', message: teamDirectMessage('private-to-main') },
+      { type: 'context.append_message', message: legacyTeamDirectMessage('legacy-private-to-main') },
+      { type: 'context.append_message', message: teamDiscussionMessage('visible-discussion') },
+      { type: 'context.append_message', message: userMessage('visible-after') },
+    ]);
+
+    const snap = await f.service.read(sid);
+    expect(snap.messages.items.map((m) => (m.content[0] as { text: string }).text)).toEqual([
+      'visible-before',
+      'visible-discussion',
+      'visible-after',
+    ]);
+    expect(snap.messages.items.map((m) => m.id)).toEqual([
+      'msg_sess_team_dm_000000',
+      'msg_sess_team_dm_000003',
+      'msg_sess_team_dm_000004',
+    ]);
   });
 
   it('inserts a compaction summary at the fold point', async () => {

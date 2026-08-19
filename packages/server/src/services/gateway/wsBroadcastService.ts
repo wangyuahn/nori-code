@@ -88,7 +88,10 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
     if (this._store.isDisposed) return;
     const globalEvent = isGlobalSessionEvent(event.type);
     const targets = globalEvent
-      ? this.connectionRegistry.values()
+      ? new Set([
+        ...this.connectionRegistry.values(),
+        ...this.sessionClients.getConnections(sid),
+      ])
       : this.sessionClients.getConnections(sid);
     for (const connection of targets) {
       if (!globalEvent && !connection.acceptsAgentEvent(sid, event.agentId)) continue;
@@ -221,7 +224,9 @@ function isGlobalSessionEvent(type: string): boolean {
     type === 'event.model_catalog.changed' ||
     type === 'event.workspace.created' ||
     type === 'event.workspace.updated' ||
-    type === 'event.workspace.deleted'
+    type === 'event.workspace.deleted' ||
+    type === 'event.approval.requested' ||
+    type === 'event.approval.resolved'
   );
 }
 

@@ -11,6 +11,7 @@ import { ChatView, type ChatViewProps } from './ChatView';
 import { WorkspaceInspector } from './WorkspaceInspector';
 import { useFilesystem } from '../hooks/useFilesystem';
 import type { ApprovalRequest, FsEntry, FsReadResponse, ModelCatalogItem, QuestionAnswer, QuestionRequest, Session, SessionAgentConfig, SessionRealtimeStatus } from '../api/client';
+import type { BrowserPermissionDecision, BrowserPermissionRequest } from '../hooks/useBrowser';
 import type { ChatMessage, CodeChange, QueuedPrompt, TodoItem, WorkBlock } from '../hooks/useChatMessages';
 import { useI18n } from '../i18n';
 
@@ -33,6 +34,7 @@ interface CodeViewProps {
   isStreaming: boolean;
   activeAgentCount?: number;
   activeAgentTokens?: number;
+  activeDiscussion?: boolean;
   sessionStatus?: SessionRealtimeStatus | null;
   compacting?: boolean;
   models: ModelCatalogItem[];
@@ -50,6 +52,16 @@ interface CodeViewProps {
   onAbort: () => boolean | void | Promise<boolean | void>;
   pendingApprovals?: ApprovalRequest[];
   onResolveApproval?: (approvalId: string, decision: 'approved' | 'rejected' | 'cancelled', options?: { remember?: boolean; feedback?: string; selectedLabel?: string }) => void | Promise<void>;
+  globalApprovals?: ApprovalRequest[];
+  onResolveGlobalApproval?: ChatViewProps['onResolveApproval'];
+  onApprovalPermissionChange?: (mode: 'auto' | 'yolo', request?: ApprovalRequest) => void | Promise<void>;
+  approvalSessionTitles?: Readonly<Record<string, string>>;
+  approvalResolvingIds?: ReadonlySet<string>;
+  approvalErrors?: Readonly<Record<string, string>>;
+  onOpenApprovalSession?: (sessionId: string, agentId?: string) => void;
+  browserPermissionsOverride?: BrowserPermissionRequest[];
+  onResolveBrowserPermissionOverride?: (id: string, decision: BrowserPermissionDecision) => void | Promise<void>;
+  showApprovalPanel?: boolean;
   pendingQuestions?: QuestionRequest[];
   onResolveQuestion?: (questionId: string, answers: Record<string, QuestionAnswer>) => void | Promise<void>;
   onDismissQuestion?: (questionId: string) => void | Promise<void>;
@@ -77,6 +89,7 @@ export function CodeView({
   isStreaming,
   activeAgentCount,
   activeAgentTokens,
+  activeDiscussion,
   sessionStatus,
   compacting,
   models,
@@ -94,6 +107,16 @@ export function CodeView({
   onAbort,
   pendingApprovals,
   onResolveApproval,
+  globalApprovals,
+  onResolveGlobalApproval,
+  onApprovalPermissionChange,
+  approvalSessionTitles,
+  approvalResolvingIds,
+  approvalErrors,
+  onOpenApprovalSession,
+  browserPermissionsOverride,
+  onResolveBrowserPermissionOverride,
+  showApprovalPanel,
   pendingQuestions,
   onResolveQuestion,
   onDismissQuestion,
@@ -229,6 +252,7 @@ export function CodeView({
         isStreaming={isStreaming}
         activeAgentCount={activeAgentCount}
         activeAgentTokens={activeAgentTokens}
+        activeDiscussion={activeDiscussion}
         sessionStatus={sessionStatus}
         compacting={compacting}
         models={models}
@@ -246,6 +270,16 @@ export function CodeView({
         onAbort={onAbort}
         pendingApprovals={pendingApprovals}
         onResolveApproval={onResolveApproval}
+        globalApprovals={globalApprovals}
+        onResolveGlobalApproval={onResolveGlobalApproval}
+        onApprovalPermissionChange={onApprovalPermissionChange}
+        approvalSessionTitles={approvalSessionTitles}
+        approvalResolvingIds={approvalResolvingIds}
+        approvalErrors={approvalErrors}
+        onOpenApprovalSession={onOpenApprovalSession}
+        browserPermissionsOverride={browserPermissionsOverride}
+        onResolveBrowserPermissionOverride={onResolveBrowserPermissionOverride}
+        showApprovalPanel={showApprovalPanel}
         pendingQuestions={pendingQuestions}
         onResolveQuestion={onResolveQuestion}
         onDismissQuestion={onDismissQuestion}

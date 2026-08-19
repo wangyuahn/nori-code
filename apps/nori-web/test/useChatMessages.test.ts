@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../src/api/client';
-import { apiMessageToChat, canApplyGeneratedSessionTitle, chatFilesFromPromptAttachments, chatScopeKey, confirmOptimisticUserMessage, contextInjectionSource, fallbackSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, isTransientChatMessageId, latestTodos, liveAssistantMessage, mergeHistory, mergeInFlightWorkBlocks, promptForRewind, RealtimeSubscriptionGate, removeTerminatedAgent, shouldFinishAbortedPrompt, shouldIgnoreTranscriptEvent, splitUploadedFileMarkup, statusForSession, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
+import { apiMessageToChat, applyRealtimeStatusEvent, canApplyGeneratedSessionTitle, chatFilesFromPromptAttachments, chatScopeKey, confirmOptimisticUserMessage, contextInjectionSource, fallbackSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, isTransientChatMessageId, latestTodos, liveAssistantMessage, mergeHistory, mergeInFlightWorkBlocks, promptForRewind, RealtimeSubscriptionGate, removeTerminatedAgent, shouldFinishAbortedPrompt, shouldIgnoreTranscriptEvent, splitUploadedFileMarkup, statusForSession, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
 
 describe('agent activity events', () => {
   it('removes a manually terminated agent from the live activity set', () => {
@@ -35,6 +35,15 @@ describe('session-bound realtime status', () => {
     expect(chatScopeKey('session-a', 'agent-review')).toBe('session-a\u0000agent-review');
     expect(chatScopeKey('session-a', 'main')).not.toBe(chatScopeKey('session-a', 'agent-review'));
     expect(statusForSession(status, chatScopeKey('session-a', 'main'), chatScopeKey('session-a', 'agent-review'))).toBeNull();
+  });
+
+  it('applies agent status events to the current mode without affecting another scope', () => {
+    expect(applyRealtimeStatusEvent(status, 'agent.status.updated', { discussMode: true }))
+      .toMatchObject({ discuss_mode: true, main_write_enabled: true });
+    expect(applyRealtimeStatusEvent(status, 'event.agent.status.updated', { discussMode: false, coderWriteEnabled: false }))
+      .toMatchObject({ discuss_mode: false, main_write_enabled: false });
+    expect(applyRealtimeStatusEvent(null, 'agent.status.updated', { discussMode: true })).toBeNull();
+    expect(applyRealtimeStatusEvent(status, 'discussion.updated', { discussMode: true })).toBe(status);
   });
 });
 
@@ -386,29 +395,99 @@ describe('main transcript projection', () => {
     }
   });
 
-  it('projects loop, skill, and other context injections as visible system rows', () => {
+  it('maps legacy injection messages into the shared tool-call shape', () => {
     expect(contextInjectionSource({ kind: 'system_trigger', name: 'goal_intake' })).toBe('goal_intake');
     expect(contextInjectionSource({ kind: 'skill_activation', skillName: 'skill-catalog' })).toBe('skill-catalog');
     expect(contextInjectionSource({ kind: 'injection', variant: '@deepseek-ai/dsh-system-prompt' })).toBe('@deepseek-ai/dsh-system-prompt');
 
     const loop = apiMessageToChat(message({ role: 'user', text: 'Continue the goal.', originKind: 'system_trigger' }));
-    expect(loop).toMatchObject({
-      role: 'system',
-      text: '',
-      workBlocks: [{ type: 'context_injection', source: 'system_trigger' }],
-    });
-    expect(loop).not.toHaveProperty('turnBoundary', true);
+    expect(loop).toMatchObject({ role: 'user', text: 'Continue the goal.' });
+    expect(loop?.toolCalls).toBeUndefined();
 
-    const skill = apiMessageToChat({
+    const injection = apiMessageToChat({
       id: 'skill-1',
       role: 'user',
-      content: [{ type: 'text', text: 'Available skills' }],
+      content: [{ type: 'text', text: '<system-reminder>Available skills</system-reminder>' }],
       created_at: '2026-07-14T00:00:00.000Z',
-      metadata: { origin: { kind: 'skill_activation', skillName: 'skill-catalog' } },
+      metadata: { origin: { kind: 'injection', variant: 'skill-catalog' } },
     });
-    expect(skill).toMatchObject({
-      workBlocks: [{ type: 'context_injection', source: 'skill-catalog' }],
+    expect(injection).toMatchObject({
+      role: 'assistant',
+      text: '',
+      toolCalls: [{
+        name: 'ContextInjection',
+        args: { source: 'skill-catalog' },
+        result: 'Available skills',
+      }],
     });
+  });
+
+  it('does not expose internal permission reminders as a callable ContextInjection', () => {
+    const permissionReminder = apiMessageToChat({
+      id: 'permission-reminder',
+      role: 'user',
+      content: [{ type: 'text', text: '<system-reminder>Auto permission mode is active.</system-reminder>' }],
+      created_at: '2026-07-14T00:00:00.000Z',
+      metadata: { origin: { kind: 'injection', variant: 'permission_mode' } },
+    });
+    expect(permissionReminder).toBeNull();
+  });
+
+  it('keeps ordinary user prompts and team discussion messages out of context injections', () => {
+    const user = apiMessageToChat(message({ role: 'user', text: '普通用户消息', originKind: 'user' }));
+    const teamSpeak = apiMessageToChat({
+      id: 'team-speak',
+      role: 'user',
+      content: [{ type: 'text', text: '缓存策略应该保留。' }],
+      created_at: '2026-07-14T00:00:00.000Z',
+      metadata: {
+        origin: {
+          kind: 'system_trigger',
+          name: 'team_discussion_statement',
+          discussionEntryId: 1,
+          speaker: { from: 'team', speakerId: 'member-1', speakerName: '缓存审查员' },
+        },
+      },
+    });
+    const teamDm = apiMessageToChat({
+      id: 'team-dm',
+      role: 'user',
+      content: [{ type: 'text', text: '<system-reminder>请检查缓存键。</system-reminder>' }],
+      created_at: '2026-07-14T00:00:01.000Z',
+      metadata: {
+        origin: {
+          kind: 'system_trigger',
+          name: 'team_dm',
+          speaker: { from: 'team', speakerId: 'agent-alpha', speakerName: 'Alpha' },
+        },
+      },
+    });
+
+    expect(user).toMatchObject({ role: 'user', text: '普通用户消息' });
+    expect(user?.workBlocks).toBeUndefined();
+    expect(teamSpeak).toMatchObject({
+      role: 'system',
+      kind: 'discussion',
+      text: '缓存策略应该保留。',
+      speaker: { from: 'team', name: '缓存审查员' },
+    });
+    expect(teamSpeak?.workBlocks).toBeUndefined();
+    expect(teamDm).toBeNull();
+
+    const legacyTeamDm = apiMessageToChat({
+      id: 'legacy-team-dm',
+      role: 'user',
+      content: [{ type: 'text', text: '<system-reminder>旧版私信。</system-reminder>' }],
+      created_at: '2026-07-14T00:00:02.000Z',
+      metadata: {
+        origin: {
+          kind: 'system_trigger',
+          name: 'team_member',
+          speaker: { from: 'team', speakerId: 'member-1', speakerName: '缓存审查员' },
+        },
+      },
+    });
+    expect(legacyTeamDm).toBeNull();
   });
 
   it('keeps one assistant turn around a hidden wake-up trigger', () => {

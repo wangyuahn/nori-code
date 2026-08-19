@@ -50,6 +50,7 @@ import {
   ILogService,
   IPromptService,
   IQuestionService,
+  isInternalTeamDirectMessage,
   readWireTranscript,
   toProtocolMessage,
   toProtocolSession,
@@ -197,11 +198,12 @@ export class SnapshotService extends Disposable implements ISnapshotService {
     transcript: WireTranscript,
   ): Message[] {
     let previousMs = Number.NEGATIVE_INFINITY;
-    return transcript.entries.map((entry, idx) => {
+    return transcript.entries.flatMap((entry, idx) => {
+      if (isInternalTeamDirectMessage(entry.message)) return [];
       const baseMs = entry.time ?? sessionCreatedAtMs + idx;
       const createdAtMs = Math.max(previousMs + 1, baseMs);
       previousMs = createdAtMs;
-      return toProtocolMessage(sid, idx, entry.message, sessionCreatedAtMs, createdAtMs);
+      return [toProtocolMessage(sid, idx, entry.message, sessionCreatedAtMs, createdAtMs)];
     });
   }
 

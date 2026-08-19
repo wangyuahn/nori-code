@@ -143,6 +143,26 @@ export function parseMessageId(
 }
 
 /**
+ * TeamDM prompts are durable model-context transport, not chat history. They
+ * stay available to the recipient's model but remain hidden from REST and
+ * snapshot consumers that rebuild the human-facing transcript. Older records
+ * used `team_lead`/`team_member` plus the TeamDM system-reminder wrapper, so
+ * that shape is recognized without hiding ordinary team prompts.
+ */
+export function isInternalTeamDirectMessage(message: ContextMessage): boolean {
+  const origin = message.origin;
+  const rawText = message.content
+    .flatMap((part) => part.type === 'text' ? [part.text] : [])
+    .join('');
+  const legacyTeamDm = origin?.kind === 'system_trigger'
+    && (origin.name === 'team_lead' || origin.name === 'team_member')
+    && /^\s*<system-reminder>/i.test(rawText);
+  return message.role === 'user'
+    && origin?.kind === 'system_trigger'
+    && (origin.name === 'team_dm' || legacyTeamDm);
+}
+
+/**
  * kosong's `Message.role` is `'system' | 'user' | 'assistant' | 'tool'` —
  * already aligned with SCHEMAS §3's `MessageRole`. We pass-through.
  */

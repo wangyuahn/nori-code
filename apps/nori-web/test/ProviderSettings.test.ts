@@ -22,6 +22,15 @@ async function setSelectValue(select: HTMLSelectElement, value: string): Promise
   });
 }
 
+async function setInputValue(input: HTMLInputElement, value: string): Promise<void> {
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
+
 afterEach(() => {
   document.body.replaceChildren();
   vi.restoreAllMocks();
@@ -187,6 +196,8 @@ describe('custom model thinking effort', () => {
 
     const thinkingSelect = container.querySelector<HTMLSelectElement>('[aria-label="Thinking mode"]');
     expect(thinkingSelect).not.toBeNull();
+    await setInputValue(container.querySelector<HTMLInputElement>('[aria-label="Custom model display name"]')!, 'Local Chat');
+    await setInputValue(container.querySelector<HTMLInputElement>('[aria-label="Custom model context length"]')!, '65536');
     await setSelectValue(thinkingSelect!, 'efforts');
     for (let attempt = 0; attempt < 10 && container.querySelector('.custom-model-effort-options') === null; attempt++) {
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
@@ -209,6 +220,8 @@ describe('custom model thinking effort', () => {
     expect(updateConfig).toHaveBeenCalledWith(expect.objectContaining({
       models: {
         'custom/local-chat': expect.objectContaining({
+          display_name: 'Local Chat',
+          max_context_size: 65536,
           thinking_support: true,
           support_efforts: expect.arrayContaining(['low', 'medium', 'high']),
           default_effort: 'medium',
@@ -216,6 +229,42 @@ describe('custom model thinking effort', () => {
       },
     }));
 
+    await act(async () => root.unmount());
+  });
+
+  it('shows a visible validation error for an empty context length', async () => {
+    const provider: ProviderCatalogItem = {
+      id: 'custom',
+      name: 'Custom',
+      type: 'openai',
+      has_api_key: true,
+      status: 'connected',
+      auto_discover: false,
+      custom_models: ['local-chat'],
+    };
+    vi.spyOn(api.providers, 'list').mockResolvedValue({ items: [provider] });
+    vi.spyOn(api.providerPresets, 'list').mockResolvedValue({ items: [], source: 'builtin' });
+    vi.spyOn(api, 'getConfig').mockResolvedValue({
+      models: { 'custom/local-chat': { provider: 'custom', model: 'local-chat', maxContextSize: 128000 } },
+    });
+    const updateConfig = vi.spyOn(api, 'updateConfig').mockResolvedValue({});
+    vi.spyOn(api.models, 'list').mockResolvedValue({ items: [] });
+
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(createElement(I18nProvider, null, createElement(ProviderSettings)));
+      await Promise.resolve();
+    });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+    await act(async () => container.querySelector<HTMLButtonElement>('.provider-card-main')!.click());
+    await vi.waitFor(() => expect(container.querySelector('.provider-editor')).not.toBeNull());
+    await setInputValue(container.querySelector<HTMLInputElement>('[aria-label="Custom model context length"]')!, '');
+    await act(async () => container.querySelector<HTMLButtonElement>('.provider-editor footer .btn-primary')!.click());
+
+    expect(updateConfig).not.toHaveBeenCalled();
+    expect(container.querySelector('.provider-notice.error')?.textContent).toContain('positive integer context length');
     await act(async () => root.unmount());
   });
 });

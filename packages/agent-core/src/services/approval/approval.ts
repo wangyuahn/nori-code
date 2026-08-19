@@ -99,6 +99,8 @@ export interface ToBrokerRequestParams {
   readonly approvalId: string;
   /** Session the approval lives in. */
   readonly sessionId: string;
+  /** Agent that owns this approval interaction. */
+  readonly agentId?: string;
   /** `createdAt` ISO string; broker passes a fresh `new Date().toISOString()`. */
   readonly createdAt: string;
   /** `expiresAt` ISO string; broker computes `createdAt + 60s`. */
@@ -122,6 +124,7 @@ export function toBrokerRequest(
   return {
     approval_id: params.approvalId,
     session_id: params.sessionId,
+    agent_id: params.agentId,
     turn_id: req.turnId,
     tool_call_id: req.toolCallId,
     tool_name: req.toolName,

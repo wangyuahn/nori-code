@@ -90,6 +90,11 @@ export interface CompactionSummaryOrigin {
 export interface SystemTriggerOrigin {
   readonly kind: 'system_trigger';
   readonly name: string;
+  readonly discussionEntryId?: number;
+  readonly discussionLifecycleNoticeId?: string;
+  readonly discussionRound?: number;
+  readonly discussionSkipReason?: string;
+  readonly discussionToolName?: string;
 }
 
 export type AgentCoreBackgroundTaskStatus =
@@ -418,6 +423,12 @@ export interface GoalUpdatedEvent {
   readonly change?: GoalChange;
 }
 
+export interface DiscussionUpdatedEvent {
+  readonly type: 'discussion.updated';
+  readonly discussionAgentId: string;
+  readonly kind: 'message' | 'round' | 'skip' | 'vote' | 'lifecycle';
+}
+
 export interface SkillActivatedEvent {
   readonly type: 'skill.activated';
   readonly activationId: string;
@@ -724,6 +735,7 @@ export type AgentEvent =
   | ConfigChangedEvent
   | ModelCatalogChangedEvent
   | GoalUpdatedEvent
+  | DiscussionUpdatedEvent
   | SkillActivatedEvent
   | PluginCommandActivatedEvent
   | TurnStartedEvent
@@ -828,6 +840,11 @@ export const compactionSummaryOriginSchema = z.object({
 export const systemTriggerOriginSchema = z.object({
   kind: z.literal('system_trigger'),
   name: z.string(),
+  discussionEntryId: z.number().optional(),
+  discussionLifecycleNoticeId: z.string().optional(),
+  discussionRound: z.number().optional(),
+  discussionSkipReason: z.string().optional(),
+  discussionToolName: z.string().optional(),
 }) satisfies z.ZodType<SystemTriggerOrigin>;
 
 export const agentCoreBackgroundTaskStatusSchema = z.enum([
@@ -1144,6 +1161,12 @@ export const goalUpdatedEventSchema = z.object({
   change: goalChangeSchema.optional(),
 }) satisfies z.ZodType<GoalUpdatedEvent>;
 
+export const discussionUpdatedEventSchema = z.object({
+  type: z.literal('discussion.updated'),
+  discussionAgentId: z.string().min(1),
+  kind: z.enum(['message', 'round', 'skip', 'vote', 'lifecycle']),
+}) satisfies z.ZodType<DiscussionUpdatedEvent>;
+
 export const skillActivatedEventSchema = z.object({
   type: z.literal('skill.activated'),
   activationId: z.string(),
@@ -1433,6 +1456,7 @@ export const agentEventSchema = z.discriminatedUnion('type', [
   sessionStatusChangedEventSchema,
   modelCatalogChangedEventSchema,
   goalUpdatedEventSchema,
+  discussionUpdatedEventSchema,
   skillActivatedEventSchema,
   pluginCommandActivatedEventSchema,
   turnStartedEventSchema,

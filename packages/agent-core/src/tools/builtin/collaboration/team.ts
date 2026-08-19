@@ -275,7 +275,10 @@ export class TeamSpeakTool implements BuiltinTool<TeamSpeakInput> {
       approvalRule: this.name,
       execute: async () => {
         await this.host.speakInDiscussion(args.message);
-        return { output: 'Statement published.' };
+        // TeamSpeak is the member's terminal action for this scheduled turn.
+        // Ending the turn here prevents a provider follow-up generation from
+        // consuming or invalidating the discussion lease.
+        return { output: 'Statement published.', stopTurn: true };
       },
     };
   }

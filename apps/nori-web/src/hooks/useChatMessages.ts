@@ -19,8 +19,7 @@ export interface ToolCall {
 export type WorkBlock =
   | { id: string; type: 'thinking'; text: string }
   | { id: string; type: 'progress'; text: string }
-  | { id: string; type: 'tool'; tool: ToolCall }
-  | { id: string; type: 'context_injection'; source: string; text?: string };
+  | { id: string; type: 'tool'; tool: ToolCall };
 
 export interface TodoItem {
   title: string;
@@ -31,6 +30,12 @@ export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
   text: string;
+  kind?: 'discussion';
+  speaker?: {
+    from: 'user' | 'lead' | 'team' | 'sub' | 'system';
+    id?: string;
+    name?: string;
+  };
   images?: ChatImage[];
   files?: ChatFile[];
   toolCalls?: ToolCall[];
@@ -141,6 +146,8 @@ export interface UseChatMessagesResult {
   currentThinking: string;
   currentWorkBlocks: WorkBlock[];
   sessionStatus: SessionRealtimeStatus | null;
+  agentTreeRevision: number;
+  refreshSessionStatus: () => Promise<SessionRealtimeStatus | null>;
   compacting: boolean;
   pendingApprovals: ApprovalRequest[];
   pendingQuestions: QuestionRequest[];
@@ -177,6 +184,8 @@ interface WsPayload {
   reason?: string;
   error?: { message?: string; code?: string; [key: string]: unknown };
   agentId?: string;
+  discussMode?: boolean;
+  coderWriteEnabled?: boolean;
   operationId?: string;
   operation?: 'edit' | 'write';
   path?: string;
@@ -191,6 +200,8 @@ interface WsPayload {
   snapshot?: GoalSnapshot | null;
   isError?: boolean;
   subagentId?: string;
+  discussionAgentId?: string;
+  kind?: string;
   runInBackground?: boolean;
   info?: {
     kind?: string;
@@ -223,6 +234,10 @@ function stripLeadingSystemReminders(text: string): string {
   const reminder = /^\s*<system-reminder>[\s\S]*?<\/system-reminder>\s*/i;
   while (reminder.test(result)) result = result.replace(reminder, '');
   return result.trim();
+}
+
+function unwrapLeadingSystemReminder(text: string): string {
+  return text.replace(/^\s*<system-reminder>\s*([\s\S]*?)\s*<\/system-reminder>\s*/i, '$1').trim();
 }
 
 const GENERATED_TITLE_OPEN = '<nori-session-title';
@@ -367,6 +382,23 @@ function contentFileParts(content: Message['content']): ChatFile[] {
   });
 }
 
+type DiscussionSpeaker = {
+  from: 'lead' | 'team' | 'sub';
+  id?: string;
+  name?: string;
+};
+
+function toDiscussionSpeaker(speaker: unknown): DiscussionSpeaker | undefined {
+  if (speaker === null || typeof speaker !== 'object') return undefined;
+  const candidate = speaker as { from?: unknown; speakerId?: unknown; speakerName?: unknown };
+  if (candidate.from !== 'lead' && candidate.from !== 'team' && candidate.from !== 'sub') return undefined;
+  return {
+    from: candidate.from,
+    ...(typeof candidate.speakerId === 'string' ? { id: candidate.speakerId } : {}),
+    ...(typeof candidate.speakerName === 'string' ? { name: candidate.speakerName } : {}),
+  };
+}
+
 async function releasePromptFileBlobs(attachments: readonly PromptAttachment[]): Promise<void> {
   await Promise.all(attachments.map(attachment =>
     attachment.kind === 'file'
@@ -378,26 +410,58 @@ async function releasePromptFileBlobs(attachments: readonly PromptAttachment[]):
 export function apiMessageToChat(m: Message): ChatMessage | null {
   const origin = m.metadata?.origin;
   const originKind = origin?.kind;
+  const rawText = messagePlainText(m);
+  // TeamDM is an internal prompt transport. It remains in the agent's model
+  // context, but must not reappear as a human-visible chat message when REST
+  // history is replayed after refresh.
+  const isLegacyTeamDm = m.role === 'user'
+    && originKind === 'system_trigger'
+    && (origin?.name === 'team_lead' || origin?.name === 'team_member')
+    && /^\s*<system-reminder>/i.test(rawText);
+  if (m.role === 'user' && originKind === 'system_trigger' && (origin?.name === 'team_dm' || isLegacyTeamDm)) {
+    return null;
+  }
+  const speaker = toDiscussionSpeaker(origin?.speaker);
   if (m.role === 'user' && originKind !== undefined && originKind !== 'user') {
     if (isSilentWakeOrigin(originKind)) {
       return { id: m.id, role: 'system', text: '', createdAt: m.created_at, turnBoundary: true };
     }
-    const injected = stripLeadingSystemReminders(messagePlainText(m));
-    return {
-      id: m.id,
-      role: 'system',
-      text: '',
-      createdAt: m.created_at,
-      workBlocks: [{
-        id: `${m.id}-context-injection`,
-        type: 'context_injection',
-        source: contextInjectionSource(origin),
-        ...(injected ? { text: injected } : {}),
-      }],
-    };
+    if (speaker !== undefined) {
+      return {
+        id: m.id,
+        role: 'system',
+        kind: 'discussion',
+        text: unwrapLeadingSystemReminder(messagePlainText(m)),
+        speaker: {
+          from: speaker.from,
+          ...(speaker.id ? { id: speaker.id } : {}),
+          ...(speaker.name ? { name: speaker.name } : {}),
+        },
+        createdAt: m.created_at,
+      };
+    }
+    if (originKind === 'injection') {
+      // Permission-mode reminders are internal control messages, not a model
+      // tool call. Rendering them as ContextInjection falsely advertises a
+      // callable tool to Team Agents and exposes the permission reminder as
+      // its result.
+      if (contextInjectionSource(origin) === 'permission_mode') return null;
+      const injected = unwrapLeadingSystemReminder(messagePlainText(m));
+      return {
+        id: m.id,
+        role: 'assistant',
+        text: '',
+        toolCalls: [{
+          id: `${m.id}-context-injection`,
+          name: 'ContextInjection',
+          args: { source: contextInjectionSource(origin) },
+          result: injected,
+        }],
+        createdAt: m.created_at,
+      };
+    }
   }
 
-  const rawText = messagePlainText(m);
   const text = m.role === 'user'
     ? stripLeadingSystemReminders(rawText)
     : m.role === 'assistant'
@@ -801,6 +865,20 @@ function normalizeEventType(type: string): string {
   return type.startsWith('event.') ? type.slice('event.'.length) : type;
 }
 
+export function applyRealtimeStatusEvent(
+  status: SessionRealtimeStatus | null,
+  type: string,
+  payload: { discussMode?: boolean; coderWriteEnabled?: boolean },
+): SessionRealtimeStatus | null {
+  if (status === null || normalizeEventType(type) !== 'agent.status.updated') return status;
+  if (payload.discussMode === undefined && payload.coderWriteEnabled === undefined) return status;
+  return {
+    ...status,
+    discuss_mode: payload.discussMode ?? status.discuss_mode,
+    main_write_enabled: payload.coderWriteEnabled ?? status.main_write_enabled,
+  };
+}
+
 function controlId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -871,6 +949,7 @@ export function useChatMessages(
   const [currentThinking, setCurrentThinking] = useState('');
   const [currentWorkBlocks, setCurrentWorkBlocks] = useState<WorkBlock[]>([]);
   const [sessionStatus, setSessionStatus] = useState<SessionRealtimeStatus | null>(null);
+  const [agentTreeRevision, setAgentTreeRevision] = useState(0);
   const [compacting, setCompacting] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
   const [pendingQuestions, setPendingQuestions] = useState<QuestionRequest[]>([]);
@@ -1060,6 +1139,7 @@ export function useChatMessages(
     compactingRef.current = false;
     sessionStatusScopeRef.current = null;
     setSessionStatus(null);
+    setAgentTreeRevision(0);
     setPendingQuestions([]);
     attentionRequestIdsRef.current = new Set([
       ...pendingApprovals.map(request => `approval:${request.approval_id}`),
@@ -1091,6 +1171,15 @@ export function useChatMessages(
     if (hasNew) playNotificationSound('attention');
   }, [pendingApprovals, pendingQuestions]);
 
+  const refreshSessionStatus = useCallback(async (): Promise<SessionRealtimeStatus | null> => {
+    if (!sessionId) return null;
+    const status = await api.sessions.getStatus(sessionId, agentId);
+    if (!hasCurrentScope(scopeRef, sessionId, agentId)) return null;
+    sessionStatusScopeRef.current = chatScopeKey(sessionId, agentId);
+    setSessionStatus(previous => preserveEqual(previous, status));
+    return status;
+  }, [agentId, sessionId]);
+
   useEffect(() => {
     if (!sessionId) return;
     let disposed = false;
@@ -1098,10 +1187,8 @@ export function useChatMessages(
 
     const refreshStatus = async () => {
       try {
-        let status = await api.sessions.getStatus(sessionId, agentId);
-        if (disposed || !hasCurrentScope(scopeRef, sessionId, agentId)) return;
-        sessionStatusScopeRef.current = chatScopeKey(sessionId, agentId);
-        setSessionStatus(previous => preserveEqual(previous, status));
+        let status = await refreshSessionStatus();
+        if (disposed || status === null) return;
 
         if (status.context_usage < 0.78) compactTriggeredRef.current = false;
         if (
@@ -1115,11 +1202,7 @@ export function useChatMessages(
           setCompacting(true);
           try {
             await api.sessions.compact(sessionId, undefined, agentId);
-            status = await api.sessions.getStatus(sessionId, agentId);
-            if (!disposed && hasCurrentScope(scopeRef, sessionId, agentId)) {
-              sessionStatusScopeRef.current = chatScopeKey(sessionId, agentId);
-              setSessionStatus(previous => preserveEqual(previous, status));
-            }
+            status = await refreshSessionStatus();
           } catch (error) {
             console.error('Automatic context compaction failed:', error);
           } finally {
@@ -1139,7 +1222,7 @@ export function useChatMessages(
       disposed = true;
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [agentId, isStreaming, sessionId]);
+  }, [isStreaming, refreshSessionStatus, sessionId]);
 
   const refreshApprovals = useCallback(async () => {
     if (!sessionId) {
@@ -1454,6 +1537,24 @@ export function useChatMessages(
                 ? previous
                 : { ...previous, goal: payload.snapshot ?? null });
               break;
+            case 'agent.status.updated':
+              setSessionStatus(previous => applyRealtimeStatusEvent(previous, type, payload));
+              if (payload.discussMode === undefined && payload.coderWriteEnabled === undefined) {
+                void refreshSessionStatus().catch(error => console.error('Agent status refresh failed:', error));
+              }
+              break;
+            case 'session.status_changed':
+              void refreshSessionStatus().catch(error => console.error('Session status refresh failed:', error));
+              break;
+            case 'discussion.updated':
+              setAgentTreeRevision(previous => previous + 1);
+              void refreshSessionStatus()
+                .catch(error => console.error('Discussion status refresh failed:', error));
+              if (payload.discussionAgentId === agentId) {
+                void refreshHistory(sessionId, agentId, true)
+                  .catch(error => console.error('Discussion history refresh failed:', error));
+              }
+              break;
             case 'error':
               playNotificationSound('error');
               console.error('Stream error:', payload);
@@ -1506,7 +1607,7 @@ export function useChatMessages(
       wsRef.current?.close();
       wsRef.current = null;
     };
-  }, [agentId, clearDraft, finishLiveTurn, hydrateInFlight, refreshHistory, sessionId]);
+  }, [agentId, clearDraft, finishLiveTurn, hydrateInFlight, refreshHistory, refreshSessionStatus, sessionId]);
 
   useEffect(() => {
     if (!isStreaming || !sessionId) return;
@@ -1792,7 +1893,7 @@ export function useChatMessages(
     await refreshQuestions();
   }, [agentId, refreshQuestions, sessionId]);
 
-  return { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus: statusForSession(sessionStatus, sessionStatusScopeRef.current, chatScopeKey(sessionId, agentId)), compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort };
+  return { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus: statusForSession(sessionStatus, sessionStatusScopeRef.current, chatScopeKey(sessionId, agentId)), agentTreeRevision, refreshSessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort };
 }
 
 export function statusForSession(

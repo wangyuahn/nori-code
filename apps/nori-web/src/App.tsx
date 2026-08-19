@@ -4,7 +4,7 @@ import { useBackgroundTasks } from './hooks/useBackgroundTasks';
 import { CronJobPanel } from './components/CronJobPanel';
 import { AccountCenter } from './components/AccountCenter';
 import { CodeView } from './components/CodeView';
-import { SessionAgentTree } from './components/SessionAgentTree';
+import { activeDiscussionForAgent, SessionAgentTree } from './components/SessionAgentTree';
 import { Icon, type IconName } from './components/Icon';
 import { useSessions, usePhaseStatus, useServerStatus } from './hooks/useApi';
 import { useChatMessages } from './hooks/useChatMessages';
@@ -16,6 +16,8 @@ import { modelThinkingOptions } from './utils/model-thinking';
 import { loadRewindLimit } from './rewindPreferences';
 import type { ChatSlashCommandName } from './utils/chat-slash-commands';
 import { installSoundUnlock } from './notificationSounds';
+import { useGlobalApprovals } from './hooks/useGlobalApprovals';
+import { useBrowserPermissions } from './hooks/useBrowser';
 
 type View = 'chat' | 'dashboard' | 'cron' | 'account';
 type SidebarTab = 'sessions' | 'files';
@@ -57,6 +59,8 @@ export function App() {
   const { tr } = useI18n();
   const [activeView, setActiveView] = useState<View>('chat');
   const [activeAgentSelection, setActiveAgentSelection] = useState<{ sessionId: string; agent: SessionAgent } | null>(null);
+  const [pendingAgentOpen, setPendingAgentOpen] = useState<{ sessionId: string; agentId: string } | null>(null);
+  const [sessionAgents, setSessionAgents] = useState<SessionAgent[]>([]);
   const [sidebarExpanded, setSidebarExpanded] = useState(loadSidebarExpanded);
   const [sidebarWidth, setSidebarWidth] = useState(() => Math.max(220, Math.min(480, Number(localStorage.getItem('nori-sidebar-width')) || 256)));
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('sessions');
@@ -72,7 +76,7 @@ export function App() {
     model: '',
     thinking: 'off',
     permission_mode: 'manual',
-    discuss_mode: true,
+    discuss_mode: false,
     main_write_enabled: true,
   });
   const [rewindLimit, setRewindLimit] = useState(loadRewindLimit);
@@ -103,9 +107,23 @@ export function App() {
   const activeAgent = activeAgentSelection?.sessionId === sessionId ? activeAgentSelection.agent : null;
   const activeAgentId = activeAgent?.agent_id ?? 'main';
   const selectSessionAgent = useCallback((agent: SessionAgent | null) => {
-    setActiveAgentSelection(agent && sessionId ? { sessionId, agent } : null);
+    setActiveAgentSelection(agent && agent.agent_id !== 'main' && agent.kind !== 'main' && sessionId ? { sessionId, agent } : null);
     setActiveView('chat');
   }, [sessionId]);
+  const updateSessionAgents = useCallback((agents: readonly SessionAgent[]) => {
+    setSessionAgents([...agents]);
+  }, []);
+  useEffect(() => {
+    setActiveAgentSelection(null);
+    setSessionAgents([]);
+  }, [sessionId]);
+  useEffect(() => {
+    if (pendingAgentOpen === null || pendingAgentOpen.sessionId !== sessionId) return;
+    const agent = sessionAgents.find(candidate => candidate.agent_id === pendingAgentOpen.agentId);
+    if (agent === undefined) return;
+    setActiveAgentSelection({ sessionId: pendingAgentOpen.sessionId, agent });
+    setPendingAgentOpen(null);
+  }, [pendingAgentOpen, sessionAgents, sessionId]);
   const backgroundTasks = useBackgroundTasks(sessionId);
   const [globalActivityCount, setGlobalActivityCount] = useState(0);
   useEffect(() => {
@@ -162,11 +180,16 @@ export function App() {
     sessions: tr('Sessions', '会话'),
     files: tr('Files', '文件'),
   };
-  const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort } = useChatMessages(sessionId, activeAgentId, activeSession?.title);
+  const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, sessionStatus, agentTreeRevision, refreshSessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort } = useChatMessages(sessionId, activeAgentId, activeSession?.title);
+  const activeDiscussion = activeDiscussionForAgent(sessionAgents, activeAgentId, sessionStatus);
+  const globalApprovals = useGlobalApprovals();
+  const browserPermissions = useBrowserPermissions();
   const sessionActiveAgentCount = countActiveAgents(activeSubagentIds, backgroundTasks.tasks);
+  const sessionTreeTokens = sessionAgents.reduce((total, agent) => total + (agent.tokens ?? 0), 0);
   // The server aggregate is authoritative across sessions. The current session
   // count remains a realtime fallback while that poll is loading or unavailable.
   const effectiveGlobalActiveAgentCount = effectiveGlobalActiveAgentCountFor(sessionActiveAgentCount, globalActivityCount);
+  const sessionTitles = Object.fromEntries(sessions.map(session => [session.id, session.title || session.id]));
 
   useEffect(() => {
     const onLimitChanged = (event: Event) => {
@@ -240,6 +263,26 @@ export function App() {
     await updateActiveAgentProfile({ permission_mode: permissionMode });
   };
 
+  const changeApprovalPermission = async (permissionMode: 'auto' | 'yolo', request?: import('./api/client').ApprovalRequest) => {
+    if (request) {
+      await api.sessions.updateProfile(request.session_id, {
+        agent_id: request.agent_id,
+        agent_config: { permission_mode: permissionMode },
+      });
+      return;
+    }
+    await changePermission(permissionMode);
+  };
+
+  const resolveGlobalApproval = async (
+    approvalId: string,
+    decision: 'approved' | 'rejected' | 'cancelled',
+    options?: { remember?: boolean; feedback?: string; selectedLabel?: string },
+  ) => {
+    const request = globalApprovals.requests.find(item => item.approval_id === approvalId);
+    if (request) await globalApprovals.resolveApproval(request, decision, options);
+  };
+
   const changeTaskMode = async (taskMode: 'discuss' | 'code') => {
     const discussMode = taskMode === 'discuss';
     if (!activeSession) {
@@ -247,6 +290,7 @@ export function App() {
       return;
     }
     await updateActiveAgentProfile({ discuss_mode: discussMode });
+    void refreshSessionStatus().catch(error => console.error('Task mode status refresh failed:', error));
   };
 
   const changeMainWrite = async (enabled: boolean) => {
@@ -384,6 +428,8 @@ export function App() {
             workBlocks={currentWorkBlocks}
             isStreaming={isStreaming}
             activeAgentCount={sessionActiveAgentCount}
+            activeAgentTokens={sessionTreeTokens}
+            activeDiscussion={activeDiscussion}
             sessionStatus={sessionStatus}
             compacting={compacting}
             models={models}
@@ -401,6 +447,24 @@ export function App() {
             onAbort={abort}
             pendingApprovals={pendingApprovals}
             onResolveApproval={resolveApproval}
+            globalApprovals={globalApprovals.requests}
+            onResolveGlobalApproval={resolveGlobalApproval}
+            onApprovalPermissionChange={changeApprovalPermission}
+            approvalSessionTitles={sessionTitles}
+            approvalResolvingIds={globalApprovals.resolvingIds}
+            approvalErrors={globalApprovals.errors}
+            browserPermissionsOverride={browserPermissions.pending}
+            onResolveBrowserPermissionOverride={browserPermissions.resolvePermission}
+            onOpenApprovalSession={(sourceSessionId, sourceAgentId) => {
+              if (sourceAgentId && sourceAgentId !== 'main') {
+                setPendingAgentOpen({ sessionId: sourceSessionId, agentId: sourceAgentId });
+              } else {
+                setPendingAgentOpen(null);
+              }
+              switchSession(sourceSessionId);
+              setActiveView('chat');
+              closeSidebarOnNarrowViewport();
+            }}
             pendingQuestions={pendingQuestions}
             onResolveQuestion={resolveQuestion}
             onDismissQuestion={dismissQuestion}
@@ -484,10 +548,17 @@ export function App() {
 
       <div className="main-area">
         <header className="top-bar">
-          <div className="workspace-breadcrumb">
-            <span>Nori Work</span><Icon name="chevron-right" size={13}/><strong>{activeView === 'chat' && activeSession ? activeSession.title : viewLabels[activeView]}</strong>
-            {activeView === 'chat' && activeAgent && <><Icon name="chevron-right" size={13}/><strong>{activeAgent.title || activeAgent.name || activeAgent.agent_id}</strong></>}
-          </div>
+          <AgentBreadcrumb
+            activeView={activeView}
+            activeAgentId={activeAgentId}
+            activeAgent={activeAgent}
+            agents={sessionAgents}
+            sessionTitle={activeSession?.title}
+            viewLabel={viewLabels[activeView]}
+            locationLabel={tr('Current location', '当前位置')}
+            onSelectAgent={selectSessionAgent}
+            onSelectWorkspace={() => { setActiveView('chat'); selectSessionAgent(null); }}
+          />
           <div className="top-bar-actions">
             {activeView === 'chat' && <SessionAgentTree
               sessionId={sessionId}
@@ -496,7 +567,10 @@ export function App() {
               backgroundLoading={backgroundTasks.loading}
               backgroundError={backgroundTasks.error}
               hasGlobalActivity={effectiveGlobalActiveAgentCount > 0}
+              sessionStatus={sessionStatus}
+              agentTreeRevision={agentTreeRevision}
               onSelectAgent={selectSessionAgent}
+              onAgentsChange={updateSessionAgents}
               onBackgroundTaskCancelled={backgroundTasks.markCancelled}
             />}
             <div className="session-chip" title={activeSession?.id ?? tr('No active session', '无活动会话')}><span className={`status-dot${activeSession ? ' active' : ' idle'}`} /><span>{activeSession?.title || tr('No session', '无会话')}</span></div>
@@ -593,6 +667,66 @@ export function countActiveAgents(
 
 export function effectiveGlobalActiveAgentCountFor(sessionActiveAgentCount: number, serverActivityCount: number): number {
   return Math.max(0, sessionActiveAgentCount, serverActivityCount);
+}
+
+export function buildAgentBreadcrumb(
+  agents: readonly SessionAgent[],
+  activeAgentId: string,
+): SessionAgent[] {
+  if (activeAgentId === 'main') return [];
+  const byId = new Map(agents.map(agent => [agent.agent_id, agent]));
+  const path: SessionAgent[] = [];
+  const visited = new Set<string>();
+  let current = byId.get(activeAgentId);
+  while (current && current.agent_id !== 'main' && !visited.has(current.agent_id)) {
+    visited.add(current.agent_id);
+    path.unshift(current);
+    const parentId = current.parent_agent_id;
+    if (!parentId || parentId === 'main') break;
+    current = byId.get(parentId);
+  }
+  return path;
+}
+
+export function AgentBreadcrumb({
+  activeView,
+  activeAgentId,
+  activeAgent,
+  agents,
+  sessionTitle,
+  viewLabel,
+  locationLabel,
+  onSelectAgent,
+  onSelectWorkspace,
+}: {
+  activeView: View;
+  activeAgentId: string;
+  activeAgent: SessionAgent | null;
+  agents: readonly SessionAgent[];
+  sessionTitle?: string;
+  viewLabel: string;
+  locationLabel: string;
+  onSelectAgent: (agent: SessionAgent | null) => void;
+  onSelectWorkspace: () => void;
+}) {
+  const path = buildAgentBreadcrumb(agents, activeAgentId);
+  const currentAgent = activeAgentId === 'main'
+    ? null
+    : activeAgent ?? agents.find(agent => agent.agent_id === activeAgentId) ?? null;
+  const visibleAgents = currentAgent !== null && !path.some(agent => agent.agent_id === currentAgent.agent_id)
+    ? [...path, currentAgent]
+    : path;
+  return <div className="workspace-breadcrumb" aria-label={locationLabel}>
+    <button type="button" className="workspace-breadcrumb-link" onClick={onSelectWorkspace}>Nori Work</button>
+    <Icon name="chevron-right" size={13}/>
+    {activeView === 'chat' && sessionTitle
+      ? <button type="button" className="workspace-breadcrumb-link" onClick={() => onSelectAgent(null)}>{sessionTitle}</button>
+      : <strong>{viewLabel}</strong>}
+    {activeView === 'chat' && visibleAgents.map(agent => <span className="workspace-breadcrumb-agent" key={agent.agent_id}>
+      <Icon name="chevron-right" size={13}/>
+      <button type="button" className={`workspace-breadcrumb-link${agent.agent_id === activeAgentId ? ' current' : ''}`} onClick={() => onSelectAgent(agent)} aria-current={agent.agent_id === activeAgentId ? 'page' : undefined} title={agent.title || agent.name || agent.agent_id}>{agent.title || agent.name || agent.agent_id}</button>
+    </span>)}
+  </div>;
 }
 
 function ViewHeader({

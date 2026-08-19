@@ -68,7 +68,15 @@ export interface Message {
   thinking?: string;
   tool_calls?: Array<{ id?: string; name: string; args?: unknown; result?: string; is_error?: boolean }>;
   metadata?: {
-    origin?: { kind?: string; [key: string]: unknown };
+    origin?: {
+      kind?: string;
+      speaker?: {
+        from?: 'user' | 'lead' | 'team' | 'sub' | 'system';
+        speakerId?: string;
+        speakerName?: string;
+      };
+      [key: string]: unknown;
+    };
     [key: string]: unknown;
   };
 }
@@ -504,6 +512,7 @@ export interface UndoSessionResponse {
 export interface ApprovalRequest {
   approval_id: string;
   session_id: string;
+  agent_id?: string;
   turn_id?: number;
   tool_call_id: string;
   tool_name: string;
@@ -712,6 +721,29 @@ export function createClient(
         `/files/${encodeURIComponent(fileId)}`,
         undefined,
         { method: 'DELETE' },
+      ),
+    },
+    approvals: {
+      list: () => request<{ items: ApprovalRequest[] }>('/approvals', { status: 'pending' }),
+      resolve: (approvalId: string, input: {
+        decision: 'approved' | 'rejected' | 'cancelled';
+        remember?: boolean;
+        feedback?: string;
+        selected_label?: string;
+        agent_id?: string;
+      }) => request<{ resolved: true }>(
+        `/approvals/${encodeURIComponent(approvalId)}`,
+        undefined,
+        {
+          method: 'POST',
+          body: {
+            decision: input.decision,
+            agent_id: input.agent_id,
+            ...(input.remember ? { scope: 'session' } : {}),
+            ...(input.feedback?.trim() ? { feedback: input.feedback.trim() } : {}),
+            ...(input.selected_label ? { selected_label: input.selected_label } : {}),
+          },
+        },
       ),
     },
     // --- Vault ---

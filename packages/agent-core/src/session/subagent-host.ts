@@ -21,6 +21,7 @@ import {
   type ResolvedAgentProfile,
 } from '../profile';
 import {
+  createDeadlineAbortSignal,
   linkAbortSignal,
   userCancellationReason,
 } from '../utils/abort';
@@ -58,6 +59,8 @@ import TEAM_AGENT_EXECUTION_PROMPT from './team-agent-execution.md?raw';
 
 export const DEFAULT_SUBAGENT_TIMEOUT_MS = 30 * 60 * 1000;
 export const DEFAULT_SUBAGENT_TIMEOUT_DESCRIPTION = '30 minutes';
+export const DEFAULT_TEAM_DISCUSSION_MEMBER_TIMEOUT_MS = 2 * 60 * 1000;
+const TEAM_DISCUSSION_CANCEL_SETTLE_GRACE_MS = 5_000;
 
 export type {
   SubagentResult as QueuedSubagentRunResult,
@@ -107,6 +110,11 @@ IMPORTANT:
 
 const ASK_PARENT_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
 
+export interface SessionSubagentHostOptions {
+  /** Maximum time a single member may occupy a scheduled Discuss turn. */
+  readonly discussionMemberTimeoutMs?: number;
+}
+
 export interface RunSubagentOptions {
   readonly parentToolCallId: string;
   readonly parentToolCallUuid?: string;
@@ -150,6 +158,7 @@ export class SessionSubagentHost {
   // Nori runtime settings propagated through nested subagents.
   private _noriMemory?: NoriMemoryProvider;
   private _noriRetrievalGate?: { triggerMode: string; maxResults: number };
+  private readonly discussionMemberTimeoutMs: number;
 
   setNoriConfig(config: {
     memory?: NoriMemoryProvider;
@@ -162,7 +171,14 @@ export class SessionSubagentHost {
   constructor(
     private readonly session: Session,
     private readonly ownerAgentId: string,
-  ) {}
+    options: SessionSubagentHostOptions = {},
+  ) {
+    const timeout = options.discussionMemberTimeoutMs ?? DEFAULT_TEAM_DISCUSSION_MEMBER_TIMEOUT_MS;
+    if (!Number.isFinite(timeout) || timeout <= 0) {
+      throw new Error('discussionMemberTimeoutMs must be a positive finite number.');
+    }
+    this.discussionMemberTimeoutMs = timeout;
+  }
 
   async createTeam(
     members: readonly TeamIdentity[],
@@ -237,25 +253,75 @@ export class SessionSubagentHost {
   ): Promise<Array<{ readonly agentId: string; readonly task: string | null; readonly turnId?: number }>> {
     const assigned = await this.session.assignTeamTasks(this.ownerAgentId, assignments);
     const started: Array<{ readonly agentId: string; readonly task: string | null; readonly turnId?: number }> = [];
-    for (const assignment of assigned) {
-      signal.throwIfAborted();
-      if (assignment.task === null) {
-        started.push({ agentId: assignment.agentId, task: null });
-        continue;
+    const observedLeases = new Set<string>();
+    try {
+      for (const assignment of assigned) {
+        signal.throwIfAborted();
+        if (assignment.task === null) {
+          started.push({ agentId: assignment.agentId, task: null });
+          continue;
+        }
+        const assignedAt = assignment.assignedAt;
+        if (assignedAt === undefined) {
+          throw new Error(`Team member "${assignment.agentId}" is missing its assignment lease token.`);
+        }
+        const turnId = assignment.agent.turn.prompt(
+          [{
+            type: 'text',
+            text: `${assignment.task}\n\n${TEAM_AGENT_EXECUTION_PROMPT.trim()}`,
+          }],
+          this.teamLeadPromptOrigin(),
+        );
+        if (turnId === null) {
+          throw new Error(`Team member "${assignment.agentId}" could not start its assigned turn.`);
+        }
+        observedLeases.add(assignment.agentId);
+        // A real prompt id always owns an active turn. Keep this guard for
+        // lightweight transports/tests that stub prompt() without creating a
+        // turn; there is no settlement to observe in that case.
+        if (assignment.agent.turn.hasActiveTurn) {
+          this.observeTeamAssignmentTurn(assignment.agentId, assignedAt, assignment.agent);
+        }
+        started.push({ agentId: assignment.agentId, task: assignment.task, turnId });
       }
-      const turnId = assignment.agent.turn.prompt(
-        [{
-          type: 'text',
-          text: `${assignment.task}\n\n${TEAM_AGENT_EXECUTION_PROMPT.trim()}`,
-        }],
-        this.teamLeadPromptOrigin(),
-      );
-      if (turnId === null) {
-        throw new Error(`Team member "${assignment.agentId}" could not start its assigned turn.`);
-      }
-      started.push({ agentId: assignment.agentId, task: assignment.task, turnId });
+      return started;
+    } catch (error) {
+      await Promise.all(assigned.map(async (assignment) => {
+        if (
+          assignment.task === null
+          || assignment.assignedAt === undefined
+          || observedLeases.has(assignment.agentId)
+        ) return;
+        try {
+          await this.session.releaseTeamAssignment(
+            this.ownerAgentId,
+            assignment.agentId,
+            assignment.assignedAt,
+          );
+        } catch {
+          // Preserve the original TeamAssign failure. A metadata write error
+          // must not hide the prompt/abort reason that caused this cleanup.
+        }
+      }));
+      throw error;
     }
-    return started;
+  }
+
+  private observeTeamAssignmentTurn(agentId: string, assignedAt: string, agent: Agent): void {
+    void (async () => {
+      try {
+        await agent.turn.waitForCurrentTurn();
+      } catch {
+        // The write lease is tied to settlement, regardless of turn outcome.
+      } finally {
+        try {
+          await this.session.releaseTeamAssignment(this.ownerAgentId, agentId, assignedAt);
+        } catch {
+          // Lease cleanup is fire-and-forget after a terminal turn. The
+          // session's normal metadata/error path remains authoritative.
+        }
+      }
+    })();
   }
 
   async broadcastTeam(message: string, signal: AbortSignal): Promise<readonly string[]> {
@@ -279,7 +345,7 @@ export class SessionSubagentHost {
     targetAgentId: string,
     message: string,
     signal: AbortSignal,
-  ): Promise<'completed' | 'buffered'> {
+  ): Promise<TeamDirectMessageDelivery> {
     signal.throwIfAborted();
     const sender = this.session.getAgentMetadata(this.ownerAgentId);
     const leaderAgentId = this.ownerAgentId === 'main'
@@ -296,9 +362,14 @@ export class SessionSubagentHost {
       throw new Error(`TeamDM target "${targetAgentId}" is not in this team.`);
     }
     const recipient = await this.session.ensureAgentResumed(targetAgentId);
-    const origin = this.ownerAgentId === leaderAgentId
-      ? this.teamLeadPromptOrigin()
-      : this.teamMemberPromptOrigin(sender);
+    // TeamDM is an internal prompt transport. Keep it in the recipient's
+    // model context, but tag it distinctly so transcript projections can
+    // avoid rendering it as a normal user/Discuss message after refresh.
+    const origin = this.teamDirectMessagePromptOrigin(
+      this.ownerAgentId === leaderAgentId ? undefined : sender,
+      this.ownerAgentId === leaderAgentId ? leaderAgentId : this.ownerAgentId,
+      this.ownerAgentId === leaderAgentId ? 'lead' : 'team',
+    );
     const input = [{ type: 'text' as const, text: wrapTeamDirectMessage(message) }];
     const recipientBusy = recipient.turn.hasActiveTurn;
     const turnId = recipientBusy
@@ -306,12 +377,12 @@ export class SessionSubagentHost {
       : recipient.turn.prompt(input, origin);
     if (turnId === null) {
       if (recipientBusy) {
-        return 'buffered';
+        return { delivered: true, processing: 'queued' };
       }
       throw new Error(`TeamDM target "${targetAgentId}" could not start a turn.`);
     }
     await runChildTurnToCompletion(recipient, signal);
-    return 'completed';
+    return { delivered: true, processing: 'completed' };
   }
 
   async getTeamStatus(): Promise<TeamStatusResult> {
@@ -415,6 +486,11 @@ export class SessionSubagentHost {
         discussionTopic,
         participants,
       );
+      await this.appendDiscussionEvent(
+        created.id,
+        `讨论已开始：${discussionTopic}`,
+        this.teamDiscussionLifecycleOrigin(`${created.discussion.startedAt}:started`),
+      );
       await this.notifyDiscussionLifecycle(created.discussion, created.discussion.participantAgentIds, 'started');
       active = [created.id, this.session.getAgentMetadata(created.id)!];
     }
@@ -424,18 +500,46 @@ export class SessionSubagentHost {
       throw new Error('The active team discussion metadata is unavailable.');
     }
     if (action === 'archive') {
+      // Archiving closes the execution/discussion lifecycle. Revoke any
+      // TeamAssign write lease so an idle member cannot keep editing through
+      // its sub-session after the discussion has formally ended.
+      await this.lockTeamWritesForDiscuss();
       const discussion = await this.session.updateTeamDiscussion(active[0], {
         participantAgentIds: activeDiscussion.participantAgentIds,
         status: 'archived',
         topic: activeDiscussion.topic,
       });
+      await this.appendDiscussionEvent(
+        active[0],
+        `讨论已结束并归档：${discussion.topic}`,
+        this.teamDiscussionLifecycleOrigin(`${discussion.startedAt}:ended`),
+      );
       await this.notifyDiscussionLifecycle(discussion, Object.keys(discussion.readCursors ?? {}), 'ended');
       return { discussionAgentId: active[0], discussion, statements: [], votes: [] };
     }
     if (action === 'vote') {
       return this.runTeamVote(active[0], activeDiscussion, signal);
     }
-    return this.runTeamDiscussionRound(active[0], activeDiscussion, signal, statement);
+    let scheduledAgentIds: readonly string[] | undefined;
+    if (action === 'start') {
+      scheduledAgentIds = activeDiscussion.participantAgentIds;
+    } else if (participantAgentIds !== undefined) {
+      const participants = new Set(activeDiscussion.participantAgentIds);
+      const unique = new Set(participantAgentIds);
+      if (unique.size !== participantAgentIds.length || participantAgentIds.some((id) => !participants.has(id))) {
+        throw new Error('participant_agent_ids must be distinct active discussion participants.');
+      }
+      scheduledAgentIds = participantAgentIds;
+    }
+    const targetedRetry = action === 'continue' && participantAgentIds !== undefined;
+    return this.runTeamDiscussionRound(
+      active[0],
+      activeDiscussion,
+      signal,
+      statement,
+      scheduledAgentIds,
+      !targetedRetry,
+    );
   }
 
   async speakInDiscussion(message: string): Promise<{ readonly discussionAgentId: string; readonly entryId: number }> {
@@ -471,6 +575,84 @@ export class SessionSubagentHost {
     }));
   }
 
+  private async appendDiscussionEvent(
+    discussionAgentId: string,
+    text: string,
+    origin: PromptOrigin,
+  ): Promise<void> {
+    const transcript = await this.session.ensureAgentResumed(discussionAgentId);
+    transcript.context.appendUserMessage([{ type: 'text', text }], origin);
+    const kind = origin.kind === 'system_trigger' && origin.name === 'team_discussion_round'
+      ? 'round'
+      : origin.kind === 'system_trigger' && origin.name === 'team_discussion_skip'
+        ? 'skip'
+        : origin.kind === 'system_trigger' && origin.name === 'team_discussion_vote'
+          ? 'vote'
+          : 'lifecycle';
+    transcript.emitEvent({
+      type: 'discussion.updated',
+      discussionAgentId,
+      kind,
+    });
+  }
+
+  private async appendDiscussionSkip(
+    discussionAgentId: string,
+    memberName: string,
+    reason = 'abstain',
+    detail?: string,
+  ): Promise<void> {
+    const suffix = detail === undefined ? '' : `：${detail}`;
+    await this.appendDiscussionEvent(
+      discussionAgentId,
+      `${memberName} 跳过本轮（弃权${reason === 'abstain' ? '' : `：${reason}`}${suffix}）`,
+      {
+        kind: 'system_trigger',
+        name: 'team_discussion_skip',
+        discussionSkipReason: reason,
+        speaker: { from: 'team', speakerName: memberName },
+      },
+    );
+  }
+
+  private async appendDiscussionVote(
+    discussionAgentId: string,
+    agentId: string,
+    vote: TeamVote['vote'],
+  ): Promise<void> {
+    const memberName = this.session.getAgentMetadata(agentId)?.name ?? '团队成员';
+    await this.appendDiscussionEvent(
+      discussionAgentId,
+      `${memberName} 投票：${vote}`,
+      {
+        kind: 'system_trigger',
+        name: 'team_discussion_vote',
+        speaker: { from: 'team', speakerId: agentId, speakerName: memberName },
+      },
+    );
+  }
+
+  private async appendDiscussionToolErrors(
+    discussionAgentId: string,
+    agentId: string,
+    errors: readonly DiscussionToolError[],
+  ): Promise<void> {
+    if (errors.length === 0) return;
+    const memberName = this.session.getAgentMetadata(agentId)?.name ?? '团队成员';
+    for (const error of errors) {
+      await this.appendDiscussionEvent(
+        discussionAgentId,
+        `${memberName} 的 ${error.toolName} 失败：${error.message}`,
+        {
+          kind: 'system_trigger',
+          name: 'team_discussion_tool_error',
+          discussionToolName: error.toolName,
+          speaker: { from: 'team', speakerId: agentId, speakerName: memberName },
+        },
+      );
+    }
+  }
+
   private requireActiveDiscussion(): { readonly id: string; readonly meta: NonNullable<ReturnType<Session['getAgentMetadata']>> } {
     const active = this.session.activeTeamDiscussion(this.ownerAgentId);
     if (active === undefined) throw new Error('There is no active team discussion.');
@@ -482,55 +664,123 @@ export class SessionSubagentHost {
     discussion: TeamDiscussionMeta,
     signal: AbortSignal,
     statement?: string,
+    scheduledAgentIds?: readonly string[],
+    publishLeadStatement = true,
   ): Promise<TeamDiscussionResult> {
+    const round = (discussion.round ?? 0) + 1;
+    const updatedDiscussion = typeof this.session.updateTeamDiscussion === 'function'
+      ? await this.session.updateTeamDiscussion(discussionAgentId, {
+        participantAgentIds: discussion.participantAgentIds,
+        status: discussion.status,
+        topic: discussion.topic,
+        round,
+      })
+      : { ...discussion, round };
+    await this.appendDiscussionEvent(
+      discussionAgentId,
+      `第 ${String(round)} 轮讨论开始`,
+      this.teamDiscussionRoundOrigin(round),
+    );
     const statements: TeamDiscussionStatement[] = [];
     const leadStatement = statement?.trim();
-    if (leadStatement) {
+    // A targeted retry carries a routing instruction rather than a new shared
+    // lead statement. The initial round may also specify participants, but its
+    // lead statement must still be published before the first member turn.
+    if (leadStatement && publishLeadStatement) {
       if (typeof this.session.publishLeadDiscussionStatement === 'function') {
         await this.session.publishLeadDiscussionStatement(this.ownerAgentId, leadStatement);
       }
       statements.push({ agentId: this.ownerAgentId, statement: leadStatement, skipped: false });
     }
-    for (const agentId of discussion.participantAgentIds) {
+    for (const agentId of scheduledAgentIds ?? discussion.participantAgentIds) {
       signal.throwIfAborted();
       const meta = this.session.getAgentMetadata(agentId);
       if (meta?.kind !== 'team') continue;
       const participant = await this.session.ensureAgentResumed(agentId);
       if (participant.turn.hasActiveTurn) {
-        statements.push({ agentId, skipped: true, reason: 'active' });
+        const skipped = { agentId, skipped: true, reason: 'active' };
+        statements.push(skipped);
+        await this.appendDiscussionSkip(discussionAgentId, meta.name ?? '团队成员', skipped.reason);
         continue;
       }
       const unread = await this.session.unreadTeamDiscussionStatements(discussionAgentId, agentId);
       this.session.beginTeamDiscussionTurn(discussionAgentId, agentId);
+      const deadline = createDeadlineAbortSignal(signal, this.discussionMemberTimeoutMs);
+      const historyStart = participant.context?.history.length ?? 0;
       try {
         const turnId = participant.turn.prompt(
           [{ type: 'text', text: discussionRoundPrompt(unread.statements) }],
           this.teamLeadPromptOrigin(),
         );
         if (turnId === null) {
-          statements.push({ agentId, skipped: true, reason: 'unavailable' });
+          const skipped = { agentId, skipped: true, reason: 'unavailable' };
+          statements.push(skipped);
+          await this.appendDiscussionSkip(discussionAgentId, meta.name ?? '团队成员', skipped.reason);
           continue;
         }
         // Mark messages as read only after this agent accepted the turn. That
         // prevents a rejected prompt from silently losing an unread update,
         // while keeping accepted messages from being replayed into its cache.
         await this.session.acknowledgeTeamDiscussionStatements(discussionAgentId, agentId, unread.cursor);
-        await runChildTurnToCompletion(participant, signal);
-      } catch {
+        await runDiscussionChildTurnToCompletion(participant, deadline.signal);
+      } catch (error) {
         const sent = this.session.consumeTeamDiscussionSpeak(discussionAgentId, agentId);
-        statements.push(sent === undefined
-          ? { agentId, skipped: true, reason: 'failed' }
-          : { agentId, statement: sent.message, skipped: false });
+        const toolErrors = collectDiscussionToolErrors(participant, historyStart);
+        await this.appendDiscussionToolErrors(discussionAgentId, agentId, toolErrors);
+        if (sent === undefined) {
+          const timedOut = deadline.timedOut();
+          const detail = timedOut
+            ? `Member discussion turn timed out after ${this.discussionMemberTimeoutMs}ms.`
+            : discussionFailureDetail(error, toolErrors);
+          const skipped = {
+            agentId,
+            skipped: true,
+            reason: timedOut ? 'timeout' : 'failed',
+            error: detail,
+            ...(toolErrors.length > 0 ? { toolErrors } : {}),
+          };
+          statements.push(skipped);
+          await this.appendDiscussionSkip(discussionAgentId, meta.name ?? '团队成员', skipped.reason, detail);
+        } else {
+          statements.push({
+            agentId,
+            statement: sent.message,
+            skipped: false,
+            ...(toolErrors.length > 0 ? { toolErrors } : {}),
+          });
+        }
         continue;
       } finally {
+        deadline.clear();
         this.session.endTeamDiscussionTurn(discussionAgentId, agentId);
       }
       const sent = this.session.consumeTeamDiscussionSpeak(discussionAgentId, agentId);
-      statements.push(sent === undefined
-        ? { agentId, skipped: true }
-        : { agentId, statement: sent.message, skipped: false });
+      const toolErrors = collectDiscussionToolErrors(participant, historyStart);
+      await this.appendDiscussionToolErrors(discussionAgentId, agentId, toolErrors);
+      if (sent === undefined) {
+        const detail = toolErrors.length > 0 ? discussionToolErrorText(toolErrors) : undefined;
+        const skipped = {
+          agentId,
+          skipped: true,
+          ...(detail === undefined ? {} : { reason: 'failed', error: detail, toolErrors }),
+        };
+        statements.push(skipped);
+        await this.appendDiscussionSkip(
+          discussionAgentId,
+          meta.name ?? '团队成员',
+          detail === undefined ? 'abstain' : 'failed',
+          detail,
+        );
+      } else {
+        statements.push({
+          agentId,
+          statement: sent.message,
+          skipped: false,
+          ...(toolErrors.length > 0 ? { toolErrors } : {}),
+        });
+      }
     }
-    return { discussionAgentId, discussion, statements, votes: [] };
+    return { discussionAgentId, discussion: updatedDiscussion, statements, votes: [] };
   }
 
   private async runTeamVote(
@@ -538,7 +788,6 @@ export class SessionSubagentHost {
     discussion: TeamDiscussionMeta,
     signal: AbortSignal,
   ): Promise<TeamDiscussionResult> {
-    const transcript = await this.session.ensureAgentResumed(discussionAgentId);
     const voters = discussion.participantAgentIds.map((agentId) =>
       [agentId, this.session.getAgentMetadata(agentId)] as const,
     );
@@ -558,6 +807,7 @@ export class SessionSubagentHost {
       const participant = await this.session.ensureAgentResumed(agentId);
       if (participant.turn.hasActiveTurn) {
         votes.push({ agentId, vote: 'abstain' });
+        await this.appendDiscussionVote(discussionAgentId, agentId, 'abstain');
         continue;
       }
       // Voting is a scheduled participant turn too. Deliver only this
@@ -574,29 +824,23 @@ export class SessionSubagentHost {
       );
       if (turnId === null) {
         votes.push({ agentId, vote: 'abstain' });
+        await this.appendDiscussionVote(discussionAgentId, agentId, 'abstain');
         continue;
       }
       await this.session.acknowledgeTeamDiscussionStatements(discussionAgentId, agentId, unread.cursor);
+      const deadline = createDeadlineAbortSignal(signal, this.discussionMemberTimeoutMs);
       try {
-        await runChildTurnToCompletion(participant, signal);
+        await runDiscussionChildTurnToCompletion(participant, deadline.signal);
       } catch {
         votes.push({ agentId, vote: 'abstain' });
+        await this.appendDiscussionVote(discussionAgentId, agentId, 'abstain');
         continue;
+      } finally {
+        deadline.clear();
       }
       const vote = parseTeamVote(lastAssistantText(participant));
       votes.push({ agentId, vote });
-      transcript.context.appendUserMessage(
-        [{ type: 'text', text: `${this.session.getAgentMetadata(agentId)?.name ?? '团队成员'} voted: ${vote}` }],
-        {
-          kind: 'system_trigger',
-          name: 'team_discussion_vote',
-          speaker: {
-            from: 'team',
-            speakerId: agentId,
-            speakerName: this.session.getAgentMetadata(agentId)?.name ?? '团队成员',
-          },
-        },
-      );
+      await this.appendDiscussionVote(discussionAgentId, agentId, vote);
     }
     return { discussionAgentId, discussion, statements: [], votes };
   }
@@ -626,6 +870,19 @@ export class SessionSubagentHost {
     };
   }
 
+  private teamDiscussionRoundOrigin(round: number): PromptOrigin {
+    return {
+      kind: 'system_trigger',
+      name: 'team_discussion_round',
+      discussionRound: round,
+      speaker: {
+        from: 'lead',
+        speakerId: this.ownerAgentId,
+        speakerName: '主代理',
+      },
+    };
+  }
+
   private teamMemberPromptOrigin(
     meta: { readonly name?: string } | undefined,
     speakerId = this.ownerAgentId,
@@ -637,6 +894,22 @@ export class SessionSubagentHost {
         from: 'team',
         speakerId,
         speakerName: meta?.name ?? '团队成员',
+      },
+    };
+  }
+
+  private teamDirectMessagePromptOrigin(
+    sender: { readonly name?: string } | undefined,
+    speakerId: string,
+    from: 'lead' | 'team',
+  ): PromptOrigin {
+    return {
+      kind: 'system_trigger',
+      name: 'team_dm',
+      speaker: {
+        from,
+        speakerId,
+        speakerName: from === 'lead' ? '主代理' : sender?.name ?? '团队成员',
       },
     };
   }
@@ -1318,6 +1591,20 @@ export interface TeamDiscussionStatement {
   readonly statement?: string;
   readonly skipped: boolean;
   readonly reason?: string;
+  readonly error?: string;
+  readonly toolErrors?: readonly DiscussionToolError[];
+}
+
+export interface DiscussionToolError {
+  readonly toolName: string;
+  readonly message: string;
+}
+
+export interface TeamDirectMessageDelivery {
+  /** The message was accepted by the recipient turn queue. */
+  readonly delivered: true;
+  /** Whether the recipient processed it now or will process it in its active turn. */
+  readonly processing: 'completed' | 'queued';
 }
 
 export interface TeamVote {
@@ -1540,7 +1827,7 @@ function escapeXmlAttribute(value: string): string {
   return escapeXmlText(value).replaceAll('"', '&quot;');
 }
 
-async function runChildTurnToCompletion(child: Agent, signal: AbortSignal): Promise<void> {
+async function runChildTurnToCompletion(child: Agent, signal?: AbortSignal): Promise<void> {
   const completion = await child.turn.waitForCurrentTurn(signal);
   const turnEnded = completion.event;
   if (turnEnded.reason !== 'completed') {
@@ -1559,6 +1846,72 @@ async function runChildTurnToCompletion(child: Agent, signal: AbortSignal): Prom
   if (completion.stopReason === 'max_tokens') {
     throw new Error(`${SUBAGENT_MAX_TOKENS_ERROR}.`);
   }
+}
+
+/**
+ * A cancelled parent wait must not release the discussion lease while the child
+ * turn is still settling. The member may have an in-flight tool result and can
+ * still publish TeamSpeak before its turn actually ends.
+ */
+async function runDiscussionChildTurnToCompletion(child: Agent, signal: AbortSignal): Promise<void> {
+  try {
+    await runChildTurnToCompletion(child, signal);
+  } catch (error) {
+    if (signal.aborted && child.turn.hasActiveTurn) {
+      // waitForCurrentTurn(signal) has already cancelled the child. Give the
+      // provider/tool worker a bounded grace period to settle, then release the
+      // Discuss scheduler so one uncooperative provider cannot deadlock every
+      // later participant.
+      await Promise.race([
+        runChildTurnToCompletion(child).catch(() => undefined),
+        new Promise<void>((resolve) => setTimeout(resolve, TEAM_DISCUSSION_CANCEL_SETTLE_GRACE_MS)),
+      ]);
+    }
+    throw error;
+  }
+}
+
+function collectDiscussionToolErrors(
+  agent: Agent,
+  historyStart: number,
+): DiscussionToolError[] {
+  const toolNames = new Map<string, string>();
+  const history = agent.context?.history ?? [];
+  for (const message of history.slice(historyStart)) {
+    if (message.role !== 'assistant') continue;
+    for (const call of message.toolCalls) toolNames.set(call.id, call.name);
+  }
+  const errors: DiscussionToolError[] = [];
+  for (const message of history.slice(historyStart)) {
+    if (
+      message.role !== 'tool'
+      || message.isError !== true
+      || message.toolCallId === undefined
+    ) continue;
+    const text = message.content
+      .filter((part) => part.type === 'text')
+      .map((part) => part.text)
+      .join('\n')
+      .replace(/^\s*<system>ERROR:[\s\S]*?<\/system>\s*/i, '')
+      .trim();
+    errors.push({
+      toolName: toolNames.get(message.toolCallId) ?? 'Tool',
+      message: text || 'Tool execution failed without an error message.',
+    });
+  }
+  return errors;
+}
+
+function discussionToolErrorText(errors: readonly DiscussionToolError[]): string {
+  return errors.map((error) => `${error.toolName}: ${error.message}`).join('\n');
+}
+
+function discussionFailureDetail(error: unknown, toolErrors: readonly DiscussionToolError[]): string {
+  const turnError = error instanceof Error ? error.message : String(error);
+  const toolErrorText = discussionToolErrorText(toolErrors);
+  if (toolErrorText.length === 0) return turnError;
+  if (turnError.length === 0 || toolErrorText.includes(turnError)) return toolErrorText;
+  return `${turnError}\n${toolErrorText}`;
 }
 
 async function waitForNestedAgentWork(child: Agent, signal: AbortSignal): Promise<void> {

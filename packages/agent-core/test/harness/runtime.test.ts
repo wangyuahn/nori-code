@@ -864,6 +864,9 @@ base_url = "https://search.example.test/v1"
 
     expect(after).toBeDefined();
     expect(after).not.toBe(before);
+    // WebSearch is no longer enabled by the Kimi/Moonshot service config.
+    // Nori registers its credential-free public provider at the tool layer,
+    // so runtime services remain provider-agnostic across custom models.
     expect(after?.options.toolServices?.webSearcher).toBeUndefined();
     expect(reloaded.agents['main']).toBeDefined();
   });

@@ -34,6 +34,7 @@ import { SessionNotFoundError } from '../session/session';
 import {
   IMessageService,
   MessageNotFoundError,
+  isInternalTeamDirectMessage,
   parseMessageId,
   toProtocolMessage,
   type MessageListQuery,
@@ -113,7 +114,7 @@ export class MessageService extends Disposable implements IMessageService {
     if (parsed === undefined || parsed.sessionId !== sid) {
       throw new MessageNotFoundError(sid, mid);
     }
-    const entry = all[parsed.index];
+    const entry = all.find((message) => message.id === mid);
     if (entry === undefined) {
       throw new MessageNotFoundError(sid, mid);
     }
@@ -142,11 +143,12 @@ export class MessageService extends Disposable implements IMessageService {
     const summary = await this._requireSession(sid);
     const entries = await this._getTranscriptEntries(sid, agentId, summary);
     let previousMs = Number.NEGATIVE_INFINITY;
-    return entries.map((entry, idx) => {
+    return entries.flatMap((entry, idx) => {
+      if (isInternalTeamDirectMessage(entry.message)) return [];
       const baseMs = entry.time ?? summary.createdAt + idx;
       const createdAtMs = Math.max(previousMs + 1, baseMs);
       previousMs = createdAtMs;
-      return toProtocolMessage(sid, idx, entry.message, summary.createdAt, createdAtMs);
+      return [toProtocolMessage(sid, idx, entry.message, summary.createdAt, createdAtMs)];
     });
   }
 

@@ -390,7 +390,17 @@ function ProviderEditor({ draft, saving, isNew = false, onChange, onSave, onCanc
       <label className="provider-switch"><input type="checkbox" checked={draft.disabled} onChange={event => onChange('disabled', event.target.checked)}/><span><strong>{tr('Disabled', '禁用')}</strong><small>{tr('Disabled providers disappear from model selection.', '禁用后不会出现在模型选择器中。')}</small></span></label>
       {!draft.autoDiscover && <div className="provider-form-wide custom-model-editor">
         <div className="custom-model-editor-heading"><span>{tr('Custom models', '自定义模型')}</span><small>{tr('Set supported thinking efforts and a default. Unsupported models hide the chat effort picker.', '设置支持的推理档位和默认档位。不支持思考的模型不会显示聊天页强度选择器。')}</small></div>
-        {draft.customModels.map((model, index) => <CustomModelRow key={`custom-model-${String(index)}`} model={model} tr={tr} onChange={patch => updateCustomModel(index, patch)} onRemove={() => onChange('customModels', draft.customModels.length === 1 ? [emptyCustomModelDraft()] : draft.customModels.filter((_, itemIndex) => itemIndex !== index))} />)}
+        {draft.customModels.map((model, index) => <CustomModelRow
+          key={`custom-model-${String(index)}`}
+          model={model}
+          tr={tr}
+          onChange={patch => updateCustomModel(index, patch)}
+          onSave={onSave}
+          onRemove={() => {
+            if (!window.confirm(tr(`Delete custom model “${model.id || 'unnamed'}”?`, `确定删除自定义模型“${model.id || '未命名'}”吗？`))) return;
+            onChange('customModels', draft.customModels.length === 1 ? [emptyCustomModelDraft()] : draft.customModels.filter((_, itemIndex) => itemIndex !== index));
+          }}
+        />)}
         <button type="button" className="btn btn-secondary btn-compact" onClick={() => onChange('customModels', [...draft.customModels, emptyCustomModelDraft()])}><Icon name="plus" size={13}/>{tr('Add custom model', '添加自定义模型')}</button>
       </div>}
     </div>
@@ -398,7 +408,7 @@ function ProviderEditor({ draft, saving, isNew = false, onChange, onSave, onCanc
   </section>;
 }
 
-function CustomModelRow({ model, tr, onChange, onRemove }: { model: CustomModelDraft; tr: (english: string, chinese: string) => string; onChange: (patch: Partial<CustomModelDraft>) => void; onRemove: () => void }) {
+function CustomModelRow({ model, tr, onChange, onSave, onRemove }: { model: CustomModelDraft; tr: (english: string, chinese: string) => string; onChange: (patch: Partial<CustomModelDraft>) => void; onSave: () => void; onRemove: () => void }) {
   const toggleEffort = (effort: string) => {
     const selected = model.supportEfforts.includes(effort)
       ? model.supportEfforts.filter(item => item !== effort)
@@ -408,14 +418,19 @@ function CustomModelRow({ model, tr, onChange, onRemove }: { model: CustomModelD
       defaultEffort: selected.includes(model.defaultEffort) ? model.defaultEffort : selected[Math.floor(selected.length / 2)] ?? '',
     });
   };
-  return <div className="custom-model-row">
+  return <article className="custom-model-row">
     <label><span>{tr('Model ID', '模型 ID')}</span><input value={model.id} onChange={event => onChange({ id: event.target.value })} placeholder="gpt-4o" aria-label={tr('Custom model ID', '自定义模型 ID')} /></label>
+    <label><span>{tr('Display name', '显示名称')}</span><input value={model.displayName ?? ''} onChange={event => onChange({ displayName: event.target.value })} placeholder={tr('Optional label', '可选显示名')} aria-label={tr('Custom model display name', '自定义模型显示名称')} /></label>
+    <label><span>{tr('Context length', '上下文长度')}</span><input inputMode="numeric" value={model.contextLength ?? ''} onChange={event => onChange({ contextLength: event.target.value })} placeholder="128000" aria-label={tr('Custom model context length', '自定义模型上下文长度')} /></label>
     <label><span>{tr('Thinking', '思考')}</span><select value={model.thinking} aria-label={tr('Thinking mode', '思考模式')} onChange={event => onChange({ thinking: event.target.value as CustomModelThinkingMode })}>
       <option value="unsupported">{tr('Not supported', '不支持')}</option>
       <option value="toggle">{tr('On / off', '开 / 关')}</option>
       <option value="efforts">{tr('Adjustable efforts', '可调档位')}</option>
     </select></label>
-    <button type="button" className="icon-button" onClick={onRemove} title={tr('Remove custom model', '删除自定义模型')} aria-label={tr('Remove custom model', '删除自定义模型')}><Icon name="trash" size={14}/></button>
+    <div className="custom-model-row-actions">
+      <button type="button" className="btn btn-secondary btn-compact custom-model-save" onClick={onSave} title={tr('Save custom model', '保存自定义模型')}>{tr('Save', '保存')}</button>
+      <button type="button" className="icon-button" onClick={onRemove} title={tr('Remove custom model', '删除自定义模型')} aria-label={tr('Remove custom model', '删除自定义模型')}><Icon name="trash" size={14}/></button>
+    </div>
     {model.thinking === 'efforts' && <div className="custom-model-efforts">
       <span>{tr('Supported efforts', '支持的档位')}</span>
       <div className="custom-model-effort-options">
@@ -426,7 +441,7 @@ function CustomModelRow({ model, tr, onChange, onRemove }: { model: CustomModelD
         {model.supportEfforts.map(effort => <option key={effort} value={effort}>{effort}</option>)}
       </select></label>
     </div>}
-  </div>;
+  </article>;
 }
 
 export function providerCustomModelsForPatch(autoDiscover: boolean, customModels: string[]): string[] {

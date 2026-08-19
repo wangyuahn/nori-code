@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { api, type BackgroundTask, type SessionAgent } from '../api/client';
+import { api, type BackgroundTask, type SessionAgent, type SessionRealtimeStatus } from '../api/client';
 import { useI18n } from '../i18n';
 import { Icon } from './Icon';
 
@@ -11,19 +11,60 @@ interface SessionAgentTreeProps {
   backgroundLoading?: boolean;
   backgroundError?: string | null;
   hasGlobalActivity?: boolean;
+  sessionStatus?: SessionRealtimeStatus | null;
+  agentTreeRevision?: number;
   onSelectAgent: (agent: SessionAgent | null) => void;
+  onAgentsChange?: (agents: readonly SessionAgent[]) => void;
   onBackgroundTaskCancelled?: (taskId: string) => void;
 }
 
 const TERMINAL_STATUSES = new Set(['completed', 'done', 'failed', 'cancelled', 'stopped', 'terminated']);
 const ACTIVE_STATUSES = new Set(['running', 'active', 'pending', 'awaiting_approval', 'awaiting_question']);
+const EMPTY_AGENT_CHILDREN = new Map<string, readonly SessionAgent[]>();
 
 function isTerminalAgent(agent: SessionAgent): boolean {
-  return TERMINAL_STATUSES.has(agent.status.toLowerCase());
+  return TERMINAL_STATUSES.has(agentStatus(agent));
 }
 
 function isActiveAgent(agent: SessionAgent): boolean {
-  return ACTIVE_STATUSES.has(agent.status.toLowerCase());
+  return ACTIVE_STATUSES.has(agentStatus(agent));
+}
+
+export function isActiveDiscussionAgent(agent: SessionAgent): boolean {
+  const status = agentStatus(agent);
+  return (agent.kind === 'discussion' || status === 'discuss')
+    && !agent.archived
+    && status !== 'archived'
+    && !isTerminalAgent(agent);
+}
+
+export function activeDiscussionForAgent(
+  agents: readonly SessionAgent[],
+  selectedAgentId: string,
+  _sessionStatus?: SessionRealtimeStatus | null,
+): boolean {
+  const byId = new Map(agents.map(agent => [agent.agent_id, agent]));
+  const discussions = agents.filter(isActiveDiscussionAgent);
+  if (discussions.length === 0) return false;
+  if (selectedAgentId === 'main') return true;
+  const isInBranch = (startId: string, targetId: string): boolean => {
+    let current = byId.get(startId);
+    const visited = new Set<string>();
+    while (current && current.agent_id !== 'main' && !visited.has(current.agent_id)) {
+      if (current.agent_id === targetId) return true;
+      visited.add(current.agent_id);
+      current = current.parent_agent_id ? byId.get(current.parent_agent_id) : undefined;
+    }
+    return false;
+  };
+  return discussions.some(discussion => {
+    return isInBranch(selectedAgentId, discussion.agent_id)
+      || isInBranch(discussion.agent_id, selectedAgentId);
+  });
+}
+
+function agentStatus(agent: SessionAgent): string {
+  return typeof agent.status === 'string' ? agent.status.toLowerCase() : '';
 }
 
 function agentLabel(agent: SessionAgent): string {
@@ -65,6 +106,96 @@ function backgroundTasksOnly(tasks: readonly BackgroundTask[]): BackgroundTask[]
   return tasks.filter(task => task.kind !== 'subagent');
 }
 
+interface AgentTreeData {
+  teamPartners: SessionAgent[];
+  activeDiscussions: SessionAgent[];
+  liveMainSubAgents: SessionAgent[];
+  otherActiveRoots: SessionAgent[];
+  archivedAgents: SessionAgent[];
+  teamChildrenByParent: Map<string, SessionAgent[]>;
+  temporaryChildrenByParent: Map<string, SessionAgent[]>;
+  archivedChildrenByParent: Map<string, SessionAgent[]>;
+}
+
+function buildChildrenByParent(
+  agents: readonly SessionAgent[],
+  allowedIds: ReadonlySet<string>,
+): Map<string, SessionAgent[]> {
+  const candidateById = new Map<string, string>();
+  for (const agent of agents) {
+    const candidate = typeof agent.parent_agent_id === 'string' ? agent.parent_agent_id : undefined;
+    if (
+      candidate
+      && candidate !== agent.agent_id
+      && (candidate === 'main' || allowedIds.has(candidate))
+    ) {
+      candidateById.set(agent.agent_id, candidate);
+    }
+  }
+
+  const createsCycle = (agentId: string, candidate: string): boolean => {
+    const visited = new Set<string>([agentId]);
+    let current: string | undefined = candidate;
+    while (current && current !== 'main') {
+      if (visited.has(current)) return true;
+      visited.add(current);
+      current = candidateById.get(current);
+    }
+    return false;
+  };
+
+  const childrenByParent = new Map<string, SessionAgent[]>();
+  for (const agent of agents) {
+    const candidate = candidateById.get(agent.agent_id);
+    const parent = candidate && !createsCycle(agent.agent_id, candidate) ? candidate : 'main';
+    const children = childrenByParent.get(parent) ?? [];
+    children.push(agent);
+    childrenByParent.set(parent, children);
+  }
+  return childrenByParent;
+}
+
+function buildAgentTreeData(agents: readonly SessionAgent[]): AgentTreeData {
+  const uniqueAgents: SessionAgent[] = [];
+  const seenIds = new Set<string>();
+  for (const agent of agents) {
+    if (!agent || typeof agent.agent_id !== 'string' || !agent.agent_id || seenIds.has(agent.agent_id)) continue;
+    seenIds.add(agent.agent_id);
+    uniqueAgents.push(agent);
+  }
+
+  const nonMainAgents = uniqueAgents.filter(agent => agent.agent_id !== 'main' && agent.kind !== 'main');
+  const archived = nonMainAgents.filter(agent => (
+    agent.archived
+    || agentStatus(agent) === 'archived'
+    || ((agent.kind === 'sub' || agent.kind === 'discussion') && isTerminalAgent(agent))
+  ));
+  const active = nonMainAgents.filter(agent => !archived.includes(agent));
+  const activeIds = new Set(active.map(agent => agent.agent_id));
+  const archivedIds = new Set(archived.map(agent => agent.agent_id));
+  const activeChildrenByParent = buildChildrenByParent(active, activeIds);
+  const archivedChildrenByParent = buildChildrenByParent(archived, archivedIds);
+  const activeRoots = activeChildrenByParent.get('main') ?? [];
+  const teamPartners = activeRoots.filter(agent => agent.kind === 'team');
+  const activeDiscussions = activeRoots.filter(agent => agent.kind === 'discussion');
+  const temporaryRoots = activeRoots.filter(agent => agent.kind !== 'team' && agent.kind !== 'discussion');
+  const teamChildrenByParent = new Map(activeChildrenByParent);
+  const temporaryChildrenByParent = new Map(activeChildrenByParent);
+  teamChildrenByParent.set('main', teamPartners);
+  temporaryChildrenByParent.set('main', temporaryRoots);
+
+  return {
+    teamPartners,
+    activeDiscussions,
+    liveMainSubAgents: temporaryRoots.filter(agent => agent.kind === 'sub'),
+    otherActiveRoots: temporaryRoots.filter(agent => agent.kind !== 'sub'),
+    archivedAgents: archivedChildrenByParent.get('main') ?? [],
+    teamChildrenByParent,
+    temporaryChildrenByParent,
+    archivedChildrenByParent,
+  };
+}
+
 export function SessionAgentTree({
   sessionId,
   selectedAgentId,
@@ -72,7 +203,10 @@ export function SessionAgentTree({
   backgroundLoading = false,
   backgroundError = null,
   hasGlobalActivity = false,
+  sessionStatus: _sessionStatus = null,
+  agentTreeRevision = 0,
   onSelectAgent,
+  onAgentsChange,
   onBackgroundTaskCancelled,
 }: SessionAgentTreeProps) {
   const { tr } = useI18n();
@@ -85,16 +219,28 @@ export function SessionAgentTree({
   const treeRef = useRef<HTMLDetailsElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const loadedSessionIdRef = useRef<string | null>(null);
+  const openRef = useRef(false);
+  const refreshDeferredRef = useRef(false);
+  const agentsRef = useRef<SessionAgent[]>([]);
+  const [collapsedAgentIds, setCollapsedAgentIds] = useState<Set<string>>(() => new Set());
+  const [sectionOpen, setSectionOpen] = useState({ team: true, discussion: true, temporary: true, background: false, archive: false });
 
   const refresh = useCallback(async () => {
     if (!sessionId) {
       loadedSessionIdRef.current = null;
+      agentsRef.current = [];
       setAgents([]);
       setError(null);
+      onAgentsChange?.([]);
+      return;
+    }
+    if (openRef.current && loadedSessionIdRef.current === sessionId) {
+      refreshDeferredRef.current = true;
       return;
     }
     if (loadedSessionIdRef.current !== sessionId) {
       loadedSessionIdRef.current = sessionId;
+      agentsRef.current = [];
       setAgents([]);
       setError(null);
     }
@@ -104,7 +250,11 @@ export function SessionAgentTree({
       const result = await api.sessions.getAgents(sessionId);
       if (requestId !== requestIdRef.current) return;
       const items = result.items ?? [];
-      setAgents(items);
+      if (!sameAgentList(agentsRef.current, items)) {
+        agentsRef.current = items;
+        setAgents(items);
+        onAgentsChange?.(items);
+      }
       setError(null);
       if (selectedAgentId !== 'main' && !items.some(agent => agent.agent_id === selectedAgentId)) {
         onSelectAgent(null);
@@ -115,7 +265,14 @@ export function SessionAgentTree({
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [onSelectAgent, selectedAgentId, sessionId]);
+  }, [onAgentsChange, onSelectAgent, selectedAgentId, sessionId]);
+
+  useEffect(() => {
+    openRef.current = false;
+    refreshDeferredRef.current = false;
+    setCollapsedAgentIds(new Set());
+    setSectionOpen({ team: true, discussion: true, temporary: true, background: false, archive: false });
+  }, [sessionId]);
 
   useEffect(() => {
     void refresh();
@@ -127,35 +284,21 @@ export function SessionAgentTree({
     };
   }, [refresh, sessionId]);
 
-  const { teamPartners, liveDiscussions, liveMainSubAgents, archivedAgents, childrenByParent } = useMemo(() => {
-    const archived: SessionAgent[] = [];
-    const active: SessionAgent[] = [];
-    for (const agent of agents) {
-      if (agent.kind === 'main') continue;
-      const done = agent.archived
-        || agent.status.toLowerCase() === 'archived'
-        || (agent.kind === 'sub' && isTerminalAgent(agent))
-        || (agent.kind === 'discussion' && isTerminalAgent(agent));
-      if (done) archived.push(agent);
-      else active.push(agent);
-    }
-    const children = new Map<string, SessionAgent[]>();
-    const teamPartners = active.filter(agent => agent.kind === 'team');
-    const liveDiscussions = active.filter(agent => agent.kind === 'discussion');
-    const liveMainSubAgents: SessionAgent[] = [];
-    for (const agent of active) {
-      if (agent.kind !== 'sub') continue;
-      const parentAgentId = agent.parent_agent_id || 'main';
-      if (parentAgentId === 'main') {
-        liveMainSubAgents.push(agent);
-        continue;
-      }
-      const existing = children.get(parentAgentId) ?? [];
-      existing.push(agent);
-      children.set(parentAgentId, existing);
-    }
-    return { teamPartners, liveDiscussions, liveMainSubAgents, archivedAgents: archived, childrenByParent: children };
-  }, [agents]);
+  useEffect(() => {
+    if (!sessionId || agentTreeRevision === 0) return;
+    void refresh();
+  }, [agentTreeRevision, refresh, sessionId]);
+
+  const {
+    teamPartners,
+    activeDiscussions,
+    liveMainSubAgents,
+    otherActiveRoots,
+    archivedAgents,
+    teamChildrenByParent,
+    temporaryChildrenByParent,
+    archivedChildrenByParent,
+  } = useMemo(() => buildAgentTreeData(agents), [agents]);
 
   const mainAgent = useMemo<SessionAgent | null>(() => {
     if (!sessionId) return null;
@@ -167,13 +310,17 @@ export function SessionAgentTree({
     };
   }, [agents, sessionId, tr]);
   const visibleBackground = backgroundTasksOnly(backgroundTasks);
-  const hasLiveTeam = teamPartners.length > 0;
-  const hasLiveSubAgent = liveMainSubAgents.length > 0 || [...childrenByParent.values()].some(list => list.length > 0);
+  const hasLiveTeam = teamPartners.length > 0 || activeDiscussions.length > 0;
+  const hasLiveSubAgent = liveMainSubAgents.length > 0
+    || [...temporaryChildrenByParent.values()].some(list => list.length > 0);
   const hasActivity = hasGlobalActivity
     || teamPartners.some(isActiveAgent)
+    || activeDiscussions.some(isActiveAgent)
     || liveMainSubAgents.some(isActiveAgent)
-    || [...childrenByParent.values()].some(list => list.some(isActiveAgent))
+    || [...teamChildrenByParent.values()].some(list => list.some(isActiveAgent))
+    || [...temporaryChildrenByParent.values()].some(list => list.some(isActiveAgent))
     || visibleBackground.some(task => task.status === 'running');
+  const discussionActive = activeDiscussionForAgent(agents, selectedAgentId, _sessionStatus);
   const triggerLabel = hasLiveTeam
     ? tr('Team', '团队')
     : hasLiveSubAgent
@@ -188,7 +335,7 @@ export function SessionAgentTree({
     if (!trigger) return undefined;
     const bounds = trigger.getBoundingClientRect();
     const viewportMargin = 16;
-    const width = Math.min(504, Math.max(280, window.innerWidth - viewportMargin * 2));
+    const width = Math.min(440, Math.max(280, window.innerWidth - viewportMargin * 2));
     const right = Math.max(viewportMargin, window.innerWidth - bounds.right);
     return {
       top: bounds.bottom + 6,
@@ -227,31 +374,61 @@ export function SessionAgentTree({
     onSelectAgent(agent);
   }, [closeTree, onSelectAgent]);
 
-  const menu = <div ref={menuRef} className="session-agent-tree-menu" style={menuStyle} role="menu">
+  const toggleAgent = useCallback((agentId: string) => {
+    setCollapsedAgentIds(previous => {
+      const next = new Set(previous);
+      if (next.has(agentId)) next.delete(agentId);
+      else next.add(agentId);
+      return next;
+    });
+  }, []);
+  const updateSectionOpen = useCallback((section: 'team' | 'discussion' | 'temporary' | 'background' | 'archive', nextOpen: boolean) => {
+    setSectionOpen(previous => previous[section] === nextOpen ? previous : { ...previous, [section]: nextOpen });
+  }, []);
+
+  const treeCounts = {
+    team: teamPartners.length,
+    discussion: activeDiscussions.length,
+    temporary: liveMainSubAgents.length + otherActiveRoots.length,
+    background: visibleBackground.length,
+    archive: archivedAgents.length,
+  };
+  const mainChildrenContent = (treeCounts.team > 0 || treeCounts.discussion > 0 || treeCounts.temporary > 0) ? <>
+    {treeCounts.team > 0 && <TreeSection label={tr('Team partners', '团队伙伴')} count={treeCounts.team} open={sectionOpen.team} onOpenChange={nextOpen => updateSectionOpen('team', nextOpen)}>
+      {teamPartners.map(agent => <AgentNode key={agent.agent_id} agent={agent} selectedAgentId={selectedAgentId} childrenByParent={teamChildrenByParent} collapsedAgentIds={collapsedAgentIds} onToggle={toggleAgent} onSelect={selectAgent} depth={1}/>)}</TreeSection>}
+    {treeCounts.discussion > 0 && <TreeSection className="session-agent-tree-discussion-list" label={tr('Discuss sessions', '讨论会话')} count={treeCounts.discussion} open={sectionOpen.discussion} onOpenChange={nextOpen => updateSectionOpen('discussion', nextOpen)}>
+      {activeDiscussions.map(agent => <AgentNode key={agent.agent_id} agent={agent} selectedAgentId={selectedAgentId} childrenByParent={temporaryChildrenByParent} collapsedAgentIds={collapsedAgentIds} onToggle={toggleAgent} onSelect={selectAgent} depth={1}/>)}</TreeSection>}
+    {treeCounts.temporary > 0 && <TreeSection label={tr('Temporary', '临时')} count={treeCounts.temporary} open={sectionOpen.temporary} onOpenChange={nextOpen => updateSectionOpen('temporary', nextOpen)}>
+      {[...liveMainSubAgents, ...otherActiveRoots].map(agent => <AgentNode key={agent.agent_id} agent={agent} selectedAgentId={selectedAgentId} childrenByParent={temporaryChildrenByParent} collapsedAgentIds={collapsedAgentIds} onToggle={toggleAgent} onSelect={selectAgent} depth={1}/>)}</TreeSection>}
+  </> : undefined;
+  const menu = <div ref={menuRef} className="session-agent-tree-menu" style={menuStyle} role="tree" aria-label={tr('Session agent tree', '会话智能体树')}>
+    <header className="session-agent-tree-menu-header">
+      <div className="session-agent-tree-menu-title">
+        <span className="session-agent-tree-menu-icon"><Icon name="git-branch" size={15}/></span>
+        <span><strong>{tr('Session agents', '会话智能体')}</strong><small>{tr('Main session and branches', '主会话与分支')}</small></span>
+      </div>
+      <div className="session-agent-tree-menu-state">
+        <span className={`session-agent-tree-state-chip${discussionActive ? ' discuss' : ''}`}><Icon name={discussionActive ? 'chat' : 'terminal'} size={11}/>{discussionActive ? tr('Discuss', '讨论') : tr('Code', '执行')}</span>
+        {hasActivity && <span className="session-agent-tree-live-chip"><i aria-hidden="true"/>{tr('Live', '活动中')}</span>}
+      </div>
+    </header>
     {loading && agents.length === 0 && <TreeNotice text={tr('Loading team tree…', '正在加载团队树…')}/>}
     {error && <TreeNotice text={tr('Unable to load the team tree.', '无法加载团队树。')} detail={error} kind="error"/>}
-    {mainAgent && <AgentNode agent={mainAgent} selectedAgentId={selectedAgentId} childrenByParent={new Map()} onSelect={selectAgent} depth={0}/>}
-    {teamPartners.map(agent => <AgentNode key={agent.agent_id} agent={agent} selectedAgentId={selectedAgentId} childrenByParent={childrenByParent} onSelect={selectAgent} depth={0}/>)}
-    {liveDiscussions.map(agent => <AgentNode key={agent.agent_id} agent={agent} selectedAgentId={selectedAgentId} childrenByParent={new Map()} onSelect={selectAgent} depth={0}/>)}
-    {liveMainSubAgents.length > 0 && <div className="session-agent-tree-section">
-      <p className="session-agent-tree-section-label">{tr('Temporary', '临时')}</p>
-      {liveMainSubAgents.map(agent => <AgentNode key={agent.agent_id} agent={agent} selectedAgentId={selectedAgentId} childrenByParent={new Map()} onSelect={selectAgent} depth={1}/>)}
-    </div>}
-    {visibleBackground.length > 0 || backgroundLoading || backgroundError ? <div className="session-agent-tree-background-list">
-      <p className="session-agent-tree-section-label">{tr('Background', '后台')}</p>
+    {mainAgent && <AgentNode agent={mainAgent} selectedAgentId={selectedAgentId} childrenByParent={EMPTY_AGENT_CHILDREN} childrenContent={mainChildrenContent} collapsedAgentIds={collapsedAgentIds} onToggle={toggleAgent} onSelect={selectAgent} depth={0}/>}
+    {visibleBackground.length > 0 || backgroundLoading || backgroundError ? <TreeSection className="session-agent-tree-background-list" label={tr('Background', '后台')} count={treeCounts.background} open={sectionOpen.background} onOpenChange={nextOpen => updateSectionOpen('background', nextOpen)}>
       {backgroundLoading && visibleBackground.length === 0 && <TreeNotice text={tr('Loading background tasks…', '正在加载后台任务…')}/>}
       {backgroundError && <TreeNotice text={tr('Unable to load background tasks.', '无法加载后台任务。')} detail={backgroundError} kind="error"/>}
       {visibleBackground.map(task => <BackgroundTaskNode key={task.id} sessionId={sessionId} task={task} onCancelled={onBackgroundTaskCancelled}/>)}
-    </div> : null}
-    {archivedAgents.length > 0 && <div className="session-agent-tree-section">
-      <p className="session-agent-tree-section-label">{tr('Archive', '归档')}</p>
-      {archivedAgents.map(agent => <AgentNode key={agent.agent_id} agent={agent} selectedAgentId={selectedAgentId} childrenByParent={new Map()} onSelect={selectAgent} depth={1}/>)}
-    </div>}
+    </TreeSection> : null}
+    {archivedAgents.length > 0 && <TreeSection label={tr('Archive', '归档')} count={treeCounts.archive} open={sectionOpen.archive} onOpenChange={nextOpen => updateSectionOpen('archive', nextOpen)}>
+      {archivedAgents.map(agent => <AgentNode key={agent.agent_id} agent={agent} selectedAgentId={selectedAgentId} childrenByParent={archivedChildrenByParent} collapsedAgentIds={collapsedAgentIds} onToggle={toggleAgent} onSelect={selectAgent} depth={1}/>)}
+    </TreeSection>}
     {!loading && !error && !mainAgent && visibleBackground.length === 0 && <TreeNotice text={tr('No team, SubAgent, or background tasks.', '暂无团队、SubAgent 或后台任务。')}/>}
   </div>;
 
-  return <><details ref={treeRef} className={`session-agent-tree${hasActivity ? ' activity-pending' : ''}`} onToggle={event => {
+  return <><details ref={treeRef} className={`session-agent-tree${hasActivity ? ' activity-pending' : ''}${discussionActive ? ' discussion-active' : ''}`} onToggle={event => {
     const isOpen = event.currentTarget.open;
+    openRef.current = isOpen;
     if (isOpen) {
       // Measure before mounting the portal so the first frame is anchored;
       // the next animation frame then tracks any layout shift.
@@ -260,33 +437,64 @@ export function SessionAgentTree({
       requestAnimationFrame(updateMenuPosition);
     } else {
       setOpen(false);
+      if (refreshDeferredRef.current) {
+        refreshDeferredRef.current = false;
+        void refresh();
+      }
     }
   }}>
     <summary title={tr('Open the team and SubAgent tree', '查看团队与 SubAgent 树')}>
-      <Icon name="git-branch" size={15}/><span>{triggerLabel}</span>{hasActivity && <i aria-label={tr('Activity pending', '有活动任务')}/>}<Icon name="chevron-down" size={13}/>
+      <Icon name="git-branch" size={15}/><span className="session-agent-tree-trigger-label">{triggerLabel}</span><span className="session-agent-tree-trigger-context">{tr('agents', '智能体')}</span>{discussionActive && <span className="session-agent-tree-mode" data-mode="discuss"><Icon name="chat" size={12}/><span>{tr('Discuss', '讨论')}</span></span>}{hasActivity && <i aria-label={tr('Activity pending', '有活动任务')}/>}<Icon name="chevron-down" size={13}/>
     </summary>
-  </details>{open && createPortal(menu, document.body)}</>;
+  </details>{open && menuStyle && createPortal(menu, document.body)}</>;
 }
 
-function AgentNode({ agent, selectedAgentId, childrenByParent, onSelect, depth = 0 }: {
+function TreeSection({ label, count, open, onOpenChange, className, children }: { label: string; count?: number; open: boolean; onOpenChange: (open: boolean) => void; className?: string; children: ReactNode }) {
+  const initialOpen = useRef(open);
+  const sectionRef = useCallback((node: HTMLDetailsElement | null) => {
+    if (node !== null) node.open = initialOpen.current;
+  }, []);
+  // Keep the browser-owned open state after mount. Passing `open={open}` on
+  // every parent refresh makes React race the native details toggle and causes
+  // the section to visibly flash back and forth.
+  return <details ref={sectionRef} className={`session-agent-tree-section${className ? ` ${className}` : ''}`} onToggle={event => {
+    if (event.target !== event.currentTarget) return;
+    onOpenChange(event.currentTarget.open);
+  }}>
+    <summary><Icon name="chevron-right" size={11}/><span className="session-agent-tree-section-label">{label}</span>{count !== undefined && <span className="session-agent-tree-section-count">{count}</span>}</summary>
+    <div className="session-agent-tree-section-body">{children}</div>
+  </details>;
+}
+
+function AgentNode({ agent, selectedAgentId, childrenByParent, childrenContent, collapsedAgentIds, onToggle, onSelect, depth = 0 }: {
   agent: SessionAgent;
   selectedAgentId: string;
   childrenByParent: ReadonlyMap<string, readonly SessionAgent[]>;
+  childrenContent?: ReactNode;
+  collapsedAgentIds: ReadonlySet<string>;
+  onToggle: (agentId: string) => void;
   onSelect: (agent: SessionAgent) => void;
   depth?: number;
 }) {
   const { tr } = useI18n();
   const children = childrenByParent.get(agent.agent_id) ?? [];
+  const hasChildren = children.length > 0 || (childrenContent !== undefined && childrenContent !== null);
   const label = agentLabel(agent);
   const summary = humanSummary(agent.summary) ?? humanSummary(agent.intro);
   const lastActive = relativeTime(agent.last_active);
+  const collapsed = collapsedAgentIds.has(agent.agent_id);
   const selectable = agent.archived || !isTerminalAgent(agent) || agent.kind === 'team' || agent.kind === 'discussion' || agent.kind === 'sub';
   const identity = agentIdentity(agent, tr);
-  return <div className={`session-agent-tree-node depth-${depth}${selectedAgentId === agent.agent_id ? ' selected' : ''}${!selectable ? ' terminal' : ''}`} style={{ '--agent-tree-depth': depth } as CSSProperties}>
-    <button type="button" role="menuitem" disabled={!selectable} onClick={() => onSelect(agent)} title={summary ?? label}>
-      <span className={`status-dot ${agentStatusClass(agent.status)}`}/><span className="session-agent-tree-copy"><span><strong>{label}</strong><em>({identity})</em></span>{summary && <small>{summary}</small>}</span><span className="session-agent-tree-meta">{typeof agent.tokens === 'number' && agent.tokens > 0 && <small>{agent.tokens.toLocaleString()} tok</small>}{lastActive && <small title={agent.last_active}>{lastActive}</small>}</span>
+  const role = agentRole(agent, tr);
+  const isDiscussion = agent.kind === 'discussion';
+  const isArchivedDiscussion = isDiscussion && (agent.archived || agentStatus(agent) === 'archived');
+  return <div data-agent-id={agent.agent_id} data-agent-kind={agent.kind} className={`session-agent-tree-node depth-${depth}${hasChildren ? ` has-children${collapsed ? ' children-collapsed' : ' children-expanded'}` : ''}${isDiscussion ? ` discussion${isArchivedDiscussion ? ' archived-discussion' : ''}` : ''}${selectedAgentId === agent.agent_id ? ' selected' : ''}${!selectable ? ' terminal' : ''}`} style={{ '--agent-tree-depth': depth } as CSSProperties} role="treeitem" aria-level={depth + 1} aria-expanded={hasChildren ? !collapsed : undefined}>
+    <span className="session-agent-tree-branch" aria-hidden="true"/>
+    {hasChildren ? <button type="button" className="session-agent-tree-toggle" aria-label={collapsed ? tr('Expand children', '展开子项') : tr('Collapse children', '折叠子项')} aria-expanded={!collapsed} onClick={event => { event.stopPropagation(); onToggle(agent.agent_id); }}><Icon name="chevron-right" size={11}/></button> : <span className="session-agent-tree-toggle-spacer" aria-hidden="true"/>}
+    <button type="button" disabled={!selectable} onClick={() => onSelect(agent)} title={summary ?? label} aria-current={selectedAgentId === agent.agent_id ? 'true' : undefined}>
+      <span className={`status-dot ${agentStatusClass(agent.status)}`}/><span className="session-agent-tree-copy"><span><strong>{label}</strong><span className="session-agent-tree-identity">{isDiscussion && <Icon name="chat" size={11}/>}<em>({identity})</em></span></span>{summary && <small>{summary}</small>}</span><span className="session-agent-tree-meta"><span className={`session-agent-tree-role role-${agent.kind}`}>{role}</span>{typeof agent.tokens === 'number' && agent.tokens > 0 && <small>{agent.tokens.toLocaleString()} tok</small>}{lastActive && <small title={agent.last_active}>{lastActive}</small>}</span>
     </button>
-    {children.length > 0 && <div className="session-agent-tree-children">{children.map(child => <AgentNode key={child.agent_id} agent={child} selectedAgentId={selectedAgentId} childrenByParent={childrenByParent} onSelect={onSelect} depth={depth + 1}/>)}</div>}
+    {hasChildren && !collapsed && <div className="session-agent-tree-children" role="group">{children.map(child => <AgentNode key={child.agent_id} agent={child} selectedAgentId={selectedAgentId} childrenByParent={childrenByParent} collapsedAgentIds={collapsedAgentIds} onToggle={onToggle} onSelect={onSelect} depth={depth + 1}/>)}{childrenContent}</div>}
   </div>;
 }
 
@@ -295,11 +503,40 @@ function agentIdentity(agent: SessionAgent, tr: (english: string, chinese: strin
     case 'main': return tr('Main session', '主会话');
     case 'team': return tr('Team partner', '团队伙伴');
     case 'sub': return tr('SubAgent', 'SubAgent');
-    case 'discussion': return agent.archived || agent.status.toLowerCase() === 'archived'
+    case 'discussion': return agent.archived || agentStatus(agent) === 'archived'
       ? tr('Archived Discuss', '已归档 Discuss')
       : tr('Discuss', '讨论');
     default: return tr('Agent', '智能体');
   }
+}
+
+function agentRole(agent: SessionAgent, tr: (english: string, chinese: string) => string): string {
+  switch (agent.kind) {
+    case 'main': return tr('ROOT', '根节点');
+    case 'team': return tr('TEAM', '团队');
+    case 'discussion': return tr('DISCUSS', '讨论');
+    case 'sub': return tr('SUBAGENT', '子代理');
+    default: return tr('AGENT', '代理');
+  }
+}
+
+function sameAgentList(previous: readonly SessionAgent[], next: readonly SessionAgent[]): boolean {
+  if (previous.length !== next.length) return false;
+  return previous.every((agent, index) => {
+    const candidate = next[index];
+    return candidate !== undefined
+      && agent.agent_id === candidate.agent_id
+      && agent.kind === candidate.kind
+      && agent.parent_agent_id === candidate.parent_agent_id
+      && agent.name === candidate.name
+      && agent.title === candidate.title
+      && agent.intro === candidate.intro
+      && agent.status === candidate.status
+      && agent.tokens === candidate.tokens
+      && agent.last_active === candidate.last_active
+      && agent.summary === candidate.summary
+      && agent.archived === candidate.archived;
+  });
 }
 
 function BackgroundTaskNode({ sessionId, task, onCancelled }: { sessionId: string | null; task: BackgroundTask; onCancelled?: (taskId: string) => void }) {

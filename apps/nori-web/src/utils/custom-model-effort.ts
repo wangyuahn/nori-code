@@ -4,6 +4,8 @@ export type CustomModelThinkingMode = 'unsupported' | 'toggle' | 'efforts';
 
 export interface CustomModelDraft {
   id: string;
+  displayName?: string;
+  contextLength?: string;
   thinking: CustomModelThinkingMode;
   supportEfforts: string[];
   defaultEffort: string;
@@ -20,7 +22,7 @@ export const COMMON_THINKING_EFFORTS = [
 ] as const;
 
 export function emptyCustomModelDraft(): CustomModelDraft {
-  return { id: '', thinking: 'unsupported', supportEfforts: [], defaultEffort: '' };
+  return { id: '', displayName: '', contextLength: '128000', thinking: 'unsupported', supportEfforts: [], defaultEffort: '' };
 }
 
 export function parseCustomModelDrafts(
@@ -73,9 +75,13 @@ export function customModelAliasPatch(
     ...previous,
     provider: providerId,
     model: id,
-    max_context_size: numberField(previous['max_context_size'] ?? previous['maxContextSize']) ?? 128000,
+    max_context_size: parseContextLength(draft.contextLength)
+      ?? numberField(previous['max_context_size'] ?? previous['maxContextSize'])
+      ?? 128000,
     capabilities,
-    display_name: stringField(previous['display_name'] ?? previous['displayName']) ?? id,
+    display_name: draft.displayName !== undefined
+      ? (draft.displayName.trim() || id)
+      : stringField(previous['display_name'] ?? previous['displayName']) ?? id,
     thinking_support: draft.thinking !== 'unsupported',
   };
 
@@ -102,6 +108,10 @@ export function validateCustomModelDrafts(drafts: readonly CustomModelDraft[]): 
   if (ids.length === 0) return 'Add at least one custom model when automatic discovery is disabled.';
   for (const draft of drafts) {
     if (!draft.id.trim()) continue;
+    const contextLength = parseContextLength(draft.contextLength);
+    if (contextLength === undefined) {
+      return `Model ${draft.id.trim()} needs a positive integer context length.`;
+    }
     if (draft.thinking === 'efforts' && uniqueStrings(draft.supportEfforts).length === 0) {
       return `Model ${draft.id.trim()} needs at least one thinking effort.`;
     }
@@ -111,8 +121,12 @@ export function validateCustomModelDrafts(drafts: readonly CustomModelDraft[]): 
 
 function aliasToCustomModelDraft(id: string, alias: unknown): CustomModelDraft {
   if (!isRecord(alias)) {
-    return { id, thinking: 'unsupported', supportEfforts: [], defaultEffort: '' };
+    return { ...emptyCustomModelDraft(), id };
   }
+  const displayName = stringField(alias['display_name'] ?? alias['displayName']) ?? '';
+  const contextLength = String(
+    parseContextLength(alias['max_context_size'] ?? alias['maxContextSize']) ?? 128000,
+  );
   const efforts = uniqueStrings(alias['support_efforts'] ?? alias['supportEfforts']);
   const capabilities = uniqueStrings(alias['capabilities']);
   const thinkingSupport = booleanField(alias['thinking_support'] ?? alias['thinkingSupport'])
@@ -121,15 +135,17 @@ function aliasToCustomModelDraft(id: string, alias: unknown): CustomModelDraft {
     const defaultEffort = stringField(alias['default_effort'] ?? alias['defaultEffort']) ?? '';
     return {
       id,
+      displayName,
+      contextLength,
       thinking: 'efforts',
       supportEfforts: efforts,
       defaultEffort: efforts.includes(defaultEffort) ? defaultEffort : defaultEffortFromList(efforts) ?? '',
     };
   }
   if (thinkingSupport === true) {
-    return { id, thinking: 'toggle', supportEfforts: [], defaultEffort: '' };
+    return { id, displayName, contextLength, thinking: 'toggle', supportEfforts: [], defaultEffort: '' };
   }
-  return { id, thinking: 'unsupported', supportEfforts: [], defaultEffort: '' };
+  return { id, displayName, contextLength, thinking: 'unsupported', supportEfforts: [], defaultEffort: '' };
 }
 
 export function customModelToCatalogItem(
@@ -145,6 +161,7 @@ export function customModelToCatalogItem(
     provider: providerId,
     model: `${providerId}/${draft.id.trim()}`,
     max_context_size: numberField(alias['max_context_size']) ?? 128000,
+    display_name: stringField(alias['display_name']) ?? undefined,
     capabilities: stringArray(alias['capabilities']),
     supports_thinking: alias['thinking_support'] === true,
     support_efforts: Array.isArray(alias['support_efforts']) ? stringArray(alias['support_efforts']) : undefined,
@@ -184,6 +201,14 @@ function stringField(value: unknown): string | undefined {
 
 function numberField(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function parseContextLength(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === 'number') return Number.isInteger(value) && value > 0 ? value : undefined;
+  if (typeof value !== 'string' || !/^\d+$/.test(value.trim())) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function booleanField(value: unknown): boolean | undefined {

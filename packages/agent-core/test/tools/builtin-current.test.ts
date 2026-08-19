@@ -389,6 +389,7 @@ describe('current builtin collaboration tools', () => {
       signal,
     );
     expect(spoken.output).toBe('Statement published.');
+    expect(spoken.stopTurn).toBe(true);
     expect(speakInDiscussion).toHaveBeenCalledWith('The cache key is stable.');
     const statusOutput = typeof currentStatus.output === 'string' ? currentStatus.output : '';
     expect(JSON.parse(statusOutput)).toMatchObject({

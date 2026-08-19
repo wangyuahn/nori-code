@@ -84,6 +84,32 @@ function mkAssistantMessage(text: string, toolCalls: ContextMessage['toolCalls']
   } as ContextMessage;
 }
 
+function mkTeamDirectMessage(text: string): ContextMessage {
+  return {
+    role: 'user',
+    content: [{ type: 'text', text }],
+    toolCalls: [],
+    origin: {
+      kind: 'system_trigger',
+      name: 'team_dm',
+      speaker: { from: 'team', speakerId: 'agent-alpha', speakerName: 'Alpha' },
+    },
+  } as ContextMessage;
+}
+
+function mkLegacyTeamDirectMessage(text: string): ContextMessage {
+  return {
+    role: 'user',
+    content: [{ type: 'text', text: `<system-reminder>${text}</system-reminder>` }],
+    toolCalls: [],
+    origin: {
+      kind: 'system_trigger',
+      name: 'team_member',
+      speaker: { from: 'team', speakerId: 'agent-alpha', speakerName: 'Alpha' },
+    },
+  } as ContextMessage;
+}
+
 describe('deriveMessageId / parseMessageId', () => {
   it('round-trips a derived id', () => {
     const id = deriveMessageId('sess_01HABC', 3);
@@ -178,6 +204,26 @@ describe('toProtocolMessage content adapter', () => {
       tool_name: 'Bash',
       input: { command: 'ls' },
     });
+  });
+
+  it('serializes ContextInjection through the same tool_use protocol', () => {
+    const m: ContextMessage = {
+      role: 'assistant',
+      content: [],
+      toolCalls: [{
+        type: 'function',
+        id: 'context-injection-1',
+        name: 'ContextInjection',
+        arguments: JSON.stringify({ source: 'system_reminder' }),
+      }],
+    } as ContextMessage;
+    const out = toProtocolMessage(SESSION_ID, 2, m, SESSION_CREATED_AT);
+    expect(out.content).toEqual([{
+      type: 'tool_use',
+      tool_call_id: 'context-injection-1',
+      tool_name: 'ContextInjection',
+      input: { source: 'system_reminder' },
+    }]);
   });
 
   it('treats tool-role messages as a single tool_result content part', () => {
@@ -276,6 +322,34 @@ describe('MessageService', () => {
   it('list filters by role AFTER pagination', async () => {
     const page = await impl.list(SESSION_ID, { role: 'user' });
     expect(page.items.every((m) => m.role === 'user')).toBe(true);
+  });
+
+  it('hides internal TeamDM transport while preserving visible message ids', async () => {
+    const history = [
+      mkUserMessage('visible-before'),
+      mkTeamDirectMessage('private-to-main'),
+      mkLegacyTeamDirectMessage('legacy-private-to-main'),
+      mkUserMessage('visible-after'),
+    ];
+    bridge = makeFakeBridge([mkSummary()], history);
+    impl.dispose();
+    impl = new MessageService(bridge);
+
+    const page = await impl.list(SESSION_ID, { page_size: 10 });
+    expect(page.items.map((m) => (m.content[0] as { text: string }).text)).toEqual([
+      'visible-after',
+      'visible-before',
+    ]);
+    expect(page.items.map((m) => m.id)).toEqual([
+      deriveMessageId(SESSION_ID, 3),
+      deriveMessageId(SESSION_ID, 0),
+    ]);
+    await expect(impl.get(SESSION_ID, deriveMessageId(SESSION_ID, 1)))
+      .rejects.toBeInstanceOf(MessageNotFoundError);
+    await expect(impl.get(SESSION_ID, deriveMessageId(SESSION_ID, 2)))
+      .rejects.toBeInstanceOf(MessageNotFoundError);
+    await expect(impl.get(SESSION_ID, deriveMessageId(SESSION_ID, 3)))
+      .resolves.toMatchObject({ id: deriveMessageId(SESSION_ID, 3) });
   });
 
   it('list throws SessionNotFoundError for unknown sid', async () => {

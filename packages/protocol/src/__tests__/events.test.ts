@@ -8,6 +8,7 @@ import {
   agentEventSchema,
   assistantDeltaEventSchema,
   eventSchema,
+  promptOriginSchema,
   toolCallStartedEventSchema,
 } from '../events';
 import type { Event } from '../events';
@@ -18,6 +19,32 @@ const _assertEvent: _AssertEventNonNever = true;
 
 type _AssertToolInputDisplayNonNever = ToolInputDisplay extends never ? never : true;
 const _assertDisplay: _AssertToolInputDisplayNonNever = true;
+
+describe('prompt origin serialization', () => {
+  it('preserves discussion speaker and visible transcript markers', () => {
+    const origin = promptOriginSchema.parse({
+      kind: 'system_trigger',
+      name: 'team_discussion_skip',
+      discussionSkipReason: 'unavailable',
+      discussionRound: 2,
+      discussionToolName: 'WebSearch',
+      speaker: {
+        from: 'team',
+        speakerId: 'member-1',
+        speakerName: 'Reviewer',
+      },
+    });
+
+    expect(origin).toMatchObject({
+      kind: 'system_trigger',
+      name: 'team_discussion_skip',
+      discussionSkipReason: 'unavailable',
+      discussionRound: 2,
+      discussionToolName: 'WebSearch',
+      speaker: { from: 'team', speakerId: 'member-1' },
+    });
+  });
+});
 
 const packageRoot = fileURLToPath(new URL('../..', import.meta.url));
 const sdkPackageName = ['@moonshot-ai', 'kimi-code-sdk'].join('/');

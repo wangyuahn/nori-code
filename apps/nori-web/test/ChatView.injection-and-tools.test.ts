@@ -74,27 +74,71 @@ describe('ChatView tool details and context injection', () => {
     expect(container.querySelector('.compact-tool-detail')).not.toBeNull();
   });
 
-  it('renders context injection rows with a document icon and source name', async () => {
+  it('renders context injection calls with the shared tool renderer', async () => {
     const { container } = await renderChat({
       messages: [{
         id: 'inject-1',
-        role: 'system',
+        role: 'assistant',
         text: '',
         workBlocks: [
-          { id: 'prompt-1', type: 'context_injection', source: '@deepseek-ai/dsh-system-prompt' },
-          { id: 'skill-1', type: 'context_injection', source: 'skill-catalog' },
-          { id: 'loop-1', type: 'context_injection', source: 'goal_intake', text: 'Continue the current goal.' },
+          { id: 'prompt-1', type: 'tool', tool: { id: 'prompt-1', name: 'ContextInjection', args: { source: '@deepseek-ai/dsh-system-prompt' }, result: '' } },
+          { id: 'skill-1', type: 'tool', tool: { id: 'skill-1', name: 'ContextInjection', args: { source: 'skill-catalog' }, result: '' } },
+          { id: 'loop-1', type: 'tool', tool: { id: 'loop-1', name: 'ContextInjection', args: { source: 'goal_intake' }, result: 'Continue the current goal.' } },
         ],
       }],
     });
 
-    const rows = [...container.querySelectorAll('.compact-context-injection')];
+    const rows = [...container.querySelectorAll('.compact-tool-call')];
     expect(rows.map(row => row.textContent)).toEqual([
-      expect.stringContaining('Context injection · @deepseek-ai/dsh-system-prompt'),
-      expect.stringContaining('Context injection · skill-catalog'),
-      expect.stringContaining('Context injection · goal_intake'),
+      expect.stringContaining('@deepseek-ai/dsh-system-prompt'),
+      expect.stringContaining('skill-catalog'),
+      expect.stringContaining('goal_intake'),
     ]);
-    expect(container.querySelectorAll('.compact-context-injection .compact-tool-icon svg').length).toBe(3);
+    expect(container.querySelectorAll('.compact-tool-call .compact-tool-icon svg').length).toBe(3);
+  });
+
+  it('expands context injection through the shared tool details', async () => {
+    const { container } = await renderChat({
+      messages: [
+        {
+          id: 'inject-expand',
+          role: 'assistant',
+          text: '',
+          workBlocks: [{
+            id: 'inject-body',
+            type: 'tool',
+            tool: {
+              id: 'inject-body',
+              name: 'ContextInjection',
+              args: { source: 'system_reminder' },
+              result: 'Only the model should see this reminder.',
+            },
+          }],
+        },
+        {
+          id: 'discussion-visible',
+          role: 'system',
+          kind: 'discussion',
+          text: '成员建议保留兼容字段。',
+          speaker: { from: 'team', name: '兼容性成员' },
+        },
+      ],
+    });
+
+    const details = container.querySelector<HTMLDetailsElement>('.compact-tool-call')!;
+    expect(details).not.toBeNull();
+    expect(details.open).toBe(false);
+    expect(container.querySelector('.chat-message-discussion')?.textContent).toContain('成员建议保留兼容字段。');
+    expect(container.querySelector('.chat-message-discussion')?.textContent).toContain('兼容性成员');
+
+    await act(async () => {
+      details.open = true;
+      details.dispatchEvent(new Event('toggle'));
+    });
+    expect(details.open).toBe(true);
+    expect(details.textContent).toContain('Only the model should see this reminder.');
+    expect(details.textContent).toContain('Arguments');
+    expect(details.textContent).toContain('Result');
   });
 });
 

@@ -135,6 +135,7 @@ export {
   IMessageService,
   MessageNotFoundError,
   deriveMessageId,
+  isInternalTeamDirectMessage,
   parseMessageId,
   toProtocolMessage,
 } from './message/message';

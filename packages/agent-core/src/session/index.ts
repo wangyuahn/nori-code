@@ -147,6 +147,8 @@ export interface TeamDiscussionMeta {
   readonly updatedAt: string;
   /** Monotonic statement sequence used by participant-specific read cursors. */
   readonly nextStatementId?: number;
+  /** Number of completed or currently running discussion rounds. */
+  readonly round?: number;
   /** Last shared statement delivered to each participant. Kept out of model prompts. */
   readonly readCursors?: Readonly<Record<string, number>>;
   /**
@@ -790,7 +792,12 @@ export class Session {
   async assignTeamTasks(
     leaderAgentId: string,
     assignments: readonly TeamAssignment[],
-  ): Promise<Array<{ readonly agentId: string; readonly task: string | null; readonly agent: Agent }>> {
+  ): Promise<Array<{
+    readonly agentId: string;
+    readonly task: string | null;
+    readonly agent: Agent;
+    readonly assignedAt?: string;
+  }>> {
     this.assertTeamLead(leaderAgentId);
     const members = this.teamMemberMetadata(leaderAgentId);
     if (members.length === 0) {
@@ -849,7 +856,40 @@ export class Session {
     await this.writeMetadata();
     const leader = await this.ensureAgentResumed(leaderAgentId);
     if (leader.discussMode.isActive) leader.discussMode.exit();
-    return resolved;
+    return resolved.map((assignment) => ({
+      ...assignment,
+      assignedAt: assignment.task === null ? undefined : assignedAt,
+    }));
+  }
+
+  /**
+   * Release one member's write lease only if it still belongs to the observed
+   * TeamAssign call. A late completion from an older turn must never revoke a
+   * newer assignment for the same durable member.
+   */
+  async releaseTeamAssignment(
+    leaderAgentId: string,
+    agentId: string,
+    assignedAt: string,
+  ): Promise<boolean> {
+    this.assertTeamLead(leaderAgentId);
+    const current = this.metadata.agents[agentId];
+    if (
+      current?.kind !== 'team'
+      || current.teamLeaderAgentId !== leaderAgentId
+      || current.assignedAt !== assignedAt
+    ) {
+      return false;
+    }
+    this.metadata.agents[agentId] = {
+      ...current,
+      assignedTask: undefined,
+      assignedAt: undefined,
+    };
+    const agent = this.getReadyAgent(agentId);
+    if (agent !== undefined) this.configureTeamAgentRuntime(agent, this.metadata.agents[agentId]!);
+    await this.writeMetadata();
+    return true;
   }
 
   /** Revoke every TeamAssign write lease. Used when re-entering Discuss or archiving. */
@@ -910,6 +950,7 @@ export class Session {
       startedAt: now,
       updatedAt: now,
       nextStatementId: 0,
+      round: 0,
       readCursors: Object.fromEntries(participants.map((agentId) => [agentId, 0])),
       statements: [],
     };
@@ -936,7 +977,7 @@ export class Session {
 
   async updateTeamDiscussion(
     discussionAgentId: string,
-    update: Pick<TeamDiscussionMeta, 'participantAgentIds' | 'status' | 'topic'>,
+    update: Pick<TeamDiscussionMeta, 'participantAgentIds' | 'status' | 'topic'> & Pick<Partial<TeamDiscussionMeta>, 'round'>,
   ): Promise<TeamDiscussionMeta> {
     const meta = this.metadata.agents[discussionAgentId];
     if (meta?.discussion === undefined) {
@@ -1003,6 +1044,11 @@ export class Session {
         speaker: { from: 'lead', speakerId: leaderAgentId, speakerName: '主代理' },
       },
     );
+    transcript.emitEvent({
+      type: 'discussion.updated',
+      discussionAgentId,
+      kind: 'message',
+    });
     await this.writeMetadata();
     return { discussionAgentId, entryId };
   }
@@ -1055,6 +1101,11 @@ export class Session {
         speaker: { from: 'team', speakerId: agentId, speakerName: record.name },
       },
     );
+    transcript.emitEvent({
+      type: 'discussion.updated',
+      discussionAgentId,
+      kind: 'message',
+    });
     const speaks = this.teamDiscussionSpeaks.get(discussionAgentId) ?? new Map<string, TeamDiscussionStatementRecord>();
     speaks.set(agentId, record);
     this.teamDiscussionSpeaks.set(discussionAgentId, speaks);

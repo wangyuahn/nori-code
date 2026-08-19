@@ -654,6 +654,50 @@ describe('interactive user questions', () => {
 });
 
 describe('tool permission controls', () => {
+  it('renders global approvals above the composer and resolves them through the source-aware handler', async () => {
+    const onResolveApproval = vi.fn(async () => undefined);
+    const onResolveGlobalApproval = vi.fn(async () => undefined);
+    const onOpenApprovalSession = vi.fn();
+    const globalRequest = {
+      ...approvalRequest(),
+      approval_id: 'approval-global',
+      session_id: 'session-other',
+      agent_id: 'agent-review',
+    };
+    const { container } = await renderChat({
+      pendingApprovals: [approvalRequest()],
+      onResolveApproval,
+      globalApprovals: [approvalRequest(), globalRequest],
+      onResolveGlobalApproval,
+      approvalSessionTitles: { 'session-other': 'Other conversation' },
+      onOpenApprovalSession,
+    });
+
+    const composer = container.querySelector('.chat-composer-wrap')!;
+    const dock = composer.querySelector('.approval-dock')!;
+    const input = composer.querySelector('.chat-input-area')!;
+    expect(dock.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(dock.textContent).toContain('2');
+
+    const next = dock.querySelector<HTMLButtonElement>('.approval-pager button:last-child');
+    await act(async () => next?.click());
+    expect(dock.textContent).toContain('Other conversation · agent-review');
+    await act(async () => dock.querySelector<HTMLButtonElement>('.approval-source button')?.click());
+    expect(onOpenApprovalSession).toHaveBeenCalledWith('session-other', 'agent-review');
+
+    await act(async () => {
+      [...dock.querySelectorAll<HTMLButtonElement>('.approval-actions button')]
+        .find(button => button.textContent === 'Approve')?.click();
+      await Promise.resolve();
+    });
+    expect(onResolveGlobalApproval).toHaveBeenCalledWith(
+      'approval-global',
+      'approved',
+      expect.objectContaining({ remember: false }),
+    );
+    expect(onResolveApproval).not.toHaveBeenCalled();
+  });
+
   it('switches the session to AUTO before approving the pending tool', async () => {
     const calls: string[] = [];
     const onPermissionChange = vi.fn(async (mode: 'auto' | 'yolo' | 'manual') => {
@@ -1015,13 +1059,13 @@ describe('chat slash commands and task-mode shortcut', () => {
     expect(props.onTaskModeChange).not.toHaveBeenCalled();
   });
 
-  it('toggles Code to Plan with Tab only when the composer is unobstructed', async () => {
+  it('toggles Code to Discuss with Tab only when the composer is unobstructed', async () => {
     const onTaskModeChange = vi.fn();
     const { container } = await renderChat({ onTaskModeChange });
     const input = container.querySelector<HTMLTextAreaElement>('.chat-input')!;
 
     await pressKey(input, 'Tab');
-    expect(onTaskModeChange).toHaveBeenCalledWith('plan');
+    expect(onTaskModeChange).toHaveBeenCalledWith('discuss');
 
     onTaskModeChange.mockClear();
     const blocked = await renderChat({ onTaskModeChange, pendingApprovals: [{} as ApprovalRequest] });
@@ -1029,10 +1073,9 @@ describe('chat slash commands and task-mode shortcut', () => {
     expect(onTaskModeChange).not.toHaveBeenCalled();
   });
 
-  it('updates the task-mode control immediately while the server status is stale', async () => {
-    let resolveUpdate!: () => void;
-    const onTaskModeChange = vi.fn(() => new Promise<void>(resolve => { resolveUpdate = resolve; }));
-    const { container } = await renderChat({
+  it('renders the server task mode and changes it through the segmented control', async () => {
+    const onTaskModeChange = vi.fn();
+    const { container, props, root } = await renderChat({
       onTaskModeChange,
       sessionStatus: {
         status: 'ready',
@@ -1046,22 +1089,105 @@ describe('chat slash commands and task-mode shortcut', () => {
         context_usage: 0,
       },
     });
-    const modeButton = container.querySelector<HTMLButtonElement>('.composer-task-cycle')!;
+    const executeButton = container.querySelector<HTMLButtonElement>('.composer-task-mode [data-mode="code"]')!;
+    const discussButton = container.querySelector<HTMLButtonElement>('.composer-task-mode [data-mode="discuss"]')!;
 
-    expect(modeButton.dataset.mode).toBe('code');
+    expect(executeButton.getAttribute('aria-pressed')).toBe('true');
+    expect(discussButton.getAttribute('aria-pressed')).toBe('false');
+    expect(executeButton.classList.contains('active')).toBe(true);
+    expect(discussButton.classList.contains('active')).toBe(false);
+
     await act(async () => {
-      modeButton.click();
+      discussButton.click();
       await Promise.resolve();
     });
 
-    expect(onTaskModeChange).toHaveBeenCalledWith('plan');
-    expect(modeButton.dataset.mode).toBe('plan');
+    expect(onTaskModeChange).toHaveBeenCalledWith('discuss');
+    expect(props.onSendMessage).not.toHaveBeenCalled();
+    // The control follows the server status; a pending request must not create
+    // a second client-only mode.
+    expect(executeButton.classList.contains('active')).toBe(true);
+
+    await act(async () => {
+      root.render(createElement(I18nProvider, null, createElement(ChatView, {
+        ...props,
+        sessionStatus: { ...props.sessionStatus!, discuss_mode: true },
+      })));
+    });
+    expect(discussButton.classList.contains('active')).toBe(true);
+    expect(executeButton.classList.contains('active')).toBe(false);
     expect(container.querySelector('.main-write-icon-toggle')).toBeNull();
 
     await act(async () => {
-      resolveUpdate();
-      await Promise.resolve();
+      root.render(createElement(I18nProvider, null, createElement(ChatView, {
+        ...props,
+        sessionStatus: { ...props.sessionStatus!, discuss_mode: false },
+      })));
     });
+    expect(executeButton.getAttribute('aria-pressed')).toBe('true');
+    expect(discussButton.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('does not carry discussion mode across agent changes', async () => {
+    const { container, props, root } = await renderChat({
+      agentId: 'discussion-agent',
+      sessionStatus: {
+        status: 'ready',
+        thinking_level: 'off',
+        permission: 'manual',
+        discuss_mode: true,
+        main_write_enabled: false,
+        goal: null,
+        context_tokens: 0,
+        max_context_tokens: 128_000,
+        context_usage: 0,
+      },
+    });
+    expect(container.querySelector<HTMLButtonElement>('[data-mode="discuss"]')?.getAttribute('aria-pressed')).toBe('true');
+
+    await act(async () => {
+      root.render(createElement(I18nProvider, null, createElement(ChatView, {
+        ...props,
+        agentId: 'main',
+        sessionStatus: { ...props.sessionStatus!, discuss_mode: false, main_write_enabled: true },
+      })));
+    });
+    expect(container.querySelector<HTMLButtonElement>('[data-mode="code"]')?.getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelector<HTMLButtonElement>('[data-mode="discuss"]')?.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('uses the active discussion snapshot for the composer instead of a stale status flag', async () => {
+    const { container } = await renderChat({
+      activeDiscussion: false,
+      sessionStatus: {
+        status: 'ready',
+        thinking_level: 'off',
+        permission: 'manual',
+        discuss_mode: true,
+        main_write_enabled: true,
+        goal: null,
+        context_tokens: 0,
+        max_context_tokens: 128_000,
+        context_usage: 0,
+      },
+    });
+    expect(container.querySelector<HTMLButtonElement>('[data-mode="code"]')?.getAttribute('aria-pressed')).toBe('true');
+
+    const discussion = await renderChat({
+      activeDiscussion: true,
+      sessionStatus: {
+        status: 'ready',
+        thinking_level: 'off',
+        permission: 'manual',
+        discuss_mode: false,
+        main_write_enabled: false,
+        goal: null,
+        context_tokens: 0,
+        max_context_tokens: 128_000,
+        context_usage: 0,
+      },
+    });
+    expect(discussion.container.querySelector<HTMLButtonElement>('[data-mode="discuss"]')?.getAttribute('aria-pressed')).toBe('true');
   });
 
   it('updates the main-write control immediately while the server profile is stale', async () => {

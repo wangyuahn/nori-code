@@ -71,10 +71,84 @@ const approvalParamsSchema = z.object({
   approval_id: z.string().min(1),
 });
 
+const globalApprovalParamsSchema = z.object({
+  approval_id: z.string().min(1),
+});
+
 export function registerApprovalsRoutes(
   app: ApprovalRouteHost,
   ix: IInstantiationService,
 ): void {
+  const globalListRoute = defineRoute(
+    {
+      method: 'GET',
+      path: '/approvals',
+      querystring: listPendingApprovalsQuerySchema,
+      success: { data: listPendingApprovalsResponseSchema },
+      description: 'List all pending approval requests',
+      tags: ['approvals'],
+    },
+    async (req, reply) => {
+      const broker = ix.invokeFunction((a) =>
+        a.get(IApprovalService) as ApprovalService,
+      );
+      reply.send(okEnvelope({ items: broker.listPendingAll() }, req.id));
+    },
+  );
+  app.get(
+    globalListRoute.path,
+    globalListRoute.options,
+    globalListRoute.handler as Parameters<ApprovalRouteHost['get']>[2],
+  );
+
+  const globalResolveRoute = defineRoute(
+    {
+      method: 'POST',
+      path: '/approvals/{approval_id}',
+      params: globalApprovalParamsSchema,
+      body: approvalResolveRequestSchema,
+      success: { data: approvalResolveResultSchema },
+      description: 'Resolve a pending approval request from any session',
+      tags: ['approvals'],
+    },
+    async (req, reply) => {
+      const { approval_id } = req.params;
+      const body = req.body;
+      const broker = ix.invokeFunction((a) =>
+        a.get(IApprovalService) as ApprovalService,
+      );
+      if (!broker.isPending(approval_id, body.agent_id)) {
+        if (broker.isRecentlyResolved(approval_id)) {
+          reply.send({
+            code: ErrorCode.APPROVAL_ALREADY_RESOLVED,
+            msg: `approval ${approval_id} already resolved`,
+            data: { resolved: false },
+            request_id: req.id,
+          });
+          return;
+        }
+        reply.send(errEnvelope(
+          ErrorCode.APPROVAL_NOT_FOUND,
+          `approval ${approval_id} not found`,
+          req.id,
+        ));
+        return;
+      }
+      const { agent_id: _agentId, ...response } = body;
+      broker.resolve(approval_id, approvalToAgentCoreResponse(response));
+      broker.markResolved(approval_id);
+      reply.send(okEnvelope({
+        resolved: true,
+        resolved_at: new Date().toISOString(),
+      }, req.id));
+    },
+  );
+  app.post(
+    globalResolveRoute.path,
+    globalResolveRoute.options,
+    globalResolveRoute.handler as Parameters<ApprovalRouteHost['post']>[2],
+  );
+
   const listRoute = defineRoute(
     {
       method: 'GET',

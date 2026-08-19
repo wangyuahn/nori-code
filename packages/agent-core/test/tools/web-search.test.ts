@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   WebSearchInputSchema,
   WebSearchTool,
+  PublicWebSearchProvider,
   type WebSearchProvider,
 } from '../../src/tools/builtin/web/web-search';
 import { toolContentString } from './fixtures/fake-kaos';
@@ -246,6 +247,20 @@ describe('WebSearchTool', () => {
     expect(content).toContain('request timed out');
   });
 
+  it('does not duplicate an already classified timeout detail', async () => {
+    const provider: WebSearchProvider = {
+      search: vi.fn().mockRejectedValue(new Error('Search timed out after 10 seconds')),
+    };
+    const tool = new WebSearchTool(provider);
+    const result = await executeTool(tool, {
+      turnId: 't1',
+      toolCallId: 'c-timeout-raw',
+      args: { query: 'fail' },
+      signal,
+    });
+    expect(toolContentString(result)).toBe('Search timed out after 10 seconds');
+  });
+
   it('classifies aborted requests', async () => {
     const err = new Error('The operation was aborted');
     err.name = 'AbortError';
@@ -265,7 +280,7 @@ describe('WebSearchTool', () => {
     expect(content).toContain('The operation was aborted');
   });
 
-  it('passes only the query and toolCallId to the provider', async () => {
+  it('passes the query, toolCallId, and cancellation signal to the provider', async () => {
     const provider = fakeProvider([]);
     const tool = new WebSearchTool(provider);
     await executeTool(tool, {
@@ -276,6 +291,7 @@ describe('WebSearchTool', () => {
     });
     expect(provider.search).toHaveBeenCalledWith('test', {
       toolCallId: 'c4',
+      signal,
     });
   });
 
@@ -297,4 +313,61 @@ describe('WebSearchTool', () => {
   });
 });
 
+describe('PublicWebSearchProvider', () => {
+  it('uses Bing China without credentials and parses RSS results', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        '<?xml version="1.0"?><rss><channel><item><title>中文结果</title><link>https://example.com</link><description>摘要</description><pubDate>Today</pubDate></item></channel></rss>',
+        { status: 200, headers: { 'content-type': 'application/rss+xml' } },
+      ),
+    );
+    const provider = new PublicWebSearchProvider({ fetchImpl, timeoutMs: 1000 });
+    await expect(provider.search('人工智能')).resolves.toEqual([
+      {
+        title: '中文结果',
+        url: 'https://example.com',
+        snippet: '摘要',
+        date: 'Today',
+        siteName: 'example.com',
+      },
+    ]);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      expect.stringContaining('https://cn.bing.com/search?format=rss&q='),
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
 
+  it('falls back to DuckDuckGo when Bing fails', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Bing unavailable'))
+      .mockResolvedValueOnce(
+        new Response(
+          '<div class="result"><a class="result__a" href="https://example.com">DDG result</a><a class="result__snippet">DDG snippet</a></div>',
+          { status: 200 },
+        ),
+      );
+    const provider = new PublicWebSearchProvider({ fetchImpl, timeoutMs: 1000 });
+    await expect(provider.search('fallback')).resolves.toEqual([
+      {
+        title: 'DDG result',
+        url: 'https://example.com/',
+        snippet: 'DDG snippet',
+        siteName: 'example.com',
+      },
+    ]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls[1]?.[0]).toContain('html.duckduckgo.com/html/');
+  });
+
+  it('propagates cancellation instead of trying another provider', async () => {
+    const controller = new AbortController();
+    const fetchImpl = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      controller.abort(new Error('cancelled by user'));
+      throw Object.assign(new Error('The operation was aborted'), { name: 'AbortError' });
+    });
+    const provider = new PublicWebSearchProvider({ fetchImpl, timeoutMs: 1000 });
+    await expect(provider.search('cancel', { signal: controller.signal })).rejects.toThrow(/abort|cancel/i);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});

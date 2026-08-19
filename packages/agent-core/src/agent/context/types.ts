@@ -63,6 +63,12 @@ export interface SystemTriggerOrigin {
   readonly discussionEntryId?: number;
   /** Durable idempotency marker for a team-discussion lifecycle notice. */
   readonly discussionLifecycleNoticeId?: string;
+  /** Durable round number for visible team-discussion transcript events. */
+  readonly discussionRound?: number;
+  /** Optional skip reason for a visible discussion abstention marker. */
+  readonly discussionSkipReason?: string;
+  /** Tool name attached to a visible member-side Discuss failure. */
+  readonly discussionToolName?: string;
 }
 
 /**

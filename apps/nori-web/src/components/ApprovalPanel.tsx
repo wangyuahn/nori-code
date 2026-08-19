@@ -13,9 +13,14 @@ interface ApprovalOptions {
 interface ApprovalPanelProps {
   requests: ApprovalRequest[];
   onResolve?: (id: string, decision: 'approved' | 'rejected' | 'cancelled', options?: ApprovalOptions) => void | Promise<void>;
-  onPermissionChange?: (mode: 'auto' | 'yolo') => void | Promise<void>;
+  onPermissionChange?: (mode: 'auto' | 'yolo', request?: ApprovalRequest) => void | Promise<void>;
   browserPermissions?: NoriBrowserState['permissions']['pending'];
   onResolveBrowserPermission?: (id: string, decision: 'allow_once' | 'allow_always' | 'deny' | 'deny_always') => void | Promise<void>;
+  floating?: boolean;
+  sessionTitles?: Readonly<Record<string, string>>;
+  onOpenSession?: (sessionId: string, agentId?: string) => void;
+  resolvingIds?: ReadonlySet<string>;
+  errors?: Readonly<Record<string, string>>;
 }
 
 interface DisplayData {
@@ -23,9 +28,10 @@ interface DisplayData {
   [key: string]: unknown;
 }
 
-export function ApprovalPanel({ requests, onResolve, onPermissionChange, browserPermissions = [], onResolveBrowserPermission }: ApprovalPanelProps) {
+export function ApprovalPanel({ requests, onResolve, onPermissionChange, browserPermissions = [], onResolveBrowserPermission, floating = false, sessionTitles = {}, onOpenSession, resolvingIds = new Set(), errors = {} }: ApprovalPanelProps) {
   const { tr } = useI18n();
   const [layout, setLayout] = useState<'compact' | 'stack'>('compact');
+  const [collapsed, setCollapsed] = useState(false);
   const [activeIndex, setActiveIndex] = useState(0);
   const [remembered, setRemembered] = useState<Set<string>>(new Set());
   const [feedback, setFeedback] = useState<Record<string, string>>({});
@@ -51,12 +57,14 @@ export function ApprovalPanel({ requests, onResolve, onPermissionChange, browser
     requestId: string,
     mode: 'auto' | 'yolo',
     resolve: () => void | Promise<void>,
+    request?: ApprovalRequest,
   ) => {
     if (!onPermissionChange || switchingMode[requestId]) return;
     setSwitchingMode(previous => ({ ...previous, [requestId]: mode }));
     setModeErrors(previous => ({ ...previous, [requestId]: undefined }));
     try {
-      await onPermissionChange(mode);
+      if (request) await onPermissionChange(mode, request);
+      else await onPermissionChange(mode);
       await resolve();
     } catch (error) {
       setModeErrors(previous => ({
@@ -75,17 +83,19 @@ export function ApprovalPanel({ requests, onResolve, onPermissionChange, browser
     const kind = display?.kind;
     const requestFeedback = feedback[request.approval_id] ?? '';
     const remember = remembered.has(request.approval_id);
+    const isResolving = resolvingIds.has(request.approval_id);
     const resolve = (decision: 'approved' | 'rejected' | 'cancelled', options: ApprovalOptions = {}) => onResolve?.(request.approval_id, decision, { remember, feedback: requestFeedback, ...options });
     const activeModeSwitch = switchingMode[request.approval_id];
 
-    return <div key={request.approval_id} className={`approval-card pending approval-kind-${kind ?? 'generic'}`}>
+    return <div key={request.approval_id} className={`approval-card pending approval-kind-${kind ?? 'generic'}`} aria-busy={isResolving}>
       <div className="approval-card-header"><span className="approval-tool-icon"><Icon name={kind === 'goal_start' ? 'target' : 'settings'} size={15}/></span><span className="approval-tool-name">{kind === 'goal_start' ? tr('Start goal', '启动目标') : request.tool_name}</span><span className="approval-status approval-status--pending">{tr('Permission required', '需要授权')}</span></div>
+      {(floating || onOpenSession !== undefined) && <div className="approval-source"><span>{sessionTitles[request.session_id] || request.session_id}{request.agent_id && request.agent_id !== 'main' ? ` · ${request.agent_id}` : ''}</span>{onOpenSession && <button type="button" onClick={() => onOpenSession(request.session_id, request.agent_id)}>{tr('Open source', '打开来源')}</button>}</div>}
       <div className="approval-action-label">{request.action}</div>
       <ApprovalDisplay display={display} fallback={request.tool_input_display}/>
 
       {kind === 'generic' && <textarea className="approval-feedback" value={requestFeedback} onChange={event => setFeedback(previous => ({ ...previous, [request.approval_id]: event.target.value }))} placeholder={tr('Optional feedback', '可选反馈')}/>}
 
-      {modeErrors[request.approval_id] && <div className="approval-mode-error" role="alert">{modeErrors[request.approval_id]}</div>}
+      {(modeErrors[request.approval_id] || errors[request.approval_id]) && <div className="approval-mode-error" role="alert">{modeErrors[request.approval_id] || errors[request.approval_id]}</div>}
 
       <div className="approval-actions">
         {kind === 'goal_start' ? <GoalApprovalActions display={display} onSelect={(decision, label) => resolve(decision, { selectedLabel: label })} tr={tr}/>
@@ -115,10 +125,10 @@ export function ApprovalPanel({ requests, onResolve, onPermissionChange, browser
     ? renderRequest(item.request)
     : renderBrowserPermission(item.request);
 
-  return <aside className={`approval-dock approval-dock-${layout}`} onWheel={onWheel}>
-    <header className="approval-dock-header"><span><Icon name="alert" size={14}/><strong>{tr('Permissions', '授权')}</strong><small>{items.length}</small></span><div className="approval-layout-switch" role="group" aria-label={tr('Approval layout', '授权布局')}><button className={layout === 'compact' ? 'active' : ''} onClick={() => setLayout('compact')} title={tr('Group requests and use the mouse wheel to switch', '合并请求，用鼠标滚轮切换')}><Icon name="archive" size={13}/></button><button className={layout === 'stack' ? 'active' : ''} onClick={() => setLayout('stack')} title={tr('Show requests vertically', '纵向平铺请求')}><Icon name="list" size={13}/></button></div></header>
-    <div className="approval-panel">{layout === 'compact' ? renderItem(items[activeIndex]!) : items.map(renderItem)}</div>
-    {layout === 'compact' && items.length > 1 && <footer className="approval-pager"><button onClick={() => setActiveIndex(index => (index - 1 + items.length) % items.length)}><Icon name="chevron-left" size={13}/></button><span>{activeIndex + 1} / {items.length} · {tr('Scroll to switch', '滚轮切换')}</span><button onClick={() => setActiveIndex(index => (index + 1) % items.length)}><Icon name="chevron-right" size={13}/></button></footer>}
+  return <aside className={`approval-dock approval-dock-${layout}${floating ? ' approval-dock-floating' : ''}`} onWheel={onWheel}>
+    <header className="approval-dock-header"><span><Icon name="alert" size={14}/><strong>{tr('Permissions', '授权')}</strong><small>{items.length}</small></span><div className="approval-layout-switch" role="group" aria-label={tr('Approval layout', '授权布局')}>{floating && <button type="button" onClick={() => setCollapsed(previous => !previous)} aria-expanded={!collapsed} aria-label={collapsed ? tr('Expand permissions', '展开授权') : tr('Collapse permissions', '收起授权')} title={collapsed ? tr('Expand permissions', '展开授权') : tr('Collapse permissions', '收起授权')}><Icon name="chevron-down" size={13}/></button>}<button type="button" className={layout === 'compact' ? 'active' : ''} onClick={() => setLayout('compact')} title={tr('Group requests and use the mouse wheel to switch', '合并请求，用鼠标滚轮切换')}><Icon name="archive" size={13}/></button><button type="button" className={layout === 'stack' ? 'active' : ''} onClick={() => setLayout('stack')} title={tr('Show requests vertically', '纵向平铺请求')}><Icon name="list" size={13}/></button></div></header>
+    {!collapsed && <><div className="approval-panel">{layout === 'compact' ? renderItem(items[activeIndex]!) : items.map(renderItem)}</div>
+    {layout === 'compact' && items.length > 1 && <footer className="approval-pager"><button type="button" onClick={() => setActiveIndex(index => (index - 1 + items.length) % items.length)}><Icon name="chevron-left" size={13}/><span className="sr-only">{tr('Previous approval', '上一个授权请求')}</span></button><span>{activeIndex + 1} / {items.length} · {tr('Scroll to switch', '滚轮切换')}</span><button type="button" onClick={() => setActiveIndex(index => (index + 1) % items.length)}><Icon name="chevron-right" size={13}/><span className="sr-only">{tr('Next approval', '下一个授权请求')}</span></button></footer>}</>}
   </aside>;
 }
 

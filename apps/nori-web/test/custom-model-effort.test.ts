@@ -67,6 +67,7 @@ describe('custom model effort persistence', () => {
     expect(drafts).toEqual([
       expect.objectContaining({
         id: 'local-chat',
+        contextLength: '128000',
         thinking: 'efforts',
         supportEfforts: ['low', 'high'],
         defaultEffort: 'high',
@@ -74,10 +75,33 @@ describe('custom model effort persistence', () => {
     ]);
     expect(validateCustomModelDrafts([{
       id: 'local-chat',
+      contextLength: '128000',
       thinking: 'efforts',
       supportEfforts: [],
       defaultEffort: '',
     }])).toContain('needs at least one thinking effort');
+  });
+
+  it('writes the edited display name and context length into the model alias', () => {
+    expect(customModelAliasPatch('custom', {
+      id: 'local-chat',
+      displayName: 'Local Chat',
+      contextLength: '65536',
+      thinking: 'unsupported',
+      supportEfforts: [],
+      defaultEffort: '',
+    })).toEqual(expect.objectContaining({
+      display_name: 'Local Chat',
+      max_context_size: 65536,
+    }));
+    expect(validateCustomModelDrafts([{
+      id: 'local-chat',
+      displayName: '',
+      contextLength: '',
+      thinking: 'unsupported',
+      supportEfforts: [],
+      defaultEffort: '',
+    }])).toContain('positive integer context length');
   });
 
   it('does not hydrate a same-named legacy alias owned by another provider', () => {
@@ -91,6 +115,8 @@ describe('custom model effort persistence', () => {
       },
     }, 'target-provider')).toEqual([{
       id: 'shared-model',
+      displayName: '',
+      contextLength: '128000',
       thinking: 'unsupported',
       supportEfforts: [],
       defaultEffort: '',
