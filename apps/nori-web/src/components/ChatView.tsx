@@ -1190,7 +1190,7 @@ function toolCallIcon(name: string): IconName {
   const normalized = name.toLowerCase();
   if (normalized === 'contextinjection') return 'document';
   if (normalized.includes('bash') || normalized.includes('terminal') || normalized.includes('command')) return 'terminal';
-  if (normalized === 'subagent' || normalized === 'agent') return 'git-branch';
+  if (normalized.startsWith('team')) return 'git-branch';
   if (normalized.includes('browser') || normalized.includes('web')) return 'globe';
   if (normalized.includes('read') || normalized.includes('write') || normalized.includes('edit') || normalized.includes('file')) return 'files';
   return 'settings';
@@ -1217,12 +1217,6 @@ function summarizeToolCall(tool: ToolCall, tr: (english: string, chinese: string
         ? operationCounts.deletions
         : normalized === 'edit' ? countLines(oldText) : 0);
     return [path, `+${additions} -${deletions}`].filter(Boolean).join(' · ');
-  }
-  if (normalized === 'subagent') {
-    const tasks = Array.isArray(args.tasks) ? args.tasks : Array.isArray(args.items) ? args.items : [];
-    const resumed = Array.isArray(args.resume_agent_ids) ? args.resume_agent_ids.length : 0;
-    const count = tasks.length + resumed;
-    return count > 0 ? tr(`${count} SubAgents launched`, `调用 ${count} 个 SubAgent`) : tr('SubAgent task', 'SubAgent 任务');
   }
   return path ?? firstString(args.description, args.query, args.command) ?? '';
 }

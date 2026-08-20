@@ -1530,7 +1530,7 @@ export class KimiTUI {
     this.sessionEventHandler.resetRuntimeState();
     this.tasksBrowserController.close();
     this.btwPanelController.clear();
-    this.state.footer.setBackgroundCounts({ bashTasks: 0, agentTasks: 0 });
+    this.state.footer.setBackgroundCounts({ processTasks: 0, questionTasks: 0 });
     this.streamingUI.setTodoList([]);
     this.streamingUI.setTurnId(undefined);
     this.setAppState({ mcpServersSummary: null });
@@ -2168,32 +2168,23 @@ export class KimiTUI {
       };
     }
     this.syncTerminalProgress(this.shouldShowTerminalProgress(effectiveMode));
-    const placeSpinnerInSubAgent = this.shouldPlaceActivitySpinnerInSubAgent(effectiveMode);
-    const activityModeKey = `${effectiveMode}:${placeSpinnerInSubAgent ? 'subagent' : 'pane'}`;
-
     if (
-      activityModeKey === this.lastActivityMode &&
+      effectiveMode === this.lastActivityMode &&
       (effectiveMode === 'waiting' || effectiveMode === 'thinking' || effectiveMode === 'tool')
     ) {
-      if (placeSpinnerInSubAgent) {
-        this.syncSubAgentActivitySpinner(this.state.activitySpinner?.instance);
-      }
       return;
     }
 
-    this.lastActivityMode = activityModeKey;
+    this.lastActivityMode = effectiveMode;
     this.state.activityContainer.clear();
 
     switch (effectiveMode) {
       case 'hidden':
         this.stopActivitySpinner();
-        this.syncSubAgentActivitySpinner(undefined);
         this.state.ui.requestRender();
         return;
       case 'waiting': {
         const spinner = this.ensureActivitySpinner('moon');
-        this.syncSubAgentActivitySpinner(placeSpinnerInSubAgent ? spinner : undefined);
-        if (placeSpinnerInSubAgent) break;
         this.state.activityContainer.addChild(
           new ActivityPaneComponent({
             mode: 'waiting',
@@ -2205,14 +2196,12 @@ export class KimiTUI {
       }
       case 'thinking': {
         this.stopActivitySpinner();
-        this.syncSubAgentActivitySpinner(undefined);
         break;
       }
       case 'composing': {
         const spinner = this.ensureActivitySpinner('braille', 'working...', (s) =>
           currentTheme.fg('primary', s),
         );
-        this.syncSubAgentActivitySpinner(undefined);
         this.state.activityContainer.addChild(
           new ActivityPaneComponent({
             mode: 'composing',
@@ -2224,8 +2213,6 @@ export class KimiTUI {
       }
       case 'tool': {
         const spinner = this.ensureActivitySpinner('moon');
-        this.syncSubAgentActivitySpinner(placeSpinnerInSubAgent ? spinner : undefined);
-        if (placeSpinnerInSubAgent) break;
         this.state.activityContainer.addChild(
           new ActivityPaneComponent({
             mode: 'tool',
@@ -2238,7 +2225,6 @@ export class KimiTUI {
       case 'idle':
       case 'session': {
         this.stopActivitySpinner();
-        this.syncSubAgentActivitySpinner(undefined);
         // Keep a placeholder row so the activity area does not fully shrink
         // when the spinner is removed at the end of streaming; combined with
         // pi-tui's clamp, this avoids a destructive full redraw (viewport jump).
@@ -2480,19 +2466,6 @@ export class KimiTUI {
       effectiveMode === 'composing' ||
       effectiveMode === 'tool'
     );
-  }
-
-  private shouldPlaceActivitySpinnerInSubAgent(
-    effectiveMode: EffectiveActivityPaneMode,
-  ): boolean {
-    return (
-      this.sessionEventHandler.hasActiveSubAgentToolCall() &&
-      (effectiveMode === 'waiting' || effectiveMode === 'tool')
-    );
-  }
-
-  private syncSubAgentActivitySpinner(spinner: MoonLoader | undefined): void {
-    this.sessionEventHandler.syncSubAgentActivitySpinner(spinner);
   }
 
   private syncTerminalProgress(active: boolean): void {

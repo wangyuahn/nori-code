@@ -197,8 +197,6 @@ interface LegacyPersistedTask {
   readonly timed_out?: boolean;
   readonly stop_reason?: string;
   readonly timeout_ms?: number;
-  readonly agent_id?: string;
-  readonly subagent_type?: string;
 }
 
 function legacyPersistedTaskToInfo(task: LegacyPersistedTask): PersistedTask {
@@ -215,15 +213,6 @@ function legacyPersistedTaskToInfo(task: LegacyPersistedTask): PersistedTask {
     stopReason,
     timeoutMs,
   };
-
-  if (task.task_id.startsWith('agent-')) {
-    return {
-      ...base,
-      kind: 'agent',
-      agentId: optionalNonEmptyString(task.agent_id),
-      subagentType: optionalNonEmptyString(task.subagent_type),
-    };
-  }
 
   return {
     ...base,

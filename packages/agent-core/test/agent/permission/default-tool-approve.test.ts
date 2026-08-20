@@ -53,16 +53,17 @@ describe('DefaultToolApprovePermissionPolicy', () => {
     expect(policy.evaluate(policyContext('CronDelete', { id: 'job_1' }))).toBeUndefined();
   });
 
-  it('does not approve SubAgent', () => {
+  it('auto-approves TeamAssign', () => {
+    // Handing a track to a member has no side effect on the world by itself —
+    // whatever that member then does is gated by its own policies. Delegation
+    // must not need a prompt, or collaboration stalls behind approvals.
     expect(
       policy.evaluate(
-        policyContext('SubAgent', {
-          description: 'Check files',
-          prompt_template: 'Check {{item}}',
-          items: ['a.ts', 'b.ts'],
+        policyContext('TeamAssign', {
+          assignments: [{ agent_id: 'agent-1', task: 'Check a.ts' }],
         }),
       ),
-    ).toBeUndefined();
+    ).toEqual({ kind: 'approve' });
   });
 
   it('auto-approves TeamDecide', () => {

@@ -1,6 +1,5 @@
 import type { Session } from '@nori-code/sdk';
 
-import { AgentGroupComponent } from '../components/messages/agent-group';
 import { AssistantMessageComponent } from '../components/messages/assistant-message';
 import { currentWorkingTip } from '../components/chrome/working-tips';
 import { CompactionComponent } from '../components/dialogs/compaction';
@@ -62,12 +61,6 @@ export class StreamingUIController {
     { name?: string; argumentsText: string; startedAtMs: number }
   >();
   private _pendingToolComponents = new Map<string, ToolCallComponent>();
-  private _pendingAgentGroup: {
-    readonly turnId: string | undefined;
-    readonly step: number;
-    solo?: ToolCallComponent;
-    group?: AgentGroupComponent;
-  } | null = null;
   private _pendingReadGroup: {
     readonly turnId: string | undefined;
     readonly step: number;
@@ -162,10 +155,6 @@ export class StreamingUIController {
     this._pendingToolComponents.delete(id);
   }
 
-  hasPendingAgentGroup(): boolean {
-    return this._pendingAgentGroup !== null;
-  }
-
   hasPendingReadGroup(): boolean {
     return this._pendingReadGroup !== null;
   }
@@ -174,132 +163,6 @@ export class StreamingUIController {
     if (!this._activeToolCalls.has(toolCallId)) {
       this._pendingToolComponents.delete(toolCallId);
     }
-  }
-
-  /**
-   * Push the actual terminal status of a background agent task into the
-   * matching `Agent` tool call component so its snapshot phase no longer
-   * trusts the spawn-success ToolResult (which would otherwise label every
-   * terminated bg agent — including `lost` ones — as `✓ Completed`).
-   *
-   * Resolution policy: an `args.agentId` is treated as authoritative — we
-   * either find a card whose `getSubagentAgentId()` returns the same id
-   * (in-memory metadata for live foreground, parsed from the spawn-success
-   * `agent_id: ...` line for live backgrounded and replayed cards) or we
-   * skip. We deliberately do NOT fall back to description match when
-   * `agentId` is provided, because:
-   *   - On resume, `applyTerminalBackgroundAgentStatuses` iterates every
-   *     persisted terminal task, including ones whose tool calls fell
-   *     outside the `REPLAY_TURN_LIMIT` window. A description fallback
-   *     would let an old `lost` task stamp its status onto an unrelated
-   *     recent Agent card that happens to share `args.description`.
-   *   - During a live spawn / terminate race, the same card can briefly
-   *     appear in both `_pendingToolComponents` and `transcriptContainer`,
-   *     so a description match could double-visit the same component and
-   *     mark itself ambiguous. agentId match short-circuits on the first
-   *     hit and is immune.
-   *
-   * Description fallback is kept as a best-effort path only when
-   * `agentId` is unknown — that is, on resume of pre-PR sessions whose
-   * disk records pre-date `agent_id` persistence.
-   *
-   * Search scope includes both in-flight components and already-mounted
-   * cards (some live in `transcriptContainer` standalone, others are
-   * borrowed by an `AgentGroupComponent` and reachable only via
-   * `getToolComponents()`).
-   *
-   * Returns true iff a component was found and updated.
-   */
-  applyBackgroundTaskTerminalStatus(args: {
-    agentId?: string | undefined;
-    description: string;
-    status: 'completed' | 'failed' | 'timed_out' | 'killed' | 'lost';
-    /**
-     * Real failure message to surface on the card. Pass the `subagent.failed`
-     * event's `error` for live crashes — it is far more useful than the
-     * friendly generic the card falls back to. Omit on the resume / terminate
-     * path where no real error is available.
-     */
-    errorText?: string | undefined;
-  }): boolean {
-    const useAgentIdOnly = args.agentId !== undefined;
-    let agentIdMatch: ToolCallComponent | undefined;
-    let descMatch: ToolCallComponent | undefined;
-    let descAmbiguous = false;
-    const visit = (tc: ToolCallComponent): void => {
-      if (agentIdMatch !== undefined) return;
-      if (useAgentIdOnly) {
-        if (tc.getSubagentAgentId() === args.agentId) agentIdMatch = tc;
-        return;
-      }
-      if (tc.getAgentToolDescription() !== args.description) return;
-      if (descMatch !== undefined) {
-        descAmbiguous = true;
-        return;
-      }
-      descMatch = tc;
-    };
-
-    for (const tc of this._pendingToolComponents.values()) {
-      visit(tc);
-      if (agentIdMatch !== undefined) break;
-    }
-    if (agentIdMatch === undefined) {
-      for (const child of this.host.state.transcriptContainer.children) {
-        if (child instanceof ToolCallComponent) {
-          visit(child);
-        } else if (child instanceof AgentGroupComponent) {
-          for (const tc of child.getToolComponents()) {
-            visit(tc);
-            if (agentIdMatch !== undefined) break;
-          }
-        }
-        if (agentIdMatch !== undefined) break;
-      }
-    }
-    const target = useAgentIdOnly
-      ? agentIdMatch
-      : descAmbiguous
-        ? undefined
-        : descMatch;
-    if (target === undefined) return false;
-    target.setBackgroundTaskTerminalStatus(args.status, { errorText: args.errorText });
-    return true;
-  }
-
-  /**
-   * Mark a foreground subagent card as detached-to-background (`◐ backgrounded`).
-   * Routed from a `background.task.started` event whose `info.kind === 'agent'`,
-   * keyed by `agentId`. Returns true iff a matching component was found.
-   *
-   * Gated to cards that are currently foreground-running: `background.task.started`
-   * also fires for `Agent(run_in_background=true)` launches and for background
-   * resumes, and those must not mutate older completed rows that happen to share
-   * the same `agentId` (a resume's new card has no parsed `agent_id` yet, so the
-   * search can otherwise hit the previous completed card).
-   */
-  markSubagentBackgrounded(agentId: string | undefined): boolean {
-    if (agentId === undefined) return false;
-    const visit = (tc: ToolCallComponent): boolean => {
-      if (tc.getSubagentAgentId() !== agentId) return false;
-      const phase = tc.getSubagentSnapshot().phase;
-      if (phase !== 'running' && phase !== 'queued' && phase !== 'spawning') return false;
-      tc.markBackgrounded();
-      return true;
-    };
-    for (const tc of this._pendingToolComponents.values()) {
-      if (visit(tc)) return true;
-    }
-    for (const child of this.host.state.transcriptContainer.children) {
-      if (child instanceof ToolCallComponent) {
-        if (visit(child)) return true;
-      } else if (child instanceof AgentGroupComponent) {
-        for (const tc of child.getToolComponents()) {
-          if (visit(tc)) return true;
-        }
-      }
-    }
-    return false;
   }
 
   /** Registers a tool call that arrived via tool.call.started.
@@ -315,9 +178,7 @@ export class StreamingUIController {
       existingComponent.updateToolCall(toolCall);
     } else if (existing === undefined) {
       this.finalizeLiveTextBuffers('tool');
-      if (toolCall.name !== 'SubAgent') {
-        this.onToolCallStart(toolCall);
-      }
+      this.onToolCallStart(toolCall);
     }
     return existing === undefined;
   }
@@ -387,7 +248,6 @@ export class StreamingUIController {
     for (const toolCallId of completedToolCallIds) {
       this._pendingToolComponents.delete(toolCallId);
     }
-    this._pendingAgentGroup = null;
     this._pendingReadGroup = null;
     this._currentTurnId = undefined;
     this._currentStep = 0;
@@ -534,7 +394,6 @@ export class StreamingUIController {
     this.clearFlushTimerIfIdle();
     this._streamingToolCallArguments.clear();
     this.disposeAndClearPendingToolComponents();
-    this._pendingAgentGroup = null;
     this._pendingReadGroup = null;
     this.resetToolCallState();
   }
@@ -582,7 +441,6 @@ export class StreamingUIController {
 
   onStreamingTextStart(): void {
     const { state } = this.host;
-    this._pendingAgentGroup = null;
     this._pendingReadGroup = null;
     const entry = {
       id: nextTranscriptId(),
@@ -619,7 +477,6 @@ export class StreamingUIController {
     if (fullText.length === 0 && this._activeThinkingComponent === undefined) return;
     const { state } = this.host;
     if (this._activeThinkingComponent === undefined) {
-      this._pendingAgentGroup = null;
       this._pendingReadGroup = null;
       this._activeThinkingComponent = new ThinkingComponent(
         fullText,
@@ -656,12 +513,9 @@ export class StreamingUIController {
     if (state.toolOutputExpanded) tc.setExpanded(true);
     this._pendingToolComponents.set(toolCall.id, tc);
 
-    if (toolCall.name !== 'Agent') this._pendingAgentGroup = null;
     if (toolCall.name !== 'Read') this._pendingReadGroup = null;
 
-    let handled = this.tryAttachAgentToolCall(toolCall, tc);
-    if (!handled) handled = this.tryAttachReadToolCall(toolCall, tc);
-    if (!handled) {
+    if (!this.tryAttachReadToolCall(toolCall, tc)) {
       state.transcriptContainer.addChild(tc);
       state.ui.requestRender();
     }
@@ -757,66 +611,9 @@ export class StreamingUIController {
     const existingComponent = this._pendingToolComponents.get(id);
     if (existingComponent !== undefined) {
       existingComponent.updateToolCall(toolCall);
-    } else if (toolCall.name !== 'SubAgent') {
+    } else {
       this.onToolCallStart(toolCall);
     }
-  }
-
-  private tryAttachAgentToolCall(toolCall: ToolCallBlockData, tc: ToolCallComponent): boolean {
-    const { state } = this.host;
-    if (toolCall.name !== 'Agent') {
-      this._pendingAgentGroup = null;
-      return false;
-    }
-
-    const step = toolCall.step ?? this._currentStep;
-    const turnId = toolCall.turnId ?? this._currentTurnId;
-    const pending = this._pendingAgentGroup;
-
-    if (pending !== null && (pending.step !== step || pending.turnId !== turnId)) {
-      this._pendingAgentGroup = null;
-    }
-
-    const cur = this._pendingAgentGroup;
-    if (cur === null) {
-      this._pendingAgentGroup = { step, turnId, solo: tc };
-      state.transcriptContainer.addChild(tc);
-      state.ui.requestRender();
-      return true;
-    }
-
-    if (cur.group !== undefined) {
-      cur.group.attach(toolCall.id, tc);
-      return true;
-    }
-
-    const solo = cur.solo;
-    if (solo === undefined) {
-      this._pendingAgentGroup = { step, turnId, solo: tc };
-      state.transcriptContainer.addChild(tc);
-      state.ui.requestRender();
-      return true;
-    }
-    const group = this.upgradeSoloAgentToGroup(solo);
-    group.attach(toolCall.id, tc);
-    this._pendingAgentGroup = { step, turnId, group };
-    state.ui.requestRender();
-    return true;
-  }
-
-  private upgradeSoloAgentToGroup(solo: ToolCallComponent): AgentGroupComponent {
-    const { state } = this.host;
-    const group = new AgentGroupComponent(state.ui);
-    const children = state.transcriptContainer.children;
-    const idx = children.indexOf(solo);
-    if (idx >= 0) {
-      children[idx] = group;
-      state.transcriptContainer.invalidate();
-    } else {
-      state.transcriptContainer.addChild(group);
-    }
-    group.attach(solo.toolCallView.id, solo);
-    return group;
   }
 
   private tryAttachReadToolCall(toolCall: ToolCallBlockData, tc: ToolCallComponent): boolean {

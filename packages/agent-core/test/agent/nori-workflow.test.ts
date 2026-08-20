@@ -13,7 +13,7 @@ const emptyActivity: NoriWorkflowActivity = {
   testFilesCreated: 0,
   shellCommandCount: 0,
   verificationCommandCount: 0,
-  subagentCount: 0,
+  delegationCount: 0,
   memorySearchCount: 0,
   memoryWriteCount: 0,
   userPromptText: '',
@@ -47,20 +47,20 @@ describe('Nori workflow gate', () => {
       reviewRequiredThreshold: 8,
       maxReviewGateContinuations: 4,
       memorySearchRequired: true,
-      bugHuntSubagentRequired: true,
+      bugHuntDelegationRequired: true,
       requireAnalysisNote: true,
       requireDecisionNote: true,
       requireReviewNote: true,
     });
   });
 
-  it('forces SubAgent for bug hunt intent before ordinary review scoring', () => {
+  it('forces Team delegation for bug hunt intent before ordinary review scoring', () => {
     const decision = decideNoriWorkflowGate(
       {
         reviewSuggestionThreshold: 4,
         reviewRequiredThreshold: 7,
         maxReviewGateContinuations: 2,
-        bugHuntSubagentRequired: true,
+        bugHuntDelegationRequired: true,
       },
       {
         ...emptyActivity,
@@ -70,24 +70,24 @@ describe('Nori workflow gate', () => {
     );
 
     expect(decision).toMatchObject({
-      kind: 'bug_hunt_subagent',
+      kind: 'bug_hunt_delegation',
       phase: 'review',
       mode: 'required',
-      requiredTool: 'SubAgent',
+      requiredTool: 'TeamAssign',
     });
   });
 
-  it('does not force bug hunt SubAgent after a SubAgent call already happened', () => {
+  it('does not force bug hunt delegation after a TeamAssign call already happened', () => {
     const decision = decideNoriWorkflowGate(
       {
         reviewSuggestionThreshold: 4,
         reviewRequiredThreshold: 7,
         maxReviewGateContinuations: 2,
-        bugHuntSubagentRequired: true,
+        bugHuntDelegationRequired: true,
       },
       {
         ...emptyActivity,
-        subagentCount: 1,
+        delegationCount: 1,
         userPromptText: '找 bug 并 review',
       },
     );

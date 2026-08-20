@@ -20,7 +20,7 @@ import { TaskListTool } from '../../../src/tools/background/task-list';
 import { TaskOutputTool } from '../../../src/tools/background/task-output';
 import { TaskStopTool } from '../../../src/tools/background/task-stop';
 import {
-  agentTask,
+  promiseTask,
   createBackgroundManager,
   registerProcess,
   waitForOutput,
@@ -269,23 +269,17 @@ describe('TaskOutputTool', () => {
     }
   });
 
-  it('returns agent metadata and final summary without process fields', async () => {
+  it('returns non-process metadata and final output without process fields', async () => {
     const { manager } = createBackgroundManager();
     const taskId = manager.registerTask(
-      agentTask(
-        Promise.resolve({ result: 'SUBAGENT-FINAL-SUMMARY\n' }),
-        'agent output test',
-        { agentId: 'agent-child', subagentType: 'coder' },
-      ),
+      promiseTask(Promise.resolve({ result: 'TASK-FINAL-SUMMARY\n' }), 'question output test'),
     );
 
     await manager.wait(taskId);
     const content = await taskOutput(manager, taskId);
 
-    expect(content).toContain('kind: agent');
-    expect(content).toContain('agent_id: agent-child');
-    expect(content).toContain('subagent_type: coder');
-    expect(content).toContain('[output]\nSUBAGENT-FINAL-SUMMARY');
+    expect(content).toContain('kind: question');
+    expect(content).toContain('[output]\nTASK-FINAL-SUMMARY');
     expect(content).not.toMatch(/^pid:/m);
     expect(content).not.toMatch(/^command:/m);
     expect(content).not.toMatch(/^exit_code:/m);
@@ -341,7 +335,7 @@ describe('TaskOutputTool', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const { manager } = createBackgroundManager();
     const taskId = manager.registerTask(
-      agentTask(new Promise(() => {}), 'will time out'),
+      promiseTask(new Promise(() => {}), 'will time out'),
       { timeoutMs: 1 },
     );
 

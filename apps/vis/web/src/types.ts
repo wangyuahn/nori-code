@@ -25,7 +25,6 @@ export type {
   BackgroundTaskInfo,
   BackgroundTaskStatus,
   ProcessBackgroundTaskInfo,
-  AgentBackgroundTaskInfo,
   QuestionBackgroundTaskInfo,
   BackgroundTaskEntry,
   BackgroundTasksResponse,

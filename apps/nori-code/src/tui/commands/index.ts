@@ -25,7 +25,7 @@ export { handleFeedbackCommand, showMcpServers, showStatusReport, showUsage } fr
 export { handlePluginsCommand } from './plugins';
 export { handleReloadCommand, handleReloadTuiCommand } from './reload';
 export { handleGoalCommand, parseGoalCommand } from './goal';
-export { goalArgumentCompletions, subagentArgumentCompletions } from './registry';
+export { goalArgumentCompletions } from './registry';
 export { handleForkCommand, handleInitCommand, handleTitleCommand } from './session';
 export { handleUndoCommand } from './undo';
 export { handleWebCommand } from './web';

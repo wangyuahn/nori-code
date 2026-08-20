@@ -113,11 +113,6 @@ function handleEvent(
     case 'tool.result':
     case 'tool.list.updated':
     case 'mcp.server.status':
-    case 'subagent.spawned':
-    case 'subagent.started':
-    case 'subagent.completed':
-    case 'subagent.failed':
-    case 'subagent.suspended':
     case 'compaction.started':
     case 'compaction.blocked':
     case 'compaction.cancelled':

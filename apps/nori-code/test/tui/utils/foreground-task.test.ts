@@ -52,25 +52,15 @@ describe('pickForegroundTask', () => {
     const bg = task({ taskId: 'bash-bg', detached: true, startedAt: 9999 });
     expect(pickForegroundTask([bg, fg])?.taskId).toBe('bash-fg');
   });
-
-  it('accepts agent (subagent) foreground tasks', () => {
-    const agent = task({
-      taskId: 'agent-aaaaaaaa',
-      kind: 'agent',
-      agentId: 'child-1',
-      subagentType: 'coder',
-    } as Partial<BackgroundTaskInfo>);
-    expect(pickForegroundTask([agent])?.taskId).toBe('agent-aaaaaaaa');
-  });
 });
 
 describe('pickForegroundTasks', () => {
   it('returns all foreground running tasks, most recently started first', () => {
     const a = task({ taskId: 'bash-a', startedAt: 1000 });
-    const b = task({ taskId: 'agent-b', kind: 'agent', startedAt: 3000 });
+    const b = task({ taskId: 'bash-b', startedAt: 3000 });
     const c = task({ taskId: 'bash-c', startedAt: 2000 });
     expect(pickForegroundTasks([a, b, c]).map((t) => t.taskId)).toEqual([
-      'agent-b',
+      'bash-b',
       'bash-c',
       'bash-a',
     ]);

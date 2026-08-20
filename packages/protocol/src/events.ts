@@ -293,23 +293,13 @@ export interface ProcessBackgroundTaskInfo extends BackgroundTaskInfoBase {
   readonly exitCode: number | null;
 }
 
-export interface AgentBackgroundTaskInfo extends BackgroundTaskInfoBase {
-  readonly kind: 'agent';
-  readonly agentId?: string;
-  readonly subagentType?: string;
-  readonly paused?: boolean;
-}
-
 export interface QuestionBackgroundTaskInfo extends BackgroundTaskInfoBase {
   readonly kind: 'question';
   readonly questionCount: number;
   readonly toolCallId?: string;
 }
 
-export type BackgroundTaskInfo =
-  | ProcessBackgroundTaskInfo
-  | AgentBackgroundTaskInfo
-  | QuestionBackgroundTaskInfo;
+export type BackgroundTaskInfo = ProcessBackgroundTaskInfo | QuestionBackgroundTaskInfo;
 
 export interface CompactionResult {
   readonly summary: string;
@@ -622,43 +612,6 @@ export interface ToolResultEvent {
   readonly synthetic?: boolean;
 }
 
-export interface SubagentSpawnedEvent {
-  readonly type: 'subagent.spawned';
-  readonly subagentId: string;
-  readonly subagentName: string;
-  readonly parentToolCallId: string;
-  readonly parentToolCallUuid?: string;
-  readonly parentAgentId?: string;
-  readonly description?: string;
-  readonly subagentIndex?: number;
-  readonly runInBackground: boolean;
-}
-
-export interface SubagentStartedEvent {
-  readonly type: 'subagent.started';
-  readonly subagentId: string;
-}
-
-export interface SubagentSuspendedEvent {
-  readonly type: 'subagent.suspended';
-  readonly subagentId: string;
-  readonly reason: string;
-}
-
-export interface SubagentCompletedEvent {
-  readonly type: 'subagent.completed';
-  readonly subagentId: string;
-  readonly resultSummary: string;
-  readonly usage?: TokenUsage;
-  readonly contextTokens?: number;
-}
-
-export interface SubagentFailedEvent {
-  readonly type: 'subagent.failed';
-  readonly subagentId: string;
-  readonly error: string;
-}
-
 export interface CompactionStartedEvent {
   readonly type: 'compaction.started';
   readonly trigger: 'manual' | 'auto';
@@ -764,11 +717,6 @@ export type AgentEvent =
   | ToolResultEvent
   | ToolListUpdatedEvent
   | McpServerStatusEvent
-  | SubagentSpawnedEvent
-  | SubagentStartedEvent
-  | SubagentSuspendedEvent
-  | SubagentCompletedEvent
-  | SubagentFailedEvent
   | CompactionStartedEvent
   | CompactionBlockedEvent
   | CompactionCancelledEvent
@@ -1061,13 +1009,6 @@ export const processBackgroundTaskInfoSchema = backgroundTaskInfoBaseSchema.exte
   exitCode: z.number().nullable(),
 }) satisfies z.ZodType<ProcessBackgroundTaskInfo>;
 
-export const agentBackgroundTaskInfoSchema = backgroundTaskInfoBaseSchema.extend({
-  kind: z.literal('agent'),
-  agentId: z.string().optional(),
-  subagentType: z.string().optional(),
-  paused: z.boolean().optional(),
-}) satisfies z.ZodType<AgentBackgroundTaskInfo>;
-
 export const questionBackgroundTaskInfoSchema = backgroundTaskInfoBaseSchema.extend({
   kind: z.literal('question'),
   questionCount: z.number(),
@@ -1076,7 +1017,6 @@ export const questionBackgroundTaskInfoSchema = backgroundTaskInfoBaseSchema.ext
 
 export const backgroundTaskInfoSchema = z.discriminatedUnion('kind', [
   processBackgroundTaskInfoSchema,
-  agentBackgroundTaskInfoSchema,
   questionBackgroundTaskInfoSchema,
 ]) satisfies z.ZodType<BackgroundTaskInfo>;
 
@@ -1348,43 +1288,6 @@ export const toolResultEventSchema = z.object({
   synthetic: z.boolean().optional(),
 }) satisfies z.ZodType<ToolResultEvent>;
 
-export const subagentSpawnedEventSchema = z.object({
-  type: z.literal('subagent.spawned'),
-  subagentId: z.string(),
-  subagentName: z.string(),
-  parentToolCallId: z.string(),
-  parentToolCallUuid: z.string().optional(),
-  parentAgentId: z.string().optional(),
-  description: z.string().optional(),
-  subagentIndex: z.number().optional(),
-  runInBackground: z.boolean(),
-}) satisfies z.ZodType<SubagentSpawnedEvent>;
-
-export const subagentStartedEventSchema = z.object({
-  type: z.literal('subagent.started'),
-  subagentId: z.string(),
-}) satisfies z.ZodType<SubagentStartedEvent>;
-
-export const subagentSuspendedEventSchema = z.object({
-  type: z.literal('subagent.suspended'),
-  subagentId: z.string(),
-  reason: z.string(),
-}) satisfies z.ZodType<SubagentSuspendedEvent>;
-
-export const subagentCompletedEventSchema = z.object({
-  type: z.literal('subagent.completed'),
-  subagentId: z.string(),
-  resultSummary: z.string(),
-  usage: tokenUsageSchema.optional(),
-  contextTokens: z.number().optional(),
-}) satisfies z.ZodType<SubagentCompletedEvent>;
-
-export const subagentFailedEventSchema = z.object({
-  type: z.literal('subagent.failed'),
-  subagentId: z.string(),
-  error: z.string(),
-}) satisfies z.ZodType<SubagentFailedEvent>;
-
 export const compactionStartedEventSchema = z.object({
   type: z.literal('compaction.started'),
   trigger: z.enum(['manual', 'auto']),
@@ -1493,11 +1396,6 @@ export const agentEventSchema = z.discriminatedUnion('type', [
   toolResultEventSchema,
   toolListUpdatedEventSchema,
   mcpServerStatusEventSchema,
-  subagentSpawnedEventSchema,
-  subagentStartedEventSchema,
-  subagentSuspendedEventSchema,
-  subagentCompletedEventSchema,
-  subagentFailedEventSchema,
   compactionStartedEventSchema,
   compactionBlockedEventSchema,
   compactionCancelledEventSchema,

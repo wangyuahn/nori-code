@@ -470,13 +470,7 @@ export class TasksBrowserApp extends Container implements Focusable {
     const pointer = selected ? `${SELECT_POINTER} ` : '  ';
     const pointerStyled = currentTheme.fg(selected ? 'primary' : 'textDim', pointer);
 
-    const idColor = selected
-      ? 'primary'
-      : task.kind === 'agent'
-        ? 'success'
-        : task.kind === 'question'
-          ? 'warning'
-          : 'accent';
+    const idColor = selected ? 'primary' : task.kind === 'question' ? 'warning' : 'accent';
     const idText = selected
       ? currentTheme.boldFg(idColor, task.taskId)
       : currentTheme.fg(idColor, task.taskId);
@@ -546,12 +540,6 @@ export class TasksBrowserApp extends Container implements Focusable {
     ];
     if (task.kind === 'process' && task.command && task.command !== task.description) {
       lines.push(`${label('Command:')}${value(singleLine(task.command))}`);
-    }
-    if (task.kind === 'agent' && task.agentId !== undefined) {
-      lines.push(`${label('Agent ID:')}${value(task.agentId)}`);
-    }
-    if (task.kind === 'agent' && task.subagentType !== undefined) {
-      lines.push(`${label('Agent type:')}${value(task.subagentType)}`);
     }
     if (task.kind === 'question') {
       lines.push(`${label('Questions:')}${currentTheme.fg('textMuted', String(task.questionCount))}`);

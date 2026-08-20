@@ -19,7 +19,6 @@ export * from './editor/file-mention-provider';
 export * from './media/code-highlight';
 export * from './media/diff-preview';
 export * from './media/image-thumbnail';
-export * from './messages/agent-group';
 export * from './messages/assistant-message';
 export * from './messages/background-agent-status';
 export * from './messages/read-group';

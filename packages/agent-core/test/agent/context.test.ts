@@ -1230,39 +1230,25 @@ describe('Agent context notification projection', () => {
     expect(text.trimEnd()).toMatch(/<\/notification>$/);
   });
 
-  it('renders an agent_id attribute when the notification carries one', () => {
-    // Background agent tasks (taskId starts with `agent-`) own a separate
-    // `agent_id` for the spawned subagent. Surfacing it as a top-level XML
-    // attribute lets the LLM resume the right thing without having to dig
-    // it out of the body or cross-reference the spawn-success ToolResult.
+  it('renders a closed attribute set and ignores unknown keys', () => {
+    // `agent_id` used to be emitted so the LLM could feed an id back to the
+    // temporary-subagent resume path. That path no longer exists, so the
+    // attribute set is closed: an extra key must not leak into the tag.
     const text = renderNotificationXml({
       id: 'n_lost1',
       category: 'task',
       type: 'task.lost',
       source_kind: 'background_task',
-      source_id: 'agent-w7gq3wwj',
+      source_id: 'question-w7gq3wwj',
       agent_id: 'agent-0',
-      title: 'Background agent lost',
+      title: 'Background question lost',
       severity: 'warning',
-      body: 'Background agent 1 lost.',
+      body: 'Background question 1 lost.',
     });
 
-    expect(text).toContain('source_id="agent-w7gq3wwj"');
-    expect(text).toContain('agent_id="agent-0"');
-  });
-
-  it('omits the agent_id attribute when the notification does not carry one', () => {
-    const text = renderNotificationXml({
-      id: 'n_bash',
-      category: 'task',
-      type: 'task.completed',
-      source_kind: 'background_task',
-      source_id: 'bash-abcdef00',
-      title: 'Background task completed',
-      severity: 'info',
-      body: 'echo done completed.',
-    });
-
+    expect(text.split('\n')[0]).toBe(
+      '<notification id="n_lost1" category="task" type="task.lost" source_kind="background_task" source_id="question-w7gq3wwj">',
+    );
     expect(text).not.toContain('agent_id=');
   });
 

@@ -25,17 +25,7 @@ const ADD_DIR_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
   { value: 'list', description: 'Show configured additional workspace directories' },
 ];
 
-const SUBAGENT_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
-  { value: 'on', description: 'Turn SubAgent mode on' },
-  { value: 'off', description: 'Turn SubAgent mode off' },
-];
-
 /** Argument autocompletion for the `/goal` command (subcommands). */
-/** Argument autocompletion for the `/subagent` command. */
-export function subagentArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
-  return completeLeadingArg(SUBAGENT_ARG_COMPLETIONS, argumentPrefix);
-}
-
 export function goalArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
   const nextMatch = argumentPrefix.match(/^next\s+(\S*)$/i);
   if (nextMatch !== null) {
@@ -272,15 +262,6 @@ export const BUILTIN_SLASH_COMMANDS = [
     description: 'Compact the conversation context',
     priority: 80,
     argumentHint: '<instruction>',
-  },
-  {
-    name: 'subagent',
-    aliases: [],
-    description: 'Enable SubAgent mode or start a coordinated SubAgent task',
-    priority: 80,
-    argumentHint: '[on|off] | <task>',
-    completeArgs: subagentArgumentCompletions,
-    availability: 'idle-only',
   },
   {
     name: 'goal',

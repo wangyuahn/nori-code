@@ -1,9 +1,7 @@
 import { renderPrompt } from '../utils/render-prompt';
 import TEAM_ENGINEERING_PROMPT from './default/team-engineering.md?raw';
-import TEMPORARY_AGENT_PROMPT from './default/temporary-agent.md?raw';
 import type {
   RawAgentProfile,
-  RawSubagentProfile,
   ResolvedAgentProfile,
   SystemPromptContext,
   SystemPromptRenderer,
@@ -17,10 +15,7 @@ interface MergedAgentProfile {
   readonly tools: string[];
   readonly toolsReadonly?: boolean | undefined;
   readonly whenToUse?: string | undefined;
-  readonly subagents?: Record<string, RawSubagentProfile> | undefined;
 }
-
-const MAIN_AGENT_PROFILE_NAMES = new Set(['agent', 'nori-agent', 'nori-coder']);
 
 /**
  * Resolve agent profiles with extends inheritance.
@@ -37,7 +32,7 @@ export function resolveAgentProfiles(
 ): Record<string, ResolvedAgentProfile> {
   const profileMap = new Map<string, RawAgentProfile>();
   const mergedCache = new Map<string, MergedAgentProfile>();
-  const resolvedCache = new Map<string, ResolvedAgentProfile>();
+  const result: Record<string, ResolvedAgentProfile> = {};
 
   for (const profile of raw) {
     if (profileMap.has(profile.name)) {
@@ -48,15 +43,7 @@ export function resolveAgentProfiles(
 
   for (const profile of raw) {
     const merged = resolveMergedProfile(profile.name, profileMap, mergedCache, []);
-    resolvedCache.set(profile.name, toResolvedProfile(merged));
-  }
-
-  applySubagentDescriptions(mergedCache, resolvedCache);
-  linkResolvedSubagents(mergedCache, resolvedCache);
-
-  const result: Record<string, ResolvedAgentProfile> = {};
-  for (const [name, profile] of resolvedCache) {
-    result[name] = profile;
+    result[profile.name] = toResolvedProfile(merged);
   }
 
   return result;
@@ -105,7 +92,6 @@ function resolveMergedProfile(
     tools: profile.tools !== undefined ? [...profile.tools] : [...(parent?.tools ?? [])],
     toolsReadonly: profile.tools_readonly ?? parent?.toolsReadonly,
     whenToUse: profile.whenToUse ?? parent?.whenToUse,
-    subagents: cloneSubagents(profile.subagents),
   };
 
   cache.set(profile.name, merged);
@@ -127,20 +113,19 @@ function toResolvedProfile(merged: MergedAgentProfile): ResolvedAgentProfile {
  * Build a renderer that captures the merged template and prompt vars.
  * The runtime SystemPromptContext is mapped to the template variables
  * (KIMI_OS, KIMI_AGENTS_MD, ...) at render time.
+ *
+ * Every agent — the root lead and every team member, at any depth — runs the
+ * same Team Engineering operating rules, because every node can lead a
+ * department of its own.
  */
 function createSystemPromptRenderer(merged: MergedAgentProfile): SystemPromptRenderer {
   return (context: SystemPromptContext): string => {
     const vars = buildTemplateVars(context, merged.promptVars, merged.tools);
     try {
-      const collaborationPrompt = MAIN_AGENT_PROFILE_NAMES.has(merged.name)
-        ? TEAM_ENGINEERING_PROMPT
-        : TEMPORARY_AGENT_PROMPT;
-      const renderedCollaborationPrompt = renderPrompt(collaborationPrompt, vars);
-      const renderedTemplate = renderPrompt(merged.systemPromptTemplate, vars);
-      const promptParts = merged.systemPromptTemplate.trim() === TEMPORARY_AGENT_PROMPT.trim()
-        ? [renderedTemplate]
-        : [renderedCollaborationPrompt.trim(), renderedTemplate];
-      return promptParts
+      return [
+        renderPrompt(TEAM_ENGINEERING_PROMPT, vars).trim(),
+        renderPrompt(merged.systemPromptTemplate, vars),
+      ]
         .filter(Boolean)
         .join('\n\n');
     } catch (error) {
@@ -187,60 +172,4 @@ function buildTemplateVars(
     KIMI_NORI_VAULT_PATH: context.noriVaultPath ?? '',
     KIMI_NORI_TOOL_HINTS: context.noriToolHints ?? '',
   };
-}
-
-function applySubagentDescriptions(
-  mergedProfiles: Map<string, MergedAgentProfile>,
-  resolvedProfiles: Map<string, ResolvedAgentProfile>,
-): void {
-  for (const [ownerName, owner] of mergedProfiles) {
-    if (owner.subagents === undefined) continue;
-    for (const [subagentName, subagent] of Object.entries(owner.subagents)) {
-      const target = resolvedProfiles.get(subagentName);
-      if (target === undefined) {
-        throwMissingSubagent(ownerName, subagentName);
-      }
-      if (target.description === undefined && subagent.description !== undefined) {
-        target.description = subagent.description;
-      }
-    }
-  }
-}
-
-function linkResolvedSubagents(
-  mergedProfiles: Map<string, MergedAgentProfile>,
-  resolvedProfiles: Map<string, ResolvedAgentProfile>,
-): void {
-  for (const [ownerName, owner] of mergedProfiles) {
-    if (owner.subagents === undefined) continue;
-
-    const subagents: Record<string, ResolvedAgentProfile> = {};
-    for (const subagentName of Object.keys(owner.subagents)) {
-      const target = resolvedProfiles.get(subagentName);
-      if (target === undefined) {
-        throwMissingSubagent(ownerName, subagentName);
-      }
-      subagents[subagentName] = target;
-    }
-
-    const resolved = resolvedProfiles.get(ownerName);
-    if (resolved !== undefined) {
-      resolved.subagents = subagents;
-    }
-  }
-}
-
-function throwMissingSubagent(ownerName: string, subagentName: string): never {
-  throw new Error(
-    `Agent profile "${ownerName}" declares subagent "${subagentName}" but that agent profile was not found`,
-  );
-}
-
-function cloneSubagents(
-  subagents: Record<string, RawSubagentProfile> | undefined,
-): Record<string, RawSubagentProfile> | undefined {
-  if (subagents === undefined) return undefined;
-  return Object.fromEntries(
-    Object.entries(subagents).map(([name, subagent]) => [name, { ...subagent }]),
-  );
 }

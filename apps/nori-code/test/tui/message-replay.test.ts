@@ -16,7 +16,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { KimiTUI, type KimiTUIStartupInput, type TUIState } from '#/tui/kimi-tui';
 import type { SessionEventHandler } from '#/tui/controllers/session-event-handler';
 import type { StreamingUIController } from '#/tui/controllers/streaming-ui';
-import { AgentGroupComponent } from '#/tui/components/messages/agent-group';
 import { ReadGroupComponent } from '#/tui/components/messages/read-group';
 
 vi.mock('#/utils/open-url', () => ({ openUrl: vi.fn() }));
@@ -260,18 +259,6 @@ function backgroundTask(
   description: string,
   status: BackgroundTaskInfo['status'] = 'running',
 ): BackgroundTaskInfo {
-  if (taskId.startsWith('agent-')) {
-    return {
-      taskId,
-      kind: 'agent',
-      agentId: taskId,
-      subagentType: 'coder',
-      description,
-      status,
-      startedAt: 1,
-      endedAt: status === 'running' ? null : 2,
-    };
-  }
   return {
     taskId,
     kind: 'process',
@@ -571,45 +558,6 @@ describe('KimiTUI resume message replay', () => {
     ).toEqual(['Goal blocked']);
   });
 
-  it('groups replayed Agent calls from one assistant message using live grouping', async () => {
-    const replay: AgentReplayRecord[] = [
-      message('user', [{ type: 'text', text: 'run two agents' }]),
-      message('assistant', [], {
-        toolCalls: [
-          toolCall('call_agent_1', 'Agent', {
-            description: 'Review API',
-            subagent_type: 'reviewer',
-          }),
-          toolCall('call_agent_2', 'Agent', {
-            description: 'Review tests',
-            subagent_type: 'reviewer',
-          }),
-        ],
-      }),
-      message('tool', [{ type: 'text', text: 'agent one done' }], {
-        toolCallId: 'call_agent_1',
-      }),
-      message('tool', [{ type: 'text', text: 'agent two done' }], {
-        toolCallId: 'call_agent_2',
-      }),
-    ];
-
-    const driver = await replayIntoDriver(replay);
-    const group = driver.state.transcriptContainer.children.find(
-      (child) => child instanceof AgentGroupComponent,
-    );
-
-    expect(group).toBeInstanceOf(AgentGroupComponent);
-    expect((group as AgentGroupComponent).size()).toBe(2);
-    const output = stripAnsi((group as AgentGroupComponent).render(120).join('\n'));
-    expect(output).toContain('2 agents finished');
-    expect(output).not.toContain('Still working…');
-    expect(output).not.toContain('Waiting to start…');
-    expect(driver.streamingUI.hasPendingAgentGroup()).toBe(false);
-    expect(driver.streamingUI.getToolComponent('call_agent_1')).toBeUndefined();
-    expect(driver.streamingUI.getToolComponent('call_agent_2')).toBeUndefined();
-  });
-
   it('groups replayed Read calls from one assistant message using live grouping', async () => {
     const replay: AgentReplayRecord[] = [
       message('user', [{ type: 'text', text: 'read files' }]),
@@ -639,81 +587,6 @@ describe('KimiTUI resume message replay', () => {
     expect(driver.streamingUI.getToolComponent('call_read_2')).toBeUndefined();
   });
 
-  it('renders replayed SubAgent calls as compact result summaries', async () => {
-    const replay: AgentReplayRecord[] = [
-      message('user', [{ type: 'text', text: 'review files with subagents' }]),
-      message('assistant', [], {
-        toolCalls: [
-          toolCall('call_subagent', 'SubAgent', {
-            description: 'Review changed files',
-            items: ['src/a.ts', 'src/b.ts'],
-          }),
-        ],
-      }),
-      message(
-        'tool',
-        [{
-          type: 'text',
-          text: [
-            '<subagent_result>',
-            '<summary>completed: 1, failed: 1</summary>',
-            '<subagent index="1" outcome="completed">Reviewed src/a.ts.</subagent>',
-            '<subagent index="2" outcome="failed">Agent timed out.</subagent>',
-            '</subagent_result>',
-          ].join('\n'),
-        }],
-        { toolCallId: 'call_subagent' },
-      ),
-    ];
-
-    const driver = await replayIntoDriver(replay);
-    const transcript = stripAnsi(driver.state.transcriptContainer.render(140).join('\n'));
-
-    expect(transcript).toContain('SubAgent: ✓ 1 completed · ✗ 1 failed');
-    expect(transcript).not.toContain('<subagent_result>');
-    expect(transcript).not.toContain('Reviewed src/a.ts.');
-    expect(transcript).not.toContain('Agent timed out.');
-  });
-
-  it('does not show no-index replayed SubAgent failures as completed', async () => {
-    const replay: AgentReplayRecord[] = [
-      message('user', [{ type: 'text', text: 'review files with subagents' }]),
-      message('assistant', [], {
-        toolCalls: [
-          toolCall('call_subagent', 'SubAgent', {
-            description: 'Review changed files',
-            items: ['src/a.ts', 'src/b.ts'],
-          }),
-        ],
-      }),
-      message(
-        'tool',
-        [{
-          type: 'text',
-          text: [
-            '<subagent_result>',
-            '<summary>failed: 1, aborted: 1</summary>',
-            '<resume_hint>Call SubAgent with resume_agent_ids using the agent_id values ' +
-              'in this result to continue unfinished work.</resume_hint>',
-            '<subagent agent_id="agent-1" item="src/a.ts" outcome="failed">' +
-              'Agent timed out.</subagent>',
-            '<subagent agent_id="agent-2" item="src/b.ts" outcome="aborted">' +
-              'User interrupted.</subagent>',
-            '</subagent_result>',
-          ].join('\n'),
-        }],
-        { toolCallId: 'call_subagent' },
-      ),
-    ];
-
-    const driver = await replayIntoDriver(replay);
-    const transcript = stripAnsi(driver.state.transcriptContainer.render(140).join('\n'));
-
-    expect(transcript).toContain('SubAgent: ✗ 1 failed · ⊘ 1 aborted');
-    expect(transcript).not.toContain('SubAgent: ✓ Completed.');
-    expect(transcript).not.toContain('<subagent_result>');
-  });
-
   it('hydrates todo and background snapshot state from resumed main agent', async () => {
     const driver = await replayIntoDriver([], {
       toolStore: {
@@ -724,7 +597,7 @@ describe('KimiTUI resume message replay', () => {
         ],
       },
       background: [
-        backgroundTask('agent-bg1', 'Review long-running work', 'running'),
+        backgroundTask('bash-bg0', 'Watch sources', 'running'),
         backgroundTask('bash-bg1', 'Build package', 'completed'),
       ],
     });
@@ -733,106 +606,9 @@ describe('KimiTUI resume message replay', () => {
       { title: 'Review resume snapshot', status: 'done' },
       { title: 'Render replay transcript', status: 'in_progress' },
     ]);
-    expect(driver.sessionEventHandler.backgroundTasks.has('agent-bg1')).toBe(true);
+    expect(driver.sessionEventHandler.backgroundTasks.has('bash-bg0')).toBe(true);
     expect(driver.sessionEventHandler.backgroundTasks.has('bash-bg1')).toBe(true);
     expect(driver.sessionEventHandler.backgroundTaskTranscriptedTerminal.has('bash-bg1')).toBe(true);
-  });
-
-  it('matches completed resumed background agents by agent id when task id differs', async () => {
-    const driver = await replayIntoDriver([], {
-      background: [
-        {
-          taskId: 'task-bg1',
-          kind: 'agent',
-          agentId: 'agent-bg1',
-          subagentType: 'coder',
-          description: 'Review long-running work',
-          status: 'running',
-          startedAt: 1,
-          endedAt: null,
-        },
-      ],
-    });
-
-    expect(
-      driver.sessionEventHandler.subAgentEventHandler.backgroundAgentMetadata.has('agent-bg1'),
-    ).toBe(true);
-    expect(
-      driver.sessionEventHandler.subAgentEventHandler.backgroundAgentMetadata.has('task-bg1'),
-    ).toBe(false);
-
-    driver.sessionEventHandler.handleEvent(
-      {
-        type: 'subagent.completed',
-        agentId: 'main',
-        sessionId: 'ses-replay',
-        subagentId: 'agent-bg1',
-        resultSummary: 'Reviewed the long-running work.',
-      },
-      () => {},
-    );
-
-    const status = driver.state.transcriptEntries.find(
-      (entry) => entry.backgroundAgentStatus?.phase === 'completed',
-    );
-
-    expect(
-      driver.sessionEventHandler.subAgentEventHandler.backgroundAgentMetadata.has('agent-bg1'),
-    ).toBe(false);
-    expect(status?.backgroundAgentStatus?.headline).toBe('agent completed in background');
-    expect(status?.backgroundAgentStatus?.detail).toContain('Review long-running work');
-  });
-
-  it('keeps timed-out status when an aborted resumed background agent later fails', async () => {
-    const info: BackgroundTaskInfo = {
-      taskId: 'task-bg-timeout',
-      kind: 'agent',
-      agentId: 'agent-bg-timeout',
-      subagentType: 'coder',
-      description: 'Review timeout handling',
-      status: 'running',
-      startedAt: 1,
-      endedAt: null,
-      timeoutMs: 1000,
-    };
-    const driver = await replayIntoDriver([], { background: [info] });
-    const applyTerminalStatus = vi
-      .spyOn(driver.streamingUI, 'applyBackgroundTaskTerminalStatus')
-      .mockReturnValue(true);
-
-    driver.sessionEventHandler.handleEvent(
-      {
-        type: 'background.task.terminated',
-        agentId: 'main',
-        sessionId: 'ses-replay',
-        info: { ...info, status: 'timed_out', endedAt: 2 },
-      },
-      () => {},
-    );
-    driver.sessionEventHandler.handleEvent(
-      {
-        type: 'subagent.failed',
-        agentId: 'main',
-        sessionId: 'ses-replay',
-        subagentId: 'agent-bg-timeout',
-        error: 'The subagent was aborted.',
-      },
-      () => {},
-    );
-
-    expect(applyTerminalStatus.mock.calls.map(([args]) => args.status)).toEqual(['timed_out']);
-    expect(
-      driver.sessionEventHandler.subAgentEventHandler.backgroundAgentMetadata.has(
-        'agent-bg-timeout',
-      ),
-    ).toBe(false);
-    expect(driver.sessionEventHandler.backgroundTaskTranscriptedTerminal.has('task-bg-timeout'))
-      .toBe(true);
-    expect(
-      driver.state.transcriptEntries.some(
-        (entry) => entry.backgroundAgentStatus?.phase === 'failed',
-      ),
-    ).toBe(false);
   });
 
   it('renders replayed bash background notifications as bash tasks', async () => {

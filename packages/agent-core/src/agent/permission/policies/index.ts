@@ -27,7 +27,7 @@ export function createPermissionDecisionPolicies(agent: Agent): PermissionPolicy
     new PreToolCallHookPermissionPolicy(agent),
     // auto mode + AskUserQuestion → deny.
     new AutoModeAskUserQuestionDenyPermissionPolicy(agent),
-    // Discuss: Write/Edit/Bash/SubAgent and related mutating tools → deny.
+    // Discuss: Write/Edit/Bash and related mutating tools → deny.
     new DiscussModeGuardDenyPermissionPolicy(agent),
     // tools_readonly: deny Write/Edit/Bash when readonly is active.
     new ReadonlyPermissionPolicy(agent),

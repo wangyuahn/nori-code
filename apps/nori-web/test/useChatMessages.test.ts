@@ -1,13 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../src/api/client';
-import { apiMessageToChat, applyRealtimeStatusEvent, canApplyGeneratedSessionTitle, chatFilesFromPromptAttachments, chatScopeKey, confirmOptimisticUserMessage, fallbackSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, isTransientChatMessageId, latestTodos, liveAssistantMessage, mergeHistory, mergeInFlightWorkBlocks, promptForRewind, RealtimeEventDeduper, RealtimeSubscriptionGate, removeTerminatedAgent, shouldFinishAbortedPrompt, shouldIgnoreTranscriptEvent, splitUploadedFileMarkup, statusForSession, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
-
-describe('agent activity events', () => {
-  it('removes a manually terminated agent from the live activity set', () => {
-    expect(removeTerminatedAgent(['agent-1', 'agent-2'], 'agent-1')).toEqual(['agent-2']);
-    expect(removeTerminatedAgent(['agent-2'], 'missing')).toEqual(['agent-2']);
-  });
-});
+import { apiMessageToChat, applyRealtimeStatusEvent, canApplyGeneratedSessionTitle, chatFilesFromPromptAttachments, chatScopeKey, confirmOptimisticUserMessage, fallbackSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, isTransientChatMessageId, latestTodos, liveAssistantMessage, mergeHistory, mergeInFlightWorkBlocks, promptForRewind, RealtimeEventDeduper, RealtimeSubscriptionGate, shouldFinishAbortedPrompt, shouldIgnoreTranscriptEvent, splitUploadedFileMarkup, statusForSession, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
 
 describe('session-bound realtime status', () => {
   const status = {

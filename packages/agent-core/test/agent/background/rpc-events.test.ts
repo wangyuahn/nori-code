@@ -13,12 +13,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   BackgroundTaskPersistence,
-  SubagentBackgroundTask,
   type BackgroundTaskInfo,
 } from '../../../src/agent/background';
 import {
-  agentTask,
   createBackgroundManager,
+  promiseTask,
   registerProcess,
 } from './helpers';
 
@@ -76,18 +75,17 @@ function persistedProcess(
   };
 }
 
-function persistedAgent(
-  overrides: Partial<Extract<BackgroundTaskInfo, { kind: 'agent' }>> = {},
-): Extract<BackgroundTaskInfo, { kind: 'agent' }> {
+function persistedQuestion(
+  overrides: Partial<Extract<BackgroundTaskInfo, { kind: 'question' }>> = {},
+): Extract<BackgroundTaskInfo, { kind: 'question' }> {
   return {
-    taskId: 'agent-done0000',
-    kind: 'agent',
+    taskId: 'question-done0000',
+    kind: 'question',
     description: 'restored task',
     startedAt: 1_700_000_000,
     endedAt: 1_700_000_010,
     status: 'completed',
-    agentId: 'agent-session-id',
-    subagentType: 'coder',
+    questionCount: 1,
     ...overrides,
   };
 }
@@ -114,22 +112,22 @@ describe('BackgroundManager — event emission', () => {
     });
   });
 
-  it('emits background.task.started for agent tasks', () => {
+  it('emits background.task.started for non-process tasks', () => {
     const { agent, manager } = createBackgroundManager();
     const taskId = manager.registerTask(
-      agentTask(new Promise(() => {}), 'agent task'),
+      promiseTask(new Promise(() => {}), 'question task'),
     );
 
     expect(agent.emittedEvents).toContainEqual({
       type: 'background.task.started',
       info: expect.objectContaining({
         taskId,
-        kind: 'agent',
+        kind: 'question',
         status: 'running',
       }),
     });
     expect(agent.telemetry.track).toHaveBeenCalledWith('background_task_created', {
-      kind: 'agent',
+      kind: 'question',
     });
   });
 
@@ -189,7 +187,7 @@ describe('BackgroundManager — event emission', () => {
     const { agent, manager } = createBackgroundManager();
     const failedId = registerProcess(manager, immediateProcess(1), 'false', 'failed');
     const timedOutId = manager.registerTask(
-      agentTask(new Promise(() => {}), 'slow agent'),
+      promiseTask(new Promise(() => {}), 'slow task'),
       { timeoutMs: 1 },
     );
     agent.telemetry.track.mockClear();
@@ -205,7 +203,7 @@ describe('BackgroundManager — event emission', () => {
     );
     expect(agent.telemetry.track).toHaveBeenCalledWith(
       'background_task_completed',
-      expect.objectContaining({ kind: 'agent', status: 'timed_out' }),
+      expect.objectContaining({ kind: 'question', status: 'timed_out' }),
     );
   });
 
@@ -225,50 +223,6 @@ describe('BackgroundManager — event emission', () => {
         }),
       },
     ]);
-  });
-
-  it('emits live updates after pause, guidance, and resume', async () => {
-    const { agent, manager } = createBackgroundManager();
-    let paused = false;
-    const control = {
-      get paused() { return paused; },
-      pause: vi.fn(() => { paused = true; }),
-      addGuidance: vi.fn(),
-      resume: vi.fn(() => { paused = false; }),
-    };
-    const taskId = manager.registerTask(new SubagentBackgroundTask(
-      'review changes',
-      signal => new Promise<string>((_resolve, reject) => {
-        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
-      }),
-      2,
-      control,
-    ));
-    agent.emittedEvents.length = 0;
-
-    await manager.pause(taskId, 'hold before editing');
-    await manager.addGuidance(taskId, 'inspect the parser too');
-    await manager.resume(taskId, 'continue now');
-
-    expect(control.pause).toHaveBeenCalledWith('hold before editing');
-    expect(control.addGuidance).toHaveBeenCalledWith('inspect the parser too');
-    expect(control.resume).toHaveBeenCalledWith('continue now');
-    expect(agent.emittedEvents).toEqual([
-      {
-        type: 'background.task.updated',
-        info: expect.objectContaining({ taskId, paused: true }),
-      },
-      {
-        type: 'background.task.updated',
-        info: expect.objectContaining({ taskId, paused: true }),
-      },
-      {
-        type: 'background.task.updated',
-        info: expect.objectContaining({ taskId, paused: false }),
-      },
-    ]);
-
-    await manager.stop(taskId, 'test cleanup');
   });
 
   it('emits background.task.terminated when a restored task is marked lost', async () => {
@@ -304,12 +258,12 @@ describe('BackgroundManager — event emission', () => {
 });
 
 describe('BackgroundManager — notification delivery', () => {
-  it('steers completed agent task notifications into the turn flow', async () => {
+  it('steers completed non-process task notifications into the turn flow', async () => {
     const { agent, manager } = createBackgroundManager();
     const taskId = manager.registerTask(
-      agentTask(
-        Promise.resolve({ result: 'final subagent summary' }),
-        'agent task',
+      promiseTask(
+        Promise.resolve({ result: 'final task summary' }),
+        'question task',
       ),
     );
 
@@ -325,16 +279,11 @@ describe('BackgroundManager — notification delivery', () => {
       taskId,
       status: 'completed',
       notificationId: `task:${taskId}:completed`,
-      speaker: {
-        from: 'sub',
-        speakerId: 'agent-child',
-        speakerName: 'SubAgent agent-child',
-      },
     });
     const text = (content as Array<{ text: string }>)[0]!.text;
     expect(text).toMatch(/^<system-reminder>\n<notification[\s\S]*<\/notification>\n<\/system-reminder>$/);
-    expect(text).toContain('Background agent completed');
-    expect(text).toContain('final subagent summary');
+    expect(text).toContain('Background question completed');
+    expect(text).toContain('final task summary');
     expect(text).toContain('<output-preview');
     expect(text).not.toContain('<output-file');
   });
@@ -362,8 +311,8 @@ describe('BackgroundManager — notification delivery', () => {
 
   it('uses a bounded output preview when no persisted task output exists', async () => {
     const { agent, manager } = createBackgroundManager();
-    const output = `early-output-marker\n${'x'.repeat(4_000)}\nfinal subagent line`;
-    const taskId = manager.registerTask(agentTask(Promise.resolve({ result: output }), 'agent task'));
+    const output = `early-output-marker\n${'x'.repeat(4_000)}\nfinal task line`;
+    const taskId = manager.registerTask(promiseTask(Promise.resolve({ result: output }), 'question task'));
 
     await manager.wait(taskId);
 
@@ -374,7 +323,7 @@ describe('BackgroundManager — notification delivery', () => {
     const text = (content as Array<{ text: string }>)[0]!.text;
     expect(text).toContain('<output-preview');
     expect(text).toContain('truncated="true"');
-    expect(text).toContain('final subagent line');
+    expect(text).toContain('final task line');
     expect(text).not.toContain('early-output-marker');
     expect(text).not.toContain('<output-file');
   });
@@ -400,12 +349,12 @@ describe('BackgroundManager — notification delivery', () => {
     );
   });
 
-  it('replays restored terminal agent task notifications when undelivered', async () => {
-    const sessionDir = await mkdtemp(join(tmpdir(), 'kimi-bg-agent-replay-'));
+  it('replays restored terminal non-process task notifications when undelivered', async () => {
+    const sessionDir = await mkdtemp(join(tmpdir(), 'kimi-bg-question-replay-'));
     try {
       const persistence = new BackgroundTaskPersistence(sessionDir);
-      await persistence.writeTask(persistedAgent());
-      await persistence.appendTaskOutput('agent-done0000', 'restored subagent summary');
+      await persistence.writeTask(persistedQuestion());
+      await persistence.appendTaskOutput('question-done0000', 'restored task summary');
       const { agent, manager } = createBackgroundManager({ sessionDir });
 
       await manager.loadFromDisk();
@@ -418,20 +367,15 @@ describe('BackgroundManager — notification delivery', () => {
       const [content, origin] = agent.context.appendUserMessage.mock.calls[0]!;
       expect(origin).toEqual({
         kind: 'background_task',
-        taskId: 'agent-done0000',
+        taskId: 'question-done0000',
         status: 'completed',
-        notificationId: 'task:agent-done0000:completed',
-        speaker: {
-          from: 'sub',
-          speakerId: 'agent-session-id',
-          speakerName: 'SubAgent agent-session-id',
-        },
+        notificationId: 'task:question-done0000:completed',
       });
       const text = (content as Array<{ text: string }>)[0]!.text;
-      expect(text).toContain('Background agent completed');
-      expect(text).not.toContain('restored subagent summary');
+      expect(text).toContain('Background question completed');
+      expect(text).not.toContain('restored task summary');
       expect(text).toContain('<output-file');
-      expect(text).toContain(persistence.taskOutputFile('agent-done0000'));
+      expect(text).toContain(persistence.taskOutputFile('question-done0000'));
     } finally {
       await rm(sessionDir, { recursive: true, force: true });
     }
@@ -506,13 +450,13 @@ describe('BackgroundManager — notification delivery', () => {
     try {
       const origin = {
         kind: 'background_task',
-        taskId: 'agent-seen0000',
+        taskId: 'question-seen0000',
         status: 'completed',
-        notificationId: 'task:agent-seen0000:completed',
+        notificationId: 'task:question-seen0000:completed',
       } as const;
       const persistence = new BackgroundTaskPersistence(sessionDir);
-      await persistence.writeTask(persistedAgent({ taskId: 'agent-seen0000' }));
-      await persistence.appendTaskOutput('agent-seen0000', 'already delivered summary');
+      await persistence.writeTask(persistedQuestion({ taskId: 'question-seen0000' }));
+      await persistence.appendTaskOutput('question-seen0000', 'already delivered summary');
       const { agent, manager } = createBackgroundManager({ sessionDir });
       manager.markDeliveredNotification(origin);
 
@@ -526,13 +470,13 @@ describe('BackgroundManager — notification delivery', () => {
     }
   });
 
-  it('does not double-notify newly lost restored agent tasks', async () => {
-    const sessionDir = await mkdtemp(join(tmpdir(), 'kimi-bg-agent-lost-'));
+  it('does not double-notify newly lost restored non-process tasks', async () => {
+    const sessionDir = await mkdtemp(join(tmpdir(), 'kimi-bg-question-lost-'));
     try {
       const persistence = new BackgroundTaskPersistence(sessionDir);
       await persistence.writeTask(
-        persistedAgent({
-          taskId: 'agent-run00000',
+        persistedQuestion({
+          taskId: 'question-run00000',
           description: 'interrupted task',
           endedAt: null,
           status: 'running',
@@ -551,31 +495,26 @@ describe('BackgroundManager — notification delivery', () => {
       const [content, origin] = agent.turn.steer.mock.calls[0]!;
       expect(origin).toEqual({
         kind: 'background_task',
-        taskId: 'agent-run00000',
+        taskId: 'question-run00000',
         status: 'lost',
-        notificationId: 'task:agent-run00000:lost',
-        speaker: {
-          from: 'sub',
-          speakerId: 'agent-session-id',
-          speakerName: 'SubAgent agent-session-id',
-        },
+        notificationId: 'task:question-run00000:lost',
       });
       expect((content as Array<{ text: string }>)[0]!.text).toContain(
-        'Background agent lost',
+        'Background question lost',
       );
     } finally {
       await rm(sessionDir, { recursive: true, force: true });
     }
   });
 
-  it('fires a Notification hook when a background agent notification is delivered', async () => {
+  it('fires a Notification hook when a background task notification is delivered', async () => {
     const fireAndForgetTrigger = vi.fn(() => Promise.resolve([]));
     const { agent, manager } = createBackgroundManager({
       hooks: { fireAndForgetTrigger },
     });
     const taskId = manager.registerTask(
-      agentTask(
-        Promise.resolve({ result: 'final agent output' }),
+      promiseTask(
+        Promise.resolve({ result: 'final task output' }),
         'inspect repository',
       ),
     );
@@ -591,7 +530,7 @@ describe('BackgroundManager — notification delivery', () => {
       inputData: {
         sink: 'context',
         notificationType: 'task.completed',
-        title: 'Background agent completed',
+        title: 'Background question completed',
         body: 'inspect repository completed.',
         severity: 'info',
         sourceKind: 'background_task',
@@ -608,8 +547,8 @@ describe('BackgroundManager — notification delivery', () => {
       hooks: { fireAndForgetTrigger },
     });
     const taskId = manager.registerTask(
-      agentTask(
-        Promise.resolve({ result: 'final agent output' }),
+      promiseTask(
+        Promise.resolve({ result: 'final task output' }),
         'inspect repository',
       ),
     );
@@ -650,49 +589,7 @@ describe('BackgroundManager — notification delivery', () => {
   });
 });
 
-describe('BackgroundManager — agent recovery notification bodies', () => {
-  it('failed temporary agent task body does not offer a resume handle', async () => {
-    const { agent, manager } = createBackgroundManager();
-    const taskId = manager.registerTask(
-      agentTask(
-        Promise.reject(new Error('subagent crashed')),
-        'inspect repository',
-        { agentId: 'agent-7' },
-      ),
-    );
-
-    await manager.wait(taskId);
-
-    await vi.waitFor(() => {
-      expect(agent.turn.steer).toHaveBeenCalled();
-    });
-    const [content] = agent.turn.steer.mock.calls[0]!;
-    const text = (content as Array<{ text: string }>)[0]!.text;
-    expect(text).toContain('agent_id="agent-7"');
-    expect(text).not.toMatch(/Agent\(resume=/);
-  });
-
-  it('completed agent task body does not add resume instructions', async () => {
-    const { agent, manager } = createBackgroundManager();
-    const taskId = manager.registerTask(
-      agentTask(
-        Promise.resolve({ result: 'all good' }),
-        'inspect repository',
-        { agentId: 'agent-8' },
-      ),
-    );
-
-    await manager.wait(taskId);
-
-    await vi.waitFor(() => {
-      expect(agent.turn.steer).toHaveBeenCalled();
-    });
-    const [content] = agent.turn.steer.mock.calls[0]!;
-    const text = (content as Array<{ text: string }>)[0]!.text;
-    expect(text).toContain('agent_id="agent-8"');
-    expect(text).not.toMatch(/Agent\(resume="agent-8"/);
-  });
-
+describe('BackgroundManager — notification bodies', () => {
   it('process task body never mentions resume', async () => {
     const { agent, manager } = createBackgroundManager();
     const taskId = registerProcess(manager, immediateProcess(1), 'false', 'shell');

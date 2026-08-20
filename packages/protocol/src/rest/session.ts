@@ -129,7 +129,7 @@ const realtimeTokenUsageSchema = z.object({
 
 export const sessionAgentTreeNodeSchema = z.object({
   id: sessionAgentIdSchema,
-  kind: z.enum(['main', 'team', 'sub', 'discussion', 'independent']),
+  kind: z.enum(['main', 'team', 'discussion', 'independent']),
   parent_agent_id: sessionAgentIdSchema.nullable(),
   name: z.string().min(1),
   role: z.string().min(1).optional(),
@@ -139,7 +139,6 @@ export const sessionAgentTreeNodeSchema = z.object({
   team_report_summary: z.string().min(1).optional(),
   team_report_received: z.boolean().optional(),
   summary: z.string().min(1).optional(),
-  subagent_item: z.string().min(1).optional(),
   status: sessionStatusSchema,
   usage: realtimeTokenUsageSchema.optional(),
   last_active: z.string().datetime(),

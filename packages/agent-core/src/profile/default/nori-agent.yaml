@@ -1,6 +1,6 @@
 extends: agent
 name: nori-agent
-description: Nori Code orchestration agent — hybrid rule-engine + LLM reasoning with Obsidian memory and Team/SubAgent coordination
+description: Nori Code orchestration agent — hybrid rule-engine + LLM reasoning with Obsidian memory and Team coordination
 
 systemPromptPath: ./nori-system.md
 
@@ -29,7 +29,6 @@ tools:
   - Browser
   - Skill
   - AskUserQuestion
-  - SubAgent
   - TeamCreate
   - TeamDismiss
   - TeamAssign
@@ -52,11 +51,3 @@ tools:
   - nori_memory_write
   - nori_memory_remove
   - nori_ask_parent
-
-subagents:
-  orchestrator:
-    description: Temporary read-only task agent for bounded inspection and delegation.
-  explore:
-    description: Fast codebase exploration with prompt-enforced read-only behavior.
-  coder:
-    description: Temporary software engineering worker for a bounded delegated task.

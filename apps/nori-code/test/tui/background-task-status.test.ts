@@ -4,29 +4,13 @@ import { describe, expect, it } from 'vitest';
 import { formatBackgroundTaskTranscript } from '@/tui/utils/background-task-status';
 
 function task(overrides: Partial<BackgroundTaskInfo> = {}): BackgroundTaskInfo {
-  const taskId = overrides.taskId ?? 'bash-abcd1234';
-  const kind = overrides.kind ?? (taskId.startsWith('agent-') ? 'agent' : 'process');
-  const base = {
-    taskId,
-    kind,
+  return {
+    taskId: 'bash-abcd1234',
+    kind: 'process',
     description: 'dev server',
     status: 'running',
     startedAt: Date.now() - 1000,
     endedAt: null,
-    ...overrides,
-  };
-  if (kind === 'agent') {
-    return {
-      ...base,
-      kind: 'agent',
-      agentId: 'agent-child',
-      subagentType: 'coder',
-      ...overrides,
-    } as BackgroundTaskInfo;
-  }
-  return {
-    ...base,
-    kind: 'process',
     command: 'npm run dev',
     pid: 1234,
     exitCode: null,
@@ -40,13 +24,6 @@ describe('formatBackgroundTaskTranscript', () => {
     expect(data.phase).toBe('started');
     expect(data.headline).toContain('bash task started');
     expect(data.detail).toBe('dev server');
-  });
-
-  it('renders an agent started entry', () => {
-    const data = formatBackgroundTaskTranscript(
-      task({ taskId: 'agent-deadbeef', status: 'running' }),
-    );
-    expect(data.headline).toContain('agent task started');
   });
 
   it('renders a question started entry', () => {
@@ -95,10 +72,10 @@ describe('formatBackgroundTaskTranscript', () => {
     expect(data.detail).toContain('session restarted');
   });
 
-  it('surfaces timeout stop reason for agent deadlines', () => {
+  it('surfaces timeout stop reason for task deadlines', () => {
     const data = formatBackgroundTaskTranscript(
       task({
-        taskId: 'agent-aaaaaaaa',
+        taskId: 'bash-aaaaaaaa',
         status: 'timed_out',
         endedAt: Date.now(),
       }),

@@ -1072,8 +1072,8 @@ describe('SessionService agent tree', () => {
         agent_reviewer: {
           homedir: '/tmp/agent_reviewer',
           type: 'sub',
+          kind: 'team',
           parentAgentId: 'main',
-          subagentItem: 'src/review.ts',
           name: 'Reviewer',
           role: 'reviewer',
           mandate: 'Review behavior',
@@ -1105,7 +1105,7 @@ describe('SessionService agent tree', () => {
       }),
       expect.objectContaining({
         id: 'agent_reviewer',
-        kind: 'sub',
+        kind: 'team',
         parent_agent_id: 'main',
         name: 'Reviewer',
         role: 'reviewer',

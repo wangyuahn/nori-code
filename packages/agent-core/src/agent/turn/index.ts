@@ -146,7 +146,7 @@ export class TurnFlow {
   private turnVerificationCommandCount = 0;
   private turnMemorySearchCount = 0;
   private turnMemoryWriteCount = 0;
-  private turnSubagentCount = 0;
+  private turnDelegationCount = 0;
   private turnUserPromptText = '';
   private pendingNoriWorkflowGateContinuation = false;
   private noriWorkflowGateContinuationCounts = new Map<string, number>();
@@ -338,12 +338,10 @@ export class TurnFlow {
     // need to wake the main agent after this cancellation settles.
     this.steerBuffer = this.steerBuffer.filter(({ origin }) => origin.kind !== 'user');
     // A direct cancel (RPC / replay) is the user pressing stop. When the cancel
-    // is propagated from an aborting signal (e.g. a subagent's deadline via
+    // is propagated from an aborting signal (e.g. a scheduler deadline via
     // waitForCurrentTurn), carry that original reason instead so a timeout is
     // not mislabeled to the model as a deliberate user interruption.
-    const cancelReason = reason ?? userCancellationReason();
-    this.abortTurn(cancelReason);
-    this.agent.subagentHost?.cancelAll(cancelReason);
+    this.abortTurn(reason ?? userCancellationReason());
   }
 
   get currentId() {
@@ -689,7 +687,7 @@ export class TurnFlow {
     this.turnVerificationCommandCount = 0;
     this.turnMemorySearchCount = 0;
     this.turnMemoryWriteCount = 0;
-    this.turnSubagentCount = 0;
+    this.turnDelegationCount = 0;
     this.turnUserPromptText = contentPartsText(input);
     this.pendingNoriWorkflowGateContinuation = false;
     this.noriWorkflowGateContinuationCounts = new Map<string, number>();
@@ -1273,8 +1271,8 @@ export class TurnFlow {
       if (event.name === 'nori_memory_write') {
         this.turnMemoryWriteCount++;
       }
-      if (event.name === 'SubAgent') {
-        this.turnSubagentCount++;
+      if (event.name === 'TeamAssign') {
+        this.turnDelegationCount++;
       }
       if (event.name === 'Bash') {
         this.turnShellCommandCount++;
@@ -1395,7 +1393,7 @@ export class TurnFlow {
       testFilesCreated: this.turnTestFilesCreated,
       shellCommandCount: this.turnShellCommandCount,
       verificationCommandCount: this.turnVerificationCommandCount,
-      subagentCount: this.turnSubagentCount,
+      delegationCount: this.turnDelegationCount,
     };
   }
 
@@ -1412,16 +1410,16 @@ export class TurnFlow {
     const lines = [
       `<nori_workflow_gate kind="${visibleKind}" phase="${decision.phase}" mode="${decision.mode}"${requiredToolAttribute}>`,
       `Reason: ${decision.reason}.`,
-      `Observed work: memory_searches=${activity.memorySearchCount}, memory_writes=${activity.memoryWriteCount}, created_files=${activity.filesCreated}, modified_files=${activity.filesModified}, subagent_calls=${activity.subagentCount}.`,
+      `Observed work: memory_searches=${activity.memorySearchCount}, memory_writes=${activity.memoryWriteCount}, created_files=${activity.filesCreated}, modified_files=${activity.filesModified}, team_assignments=${activity.delegationCount}.`,
       '',
     ];
 
-    if (decision.kind === 'bug_hunt_subagent') {
+    if (decision.kind === 'bug_hunt_delegation') {
       lines.push(
         'The current task is bug hunting, failure diagnosis, review, audit, regression investigation, or broad problem finding. Do not finish from a single main-agent pass.',
-        'Call SubAgent now as the only tool call if it is available. Split the investigation into concrete parallel tracks such as type/build, tests, runtime/rendering/UI, permissions/config/settings, persistence/memory/session, and dead/duplicate code.',
-        'If SubAgent is unavailable but a configured graph-check launcher is available, use it and then check the graph-check result/status before final response.',
-        'If neither SubAgent nor the configured DAG launcher is available, state that exact blocker and continue with the narrowest local verification you can run.',
+        'Split the investigation into concrete tracks such as type/build, tests, runtime/rendering/UI, permissions/config/settings, persistence/memory/session, and dead/duplicate code. Agree the split with the Team in Discuss, then hand every track out with TeamAssign.',
+        'If no Team member exists yet, create only as many members as there are distinct tracks, then assign.',
+        'If the Team tools are unavailable, state that exact blocker and continue with the narrowest local verification you can run.',
       );
     } else {
       lines.push(
@@ -1442,13 +1440,13 @@ export class TurnFlow {
       `Reason: ${decision.reason}.`,
       '',
       'Before final response, make a forward difficulty assessment of this project/task using the observed work in this turn.',
-      `Observed work: created_files=${activity.filesCreated}, modified_files=${activity.filesModified}, shell_commands=${activity.shellCommandCount}, verification_commands=${activity.verificationCommandCount}, subagent_calls=${activity.subagentCount}.`,
+      `Observed work: created_files=${activity.filesCreated}, modified_files=${activity.filesModified}, shell_commands=${activity.shellCommandCount}, verification_commands=${activity.verificationCommandCount}, team_assignments=${activity.delegationCount}.`,
     ];
 
     if (decision.mode === 'required') {
       lines.push(
         '',
-        'Review is mandatory now. Use concurrent review/verification before final response: prefer SubAgent with concrete tasks for type/lint/test/regression/diff review when SubAgent is available. If a configured graph-check launcher was used, check its result/status and incorporate the result.',
+        'Review is mandatory now. Run review/verification before the final response: assign concrete type/lint/test/regression/diff review tracks to Team members with TeamAssign when the Team tools are available. If a configured graph-check launcher was used, check its result/status and incorporate the result.',
         'Do not merely summarize the implementation. Stop only after the review/verification result has been considered, or after reporting the exact blocker that prevents review.',
       );
     } else {

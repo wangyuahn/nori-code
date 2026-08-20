@@ -329,7 +329,6 @@ export async function createGoal(
 
   await ensureAutoPermission(
     host as SlashCommandHost,
-    'goal',
     commandText,
     async () => {
       await startGoal(host, parsed, options);

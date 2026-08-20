@@ -169,26 +169,34 @@ describe('events / display re-exports', () => {
     expect((parsed as { info: { detached?: boolean } }).info.detached).toBe(false);
   });
 
-  it('preserves paused state on background task updates', () => {
+  it('drops removed task dimensions from background task updates', () => {
+    // `kind: 'agent'`, `subagentType`, and `paused` all belonged to the
+    // temporary-subagent task kind and its pause/resume controls, which no
+    // longer exist. The event channel must not let them back in: a legacy
+    // producer's extra keys are stripped, not forwarded to clients.
     const parsed = eventSchema.parse({
       type: 'background.task.updated',
       agentId: 'main',
       sessionId: 'sess_1',
       info: {
-        kind: 'agent',
-        taskId: 'subagent-deadbeef',
+        kind: 'question',
+        taskId: 'question-deadbeef',
         description: 'Review changes',
         status: 'running',
         detached: true,
         paused: true,
         startedAt: 1,
         endedAt: null,
+        questionCount: 1,
         subagentType: 'subagent:2',
       },
     });
 
     expect(parsed.type).toBe('background.task.updated');
-    expect((parsed as { info: { paused?: boolean } }).info.paused).toBe(true);
+    const { info } = parsed as { info: Record<string, unknown> };
+    expect(info['detached']).toBe(true);
+    expect(info).not.toHaveProperty('paused');
+    expect(info).not.toHaveProperty('subagentType');
   });
 
   it('validates event.session.created events', () => {

@@ -286,7 +286,7 @@ function WorkspaceActivitySummary({ mainWorking, agentCount, agentTokens, goal, 
       <span><small>{statusSummary}</small><strong>{headline}</strong></span>
       {agentTokens > 0 && <em>{formatTokens(agentTokens)} tokens</em>}
     </div>}
-    {agentCount > 0 && <p className="inspector-activity-line active"><span>{tr('Subagents', '子智能体')}</span><strong>{currentAgentPhrase}{agentTokens > 0 ? ` · ${formatTokens(agentTokens)} tokens` : ''}</strong></p>}
+    {agentCount > 0 && <p className="inspector-activity-line active"><span>{tr('Team members', '团队成员')}</span><strong>{currentAgentPhrase}{agentTokens > 0 ? ` · ${formatTokens(agentTokens)} tokens` : ''}</strong></p>}
     {goal && <section className={`inspector-activity-card inspector-activity-goal goal-${goal.status}`}>
       <header className="inspector-activity-card-heading inspector-activity-goal-heading"><span><Icon name="target" size={13}/><strong>{tr('Goal', '目标')}</strong></span><em>{goalStatusLabel}</em></header>
       <div className="inspector-activity-card-divider"/>

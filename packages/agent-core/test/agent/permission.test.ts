@@ -79,7 +79,7 @@ describe('Agent permission', () => {
 
     expect(policy.evaluate(contextFor('Write'))?.kind).toBe('deny');
     expect(policy.evaluate(contextFor('Bash'))?.kind).toBe('deny');
-    expect(policy.evaluate(contextFor('SubAgent'))?.kind).toBe('deny');
+    expect(policy.evaluate(contextFor('Edit'))?.kind).toBe('deny');
     expect(policy.evaluate(contextFor('Read'))).toBeUndefined();
   });
 

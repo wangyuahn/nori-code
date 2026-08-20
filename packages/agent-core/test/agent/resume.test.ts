@@ -268,9 +268,9 @@ describe('Agent resume', () => {
   it('keeps delivered background notifications indexed after compaction replay', async () => {
     const origin = {
       kind: 'background_task',
-      taskId: 'agent-seen0000',
+      taskId: 'question-seen0000',
       status: 'completed',
-      notificationId: 'task:agent-seen0000:completed',
+      notificationId: 'task:question-seen0000:completed',
     } as const;
     const persistence = new RecordingAgentPersistence([
       {
@@ -295,15 +295,16 @@ describe('Agent resume', () => {
       const backgroundPersistence = new BackgroundTaskPersistence(sessionDir);
       const ctx = testAgent({ persistence, homedir: sessionDir });
       await backgroundPersistence.writeTask({
-        taskId: 'agent-seen0000',
-        kind: 'agent',
+        taskId: 'question-seen0000',
+        kind: 'question',
+        questionCount: 1,
         description: 'already delivered',
         startedAt: 1_700_000_000,
         endedAt: 1_700_000_010,
         status: 'completed',
       });
       await backgroundPersistence.appendTaskOutput(
-        'agent-seen0000',
+        'question-seen0000',
         'already delivered summary',
       );
       const steer = vi.spyOn(ctx.agent.turn, 'steer');
@@ -424,14 +425,15 @@ describe('Agent resume', () => {
       const backgroundPersistence = new BackgroundTaskPersistence(sessionDir);
       const ctx = testAgent({ persistence, homedir: sessionDir });
       await backgroundPersistence.writeTask({
-        taskId: 'agent-new00000',
-        kind: 'agent',
+        taskId: 'question-new00000',
+        kind: 'question',
+        questionCount: 1,
         description: 'newly delivered',
         startedAt: 1_700_000_000,
         endedAt: 1_700_000_010,
         status: 'completed',
       });
-      await backgroundPersistence.appendTaskOutput('agent-new00000', 'newly delivered summary');
+      await backgroundPersistence.appendTaskOutput('question-new00000', 'newly delivered summary');
       const steer = vi.spyOn(ctx.agent.turn, 'steer');
 
       await ctx.agent.resume();
@@ -441,7 +443,7 @@ describe('Agent resume', () => {
         ctx.agent.context.history.some(
           (message) =>
             message.origin?.kind === 'background_task' &&
-            message.origin.taskId === 'agent-new00000',
+            message.origin.taskId === 'question-new00000',
         ),
       ).toBe(true);
       expect(persistence.appended).toContainEqual(
@@ -450,9 +452,9 @@ describe('Agent resume', () => {
           message: expect.objectContaining({
             origin: {
               kind: 'background_task',
-              taskId: 'agent-new00000',
+              taskId: 'question-new00000',
               status: 'completed',
-              notificationId: 'task:agent-new00000:completed',
+              notificationId: 'task:question-new00000:completed',
             },
           }),
         }),

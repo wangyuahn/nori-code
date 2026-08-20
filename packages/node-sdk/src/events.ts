@@ -81,15 +81,6 @@ export type {
   QuestionResult,
 } from '@nori-code/agent-core';
 
-// Subagent lifecycle events.
-export type {
-  SubagentSpawnedEvent,
-  SubagentStartedEvent,
-  SubagentSuspendedEvent,
-  SubagentCompletedEvent,
-  SubagentFailedEvent,
-} from '@nori-code/agent-core';
-
 // Compaction lifecycle events and compaction result payload.
 export type {
   CompactionStartedEvent,
@@ -100,7 +91,7 @@ export type {
 } from '@nori-code/agent-core';
 
 // Background task lifecycle events emitted by the BPM. Covers both
-// bash (`bash-*`) and agent (`agent-*`) tasks under one wire format.
+// bash (`bash-*`) and question (`question-*`) tasks under one wire format.
 export type {
   BackgroundTaskStartedEvent,
   BackgroundTaskUpdatedEvent,

@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SDKSessionRPC } from '../../src/rpc';
 import { Session } from '../../src/session';
 import { ProcessBackgroundTask } from '../../src/agent/background';
-import { agentTask } from '../agent/background/helpers';
+import { promiseTask } from '../agent/background/helpers';
 
 
 const tempDirs: string[] = [];
@@ -178,7 +178,10 @@ describe('Session lifecycle hooks', () => {
     expect(agent.background.getTask(taskId)?.status).toBe('running');
   });
 
-  it('keeps background agent turns alive on close when keepAliveOnExit is true', async () => {
+  it('cancels agent turns on close even when keepAliveOnExit keeps tasks running', async () => {
+    // `keepAliveOnExit` governs background *tasks* only. A background task can
+    // no longer own another agent's turn, so closing the session always cancels
+    // every live turn while the detached tasks are left running.
     const { sessionDir, workDir } = await hookFixture();
     const session = new Session({
       kaos: testKaos.withCwd(workDir),
@@ -189,10 +192,7 @@ describe('Session lifecycle hooks', () => {
       background: { keepAliveOnExit: true },
     });
     const main = await session.createMain();
-    const { id: childId, agent: child } = await session.createAgent(
-      { type: 'sub' },
-      { parentAgentId: 'main' },
-    );
+    const { agent: child } = await session.createAgent({ type: 'sub' }, { parentAgentId: 'main' });
     const turnSettled = createDeferred<void>();
     const waitSpy = vi
       .spyOn(child.turn, 'waitForCurrentTurn')
@@ -201,21 +201,14 @@ describe('Session lifecycle hooks', () => {
       turnSettled.resolve();
     });
     vi.spyOn(child.turn, 'hasActiveTurn', 'get').mockReturnValue(true);
-    const abortController = new AbortController();
-    const abort = vi.spyOn(abortController, 'abort');
     const taskId = main.background.registerTask(
-      agentTask(new Promise(() => {}), 'keep background agent alive', {
-        abortController,
-        agentId: childId,
-        subagentType: 'coder',
-      }),
+      promiseTask(new Promise(() => {}), 'keep background task alive'),
     );
 
     await session.close();
 
-    expect(cancelSpy).not.toHaveBeenCalled();
-    expect(waitSpy).not.toHaveBeenCalled();
-    expect(abort).not.toHaveBeenCalled();
+    expect(waitSpy).toHaveBeenCalled();
+    expect(cancelSpy).toHaveBeenCalled();
     expect(main.background.getTask(taskId)?.status).toBe('running');
   });
 

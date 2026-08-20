@@ -1,3 +1,0 @@
-The subagent always runs detached from the current turn, even when the legacy `run_in_background` field is omitted or false. There is no execution deadline. Completion arrives automatically inside a `<system-reminder>`: active work continues without interruption, while an idle parent is woken to process the result.
-
-Continue with other useful work or respond to the user. If nothing can proceed without the result, stop and wait; do not poll, sleep, or call another tool merely to discover completion. Use TaskOutput only when an explicit live preview is needed. Never fabricate or predict what the result will say.

@@ -5,7 +5,6 @@ import {
   resolveSlashCommandAvailability,
   addDirArgumentCompletions,
   sortSlashCommands,
-  subagentArgumentCompletions,
   type KimiSlashCommand,
 } from '#/tui/commands/index';
 import { describe, expect, it } from 'vitest';
@@ -47,32 +46,6 @@ describe('built-in slash command registry', () => {
     expect(resolveSlashCommandAvailability(plan!, '')).toBe('always');
     expect(resolveSlashCommandAvailability(plan!, 'on')).toBe('always');
     expect(resolveSlashCommandAvailability(plan!, 'clear')).toBe('idle-only');
-  });
-
-  it('keeps SubAgent mode changes and SubAgent tasks idle-only', () => {
-    const subagent = findBuiltInSlashCommand('subagent');
-    expect(subagent).toBeDefined();
-    expect(subagent?.name).toBe('subagent');
-    expect((subagent as KimiSlashCommand).experimentalFlag).toBeUndefined();
-    expect(resolveSlashCommandAvailability(subagent!, 'on')).toBe('idle-only');
-    expect(resolveSlashCommandAvailability(subagent!, 'off')).toBe('idle-only');
-    expect(resolveSlashCommandAvailability(subagent!, 'Ship feature X')).toBe('idle-only');
-  });
-
-  it('offers SubAgent subcommand argument completions', () => {
-    const values = (prefix: string): string[] | null => {
-      const items = subagentArgumentCompletions(prefix);
-      return items === null ? null : items.map((item) => item.value);
-    };
-
-    expect(values('')).toEqual(['on', 'off']);
-    expect(values('O')).toEqual(['on', 'off']);
-    expect(subagentArgumentCompletions('of')).toEqual([
-      { value: 'off', label: 'off', description: 'Turn SubAgent mode off' },
-    ]);
-    expect(values('on')).toBeNull();
-    expect(values('off')).toBeNull();
-    expect(values('Ship feature X')).toBeNull();
   });
 
   it('offers add-dir list and directory argument completions', () => {
@@ -170,7 +143,6 @@ describe('built-in slash command registry', () => {
         'sessions',
         'settings',
         'status',
-        'subagent',
         'theme',
         'title',
         'undo',

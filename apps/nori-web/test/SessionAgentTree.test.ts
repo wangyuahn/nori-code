@@ -17,7 +17,7 @@ describe('SessionAgentTree', () => {
     const agents = [
       { agent_id: 'main', kind: 'main', name: 'Main', status: 'idle' },
       { agent_id: 'team', kind: 'team', name: 'Team Engineering', status: 'idle', parent_agent_id: 'main' },
-      { agent_id: 'child', kind: 'sub', name: 'Protocol trace', status: 'running', parent_agent_id: 'team' },
+      { agent_id: 'child', kind: 'independent', name: 'Protocol trace', status: 'running', parent_agent_id: 'team' },
     ];
     try {
       await act(async () => {
@@ -70,16 +70,16 @@ describe('SessionAgentTree', () => {
           last_active: new Date().toISOString(),
         },
         {
-          agent_id: 'temp-main',
-          kind: 'sub',
+          agent_id: 'independent-main',
+          kind: 'independent',
           parent_agent_id: 'main',
           name: 'Main spawned audit',
           status: 'running',
-          summary: 'Temporary bucket child',
+          summary: 'Independent transcript under main',
         },
         {
-          agent_id: 'temp-audit',
-          kind: 'sub',
+          agent_id: 'independent-audit',
+          kind: 'independent',
           parent_agent_id: 'team-review',
           name: 'Audit task',
           status: 'running',
@@ -126,10 +126,11 @@ describe('SessionAgentTree', () => {
       expect(document.body.textContent).toContain('Main agent');
       expect(document.body.textContent).toContain('Main session');
       expect(document.body.textContent).toContain('Team partner');
-      expect(document.body.textContent).toContain('Temporary');
       expect(document.body.textContent).toContain('Archive');
-      expect(document.body.textContent).toContain('(SubAgent)');
-      expect(document.body.textContent).not.toContain('Temporary SubAgent');
+      // Every node states its own identity. `independent` reads as the generic
+      // Agent — the temporary SubAgent identity no longer exists.
+      expect(document.body.textContent).toContain('(Agent)');
+      expect(document.body.textContent).not.toContain('SubAgent');
       expect(document.body.textContent).toContain('Archived Discuss');
       expect(document.body.textContent).toContain('Live Discuss');
       expect(document.body.textContent).toContain('Discuss');
@@ -153,7 +154,7 @@ describe('SessionAgentTree', () => {
       const reopenedAuditButton = [...document.body.querySelectorAll<HTMLButtonElement>('.session-agent-tree-node > button')]
         .find(button => button.textContent?.includes('Audit task'));
       await act(async () => { reopenedAuditButton?.click(); });
-      expect(onSelectAgent).toHaveBeenLastCalledWith(expect.objectContaining({ agent_id: 'temp-audit' }));
+      expect(onSelectAgent).toHaveBeenLastCalledWith(expect.objectContaining({ agent_id: 'independent-audit' }));
     } finally {
       await act(async () => root.unmount());
       container.remove();
@@ -318,8 +319,8 @@ describe('SessionAgentTree', () => {
       items: [
         { agent_id: 'main', kind: 'main', name: 'Main', status: 'idle' },
         { agent_id: 'team', kind: 'team', name: 'Team', status: 'running' },
-        { agent_id: 'child', kind: 'sub', parent_agent_id: 'team', name: 'Child', status: 'running' },
-        { agent_id: 'archived', kind: 'sub', parent_agent_id: 'team', name: 'Archived child', status: 'archived', archived: true },
+        { agent_id: 'child', kind: 'independent', parent_agent_id: 'team', name: 'Child', status: 'running' },
+        { agent_id: 'archived', kind: 'independent', parent_agent_id: 'team', name: 'Archived child', status: 'archived', archived: true },
       ],
     });
     const container = document.createElement('div');
@@ -367,7 +368,7 @@ describe('SessionAgentTree', () => {
     let agents = [
       { agent_id: 'main', kind: 'main', name: 'Main', status: 'idle' },
       { agent_id: 'team', kind: 'team', name: 'Team', status: 'running', parent_agent_id: 'main' },
-      { agent_id: 'child', kind: 'sub', name: 'Child', status: 'running', parent_agent_id: 'team' },
+      { agent_id: 'child', kind: 'independent', name: 'Child', status: 'running', parent_agent_id: 'team' },
     ];
     const getAgents = vi.spyOn(api.sessions, 'getAgents').mockImplementation(async () => ({ items: agents }));
     const container = document.createElement('div');
@@ -411,14 +412,14 @@ describe('SessionAgentTree', () => {
     }
   });
 
-  it('keeps sibling branches independent and renders the Main → Team → SubAgent hierarchy', async () => {
+  it('keeps sibling branches independent and renders the Main → Team → child hierarchy', async () => {
     vi.spyOn(api.sessions, 'getAgents').mockResolvedValue({
       items: [
         { agent_id: 'main', kind: 'main', name: 'Main', status: 'idle' },
         { agent_id: 'team-a', kind: 'team', name: 'Team A', status: 'running', parent_agent_id: 'main' },
-        { agent_id: 'sub-a', kind: 'sub', name: 'Sub A', status: 'running', parent_agent_id: 'team-a' },
+        { agent_id: 'sub-a', kind: 'independent', name: 'Sub A', status: 'running', parent_agent_id: 'team-a' },
         { agent_id: 'team-b', kind: 'team', name: 'Team B', status: 'running', parent_agent_id: 'main' },
-        { agent_id: 'sub-b', kind: 'sub', name: 'Sub B', status: 'running', parent_agent_id: 'team-b' },
+        { agent_id: 'sub-b', kind: 'independent', name: 'Sub B', status: 'running', parent_agent_id: 'team-b' },
       ],
     });
     const container = document.createElement('div');
@@ -463,9 +464,9 @@ describe('SessionAgentTree', () => {
     vi.spyOn(api.sessions, 'getAgents').mockResolvedValue({
       items: [
         { agent_id: 'main', kind: 'main', name: 'Main', status: 'idle' },
-        { agent_id: 'cycle-a', kind: 'sub', name: 'Cycle A', status: 'running', parent_agent_id: 'cycle-b' },
-        { agent_id: 'cycle-b', kind: 'sub', name: 'Cycle B', status: 'running', parent_agent_id: 'cycle-a' },
-        { agent_id: 'missing', kind: 'sub', name: 'Missing parent', status: 'running', parent_agent_id: 'does-not-exist' },
+        { agent_id: 'cycle-a', kind: 'independent', name: 'Cycle A', status: 'running', parent_agent_id: 'cycle-b' },
+        { agent_id: 'cycle-b', kind: 'independent', name: 'Cycle B', status: 'running', parent_agent_id: 'cycle-a' },
+        { agent_id: 'missing', kind: 'independent', name: 'Missing parent', status: 'running', parent_agent_id: 'does-not-exist' },
       ],
     });
     const container = document.createElement('div');
@@ -480,7 +481,7 @@ describe('SessionAgentTree', () => {
           onSelectAgent: vi.fn(),
         })));
       });
-      await vi.waitFor(() => expect(container.textContent).toContain('SubAgent'));
+      await vi.waitFor(() => expect(container.textContent).toContain('agents'));
       await act(async () => { container.querySelector<HTMLElement>('.session-agent-tree > summary')?.click(); });
       await vi.waitFor(() => expect(document.body.textContent).toContain('Cycle A'));
       expect(document.body.querySelectorAll('[data-agent-id="cycle-a"]')).toHaveLength(1);

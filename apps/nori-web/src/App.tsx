@@ -8,7 +8,7 @@ import { SessionAgentTree } from './components/SessionAgentTree';
 import { Icon, type IconName } from './components/Icon';
 import { useSessions, usePhaseStatus, useServerStatus } from './hooks/useApi';
 import { useChatMessages } from './hooks/useChatMessages';
-import { api, type BackgroundTask, type FsEntry, type Message, type ModelCatalogItem, type PromptAttachment, type PromptExecutionOptions, type Session, type SessionAgent, type SessionAgentConfig } from './api/client';
+import { api, type FsEntry, type Message, type ModelCatalogItem, type PromptAttachment, type PromptExecutionOptions, type Session, type SessionActivity, type SessionAgent, type SessionAgentConfig } from './api/client';
 import { FileTree } from './components/FileTree';
 import { ProjectFolderPicker } from './components/ProjectFolderPicker';
 import { useI18n } from './i18n';
@@ -125,18 +125,18 @@ export function App() {
     setPendingAgentOpen(null);
   }, [pendingAgentOpen, sessionAgents, sessionId]);
   const backgroundTasks = useBackgroundTasks(sessionId);
-  const [globalActivityCount, setGlobalActivityCount] = useState(0);
+  const [activity, setActivity] = useState<readonly SessionActivity[]>([]);
   useEffect(() => {
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const refresh = async () => {
       try {
         const result = await api.sessions.getActivity();
-        if (!disposed) setGlobalActivityCount(result.items.length);
+        if (!disposed) setActivity(result.items);
       } catch {
-        // Drop the last server snapshot; current-session realtime state remains
-        // available through sessionActiveAgentCount as a local fallback.
-        if (!disposed) setGlobalActivityCount(0);
+        // Drop the last snapshot rather than showing a stale one; the next poll
+        // is 2.5s away and a wrong "still working" badge is worse than none.
+        if (!disposed) setActivity([]);
       } finally {
         if (!disposed) timer = setTimeout(() => void refresh(), 2_500);
       }
@@ -180,14 +180,12 @@ export function App() {
     sessions: tr('Sessions', '会话'),
     files: tr('Files', '文件'),
   };
-  const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, activeTurnId, sessionStatus, agentTreeRevision, discussionTurnAgentId, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort } = useChatMessages(sessionId, activeAgentId, activeSession?.title);
+  const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, activeTurnId, sessionStatus, agentTreeRevision, discussionTurnAgentId, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort } = useChatMessages(sessionId, activeAgentId, activeSession?.title);
   const globalApprovals = useGlobalApprovals();
   const browserPermissions = useBrowserPermissions();
-  const sessionActiveAgentCount = countActiveAgents(activeSubagentIds, backgroundTasks.tasks);
+  const sessionActiveAgentCount = countActiveAgents(activity, sessionId ?? undefined);
   const sessionTreeTokens = sessionAgents.reduce((total, agent) => total + (agent.tokens ?? 0), 0);
-  // The server aggregate is authoritative across sessions. The current session
-  // count remains a realtime fallback while that poll is loading or unavailable.
-  const effectiveGlobalActiveAgentCount = effectiveGlobalActiveAgentCountFor(sessionActiveAgentCount, globalActivityCount);
+  const effectiveGlobalActiveAgentCount = countActiveAgents(activity);
   const sessionTitles = Object.fromEntries(sessions.map(session => [session.id, session.title || session.id]));
 
   useEffect(() => {
@@ -633,20 +631,18 @@ export function WindowControls() {
   </div>;
 }
 
+/**
+ * Count distinct agents the server reports as active. `/sessions/activity`
+ * already returns one entry per (session, agent) and only for non-idle work, so
+ * this is a filter plus a length. Pass `sessionId` for the current session's
+ * badge; omit it for the global badge.
+ */
 export function countActiveAgents(
-  activeSubagentIds: readonly string[],
-  backgroundTasks: readonly BackgroundTask[],
+  activity: readonly SessionActivity[],
+  sessionId?: string,
 ): number {
-  const realtimeCount = new Set(activeSubagentIds).size;
-  const polledCount = backgroundTasks.filter(task =>
-    task.kind === 'subagent' && task.status === 'running',
-  ).length;
-  // Realtime agent ids and task records describe the same work through different APIs.
-  return Math.max(realtimeCount, polledCount);
-}
-
-export function effectiveGlobalActiveAgentCountFor(sessionActiveAgentCount: number, serverActivityCount: number): number {
-  return Math.max(0, sessionActiveAgentCount, serverActivityCount);
+  if (sessionId === undefined) return activity.length;
+  return activity.filter(item => item.session_id === sessionId).length;
 }
 
 export function buildAgentBreadcrumb(

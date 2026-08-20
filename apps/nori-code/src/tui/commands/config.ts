@@ -25,10 +25,8 @@ import { SettingsSelectorComponent, type SettingsSelection } from '../components
 import {
   StartPermissionPromptComponent,
   goalStartOptions,
-  SUBAGENT_OPTIONS,
   GOAL_MANUAL_NOTICE,
   GOAL_YOLO_NOTICE,
-  SUBAGENT_NOTICE,
 } from '../components/dialogs/start-permission-prompt';
 import { ThemeSelectorComponent } from '../components/dialogs/theme-selector';
 import { UpdatePreferenceSelectorComponent } from '../components/dialogs/update-preference-selector';
@@ -117,18 +115,17 @@ export async function handleSettingPermission(host: SlashCommandHost, mode: stri
 }
 
 // ---------------------------------------------------------------------------
-// Shared permission guard for Goal / SubAgent start flows
+// Permission guard for the /goal start flow
 // ---------------------------------------------------------------------------
 
 /**
- * Ensures the session has a permissive-enough mode before starting a goal or
- * SubAgent task. When the current permission is `auto` (or `yolo` for SubAgent) the
- * callback runs immediately; otherwise a permission prompt is shown so the
- * user can switch modes or proceed in Manual.
+ * Ensures the session has a permissive-enough mode before starting a goal.
+ * When the current permission is `auto` the callback runs immediately;
+ * otherwise a permission prompt is shown so the user can switch modes or
+ * proceed in Manual.
  */
 export async function ensureAutoPermission(
   host: SlashCommandHost,
-  action: 'goal' | 'subagent',
   commandText: string,
   onStart: () => Promise<void>,
 ): Promise<void> {
@@ -140,31 +137,15 @@ export async function ensureAutoPermission(
     return;
   }
 
-  // SubAgent runs fine under yolo; only prompt on manual.
-  if (action === 'subagent' && currentMode === 'yolo') {
-    await onStart();
-    return;
-  }
-
-  const cancelStatus = action === 'goal' ? 'Goal not started.' : 'SubAgent task not started.';
-
   const cancelStart = (): void => {
     host.restoreInputText(commandText);
-    host.showStatus(cancelStatus);
+    host.showStatus('Goal not started.');
   };
 
   const isYolo = currentMode === 'yolo';
-  const title = action === 'goal'
-    ? (isYolo ? 'Start a goal in YOLO mode?' : 'Start a goal with approvals on?')
-    : 'Start a SubAgent task with approvals on?';
-
-  const noticeLines = action === 'goal'
-    ? (isYolo ? GOAL_YOLO_NOTICE : GOAL_MANUAL_NOTICE)
-    : SUBAGENT_NOTICE;
-
-  const options = action === 'goal'
-    ? goalStartOptions(isYolo ? 'yolo' : 'manual')
-    : SUBAGENT_OPTIONS;
+  const title = isYolo ? 'Start a goal in YOLO mode?' : 'Start a goal with approvals on?';
+  const noticeLines = isYolo ? GOAL_YOLO_NOTICE : GOAL_MANUAL_NOTICE;
+  const options = goalStartOptions(isYolo ? 'yolo' : 'manual');
 
   host.mountEditorReplacement(
     new StartPermissionPromptComponent({
@@ -1066,15 +1047,9 @@ function setWorkflowConfig(host: SlashCommandHost, patch: Partial<WorkflowConfig
 function showWorkflowPicker(host: SlashCommandHost): void {
   const config = getWorkflowConfig(host);
 
-  const bugHuntLabel = config.bugHuntSubAgentRequired ? 'ON' : 'OFF';
   const gateLabel = String(config.maxReviewGateContinuations);
 
   const options: ChoiceOption[] = [
-    {
-      value: 'bug-hunt-subagent',
-      label: `Bug Hunt SubAgent: ${bugHuntLabel}`,
-      description: 'Automatically launch SubAgent for bug hunt / failure diagnosis requests.',
-    },
     {
       value: 'review-thresholds',
       label: `Review Thresholds: ${config.reviewSuggestionThreshold} / ${config.reviewRequiredThreshold}`,
@@ -1095,12 +1070,6 @@ function showWorkflowPicker(host: SlashCommandHost): void {
       onSelect: (value) => {
         host.restoreEditor();
         switch (value) {
-          case 'bug-hunt-subagent': {
-            const next = !getWorkflowConfig(host).bugHuntSubAgentRequired;
-            setWorkflowConfig(host, { bugHuntSubAgentRequired: next });
-            host.showStatus(`Bug Hunt SubAgent: ${next ? 'ON' : 'OFF'}`);
-            break;
-          }
           case 'review-thresholds':
             showReviewThresholdPicker(host);
             return;

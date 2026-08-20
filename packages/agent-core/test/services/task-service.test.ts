@@ -131,18 +131,6 @@ describe('toProtocolTask adapter', () => {
     expect(out.status).toBe('failed');
   });
 
-  it("maps 'agent' kind → 'subagent'", () => {
-    const info: BackgroundTaskInfo = {
-      taskId: 't_a',
-      kind: 'agent',
-      description: 'sub',
-      status: 'running',
-      startedAt: 0,
-      endedAt: null,
-    };
-    expect(toProtocolTask('s', info).kind).toBe('subagent');
-  });
-
   it("maps 'question' kind → 'tool'", () => {
     const info: BackgroundTaskInfo = {
       taskId: 't_q',

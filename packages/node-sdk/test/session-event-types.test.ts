@@ -42,12 +42,6 @@ describe('Event public types', () => {
     >();
   });
 
-  it('narrows subagent lifecycle events by type', () => {
-    expectTypeOf<EventByType<'subagent.spawned'>['subagentId']>().toEqualTypeOf<string>();
-    expectTypeOf<EventByType<'subagent.spawned'>['runInBackground']>().toEqualTypeOf<boolean>();
-    expectTypeOf<EventByType<'subagent.suspended'>['reason']>().toEqualTypeOf<string>();
-  });
-
   it('narrows cron fired events by type', () => {
     expectTypeOf<EventByType<'cron.fired'>['prompt']>().toEqualTypeOf<string>();
     expectTypeOf<EventByType<'cron.fired'>['origin']['kind']>().toEqualTypeOf<'cron_job'>();
@@ -77,6 +71,7 @@ describe('Event public types', () => {
         case 'event.config.changed':
         case 'event.model_catalog.changed':
         case 'goal.updated':
+        case 'discussion.updated':
         case 'skill.activated':
         case 'plugin_command.activated':
         case 'error':
@@ -98,11 +93,6 @@ describe('Event public types', () => {
         case 'tool.result':
         case 'tool.list.updated':
         case 'mcp.server.status':
-        case 'subagent.spawned':
-        case 'subagent.started':
-        case 'subagent.suspended':
-        case 'subagent.completed':
-        case 'subagent.failed':
         case 'compaction.started':
         case 'compaction.blocked':
         case 'compaction.cancelled':

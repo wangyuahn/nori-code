@@ -89,8 +89,6 @@ export interface BackgroundTaskOrigin {
   readonly taskId: string;
   readonly status: BackgroundTaskStatus;
   readonly notificationId: string;
-  /** Model-facing identity for detached SubAgent completion notifications. */
-  readonly speaker?: SpeakerOrigin;
 }
 
 export interface CronJobOrigin {

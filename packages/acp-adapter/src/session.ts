@@ -1457,7 +1457,6 @@ function formatTasksReport(tasks: readonly BackgroundTaskInfo[]): string {
     ...tasks.map((task) => {
       const parts = [`- ${task.taskId}: ${task.status}`, task.description];
       if (task.kind === 'process') parts.push(`command=${task.command}`);
-      if (task.kind === 'agent' && task.subagentType !== undefined) parts.push(`subagent=${task.subagentType}`);
       if (task.stopReason !== undefined) parts.push(`reason=${task.stopReason}`);
       return parts.join(' · ');
     }),

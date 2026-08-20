@@ -29,7 +29,7 @@ export interface StartPermissionPromptOptions<
 }
 
 // ---------------------------------------------------------------------------
-// Pre-built option sets for goal / SubAgent permission prompts
+// Pre-built option sets for the goal permission prompt
 // ---------------------------------------------------------------------------
 
 export const GOAL_MANUAL_OPTIONS: readonly StartPermissionOption[] = [
@@ -82,27 +82,6 @@ export function goalStartOptions(mode: 'manual' | 'yolo'): readonly StartPermiss
   return mode === 'yolo' ? GOAL_YOLO_OPTIONS : GOAL_MANUAL_OPTIONS;
 }
 
-export const SUBAGENT_OPTIONS: readonly StartPermissionOption[] = [
-  {
-    value: 'auto',
-    label: 'Switch to Auto and start',
-    description:
-      'Best for SubAgent tasks. Tools are approved automatically, and questions are skipped.',
-  },
-  {
-    value: 'yolo',
-    label: 'Switch to YOLO and start',
-    description:
-      'Tools and Discuss transitions are approved automatically. Nori Code may still ask you questions.',
-  },
-  {
-    value: 'manual',
-    label: 'Start in Manual',
-    description:
-      'Keep approvals on. Nori Code may stop and wait for you during the SubAgent task.',
-  },
-];
-
 export const GOAL_MANUAL_NOTICE = [
   'Manual mode asks you before Nori Code runs commands, edits files, or takes other risky actions.',
   'Manual mode is not suitable for unattended goal work.',
@@ -113,12 +92,6 @@ export const GOAL_YOLO_NOTICE = [
   'YOLO mode approves tools and Discuss transitions automatically.',
   'YOLO mode can still stop for questions.',
   'Switch to Auto if you want questions skipped during goal work.',
-] as const;
-
-export const SUBAGENT_NOTICE = [
-  'Manual mode asks you before Nori Code runs commands, edits files, or takes other risky actions.',
-  'Manual mode can block SubAgent work while agents are running.',
-  'You can go back without losing your command.',
 ] as const;
 
 export class StartPermissionPromptComponent<TChoice extends StartPermissionChoice = StartPermissionChoice>

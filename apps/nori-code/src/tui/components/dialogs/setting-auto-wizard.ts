@@ -1,13 +1,12 @@
 /**
  * SettingAutoWizardComponent — multi-step guided setup for /setting auto.
  *
- * Walks the user through 6 sequential steps:
+ * Walks the user through 5 sequential steps:
  *   1. Permission mode (yolo / auto / manual)
  *   2. Model selection
- *   3. SubAgent depth
- *   4. Coder write permission
- *   5. Discuss
- *   6. Notification toggle
+ *   3. Coder write permission
+ *   4. Discuss
+ *   5. Notification toggle
  *
  * Each step shows a title, description, and a list of choices. Enter
  * selects, Esc goes back one step (or cancels on step 1).
@@ -167,9 +166,9 @@ export class SettingAutoWizardComponent extends Container implements Focusable {
         key: 'coderWrite',
         title: 'Coder Write Permission',
         description:
-          'Can the nori-coder sub-agent directly write files and run commands?\n\n' +
+          'Can the nori-coder agent directly write files and run commands?\n\n' +
           '• On  — Coder can use Write/Edit/Bash directly. Faster, less back-and-forth.\n' +
-          '• Off — Coder is read-only and must delegate writes via SubAgent.\n\n' +
+          '• Off — Coder is read-only and must hand writes back to the lead.\n\n' +
           'Recommended: On for most projects.',
         options: ON_OFF_OPTIONS,
         currentValue: appState.coderWriteEnabled ? 'on' : 'off',
@@ -192,7 +191,7 @@ export class SettingAutoWizardComponent extends Container implements Focusable {
           'Should Nori send desktop notifications when tasks complete?\n\n' +
           '• On  — Get notified when long-running tasks finish.\n' +
           '• Off — No notifications. Check manually.\n\n' +
-          'Recommended: On, especially for longer SubAgent runs.',
+          'Recommended: On, especially for longer team runs.',
         options: ON_OFF_OPTIONS,
         currentValue: appState.notifications.enabled ? 'on' : 'off',
       },

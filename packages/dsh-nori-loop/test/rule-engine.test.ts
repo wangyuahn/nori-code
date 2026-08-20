@@ -18,8 +18,8 @@ const RULES = [
   },
   {
     name: 'review_after_subagent',
-    condition: { type: 'on_tool', tool: 'SubAgent', stage: 'after' },
-    prompt: 'Review SubAgent results.',
+    condition: { type: 'on_tool', tool: 'TeamAssign', stage: 'after' },
+    prompt: 'Review TeamAssign results.',
     enforced: true,
   },
   {
@@ -43,7 +43,7 @@ const RULES = [
 ] as const satisfies readonly RuleConfig[];
 
 const searchRule = RULES[0]!;
-const subagentRule = RULES[1]!;
+const teamAssignRule = RULES[1]!;
 const adrRule = RULES[2]!;
 const alwaysRule = RULES[3]!;
 const reviewerRule = RULES[4]!;
@@ -53,8 +53,8 @@ describe('checkCondition', () => {
     expect(checkCondition(alwaysRule.condition, {})).toBe(true);
     expect(checkCondition(searchRule.condition, { currentPhase: 'implement', phaseStage: 'enter' })).toBe(true);
     expect(checkCondition(searchRule.condition, { currentPhase: 'implement', phaseStage: 'exit' })).toBe(false);
-    expect(checkCondition(subagentRule.condition, { currentTool: 'SubAgent', toolStage: 'after' })).toBe(true);
-    expect(checkCondition(subagentRule.condition, { currentTool: 'SubAgent', toolStage: 'before' })).toBe(false);
+    expect(checkCondition(teamAssignRule.condition, { currentTool: 'TeamAssign', toolStage: 'after' })).toBe(true);
+    expect(checkCondition(teamAssignRule.condition, { currentTool: 'TeamAssign', toolStage: 'before' })).toBe(false);
   });
 });
 
@@ -71,7 +71,7 @@ describe('ruleTargetsAgent', () => {
   });
 
   it('untargeted rules apply everywhere', () => {
-    expect(ruleTargetsAgent(subagentRule, true, 'coder')).toBe(true);
+    expect(ruleTargetsAgent(teamAssignRule, true, 'coder')).toBe(true);
   });
 });
 

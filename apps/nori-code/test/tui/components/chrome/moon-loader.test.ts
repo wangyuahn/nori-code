@@ -20,7 +20,7 @@ afterEach(() => {
 });
 
 describe('MoonLoader', () => {
-  it('keeps the tip out of renderInline so it does not squeeze against the SubAgent progress bar', () => {
+  it('keeps the tip out of renderInline so it does not squeeze against inline content', () => {
     const loader = createLoader();
     loader.setTip(' · Tip: ctrl+s: steer mid-turn');
     loader.setAvailableWidth(80);

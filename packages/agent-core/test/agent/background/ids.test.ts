@@ -9,7 +9,7 @@ import type { KaosProcess } from '@nori-code/kaos';
 import { describe, expect, it, vi } from 'vitest';
 
 import { BackgroundTaskPersistence } from '../../../src/agent/background';
-import { agentTask, createBackgroundManager, registerProcess } from './helpers';
+import { promiseTask, createBackgroundManager, registerProcess } from './helpers';
 
 function pendingProcess(): KaosProcess {
   return {
@@ -33,14 +33,14 @@ describe('background task id format', () => {
     expect(manager.getTask(id)).toMatchObject({ taskId: id, kind: 'process' });
   });
 
-  it('assigns agent-prefixed ids to agent tasks', () => {
+  it('assigns kind-prefixed ids to non-process tasks', () => {
     const { manager } = createBackgroundManager();
     const id = manager.registerTask(
-      agentTask(new Promise(() => {}), 'agent task'),
+      promiseTask(new Promise(() => {}), 'question task'),
     );
 
-    expect(id).toMatch(/^agent-[0-9a-z]{8}$/);
-    expect(manager.getTask(id)).toMatchObject({ taskId: id, kind: 'agent' });
+    expect(id).toMatch(/^question-[0-9a-z]{8}$/);
+    expect(manager.getTask(id)).toMatchObject({ taskId: id, kind: 'question' });
   });
 
   it('rejects malformed ids at the persistence path boundary', () => {

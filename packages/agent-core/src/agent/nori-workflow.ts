@@ -3,8 +3,7 @@ export interface NoriWorkflowConfig {
   readonly reviewRequiredThreshold: number;
   readonly maxReviewGateContinuations: number;
   readonly memorySearchRequired?: boolean;
-  readonly bugHuntSubagentRequired?: boolean;
-  readonly preSubagentDocRequired?: boolean;
+  readonly bugHuntDelegationRequired?: boolean;
   readonly requireAnalysisNote?: boolean;
   readonly requireDecisionNote?: boolean;
   readonly requireReviewNote?: boolean;
@@ -16,7 +15,8 @@ export interface NoriReviewActivity {
   readonly testFilesCreated: number;
   readonly shellCommandCount: number;
   readonly verificationCommandCount: number;
-  readonly subagentCount: number;
+  /** `TeamAssign` calls observed this turn — investigation handed to members. */
+  readonly delegationCount: number;
 }
 
 export interface NoriWorkflowActivity extends NoriReviewActivity {
@@ -33,7 +33,7 @@ export interface NoriReviewGateDecision {
   readonly reason: string;
 }
 
-export type NoriWorkflowGateKind = 'bug_hunt_subagent' | 'memory_search' | 'review';
+export type NoriWorkflowGateKind = 'bug_hunt_delegation' | 'memory_search' | 'review';
 
 export interface NoriWorkflowGateDecision {
   readonly kind: NoriWorkflowGateKind;
@@ -48,7 +48,7 @@ export const DEFAULT_NORI_WORKFLOW_CONFIG: NoriWorkflowConfig = {
   reviewSuggestionThreshold: 4,
   reviewRequiredThreshold: 7,
   maxReviewGateContinuations: 2,
-  bugHuntSubagentRequired: true,
+  bugHuntDelegationRequired: true,
 };
 
 export function resolveNoriWorkflowConfig(
@@ -97,10 +97,9 @@ export function resolveNoriWorkflowConfig(
       booleanValue(workflow?.['require_memory_search']) ??
       hasWorkflowToolStep(noriConfig, 'implement', 'nori_memory_search') ??
       hasEnforcedRule(rules?.['definitions'], 'search_before_code'),
-    bugHuntSubagentRequired:
-      booleanValue(workflow?.['bug_hunt_subagent_required']) ??
-      DEFAULT_NORI_WORKFLOW_CONFIG.bugHuntSubagentRequired,
-    preSubagentDocRequired: booleanValue(rules?.['pre_subagent_doc_required']),
+    bugHuntDelegationRequired:
+      booleanValue(workflow?.['bug_hunt_delegation_required']) ??
+      DEFAULT_NORI_WORKFLOW_CONFIG.bugHuntDelegationRequired,
     requireAnalysisNote: booleanValue(rules?.['require_analysis_note']),
     requireDecisionNote: booleanValue(rules?.['require_decision_note']),
     requireReviewNote: booleanValue(rules?.['require_pattern_note']),
@@ -114,15 +113,15 @@ export function decideNoriWorkflowGate(
   if (config === undefined) return undefined;
 
   if (
-    (config.bugHuntSubagentRequired ?? true) &&
+    (config.bugHuntDelegationRequired ?? true) &&
     hasNoriBugHuntIntent(activity.userPromptText) &&
-    activity.subagentCount <= 0
+    activity.delegationCount <= 0
   ) {
     return {
-      kind: 'bug_hunt_subagent',
+      kind: 'bug_hunt_delegation',
       phase: 'review',
       mode: 'required',
-      requiredTool: 'SubAgent',
+      requiredTool: 'TeamAssign',
       reason: 'the user asked for bug hunting, failure diagnosis, review, or broad problem finding',
     };
   }
@@ -194,7 +193,7 @@ export function scoreNoriReviewDifficulty(activity: NoriReviewActivity): number 
   score += Math.min(6, changedFiles * 2);
   score += Math.min(2, activity.filesCreated);
   score += Math.min(2, activity.shellCommandCount);
-  score += Math.min(3, activity.subagentCount * 3);
+  score += Math.min(3, activity.delegationCount * 3);
   if (
     changedFiles > 0 &&
     activity.testFilesCreated <= 0 &&
@@ -213,7 +212,7 @@ function hasImplementationActivity(activity: NoriReviewActivity): boolean {
   return (
     activity.filesCreated > 0 ||
     activity.filesModified > 0 ||
-    activity.subagentCount > 0
+    activity.delegationCount > 0
   );
 }
 

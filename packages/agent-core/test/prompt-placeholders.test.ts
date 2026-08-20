@@ -23,18 +23,14 @@ const SRC = join(import.meta.dirname, '..', 'src');
 // templated prompt file is introduced.
 const TEMPLATED = new Set([
   'agent/compaction/compaction-instruction.md',
-  'profile/default/coder-system.md',
   'profile/default/nori-system.md',
   'profile/default/system.md',
-  'profile/default/temporary-agent.md',
   'tools/builtin/file/read.md',
   'tools/builtin/file/read-media.md',
   'tools/builtin/shell/bash.md',
 ]);
 
-const STATIC_PLACEHOLDER_PROTOCOL_FILES = new Set([
-  'tools/builtin/collaboration/subagent.md',
-]);
+const STATIC_PLACEHOLDER_PROTOCOL_FILES = new Set<string>([]);
 
 const mdFiles = globSync('**/*.md', { cwd: SRC })
   .map((file) => file.split('\\').join('/'))

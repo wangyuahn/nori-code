@@ -27,7 +27,6 @@ tools:
   - TodoList
   - Skill
   - WebSearch
-  - SubAgent
   - TeamCreate
   - TeamDismiss
   - TeamAssign
@@ -50,11 +49,3 @@ tools:
   - nori_memory_write
   - nori_memory_remove
   - nori_ask_parent
-
-subagents:
-  orchestrator:
-    description: Temporary read-only task agent for bounded inspection and delegation.
-  coder:
-    description: Temporary software engineering worker for a bounded delegated task.
-  explore:
-    description: Fast codebase exploration with prompt-enforced read-only behavior.

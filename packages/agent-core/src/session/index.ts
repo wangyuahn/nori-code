@@ -112,8 +112,7 @@ export interface AgentMeta {
   readonly homedir: string;
   readonly type: AgentType;
   readonly parentAgentId: string | null;
-  readonly subagentItem?: string;
-  /** `team` agents are durable collaborators; `sub` agents are SubAgent transcripts. */
+  /** `team` agents are durable members; `sub` agents are discussion transcripts. */
   readonly kind?: 'team' | 'sub';
   readonly name?: string;
   /** @deprecated Read legacy metadata only; never emit or display it for new agents. */
@@ -131,9 +130,6 @@ export interface AgentMeta {
   readonly teamReport?: TeamReportRecord;
   /** Present only on an agent-scoped, archived-or-active team discussion transcript. */
   readonly discussion?: TeamDiscussionMeta;
-  /** Completed SubAgent transcripts stay in the parent session archive. */
-  readonly archived?: boolean;
-  readonly completedAt?: string;
 }
 
 export interface TeamIdentity {
@@ -198,7 +194,6 @@ type AgentEntry = Agent | Promise<ResumedAgent>;
 export interface CreateAgentOptions {
   readonly profile?: ResolvedAgentProfile;
   readonly parentAgentId?: string;
-  readonly subagentItem?: string;
   readonly persistMetadata?: boolean;
   readonly kind?: 'team' | 'sub';
   readonly teamIdentity?: TeamIdentity;
@@ -520,25 +515,12 @@ export class Session {
   }
 
   private async cancelActiveTurnsOnClose(): Promise<void> {
-    const backgroundAgentIds = this.activeBackgroundAgentIds();
     const cancellations: Array<Promise<void>> = [];
-    for (const [agentId, entry] of this.agents) {
-      if (!(entry instanceof Agent) || backgroundAgentIds.has(agentId)) continue;
+    for (const entry of this.agents.values()) {
+      if (!(entry instanceof Agent)) continue;
       cancellations.push(this.cancelAgentTurnOnClose(entry));
     }
     await Promise.allSettled(cancellations);
-  }
-
-  private activeBackgroundAgentIds(): Set<string> {
-    const agentIds = new Set<string>();
-    for (const agent of this.readyAgents()) {
-      for (const task of agent.background.list(true)) {
-        if (task.kind === 'agent' && task.agentId !== undefined && task.detached !== false) {
-          agentIds.add(task.agentId);
-        }
-      }
-    }
-    return agentIds;
   }
 
   private async cancelAgentTurnOnClose(agent: Agent): Promise<void> {
@@ -632,7 +614,6 @@ export class Session {
         homedir,
         type,
         parentAgentId,
-        subagentItem: options.subagentItem,
         kind,
         name: identity?.name ?? options.name,
         mandate: identity?.mandate,
@@ -649,28 +630,6 @@ export class Session {
     if (type === 'main') this.enableTeamLeadTools(agent);
 
     return { id, agent };
-  }
-
-  /**
-   * Completed SubAgent transcripts stay in the parent session. Mark them
-   * archived so the live tree can drop them without destroying metadata.
-   */
-  async archiveCompletedSubagent(id: string): Promise<void> {
-    const metadata = this.metadata.agents[id];
-    if (
-      metadata === undefined ||
-      metadata.type !== 'sub' ||
-      metadata.kind === 'team' ||
-      metadata.discussion !== undefined ||
-      metadata.archived
-    ) return;
-
-    this.metadata.agents[id] = {
-      ...metadata,
-      archived: true,
-      completedAt: new Date().toISOString(),
-    };
-    await this.writeMetadata();
   }
 
   /** Creates a durable team member within this Session, never a child Session. */
@@ -742,7 +701,7 @@ export class Session {
     }
     // A dismissal owns the whole member branch. A direct member turn is not
     // the only in-flight work: an assigned partner can have temporary
-    // SubAgent/background work below it. Treat that as active too so the
+    // background work below it. Treat that as active too so the
     // required confirmation cannot silently orphan live work.
     const descendantIds = this.descendantAgentIds(uniqueIds);
     const branchIds = [...uniqueIds, ...descendantIds];
@@ -753,14 +712,13 @@ export class Session {
     if (active.length > 0 && !confirmActive) {
       throw new KimiError(
         ErrorCodes.SESSION_STATE_INVALID,
-        'One or more team members or their temporary subagents are working. Retry TeamDismiss with confirm_active=true.',
+        'One or more team members are working. Retry TeamDismiss with confirm_active=true.',
       );
     }
 
     const cancellation = abortError(`Dismissed: ${reason.trim()}`);
     for (const id of branchIds) {
       const agent = this.getReadyAgent(id);
-      agent?.subagentHost?.cancelAll(cancellation);
       agent?.turn.cancel(undefined, cancellation);
       await agent?.background.stopAll(`Dismissed: ${reason.trim()}`);
       this.agents.delete(id);
@@ -1522,22 +1480,33 @@ export class Session {
     return this.agentsMdWarning;
   }
 
+  /**
+   * Run `/init` as one system-trigger turn on the main agent.
+   *
+   * The exploration stays in the main transcript so the user can watch it,
+   * and the resulting AGENTS.md is injected afterwards so later turns read the
+   * file the run just wrote.
+   */
   async generateAgentsMd(): Promise<void> {
     await this.skillsReady;
     const mainAgent = this.requireMainAgent();
 
-    let spawnedAgentId: string | undefined;
     try {
-      const handle = await mainAgent.subagentHost!.spawn({
-        profileName: 'coder',
-        parentToolCallId: 'generate-agents-md',
-        prompt: DEFAULT_INIT_PROMPT,
-        description: 'Initialize AGENTS.md',
-        runInBackground: false,
-        signal: new AbortController().signal,
-      });
-      spawnedAgentId = handle.agentId;
-      await handle.completion;
+      const turnId = mainAgent.turn.prompt(
+        [{ type: 'text', text: DEFAULT_INIT_PROMPT }],
+        { kind: 'system_trigger', name: 'init' },
+      );
+      if (turnId === null) {
+        throw new Error('The main agent is busy; retry `/init` once the current turn finishes.');
+      }
+      const completion = await mainAgent.turn.waitForCurrentTurn();
+      if (completion.event.reason !== 'completed') {
+        throw new Error(
+          completion.event.error === undefined
+            ? `Init turn ${completion.event.reason}`
+            : `[${completion.event.error.code}] ${completion.event.error.message}`,
+        );
+      }
 
       const agentsMd = await loadAgentsMd(mainAgent.kaos, this.options.kimiHomeDir);
       mainAgent.context.appendSystemReminder(initCompletionReminder(agentsMd), {
@@ -1551,18 +1520,6 @@ export class Session {
         error instanceof Error ? error.message : 'Init failed',
         { cause: error },
       );
-    } finally {
-      // AGENTS.md generation is a one-shot internal task. Keep its result in
-      // the parent reminder, but never leave the temporary worker in the
-      // session agent tree after completion or failure.
-      if (spawnedAgentId !== undefined) {
-        await mainAgent.subagentHost!.discard(spawnedAgentId).catch((error) => {
-          log.warn('failed to discard AGENTS.md generator', {
-            agentId: spawnedAgentId,
-            error,
-          });
-        });
-      }
     }
   }
 
@@ -1776,7 +1733,7 @@ export class Session {
   private enableTeamLeadTools(agent: Agent): void {
     agent.tools.setActiveTools([
       // Team controls supplement the lead profile. Replacing the active set
-      // would silently remove normal tools such as SubAgent and user tools.
+      // would silently remove normal tools and user tools.
       // This must not depend on builtin registration: profiles are selected
       // before a provider can initialize every builtin tool.
       ...agent.tools.activeToolNames(),
@@ -2059,17 +2016,12 @@ export class Session {
   ): ResolvedAgentProfile | undefined {
     const profileName = agent.config.profileName;
     if (profileName === undefined) return undefined;
+    const profile = DEFAULT_AGENT_PROFILES[profileName];
     if (meta.type === 'sub') {
-      const parentProfileName = parentAgent?.config.profileName;
-      const profile = (
-        DEFAULT_AGENT_PROFILES[parentProfileName ?? 'agent']?.subagents?.[profileName] ??
-        DEFAULT_AGENT_PROFILES['agent']?.subagents?.[profileName]
-      );
       if (meta.kind === 'team') return teamProfile(profile ?? defaultTeamProfile(), teamIdentityFromMeta(meta));
       if (meta.discussion !== undefined) return discussionProfile(profile ?? defaultTeamProfile(), meta.discussion);
-      return profile;
     }
-    return DEFAULT_AGENT_PROFILES[profileName];
+    return profile;
   }
 
   private nextGeneratedAgentId(): string {

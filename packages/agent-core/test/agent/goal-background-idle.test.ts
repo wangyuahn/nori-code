@@ -6,7 +6,7 @@ import {
   resolveGoalBackgroundIdleMinutes,
   shouldSuppressGoalContinuationForBackground,
 } from '../../src/agent/turn/goal-background-idle';
-import { agentTask } from './background/helpers';
+import { promiseTask } from './background/helpers';
 import { testAgent } from './harness/agent';
 
 describe('goal background idle helpers', () => {
@@ -22,14 +22,13 @@ describe('goal background idle helpers', () => {
     expect(
       shouldSuppressGoalContinuationForBackground([
         {
-          taskId: 'agent-1',
-          kind: 'agent',
+          taskId: 'question-1',
+          kind: 'question',
           description: 'worker',
           status: 'running',
           startedAt: 1,
           endedAt: null,
-          agentId: 'child',
-          subagentType: 'coder',
+          questionCount: 1,
         },
       ]),
     ).toBe(true);
@@ -54,7 +53,7 @@ describe('driveGoal + unfinished background', () => {
 
     // Hang forever so the task stays non-terminal.
     const never = new Promise<{ result: string }>(() => {});
-    ctx.agent.background.registerTask(agentTask(never, 'hanging collaborator'));
+    ctx.agent.background.registerTask(promiseTask(never, 'hanging collaborator'));
 
     ctx.mockNextResponse({ type: 'text', text: 'Launched workers; waiting.' });
 
@@ -82,7 +81,7 @@ describe('driveGoal + unfinished background', () => {
     await ctx.agent.goal.createGoal({ objective: 'wait for workers' }, 'model');
 
     const never = new Promise<{ result: string }>(() => {});
-    ctx.agent.background.registerTask(agentTask(never, 'hanging collaborator'));
+    ctx.agent.background.registerTask(promiseTask(never, 'hanging collaborator'));
 
     ctx.mockNextResponse({ type: 'text', text: 'Waiting on background.' });
     ctx.mockNextResponse({ type: 'text', text: 'Idle wake ack.' });
@@ -115,7 +114,7 @@ describe('driveGoal + unfinished background', () => {
     await ctx.agent.goal.createGoal({ objective: 'wait for workers' }, 'model');
 
     const never = new Promise<{ result: string }>(() => {});
-    ctx.agent.background.registerTask(agentTask(never, 'hanging collaborator'));
+    ctx.agent.background.registerTask(promiseTask(never, 'hanging collaborator'));
 
     ctx.mockNextResponse({ type: 'text', text: 'Waiting first.' });
     ctx.mockNextResponse({ type: 'text', text: 'Still waiting after wake.' });
@@ -155,7 +154,7 @@ describe('driveGoal + unfinished background', () => {
     await ctx.agent.goal.createGoal({ objective: 'wait for workers' }, 'model');
 
     const never = new Promise<{ result: string }>(() => {});
-    ctx.agent.background.registerTask(agentTask(never, 'hanging collaborator'));
+    ctx.agent.background.registerTask(promiseTask(never, 'hanging collaborator'));
 
     ctx.mockNextResponse({ type: 'text', text: 'Waiting.' });
     ctx.mockNextResponse({ type: 'text', text: 'Wake after activity reset.' });
@@ -188,7 +187,7 @@ describe('driveGoal + unfinished background', () => {
     await ctx.agent.goal.createGoal({ objective: 'wait for workers' }, 'model');
 
     const never = new Promise<{ result: string }>(() => {});
-    ctx.agent.background.registerTask(agentTask(never, 'hanging collaborator'));
+    ctx.agent.background.registerTask(promiseTask(never, 'hanging collaborator'));
 
     ctx.mockNextResponse({ type: 'text', text: 'Waiting forever without timeout wake.' });
 

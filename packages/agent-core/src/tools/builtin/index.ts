@@ -4,7 +4,6 @@ export * from '../background/task-stop';
 export * from '../cron/cron-create';
 export * from '../cron/cron-delete';
 export * from '../cron/cron-list';
-export * from './collaboration/subagent';
 export * from './collaboration/ask-user';
 export * from './collaboration/skill-tool';
 export * from './collaboration/team';

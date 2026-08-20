@@ -19,7 +19,7 @@ export type TeamCreateInput = z.infer<typeof TeamCreateInputSchema>;
 
 export class TeamCreateTool implements BuiltinTool<TeamCreateInput> {
   readonly name = 'TeamCreate' as const;
-  readonly description = 'Main lead only: create durable Team Agents in this parent session. Every member requires a unique non-empty name, role, and mandate. SubAgent remains temporary work.';
+  readonly description = 'Main lead only: create durable Team Agents in this parent session. Every member requires a unique non-empty name, role, and mandate.';
   readonly parameters = toInputJsonSchema(TeamCreateInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}

@@ -148,7 +148,7 @@ export type LoopControl = z.infer<typeof LoopControlSchema>;
 export const CustomAgentConfigSchema = z.object({
   description: z.string().min(1),
   role: z.string().min(1),
-  baseProfile: z.enum(['orchestrator', 'nori-coder', 'coder', 'explore']).default('coder'),
+  baseProfile: z.enum(['agent', 'nori-agent', 'nori-coder']).default('agent'),
   model: z.string().trim().min(1).optional(),
   enabled: z.boolean().default(true),
   permissions: z.object({
@@ -156,7 +156,6 @@ export const CustomAgentConfigSchema = z.object({
     write: z.boolean().optional(),
     shell: z.boolean().optional(),
     web: z.boolean().optional(),
-    delegate: z.boolean().optional(),
   }).optional(),
 });
 export type CustomAgentConfig = z.infer<typeof CustomAgentConfigSchema>;

@@ -104,16 +104,6 @@ describe('resolveSlashCommandInput', () => {
       commandName: 'experiments',
       reason: 'streaming',
     });
-    expect(resolve('/subagent on', { isStreaming: true })).toEqual({
-      kind: 'blocked',
-      commandName: 'subagent',
-      reason: 'streaming',
-    });
-    expect(resolve('/subagent off', { isStreaming: true })).toEqual({
-      kind: 'blocked',
-      commandName: 'subagent',
-      reason: 'streaming',
-    });
   });
 
   it('blocks model and session pickers while compacting', () => {
@@ -140,16 +130,6 @@ describe('resolveSlashCommandInput', () => {
     expect(resolve('/experiments', { isCompacting: true })).toEqual({
       kind: 'blocked',
       commandName: 'experiments',
-      reason: 'compacting',
-    });
-    expect(resolve('/subagent on', { isCompacting: true })).toEqual({
-      kind: 'blocked',
-      commandName: 'subagent',
-      reason: 'compacting',
-    });
-    expect(resolve('/subagent off', { isCompacting: true })).toEqual({
-      kind: 'blocked',
-      commandName: 'subagent',
       reason: 'compacting',
     });
   });
@@ -242,14 +222,6 @@ describe('resolveSlashCommandInput', () => {
     expect(resolve('/does-not-exist arg')).toEqual({
       kind: 'message',
       input: '/does-not-exist arg',
-    });
-  });
-
-  it('resolves /subagent without an experimental flag', () => {
-    expect(resolve('/subagent Ship feature X')).toMatchObject({
-      kind: 'builtin',
-      name: 'subagent',
-      args: 'Ship feature X',
     });
   });
 

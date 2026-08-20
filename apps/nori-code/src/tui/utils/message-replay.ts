@@ -10,7 +10,6 @@ import type {
 
 import type {
   AppState,
-  BackgroundAgentMetadata,
   SkillActivationTrigger,
   ToolCallBlockData,
   TranscriptEntry,
@@ -51,10 +50,6 @@ export interface PluginCommandProjection {
   readonly trigger: 'user-slash';
 }
 
-export interface ReplayBackgroundProjection {
-  readonly backgroundAgentMetadata: ReadonlyMap<string, BackgroundAgentMetadata>;
-}
-
 export function appStateFromResumeAgent(agent: ResumedAgentState): Partial<AppState> {
   const maxContextTokens = agent.config.modelCapabilities?.max_context_tokens ?? 0;
   const contextTokens = agent.context.tokenCount;
@@ -80,37 +75,20 @@ export function isTerminalBackgroundTask(info: BackgroundTaskInfo): boolean {
 }
 
 export function countActiveBackgroundTasks(tasks: ReadonlyMap<string, BackgroundTaskInfo>): {
-  bashTasks: number;
-  agentTasks: number;
+  processTasks: number;
+  questionTasks: number;
 } {
-  let bashTasks = 0;
-  let agentTasks = 0;
+  let processTasks = 0;
+  let questionTasks = 0;
   for (const info of tasks.values()) {
     if (isTerminalBackgroundTask(info)) continue;
-    if (info.kind === 'agent') {
-      agentTasks += 1;
+    if (info.kind === 'question') {
+      questionTasks += 1;
     } else {
-      bashTasks += 1;
+      processTasks += 1;
     }
   }
-  return { bashTasks, agentTasks };
-}
-
-export function replayBackgroundProjection(
-  background: readonly BackgroundTaskInfo[],
-): ReplayBackgroundProjection {
-  const backgroundAgentMetadata = new Map<string, BackgroundAgentMetadata>();
-  for (const info of background) {
-    if (info.kind !== 'agent') continue;
-    if (isTerminalBackgroundTask(info)) continue;
-    const agentId = info.agentId ?? info.taskId;
-    backgroundAgentMetadata.set(agentId, {
-      agentId,
-      parentToolCallId: info.taskId,
-      description: info.description,
-    });
-  }
-  return { backgroundAgentMetadata };
+  return { processTasks, questionTasks };
 }
 
 export function createReplayRenderContext(): ReplayRenderContext {

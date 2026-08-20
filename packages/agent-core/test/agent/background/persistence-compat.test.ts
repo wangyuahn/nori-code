@@ -52,7 +52,11 @@ describe('BackgroundTaskPersistence legacy compatibility', () => {
     });
   });
 
-  it('normalizes legacy timed-out agent records', async () => {
+  it('normalizes legacy timed-out agent records into process records', async () => {
+    // `agent-*` records were written by the temporary-subagent task kind, which
+    // no longer exists. An old session directory can still contain them, so
+    // they must load as ordinary process records — the removed subagent
+    // dimension (`agent_id` / `subagent_type`) is dropped, not resurrected.
     await writeLegacyTask('agent-timeout1', {
       task_id: 'agent-timeout1',
       command: '[agent] slow task',
@@ -74,15 +78,17 @@ describe('BackgroundTaskPersistence legacy compatibility', () => {
     expect(tasks).toHaveLength(1);
     expect(tasks[0]).toMatchObject({
       taskId: 'agent-timeout1',
-      kind: 'agent',
+      kind: 'process',
+      command: '[agent] slow task',
       description: 'slow legacy agent',
       startedAt: 1_700_000_000,
       endedAt: 1_700_000_100,
       status: 'timed_out',
       stopReason: 'deadline',
-      agentId: 'agent-session-id',
-      subagentType: 'reviewer',
+      exitCode: 1,
     });
+    expect(tasks[0]).not.toHaveProperty('agentId');
+    expect(tasks[0]).not.toHaveProperty('subagentType');
   });
 
   it('migrates legacy records through load/reconcile writeback', async () => {

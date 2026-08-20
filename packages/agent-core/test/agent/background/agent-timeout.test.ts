@@ -11,7 +11,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { agentTask, createBackgroundManager } from './helpers';
+import { promiseTask, createBackgroundManager } from './helpers';
 
 describe('AgentBackgroundTask — timeoutMs', () => {
   afterEach(() => {
@@ -23,7 +23,7 @@ describe('AgentBackgroundTask — timeoutMs', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     // A never-resolving completion — only the deadline will fire.
     const hangForever = new Promise<{ result: string }>(() => {});
-    const taskId = manager.registerTask(agentTask(hangForever, 'hang'), { timeoutMs: 2_000 });
+    const taskId = manager.registerTask(promiseTask(hangForever, 'hang'), { timeoutMs: 2_000 });
 
     // Advance past the deadline and manager-owned stop grace.
     const terminalPromise = manager.wait(taskId);
@@ -40,7 +40,7 @@ describe('AgentBackgroundTask — timeoutMs', () => {
     const completion = new Promise<{ result: string }>((res) => {
       resolveFn = res;
     });
-    const taskId = manager.registerTask(agentTask(completion, 'no deadline'));
+    const taskId = manager.registerTask(promiseTask(completion, 'no deadline'));
 
     resolveFn({ result: 'finished' });
     const info = await manager.wait(taskId);
@@ -56,7 +56,7 @@ describe('AgentBackgroundTask — timeoutMs', () => {
     const internalErr = new Error('aiohttp sock_read timeout');
     internalErr.name = 'TimeoutError';
     const rejecting = Promise.reject(internalErr);
-    const taskId = manager.registerTask(agentTask(rejecting, 'internal timeout'), {
+    const taskId = manager.registerTask(promiseTask(rejecting, 'internal timeout'), {
       timeoutMs: 900_000,
     });
 
@@ -79,7 +79,7 @@ describe('AgentBackgroundTask — timeoutMs', () => {
   it('explicit timeoutMs is persisted on the task info', () => {
     const { manager } = createBackgroundManager();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    const taskId = manager.registerTask(agentTask(new Promise(() => {}), 'persist timeout'), {
+    const taskId = manager.registerTask(promiseTask(new Promise(() => {}), 'persist timeout'), {
       timeoutMs: 1_800_000,
     });
     const info = manager.getTask(taskId);
@@ -100,7 +100,7 @@ describe('AgentBackgroundTask — timeoutMs', () => {
   // registerAgentTask, the assertion below catches it.
   it('omitted timeoutMs leaves the task info field undefined', () => {
     const { manager } = createBackgroundManager();
-    const taskId = manager.registerTask(agentTask(new Promise(() => {}), 'default timeout'));
+    const taskId = manager.registerTask(promiseTask(new Promise(() => {}), 'default timeout'));
     const info = manager.getTask(taskId);
     expect((info as unknown as { timeoutMs?: number }).timeoutMs).toBeUndefined();
   });
@@ -114,7 +114,7 @@ describe('AgentBackgroundTask — timeoutMs', () => {
   // immediate kill.
   it('timeoutMs=0 is preserved on the task info and does not arm a deadline', async () => {
     const { manager } = createBackgroundManager();
-    const taskId = manager.registerTask(agentTask(new Promise(() => {}), 'zero timeout'), {
+    const taskId = manager.registerTask(promiseTask(new Promise(() => {}), 'zero timeout'), {
       timeoutMs: 0,
     });
     // The literal zero is preserved on the task info.

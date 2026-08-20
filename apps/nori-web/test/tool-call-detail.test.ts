@@ -85,7 +85,7 @@ describe('tool call detail fields', () => {
     });
   });
 
-  it('covers write, glob, fetch, agent, SubAgent, and skill specialized fields', () => {
+  it('covers write, glob, fetch, and skill specialized fields', () => {
     expect(fields({
       id: 'write-1',
       name: 'Write',
@@ -102,19 +102,41 @@ describe('tool call detail fields', () => {
       args: { url: 'https://example.com' },
     })).toMatchObject({ url: 'https://example.com' });
     expect(fields({
-      id: 'agent-1',
-      name: 'Agent',
-      args: { prompt: 'Review', subagent_type: 'coder' },
-    })).toMatchObject({ prompt: 'Review', subagent: 'coder' });
-    expect(fields({
-      id: 'subagent-1',
-      name: 'SubAgent',
-      args: { description: 'Inspect', tasks: [{ prompt: 'a' }, { prompt: 'b' }] },
-    })).toMatchObject({ description: 'Inspect', agents: '2' });
-    expect(fields({
       id: 'skill-1',
       name: 'Skill',
       args: { skill: 'skill-catalog' },
     })).toMatchObject({ skill: 'skill-catalog' });
+  });
+
+  it('summarizes the Team delegation and discussion tools', () => {
+    expect(fields({
+      id: 'team-create-1',
+      name: 'TeamCreate',
+      args: { members: [{ name: 'Ren', role: 'reviewer', mandate: 'Review diffs' }, { name: 'Kai' }] },
+    })).toMatchObject({ members: 'Ren — reviewer\nKai' });
+    expect(fields({
+      id: 'team-assign-1',
+      name: 'TeamAssign',
+      args: { assignments: [{ agent_id: 'agent-1', task: 'Check a.ts' }, { agent_id: 'agent-2', task: null }] },
+    })).toMatchObject({ assignments: 'agent-1: Check a.ts\nagent-2: cleared' });
+    expect(fields({
+      id: 'team-dm-1',
+      name: 'TeamDM',
+      args: { agent_id: 'agent-1', message: 'Status?' },
+    })).toMatchObject({ recipient: 'agent-1', message: 'Status?' });
+    // TeamSpeak has no recipient — a member speaks to its whole department — so
+    // the recipient row must be absent rather than rendered as "unknown".
+    expect(fields({
+      id: 'team-speak-1',
+      name: 'TeamSpeak',
+      args: { message: 'Cache first.' },
+    })).toMatchObject({ message: 'Cache first.' });
+    expect(fields({ id: 'team-speak-2', name: 'TeamSpeak', args: { message: 'Cache first.' } }))
+      .not.toHaveProperty('recipient');
+    expect(fields({
+      id: 'team-decide-1',
+      name: 'TeamDecide',
+      args: { action: 'start', topic: 'Cache', statement: 'Lead first.' },
+    })).toMatchObject({ action: 'start', topic: 'Cache', statement: 'Lead first.' });
   });
 });

@@ -42,14 +42,10 @@ export function isBackgroundTaskTerminal(status: BackgroundTaskStatus): boolean 
   return TERMINAL_STATUSES.has(status);
 }
 
-export { AgentBackgroundTask } from './agent-task';
-export type { AgentBackgroundTaskInfo } from './agent-task';
 export { ProcessBackgroundTask } from './process-task';
 export type { ProcessBackgroundTaskInfo } from './process-task';
 export { QuestionBackgroundTask } from './question-task';
 export type { QuestionBackgroundTaskInfo } from './question-task';
-export { SubagentBackgroundTask } from './subagent-task';
-export type { SubagentTaskControl } from './subagent-task';
 export { BackgroundTaskPersistence } from './persist';
 export type {
   BackgroundTaskInfo,
@@ -158,8 +154,6 @@ type BackgroundTaskNotification = Record<string, unknown> & {
   readonly type: string;
   readonly source_kind: 'background_task';
   readonly source_id: string;
-  /** Temporary subagent id. Omitted for process tasks. */
-  readonly agent_id?: string | undefined;
   readonly title: string;
   readonly severity: 'info' | 'warning';
   readonly body: string;
@@ -725,15 +719,6 @@ export class BackgroundManager {
       taskId: info.taskId,
       status: info.status,
       notificationId: `task:${info.taskId}:${info.status}`,
-      ...(info.kind === 'agent' && info.agentId
-        ? {
-            speaker: {
-              from: 'sub' as const,
-              speakerId: info.agentId,
-              speakerName: `SubAgent ${info.agentId}`,
-            },
-          }
-        : {}),
     };
     const key = notificationKey(origin);
     if (this.scheduledNotificationKeys.has(key)) return;
@@ -755,7 +740,6 @@ export class BackgroundManager {
         type: `task.${info.status}`,
         source_kind: 'background_task',
         source_id: info.taskId,
-        agent_id: info.kind === 'agent' ? info.agentId : undefined,
         title: `Background ${info.kind} ${info.status}`,
         severity: info.status === 'completed' ? 'info' : 'warning',
         body: buildBackgroundTaskNotificationBody(info),

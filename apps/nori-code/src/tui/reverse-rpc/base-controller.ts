@@ -4,9 +4,9 @@
  * Approval and question flows wait for a UI action before returning a response.
  * Subclasses only need to define the default cancellation response.
  *
- * When concurrent requests arrive (e.g. multiple parallel subagents each
- * needing approval), only one panel is shown at a time; additional requests
- * are queued in arrival order and advance after the current one resolves.
+ * When concurrent requests arrive (e.g. several team members each needing
+ * approval), only one panel is shown at a time; additional requests are queued
+ * in arrival order and advance after the current one resolves.
  */
 
 export interface ReverseRpcUIHooks<TPayload> {

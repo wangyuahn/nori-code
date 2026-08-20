@@ -2,13 +2,12 @@ import type { KaosProcess } from '@nori-code/kaos';
 import { vi } from 'vitest';
 
 import {
-  AgentBackgroundTask,
   BackgroundManager,
   BackgroundTaskPersistence,
   ProcessBackgroundTask,
+  QuestionBackgroundTask,
   type BackgroundTaskInfo,
 } from '../../../src/agent/background';
-import type { SessionSubagentHost, SubagentHandle } from '../../../src/session/subagent-host';
 import type { AgentEvent } from '../../../src/rpc/events';
 
 export interface FakeBackgroundAgent {
@@ -67,27 +66,43 @@ export function registerProcess(
   return manager.registerTask(new ProcessBackgroundTask(proc, command, description));
 }
 
-export function agentTask(
+export interface PromiseTaskOptions {
+  /**
+   * Called with the abort reason once the manager cancels the task's own
+   * signal. This is the single cancellation channel every task kind sees, so
+   * a test can both observe that cancellation arrived and model a runner that
+   * rejects as soon as it does.
+   */
+  readonly onAbort?: (reason: unknown) => void;
+}
+
+/**
+ * A background task whose lifetime is a plain promise.
+ *
+ * Manager-level behavior — deadlines, kill propagation, foreground release,
+ * concurrency limits — is identical for every task kind, so these tests drive
+ * it through the simplest task there is instead of a real workload.
+ */
+export function promiseTask(
   completion: Promise<{ result: string }>,
   description: string,
-  options: {
-    readonly agentId?: string;
-    readonly subagentType?: string;
-    readonly subagentHost?: Pick<SessionSubagentHost, 'markActiveChildDetached'>;
-    readonly abortController?: AbortController;
-  } = {},
-): AgentBackgroundTask {
-  const handle: SubagentHandle = {
-    agentId: options.agentId ?? 'agent-child',
-    profileName: options.subagentType ?? 'coder',
-    resumed: false,
-    completion,
-  };
-  return new AgentBackgroundTask(
-    handle,
+  options: PromiseTaskOptions = {},
+): QuestionBackgroundTask {
+  return new QuestionBackgroundTask(
+    async (signal) => {
+      const onAbort = options.onAbort;
+      if (onAbort !== undefined) {
+        // `stop()` can abort before the lifecycle ever reaches `start`, so the
+        // already-aborted case must fire too — an `abort` listener attached
+        // after the fact never runs.
+        if (signal.aborted) onAbort(signal.reason);
+        else signal.addEventListener('abort', () => onAbort(signal.reason), { once: true });
+      }
+      const { result } = await completion;
+      return { output: result };
+    },
     description,
-    options.subagentHost ?? { markActiveChildDetached: vi.fn() },
-    options.abortController ?? new AbortController(),
+    { questionCount: 1 },
   );
 }
 

@@ -8,14 +8,14 @@ import {
 } from '../task';
 
 describe('backgroundTaskKindSchema', () => {
-  it.each(['subagent', 'bash', 'tool'] as const)('accepts %s', (k) => {
+  it.each(['bash', 'tool'] as const)('accepts %s', (k) => {
     expect(backgroundTaskKindSchema.parse(k)).toBe(k);
   });
 
-  it("rejects agent-core's 'process' / 'agent' / 'question' literals", () => {
+  it("rejects agent-core's 'process' / 'question' literals and the retired 'subagent'", () => {
     expect(backgroundTaskKindSchema.safeParse('process').success).toBe(false);
-    expect(backgroundTaskKindSchema.safeParse('agent').success).toBe(false);
     expect(backgroundTaskKindSchema.safeParse('question').success).toBe(false);
+    expect(backgroundTaskKindSchema.safeParse('subagent').success).toBe(false);
   });
 });
 

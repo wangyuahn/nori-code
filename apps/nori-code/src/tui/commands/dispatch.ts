@@ -332,9 +332,6 @@ async function handleBuiltInSlashCommand(
     case 'goal':
       await handleGoalCommand(host, args);
       return;
-    case 'subagent':
-      host.sendNormalUserInput(args);
-      return;
     case 'init':
       await handleInitCommand(host);
       return;

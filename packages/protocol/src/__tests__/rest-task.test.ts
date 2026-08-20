@@ -45,12 +45,12 @@ describe('getTaskResponseSchema', () => {
     const t = {
       id: 'task_01',
       session_id: 'sess_01',
-      kind: 'subagent' as const,
+      kind: 'tool' as const,
       description: 'spin up x',
       status: 'running' as const,
       created_at: '2026-06-04T10:00:00.000Z',
     };
-    expect(getTaskResponseSchema.parse(t).kind).toBe('subagent');
+    expect(getTaskResponseSchema.parse(t).kind).toBe('tool');
   });
 });
 

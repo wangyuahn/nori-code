@@ -242,7 +242,7 @@ describe('Session.prompt events', () => {
     }
   });
 
-  it('runs init through generateAgentsMd RPC as a subagent system trigger without prompt metadata updates', async () => {
+  it('runs init through generateAgentsMd RPC as a main-agent system trigger without prompt metadata updates', async () => {
     const homeDir = await makeTempDir();
     const workDir = await makeTempDir();
     const harness = createKimiHarness({
@@ -261,20 +261,12 @@ describe('Session.prompt events', () => {
       await session.init();
       unsubscribe();
 
-      const spawned = events.find((event) => event.type === 'subagent.spawned');
-      expect(spawned).toMatchObject({
-        type: 'subagent.spawned',
-        sessionId: session.id,
-        agentId: 'main',
-        subagentName: 'coder',
-        parentToolCallId: 'generate-agents-md',
-      });
       expect(events).toContainEqual(
         expect.objectContaining({
           type: 'turn.started',
           sessionId: session.id,
-          agentId: spawned?.type === 'subagent.spawned' ? spawned.subagentId : undefined,
-          origin: expect.objectContaining({ kind: 'system_trigger', name: 'subagent' }),
+          agentId: 'main',
+          origin: expect.objectContaining({ kind: 'system_trigger', name: 'init' }),
         }),
       );
       expect(events).not.toContainEqual(

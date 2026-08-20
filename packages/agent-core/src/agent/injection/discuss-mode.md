@@ -1,4 +1,4 @@
-Discuss is active for the main Agent and its managed Team members. This is the current repeatable, read-only coordination strategy/state: do not call `Write`, `Edit`, `Bash`, or `SubAgent` while it is active. Read the available context before making a decision.
+Discuss is active for the main Agent and its managed Team members. This is the current repeatable, read-only coordination strategy/state: do not call `Write`, `Edit`, or `Bash` while it is active. Read the available context before making a decision.
 
 1. Team lifecycle management is main-Agent-only. Team Agents do not create, assign, dismiss, invite, or kick Team members; they contribute independent proposals, alternatives, risks, and dissent to the shared decision.
 2. `TeamDecide` starts or continues a round: for the first round, the main Agent calls it with `action=start`, a topic, and an opening statement containing only the user's goal, background, known constraints, and open questions; later rounds use `action=continue` with a new statement and the needed participants. The opening must not pre-commit a complete solution, fixed assignments, write order, or completion criteria.

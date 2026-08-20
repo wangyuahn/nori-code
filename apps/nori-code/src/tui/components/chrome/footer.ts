@@ -193,13 +193,13 @@ export class FooterComponent implements Component {
   private goalTimer: ReturnType<typeof setInterval> | null = null;
   /**
    * Non-terminal background-task counts split by kind so the footer can
-   * render two distinct badges. `bashTasks` covers `bash-*` BPM tasks
-   * spawned via `Shell run_in_background=true`; `agentTasks` covers
-   * `agent-*` BPM tasks (background subagents). Either zero hides its
+   * render two distinct badges. `processTasks` covers `process-*` tasks
+   * spawned via `Shell run_in_background=true`; `questionTasks` covers
+   * `question-*` tasks awaiting user answers. Either zero hides its
    * respective badge.
    */
-  private backgroundBashTaskCount = 0;
-  private backgroundAgentCount = 0;
+  private backgroundProcessTaskCount = 0;
+  private backgroundQuestionTaskCount = 0;
 
   constructor(state: AppState, onRefresh: () => void = () => {}) {
     this.state = state;
@@ -239,9 +239,9 @@ export class FooterComponent implements Component {
    * count produces its own bracketed badge on line 1; zeros hide them
    * independently.
    */
-  setBackgroundCounts(counts: { bashTasks: number; agentTasks: number }): void {
-    this.backgroundBashTaskCount = Math.max(0, counts.bashTasks);
-    this.backgroundAgentCount = Math.max(0, counts.agentTasks);
+  setBackgroundCounts(counts: { processTasks: number; questionTasks: number }): void {
+    this.backgroundProcessTaskCount = Math.max(0, counts.processTasks);
+    this.backgroundQuestionTaskCount = Math.max(0, counts.questionTasks);
   }
 
   invalidate(): void {}
@@ -250,7 +250,7 @@ export class FooterComponent implements Component {
     const colors = currentTheme.palette;
     const state = this.state;
 
-    // ── Line 1: mode badges + model + [N task(s) running] + [N agent(s) running] + cwd + git + hints ──
+    // ── Line 1: mode badges + model + [N task(s) running] + [N question(s) pending] + cwd + git + hints ──
     const left: string[] = [];
     const modes: string[] = [];
     if (state.permissionMode === 'auto') modes.push(chalk.hex(colors.warning).bold('auto'));
@@ -283,19 +283,19 @@ export class FooterComponent implements Component {
       left.push(renderedModelLabel);
     }
 
-    // Background-task badges sit immediately before cwd. `bash-*` tasks
-    // (shell processes) and `agent-*` tasks (background subagents) get
-    // separate badges so the user can distinguish them at a glance.
-    if (this.backgroundBashTaskCount > 0) {
-      const noun = this.backgroundBashTaskCount === 1 ? 'task' : 'tasks';
+    // Background-task badges sit immediately before cwd. Shell processes and
+    // pending questions get separate badges so the user can distinguish them
+    // at a glance.
+    if (this.backgroundProcessTaskCount > 0) {
+      const noun = this.backgroundProcessTaskCount === 1 ? 'task' : 'tasks';
       left.push(
-        chalk.hex(colors.primary)(`[${String(this.backgroundBashTaskCount)} ${noun} running]`),
+        chalk.hex(colors.primary)(`[${String(this.backgroundProcessTaskCount)} ${noun} running]`),
       );
     }
-    if (this.backgroundAgentCount > 0) {
-      const noun = this.backgroundAgentCount === 1 ? 'SubAgent' : 'SubAgents';
+    if (this.backgroundQuestionTaskCount > 0) {
+      const noun = this.backgroundQuestionTaskCount === 1 ? 'question' : 'questions';
       left.push(
-        chalk.hex(colors.primary)(`[${String(this.backgroundAgentCount)} ${noun} running]`),
+        chalk.hex(colors.primary)(`[${String(this.backgroundQuestionTaskCount)} ${noun} pending]`),
       );
     }
 

@@ -20,11 +20,6 @@ import { abortError } from '../../src/utils/abort';
 import type { AgentOptions } from '../../src/agent';
 import { ErrorCodes, KimiError } from '../../src/errors';
 import type { Logger, LogPayload } from '../../src/logging';
-import type {
-  QueuedSubagentRunResult,
-  QueuedSubagentTask,
-  SessionSubagentHost,
-} from '../../src/session/subagent-host';
 import type { NoriMemoryProvider } from '../../src/tools/builtin/nori/types';
 import { recordingTelemetry, type TelemetryRecord } from '../fixtures/telemetry';
 import { createFakeKaos } from '../tools/fixtures/fake-kaos';
@@ -127,27 +122,27 @@ describe('Agent turn flow', () => {
     expect(inputs).toContain('difficulty_score="10"');
   });
 
-  it('continues with a required Nori graph-check gate for bug hunt requests', async () => {
+  it('continues with a required Nori delegation gate for bug hunt requests', async () => {
     const ctx = testAgent({
       noriWorkflow: {
         reviewSuggestionThreshold: 4,
         reviewRequiredThreshold: 7,
         maxReviewGateContinuations: 1,
-        bugHuntSubagentRequired: true,
+        bugHuntDelegationRequired: true,
       },
     });
     ctx.configure();
 
     ctx.mockNextResponse({ type: 'text', text: 'I inspected the problem locally.' });
-    ctx.mockNextResponse({ type: 'text', text: 'SubAgent is not available in this harness.' });
+    ctx.mockNextResponse({ type: 'text', text: 'The Team tools are not available in this harness.' });
 
     await ctx.rpc.prompt({ input: [{ type: 'text', text: '帮我找 bug，排查黑屏问题' }] });
     await ctx.untilTurnEnd();
 
     expect(ctx.llmCalls).toHaveLength(2);
     const inputs = llmHistoryText(ctx);
-    expect(inputs).toContain('<nori_workflow_gate kind="bug_hunt_subagent"');
-    expect(inputs).toContain('Call SubAgent now as the only tool call');
+    expect(inputs).toContain('<nori_workflow_gate kind="bug_hunt_delegation"');
+    expect(inputs).toContain('hand every track out with TeamAssign');
   });
 
   it('after UpdateGoal complete, prefers goal outcome over nori workflow gate', async () => {
@@ -156,7 +151,7 @@ describe('Agent turn flow', () => {
         reviewSuggestionThreshold: 4,
         reviewRequiredThreshold: 7,
         maxReviewGateContinuations: 2,
-        bugHuntSubagentRequired: true,
+        bugHuntDelegationRequired: true,
       },
     });
     ctx.configure({ tools: ['UpdateGoal', 'GetGoal'] });
@@ -1955,13 +1950,6 @@ function noriMemorySearchCallWithId(id: string, keywords: string[]): ToolCall {
     name: 'nori_memory_search',
     arguments: JSON.stringify({ keywords, top_k: 5 }),
   };
-}
-
-function mockSubagentHost<T extends Partial<SessionSubagentHost>>(
-  host: T,
-): T & SessionSubagentHost {
-  return { spawn: vi.fn(), resume: vi.fn(), runQueued: vi.fn(), ...host } as unknown as T &
-    SessionSubagentHost;
 }
 
 interface ApiErrorTelemetryCase {

@@ -5,7 +5,6 @@ const DISCUSS_DENIED_TOOLS = new Set([
   'Write',
   'Edit',
   'Bash',
-  'SubAgent',
   'TaskStop',
   'CronCreate',
   'CronDelete',

@@ -122,7 +122,7 @@ describe('Session.init', () => {
     }
   });
 
-  it('runs an isolated system-trigger turn and records the latest AGENTS as a system reminder', async () => {
+  it('runs init as a main-agent system-trigger turn and records the latest AGENTS as a system reminder', async () => {
     const workDir = await makeTempDir();
     const sessionDir = await makeTempDir();
     await mkdir(join(workDir, '.git'));
@@ -155,33 +155,15 @@ describe('Session.init', () => {
 
     await session.generateAgentsMd();
 
-    // AGENTS.md generation uses a temporary SubAgent. Its result is folded into
-    // the parent reminder, then the worker is archived in the parent session.
+    // Init explores in the main transcript so the user can watch it; the
+    // resulting AGENTS.md is folded back in as a system reminder afterwards.
     expect(session.agents.get('main')).toBe(mainAgent);
-    expect(session.getAgentMetadata('agent-0')?.archived).toBe(true);
-    expect(session.agents.has('agent-0')).toBe(true);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: 'subagent.spawned',
-        agentId: 'main',
-        subagentId: 'agent-0',
-        subagentName: 'coder',
-        parentToolCallId: 'generate-agents-md',
-      }),
-    );
+    expect(session.agents.size).toBe(1);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'turn.started',
-        agentId: 'agent-0',
-        origin: expect.objectContaining({ kind: 'system_trigger', name: 'subagent' }),
-      }),
-    );
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: 'subagent.completed',
         agentId: 'main',
-        subagentId: 'agent-0',
-        contextTokens: expect.any(Number),
+        origin: expect.objectContaining({ kind: 'system_trigger', name: 'init' }),
       }),
     );
     expect(scripted.calls[0]?.history).toMatchObject([
@@ -202,7 +184,13 @@ describe('Session.init', () => {
     expect(contextText).toContain('<system-reminder>');
     expect(contextText).toContain('Latest AGENTS.md file content:');
     expect(contextText).toContain('latest project instructions');
-    expect(contextText).not.toContain('Task requirements:');
+    // Init is now a real system-trigger turn on the main agent rather than a
+    // discarded temporary worker, so its prompt stays in the main transcript —
+    // recorded exactly once, and before the AGENTS.md reminder it produced.
+    expect(contextText.match(/Task requirements:/g)).toHaveLength(1);
+    expect(contextText.indexOf('Task requirements:')).toBeLessThan(
+      contextText.indexOf('Latest AGENTS.md file content:'),
+    );
   });
 
   it('loads AGENTS.md via the persistence kaos when the tool kaos rejects readText (Zed ACP "Internal error" regression)', async () => {
@@ -333,7 +321,7 @@ describe('Session.init', () => {
         'hot-reviewer': {
           description: 'Review the current implementation.',
           role: 'Find correctness and regression risks.',
-          baseProfile: 'explore',
+          baseProfile: 'agent',
           enabled: true,
         },
       });

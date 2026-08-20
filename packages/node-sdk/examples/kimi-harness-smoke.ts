@@ -44,8 +44,8 @@ async function main(): Promise<void> {
       }) + '\n',
       'utf-8',
     );
-    await mkdir(join(sessionDir, 'subagents'), { recursive: true });
-    await writeFile(join(sessionDir, 'subagents', 'demo.txt'), 'demo\n', 'utf-8');
+    await mkdir(join(sessionDir, 'attachments'), { recursive: true });
+    await writeFile(join(sessionDir, 'attachments', 'demo.txt'), 'demo\n', 'utf-8');
 
     const exported = await harness.exportSession({
       id: session.id,

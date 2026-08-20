@@ -12,11 +12,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { Agent } from '../../src/agent';
 import { FLAG_DEFINITIONS, FlagResolver } from '../../src/flags';
-import {
-  type QueuedSubagentRunResult,
-  type QueuedSubagentTask,
-  SessionSubagentHost,
-} from '../../src/session/subagent-host';
+import type { SessionSubagentHost } from '../../src/session/subagent-host';
 import { SessionSkillRegistry } from '../../src/skill';
 import { TaskListInputSchema } from '../../src/tools/background/task-list';
 import { TaskOutputInputSchema } from '../../src/tools/background/task-output';
@@ -49,10 +45,6 @@ import type { WorkspaceConfig } from '../../src/tools/support/workspace';
 import { createFakeKaos } from './fixtures/fake-kaos';
 import { executeTool } from './fixtures/execute-tool';
 import { createBackgroundManager } from '../agent/background/helpers';
-import {
-  SubAgentTool,
-  SubAgentToolInputSchema,
-} from '../../src/tools/builtin/collaboration/subagent';
 import {
   NoriAskParentInputSchema,
   NoriAskParentTool,
@@ -92,45 +84,11 @@ function context<Input>(args: Input, toolCallId = 'call_1') {
   return { turnId: '0', toolCallId, args, signal };
 }
 
-function mockSubagentHost<T extends Partial<SessionSubagentHost>>(
+/** Stand in for the team host so tool tests assert wiring, not host behavior. */
+function mockTeamHost<T extends Partial<SessionSubagentHost>>(
   host: T,
 ): T & SessionSubagentHost {
-  return {
-    spawn: vi.fn(),
-    resume: vi.fn(),
-    runQueued: vi.fn(),
-    getSubagentItem: vi.fn(),
-    ...host,
-  } as unknown as T & SessionSubagentHost;
-}
-
-/** Preserve result-oriented assertions while exercising the detached runtime contract. */
-function settledSubAgentTool(host: SessionSubagentHost): SubAgentTool {
-  const background = createBackgroundManager().manager;
-  const tool = new SubAgentTool(host, background);
-  const resolveExecution = tool.resolveExecution.bind(tool);
-  return {
-    name: tool.name,
-    description: tool.description,
-    parameters: tool.parameters,
-    resolveExecution(args) {
-      const execution = resolveExecution(args);
-      if (execution.isError === true) return execution;
-      return {
-        ...execution,
-        execute: async (ctx) => {
-          const launched = await execution.execute(ctx);
-          if (launched.isError === true || typeof launched.output !== 'string') return launched;
-          const taskId = launched.output.match(/task_id: (subagent-[0-9a-z]{8})/)?.[1];
-          if (taskId === undefined) return launched;
-          await background.wait(taskId);
-          const output = await background.readOutput(taskId);
-          const finalResultStart = output.lastIndexOf('<subagent_result>');
-          return { output: finalResultStart < 0 ? output : output.slice(finalResultStart) };
-        },
-      };
-    },
-  } as SubAgentTool;
+  return host as unknown as T & SessionSubagentHost;
 }
 
 function processWithOutput(stdout: string, exitCode = 0): KaosProcess {
@@ -305,7 +263,7 @@ describe('current builtin collaboration tools', () => {
     }]);
     const assignTeam = vi.fn(async () => [{ agentId: 'agent-review', task: 'Review tests.', turnId: 7 }]);
     const speakInDiscussion = vi.fn(async () => ({ discussionAgentId: 'agent-discussion', entryId: 4 }));
-    const host = mockSubagentHost({ createTeam, assignTeam, speakInDiscussion });
+    const host = mockTeamHost({ createTeam, assignTeam, speakInDiscussion });
 
     const create = new TeamCreateTool(host);
     const assign = new TeamAssignTool(host);
@@ -323,7 +281,7 @@ describe('current builtin collaboration tools', () => {
         assigned_task: 'Review tests.',
       }],
     }));
-    const status = new TeamStatusTool(mockSubagentHost({ getTeamStatus }));
+    const status = new TeamStatusTool(mockTeamHost({ getTeamStatus }));
     const members = [{
       name: 'Reviewer',
       mandate: 'Review behavior.',
@@ -465,536 +423,6 @@ describe('current builtin collaboration tools', () => {
     expect(description).toContain('dismiss');
   });
 
-  it('SubAgent returns before temporary workers complete and arms no timeout', async () => {
-    let queued: readonly QueuedSubagentTask<unknown>[] = [];
-    let resolveBatch: (results: QueuedSubagentRunResult<unknown>[]) => void = () => {};
-    const runQueued = (<T>(tasks: readonly QueuedSubagentTask<T>[]) => {
-      queued = tasks;
-      return new Promise<QueuedSubagentRunResult<T>[]>((resolve) => {
-        resolveBatch = resolve as (results: QueuedSubagentRunResult<unknown>[]) => void;
-      });
-    }) satisfies SessionSubagentHost['runQueued'];
-    const host = mockSubagentHost({ runQueued });
-    const background = createBackgroundManager().manager;
-    const tool = new SubAgentTool(host, background);
-    const input = {
-      description: 'Review files',
-      prompt_template: 'Review {{item}}',
-      items: ['src/a.ts', 'src/b.ts'],
-    };
-
-    const launched = await executeTool(tool, context(input, 'call_subagent'));
-
-    expect(launched.output).toContain('status: running');
-    const taskId = String(launched.output).match(/task_id: (subagent-[0-9a-z]{8})/)?.[1];
-    expect(taskId).toBeDefined();
-    expect(background.getTask(taskId!)).toMatchObject({
-      detached: true,
-      status: 'running',
-      timeoutMs: undefined,
-      subagentType: 'subagent:2',
-    });
-    expect(queued).toHaveLength(2);
-    expect(queued.every((task) => task.runInBackground && task.timeout === undefined)).toBe(true);
-
-    resolveBatch(queued.map((task, index) => ({
-      task,
-      agentId: `agent-${String(index + 1)}`,
-      status: 'completed' as const,
-      result: `result ${String(index + 1)}`,
-    })));
-    await expect(background.wait(taskId!)).resolves.toMatchObject({ status: 'completed' });
-    await expect(background.readOutput(taskId!)).resolves.toContain('result 2');
-  });
-
-  it('SubAgent applies one subagent_type across templated temporary workers', async () => {
-    const host = mockSubagentHost({
-      runQueued: vi.fn().mockResolvedValue([
-        {
-          task: {
-            kind: 'spawn',
-            data: { kind: 'spawn', index: 1, item: 'src/a.ts', prompt: 'Review src/a.ts' },
-            profileName: 'explore',
-            parentToolCallId: 'call_subagent',
-            prompt: 'Review src/a.ts',
-            description: 'Review files #1 (explore)',
-        runInBackground: true,
-          },
-          agentId: 'agent-explore-1',
-          status: 'completed',
-          result: 'explore result a',
-        },
-        {
-          task: {
-            kind: 'spawn',
-            data: { kind: 'spawn', index: 2, item: 'src/b.ts', prompt: 'Review src/b.ts' },
-            profileName: 'explore',
-            parentToolCallId: 'call_subagent',
-            prompt: 'Review src/b.ts',
-            description: 'Review files #2 (explore)',
-        runInBackground: true,
-          },
-          agentId: 'agent-explore-2',
-          status: 'completed',
-          result: 'explore result b',
-        },
-      ]),
-    });
-    const tool = settledSubAgentTool(host);
-    const input = {
-      description: 'Review files',
-      prompt_template: 'Review {{item}}',
-      items: ['src/a.ts', 'src/b.ts'],
-      subagent_type: 'explore',
-    };
-
-    expect(SubAgentToolInputSchema.safeParse(input).success).toBe(true);
-    expect(
-      SubAgentToolInputSchema.safeParse({
-        ...input,
-        items: Array.from({ length: 128 }, (_, index) => `src/${String(index + 1)}.ts`),
-      }).success,
-    ).toBe(true);
-    expect(
-      SubAgentToolInputSchema.safeParse({
-        ...input,
-        items: Array.from({ length: 129 }, (_, index) => `src/${String(index + 1)}.ts`),
-      }).success,
-    ).toBe(false);
-    expect(tool.parameters).toMatchObject({
-      type: 'object',
-      properties: {
-        subagent_type: { type: 'string' },
-      },
-    });
-    expect(tool.parameters).not.toMatchObject({
-      properties: { resume_agent_ids: expect.anything() },
-    });
-
-    const result = await executeTool(tool, context(input, 'call_subagent'));
-    expect(host.runQueued).toHaveBeenCalledTimes(1);
-    expect(host.runQueued).toHaveBeenCalledWith(
-      [
-        {
-          kind: 'spawn',
-          data: { kind: 'spawn', index: 1, item: 'src/a.ts', prompt: 'Review src/a.ts' },
-          profileName: 'explore',
-          parentToolCallId: 'call_subagent',
-          prompt: 'Review src/a.ts',
-          description: 'Review files #1 (explore)',
-          subagentIndex: 1,
-          subagentItem: 'src/a.ts',
-        runInBackground: true,
-          signal: expect.any(AbortSignal),
-        },
-        {
-          kind: 'spawn',
-          data: { kind: 'spawn', index: 2, item: 'src/b.ts', prompt: 'Review src/b.ts' },
-          profileName: 'explore',
-          parentToolCallId: 'call_subagent',
-          prompt: 'Review src/b.ts',
-          description: 'Review files #2 (explore)',
-          subagentIndex: 2,
-          subagentItem: 'src/b.ts',
-        runInBackground: true,
-          signal: expect.any(AbortSignal),
-        },
-      ],
-    );
-    expect(result.output).toBe([
-      '<subagent_result>',
-      '<summary>completed: 2</summary>',
-      '<subagent item="src/a.ts" outcome="completed">explore result a</subagent>',
-      '<subagent item="src/b.ts" outcome="completed">explore result b</subagent>',
-      '</subagent_result>',
-    ].join('\n'));
-    expect(result.isError).toBeUndefined();
-  });
-
-  it('SubAgent does not expose permission rule argument matching', () => {
-    const tool = new SubAgentTool(mockSubagentHost({}));
-    const execution = tool.resolveExecution({
-      description: 'Review files',
-      prompt_template: 'Review {{item}}',
-      items: ['src/a.ts', 'src/b.ts'],
-    });
-    if (execution.isError === true) throw new Error('SubAgent resolveExecution returned an error');
-
-    expect(execution.approvalRule).toBe('SubAgent');
-    expect(execution.matchesRule).toBeUndefined();
-  });
-
-  it('SubAgent description states the enforced input requirements', () => {
-    const description = new SubAgentTool(mockSubagentHost({})).description;
-    // Mirrors the current SubAgent input guidance.
-    expect(description).toContain('at least one');
-    expect(description).toContain('dependencies');
-    expect(description).toContain('prompt_template');
-    expect(description).toContain('items');
-  });
-
-  it('SubAgent runs heterogeneous task DAGs by dependency layer', async () => {
-    const runQueued = vi.fn(
-      async <T>(
-        tasks: readonly QueuedSubagentTask<T>[],
-      ): Promise<Array<QueuedSubagentRunResult<T>>> => {
-        return tasks.map((task) => {
-          const spec = task.data as { id?: string; index: number };
-          const id = spec.id ?? String(spec.index);
-          return {
-            task,
-            agentId: `agent-${id}`,
-            status: 'completed' as const,
-            result: `done ${id}`,
-          };
-        });
-      },
-    );
-    const host = mockSubagentHost({
-      runQueued: runQueued as unknown as SessionSubagentHost['runQueued'],
-    });
-    const tool = settledSubAgentTool(host);
-    const input = {
-      description: 'Ship feature',
-      tasks: [
-        {
-          id: 'plan',
-          description: 'Plan the change',
-          subagent_type: 'explore',
-          prompt: 'Inspect the code and produce an implementation plan.',
-        },
-        {
-          id: 'implement',
-          description: 'Implement the change',
-          subagent_type: 'coder',
-          depends_on: ['plan'],
-          prompt: 'Implement the accepted plan.',
-        },
-        {
-          id: 'review',
-          description: 'Review the change',
-          subagent_type: 'explore',
-          depends_on: ['implement'],
-          prompt: 'Review the implementation and report regressions.',
-        },
-      ],
-    };
-
-    expect(SubAgentToolInputSchema.safeParse(input).success).toBe(true);
-
-    const result = await executeTool(tool, context(input, 'call_subagent'));
-
-    expect(runQueued).toHaveBeenCalledTimes(3);
-    expect(runQueued.mock.calls[0]?.[0]).toEqual([
-      expect.objectContaining({
-        kind: 'spawn',
-        profileName: 'explore',
-        prompt: 'Inspect the code and produce an implementation plan.',
-        description: 'Ship feature #1 (explore): Plan the change',
-        subagentItem: 'plan',
-      }),
-    ]);
-    expect((runQueued.mock.calls[1]?.[0] as readonly QueuedSubagentTask[])[0]?.prompt).toContain(
-      '<dependency task_id="plan" outcome="completed">done plan</dependency>',
-    );
-    expect((runQueued.mock.calls[2]?.[0] as readonly QueuedSubagentTask[])[0]?.prompt).toContain(
-      '<dependency task_id="implement" outcome="completed">done implement</dependency>',
-    );
-    expect(result.output).toBe([
-      '<subagent_result>',
-      '<summary>completed: 3</summary>',
-      '<subagent task_id="plan" outcome="completed">done plan</subagent>',
-      '<subagent task_id="implement" outcome="completed">done implement</subagent>',
-      '<subagent task_id="review" outcome="completed">done review</subagent>',
-      '</subagent_result>',
-    ].join('\n'));
-    expect(result.isError).toBeUndefined();
-  });
-
-  it('SubAgent reports downstream DAG tasks as not started when a dependency fails', async () => {
-    const runQueued = vi.fn(
-      async <T>(
-        tasks: readonly QueuedSubagentTask<T>[],
-      ): Promise<Array<QueuedSubagentRunResult<T>>> => {
-        return tasks.map((task) => ({
-          task,
-          agentId: 'agent-plan',
-          status: 'failed' as const,
-          error: 'plan failed',
-        }));
-      },
-    );
-    const host = mockSubagentHost({
-      runQueued: runQueued as unknown as SessionSubagentHost['runQueued'],
-    });
-    const tool = settledSubAgentTool(host);
-
-    const result = await executeTool(
-      tool,
-      context(
-        {
-          description: 'Ship feature',
-          tasks: [
-            { id: 'plan', prompt: 'Plan the change.' },
-            { id: 'implement', depends_on: ['plan'], prompt: 'Implement the plan.' },
-          ],
-        },
-        'call_subagent',
-      ),
-    );
-
-    expect(runQueued).toHaveBeenCalledTimes(1);
-    expect(result.output).toBe([
-      '<subagent_result>',
-      '<summary>failed: 2</summary>',
-      '<subagent task_id="plan" outcome="failed">plan failed</subagent>',
-      '<subagent task_id="implement" state="not_started" outcome="failed">Dependency "plan" did not complete successfully.</subagent>',
-      '</subagent_result>',
-    ].join('\n'));
-    expect(result.isError).toBeUndefined();
-  });
-
-  it('SubAgent rejects more than 128 temporary workers at execution time', async () => {
-    const host = mockSubagentHost({ runQueued: vi.fn() });
-    const tool = settledSubAgentTool(host);
-
-    const result = await executeTool(
-      tool,
-      context({
-        description: 'Review files',
-        prompt_template: 'Review {{item}}',
-        items: Array.from({ length: 129 }, (_, index) => `src/${String(index + 1)}.ts`),
-      }),
-    );
-
-    expect(result.output).toBe('SubAgent supports at most 128 subagents.');
-    expect(result.isError).toBe(true);
-    expect(host.runQueued).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    {
-      name: 'items without a prompt template',
-      input: {
-        description: 'Review files',
-        items: ['src/a.ts', 'src/b.ts'],
-      },
-      output: 'prompt_template is required when items are provided.',
-    },
-    {
-      name: 'a prompt template without the item placeholder',
-      input: {
-        description: 'Review files',
-        prompt_template: 'Review files',
-        items: ['src/a.ts', 'src/b.ts'],
-      },
-      output: 'prompt_template must include the {{item}} placeholder.',
-    },
-  ])('SubAgent rejects $name at execution time', async ({ input, output }) => {
-    const host = mockSubagentHost({ runQueued: vi.fn() });
-    const tool = settledSubAgentTool(host);
-
-    const result = await executeTool(tool, context(input));
-
-    expect(result.output).toBe(output);
-    expect(result.isError).toBe(true);
-    expect(host.runQueued).not.toHaveBeenCalled();
-  });
-
-  it('SubAgent rejects legacy resume_agent_ids instead of reviving a temporary worker', () => {
-    expect(
-      SubAgentToolInputSchema.safeParse({
-        description: 'Resume old work',
-        resume_agent_ids: { 'agent-old-1': 'Continue previous review A' },
-      }).success,
-    ).toBe(false);
-  });
-
-  it('SubAgent reports failed temporary workers inside the XML result without failing the tool', async () => {
-    const host = mockSubagentHost({
-      runQueued: vi.fn().mockResolvedValue([
-        {
-          task: {
-            kind: 'spawn',
-            data: { kind: 'spawn', index: 1, item: 'src/a.ts', prompt: 'Review src/a.ts' },
-            profileName: 'coder',
-            parentToolCallId: 'call_subagent',
-            prompt: 'Review src/a.ts',
-            description: 'Review files #1 (coder)',
-        runInBackground: true,
-          },
-          agentId: 'agent-coder-1',
-          status: 'completed',
-          result: 'imports are stable',
-        },
-        {
-          task: {
-            kind: 'spawn',
-            data: { kind: 'spawn', index: 2, item: 'src/b.ts', prompt: 'Review src/b.ts' },
-            profileName: 'coder',
-            parentToolCallId: 'call_subagent',
-            prompt: 'Review src/b.ts',
-            description: 'Review files #2 (coder)',
-        runInBackground: true,
-          },
-          agentId: 'agent-coder-2',
-          status: 'failed',
-          error: 'Agent timed out after 30s.',
-        },
-      ]),
-    });
-    const tool = settledSubAgentTool(host);
-
-    const result = await executeTool(
-      tool,
-      context(
-        {
-          description: 'Review files',
-          prompt_template: 'Review {{item}}',
-          items: ['src/a.ts', 'src/b.ts'],
-        },
-        'call_subagent',
-      ),
-    );
-
-    expect(result.output).toBe([
-      '<subagent_result>',
-      '<summary>completed: 1, failed: 1</summary>',
-      '<subagent item="src/a.ts" outcome="completed">imports are stable</subagent>',
-      '<subagent item="src/b.ts" outcome="failed">Agent timed out after 30s.</subagent>',
-      '</subagent_result>',
-    ].join('\n'));
-    expect(result.isError).toBeUndefined();
-  });
-
-  it('SubAgent never exposes a resumable temporary worker identifier', async () => {
-    const host = mockSubagentHost({
-      runQueued: vi.fn().mockResolvedValue([
-        {
-          task: {
-            kind: 'spawn',
-            data: { kind: 'spawn', index: 1, item: 'src/a.ts', prompt: 'Review src/a.ts' },
-            profileName: 'coder',
-            parentToolCallId: 'call_subagent',
-            prompt: 'Review src/a.ts',
-            description: 'Review files #1 (coder)',
-        runInBackground: true,
-          },
-          status: 'failed',
-          error: 'Agent did not start.',
-        },
-        {
-          task: {
-            kind: 'spawn',
-            data: { kind: 'spawn', index: 2, item: 'src/b.ts', prompt: 'Review src/b.ts' },
-            profileName: 'coder',
-            parentToolCallId: 'call_subagent',
-            prompt: 'Review src/b.ts',
-            description: 'Review files #2 (coder)',
-        runInBackground: true,
-          },
-          status: 'failed',
-          error: 'Agent also did not start.',
-        },
-      ]),
-    });
-    const tool = settledSubAgentTool(host);
-
-    const result = await executeTool(
-      tool,
-      context(
-        {
-          description: 'Review files',
-          prompt_template: 'Review {{item}}',
-          items: ['src/a.ts', 'src/b.ts'],
-        },
-        'call_subagent',
-      ),
-    );
-
-    expect(result.output).toBe([
-      '<subagent_result>',
-      '<summary>failed: 2</summary>',
-      '<subagent item="src/a.ts" outcome="failed">Agent did not start.</subagent>',
-      '<subagent item="src/b.ts" outcome="failed">Agent also did not start.</subagent>',
-      '</subagent_result>',
-    ].join('\n'));
-    expect(result.isError).toBeUndefined();
-  });
-
-  it('SubAgent reports partial aborted temporary workers inside the XML result', async () => {
-    const host = mockSubagentHost({
-      runQueued: vi.fn().mockResolvedValue([
-        {
-          task: {
-            kind: 'spawn',
-            data: { kind: 'spawn', index: 1, item: 'src/a.ts', prompt: 'Review src/a.ts' },
-            profileName: 'coder',
-            parentToolCallId: 'call_subagent',
-            prompt: 'Review src/a.ts',
-            description: 'Review files #1 (coder)',
-        runInBackground: true,
-          },
-          agentId: 'agent-coder-1',
-          status: 'completed',
-          result: 'imports are stable',
-        },
-        {
-          task: {
-            kind: 'spawn',
-            data: { kind: 'spawn', index: 2, item: 'src/b.ts', prompt: 'Review src/b.ts' },
-            profileName: 'coder',
-            parentToolCallId: 'call_subagent',
-            prompt: 'Review src/b.ts',
-            description: 'Review files #2 (coder)',
-        runInBackground: true,
-          },
-          agentId: 'agent-coder-2',
-          status: 'aborted',
-          state: 'started',
-          error: 'The user manually interrupted this subagent batch before this subagent finished.',
-        },
-        {
-          task: {
-            kind: 'spawn',
-            data: { kind: 'spawn', index: 3, item: 'src/c.ts', prompt: 'Review src/c.ts' },
-            profileName: 'coder',
-            parentToolCallId: 'call_subagent',
-            prompt: 'Review src/c.ts',
-            description: 'Review files #3 (coder)',
-        runInBackground: true,
-          },
-          status: 'aborted',
-          state: 'not_started',
-          error: 'The user manually interrupted this subagent batch before this subagent was started.',
-        },
-      ]),
-    });
-    const tool = settledSubAgentTool(host);
-
-    const result = await executeTool(
-      tool,
-      context(
-        {
-          description: 'Review files',
-          prompt_template: 'Review {{item}}',
-          items: ['src/a.ts', 'src/b.ts', 'src/c.ts'],
-        },
-        'call_subagent',
-      ),
-    );
-
-    expect(result.output).toBe([
-      '<subagent_result>',
-      '<summary>completed: 1, aborted: 2</summary>',
-      '<subagent item="src/a.ts" outcome="completed">imports are stable</subagent>',
-      '<subagent item="src/b.ts" state="started" outcome="aborted">The user manually interrupted this subagent batch before this subagent finished.</subagent>',
-      '<subagent item="src/c.ts" state="not_started" outcome="aborted">The user manually interrupted this subagent batch before this subagent was started.</subagent>',
-      '</subagent_result>',
-    ].join('\n'));
-    expect(result.isError).toBeUndefined();
-  });
-
   it('Skill exposes parameters and reports unknown skills as tool errors', async () => {
     const tool = new SkillTool({
       skills: {
@@ -1020,13 +448,13 @@ describe('current builtin collaboration tools', () => {
   it('nori_memory_search exposes and executes chained retrieval', async () => {
     const memory: NoriMemoryProvider = {
       multiRetrieve: vi.fn(async (keywords: string[]) => {
-        if (keywords.includes('SubAgent')) {
+        if (keywords.includes('TeamAssign')) {
           return [
             {
-              title: 'SubAgent ADR',
-              path: 'decisions/subagent.md',
+              title: 'TeamAssign ADR',
+              path: 'decisions/team-assign.md',
               score: 3,
-              excerpt: 'SubAgent delegates work. See [[Permission Rules]].',
+              excerpt: 'TeamAssign delegates work. See [[Permission Rules]].',
             },
           ];
         }
@@ -1052,7 +480,7 @@ describe('current builtin collaboration tools', () => {
     expect(properties).toHaveProperty('follow_up_keywords');
     expect(
       NoriMemorySearchInputSchema.safeParse({
-        keywords: ['SubAgent'],
+        keywords: ['TeamAssign'],
         include_linked: true,
         link_depth: 1,
         chain_depth: 1,
@@ -1062,7 +490,7 @@ describe('current builtin collaboration tools', () => {
     const result = await executeTool(
       tool,
       context({
-        keywords: ['SubAgent'],
+        keywords: ['TeamAssign'],
         include_linked: true,
         link_depth: 1,
         chain_depth: 1,

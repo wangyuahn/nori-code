@@ -518,7 +518,7 @@ describe('runPrompt', () => {
       emit(
         mocks.agentEvent('child-agent', {
           type: 'error',
-          code: 'subagent.failed',
+          code: 'turn.failed',
           message: 'child failed',
         }),
       );

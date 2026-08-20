@@ -33,7 +33,7 @@ export interface AppState {
   discussMode: boolean;
   /** 'bash' when the editor is in `!` shell-command mode. */
   inputMode: 'prompt' | 'bash';
-  /** Whether nori-coder subagent has been granted write access (Write/Edit/Bash). */
+  /** Whether the nori-coder agent has been granted write access (Write/Edit/Bash). */
   coderWriteEnabled: boolean;
   /** Whether the main Nori orchestrator blocks direct Write/Edit/Bash. */
   toolsReadonly: boolean;
@@ -72,7 +72,6 @@ export interface ToolCallBlockData {
   streamingArguments?: string;
   streamingStartedAtMs?: number;
   result?: ToolResultBlockData;
-  subagent?: SubagentReplayBlockData;
   step?: number;
   turnId?: string;
   /** Set when the step ended (e.g. max_tokens) before the tool call's
@@ -86,28 +85,6 @@ export interface ToolResultBlockData {
   output: string;
   is_error?: boolean;
   synthetic?: boolean;
-}
-
-export interface SubagentReplayToolCallData {
-  id: string;
-  name: string;
-  args: Record<string, unknown>;
-  description?: string;
-  result?: ToolResultBlockData;
-}
-
-export interface SubagentReplayBlockData {
-  id: string;
-  name?: string;
-  text?: string;
-  toolCalls?: readonly SubagentReplayToolCallData[];
-}
-
-export interface BackgroundAgentMetadata {
-  readonly agentId: string;
-  readonly parentToolCallId: string;
-  readonly agentName?: string;
-  readonly description?: string;
 }
 
 export type BackgroundAgentStatusPhase = 'started' | 'completed' | 'failed';

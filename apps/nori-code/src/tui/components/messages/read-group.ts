@@ -1,11 +1,10 @@
 /**
  * ReadGroupComponent renders 2+ Read tool calls from the same step as one group.
  *
- * It follows the same structure as `AgentGroupComponent`, with a smaller
- * surface:
+ * Structure:
  * - one summary header and a tree body listing each file path and status;
  * - permanently grouped, while the body remains visible;
- * - 200ms throttling, matching AgentGroup;
+ * - 200ms render throttling;
  * - state stays in each `ToolCallComponent`; the group only reads snapshots.
  *
  * Header forms:
@@ -14,7 +13,7 @@
  *   some failed: append · {F} failed
  *   all failed:  Read {N} files · failed
  *
- * Body lines follow AgentGroup's branch style:
+ * Body lines use the branch style:
  *   src/main.ts · 51 lines
  *   src/cli.ts · reading
  *   src/missing.ts · failed

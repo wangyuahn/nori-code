@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_AGENT_PROFILES,
-  configuredSubagentProfiles,
   renderConfiguredAgentList,
   loadAgentProfilesFromDir,
   loadAgentProfilesFromSources,
@@ -67,11 +66,6 @@ promptVars:
   roleAdditional: parent-role
 tools:
   - Read
-subagents:
-  shared:
-    description: Shared parent subagent
-  coder:
-    description: Coder child subagent
 `,
     );
     await write(
@@ -79,6 +73,7 @@ subagents:
       `
 extends: agent
 name: coder
+description: Coder profile
 promptVars:
   childOnly: child-value
   roleAdditional: child-role
@@ -87,30 +82,16 @@ tools:
   - Skill
 `,
     );
-    await write(
-      'shared.yaml',
-      `
-name: shared
-systemPromptTemplate: shared prompt
-tools:
-  - Read
-`,
-    );
 
     const profiles = await loadAgentProfilesFromDir([
       join(workDir, 'agent.yaml'),
       join(workDir, 'coder.yaml'),
-      join(workDir, 'shared.yaml'),
       join(workDir, 'missing.yaml'),
     ]);
     const coderPrompt = profiles['coder']?.systemPrompt(promptContext);
 
-    expect(profiles['coder']?.description).toBe('Coder child subagent');
+    expect(profiles['coder']?.description).toBe('Coder profile');
     expect(profiles['coder']?.tools).toEqual(['Bash', 'Skill']);
-    expect(profiles['agent']?.subagents?.['shared']).toBe(profiles['shared']);
-    expect(profiles['agent']?.subagents?.['coder']).toBe(profiles['coder']);
-    expect(profiles['coder']?.subagents).toBeUndefined();
-    expect(profiles['shared']?.description).toBe('Shared parent subagent');
     expect(coderPrompt).toContain('os=macOS');
     expect(coderPrompt).toContain('cwd=/workspace');
     expect(coderPrompt).toContain('listing=README.md');
@@ -124,17 +105,6 @@ tools:
   });
 
   it('reports invalid profile graphs without relying on loader internals', () => {
-    expect(() =>
-      resolveAgentProfiles([
-        {
-          name: 'agent',
-          subagents: {
-            missing: { description: 'Missing subagent' },
-          },
-        },
-      ]),
-    ).toThrow(/declares subagent "missing"/);
-
     expect(() => resolveAgentProfiles([{ name: 'agent' }, { name: 'agent' }])).toThrow(
       /Duplicate agent profile name: "agent"/,
     );
@@ -157,42 +127,24 @@ tools:
 });
 
 describe('default agent profiles', () => {
-  it('adds configured roles while preserving the selected base profile tools', () => {
-    const profiles = configuredSubagentProfiles(DEFAULT_AGENT_PROFILES['agent']?.subagents, {
-      reviewer: { description: 'Review risky changes', role: 'Find correctness bugs.', baseProfile: 'explore', model: 'deepseek-review', enabled: true, permissions: { read: true, write: true, shell: false, web: true, delegate: false } },
-      disabled: { description: 'Disabled', role: 'Do nothing.', baseProfile: 'coder', enabled: false },
-    });
-    expect(profiles?.['reviewer']?.modelAlias).toBe('deepseek-review');
-    expect(profiles?.['reviewer']?.tools).toContain('Write');
-    expect(profiles?.['reviewer']?.tools).not.toContain('Bash');
-    expect(profiles?.['reviewer']?.systemPrompt(promptContext)).toContain('<custom_agent_role>\nFind correctness bugs.');
-    expect(profiles?.['disabled']).toBeUndefined();
-  });
-
-  it('renders enabled custom agents and their permissions for the model prompt', () => {
+  it('renders enabled hiring roles and their permissions for the model prompt', () => {
     const listing = renderConfiguredAgentList({
-      reviewer: { description: 'Review risky changes', role: 'Find correctness bugs.', baseProfile: 'explore', model: 'deepseek-review', enabled: true, permissions: { read: true, web: true } },
-      disabled: { description: 'Disabled', role: 'Do nothing.', baseProfile: 'coder', enabled: false },
+      reviewer: { description: 'Review risky changes', role: 'Find correctness bugs.', baseProfile: 'agent', model: 'deepseek-review', enabled: true, permissions: { read: true, web: true } },
+      disabled: { description: 'Disabled', role: 'Do nothing.', baseProfile: 'nori-coder', enabled: false },
     });
-    expect(listing).toContain('<agent name="reviewer" base_profile="explore" model="deepseek-review">');
+    expect(listing).toContain('<agent name="reviewer" base_profile="agent" model="deepseek-review">');
     expect(listing).toContain('Role: Find correctness bugs.');
     expect(listing).toContain('Model: deepseek-review');
     expect(listing).toContain('Permissions: read, web');
     expect(listing).not.toContain('disabled');
   });
 
-  it('links bundled subagents and keeps role-specific tool sets observable', () => {
-    expect(DEFAULT_AGENT_PROFILES['agent']?.subagents?.['orchestrator']).toBe(
-      DEFAULT_AGENT_PROFILES['orchestrator'],
-    );
-    expect(DEFAULT_AGENT_PROFILES['agent']?.subagents?.['nori-coder']).toBeUndefined();
-    expect(DEFAULT_AGENT_PROFILES['orchestrator']?.tools).not.toContain('Write');
-    expect(DEFAULT_AGENT_PROFILES['agent']?.subagents?.['coder']).toBe(
-      DEFAULT_AGENT_PROFILES['coder'],
-    );
-    expect(DEFAULT_AGENT_PROFILES['agent']?.subagents?.['explore']).toBe(
-      DEFAULT_AGENT_PROFILES['explore'],
-    );
+  it('ships exactly the three bundled profiles with their tool sets', () => {
+    expect(Object.keys(DEFAULT_AGENT_PROFILES).sort()).toEqual([
+      'agent',
+      'nori-agent',
+      'nori-coder',
+    ]);
 
     expect(DEFAULT_AGENT_PROFILES['agent']?.tools).toEqual(
       expect.arrayContaining([
@@ -200,17 +152,22 @@ describe('default agent profiles', () => {
         'Write',
         'Edit',
         'Bash',
-        'SubAgent',
         'Skill',
         'TaskList',
         'TaskOutput',
         'TaskStop',
       ]),
     );
-    expect(DEFAULT_AGENT_PROFILES['coder']?.tools).toEqual(
-      expect.arrayContaining(['Read', 'Write', 'Edit', 'Bash']),
+    expect(DEFAULT_AGENT_PROFILES['agent']?.tools).not.toContain('SubAgent');
+
+    // `nori-coder` is the read-only lead: it coordinates the Team and never
+    // edits files itself, so the execution tools must stay off its list.
+    expect(DEFAULT_AGENT_PROFILES['nori-coder']?.tools).toEqual(
+      expect.arrayContaining(['Read', 'Grep', 'Glob', 'TeamAssign', 'TeamDecide']),
     );
-    expect(DEFAULT_AGENT_PROFILES['explore']?.tools).not.toContain('Write');
+    for (const tool of ['Write', 'Edit', 'Bash']) {
+      expect(DEFAULT_AGENT_PROFILES['nori-coder']?.tools).not.toContain(tool);
+    }
   });
 
   it('renders the model-invocable skill listing for bundled prompts', () => {

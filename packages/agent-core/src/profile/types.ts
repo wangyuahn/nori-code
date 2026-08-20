@@ -3,12 +3,6 @@ import { z } from 'zod';
 
 import type { SkillRegistry } from '../agent/skill/types';
 
-export const RawSubagentProfileSchema = z.object({
-  description: z.string().optional(),
-});
-
-export type RawSubagentProfile = z.infer<typeof RawSubagentProfileSchema>;
-
 export const RawAgentProfileSchema = z.object({
   extends: z.string().optional(),
   name: z.string().min(1),
@@ -21,7 +15,6 @@ export const RawAgentProfileSchema = z.object({
   tools: z.array(z.string()).optional(),
   tools_readonly: z.boolean().optional(),
   whenToUse: z.string().optional(),
-  subagents: z.record(z.string(), RawSubagentProfileSchema).optional(),
 });
 
 export type RawAgentProfile = z.infer<typeof RawAgentProfileSchema>;
@@ -62,5 +55,4 @@ export interface ResolvedAgentProfile {
   tools: string[];
   toolsReadonly?: boolean;
   whenToUse?: string;
-  subagents?: Record<string, ResolvedAgentProfile>;
 }

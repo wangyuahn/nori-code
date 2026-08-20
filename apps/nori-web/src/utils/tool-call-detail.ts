@@ -92,24 +92,32 @@ function specializedFields(tool: ToolCall, tr: Translate): ToolDetailField[] {
   if (normalized === 'fetchurl' || normalized === 'webfetch') {
     return [{ key: 'url', label: tr('URL', 'URL'), value: firstString(args.url) ?? tr('No URL', '无 URL') }];
   }
-  if (normalized === 'agent') {
-    return [
-      { key: 'prompt', label: tr('Prompt', '提示词'), value: firstString(args.prompt) ?? tr('No prompt', '无提示词') },
-      { key: 'subagent', label: tr('Subagent', '子智能体'), value: firstString(args.subagent_type, args.profile) ?? tr('No subagent type', '无子智能体类型') },
-    ];
-  }
-  if (normalized === 'subagent') {
-    const count = Array.isArray(args.tasks) ? args.tasks.length : Array.isArray(args.items) ? args.items.length : 0;
-    return [
-      { key: 'description', label: tr('Description', '描述'), value: firstString(args.description, args.template_name) ?? tr('No description', '无描述') },
-      { key: 'agents', label: tr('SubAgents', 'SubAgent 数量'), value: count > 0 ? String(count) : tr('No SubAgent list', '无 SubAgent 列表') },
-    ];
-  }
   if (normalized === 'skill') {
     return [{ key: 'skill', label: tr('Skill', '技能'), value: firstString(args.skill, args.name, args.skill_name) ?? tr('No skill name', '无技能名') }];
   }
   if (normalized === 'todolist') {
     return [{ key: 'todos', label: tr('Todos', '待办'), value: todoSummary(args.todos, tr) }];
+  }
+  if (normalized === 'teamcreate') {
+    return [{ key: 'members', label: tr('Members', '成员'), value: memberSummary(args.members, tr) }];
+  }
+  if (normalized === 'teamassign') {
+    return [{ key: 'assignments', label: tr('Assignments', '任务分配'), value: assignmentSummary(args.assignments, tr) }];
+  }
+  if (normalized === 'teamdm' || normalized === 'teambroadcast' || normalized === 'teamspeak') {
+    return [
+      ...(firstString(args.agent_id) === undefined
+        ? []
+        : [{ key: 'recipient', label: tr('Recipient', '收件成员'), value: firstString(args.agent_id) as string }]),
+      { key: 'message', label: tr('Message', '消息'), value: firstString(args.message) ?? tr('No message', '无消息') },
+    ];
+  }
+  if (normalized === 'teamdecide') {
+    return [
+      { key: 'action', label: tr('Action', '动作'), value: firstString(args.action) ?? tr('No action', '无动作') },
+      { key: 'topic', label: tr('Topic', '议题'), value: firstString(args.topic) ?? tr('No topic', '无议题') },
+      { key: 'statement', label: tr('Statement', '发言'), value: firstString(args.statement) ?? tr('No statement', '无发言') },
+    ];
   }
   return pathFields(args, tr, []);
 }
@@ -182,6 +190,28 @@ export function formatEditDiff(before: string | undefined, after: string | undef
     if (right !== undefined) lines.push(`+${right}`);
   }
   return lines.length > 0 ? lines.join('\n') : tr('No before/after text', '无前后对照');
+}
+
+function memberSummary(value: unknown, tr: Translate): string {
+  if (!Array.isArray(value) || value.length === 0) return tr('No members', '无成员');
+  return value.map(item => {
+    const member = asRecord(item);
+    const name = firstString(member.name) ?? tr('Unnamed member', '未命名成员');
+    const role = firstString(member.role);
+    return role === undefined ? name : `${name} — ${role}`;
+  }).join('\n');
+}
+
+function assignmentSummary(value: unknown, tr: Translate): string {
+  if (!Array.isArray(value) || value.length === 0) return tr('No assignments', '无任务分配');
+  return value.map(item => {
+    const assignment = asRecord(item);
+    const agentId = firstString(assignment.agent_id) ?? tr('Unknown member', '未知成员');
+    // A null task is how TeamAssign clears an assignment, so say so rather than
+    // rendering an empty line the reader has to guess at.
+    const task = firstString(assignment.task) ?? tr('cleared', '已清除');
+    return `${agentId}: ${task}`;
+  }).join('\n');
 }
 
 function todoSummary(value: unknown, tr: Translate): string {

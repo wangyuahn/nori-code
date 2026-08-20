@@ -7,8 +7,6 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { budgetToolResultForModel } from '../../src/agent/turn/tool-result-budget';
 import { HookEngine } from '../../src/session/hooks';
-import type { SessionSubagentHost } from '../../src/session/subagent-host';
-import { FLAG_DEFINITIONS, FlagResolver } from '../../src/flags';
 import { createFakeKaos } from '../tools/fixtures/fake-kaos';
 import { createCommandKaos, testAgent } from './harness/agent';
 import { executeTool } from '../tools/fixtures/execute-tool';
@@ -207,20 +205,6 @@ describe('Agent tools', () => {
     const managedBash = ctx.agent.tools.loopTools.find((tool) => tool.name === 'Bash');
     expect(managedBash).toBeDefined();
     expect(managedBash!.description).toContain('run_in_background=true');
-  });
-
-  it('exposes only SubAgent when a subagent host is available', () => {
-    const subagentHost = {} as unknown as SessionSubagentHost;
-
-    const ctx = testAgent({
-      subagentHost,
-      experimentalFlags: new FlagResolver({}, FLAG_DEFINITIONS),
-    });
-    ctx.configure({ tools: ['SubAgent'] });
-
-    const names = ctx.agent.tools.loopTools.map((tool) => tool.name);
-    expect(names).toContain('SubAgent');
-    expect(names).not.toContain('Agent');
   });
 
   it('never exposes ContextInjection as a model-callable tool', () => {

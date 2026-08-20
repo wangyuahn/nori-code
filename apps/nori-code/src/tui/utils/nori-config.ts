@@ -239,14 +239,12 @@ export interface WorkflowConfig {
   reviewSuggestionThreshold: number;
   reviewRequiredThreshold: number;
   maxReviewGateContinuations: number;
-  bugHuntSubAgentRequired: boolean;
 }
 
 export const DEFAULT_WORKFLOW_CONFIG: WorkflowConfig = {
   reviewSuggestionThreshold: 4,
   reviewRequiredThreshold: 7,
   maxReviewGateContinuations: 2,
-  bugHuntSubAgentRequired: true,
 };
 
 /**
@@ -274,20 +272,12 @@ export function loadWorkflowConfig(cwd: string): WorkflowConfig {
     if (!m || m[1] === undefined) return undefined;
     return parseInt(m[1], 10);
   };
-  const boolMatch = (key: string): boolean | undefined => {
-    const m = new RegExp(`^\\s{2}${key}:\\s*(true|false)`, 'm').exec(block);
-    if (!m || m[1] === undefined) return undefined;
-    return m[1] === 'true';
-  };
-
   const st = intMatch('review_suggestion_threshold');
   if (st !== undefined) config.reviewSuggestionThreshold = st;
   const rt = intMatch('review_required_threshold');
   if (rt !== undefined) config.reviewRequiredThreshold = rt;
   const mgc = intMatch('max_review_gate_continuations');
   if (mgc !== undefined) config.maxReviewGateContinuations = mgc;
-  const bhs = boolMatch('bug_hunt_subagent_required');
-  if (bhs !== undefined) config.bugHuntSubAgentRequired = bhs;
 
   return config;
 }
@@ -305,7 +295,6 @@ export function saveWorkflowConfig(cwd: string, config: WorkflowConfig): void {
     `  review_suggestion_threshold: ${config.reviewSuggestionThreshold}`,
     `  review_required_threshold: ${config.reviewRequiredThreshold}`,
     `  max_review_gate_continuations: ${config.maxReviewGateContinuations}`,
-    `  bug_hunt_subagent_required: ${config.bugHuntSubAgentRequired}`,
     '',
   ].join('\n');
 

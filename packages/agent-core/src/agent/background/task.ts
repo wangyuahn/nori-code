@@ -1,4 +1,3 @@
-import type { AgentBackgroundTaskInfo } from './agent-task';
 import type { ProcessBackgroundTaskInfo } from './process-task';
 import type { QuestionBackgroundTaskInfo } from './question-task';
 
@@ -46,7 +45,6 @@ export interface BackgroundTaskInfoBase {
 
 export type BackgroundTaskInfo =
   | ProcessBackgroundTaskInfo
-  | AgentBackgroundTaskInfo
   | QuestionBackgroundTaskInfo;
 
 export interface BackgroundTaskSink {

@@ -115,10 +115,17 @@ export interface Session {
   archived?: boolean;
 }
 
+/**
+ * The four node kinds the session agent tree can hold. Mirrors the REST
+ * `sessionAgentTreeNodeSchema` — an untyped `string` here let removed kinds
+ * such as the temporary subagent survive in dead UI branches.
+ */
+export type SessionAgentKind = 'main' | 'team' | 'discussion' | 'independent';
+
 /** A live or archived agent transcript owned by a parent session. */
 export interface SessionAgent {
   agent_id: string;
-  kind: string;
+  kind: SessionAgentKind;
   parent_agent_id?: string;
   name?: string;
   role?: string;
@@ -154,11 +161,22 @@ interface SessionAgentTreeWireNode {
   discussion_turn_agent_id?: string;
 }
 
+const SESSION_AGENT_KINDS: readonly SessionAgentKind[] = ['main', 'team', 'discussion', 'independent'];
+
+/**
+ * Narrows the wire kind at the single REST boundary. The tree renders a node
+ * per kind, so an unknown kind from a newer server has to land somewhere —
+ * `independent` shows it as a plain transcript instead of dropping it.
+ */
+function toSessionAgentKind(kind: string): SessionAgentKind {
+  return SESSION_AGENT_KINDS.find(candidate => candidate === kind) ?? 'independent';
+}
+
 function toSessionAgent(node: SessionAgentTreeWireNode): SessionAgent {
   const usage = node.usage;
   return {
     agent_id: node.id,
-    kind: node.kind,
+    kind: toSessionAgentKind(node.kind),
     parent_agent_id: node.parent_agent_id ?? undefined,
     name: node.name,
     role: node.role,
@@ -464,10 +482,25 @@ export interface Note {
   content_hash?: string;
 }
 
+/**
+ * One agent or background task the server currently considers active. This is
+ * the single source for "who is working right now" — the UI counts these
+ * instead of accumulating ids from lifecycle events, so the per-session badge
+ * and the global badge can never disagree.
+ */
+export interface SessionActivity {
+  session_id: string;
+  agent_id: string;
+  kind: 'agent' | 'background';
+  task_id?: string;
+  status: string;
+  last_active?: string;
+}
+
 export interface BackgroundTask {
   id: string;
   session_id: string;
-  kind: 'subagent' | 'bash' | 'tool';
+  kind: 'bash' | 'tool';
   description: string;
   status: 'running' | 'completed' | 'failed' | 'cancelled';
   command?: string;
@@ -828,14 +861,7 @@ export function createClient(
           exclude_empty: params?.exclude_empty,
         }),
 
-      getActivity: () => request<{ items: Array<{
-        session_id: string;
-        agent_id: string;
-        kind: 'agent' | 'background';
-        task_id?: string;
-        status: string;
-        last_active?: string;
-      }> }>('/sessions/activity'),
+      getActivity: () => request<{ items: SessionActivity[] }>('/sessions/activity'),
 
       get: (id: string) =>
         request<Session>(`/sessions/${encodeURIComponent(id)}`),

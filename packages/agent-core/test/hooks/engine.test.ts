@@ -181,7 +181,11 @@ describe('HookEngine', () => {
       signal: abortController.signal,
     });
 
-    expect(Date.now() - startedAt).toBeLessThan(1000);
+    // The hook sleeps 10s behind a 5s timeout, so anything well under 5s proves
+    // the abort killed it instead of the timeout expiring. The budget has to
+    // leave room for process spawn cost — on Windows `node -e` alone can take
+    // ~1s, which made a 1000ms budget fail on startup latency, not on behavior.
+    expect(Date.now() - startedAt).toBeLessThan(3000);
     expect(results).toHaveLength(1);
     expect(results[0]?.action).toBe('allow');
     expect(results[0]?.timedOut).toBeUndefined();

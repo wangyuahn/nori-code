@@ -104,18 +104,13 @@ function agentStatusClass(status: string): string {
   return 'pending';
 }
 
-function backgroundTasksOnly(tasks: readonly BackgroundTask[]): BackgroundTask[] {
-  return tasks.filter(task => task.kind !== 'subagent');
-}
-
 interface AgentTreeData {
   teamPartners: SessionAgent[];
   activeDiscussions: SessionAgent[];
-  liveMainSubAgents: SessionAgent[];
-  otherActiveRoots: SessionAgent[];
+  independentRoots: SessionAgent[];
   archivedAgents: SessionAgent[];
   teamChildrenByParent: Map<string, SessionAgent[]>;
-  temporaryChildrenByParent: Map<string, SessionAgent[]>;
+  independentChildrenByParent: Map<string, SessionAgent[]>;
   archivedChildrenByParent: Map<string, SessionAgent[]>;
 }
 
@@ -170,7 +165,7 @@ function buildAgentTreeData(agents: readonly SessionAgent[]): AgentTreeData {
   const archived = nonMainAgents.filter(agent => (
     agent.archived
     || agentStatus(agent) === 'archived'
-    || ((agent.kind === 'sub' || agent.kind === 'discussion') && isTerminalAgent(agent))
+    || (agent.kind === 'discussion' && isTerminalAgent(agent))
   ));
   const active = nonMainAgents.filter(agent => !archived.includes(agent));
   const activeIds = new Set(active.map(agent => agent.agent_id));
@@ -180,20 +175,19 @@ function buildAgentTreeData(agents: readonly SessionAgent[]): AgentTreeData {
   const activeRoots = activeChildrenByParent.get('main') ?? [];
   const teamPartners = activeRoots.filter(agent => agent.kind === 'team');
   const activeDiscussions = activeRoots.filter(agent => agent.kind === 'discussion');
-  const temporaryRoots = activeRoots.filter(agent => agent.kind !== 'team' && agent.kind !== 'discussion');
+  const independentRoots = activeRoots.filter(agent => agent.kind !== 'team' && agent.kind !== 'discussion');
   const teamChildrenByParent = new Map(activeChildrenByParent);
-  const temporaryChildrenByParent = new Map(activeChildrenByParent);
+  const independentChildrenByParent = new Map(activeChildrenByParent);
   teamChildrenByParent.set('main', teamPartners);
-  temporaryChildrenByParent.set('main', temporaryRoots);
+  independentChildrenByParent.set('main', independentRoots);
 
   return {
     teamPartners,
     activeDiscussions,
-    liveMainSubAgents: temporaryRoots.filter(agent => agent.kind === 'sub'),
-    otherActiveRoots: temporaryRoots.filter(agent => agent.kind !== 'sub'),
+    independentRoots,
     archivedAgents: archivedChildrenByParent.get('main') ?? [],
     teamChildrenByParent,
-    temporaryChildrenByParent,
+    independentChildrenByParent,
     archivedChildrenByParent,
   };
 }
@@ -226,7 +220,7 @@ export function SessionAgentTree({
   const refreshDeferredRef = useRef(false);
   const agentsRef = useRef<SessionAgent[]>([]);
   const [collapsedAgentIds, setCollapsedAgentIds] = useState<Set<string>>(() => new Set());
-  const [sectionOpen, setSectionOpen] = useState({ team: true, discussion: true, temporary: true, background: false, archive: false });
+  const [sectionOpen, setSectionOpen] = useState({ team: true, discussion: true, independent: true, background: false, archive: false });
 
   const refresh = useCallback(async (force = false) => {
     if (!sessionId) {
@@ -274,7 +268,7 @@ export function SessionAgentTree({
     openRef.current = false;
     refreshDeferredRef.current = false;
     setCollapsedAgentIds(new Set());
-    setSectionOpen({ team: true, discussion: true, temporary: true, background: false, archive: false });
+    setSectionOpen({ team: true, discussion: true, independent: true, background: false, archive: false });
   }, [sessionId]);
 
   useEffect(() => {
@@ -298,11 +292,10 @@ export function SessionAgentTree({
   const {
     teamPartners,
     activeDiscussions,
-    liveMainSubAgents,
-    otherActiveRoots,
+    independentRoots,
     archivedAgents,
     teamChildrenByParent,
-    temporaryChildrenByParent,
+    independentChildrenByParent,
     archivedChildrenByParent,
   } = useMemo(() => buildAgentTreeData(agents), [agents]);
 
@@ -315,17 +308,13 @@ export function SessionAgentTree({
       status: 'idle',
     };
   }, [agents, sessionId, tr]);
-  const visibleBackground = backgroundTasksOnly(backgroundTasks);
-  const hasLiveTeam = teamPartners.length > 0 || activeDiscussions.length > 0;
-  const hasLiveSubAgent = liveMainSubAgents.length > 0
-    || [...temporaryChildrenByParent.values()].some(list => list.length > 0);
   const hasActivity = hasGlobalActivity
     || teamPartners.some(isActiveAgent)
     || activeDiscussions.some(isActiveAgent)
-    || liveMainSubAgents.some(isActiveAgent)
+    || independentRoots.some(isActiveAgent)
     || [...teamChildrenByParent.values()].some(list => list.some(isActiveAgent))
-    || [...temporaryChildrenByParent.values()].some(list => list.some(isActiveAgent))
-    || visibleBackground.some(task => task.status === 'running');
+    || [...independentChildrenByParent.values()].some(list => list.some(isActiveAgent))
+    || backgroundTasks.some(task => task.status === 'running');
   const discussionActive = activeDiscussionForAgent(agents, selectedAgentId, _sessionStatus);
   const currentDiscussionTurnAgentId = discussionTurnAgentId !== undefined
     ? discussionTurnAgentId ?? undefined
@@ -333,11 +322,6 @@ export function SessionAgentTree({
   const currentDiscussionTurnAgent = currentDiscussionTurnAgentId === undefined
     ? undefined
     : agents.find(agent => agent.agent_id === currentDiscussionTurnAgentId);
-  const triggerLabel = hasLiveTeam
-    ? tr('Team', '团队')
-    : hasLiveSubAgent
-      ? tr('SubAgent', 'SubAgent')
-      : tr('Team', '团队');
   const closeTree = useCallback(() => {
     treeRef.current?.removeAttribute('open');
     setOpen(false);
@@ -394,24 +378,24 @@ export function SessionAgentTree({
       return next;
     });
   }, []);
-  const updateSectionOpen = useCallback((section: 'team' | 'discussion' | 'temporary' | 'background' | 'archive', nextOpen: boolean) => {
+  const updateSectionOpen = useCallback((section: 'team' | 'discussion' | 'independent' | 'background' | 'archive', nextOpen: boolean) => {
     setSectionOpen(previous => previous[section] === nextOpen ? previous : { ...previous, [section]: nextOpen });
   }, []);
 
   const treeCounts = {
     team: teamPartners.length,
     discussion: activeDiscussions.length,
-    temporary: liveMainSubAgents.length + otherActiveRoots.length,
-    background: visibleBackground.length,
+    independent: independentRoots.length,
+    background: backgroundTasks.length,
     archive: archivedAgents.length,
   };
-  const mainChildrenContent = (treeCounts.team > 0 || treeCounts.discussion > 0 || treeCounts.temporary > 0) ? <>
+  const mainChildrenContent = (treeCounts.team > 0 || treeCounts.discussion > 0 || treeCounts.independent > 0) ? <>
     {treeCounts.team > 0 && <TreeSection label={tr('Team partners', '团队伙伴')} count={treeCounts.team} open={sectionOpen.team} onOpenChange={nextOpen => updateSectionOpen('team', nextOpen)}>
       {teamPartners.map(agent => <AgentNode key={agent.agent_id} agent={agent} selectedAgentId={selectedAgentId} currentTurnAgentId={currentDiscussionTurnAgentId} childrenByParent={teamChildrenByParent} collapsedAgentIds={collapsedAgentIds} onToggle={toggleAgent} onSelect={selectAgent} depth={1}/>)}</TreeSection>}
     {treeCounts.discussion > 0 && <TreeSection className="session-agent-tree-discussion-list" label={tr('Discuss sessions', '讨论会话')} count={treeCounts.discussion} open={sectionOpen.discussion} onOpenChange={nextOpen => updateSectionOpen('discussion', nextOpen)}>
-      {activeDiscussions.map(agent => <AgentNode key={agent.agent_id} agent={agent} selectedAgentId={selectedAgentId} currentTurnAgentId={currentDiscussionTurnAgentId} childrenByParent={temporaryChildrenByParent} collapsedAgentIds={collapsedAgentIds} onToggle={toggleAgent} onSelect={selectAgent} depth={1}/>)}</TreeSection>}
-    {treeCounts.temporary > 0 && <TreeSection label={tr('Temporary', '临时')} count={treeCounts.temporary} open={sectionOpen.temporary} onOpenChange={nextOpen => updateSectionOpen('temporary', nextOpen)}>
-      {[...liveMainSubAgents, ...otherActiveRoots].map(agent => <AgentNode key={agent.agent_id} agent={agent} selectedAgentId={selectedAgentId} currentTurnAgentId={currentDiscussionTurnAgentId} childrenByParent={temporaryChildrenByParent} collapsedAgentIds={collapsedAgentIds} onToggle={toggleAgent} onSelect={selectAgent} depth={1}/>)}</TreeSection>}
+      {activeDiscussions.map(agent => <AgentNode key={agent.agent_id} agent={agent} selectedAgentId={selectedAgentId} currentTurnAgentId={currentDiscussionTurnAgentId} childrenByParent={independentChildrenByParent} collapsedAgentIds={collapsedAgentIds} onToggle={toggleAgent} onSelect={selectAgent} depth={1}/>)}</TreeSection>}
+    {treeCounts.independent > 0 && <TreeSection label={tr('Standalone', '独立')} count={treeCounts.independent} open={sectionOpen.independent} onOpenChange={nextOpen => updateSectionOpen('independent', nextOpen)}>
+      {independentRoots.map(agent => <AgentNode key={agent.agent_id} agent={agent} selectedAgentId={selectedAgentId} currentTurnAgentId={currentDiscussionTurnAgentId} childrenByParent={independentChildrenByParent} collapsedAgentIds={collapsedAgentIds} onToggle={toggleAgent} onSelect={selectAgent} depth={1}/>)}</TreeSection>}
   </> : undefined;
   const menu = <div ref={menuRef} className="session-agent-tree-menu" style={menuStyle} role="tree" aria-label={tr('Session agent tree', '会话智能体树')}>
     <header className="session-agent-tree-menu-header">
@@ -428,15 +412,15 @@ export function SessionAgentTree({
     {loading && agents.length === 0 && <TreeNotice text={tr('Loading team tree…', '正在加载团队树…')}/>}
     {error && <TreeNotice text={tr('Unable to load the team tree.', '无法加载团队树。')} detail={error} kind="error"/>}
     {mainAgent && <AgentNode agent={mainAgent} selectedAgentId={selectedAgentId} currentTurnAgentId={currentDiscussionTurnAgentId} childrenByParent={EMPTY_AGENT_CHILDREN} childrenContent={mainChildrenContent} collapsedAgentIds={collapsedAgentIds} onToggle={toggleAgent} onSelect={selectAgent} depth={0}/>}
-    {visibleBackground.length > 0 || backgroundLoading || backgroundError ? <TreeSection className="session-agent-tree-background-list" label={tr('Background', '后台')} count={treeCounts.background} open={sectionOpen.background} onOpenChange={nextOpen => updateSectionOpen('background', nextOpen)}>
-      {backgroundLoading && visibleBackground.length === 0 && <TreeNotice text={tr('Loading background tasks…', '正在加载后台任务…')}/>}
+    {backgroundTasks.length > 0 || backgroundLoading || backgroundError ? <TreeSection className="session-agent-tree-background-list" label={tr('Background', '后台')} count={treeCounts.background} open={sectionOpen.background} onOpenChange={nextOpen => updateSectionOpen('background', nextOpen)}>
+      {backgroundLoading && backgroundTasks.length === 0 && <TreeNotice text={tr('Loading background tasks…', '正在加载后台任务…')}/>}
       {backgroundError && <TreeNotice text={tr('Unable to load background tasks.', '无法加载后台任务。')} detail={backgroundError} kind="error"/>}
-      {visibleBackground.map(task => <BackgroundTaskNode key={task.id} sessionId={sessionId} task={task} onCancelled={onBackgroundTaskCancelled}/>)}
+      {backgroundTasks.map(task => <BackgroundTaskNode key={task.id} sessionId={sessionId} task={task} onCancelled={onBackgroundTaskCancelled}/>)}
     </TreeSection> : null}
     {archivedAgents.length > 0 && <TreeSection label={tr('Archive', '归档')} count={treeCounts.archive} open={sectionOpen.archive} onOpenChange={nextOpen => updateSectionOpen('archive', nextOpen)}>
       {archivedAgents.map(agent => <AgentNode key={agent.agent_id} agent={agent} selectedAgentId={selectedAgentId} currentTurnAgentId={currentDiscussionTurnAgentId} childrenByParent={archivedChildrenByParent} collapsedAgentIds={collapsedAgentIds} onToggle={toggleAgent} onSelect={selectAgent} depth={1}/>)}
     </TreeSection>}
-    {!loading && !error && !mainAgent && visibleBackground.length === 0 && <TreeNotice text={tr('No team, SubAgent, or background tasks.', '暂无团队、SubAgent 或后台任务。')}/>}
+    {!loading && !error && !mainAgent && backgroundTasks.length === 0 && <TreeNotice text={tr('No team members or background tasks.', '暂无团队成员或后台任务。')}/>}
   </div>;
 
   return <><details ref={treeRef} className={`session-agent-tree${hasActivity ? ' activity-pending' : ''}${discussionActive ? ' discussion-active' : ''}`} onToggle={event => {
@@ -456,8 +440,8 @@ export function SessionAgentTree({
       }
     }
   }}>
-    <summary title={tr('Open the team and SubAgent tree', '查看团队与 SubAgent 树')}>
-      <Icon name="git-branch" size={15}/><span className="session-agent-tree-trigger-label">{triggerLabel}</span><span className="session-agent-tree-trigger-context">{tr('agents', '智能体')}</span>{discussionActive && <span className="session-agent-tree-mode" data-mode="discuss"><Icon name="chat" size={12}/><span>{tr('Discuss', '讨论')}</span></span>}{hasActivity && <i aria-label={tr('Activity pending', '有活动任务')}/>}<Icon name="chevron-down" size={13}/>
+    <summary title={tr('Open the session agent tree', '查看会话智能体树')}>
+      <Icon name="git-branch" size={15}/><span className="session-agent-tree-trigger-label">{tr('Team', '团队')}</span><span className="session-agent-tree-trigger-context">{tr('agents', '智能体')}</span>{discussionActive && <span className="session-agent-tree-mode" data-mode="discuss"><Icon name="chat" size={12}/><span>{tr('Discuss', '讨论')}</span></span>}{hasActivity && <i aria-label={tr('Activity pending', '有活动任务')}/>}<Icon name="chevron-down" size={13}/>
     </summary>
   </details>{open && menuStyle && createPortal(menu, document.body)}</>;
 }
@@ -502,7 +486,7 @@ function AgentNode({ agent, selectedAgentId, currentTurnAgentId, childrenByParen
   const summary = humanSummary(agent.mandate) ?? humanSummary(agent.summary);
   const lastActive = relativeTime(agent.last_active);
   const collapsed = collapsedAgentIds.has(agent.agent_id);
-  const selectable = agent.archived || !isTerminalAgent(agent) || agent.kind === 'team' || agent.kind === 'discussion' || agent.kind === 'sub';
+  const selectable = agent.archived || !isTerminalAgent(agent) || agent.kind === 'team' || agent.kind === 'discussion';
   const identity = agentIdentity(agent, tr);
   const role = agentRole(agent, tr);
   const isDiscussion = agent.kind === 'discussion';
@@ -522,7 +506,6 @@ function agentIdentity(agent: SessionAgent, tr: (english: string, chinese: strin
   switch (agent.kind) {
     case 'main': return tr('Main session', '主会话');
     case 'team': return agent.role?.trim() || tr('Team partner', '团队伙伴');
-    case 'sub': return tr('SubAgent', 'SubAgent');
     case 'discussion': return agent.archived || agentStatus(agent) === 'archived'
       ? tr('Archived Discuss', '已归档 Discuss')
       : tr('Discuss', '讨论');
@@ -535,7 +518,6 @@ function agentRole(agent: SessionAgent, tr: (english: string, chinese: string) =
     case 'main': return tr('ROOT', '根节点');
     case 'team': return tr('TEAM', '团队');
     case 'discussion': return tr('DISCUSS', '讨论');
-    case 'sub': return tr('SUBAGENT', '子代理');
     default: return tr('AGENT', '代理');
   }
 }

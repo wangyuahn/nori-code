@@ -95,7 +95,10 @@ function treeAgentKind(agentId: string, agent: AgentMeta): SessionAgentTreeNode[
   if (agentId === MAIN_AGENT_ID || agent.type === 'main') return 'main';
   if (agent.discussion !== undefined) return 'discussion';
   if (agent.kind === 'team') return 'team';
-  return agent.type;
+  // Anything else is a standalone agent. `type: 'sub'` without a team kind or a
+  // discussion belongs to a non-persisted helper agent, which never reaches the
+  // tree, so there is no fourth case to map.
+  return 'independent';
 }
 
 function mapSessionUsage(usage: UsageStatus | undefined): Session['usage'] | undefined {
@@ -362,9 +365,7 @@ export class SessionService extends Disposable implements ISessionService {
         }
         this._activeBackgroundTasks.set(taskKey, {
           sessionId,
-          agentId: 'agentId' in info && info.agentId !== undefined
-            ? info.agentId
-            : `background:${info.taskId}`,
+          agentId: `background:${info.taskId}`,
           kind: 'background',
           taskId: info.taskId,
           status: 'running',
@@ -639,19 +640,18 @@ export class SessionService extends Disposable implements ISessionService {
             id: agentId,
             kind: treeAgentKind(agentId, agent),
             parent_agent_id: agent.parentAgentId,
-            name: agent.name ?? agent.subagentItem ?? agentId,
+            name: agent.name ?? agentId,
             role: agent.role,
             mandate: agent.mandate,
             assigned_task: agent.assignedTask ?? agent.teamReport?.task,
             team_report_status: agent.teamReport?.status,
             team_report_summary: agent.teamReport?.summary,
             team_report_received: agent.teamReport?.receivedAt !== undefined,
-            summary: agent.discussion?.topic ?? agent.assignedTask ?? agent.subagentItem,
-            subagent_item: agent.subagentItem,
+            summary: agent.discussion?.topic ?? agent.assignedTask,
             status,
             usage,
             last_active: this._lastActivityByAgent.get(key) ?? new Date(summary.updatedAt).toISOString(),
-            archived: agent.discussion?.status === 'archived' || agent.archived === true,
+            archived: agent.discussion?.status === 'archived',
             ...(agent.discussion?.currentTurnAgentId === undefined
               ? {}
               : { discussion_turn_agent_id: agent.discussion.currentTurnAgentId }),

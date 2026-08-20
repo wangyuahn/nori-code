@@ -35,6 +35,7 @@ import { MoonLoader } from '../components/chrome/moon-loader';
 import { buildGoalMarker } from '../components/messages/goal-markers';
 import { StatusMessageComponent } from '../components/messages/status-message';
 import {
+  MAIN_AGENT_ID,
   OAUTH_LOGIN_REQUIRED_CODE,
   OAUTH_LOGIN_REQUIRED_STARTUP_NOTICE,
 } from '../constant/kimi-tui';
@@ -71,7 +72,6 @@ import { nextTranscriptId } from '../utils/transcript-id';
 import type { BtwPanelController } from './btw-panel';
 import type { StreamingUIController } from './streaming-ui';
 import type { TasksBrowserController } from './tasks-browser';
-import { SubAgentEventHandler } from './subagent-event-handler';
 import type {
   AppState,
   LivePaneState,
@@ -114,17 +114,7 @@ export interface SessionEventHost {
 }
 
 export class SessionEventHandler {
-  readonly subAgentEventHandler: SubAgentEventHandler;
-
-  constructor(private readonly host: SessionEventHost) {
-    this.subAgentEventHandler = new SubAgentEventHandler(host, {
-      backgroundTasks: this.backgroundTasks,
-      backgroundTaskTranscriptedTerminal: this.backgroundTaskTranscriptedTerminal,
-      syncBackgroundAgentBadge: () => {
-        this.syncBackgroundTaskBadge();
-      },
-    });
-  }
+  constructor(private readonly host: SessionEventHost) {}
 
   // Runtime state – owned by this handler, reset between sessions.
   backgroundTasks: Map<string, BackgroundTaskInfo> = new Map();
@@ -146,7 +136,6 @@ export class SessionEventHandler {
   resetRuntimeState(): void {
     this.backgroundTasks.clear();
     this.backgroundTaskTranscriptedTerminal.clear();
-    this.subAgentEventHandler.resetRuntimeState();
     this.renderedSkillActivationIds.clear();
     this.renderedPluginCommandActivationIds.clear();
     this.renderedMcpServerStatusKeys.clear();
@@ -159,18 +148,6 @@ export class SessionEventHandler {
     this.queuedGoalPromotionInFlight = false;
     this.clearQueuedGoalPromotionTimer();
     this.stopAllMcpServerStatusSpinners();
-  }
-
-  clearSubAgentProgress(): void {
-    this.subAgentEventHandler.clearSubAgentProgress();
-  }
-
-  hasActiveSubAgentToolCall(): boolean {
-    return this.subAgentEventHandler.hasActiveSubAgentToolCall();
-  }
-
-  syncSubAgentActivitySpinner(spinner: MoonLoader | undefined): void {
-    this.subAgentEventHandler.syncSubAgentActivitySpinner(spinner);
   }
 
   startSubscription(): void {
@@ -229,7 +206,7 @@ export class SessionEventHandler {
   }
 
   handleEvent(event: Event, sendQueued: (item: QueuedMessage) => void): void {
-    if (this.subAgentEventHandler.routeChildAgentEvent(event)) return;
+    if (this.routeChildAgentEvent(event)) return;
 
     if ('turnId' in event && event.turnId !== undefined) {
       this.host.streamingUI.setTurnId(String(event.turnId));
@@ -262,12 +239,6 @@ export class SessionEventHandler {
       case 'compaction.completed': this.handleCompactionEnd(event, sendQueued); break;
       case 'compaction.blocked': break;
       case 'compaction.cancelled': this.handleCompactionCancel(event, sendQueued); break;
-      case 'subagent.spawned':
-      case 'subagent.started':
-      case 'subagent.suspended':
-      case 'subagent.completed':
-      case 'subagent.failed':
-        this.subAgentEventHandler.handleLifecycleEvent(event); break;
       case 'background.task.started':
       case 'background.task.terminated':
         this.handleBackgroundTaskEvent(event); break;
@@ -276,6 +247,18 @@ export class SessionEventHandler {
       case 'tool.list.updated': break;
       default: break;
     }
+  }
+
+  /**
+   * Events produced by an agent other than the lead never belong in the main
+   * transcript. A BTW side question has its own panel; a team member's or a
+   * discussion's turn is read in that agent's own view. Swallow the rest here
+   * so the lead's output is never interleaved with theirs.
+   */
+  private routeChildAgentEvent(event: Event): boolean {
+    if (event.agentId === MAIN_AGENT_ID) return false;
+    this.host.btwPanelController.routeEvent(event);
+    return true;
   }
 
   stopAllMcpServerStatusSpinners(): void {
@@ -292,7 +275,6 @@ export class SessionEventHandler {
   private handleTurnBegin(_event: TurnStartedEvent): void {
     void _event;
     this.currentTurnHasAssistantText = false;
-    this.clearSubAgentProgress();
     this.host.streamingUI.resetToolUi();
     this.host.streamingUI.setStep(0);
     this.host.patchLivePane({
@@ -326,9 +308,6 @@ export class SessionEventHandler {
 
   private handleTurnEnd(event: TurnEndedEvent, sendQueued: (item: QueuedMessage) => void): void {
     this.host.streamingUI.flushNow();
-    if (event.reason === 'cancelled') {
-      this.markActiveSubAgentsCancelled();
-    }
     if (event.reason === 'filtered') {
       this.host.showStatus('Turn stopped: provider safety policy blocked the response.', 'error');
     }
@@ -402,10 +381,6 @@ export class SessionEventHandler {
     });
   }
 
-  private markActiveSubAgentsCancelled(): void {
-    this.subAgentEventHandler.markActiveSubAgentsCancelled();
-  }
-
   private isAnthropicSessionActive(): boolean {
     const { state } = this.host;
     const model = state.appState.availableModels[state.appState.model];
@@ -421,7 +396,6 @@ export class SessionEventHandler {
     const reason = event.reason;
     if (reason === 'error') return;
     if (reason === 'aborted' || reason === undefined || reason === '') {
-      this.markActiveSubAgentsCancelled();
       this.host.showStatus('Interrupted by user', 'error');
       return;
     }
@@ -511,9 +485,6 @@ export class SessionEventHandler {
       turnId,
     };
     streamingUI.registerToolCall(toolCall);
-    if (event.name === 'SubAgent' || event.name === 'SubAgent') {
-      this.subAgentEventHandler.handleSubAgentToolCallStarted(event.toolCallId, toolCall.args);
-    }
     this.host.patchLivePane({
       mode: 'tool',
       pendingApproval: null,
@@ -525,16 +496,6 @@ export class SessionEventHandler {
     if (event.toolCallId.length === 0) return;
     const { state, streamingUI } = this.host;
     streamingUI.accumulateToolCallDelta(event.toolCallId, event.name, event.argumentsPart);
-    const preview = streamingUI.getStreamingToolCallPreview(event.toolCallId);
-    if (
-      preview !== undefined &&
-      (preview.name === 'SubAgent' || this.subAgentEventHandler.hasSubAgentProgress(event.toolCallId))
-    ) {
-      this.subAgentEventHandler.handleSubAgentToolCallDelta(event.toolCallId, preview.args, {
-        streamingArguments: preview.argumentsText,
-      });
-    }
-
     this.host.patchLivePane({
       mode: 'tool',
       pendingApproval: null,
@@ -570,11 +531,6 @@ export class SessionEventHandler {
       synthetic: event.synthetic,
     };
     const matchedCall = streamingUI.completeToolResult(event.toolCallId, resultData);
-    this.subAgentEventHandler.handleSubAgentToolResult(
-      event.toolCallId,
-      resultData,
-      event.isError === true,
-    );
     if (matchedCall !== undefined && matchedCall.name === 'TodoList' && !event.isError) {
       const rawTodos = (matchedCall.args as { todos?: unknown }).todos;
       if (Array.isArray(rawTodos)) {
@@ -1025,14 +981,6 @@ export class SessionEventHandler {
       info.status === 'lost';
 
     if (event.type === 'background.task.started') {
-      if (info.kind === 'agent') {
-        // A foreground subagent detached via Ctrl+B: flip its card to
-        // `◐ backgrounded` so it doesn't look like it completed.
-        this.host.streamingUI.markSubagentBackgrounded(info.agentId);
-        this.syncBackgroundTaskBadge();
-        this.host.tasksBrowserController.repaint();
-        return;
-      }
       this.appendBackgroundTaskEntry(info);
       this.syncBackgroundTaskBadge();
       this.host.tasksBrowserController.repaint();
@@ -1040,21 +988,8 @@ export class SessionEventHandler {
     }
 
     if (event.type === 'background.task.terminated' && isTerminal) {
-      if (info.kind === 'agent') {
-        // The Agent tool's spawn-success ToolResult is not an error, so the
-        // parent toolCall card would otherwise render `✓ Completed` for any
-        // terminated bg agent — including `lost` / `failed` / `killed`.
-        // Push the actual terminal status so the card matches reality.
-        this.host.streamingUI.applyBackgroundTaskTerminalStatus({
-          agentId: info.agentId,
-          description: info.description,
-          status: info.status,
-        });
-      }
       if (!this.backgroundTaskTranscriptedTerminal.has(info.taskId)) {
-        if (info.kind === 'process' || info.kind === 'question') {
-          this.appendBackgroundTaskEntry(info);
-        }
+        this.appendBackgroundTaskEntry(info);
         this.backgroundTaskTranscriptedTerminal.add(info.taskId);
       }
       this.syncBackgroundTaskBadge();
@@ -1084,8 +1019,8 @@ export class SessionEventHandler {
 
   private syncBackgroundTaskBadge(): void {
     const { state } = this.host;
-    let bashTasks = 0;
-    let agentTasks = 0;
+    let processTasks = 0;
+    let questionTasks = 0;
     for (const info of this.backgroundTasks.values()) {
       if (
         info.status === 'completed' ||
@@ -1096,13 +1031,13 @@ export class SessionEventHandler {
       ) {
         continue;
       }
-      if (info.kind === 'agent') {
-        agentTasks += 1;
+      if (info.kind === 'question') {
+        questionTasks += 1;
       } else {
-        bashTasks += 1;
+        processTasks += 1;
       }
     }
-    state.footer.setBackgroundCounts({ bashTasks, agentTasks });
+    state.footer.setBackgroundCounts({ processTasks, questionTasks });
     state.ui.requestRender();
   }
 }

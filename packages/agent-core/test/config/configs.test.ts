@@ -372,7 +372,7 @@ removed_flag = true
       providers: {},
       loopControl: { maxStepsPerTurn: 0, goalMaxTurns: 18, goalBackgroundIdleMinutes: 5 },
       customAgents: {
-        reviewer: { description: 'Review risky changes', role: 'Find correctness bugs.', baseProfile: 'explore', model: 'deepseek-review', enabled: true },
+        reviewer: { description: 'Review risky changes', role: 'Find correctness bugs.', baseProfile: 'agent', model: 'deepseek-review', enabled: true },
       },
     });
 
@@ -384,7 +384,7 @@ removed_flag = true
     expect(text).toContain('model = "deepseek-review"');
     expect(parseConfigString(text, configPath).customAgents?.['reviewer']).toMatchObject({
       role: 'Find correctness bugs.',
-      baseProfile: 'explore',
+      baseProfile: 'agent',
       model: 'deepseek-review',
     });
   });

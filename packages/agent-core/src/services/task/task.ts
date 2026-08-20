@@ -27,7 +27,6 @@
  * Reference table (task kind + status):
  *
  *   kind:    process   → bash
- *            agent     → subagent
  *            question  → tool
  *
  *   status:  running   → running
@@ -50,8 +49,6 @@ function mapKind(k: BackgroundTaskInfo['kind']): BackgroundTaskKind {
   switch (k) {
     case 'process':
       return 'bash';
-    case 'agent':
-      return 'subagent';
     case 'question':
       // SCHEMAS §7 has no 'question' literal; question background tasks are
       // tool-spawned flows (Loop runs them as part of `Question` tool
@@ -124,9 +121,6 @@ export function toProtocolTask(
   }
   if (info.kind === 'process' && 'command' in info && typeof info.command === 'string') {
     base.command = info.command;
-  }
-  if (info.kind === 'agent' && info.paused !== undefined) {
-    base.paused = info.paused;
   }
   if (output !== undefined) {
     base.output_preview = output.preview;

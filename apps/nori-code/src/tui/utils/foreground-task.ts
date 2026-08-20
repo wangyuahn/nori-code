@@ -1,17 +1,12 @@
 import type { BackgroundTaskInfo } from '@nori-code/sdk';
 
 function isDetachableForegroundTask(t: BackgroundTaskInfo): boolean {
-  return (
-    t.detached === false &&
-    t.status === 'running' &&
-    (t.kind === 'process' || t.kind === 'agent')
-  );
+  return t.detached === false && t.status === 'running' && t.kind === 'process';
 }
 
 /**
  * Pick all foreground tasks that `Ctrl+B` should detach: `detached === false`,
- * currently-running Bash (`process`) or subagent (`agent`) tasks, most recently
- * started first.
+ * currently-running Bash (`process`) tasks, most recently started first.
  */
 export function pickForegroundTasks(
   tasks: readonly BackgroundTaskInfo[],

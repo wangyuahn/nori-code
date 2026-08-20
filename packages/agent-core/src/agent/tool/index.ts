@@ -10,7 +10,6 @@ import type { McpConnectionManager, McpServerEntry } from '../../mcp';
 import { mcpResultToExecutableOutput } from '../../mcp/output';
 import { isMcpToolName, qualifyMcpToolName } from '../../mcp/tool-naming';
 import type { MCPClient } from '../../mcp/types';
-import { configuredSubagentProfiles, DEFAULT_AGENT_PROFILES } from '../../profile';
 import { extendWorkspaceWithSkillRoots } from '../../skill';
 import * as b from '../../tools/builtin';
 import type { ToolStore, ToolStoreData, ToolStoreKey } from '../../tools/store';
@@ -506,7 +505,6 @@ export class ToolManager {
     const reportCodeChange: b.CodeChangeReporter = (change) => {
       this.agent.emitEvent({ type: 'code.change', ...change });
     };
-    const subagentProfiles = configuredSubagentProfiles(DEFAULT_AGENT_PROFILES['agent']?.subagents, this.agent.kimiConfig?.customAgents);
     this.builtinTools = new Map(
       [
         new b.ReadTool(kaos, workspace),
@@ -533,8 +531,6 @@ export class ToolManager {
         this.agent.cron && new b.CronDeleteTool(this.agent.cron),
         this.agent.skills?.registry.listInvocableSkills().length &&
           new b.SkillTool(this.agent),
-        this.agent.subagentHost &&
-          new b.SubAgentTool(this.agent.subagentHost, background, subagentProfiles),
         this.agent.subagentHost &&
           new b.NoriAskParentTool(this.agent),
         this.agent.subagentHost && new b.TeamCreateTool(this.agent.subagentHost),

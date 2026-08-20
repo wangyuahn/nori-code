@@ -2,8 +2,8 @@ import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { countActiveAgents, effectiveGlobalActiveAgentCountFor, PrimaryNavigation, WindowControls } from '../src/App';
-import type { BackgroundTask } from '../src/api/client';
+import { countActiveAgents, PrimaryNavigation, WindowControls } from '../src/App';
+import type { SessionActivity } from '../src/api/client';
 import { I18nProvider } from '../src/i18n';
 import type { NoriDesktopAPI } from '../src/types/nori-desktop';
 
@@ -78,37 +78,23 @@ describe('PrimaryNavigation', () => {
       }));
     });
 
-    expect(container.querySelector('button[title="SubAgent"]')).toBeNull();
+    expect(container.querySelector('button[title="Collaboration"]')).toBeNull();
 
     await act(async () => { root.unmount(); });
   });
 
-  it('counts realtime and polled subagents without adding duplicate snapshots', () => {
-    const tasks: BackgroundTask[] = [{
-      id: 'subagent-task',
-      session_id: 'session-a',
-      kind: 'subagent',
-      description: 'SubAgent projection',
-      status: 'running',
-      created_at: '2026-07-17T00:00:00.000Z',
-    }, {
-      id: 'custom-background-task',
-      session_id: 'session-a',
-      kind: 'subagent',
-      description: 'Custom background reviewer',
-      status: 'running',
-      created_at: '2026-07-17T00:00:01.000Z',
-    }];
+  it('counts every activity entry globally and only the current session when scoped', () => {
+    const activity: SessionActivity[] = [
+      { session_id: 'session-a', agent_id: 'main', kind: 'agent', status: 'running' },
+      { session_id: 'session-a', agent_id: 'agent_reviewer', kind: 'agent', status: 'awaiting_approval' },
+      { session_id: 'session-b', agent_id: 'main', kind: 'background', task_id: 'process-1', status: 'running' },
+    ];
 
-    expect(countActiveAgents(['custom-agent-id'], tasks)).toBe(2);
-    expect(countActiveAgents(['custom-agent-id'], tasks.slice(0, 1))).toBe(1);
-    expect(countActiveAgents([], tasks.slice(1))).toBe(1);
-  });
-
-  it('uses only live current-session and server activity counts', () => {
-    expect(effectiveGlobalActiveAgentCountFor(0, 0)).toBe(0);
-    expect(effectiveGlobalActiveAgentCountFor(2, 0)).toBe(2);
-    expect(effectiveGlobalActiveAgentCountFor(0, 3)).toBe(3);
+    expect(countActiveAgents(activity)).toBe(3);
+    expect(countActiveAgents(activity, 'session-a')).toBe(2);
+    expect(countActiveAgents(activity, 'session-b')).toBe(1);
+    expect(countActiveAgents(activity, 'session-missing')).toBe(0);
+    expect(countActiveAgents([])).toBe(0);
   });
 });
 

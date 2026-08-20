@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { SubAgentProgressComponent } from '#/tui/components/messages/subagent-progress';
 import type { SessionEventHandler } from '#/tui/controllers/session-event-handler';
 import { KimiTUI, type KimiTUIStartupInput, type TUIState } from '#/tui/kimi-tui';
 
@@ -48,32 +47,6 @@ function makeDriverWithTerminalProgress(): {
   driver.state.terminal = { columns: 80, setProgress } as unknown as TUIState['terminal'];
   driver.state.terminalState.supportsProgress = true;
   return { driver, state: driver.state, setProgress };
-}
-
-function startSubagentProgress(driver: ActivityDriver, state: TUIState): SubAgentProgressComponent {
-  const handler = driver.sessionEventHandler.subAgentEventHandler;
-  handler.handleSubAgentToolCallStarted('call_subagent', {
-    description: 'Review changed files',
-  });
-  handler.handleLifecycleEvent({
-    type: 'subagent.spawned',
-    subagentId: 'agent-1',
-    subagentName: 'coder',
-    parentToolCallId: 'call_subagent',
-    description: 'Review changed files #1 (coder)',
-    subagentIndex: 1,
-    runInBackground: false,
-  } as Parameters<typeof handler.handleLifecycleEvent>[0]);
-  handler.handleLifecycleEvent({
-    type: 'subagent.started',
-    subagentId: 'agent-1',
-  } as Parameters<typeof handler.handleLifecycleEvent>[0]);
-
-  const progress = state.transcriptContainer.children.find(
-    (child): child is SubAgentProgressComponent => child instanceof SubAgentProgressComponent,
-  );
-  if (progress === undefined) throw new Error('expected SubAgent progress');
-  return progress;
 }
 
 describe('updateActivityPane terminal progress', () => {
@@ -157,59 +130,6 @@ describe('updateActivityPane terminal progress', () => {
       expect(setProgress).toHaveBeenCalledTimes(2);
       expect(setProgress).toHaveBeenLastCalledWith(false);
       expect(state.activitySpinner).toBeNull();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('moves the moon spinner into the SubAgent progress row while active', () => {
-    vi.useFakeTimers();
-    try {
-      const { driver, state, setProgress } = makeDriverWithTerminalProgress();
-      const progress = startSubagentProgress(driver, state);
-      state.livePane = { ...state.livePane, mode: 'tool' };
-
-      driver.updateActivityPane();
-
-      expect(setProgress).toHaveBeenCalledTimes(1);
-      expect(setProgress).toHaveBeenLastCalledWith(true);
-      expect(state.activitySpinner).not.toBeNull();
-      expect(state.activityContainer.children).toHaveLength(0);
-      expect(strip(progress.render(80).join('\n'))).toContain('🌑 Working...');
-
-      state.activitySpinner?.instance.stop();
-      driver.sessionEventHandler.clearSubAgentProgress();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('keeps ended SubAgent progress on a placeholder instead of the moon spinner', () => {
-    vi.useFakeTimers();
-    try {
-      const { driver, state } = makeDriverWithTerminalProgress();
-      const progress = startSubagentProgress(driver, state);
-      driver.sessionEventHandler.subAgentEventHandler.handleSubAgentToolResult(
-        'call_subagent',
-        {
-          tool_call_id: 'call_subagent',
-          output: 'Done',
-          is_error: false,
-        },
-        false,
-      );
-      state.livePane = { ...state.livePane, mode: 'tool' };
-
-      driver.updateActivityPane();
-
-      expect(state.activitySpinner).not.toBeNull();
-      expect(state.activityContainer.children).toHaveLength(1);
-      const output = strip(progress.render(80).join('\n'));
-      expect(output).toContain('  Working...');
-      expect(output).not.toContain('🌑 Working...');
-
-      state.activitySpinner?.instance.stop();
-      driver.sessionEventHandler.clearSubAgentProgress();
     } finally {
       vi.useRealTimers();
     }

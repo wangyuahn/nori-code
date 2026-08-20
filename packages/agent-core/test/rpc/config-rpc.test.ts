@@ -119,7 +119,7 @@ max_steps_per_turn = "nope"
         reviewer: {
           description: 'Review changes.',
           role: 'Find correctness bugs.',
-          baseProfile: 'explore',
+          baseProfile: 'agent',
           enabled: true,
         },
       },

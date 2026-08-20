@@ -526,7 +526,7 @@ describe('session agent tree schemas', () => {
     const parsed = sessionAgentTreeResponseSchema.parse({
       agents: [{
         id: 'agent_reviewer',
-        kind: 'sub',
+        kind: 'team',
         parent_agent_id: 'main',
         name: 'Reviewer',
         role: 'reviewer',

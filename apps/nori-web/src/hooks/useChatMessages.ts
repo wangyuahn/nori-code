@@ -173,7 +173,6 @@ export interface UseChatMessagesResult {
   pendingQuestions: QuestionRequest[];
   queuedPrompts: QueuedPrompt[];
   todos: TodoItem[];
-  activeSubagentIds: string[];
   codeChanges: CodeChange[];
   resolveApproval: (approvalId: string, decision: 'approved' | 'rejected' | 'cancelled', options?: { remember?: boolean; feedback?: string; selectedLabel?: string }) => Promise<void>;
   resolveQuestion: (questionId: string, answers: Record<string, QuestionAnswer>) => Promise<void>;
@@ -226,7 +225,6 @@ interface WsPayload {
   };
   snapshot?: GoalSnapshot | null;
   isError?: boolean;
-  subagentId?: string;
   discussionAgentId?: string;
   currentTurnAgentId?: string | null;
   kind?: string;
@@ -1135,7 +1133,6 @@ export function useChatMessages(
   const [pendingQuestions, setPendingQuestions] = useState<QuestionRequest[]>([]);
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
   const [todos, setTodos] = useState<TodoItem[]>([]);
-  const [activeSubagentIds, setActiveSubagentIds] = useState<string[]>([]);
   const [codeChanges, setCodeChanges] = useState<CodeChange[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const scopeRef = useRef(chatScopeKey(sessionId, agentId));
@@ -1330,7 +1327,6 @@ export function useChatMessages(
     ]);
     setQueuedPrompts([]);
     setTodos([]);
-    setActiveSubagentIds([]);
     activeToolCallsRef.current.clear();
     setCompacting(false);
     clearDraft();
@@ -1687,29 +1683,6 @@ export function useChatMessages(
             case 'tool.progress':
               lastStreamActivityAtRef.current = Date.now();
               break;
-            case 'subagent.started':
-              if (payload.subagentId) {
-                setActiveSubagentIds(previous => previous.includes(payload.subagentId!) ? previous : [...previous, payload.subagentId!]);
-              }
-              break;
-            case 'subagent.suspended':
-            case 'subagent.completed':
-            case 'subagent.failed':
-              if (payload.subagentId) {
-                setActiveSubagentIds(previous => previous.filter(id => id !== payload.subagentId));
-              }
-              if (type === 'subagent.completed') playNotificationSound('agent-complete');
-              if (type === 'subagent.failed') playNotificationSound('error');
-              break;
-            case 'background.task.terminated': {
-              const terminatedAgentId = payload.info?.kind === 'agent'
-                ? payload.info.agentId
-                : undefined;
-              if (terminatedAgentId) {
-                setActiveSubagentIds(previous => removeTerminatedAgent(previous, terminatedAgentId));
-              }
-              break;
-            }
             case 'code.change':
               if (payload.path && payload.operation && payload.diff !== undefined) {
                 const change: CodeChange = {
@@ -2096,7 +2069,7 @@ export function useChatMessages(
     await refreshQuestions();
   }, [agentId, refreshQuestions, sessionId]);
 
-  return { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, activeTurnId, sessionStatus: statusForSession(sessionStatus, sessionStatusScopeRef.current, chatScopeKey(sessionId, agentId)), agentTreeRevision, discussionTurnAgentId, refreshSessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, activeSubagentIds, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort };
+  return { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, activeTurnId, sessionStatus: statusForSession(sessionStatus, sessionStatusScopeRef.current, chatScopeKey(sessionId, agentId)), agentTreeRevision, discussionTurnAgentId, refreshSessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort };
 }
 
 export function statusForSession(
@@ -2105,13 +2078,6 @@ export function statusForSession(
   currentSessionId: string | null,
 ): SessionRealtimeStatus | null {
   return currentSessionId !== null && statusSessionId === currentSessionId ? status : null;
-}
-
-export function removeTerminatedAgent(
-  activeAgentIds: readonly string[],
-  terminatedAgentId: string,
-): string[] {
-  return activeAgentIds.filter(id => id !== terminatedAgentId);
 }
 
 function preserveEqual<T>(previous: T, next: T): T {

@@ -172,8 +172,6 @@ interface LegacyPersistedTask {
   readonly timed_out?: boolean;
   readonly stop_reason?: string;
   readonly timeout_ms?: number;
-  readonly agent_id?: string;
-  readonly subagent_type?: string;
 }
 
 type DiskPersistedTask = BackgroundTaskInfo | LegacyPersistedTask;
@@ -195,14 +193,6 @@ function legacyPersistedTaskToInfo(task: LegacyPersistedTask): BackgroundTaskInf
     stopReason: optionalNonEmptyString(task.stop_reason),
     timeoutMs: typeof task.timeout_ms === 'number' ? task.timeout_ms : undefined,
   };
-  if (task.task_id.startsWith('agent-')) {
-    return {
-      ...base,
-      kind: 'agent',
-      agentId: optionalNonEmptyString(task.agent_id),
-      subagentType: optionalNonEmptyString(task.subagent_type),
-    };
-  }
   return {
     ...base,
     kind: 'process',

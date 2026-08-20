@@ -21,7 +21,6 @@ export type {
   BackgroundTaskInfo,
   BackgroundTaskStatus,
   ProcessBackgroundTaskInfo,
-  AgentBackgroundTaskInfo,
   QuestionBackgroundTaskInfo,
 } from '@nori-code/agent-core';
 export { AGENT_WIRE_PROTOCOL_VERSION } from '@nori-code/agent-core';

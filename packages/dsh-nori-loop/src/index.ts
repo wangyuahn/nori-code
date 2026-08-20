@@ -280,7 +280,7 @@ function agentKey(agent: { id: string }): string {
           const matched = (cfg.rules?.definitions ?? []).filter(
             (r) => checkCondition(r.condition, { currentTool: name, toolStage: 'after' }),
           );
-          if (name === 'SubAgent') {
+          if (name === 'TeamAssign') {
             const t = state.phases.get(agentId);
             if (t !== undefined && t !== 'review') state.phases.set(agentId, 'review');
           }

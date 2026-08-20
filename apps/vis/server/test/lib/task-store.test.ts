@@ -73,10 +73,15 @@ describe('task-store', () => {
     expect(proc.kind).toBe('process');
     expect(proc.status).toBe('timed_out'); // failed + timed_out → timed_out
     expect(proc).toMatchObject({ detached: true, timeoutMs: 5000 });
+    // `agent-*` records were written by the temporary-subagent task kind, which
+    // no longer exists. They still have to list — the visualizer reads old
+    // sessions — but as plain process records: the removed subagent dimension
+    // (`agent_id` / `subagent_type`) is dropped, not resurrected.
     const agent = tasks.find((t) => t.taskId === 'agent-eeeeeeee')!;
-    expect(agent.kind).toBe('agent');
+    expect(agent.kind).toBe('process');
     expect(agent.status).toBe('running'); // awaiting_approval → running
-    expect(agent).toMatchObject({ agentId: 'agent-2', subagentType: 'general' });
+    expect(agent).not.toHaveProperty('agentId');
+    expect(agent).not.toHaveProperty('subagentType');
   });
 
   it('skips bad filenames, corrupt json, and unrecognized records', async () => {
@@ -109,7 +114,7 @@ describe('task-store', () => {
     expect(tasks.map((t) => t.taskId).toSorted()).toEqual(['agent-bbbbbbbb', 'bash-aaaaaaaa']);
     const bad = tasks.find((t) => t.taskId === 'agent-bbbbbbbb')!;
     expect(bad.stopReason).toBeUndefined();
-    expect(bad.kind === 'agent' ? bad.subagentType : 'n/a').toBeUndefined();
+    expect(bad).not.toHaveProperty('subagentType');
   });
 
   it('returns [] when there is no tasks directory', async () => {

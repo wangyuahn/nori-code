@@ -527,11 +527,6 @@ function runPromptTurn(
         case 'mcp.server.status':
         case 'session.meta.updated':
         case 'skill.activated':
-        case 'subagent.completed':
-        case 'subagent.failed':
-        case 'subagent.spawned':
-        case 'subagent.started':
-        case 'subagent.suspended':
         case 'tool.list.updated':
         case 'turn.started':
         case 'turn.step.completed':
