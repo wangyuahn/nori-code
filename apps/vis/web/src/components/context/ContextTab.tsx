@@ -19,7 +19,7 @@ export function ContextTab({ sessionId, initialAgentId = 'main' }: ContextTabPro
   const [agentId, setAgentId] = useState<string>(initialAgentId);
   const [history, setHistory] = useState<'model' | 'full'>('model');
   // Re-sync on session OR agent id change — see WireTab for the same
-  // rationale (session navigation must reset a stale subagent pick).
+  // rationale (session navigation must reset a stale agent pick).
   useEffect(() => {
     setAgentId(initialAgentId);
   }, [sessionId, initialAgentId]);
@@ -36,7 +36,6 @@ export function ContextTab({ sessionId, initialAgentId = 'main' }: ContextTabPro
   const permissionMode = ctx?.permission.mode ?? null;
   const discussActive = ctx?.discussMode.active ?? false;
   const goal = ctx?.goal ?? null;
-  const subagentActive = ctx?.subagent.active ?? false;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -114,9 +113,6 @@ export function ContextTab({ sessionId, initialAgentId = 'main' }: ContextTabPro
           ) : null}
           {discussActive ? (
             <Pill tone="info" variant="solid">Discuss mode</Pill>
-          ) : null}
-          {subagentActive ? (
-            <Pill tone="subagent" variant="solid">subagent activity</Pill>
           ) : null}
         </div>
       </div>

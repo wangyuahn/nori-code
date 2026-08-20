@@ -17,7 +17,6 @@ export function SessionCard({ session, onDelete, deleting }: SessionCardProps) {
     : '(no workspace)';
   const shortId = session.sessionId.replace(/^session_/, '').slice(0, 10);
   const title = session.title;
-  const subagentCount = Math.max(0, session.agentCount - 1);
 
   function handleDeleteClick(e: MouseEvent<HTMLButtonElement>) {
     e.preventDefault();
@@ -40,13 +39,13 @@ export function SessionCard({ session, onDelete, deleting }: SessionCardProps) {
           <div className="flex min-w-0 items-center gap-2">
             <span
               className="inline-block h-[7px] w-[7px] shrink-0 rounded-full"
-              style={{ backgroundColor: session.imported ? 'var(--color-cat-subagent)' : 'var(--color-fg-3)' }}
+              style={{ backgroundColor: session.imported ? 'var(--color-cat-agent)' : 'var(--color-fg-3)' }}
             />
             <span className="shrink-0 font-mono text-[12px] text-fg-0">{shortId}</span>
             {session.imported ? (
               <span
                 className="shrink-0 border px-1 py-0 font-mono text-[9px] uppercase tracking-[0.08em]"
-                style={{ borderColor: 'var(--color-cat-subagent)', color: 'var(--color-cat-subagent)' }}
+                style={{ borderColor: 'var(--color-cat-agent)', color: 'var(--color-cat-agent)' }}
                 title={
                   session.importMeta?.originalName
                     ? `imported from ${session.importMeta.originalName}`
@@ -68,9 +67,11 @@ export function SessionCard({ session, onDelete, deleting }: SessionCardProps) {
           <span className="tabular text-fg-3">
             {session.mainWireRecordCount}ev
           </span>
-          {subagentCount > 0 ? (
-            <span className="tabular text-[var(--color-cat-subagent)]">
-              {subagentCount}sub
+          {/* Only worth the pixels when the session grew past the lone main
+              agent — every session has that one. */}
+          {session.agentCount > 1 ? (
+            <span className="tabular text-[var(--color-cat-agent)]">
+              {session.agentCount}ag
             </span>
           ) : null}
           {session.imported && session.importMeta?.manifest?.kimiCodeVersion ? (

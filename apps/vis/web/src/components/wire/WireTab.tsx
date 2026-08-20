@@ -73,7 +73,7 @@ export function WireTab({ sessionId, initialAgentId = 'main' }: WireTabProps) {
   // Re-sync when the route changes either the session or the agent id
   // while this component stays mounted. Without `sessionId` in the deps,
   // navigating /sessions/A → /sessions/B (with default initialAgentId)
-  // would preserve a subagent selection from the previous session and
+  // would preserve an agent selection from the previous session and
   // 404 on the new one.
   useEffect(() => {
     setAgentId(initialAgentId);

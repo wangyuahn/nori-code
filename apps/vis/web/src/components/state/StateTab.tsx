@@ -180,9 +180,9 @@ function ManifestCard({ meta }: { meta: ImportInfo }) {
     .map(([label, value]) => ({ label, value }));
 
   return (
-    <section className="mb-5 border border-[var(--color-cat-subagent)] bg-[color-mix(in_oklab,var(--color-cat-subagent)_8%,transparent)] p-3">
+    <section className="mb-5 border border-[var(--color-cat-agent)] bg-[color-mix(in_oklab,var(--color-cat-agent)_8%,transparent)] p-3">
       <div className="flex items-center gap-2">
-        <Pill tone="subagent" variant="outline">imported bundle</Pill>
+        <Pill tone="agent" variant="outline">imported bundle</Pill>
         <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-fg-3">manifest</span>
         <span className="ml-auto"><CopyButton value={JSON.stringify(meta, null, 2)} label="copy manifest" /></span>
       </div>

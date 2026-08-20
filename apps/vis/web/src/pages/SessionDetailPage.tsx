@@ -4,12 +4,12 @@ import { useParams } from 'react-router-dom';
 import { api } from '../api';
 import { CopyButton } from '../components/shared/CopyButton';
 import { TabBar, useActiveTab } from '../components/layout/TabBar';
+import { AgentsTab } from '../components/agents/AgentsTab';
 import { TimelineTab } from '../components/analysis/TimelineTab';
 import { ContextTab } from '../components/context/ContextTab';
 import { CronTab } from '../components/tasks/CronTab';
 import { LogsTab } from '../components/logs/LogsTab';
 import { StateTab } from '../components/state/StateTab';
-import { SubagentsTab } from '../components/subagents/SubagentsTab';
 import { TasksTab } from '../components/tasks/TasksTab';
 import { WireTab } from '../components/wire/WireTab';
 import { Pill } from '../components/shared/Pill';
@@ -46,7 +46,9 @@ export function SessionDetailPage() {
   } | null;
 
   const mainAgent = session.agents.find((a) => a.agentId === 'main') ?? null;
-  const subagentCount = session.agents.filter((a) => a.agentId !== 'main').length;
+  // The Agents tab renders the whole tree, `main` included, so the tab count
+  // is the full inventory rather than "everything except main".
+  const agentCount = session.agents.length;
   const wireRecords = mainAgent?.wireRecordCount ?? null;
 
   return (
@@ -57,7 +59,7 @@ export function SessionDetailPage() {
           <span className="font-mono text-[14px] text-fg-0">{session.sessionId}</span>
           <CopyButton value={session.sessionId} />
           {session.imported ? (
-            <Pill tone="subagent" variant="outline">imported</Pill>
+            <Pill tone="agent" variant="outline">imported</Pill>
           ) : null}
           {state?.title ? (
             <span className="font-mono text-[12px] text-fg-1">"{state.title}"</span>
@@ -111,7 +113,7 @@ export function SessionDetailPage() {
           { id: 'wire', label: 'Wire', count: wireRecords },
           { id: 'timeline', label: 'Timeline', count: null },
           { id: 'context', label: 'Context', count: null },
-          { id: 'agents', label: 'Agents', count: subagentCount },
+          { id: 'agents', label: 'Agents', count: agentCount },
           { id: 'tasks', label: 'Tasks', count: tasksData?.tasks.length ?? null },
           { id: 'cron', label: 'Cron', count: cronData?.cron.length ?? null },
           { id: 'logs', label: 'Logs', count: null },
@@ -123,7 +125,7 @@ export function SessionDetailPage() {
         {active === 'wire' ? <WireTab sessionId={sessionId} /> : null}
         {active === 'timeline' ? <TimelineTab sessionId={sessionId} /> : null}
         {active === 'context' ? <ContextTab sessionId={sessionId} /> : null}
-        {active === 'agents' ? <SubagentsTab sessionId={sessionId} /> : null}
+        {active === 'agents' ? <AgentsTab sessionId={sessionId} /> : null}
         {active === 'tasks' ? <TasksTab sessionId={sessionId} /> : null}
         {active === 'cron' ? <CronTab sessionId={sessionId} /> : null}
         {active === 'logs' ? <LogsTab sessionId={sessionId} /> : null}

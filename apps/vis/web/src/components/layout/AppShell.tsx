@@ -80,7 +80,7 @@ function LogoMark() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
       <rect x="1" y="1" width="6" height="6" fill="var(--color-cat-conversation)" />
-      <rect x="9" y="1" width="6" height="6" fill="var(--color-cat-subagent)" />
+      <rect x="9" y="1" width="6" height="6" fill="var(--color-cat-agent)" />
       <rect x="1" y="9" width="6" height="6" fill="var(--color-cat-ephemeral)" />
       <rect x="9" y="9" width="6" height="6" fill="var(--color-cat-approval)" />
     </svg>

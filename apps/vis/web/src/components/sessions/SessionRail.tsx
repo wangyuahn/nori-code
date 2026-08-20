@@ -6,7 +6,7 @@ import type { SessionSummary, SessionHealth } from '../../types';
 import { SessionCard } from './SessionCard';
 import { SessionFilter } from './SessionFilter';
 
-export type SessionSortKey = 'recent' | 'oldest' | 'most_records' | 'most_subagents';
+export type SessionSortKey = 'recent' | 'oldest' | 'most_records' | 'most_agents';
 export type HealthFilter = 'all' | SessionHealth;
 export type SourceFilter = 'all' | 'local' | 'imported';
 
@@ -23,8 +23,8 @@ function sortSessions(sessions: readonly SessionSummary[], key: SessionSortKey):
       return sessions.toSorted((a, b) => a.createdAt - b.createdAt);
     case 'most_records':
       return sessions.toSorted((a, b) => b.mainWireRecordCount - a.mainWireRecordCount);
-    case 'most_subagents':
-      return sessions.toSorted((a, b) => (b.agentCount - 1) - (a.agentCount - 1));
+    case 'most_agents':
+      return sessions.toSorted((a, b) => b.agentCount - a.agentCount);
   }
 }
 

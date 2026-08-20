@@ -10,7 +10,6 @@ function info(overrides: Partial<AgentInfo> & Pick<AgentInfo, 'agentId'>): Agent
     wireExists: true,
     wireRecordCount: 0,
     wireProtocolVersion: '1.1',
-    subagentTask: null,
     ...overrides,
   };
 }
@@ -60,7 +59,7 @@ describe('agent-tree', () => {
   it('orders agents by numeric suffix, main first (agent-2 before agent-10)', () => {
     const mk = (id: string): AgentInfo => ({
       agentId: id, type: id === 'main' ? 'main' : 'sub', parentAgentId: id === 'main' ? null : 'main',
-      homedir: '', wireExists: true, wireRecordCount: 0, wireProtocolVersion: null, subagentTask: null,
+      homedir: '', wireExists: true, wireRecordCount: 0, wireProtocolVersion: null,
     });
     const tree = buildAgentTree([mk('main'), mk('agent-10'), mk('agent-2')]);
     const order = [tree[0]!.agentId, ...tree[0]!.children.map((c) => c.agentId)];

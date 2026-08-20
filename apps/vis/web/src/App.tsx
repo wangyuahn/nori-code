@@ -2,7 +2,7 @@ import { Route, Routes } from 'react-router-dom';
 import { AppShell } from './components/layout/AppShell';
 import { SessionListPage } from './pages/SessionListPage';
 import { SessionDetailPage } from './pages/SessionDetailPage';
-import { SubagentDetailPage } from './pages/SubagentDetailPage';
+import { AgentDetailPage } from './pages/AgentDetailPage';
 
 export function App() {
   return (
@@ -12,7 +12,7 @@ export function App() {
         <Route path="/sessions/:sessionId" element={<SessionDetailPage />} />
         <Route
           path="/sessions/:sessionId/agents/:agentId"
-          element={<SubagentDetailPage />}
+          element={<AgentDetailPage />}
         />
       </Routes>
     </AppShell>

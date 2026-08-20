@@ -30,9 +30,9 @@ describe('task-store', () => {
       command: 'pnpm build', pid: 4242, exitCode: 0, status: 'completed',
       detached: true, startedAt: 1000, endedAt: 2000,
     });
-    await writeTask(sessionDir, 'agent-bbbbbbbb.json', {
-      taskId: 'agent-bbbbbbbb', kind: 'agent', description: 'explore repo',
-      agentId: 'agent-1', subagentType: 'Explore', status: 'running',
+    await writeTask(sessionDir, 'bash-bbbbbbbb.json', {
+      taskId: 'bash-bbbbbbbb', kind: 'process', description: 'watch',
+      command: 'pnpm dev', pid: 4243, exitCode: null, status: 'running',
       detached: true, startedAt: 3000, endedAt: null,
     });
     await writeTask(sessionDir, 'question-cccccccc.json', {
@@ -43,14 +43,36 @@ describe('task-store', () => {
 
     const tasks = await listBackgroundTasks(sessionDir);
     expect(tasks.map((t) => t.taskId)).toEqual([
-      'agent-bbbbbbbb', // startedAt 3000
+      'bash-bbbbbbbb', // startedAt 3000
       'question-cccccccc', // 2500
       'bash-aaaaaaaa', // 1000
     ]);
-    const proc = tasks.find((t) => t.kind === 'process');
-    expect(proc).toMatchObject({ command: 'pnpm build', pid: 4242, exitCode: 0 });
-    const question = tasks.find((t) => t.kind === 'question');
-    expect(question).toMatchObject({ questionCount: 2, detached: false });
+    const proc = tasks.find((t) => t.taskId === 'bash-aaaaaaaa');
+    expect(proc).toMatchObject({ kind: 'process', command: 'pnpm build', pid: 4242, exitCode: 0 });
+    const question = tasks.find((t) => t.taskId === 'question-cccccccc');
+    expect(question).toMatchObject({ kind: 'question', questionCount: 2, detached: false });
+  });
+
+  it('still lists a task whose kind no longer exists, without inventing fields', async () => {
+    const { sessionDir, cleanup: c } = await buildSessionFixture('sample-main');
+    cleanup = c;
+
+    // `kind: 'agent'` was the temporary subagent's task kind. A session recorded
+    // before its removal must still list — the visualizer reads old recordings —
+    // so the reader keys off `taskId`, not off a closed set of kinds. It carries
+    // the record through exactly as agent-core's reader does rather than
+    // synthesizing the process fields the record never had.
+    await writeTask(sessionDir, 'agent-bbbbbbbb.json', {
+      taskId: 'agent-bbbbbbbb', kind: 'agent', description: 'explore repo',
+      status: 'running', detached: true, startedAt: 3000, endedAt: null,
+    });
+
+    const tasks = await listBackgroundTasks(sessionDir);
+    expect(tasks.map((t) => t.taskId)).toEqual(['agent-bbbbbbbb']);
+    const task = tasks[0]!;
+    expect(task.description).toBe('explore repo');
+    expect(task).not.toHaveProperty('command');
+    expect(task).not.toHaveProperty('pid');
   });
 
   it('normalizes legacy snake_case tasks to the current shape', async () => {

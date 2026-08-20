@@ -1,12 +1,12 @@
 import type { AgentNode } from '../../types';
-import { SubagentNode } from './SubagentNode';
+import { AgentTreeNode } from './AgentTreeNode';
 
-interface SubagentTreeProps {
+interface AgentTreeProps {
   tree: AgentNode[];
   sessionId: string;
 }
 
-export function SubagentTree({ tree, sessionId }: SubagentTreeProps) {
+export function AgentTree({ tree, sessionId }: AgentTreeProps) {
   if (tree.length === 0) {
     return (
       <div className="p-6 font-mono text-[12px] text-fg-3">
@@ -17,7 +17,7 @@ export function SubagentTree({ tree, sessionId }: SubagentTreeProps) {
   return (
     <div className="p-3">
       {tree.map((node) => (
-        <SubagentNode key={node.agentId} node={node} sessionId={sessionId} />
+        <AgentTreeNode key={node.agentId} node={node} sessionId={sessionId} />
       ))}
     </div>
   );

@@ -131,11 +131,6 @@ export interface AgentInfo {
   wireExists: boolean;
   wireRecordCount: number;
   wireProtocolVersion: string | null;
-  /** Per-item subagent work label persisted by agent-core for subagent-spawned
-   *  sub-agents (`AgentMeta.subagentTask`). `null` when the agent is not a
-   *  subagent item or when the value cannot be recovered (e.g. disk-only
-   *  inventory of a session with a corrupt `state.json`). */
-  subagentTask: string | null;
 }
 
 export interface SessionDetail {

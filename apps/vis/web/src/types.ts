@@ -67,5 +67,4 @@ export interface ContextResponse {
   permission: { mode: import('../../server/src/lib/agent-record-types').PermissionMode | null };
   discussMode: { active: boolean; id?: string };
   goal: import('../../server/src/lib/context-projector').GoalSnapshot | null;
-  subagent: { active: boolean; trigger?: string };
 }

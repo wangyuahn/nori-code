@@ -1,11 +1,11 @@
-import { useAgentTree } from '../../hooks/useSubagents';
-import { SubagentTree } from './SubagentTree';
+import { useAgentTree } from '../../hooks/useAgentTree';
+import { AgentTree } from './AgentTree';
 
-interface SubagentsTabProps {
+interface AgentsTabProps {
   sessionId: string;
 }
 
-export function SubagentsTab({ sessionId }: SubagentsTabProps) {
+export function AgentsTab({ sessionId }: AgentsTabProps) {
   const { data, isLoading, error } = useAgentTree(sessionId);
 
   if (isLoading) {
@@ -22,7 +22,7 @@ export function SubagentsTab({ sessionId }: SubagentsTabProps) {
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <SubagentTree tree={data.tree} sessionId={sessionId} />
+      <AgentTree tree={data.tree} sessionId={sessionId} />
     </div>
   );
 }

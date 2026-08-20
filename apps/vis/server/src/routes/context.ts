@@ -43,7 +43,6 @@ export function contextRoute(home: string = NORI_CODE_HOME): Hono {
         permission: proj.permission,
         discussMode: proj.discussMode,
         goal: proj.goal,
-        subagent: proj.subagent,
       });
     } catch (err) {
       const msg = (err as Error).message;

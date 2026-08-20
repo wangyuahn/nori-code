@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 
 import { api } from '../../api';
 import type { BackgroundTaskEntry, BackgroundTaskInfo, BackgroundTaskStatus } from '../../types';
@@ -24,15 +23,14 @@ const STATUS_TONE: Record<BackgroundTaskStatus, PillTone> = {
 };
 
 function kindTone(kind: BackgroundTaskInfo['kind']): PillTone {
-  if (kind === 'agent') return 'subagent';
   if (kind === 'question') return 'approval';
   return 'tools';
 }
 
-/** Tasks tab — background tasks (bash processes, subagents, pending
- *  questions) persisted under the session's `tasks/` directory, plus their
- *  `output.log`. None of this is reconstructable from the wire, so it is the
- *  only place to inspect what a session spawned in the background. */
+/** Tasks tab — background tasks (bash processes, pending questions) persisted
+ *  under the session's `tasks/` directory, plus their `output.log`. None of
+ *  this is reconstructable from the wire, so it is the only place to inspect
+ *  what a session spawned in the background. */
 export function TasksTab({ sessionId }: TasksTabProps) {
   const { data, isLoading, error } = useTasks(sessionId);
 
@@ -86,7 +84,7 @@ function TaskCard({ sessionId, entry }: { sessionId: string; entry: BackgroundTa
         <span className="font-mono text-[12px] text-fg-0">{task.taskId}</span>
         <CopyButton value={task.taskId} />
         {entry.agentId !== 'main' ? (
-          <Pill tone="subagent" variant="outline" title="the agent that spawned this task">
+          <Pill tone="agent" variant="outline" title="the agent that spawned this task">
             {entry.agentId}
           </Pill>
         ) : null}
@@ -108,24 +106,6 @@ function TaskCard({ sessionId, entry }: { sessionId: string; entry: BackgroundTa
             <Field label="exitCode">
               {task.exitCode ?? <Dim>(running)</Dim>}
             </Field>
-          </>
-        ) : null}
-        {task.kind === 'agent' ? (
-          <>
-            <Field label="agentId">
-              {task.agentId ? (
-                <Link
-                  to={`/sessions/${sessionId}/agents/${task.agentId}`}
-                  className="text-[var(--color-cat-subagent)] underline-offset-2 hover:underline"
-                  title="open this subagent's wire"
-                >
-                  {task.agentId} →
-                </Link>
-              ) : (
-                <Dim>(none)</Dim>
-              )}
-            </Field>
-            <Field label="subagentType">{task.subagentType ?? <Dim>(none)</Dim>}</Field>
           </>
         ) : null}
         {task.kind === 'question' ? (

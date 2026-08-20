@@ -22,7 +22,7 @@ const SORT_OPTIONS: { value: SessionSortKey; label: string }[] = [
   { value: 'recent', label: 'recent' },
   { value: 'oldest', label: 'oldest' },
   { value: 'most_records', label: 'most records' },
-  { value: 'most_subagents', label: 'most subagents' },
+  { value: 'most_agents', label: 'most agents' },
 ];
 
 const HEALTH_OPTIONS: { value: HealthFilter; label: string }[] = [

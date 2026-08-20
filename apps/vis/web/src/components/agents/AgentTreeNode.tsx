@@ -4,7 +4,7 @@ import { Pill, type PillTone } from '../shared/Pill';
 
 const TYPE_TONE: Record<AgentNode['type'], PillTone> = {
   main: 'conversation',
-  sub: 'subagent',
+  sub: 'agent',
   independent: 'tools',
 };
 
@@ -13,7 +13,7 @@ interface Props {
   sessionId: string;
 }
 
-export function SubagentNode({ node, sessionId }: Props) {
+export function AgentTreeNode({ node, sessionId }: Props) {
   const { agentId: activeAgentId } = useParams<{ agentId?: string }>();
   const selected = activeAgentId === node.agentId;
   const broken = !node.wireExists;
@@ -24,7 +24,7 @@ export function SubagentNode({ node, sessionId }: Props) {
         to={`/sessions/${sessionId}/agents/${node.agentId}`}
         className={[
           'relative flex items-start gap-3 border border-border bg-surface-0 px-3 py-2 transition-colors hover:bg-surface-1',
-          selected ? 'border-[var(--color-cat-subagent)]' : '',
+          selected ? 'border-[var(--color-cat-agent)]' : '',
         ].join(' ')}
       >
         <div className="min-w-0 flex-1">
@@ -33,11 +33,6 @@ export function SubagentNode({ node, sessionId }: Props) {
               {node.type}
             </Pill>
             <span className="font-mono text-[12px] text-fg-0">{node.agentId}</span>
-            {node.subagentTask ? (
-              <Pill tone="subagent" variant="outline" title={node.subagentTask}>
-                {node.subagentTask}
-              </Pill>
-            ) : null}
             {node.parentAgentId !== null ? (
               <span className="font-mono text-[10.5px] text-fg-3">
                 ← {node.parentAgentId}
@@ -66,7 +61,7 @@ export function SubagentNode({ node, sessionId }: Props) {
       {node.children.length > 0 ? (
         <div className="mt-1 border-l border-border pl-3 ml-3">
           {node.children.map((c) => (
-            <SubagentNode key={c.agentId} node={c} sessionId={sessionId} />
+            <AgentTreeNode key={c.agentId} node={c} sessionId={sessionId} />
           ))}
         </div>
       ) : null}

@@ -10,11 +10,11 @@ type TabId = 'wire' | 'context';
 
 const TYPE_TONE: Record<AgentInfo['type'], PillTone> = {
   main: 'conversation',
-  sub: 'subagent',
+  sub: 'agent',
   independent: 'tools',
 };
 
-export function SubagentDetailPage() {
+export function AgentDetailPage() {
   const { sessionId, agentId } = useParams<{ sessionId: string; agentId: string }>();
   const active = useActiveTab('wire') as TabId;
   const { data: detail, isLoading, error } = useSession(sessionId);

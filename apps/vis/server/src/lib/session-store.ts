@@ -28,7 +28,10 @@ interface StateJson {
   // Agent metadata comes from an untrusted state.json (a corrupt or imported
   // bundle may hold non-object entries like `{ "main": null }`), so the value
   // type allows null and inventoryAgents skips anything that isn't an object.
-  agents?: Record<string, { homedir: string; type: 'main' | 'sub' | 'independent'; parentAgentId: string | null; subagentTask?: string } | null>;
+  // Only the fields listed here are read; anything else a recording carries
+  // (e.g. the removed `subagentTask` label) is ignored rather than surfaced,
+  // so an old session still lists without reviving a dropped dimension.
+  agents?: Record<string, { homedir: string; type: 'main' | 'sub' | 'independent'; parentAgentId: string | null } | null>;
   custom?: Record<string, unknown>;
 }
 
@@ -148,9 +151,6 @@ async function discoverAgentsFromDisk(sessionDir: string): Promise<AgentInfo[]> 
       wireExists: readable,
       wireRecordCount: info.count,
       wireProtocolVersion: info.protocolVersion,
-      // subagentTask is persisted in state.json, which is unavailable on this
-      // disk-only fallback path, so it cannot be recovered here.
-      subagentTask: null,
     });
   }
   return out.sort((a, b) => compareAgentIds(a.agentId, b.agentId));
@@ -288,7 +288,6 @@ async function inventoryAgents(sessionDir: string, state: StateJson, deriveHomed
       wireExists: readable,
       wireRecordCount: info.count,
       wireProtocolVersion: info.protocolVersion,
-      subagentTask: meta.subagentTask ?? null,
     });
   }
   return result.sort((a, b) => compareAgentIds(a.agentId, b.agentId));

@@ -27,7 +27,7 @@ export function TimelineTab({ sessionId }: TimelineTabProps) {
   const { data: detail } = useSession(sessionId);
   const [agentId, setAgentId] = useState('main');
   // Reset the selected agent when navigating to another session while this tab
-  // stays mounted; otherwise a previously-selected subagent would 404 against
+  // stays mounted; otherwise a previously-selected agent would 404 against
   // the new session (mirrors WireTab/ContextTab).
   useEffect(() => {
     setAgentId('main');

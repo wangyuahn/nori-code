@@ -64,7 +64,6 @@ export interface ContextProjection {
   permission: { mode: PermissionMode | null };
   discussMode: { active: boolean; id?: string };
   goal: GoalSnapshot | null;
-  subagent: { active: boolean; trigger?: string };
 }
 
 const ZERO: TokenUsage = { inputOther: 0, output: 0, inputCacheRead: 0, inputCacheCreation: 0 };
@@ -98,7 +97,7 @@ const ZERO: TokenUsage = { inputOther: 0, output: 0, inputCacheRead: 0, inputCac
  *    list, so messages compacted/undone/cleared away stay visible and
  *    micro-compacted tool results keep their original content.
  *
- *  Everything else (append_message, loop events, goal/subagent/permission/
+ *  Everything else (append_message, loop events, goal/permission/
  *  plan/config/usage/contextTokens derived state) is identical in both
  *  modes — `mode` only affects the `messages` array and which markers
  *  appear. */
@@ -117,7 +116,6 @@ export function projectContext(
   let discussId: string | undefined;
   let contextTokens = 0;
   let goal: GoalSnapshot | null = null;
-  let subagent: { active: boolean; trigger?: string } = { active: false };
   let microCutoff = 0;
   // Maps step.uuid → the assistant ProjectedMessage that step is filling in.
   // Cleared on context.clear / context.apply_compaction.
@@ -514,7 +512,6 @@ export function projectContext(
     permission: { mode: permissionMode },
     discussMode: { active: discussActive, id: discussId },
     goal,
-    subagent,
   };
 }
 

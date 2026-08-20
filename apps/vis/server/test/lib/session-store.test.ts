@@ -172,12 +172,12 @@ describe('session-store', () => {
     await rm(elsewhere, { recursive: true, force: true });
   });
 
-  it('reports an unreadable subagent wire as wireExists=false in agent inventory', async () => {
+  it('reports an unreadable child-agent wire as wireExists=false in agent inventory', async () => {
     const { home, sessionDir, cleanup: c } = await buildSessionFixture('sample-main');
     cleanup = c;
     const { writeFile } = await import('node:fs/promises');
     const { join } = await import('node:path');
-    // Break the SUBAGENT's wire metadata; main wire stays intact so the
+    // Break the CHILD agent's wire metadata; main wire stays intact so the
     // session itself remains healthy.
     await writeFile(
       join(sessionDir, 'agents', 'agent-0', 'wire.jsonl'),
@@ -234,7 +234,7 @@ describe('session-store', () => {
     expect(sub.parentAgentId).toBe('main');
   });
 
-  it('surfaces subagentTask from state.json onto AgentInfo (null when absent)', async () => {
+  it('ignores a legacy subagentTask in state.json instead of surfacing it', async () => {
     const { home, sessionDir, cleanup: c } = await buildSessionFixture('sample-main');
     cleanup = c;
     const { readFile, writeFile } = await import('node:fs/promises');
@@ -243,12 +243,15 @@ describe('session-store', () => {
     const state = JSON.parse(await readFile(statePath, 'utf8'));
     state.agents['agent-0'].subagentTask = 'task A';
     await writeFile(statePath, JSON.stringify(state));
+    // `subagentTask` was the per-item work label of the temporary subagent,
+    // which no longer exists. A session recorded before its removal still has
+    // to inventory in full — the visualizer reads old recordings — but the
+    // removed dimension is dropped, not resurrected.
     const d = await readSessionDetail(home, 'session_fixture');
     expect(d).not.toBeNull();
+    expect(d!.agents.map((a) => a.agentId).sort()).toEqual(['agent-0', 'main']);
     const sub = d!.agents.find((a) => a.agentId === 'agent-0')!;
-    expect(sub.subagentTask).toBe('task A');
-    // main has no subagentTask in state.json → null, not undefined.
-    const main = d!.agents.find((a) => a.agentId === 'main')!;
-    expect(main.subagentTask).toBeNull();
+    expect(sub.parentAgentId).toBe('main');
+    expect(sub).not.toHaveProperty('subagentTask');
   });
 });

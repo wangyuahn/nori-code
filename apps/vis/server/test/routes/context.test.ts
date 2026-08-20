@@ -6,7 +6,7 @@ describe('context route', () => {
   let cleanup: (() => Promise<void>) | null = null;
   afterEach(async () => { if (cleanup) await cleanup(); cleanup = null; });
 
-  it('echoes the new projection fields (contextTokens, goal, subagent)', async () => {
+  it('echoes the new projection fields (contextTokens, goal)', async () => {
     const { home, cleanup: c } = await buildSessionFixture('sample-main');
     cleanup = c;
 
@@ -19,13 +19,17 @@ describe('context route', () => {
     // cherry-pick only messages/usage/config/permission/discussMode).
     expect(body).toHaveProperty('contextTokens');
     expect(body).toHaveProperty('goal');
-    expect(body).toHaveProperty('subagent');
 
     // The sample fixture's only step.end carries usage 10+5 → contextTokens=15,
-    // and has no goal / subagent records.
+    // and has no goal records.
     expect(body['contextTokens']).toBe(15);
     expect(body['goal']).toBeNull();
-    expect(body['subagent']).toEqual({ active: false });
+
+    // The projection used to carry a `subagent: { active, trigger }` field for
+    // the temporary subagent, which no longer exists. No wire record ever set
+    // it, so it always reported `{ active: false }` — guard that the dead field
+    // is not reintroduced.
+    expect(body).not.toHaveProperty('subagent');
   });
 
   it('still echoes the existing fields', async () => {

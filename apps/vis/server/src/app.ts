@@ -6,6 +6,7 @@ import { Hono } from 'hono';
 
 import { NORI_CODE_HOME } from './config';
 import { serveWebAsset, type WebAsset } from './lib/web-asset';
+import { agentsRoute } from './routes/agents';
 import { blobsRoute } from './routes/blobs';
 import { contextRoute } from './routes/context';
 import { cronRoute } from './routes/cron';
@@ -13,7 +14,6 @@ import { importsRoute } from './routes/imports';
 import { logsRoute } from './routes/logs';
 import { sessionDetailRoute } from './routes/session-detail';
 import { sessionsRoute } from './routes/sessions';
-import { subagentsRoute } from './routes/subagents';
 import { tasksRoute } from './routes/tasks';
 import { wireRoute } from './routes/wire';
 
@@ -98,7 +98,7 @@ export async function createApp(options: CreateAppOptions = {}): Promise<Hono> {
   api.route('/sessions', sessionsRoute(home));
   api.route('/sessions', sessionDetailRoute(home));
   api.route('/sessions', wireRoute(home));
-  api.route('/sessions', subagentsRoute(home));
+  api.route('/sessions', agentsRoute(home));
   api.route('/sessions', blobsRoute(home));
   api.route('/sessions', tasksRoute(home));
   api.route('/sessions', cronRoute(home));

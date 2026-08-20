@@ -4,7 +4,7 @@ export type PillTone =
   | 'conversation'
   | 'config'
   | 'lifecycle'
-  | 'subagent'
+  | 'agent'
   | 'approval'
   | 'ephemeral'
   | 'meta'
@@ -24,7 +24,7 @@ const TONE_VAR: Record<PillTone, string> = {
   conversation: '--color-cat-conversation',
   config: '--color-cat-config',
   lifecycle: '--color-cat-lifecycle',
-  subagent: '--color-cat-subagent',
+  agent: '--color-cat-agent',
   approval: '--color-cat-approval',
   ephemeral: '--color-cat-ephemeral',
   meta: '--color-cat-meta',
