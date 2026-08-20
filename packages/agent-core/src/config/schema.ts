@@ -160,6 +160,19 @@ export const CustomAgentConfigSchema = z.object({
 });
 export type CustomAgentConfig = z.infer<typeof CustomAgentConfigSchema>;
 
+export const TeamConfigSchema = z.object({
+  /**
+   * How many Team levels may exist below the main agent. `1` keeps a single flat
+   * department under main; `2` additionally lets each of main's members run a
+   * department of its own, and so on. Bounded because every level multiplies how
+   * many agents one request can hire, and an over-hired team that never talks is
+   * the exact failure this limit exists to prevent.
+   */
+  maxDepth: z.number().int().min(1).max(5).optional(),
+});
+
+export type TeamConfig = z.infer<typeof TeamConfigSchema>;
+
 export const BackgroundConfigSchema = z.object({
   maxRunningTasks: z.number().int().min(1).optional(),
   keepAliveOnExit: z.boolean().optional(),
@@ -293,6 +306,7 @@ export const KimiConfigSchema = z.object({
   loopControl: LoopControlSchema.optional(),
   customAgents: z.record(z.string().min(1), CustomAgentConfigSchema).optional(),
   background: BackgroundConfigSchema.optional(),
+  team: TeamConfigSchema.optional(),
   modelCatalog: ModelCatalogConfigSchema.optional(),
   experimental: ExperimentalConfigSchema.optional(),
   telemetry: z.boolean().optional(),
@@ -323,6 +337,7 @@ const PermissionConfigPatchSchema = PermissionConfigSchema.partial();
 const LoopControlPatchSchema = LoopControlSchema.partial();
 const CustomAgentConfigPatchSchema = CustomAgentConfigSchema.partial();
 const BackgroundConfigPatchSchema = BackgroundConfigSchema.partial();
+const TeamConfigPatchSchema = TeamConfigSchema.partial();
 const ModelCatalogConfigPatchSchema = ModelCatalogConfigSchema.partial();
 const ExperimentalConfigPatchSchema = ExperimentalConfigSchema;
 const MoonshotServiceConfigPatchSchema = MoonshotServiceConfigSchema.partial();
@@ -352,6 +367,7 @@ export const KimiConfigPatchSchema = z
     loopControl: LoopControlPatchSchema.optional(),
     customAgents: z.record(z.string().min(1), CustomAgentConfigPatchSchema).optional(),
     background: BackgroundConfigPatchSchema.optional(),
+    team: TeamConfigPatchSchema.optional(),
     modelCatalog: ModelCatalogConfigPatchSchema.optional(),
     experimental: ExperimentalConfigPatchSchema.optional(),
     telemetry: z.boolean().optional(),

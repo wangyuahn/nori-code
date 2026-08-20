@@ -60,6 +60,12 @@ import {
 } from '../skill';
 import { noopTelemetryClient, type TelemetryClient } from '../telemetry';
 import { SessionSubagentHost } from './subagent-host';
+import {
+  activeDiscussionAsParticipant,
+  canCreateDepartment,
+  DEFAULT_TEAM_MAX_DEPTH,
+  teamDepth,
+} from './team-tree';
 import type { BrowserProvider, ToolServices } from '../tools/support/services';
 import TEAM_AGENT_PROMPT from './team-agent.md?raw';
 import TEAM_ENGINEERING_PROMPT from '../profile/default/team-engineering.md?raw';
@@ -632,12 +638,13 @@ export class Session {
     return { id, agent };
   }
 
-  /** Creates a durable team member within this Session, never a child Session. */
+  /** Creates a durable member of `leaderAgentId`'s department, never a child Session. */
   async createTeamMember(
     leaderAgentId: string,
     identity: TeamIdentity,
   ): Promise<{ readonly id: string; readonly agent: Agent }> {
-    this.assertTeamLead(leaderAgentId);
+    this.assertTeamManager(leaderAgentId);
+    this.assertCanCreateDepartment(leaderAgentId);
     validateTeamIdentity(identity);
     const duplicates = this.teamMemberMetadata(leaderAgentId).some(
       ([, meta]) => meta.name?.localeCompare(identity.name, undefined, { sensitivity: 'accent' }) === 0,
@@ -685,7 +692,7 @@ export class Session {
     reason: string,
     confirmActive: boolean,
   ): Promise<void> {
-    this.assertTeamLead(leaderAgentId);
+    this.assertTeamManager(leaderAgentId);
     if (reason.trim().length === 0) {
       throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'TeamDismiss requires a reason.');
     }
@@ -769,7 +776,7 @@ export class Session {
     readonly agent: Agent;
     readonly assignedAt?: string;
   }>> {
-    this.assertTeamLead(leaderAgentId);
+    this.assertTeamManager(leaderAgentId);
     const members = this.teamMemberMetadata(leaderAgentId);
     if (members.length === 0) {
       throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'Create a team before assigning work.');
@@ -854,7 +861,7 @@ export class Session {
     agentId: string,
     assignedAt: string,
   ): Promise<boolean> {
-    this.assertTeamLead(leaderAgentId);
+    this.assertTeamManager(leaderAgentId);
     const current = this.metadata.agents[agentId];
     if (
       current?.kind !== 'team'
@@ -1006,7 +1013,7 @@ export class Session {
 
   /** Revoke every TeamAssign write lease. Used when re-entering Discuss or archiving. */
   async lockTeamAssignments(leaderAgentId: string): Promise<void> {
-    this.assertTeamLead(leaderAgentId);
+    this.assertTeamManager(leaderAgentId);
     const members = this.teamMemberMetadata(leaderAgentId);
     let changed = false;
     for (const [agentId, current] of members) {
@@ -1028,7 +1035,7 @@ export class Session {
   }
 
   async assertTeamDiscussionMode(agentId: string): Promise<void> {
-    this.assertTeamLead(agentId);
+    this.assertTeamManager(agentId);
     const leader = await this.ensureAgentResumed(agentId);
     if (!leader.discussMode.isActive) {
       throw new KimiError(
@@ -1044,7 +1051,7 @@ export class Session {
    * member permissions with the resulting mode.
    */
   async ensureTeamDiscussionMode(agentId: string): Promise<void> {
-    this.assertTeamLead(agentId);
+    this.assertTeamManager(agentId);
     const leader = await this.ensureAgentResumed(agentId);
     if (!leader.discussMode.isActive) {
       await leader.discussMode.enter();
@@ -1057,12 +1064,22 @@ export class Session {
     topic: string,
     participantAgentIds: readonly string[],
   ): Promise<{ readonly id: string; readonly agent: Agent; readonly discussion: TeamDiscussionMeta }> {
-    this.assertTeamLead(leaderAgentId);
+    this.assertTeamManager(leaderAgentId);
     if (topic.trim().length === 0) {
       throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'A discussion topic is required.');
     }
     if (this.activeTeamDiscussion(leaderAgentId) !== undefined) {
       throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'A team discussion is already active.');
+    }
+    // A node discusses in one department at a time. While it still owes its
+    // parent a statement it cannot also chair its own discussion: the same agent
+    // would be scheduled for two turns at once, and its own members would block
+    // waiting on statements it is not free to write.
+    if (activeDiscussionAsParticipant(this.metadata.agents, leaderAgentId) !== undefined) {
+      throw new KimiError(
+        ErrorCodes.SESSION_STATE_INVALID,
+        'You are a participant in your parent department\'s discussion. Finish that discussion before starting one in your own department.',
+      );
     }
     const members = new Set(this.teamMemberMetadata(leaderAgentId).map(([id]) => id));
     const participants = [...new Set(participantAgentIds)];
@@ -1154,7 +1171,7 @@ export class Session {
     leaderAgentId: string,
     message: string,
   ): Promise<{ readonly discussionAgentId: string; readonly entryId: number }> {
-    this.assertTeamLead(leaderAgentId);
+    this.assertTeamManager(leaderAgentId);
     const trimmed = message.trim();
     if (trimmed.length === 0) {
       throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'A lead discussion statement is required.');
@@ -1690,14 +1707,43 @@ export class Session {
     }
   }
 
-  /** Shared guard for every lead-only team-management operation. */
-  assertTeamLead(leaderAgentId: string): void {
-    if (leaderAgentId !== 'main' || this.metadata.agents['main'] === undefined) {
+  /**
+   * Shared guard for every team-management operation. Every node in the
+   * department tree manages its own department: `main` plus every durable Team
+   * Agent. A discussion transcript is a record of a department's discussion, not
+   * a node in the tree, so it manages nothing.
+   */
+  assertTeamManager(agentId: string): void {
+    const meta = this.metadata.agents[agentId];
+    if (meta === undefined) {
+      throw new KimiError(ErrorCodes.AGENT_NOT_FOUND, `Agent "${agentId}" was not found.`);
+    }
+    if (agentId !== 'main' && meta.kind !== 'team') {
       throw new KimiError(
         ErrorCodes.SESSION_STATE_INVALID,
-        'Team management is available only to the main agent.',
+        'Only the main agent and Team Agents manage a department.',
       );
     }
+  }
+
+  /** Team levels allowed below `main`, from `team.maxDepth` in config. */
+  teamMaxDepth(): number {
+    return this.options.config?.team?.maxDepth ?? DEFAULT_TEAM_MAX_DEPTH;
+  }
+
+  /**
+   * Guard for hiring specifically. The depth limit is checked when a member is
+   * created rather than by withholding `TeamCreate`, because the limit is a
+   * setting the user can change while agents are already running — a tool set
+   * frozen at creation time would go stale, while this message is always true.
+   */
+  private assertCanCreateDepartment(leaderAgentId: string): void {
+    const maxDepth = this.teamMaxDepth();
+    if (canCreateDepartment(this.metadata.agents, leaderAgentId, maxDepth)) return;
+    throw new KimiError(
+      ErrorCodes.SESSION_STATE_INVALID,
+      `Team depth limit reached: this agent is at depth ${String(teamDepth(this.metadata.agents, leaderAgentId))} of ${String(maxDepth)} and cannot hire its own members. Do the work in this department, or ask your parent to raise team.maxDepth.`,
+    );
   }
 
   private configureTeamAgentRuntime(agent: Agent, meta: AgentMeta): void {
@@ -1708,11 +1754,9 @@ export class Session {
       : this.getReadyAgent(meta.teamLeaderAgentId);
     const inheritedTools = [
       ...(leader?.tools.activeToolNames() ?? agent.tools.activeToolNames()),
-      ...TEAM_MEMBER_COLLABORATION_TOOLS,
+      ...TEAM_MEMBER_TOOLS,
     ];
-    agent.tools.setActiveTools(
-      inheritedTools.filter((name) => !TEAM_MEMBER_DISABLED_TOOLS.has(name)),
-    );
+    agent.tools.setActiveTools(inheritedTools);
     const discussReadonly = leader?.discussMode.isActive ?? false;
     agent.teamWriteLocked = discussReadonly;
     agent.permission.setToolsReadonly(
@@ -1737,7 +1781,7 @@ export class Session {
       // This must not depend on builtin registration: profiles are selected
       // before a provider can initialize every builtin tool.
       ...agent.tools.activeToolNames(),
-      ...TEAM_LEAD_TOOLS,
+      ...TEAM_MANAGEMENT_TOOLS,
     ]);
   }
 
@@ -2058,7 +2102,13 @@ export class Session {
 
 export * from './subagent-host';
 
-const TEAM_LEAD_TOOLS = [
+/**
+ * Tools that manage a department. Every node in the tree gets them: `main`
+ * because it is the root, and every Team Agent because it may run a department
+ * of its own. `team.maxDepth` bounds how deep that goes, enforced when a member
+ * is created rather than by withholding the tool.
+ */
+const TEAM_MANAGEMENT_TOOLS = [
   'TeamCreate',
   'TeamDismiss',
   'TeamAssign',
@@ -2070,17 +2120,12 @@ const TEAM_LEAD_TOOLS = [
   'TeamDecide',
 ] as const;
 
-/** Management tools stay lead-only until nested Team trees are implemented. */
-const TEAM_MEMBER_DISABLED_TOOLS = new Set([
-  'TeamCreate',
-  'TeamDismiss',
-  'TeamAssign',
-  'TeamBroadcast',
-  'TeamDiscussInvite',
-  'TeamDiscussKick',
-  'TeamDecide',
-]);
-const TEAM_MEMBER_COLLABORATION_TOOLS = ['TeamDM', 'TeamSpeak', 'TeamStatus'] as const;
+/**
+ * A member additionally speaks in its parent's discussion. `main` has no parent,
+ * so it never takes a participant turn and does not get `TeamSpeak`.
+ */
+const TEAM_MEMBER_TOOLS = [...TEAM_MANAGEMENT_TOOLS, 'TeamSpeak'] as const;
+
 
 function validateTeamIdentity(identity: TeamIdentity | undefined): asserts identity is TeamIdentity {
   if (identity === undefined) {

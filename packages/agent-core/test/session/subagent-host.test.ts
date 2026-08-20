@@ -69,6 +69,84 @@ function agentDouble(parts: { context?: unknown; turn: Record<string, unknown> }
   } as unknown as Agent;
 }
 
+/** Every `Session` member `SessionSubagentHost` reaches for. */
+type HostSessionMember =
+  | 'metadata'
+  | 'acknowledgeTeamDiscussionStatements'
+  | 'acknowledgeTeamReport'
+  | 'activeTeamDiscussion'
+  | 'assertTeamDiscussionMode'
+  | 'assertTeamManager'
+  | 'assignTeamTasks'
+  | 'beginTeamDiscussionTurn'
+  | 'consumeTeamDiscussionSpeak'
+  | 'createAgent'
+  | 'createTeamDiscussion'
+  | 'createTeamMember'
+  | 'dismissTeamMembers'
+  | 'endTeamDiscussionTurn'
+  | 'ensureAgentResumed'
+  | 'ensureTeamDiscussionMode'
+  | 'getAgentMetadata'
+  | 'lockTeamAssignments'
+  | 'notifyMissingTeamReport'
+  | 'notifyRunningTeamMember'
+  | 'publishLeadDiscussionStatement'
+  | 'publishTeamDiscussionStatement'
+  | 'recordTeamReport'
+  | 'releaseTeamAssignment'
+  | 'teamMemberMetadata'
+  | 'unreadTeamDiscussionStatements'
+  | 'updateTeamDiscussion';
+
+/**
+ * A complete Session double: every member the host may call, answering "nothing
+ * configured", with the scenario's own overrides on top.
+ *
+ * Completeness is the point. A double that merely omitted the members a
+ * scenario did not care about used to push the host into
+ * `typeof this.session.x === 'function'` guards — production code branching on
+ * the shape of a test, and silently skipping real work when the guard was
+ * wrong. Filling the surface here is what lets those guards not exist.
+ *
+ * Authorization defaults to permissive: these scenarios are about turn
+ * scheduling, and the department guards are exercised against a real Session.
+ */
+function teamSessionDouble(parts: Partial<Record<HostSessionMember, unknown>>): Session {
+  return {
+    metadata: { agents: {} },
+    acknowledgeTeamDiscussionStatements: vi.fn(async () => undefined),
+    acknowledgeTeamReport: vi.fn(async () => undefined),
+    activeTeamDiscussion: vi.fn(() => undefined),
+    assertTeamDiscussionMode: vi.fn(async () => undefined),
+    assertTeamManager: vi.fn(),
+    assignTeamTasks: vi.fn(async () => []),
+    beginTeamDiscussionTurn: vi.fn(),
+    consumeTeamDiscussionSpeak: vi.fn(() => undefined),
+    createAgent: vi.fn(),
+    createTeamDiscussion: vi.fn(),
+    createTeamMember: vi.fn(),
+    dismissTeamMembers: vi.fn(async () => undefined),
+    endTeamDiscussionTurn: vi.fn(),
+    ensureAgentResumed: vi.fn(),
+    ensureTeamDiscussionMode: vi.fn(async () => undefined),
+    getAgentMetadata: vi.fn(() => undefined),
+    lockTeamAssignments: vi.fn(async () => undefined),
+    notifyMissingTeamReport: vi.fn(async () => undefined),
+    notifyRunningTeamMember: vi.fn(),
+    publishLeadDiscussionStatement: vi.fn(async () => ({ discussionAgentId: 'agent-discussion', entryId: 1 })),
+    publishTeamDiscussionStatement: vi.fn(async () => ({ discussionAgentId: 'agent-discussion', entryId: 1 })),
+    recordTeamReport: vi.fn(async () => undefined),
+    releaseTeamAssignment: vi.fn(async () => undefined),
+    teamMemberMetadata: vi.fn(() => []),
+    unreadTeamDiscussionStatements: vi.fn(async () => ({ statements: [], cursor: 0 })),
+    // Echoes the patch back, which is what a real persist returns: the four
+    // fields the callers then read off the updated discussion.
+    updateTeamDiscussion: vi.fn(async (_discussionAgentId: string, patch: unknown) => patch),
+    ...parts,
+  } as unknown as Session;
+}
+
 afterEach(async () => {
   for (const dir of tempDirs.splice(0)) {
     await rm(dir, { recursive: true, force: true });
@@ -142,7 +220,7 @@ describe('SessionSubagentHost', () => {
       teamLeaderAgentId: 'main',
       name: 'Reviewer',
     };
-    const session = {
+    const session = teamSessionDouble({
       metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-review': memberMeta } },
       activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
       getAgentMetadata: vi.fn((id: string) => id === 'agent-discussion' ? discussionMeta : id === 'agent-review' ? memberMeta : undefined),
@@ -158,7 +236,7 @@ describe('SessionSubagentHost', () => {
         published = undefined;
         return result;
       }),
-    } as unknown as Session;
+    });
     const host = new SessionSubagentHost(session, 'main');
 
     const result = await host.decideTeamDiscussion('continue', undefined, undefined, signal);
@@ -240,7 +318,7 @@ describe('SessionSubagentHost', () => {
         teamLeaderAgentId: 'main',
         name: 'Reviewer',
       };
-      const session = {
+      const session = teamSessionDouble({
         metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-review': memberMeta } },
         activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
         getAgentMetadata: vi.fn((id: string) =>
@@ -259,7 +337,7 @@ describe('SessionSubagentHost', () => {
           name: 'Reviewer',
           message: 'The long tool call completed.',
         } : undefined),
-      } as unknown as Session;
+      });
       const host = new SessionSubagentHost(session, 'main', {
         discussionMemberTimeoutMs: 20,
         discussionMemberFirstResponseTimeoutMs: 10,
@@ -340,7 +418,7 @@ describe('SessionSubagentHost', () => {
         teamLeaderAgentId: 'main',
         name: 'Reviewer',
       };
-      const session = {
+      const session = teamSessionDouble({
         metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-review': memberMeta } },
         activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
         getAgentMetadata: vi.fn((id: string) =>
@@ -354,7 +432,7 @@ describe('SessionSubagentHost', () => {
         beginTeamDiscussionTurn: vi.fn(),
         endTeamDiscussionTurn: vi.fn(),
         consumeTeamDiscussionSpeak: vi.fn(() => undefined),
-      } as unknown as Session;
+      });
       const host = new SessionSubagentHost(session, 'main', {
         discussionMemberTimeoutMs: 5,
         discussionMemberFirstResponseTimeoutMs: 2,
@@ -430,7 +508,7 @@ describe('SessionSubagentHost', () => {
     const firstMeta = memberMeta('First');
     const secondMeta = memberMeta('Second');
     const endTeamDiscussionTurn = vi.fn();
-    const session = {
+    const session = teamSessionDouble({
       metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-first': firstMeta, 'agent-second': secondMeta } },
       activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
       getAgentMetadata: vi.fn((id: string) => id === 'agent-discussion' ? discussionMeta : id === 'agent-first' ? firstMeta : id === 'agent-second' ? secondMeta : undefined),
@@ -440,7 +518,7 @@ describe('SessionSubagentHost', () => {
       beginTeamDiscussionTurn: vi.fn(),
       endTeamDiscussionTurn,
       consumeTeamDiscussionSpeak: vi.fn(() => undefined),
-    } as unknown as Session;
+    });
     const host = new SessionSubagentHost(session, 'main', {
       discussionMemberTimeoutMs: 10,
       discussionMemberFirstResponseTimeoutMs: 1,
@@ -524,7 +602,7 @@ describe('SessionSubagentHost', () => {
       teamLeaderAgentId: 'main',
       name: 'Reviewer',
     };
-    const session = {
+    const session = teamSessionDouble({
       metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-review': memberMeta } },
       activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
       getAgentMetadata: vi.fn((id: string) =>
@@ -547,7 +625,7 @@ describe('SessionSubagentHost', () => {
           message: 'The retry produced a stable answer.',
         };
       }),
-    } as unknown as Session;
+    });
     const host = new SessionSubagentHost(session, 'main', {
       discussionMemberTimeoutMs: 100,
       discussionMemberFirstResponseTimeoutMs: 1,
@@ -612,7 +690,7 @@ describe('SessionSubagentHost', () => {
       teamLeaderAgentId: 'main',
       name: 'Reviewer',
     };
-    const session = {
+    const session = teamSessionDouble({
       metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-review': memberMeta } },
       activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
       getAgentMetadata: vi.fn((id: string) =>
@@ -626,7 +704,7 @@ describe('SessionSubagentHost', () => {
       beginTeamDiscussionTurn: vi.fn(),
       endTeamDiscussionTurn: vi.fn(),
       consumeTeamDiscussionSpeak: vi.fn(() => undefined),
-    } as unknown as Session;
+    });
     const host = new SessionSubagentHost(session, 'main', {
       discussionMemberTimeoutMs: 100,
       discussionMemberFirstResponseTimeoutMs: 20,
@@ -664,7 +742,7 @@ describe('SessionSubagentHost', () => {
       teamLeaderAgentId: 'main',
       name: 'Reviewer',
     };
-    const session = {
+    const session = teamSessionDouble({
       metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-review': memberMeta } },
       activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
       getAgentMetadata: vi.fn((id: string) =>
@@ -678,7 +756,7 @@ describe('SessionSubagentHost', () => {
       beginTeamDiscussionTurn: vi.fn(),
       endTeamDiscussionTurn: vi.fn(),
       consumeTeamDiscussionSpeak: vi.fn(() => undefined),
-    } as unknown as Session;
+    });
     const host = new SessionSubagentHost(session, 'main');
 
     const result = await host.decideTeamDiscussion('continue', undefined, undefined, signal);
@@ -752,7 +830,7 @@ describe('SessionSubagentHost', () => {
       teamLeaderAgentId: 'main',
       name: 'Reviewer',
     };
-    const session = {
+    const session = teamSessionDouble({
       metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-review': memberMeta } },
       activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
       getAgentMetadata: vi.fn((id: string) => id === 'agent-discussion' ? discussionMeta : id === 'agent-review' ? memberMeta : undefined),
@@ -767,7 +845,7 @@ describe('SessionSubagentHost', () => {
         name: 'Reviewer',
         message: 'The cache key is stable.',
       } : undefined),
-    } as unknown as Session;
+    });
     const host = new SessionSubagentHost(session, 'main');
 
     const result = await host.decideTeamDiscussion('continue', undefined, undefined, controller.signal);
@@ -813,7 +891,7 @@ describe('SessionSubagentHost', () => {
     });
     const alphaMeta = memberMeta('Alpha');
     const betaMeta = memberMeta('Beta');
-    const session = {
+    const session = teamSessionDouble({
       metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-alpha': alphaMeta, 'agent-beta': betaMeta } },
       activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
       getAgentMetadata: vi.fn((id: string) => id === 'agent-discussion' ? discussionMeta : id === 'agent-alpha' ? alphaMeta : id === 'agent-beta' ? betaMeta : undefined),
@@ -823,7 +901,7 @@ describe('SessionSubagentHost', () => {
       beginTeamDiscussionTurn: vi.fn(),
       endTeamDiscussionTurn: vi.fn(),
       consumeTeamDiscussionSpeak: vi.fn(() => undefined),
-    } as unknown as Session;
+    });
     const host = new SessionSubagentHost(session, 'main');
 
     const result = await host.decideTeamDiscussion(
@@ -875,7 +953,7 @@ describe('SessionSubagentHost', () => {
       teamLeaderAgentId: 'main',
       name: 'Reviewer',
     };
-    const session = {
+    const session = teamSessionDouble({
       metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-review': memberMeta } },
       activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
       getAgentMetadata: vi.fn((id: string) => id === 'agent-discussion' ? discussionMeta : id === 'agent-review' ? memberMeta : undefined),
@@ -885,7 +963,7 @@ describe('SessionSubagentHost', () => {
       beginTeamDiscussionTurn: vi.fn(),
       endTeamDiscussionTurn: vi.fn(),
       consumeTeamDiscussionSpeak: vi.fn(() => undefined),
-    } as unknown as Session;
+    });
     const host = new SessionSubagentHost(session, 'main');
 
     const result = await host.decideTeamDiscussion('continue', undefined, undefined, signal);
@@ -931,7 +1009,7 @@ describe('SessionSubagentHost', () => {
       discussion: { participantAgentIds: ['agent-review'], status: 'active' as const, topic: 'Surface tool failure', startedAt: '2026-08-18T00:00:00.000Z', updatedAt: '2026-08-18T00:00:00.000Z' },
     };
     const memberMeta = { homedir: '/review', type: 'sub' as const, parentAgentId: 'main', kind: 'team' as const, teamLeaderAgentId: 'main', name: 'Reviewer' };
-    const session = {
+    const session = teamSessionDouble({
       metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-review': memberMeta } },
       activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
       getAgentMetadata: vi.fn((id: string) => id === 'agent-discussion' ? discussionMeta : id === 'agent-review' ? memberMeta : undefined),
@@ -941,7 +1019,7 @@ describe('SessionSubagentHost', () => {
       beginTeamDiscussionTurn: vi.fn(),
       endTeamDiscussionTurn: vi.fn(),
       consumeTeamDiscussionSpeak: vi.fn(() => undefined),
-    } as unknown as Session;
+    });
     const host = new SessionSubagentHost(session, 'main');
 
     const result = await host.decideTeamDiscussion('continue', undefined, undefined, signal);
@@ -1002,7 +1080,7 @@ describe('SessionSubagentHost', () => {
           cursor: 1,
         }
       : { statements: [], cursor: 0 });
-    const session = {
+    const session = teamSessionDouble({
       metadata: {
         agents: {
           'agent-discussion': discussionMeta,
@@ -1032,7 +1110,7 @@ describe('SessionSubagentHost', () => {
       beginTeamDiscussionTurn: vi.fn(),
       endTeamDiscussionTurn: vi.fn(),
       consumeTeamDiscussionSpeak: vi.fn(() => undefined),
-    } as unknown as Session;
+    });
     const host = new SessionSubagentHost(session, 'main');
 
     await host.decideTeamDiscussion('continue', undefined, undefined, signal);
@@ -1095,7 +1173,7 @@ describe('SessionSubagentHost', () => {
       cursor: 1,
     }));
     const acknowledgeTeamDiscussionStatements = vi.fn(async () => undefined);
-    const session = {
+    const session = teamSessionDouble({
       metadata: {
         agents: {
           'agent-discussion': discussionMeta,
@@ -1122,7 +1200,7 @@ describe('SessionSubagentHost', () => {
       ),
       unreadTeamDiscussionStatements,
       acknowledgeTeamDiscussionStatements,
-    } as unknown as Session;
+    });
     const host = new SessionSubagentHost(session, 'main');
 
     const result = await host.decideTeamDiscussion('vote', undefined, undefined, signal);
@@ -1164,7 +1242,7 @@ describe('SessionSubagentHost', () => {
       assignedTask: 'Finish the assigned implementation.',
       name: 'Reviewer',
     };
-    const session = {
+    const session = teamSessionDouble({
       metadata: {
         agents: {
           'agent-discussion': discussionMeta,
@@ -1181,7 +1259,7 @@ describe('SessionSubagentHost', () => {
           ? { turn: { hasActiveTurn: true } }
           : { turn: { hasActiveTurn: false } },
       ),
-    } as unknown as Session;
+    });
     const host = new SessionSubagentHost(session, 'main');
 
     await expect(host.decideTeamDiscussion('vote', undefined, undefined, signal))
@@ -1223,7 +1301,7 @@ describe('SessionSubagentHost', () => {
     const beginTeamDiscussionTurn = vi.fn(() => {
       order.push('member');
     });
-    const session = {
+    const session = teamSessionDouble({
       metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-review': memberMeta } },
       activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
       getAgentMetadata: vi.fn((id: string) =>
@@ -1238,7 +1316,7 @@ describe('SessionSubagentHost', () => {
       beginTeamDiscussionTurn,
       endTeamDiscussionTurn: vi.fn(),
       consumeTeamDiscussionSpeak: vi.fn(() => undefined),
-    } as unknown as Session;
+    });
     const host = new SessionSubagentHost(session, 'main');
 
     await host.decideTeamDiscussion('continue', undefined, undefined, signal, 'The cache key stays.');
@@ -1257,12 +1335,12 @@ describe('SessionSubagentHost', () => {
   });
 
   it('rejects TeamDecide start without a topic even when the field is an empty string', async () => {
-    const session = {
+    const session = teamSessionDouble({
       metadata: { agents: {} },
       activeTeamDiscussion: vi.fn(() => undefined),
       teamMemberMetadata: vi.fn(() => [['agent-review', { kind: 'team' }]]),
       createTeamDiscussion: vi.fn(),
-    } as unknown as Session;
+    });
     const host = new SessionSubagentHost(session, 'main');
 
     await expect(host.decideTeamDiscussion('start', '', ['agent-review'], signal, 'Lead first.'))
@@ -1336,7 +1414,7 @@ describe('SessionSubagentHost', () => {
       teamLeaderAgentId: 'main',
       name: 'Second',
     };
-    const session = {
+    const session = teamSessionDouble({
       metadata: { agents: { 'agent-first': firstMeta, 'agent-second': secondMeta } },
       teamMemberMetadata: vi.fn(() => [
         ['agent-first', firstMeta],
@@ -1348,7 +1426,7 @@ describe('SessionSubagentHost', () => {
       ensureAgentResumed: vi.fn(async (id: string) =>
         id === 'agent-first' ? first.agent : second.agent,
       ),
-    } as unknown as Session;
+    });
     const host = new SessionSubagentHost(session, 'main');
     const firstPrompt = vi.spyOn(first.agent.turn, 'prompt');
     const secondPrompt = vi.spyOn(second.agent.turn, 'prompt');
@@ -1398,10 +1476,10 @@ describe('SessionSubagentHost', () => {
       parentAgentId: null,
       kind: 'main' as const,
     };
-    const session = {
+    const session = teamSessionDouble({
       getAgentMetadata: vi.fn((id: string) => id === 'main' ? mainMeta : memberMeta),
       ensureAgentResumed: vi.fn(async () => recipient),
-    } as unknown as Session;
+    });
     const host = new SessionSubagentHost(session, 'agent-member');
 
     await expect(host.directMessage('main', 'The parent is still running.', signal))
@@ -1428,23 +1506,25 @@ describe('SessionSubagentHost', () => {
         steer: vi.fn(),
       },
     });
-    const mainMeta = {
-      homedir: '/main',
-      type: 'main' as const,
-      parentAgentId: null,
-      kind: 'main' as const,
+    const memberMeta = {
+      homedir: '/member',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'team' as const,
+      teamLeaderAgentId: 'main',
+      name: 'Member',
     };
-    const session = {
-      getAgentMetadata: vi.fn(() => mainMeta),
+    const session = teamSessionDouble({
+      getAgentMetadata: vi.fn(() => memberMeta),
       ensureAgentResumed: vi.fn(async () => recipient),
-    } as unknown as Session;
+    });
     const host = new SessionSubagentHost(session, 'main');
 
-    await expect(host.directMessage('main', 'Cannot start.', signal))
+    await expect(host.directMessage('agent-member', 'Cannot start.', signal))
       .rejects.toThrow('could not start a turn');
     const controller = new AbortController();
     controller.abort(new Error('cancelled'));
-    await expect(host.directMessage('main', 'Cancelled.', controller.signal))
+    await expect(host.directMessage('agent-member', 'Cancelled.', controller.signal))
       .rejects.toThrow('cancelled');
   });
 
@@ -1937,17 +2017,21 @@ describe('Session.createAgent', () => {
 
     expect(member.agent.config.systemPrompt.startsWith('<team_identity>')).toBe(true);
     expect(member.agent.config.systemPrompt).toContain('Name: Reviewer');
-    expect(member.agent.config.systemPrompt).toContain('You are not the main Agent');
-    expect(member.agent.config.systemPrompt).toContain('Team management belongs to the main Agent');
+    expect(member.agent.config.systemPrompt).toContain('Your **parent** is the agent that hired you');
+    // A member manages its own department, so the prompt must hand it the rules
+    // for that rather than telling it management is somebody else's job.
+    expect(member.agent.config.systemPrompt).toContain('### Managing your own department');
+    expect(member.agent.config.systemPrompt).toContain('Hire for work you can name right now');
+    expect(member.agent.config.systemPrompt).not.toContain('Team management belongs to the main Agent');
     expect(member.agent.config.systemPrompt).toContain('do not call `Write`, `Edit`, or `Bash`');
     expect(member.agent.config.systemPrompt).not.toContain('SubAgent');
-    expect(member.agent.config.systemPrompt).toContain('TeamDM` at any time');
-    expect(member.agent.config.systemPrompt).toContain('only on the task explicitly assigned');
+    expect(member.agent.config.systemPrompt).toContain('Use `TeamDM` any time');
+    expect(member.agent.config.systemPrompt).toContain('Work only on the task your parent assigned');
     expect(member.agent.config.systemPrompt).toContain('latest content tag');
-    expect(member.agent.config.systemPrompt).toContain('Edit tag mismatches');
+    expect(member.agent.config.systemPrompt).toContain('Edit tag mismatch');
     expect(member.agent.config.systemPrompt).toContain('automatic branch or merge');
     expect(member.agent.config.systemPrompt).toContain('completed`, `blocked`, or `needs_decision');
-    expect(member.agent.config.systemPrompt).toContain('execution times out, is cancelled, or produces no output');
+    expect(member.agent.config.systemPrompt).toContain('times out, is cancelled, or produces no output');
     expect(member.agent.config.systemPrompt).not.toContain('EnterDiscussMode');
     expect(member.agent.config.systemPrompt).toContain('## Team Engineering');
     expect(member.agent.config.systemPrompt).toContain('Persistent Team members collaborate in the same parent session');
@@ -1982,7 +2066,10 @@ describe('Session.createAgent', () => {
       'TeamSpeak',
       'TeamStatus',
     ]));
-    expect(member.agent.tools.activeToolNames()).not.toEqual(expect.arrayContaining([
+    // A member runs a department of its own, so it gets the same management
+    // tools as main. Depth is bounded when a member is actually created, not by
+    // withholding the tool — `team.maxDepth` is editable while agents run.
+    expect(member.agent.tools.activeToolNames()).toEqual(expect.arrayContaining([
       'TeamCreate',
       'TeamDismiss',
       'TeamAssign',
@@ -2049,9 +2136,9 @@ describe('Session.createAgent', () => {
     expect(Object.keys(session.metadata.agents)).toEqual([main.id]);
   });
 
-  it('keeps Invite, Kick, and Decide exclusive to the main team lead', async () => {
+  it('lets a Team Agent manage its own department and refuses a discussion transcript', async () => {
     const session = new Session({
-      id: 'test-team-lead-boundary',
+      id: 'test-department-boundary',
       kaos: createFakeKaos({
         mkdir: vi.fn().mockResolvedValue(undefined),
         writeText: vi.fn().mockResolvedValue(0),
@@ -2075,11 +2162,62 @@ describe('Session.createAgent', () => {
         },
       },
     );
-    const host = new SessionSubagentHost(session, member.id);
+    const transcript = await session.createTeamDiscussion(main.id, 'Review the boundary.', [member.id]);
 
-    await expect(host.inviteToDiscussion([member.id])).rejects.toThrow('main agent');
-    await expect(host.kickFromDiscussion([member.id])).rejects.toThrow('main agent');
-    await expect(host.decideTeamDiscussion('continue', undefined, undefined, signal)).rejects.toThrow('main agent');
+    // A Team Agent chairs a department of its own, so the guard admits it. What
+    // it hits is the state it is actually missing — no Discuss mode, no active
+    // discussion — never a refusal to manage.
+    const memberHost = new SessionSubagentHost(session, member.id);
+    await expect(memberHost.inviteToDiscussion([member.id])).rejects.toThrow('Discuss mode is required');
+    await expect(memberHost.kickFromDiscussion([member.id])).rejects.toThrow('Discuss mode is required');
+    await expect(memberHost.decideTeamDiscussion('continue', undefined, undefined, signal))
+      .rejects.toThrow('There is no active team discussion');
+
+    // A discussion transcript records a department's discussion; it is not a
+    // node in the tree, so it manages nothing.
+    const transcriptHost = new SessionSubagentHost(session, transcript.id);
+    const refused = 'Only the main agent and Team Agents manage a department.';
+    await expect(transcriptHost.inviteToDiscussion([member.id])).rejects.toThrow(refused);
+    await expect(transcriptHost.kickFromDiscussion([member.id])).rejects.toThrow(refused);
+    await expect(transcriptHost.decideTeamDiscussion('continue', undefined, undefined, signal))
+      .rejects.toThrow(refused);
+    await expect(transcriptHost.createTeam([
+      { name: 'Nobody', mandate: 'Should never be hired.', role: 'none' },
+    ])).rejects.toThrow(refused);
+  });
+
+  it('lets a Team Agent hire its own members up to the configured depth', async () => {
+    const session = new Session({
+      id: 'test-department-depth',
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      initializeMainAgent: false,
+      config: { providers: {}, team: { maxDepth: 2 } },
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const hire = async (managerAgentId: string, name: string): Promise<string> => {
+      const host = new SessionSubagentHost(session, managerAgentId);
+      const [member] = await host.createTeam([{
+        name,
+        mandate: `${name} mandate`,
+        role: `${name} role`,
+      }]);
+      if (member === undefined) throw new Error('TeamCreate returned no member.');
+      return member.agentId;
+    };
+
+    const leadId = await hire(main.id, 'Lead');
+    // Depth 1 hires depth 2: the tree grows without going through main.
+    const workerId = await hire(leadId, 'Worker');
+    expect(session.getAgentMetadata(workerId)?.teamLeaderAgentId).toBe(leadId);
+
+    // Depth 2 is the limit, so its own hire would land at depth 3.
+    await expect(hire(workerId, 'TooDeep')).rejects.toThrow('depth');
+    expect(session.teamMemberMetadata(workerId)).toEqual([]);
   });
 
   it('delivers each shared TeamSpeak statement once per participant and blocks unscheduled sends', async () => {

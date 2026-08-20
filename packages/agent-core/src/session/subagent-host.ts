@@ -29,6 +29,7 @@ import type {
   TeamIdentity,
 } from './index';
 import TEAM_AGENT_EXECUTION_PROMPT from './team-agent-execution.md?raw';
+import { directMessageRelation } from './team-tree';
 
 export const DEFAULT_TEAM_DISCUSSION_MEMBER_TIMEOUT_MS = 2 * 60 * 1000;
 export const DEFAULT_TEAM_DISCUSSION_FIRST_RESPONSE_TIMEOUT_MS = 10 * 1000;
@@ -98,7 +99,7 @@ export class SessionSubagentHost {
   async createTeam(
     members: readonly TeamIdentity[],
   ): Promise<Array<{ readonly agentId: string; readonly identity: TeamIdentity }>> {
-    this.assertTeamLead();
+    this.assertDepartmentManager();
     this.preflightTeamCreation(members);
     const created: Array<{ readonly agentId: string; readonly identity: TeamIdentity }> = [];
     try {
@@ -142,16 +143,8 @@ export class SessionSubagentHost {
     }
   }
 
-  private assertTeamLead(): void {
-    // Narrow unit tests use a Session-shaped transport mock. Preserve their
-    // main-agent behavior while enforcing the real Session guard at runtime.
-    if (typeof this.session.assertTeamLead === 'function') {
-      this.session.assertTeamLead(this.ownerAgentId);
-      return;
-    }
-    if (this.ownerAgentId !== 'main') {
-      throw new Error('Team management is available only to the main agent.');
-    }
+  private assertDepartmentManager(): void {
+    this.session.assertTeamManager(this.ownerAgentId);
   }
 
   async dismissTeam(
@@ -268,9 +261,7 @@ export class SessionSubagentHost {
         // The write lease is tied to settlement, regardless of turn outcome.
       } finally {
         try {
-          if (typeof this.session.notifyMissingTeamReport === 'function') {
-            await this.session.notifyMissingTeamReport(agentId, assignedAt);
-          }
+          await this.session.notifyMissingTeamReport(agentId, assignedAt);
           await this.session.releaseTeamAssignment(this.ownerAgentId, agentId, assignedAt);
         } catch {
           // Lease cleanup is fire-and-forget after a terminal turn. The
@@ -314,22 +305,20 @@ export class SessionSubagentHost {
   ): Promise<TeamDirectMessageDelivery> {
     signal.throwIfAborted();
     const sender = this.session.getAgentMetadata(this.ownerAgentId);
-    const leaderAgentId = this.ownerAgentId === 'main'
-      ? 'main'
-      : sender?.teamLeaderAgentId;
-    if (leaderAgentId === undefined) {
-      throw new Error('TeamDM is available only to the main agent and team members.');
+    const relation = directMessageRelation(
+      { agentId: this.ownerAgentId, node: sender },
+      { agentId: targetAgentId, node: this.session.getAgentMetadata(targetAgentId) },
+    );
+    if (relation === undefined) {
+      throw new Error(
+        `TeamDM target "${targetAgentId}" is not reachable from here. You may message your parent, the members you hired, or a peer in the same department.`,
+      );
     }
-    const target = this.session.getAgentMetadata(targetAgentId);
-    const targetIsLead = targetAgentId === leaderAgentId;
-    const targetIsTeamMember =
-      target?.kind === 'team' && target.teamLeaderAgentId === leaderAgentId;
-    if (!targetIsLead && !targetIsTeamMember) {
-      throw new Error(`TeamDM target "${targetAgentId}" is not in this team.`);
-    }
+    // Reports travel upward only, so a report's recipient is the sender's parent
+    // by definition. `main` has no parent and therefore never reports.
     const reportToParent = report;
     if (reportToParent !== undefined) {
-      if (this.ownerAgentId === leaderAgentId || !targetIsLead) {
+      if (relation !== 'parent') {
         throw new Error('Team reports must be sent by a Team Agent to its direct parent.');
       }
       await this.session.recordTeamReport(this.ownerAgentId, reportToParent.status, reportToParent.summary);
@@ -339,9 +328,11 @@ export class SessionSubagentHost {
     // model context, but tag it distinctly so transcript projections can
     // avoid rendering it as a normal user/Discuss message after refresh.
     const origin = this.teamDirectMessagePromptOrigin(
-      this.ownerAgentId === leaderAgentId ? undefined : sender,
-      this.ownerAgentId === leaderAgentId ? leaderAgentId : this.ownerAgentId,
-      this.ownerAgentId === leaderAgentId ? 'lead' : 'team',
+      this.ownerAgentId === 'main' ? undefined : sender,
+      this.ownerAgentId,
+      // A node chairing its own department speaks as that department's lead;
+      // otherwise it speaks as a member of its parent's.
+      relation === 'member' ? 'lead' : 'team',
     );
     const input = [{
       type: 'text' as const,
@@ -416,10 +407,8 @@ export class SessionSubagentHost {
   }
 
   async inviteToDiscussion(agentIds: readonly string[]): Promise<TeamDiscussionMeta> {
-    this.assertTeamLead();
-    if (typeof this.session.assertTeamDiscussionMode === 'function') {
-      await this.session.assertTeamDiscussionMode(this.ownerAgentId);
-    }
+    this.assertDepartmentManager();
+    await this.session.assertTeamDiscussionMode(this.ownerAgentId);
     const active = this.requireActiveDiscussion();
     const current = new Set(active.meta.discussion!.participantAgentIds);
     const members = new Set(this.session.teamMemberMetadata(this.ownerAgentId).map(([id]) => id));
@@ -439,10 +428,8 @@ export class SessionSubagentHost {
   }
 
   async kickFromDiscussion(agentIds: readonly string[]): Promise<TeamDiscussionMeta> {
-    this.assertTeamLead();
-    if (typeof this.session.assertTeamDiscussionMode === 'function') {
-      await this.session.assertTeamDiscussionMode(this.ownerAgentId);
-    }
+    this.assertDepartmentManager();
+    await this.session.assertTeamDiscussionMode(this.ownerAgentId);
     const active = this.requireActiveDiscussion();
     const current = new Set(active.meta.discussion!.participantAgentIds);
     for (const id of agentIds) {
@@ -462,9 +449,7 @@ export class SessionSubagentHost {
   }
 
   async lockTeamWritesForDiscuss(): Promise<void> {
-    if (typeof this.session.lockTeamAssignments === 'function') {
-      await this.session.lockTeamAssignments(this.ownerAgentId);
-    }
+    await this.session.lockTeamAssignments(this.ownerAgentId);
   }
 
   async decideTeamDiscussion(
@@ -474,7 +459,7 @@ export class SessionSubagentHost {
     signal: AbortSignal,
     statement?: string,
   ): Promise<TeamDiscussionResult> {
-    this.assertTeamLead();
+    this.assertDepartmentManager();
     let active = this.session.activeTeamDiscussion(this.ownerAgentId);
     if (action === 'start') {
       if (active !== undefined) throw new Error('A team discussion is already active. Use continue or archive it first.');
@@ -495,7 +480,7 @@ export class SessionSubagentHost {
       active = [created.id, this.session.getAgentMetadata(created.id)!];
     }
     if (active === undefined) throw new Error('There is no active team discussion. Start one first.');
-    if (action === 'continue' && typeof this.session.ensureTeamDiscussionMode === 'function') {
+    if (action === 'continue') {
       await this.session.ensureTeamDiscussionMode(this.ownerAgentId);
     }
     const activeDiscussion = active[1].discussion;
@@ -671,14 +656,12 @@ export class SessionSubagentHost {
     publishLeadStatement = true,
   ): Promise<TeamDiscussionResult> {
     const round = (discussion.round ?? 0) + 1;
-    const updatedDiscussion = typeof this.session.updateTeamDiscussion === 'function'
-      ? await this.session.updateTeamDiscussion(discussionAgentId, {
-        participantAgentIds: discussion.participantAgentIds,
-        status: discussion.status,
-        topic: discussion.topic,
-        round,
-      })
-      : { ...discussion, round };
+    const updatedDiscussion = await this.session.updateTeamDiscussion(discussionAgentId, {
+      participantAgentIds: discussion.participantAgentIds,
+      status: discussion.status,
+      topic: discussion.topic,
+      round,
+    });
     await this.appendDiscussionEvent(
       discussionAgentId,
       `第 ${String(round)} 轮讨论开始`,
@@ -690,9 +673,7 @@ export class SessionSubagentHost {
     // lead statement. The initial round may also specify participants, but its
     // lead statement must still be published before the first member turn.
     if (leadStatement && publishLeadStatement) {
-      if (typeof this.session.publishLeadDiscussionStatement === 'function') {
-        await this.session.publishLeadDiscussionStatement(this.ownerAgentId, leadStatement);
-      }
+      await this.session.publishLeadDiscussionStatement(this.ownerAgentId, leadStatement);
       statements.push({ agentId: this.ownerAgentId, statement: leadStatement, skipped: false });
     }
     for (const agentId of scheduledAgentIds ?? discussion.participantAgentIds) {
