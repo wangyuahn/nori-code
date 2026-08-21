@@ -144,11 +144,12 @@ export function parseMessageId(
 }
 
 /**
- * TeamDM prompts are durable model-context transport, not chat history. They
- * stay available to the recipient's model but remain hidden from REST and
- * snapshot consumers that rebuild the human-facing transcript. Older records
- * used `team_lead`/`team_member` plus the TeamDM system-reminder wrapper, so
- * that shape is recognized without hiding ordinary team prompts.
+ * TeamDM and Chat prompts are durable model-context transport, not chat
+ * history. They stay available to the recipient's model but remain hidden
+ * from REST and snapshot consumers that rebuild the human-facing transcript
+ * (Chat renders from the department's persisted chat log instead). Older
+ * records used `team_lead`/`team_member` plus the TeamDM system-reminder
+ * wrapper, so that shape is recognized without hiding ordinary team prompts.
  */
 export function isInternalTeamDirectMessage(message: ContextMessage): boolean {
   const origin = message.origin;
@@ -160,7 +161,7 @@ export function isInternalTeamDirectMessage(message: ContextMessage): boolean {
     && /^\s*<system-reminder>/i.test(rawText);
   return message.role === 'user'
     && origin?.kind === 'system_trigger'
-    && (origin.name === 'team_dm' || legacyTeamDm);
+    && (origin.name === 'team_dm' || origin.name === 'team_chat' || legacyTeamDm);
 }
 
 /**

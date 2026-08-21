@@ -24,6 +24,7 @@ import {
 import type {
   Session,
   TeamAssignment,
+  TeamChatMessageRecord,
   TeamDiscussionMeta,
   TeamDiscussionStatementRecord,
   TeamIdentity,
@@ -374,6 +375,63 @@ export class SessionSubagentHost {
       await this.session.acknowledgeTeamReport(this.ownerAgentId);
     }
     return { delivered: true, processing: 'completed' };
+  }
+
+  /**
+   * Posts one message to this agent's own department Chat — the sibling-only
+   * channel among the members who share its parent. Chat has no chair and
+   * that parent never participates or reads it.
+   *
+   * Delivery force-injects into every mentioned recipient via `turn.steer`,
+   * which the loop now interrupts at the next tool-call boundary rather than
+   * waiting for the recipient's turn to end on its own.
+   */
+  async sendChatMessage(
+    message: string,
+    mentions: readonly string[],
+    signal: AbortSignal,
+  ): Promise<TeamChatMessageRecord> {
+    signal.throwIfAborted();
+    const sender = this.session.getAgentMetadata(this.ownerAgentId);
+    if (sender?.kind !== 'team' || sender.teamLeaderAgentId === undefined) {
+      throw new Error('Chat is only available to a member of a department.');
+    }
+    const leaderAgentId = sender.teamLeaderAgentId;
+    const members = this.session.teamMemberMetadata(leaderAgentId);
+    const targets = mentions.includes('all')
+      ? members.filter(([agentId]) => agentId !== this.ownerAgentId)
+      : members.filter(([agentId]) => agentId !== this.ownerAgentId && mentions.includes(agentId));
+    const unknown = mentions.filter((id) => id !== 'all' && !members.some(([agentId]) => agentId === id));
+    if (unknown.length > 0) {
+      throw new Error(`Chat mention target(s) not found in this department: ${unknown.join(', ')}`);
+    }
+    const record = await this.session.postTeamChatMessage(
+      leaderAgentId,
+      this.ownerAgentId,
+      sender.name ?? '团队成员',
+      message,
+      mentions,
+    );
+    const origin = this.teamChatPromptOrigin(this.ownerAgentId, sender.name);
+    const input = [{ type: 'text' as const, text: wrapTeamChatMessage(sender.name ?? this.ownerAgentId, message) }];
+    await Promise.all(targets.map(async ([agentId]) => {
+      const agent = await this.session.ensureAgentResumed(agentId);
+      await waitForAgentCompaction(agent, signal);
+      if (agent.turn.hasActiveTurn) {
+        agent.turn.steer(input, origin);
+        return;
+      }
+      const start = await startAgentPrompt(agent, input, origin, signal);
+      if (start.kind === 'busy') {
+        agent.turn.steer(input, origin);
+        return;
+      }
+      // An idle member with no launched turn has nothing to steer into; Chat
+      // is best-effort delivery, so it is skipped rather than failing the send.
+      if (start.kind === 'unstarted') return;
+      await runAgentTurnToCompletion(agent, signal);
+    }));
+    return record;
   }
 
   async getTeamStatus(): Promise<TeamStatusResult> {
@@ -926,6 +984,22 @@ export class SessionSubagentHost {
     };
   }
 
+  /**
+   * Chat is tagged `team_chat`, distinct from `team_dm`, so transcript
+   * projection and the UI can route it to a separate channel/tab.
+   */
+  private teamChatPromptOrigin(speakerId: string, speakerName: string | undefined): PromptOrigin {
+    return {
+      kind: 'system_trigger',
+      name: 'team_chat',
+      speaker: {
+        from: 'team',
+        speakerId,
+        speakerName: speakerName ?? '团队成员',
+      },
+    };
+  }
+
   async startBtw(): Promise<string> {
     const parent = await this.session.ensureAgentResumed(this.ownerAgentId);
     const { id, agent: child } = await this.session.createAgent(
@@ -1085,6 +1159,11 @@ function parseTeamVote(text: string): TeamVote['vote'] {
 
 function wrapTeamDirectMessage(message: string): string {
   return `<system-reminder>\n${message.trim()}\n</system-reminder>`;
+}
+
+/** Chat wraps with the sender's name inline — it is a group channel, not a 1:1 line. */
+function wrapTeamChatMessage(senderName: string, message: string): string {
+  return `<system-reminder>\n[Chat] ${senderName}: ${message.trim()}\n</system-reminder>`;
 }
 
 function escapeXmlAttribute(value: string): string {

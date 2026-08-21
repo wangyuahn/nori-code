@@ -284,7 +284,10 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       persistenceKaos,
       toolServices: runtime,
       browserProvider: this.browserProvider,
-      config,
+      // Read live, not captured: `setKimiConfig` rewrites config.toml and
+      // reloads while this session runs, and settings the user edits there
+      // (team.maxDepth, customAgents) must reach an already-running session.
+      config: () => this.config,
       id,
       homedir: summary.sessionDir,
       kimiHomeDir: this.homeDir,
@@ -444,7 +447,8 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       persistenceKaos,
       toolServices: runtime,
       browserProvider: this.browserProvider,
-      config,
+      // Live, for the same reason as in `createSession` above.
+      config: () => this.config,
       id: summary.id,
       homedir: summary.sessionDir,
       kimiHomeDir: this.homeDir,

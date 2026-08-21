@@ -76,7 +76,14 @@ import { loadNoriYamlConfig, createNoriProvidersFromConfig } from "./nori-provid
 export interface SessionOptions {
   readonly kaos: Kaos;
   readonly persistenceKaos?: Kaos;
-  readonly config?: KimiConfig;
+  /**
+   * The runtime config. Pass a function to read it live: `config.toml` is
+   * rewritten while sessions run (`setKimiConfig`), and a session that captured
+   * one object keeps answering from the file as it was at startup. Values the
+   * settings UI edits — `team.maxDepth`, `customAgents` — must be read live or
+   * the setting silently does nothing until restart.
+   */
+  readonly config?: KimiConfig | (() => KimiConfig);
   readonly id?: string | undefined;
   readonly homedir: string;
   readonly kimiHomeDir?: string;
@@ -136,6 +143,26 @@ export interface AgentMeta {
   readonly teamReport?: TeamReportRecord;
   /** Present only on an agent-scoped, archived-or-active team discussion transcript. */
   readonly discussion?: TeamDiscussionMeta;
+  /**
+   * This node's own department chat log — messages among its direct members
+   * only. Never includes this node itself. Persists for the agent's lifetime;
+   * unlike `discussion`, it is never archived or replaced.
+   */
+  readonly chat?: TeamChatMeta;
+}
+
+export interface TeamChatMeta {
+  readonly nextMessageId?: number;
+  readonly messages?: readonly TeamChatMessageRecord[];
+}
+
+export interface TeamChatMessageRecord {
+  readonly messageId: number;
+  readonly agentId: string;
+  readonly name: string;
+  readonly message: string;
+  readonly mentions: readonly string[];
+  readonly sentAt: string;
 }
 
 export interface TeamIdentity {
@@ -351,8 +378,18 @@ export class Session {
     }
   }
 
+  /**
+   * The runtime config as it stands right now. Resolves the accessor form of
+   * `options.config` on every read, so a session started before a `config.toml`
+   * rewrite answers from the current file rather than from a startup snapshot.
+   */
+  private get runtimeConfig(): KimiConfig | undefined {
+    const { config } = this.options;
+    return typeof config === 'function' ? config() : config;
+  }
+
   async updateCustomAgents(customAgents: KimiConfig['customAgents']): Promise<void> {
-    const config = this.options.config;
+    const config = this.runtimeConfig;
     if (config === undefined) return;
 
     config.customAgents = customAgents;
@@ -416,7 +453,7 @@ export class Session {
     const noriConfig = loadNoriYamlConfig(cwd);
     const autoProviders = createNoriProvidersFromConfig(
       noriConfig,
-      this.options.config ?? { providers: {} },
+      this.runtimeConfig ?? { providers: {} },
       cwd,
     );
     const noriWorkflow = resolveNoriWorkflowConfig(noriConfig);
@@ -935,6 +972,44 @@ export class Session {
     return true;
   }
 
+  /**
+   * Appends one message to `departmentLeaderAgentId`'s department Chat log.
+   * Chat is a sibling-only, never-archived channel, isolated from Discuss —
+   * the log lives on the parent's own metadata but the parent is never a
+   * participant (see `directMessageRelation`'s `'sibling'` case).
+   */
+  async postTeamChatMessage(
+    departmentLeaderAgentId: string,
+    senderAgentId: string,
+    senderName: string,
+    message: string,
+    mentions: readonly string[],
+  ): Promise<TeamChatMessageRecord> {
+    const meta = this.metadata.agents[departmentLeaderAgentId];
+    if (meta === undefined) {
+      throw new KimiError(ErrorCodes.AGENT_NOT_FOUND, `Department leader "${departmentLeaderAgentId}" was not found.`);
+    }
+    const chat = meta.chat ?? {};
+    const messageId = chat.nextMessageId ?? 1;
+    const record: TeamChatMessageRecord = {
+      messageId,
+      agentId: senderAgentId,
+      name: senderName,
+      message,
+      mentions,
+      sentAt: new Date().toISOString(),
+    };
+    this.metadata.agents[departmentLeaderAgentId] = {
+      ...meta,
+      chat: {
+        nextMessageId: messageId + 1,
+        messages: [...(chat.messages ?? []), record],
+      },
+    };
+    await this.writeMetadata();
+    return record;
+  }
+
   async notifyMissingTeamReport(agentId: string, assignmentId: string): Promise<boolean> {
     const meta = this.metadata.agents[agentId];
     const report = meta?.teamReport;
@@ -1449,7 +1524,7 @@ export class Session {
     const context = await prepareSystemPromptContext(
       this.systemContextKaos(agent.kaos.getcwd()),
       this.options.kimiHomeDir,
-      { additionalDirs: this.additionalDirs, customAgents: this.options.config?.customAgents },
+      { additionalDirs: this.additionalDirs, customAgents: this.runtimeConfig?.customAgents },
     );
     agent.useProfile(profile, context, this.options.kimiHomeDir);
     const { agentsMdWarning } = context;
@@ -1488,7 +1563,7 @@ export class Session {
       const context = await prepareSystemPromptContext(
         this.systemContextKaos(this.toolKaos.getcwd()),
         this.options.kimiHomeDir,
-        { additionalDirs: this.additionalDirs, customAgents: this.options.config?.customAgents },
+        { additionalDirs: this.additionalDirs, customAgents: this.runtimeConfig?.customAgents },
       );
       this.agentsMdWarning = context.agentsMdWarning;
     } catch (error) {
@@ -1728,7 +1803,7 @@ export class Session {
 
   /** Team levels allowed below `main`, from `team.maxDepth` in config. */
   teamMaxDepth(): number {
-    return this.options.config?.team?.maxDepth ?? DEFAULT_TEAM_MAX_DEPTH;
+    return this.runtimeConfig?.team?.maxDepth ?? DEFAULT_TEAM_MAX_DEPTH;
   }
 
   /**
@@ -1808,7 +1883,7 @@ export class Session {
       teamMember,
       kaos: this.toolKaos.withCwd(cwd),
       toolServices,
-      config: this.options.config,
+      config: this.runtimeConfig,
       homedir,
       skills: this.skills,
       rpc: proxyWithExtraPayload(this.rpc, { agentId: id }),
@@ -1836,7 +1911,7 @@ export class Session {
         prepareSystemPromptContext(
           this.systemContextKaos(agent.kaos.getcwd()),
           this.options.kimiHomeDir,
-          { additionalDirs: agent.getAdditionalDirs(), customAgents: this.options.config?.customAgents },
+          { additionalDirs: agent.getAdditionalDirs(), customAgents: this.runtimeConfig?.customAgents },
         ),
     });
     return agent;
@@ -1986,7 +2061,7 @@ export class Session {
       const noriConfig = loadNoriYamlConfig(cwd);
       const autoProviders = createNoriProvidersFromConfig(
         noriConfig,
-        this.options.config ?? { providers: {} },
+        this.runtimeConfig ?? { providers: {} },
         cwd,
       );
       const optionsProviders = this.options.noriProviders;
@@ -2124,7 +2199,7 @@ const TEAM_MANAGEMENT_TOOLS = [
  * A member additionally speaks in its parent's discussion. `main` has no parent,
  * so it never takes a participant turn and does not get `TeamSpeak`.
  */
-const TEAM_MEMBER_TOOLS = [...TEAM_MANAGEMENT_TOOLS, 'TeamSpeak'] as const;
+const TEAM_MEMBER_TOOLS = [...TEAM_MANAGEMENT_TOOLS, 'TeamSpeak', 'TeamChat'] as const;
 
 
 function validateTeamIdentity(identity: TeamIdentity | undefined): asserts identity is TeamIdentity {

@@ -789,6 +789,9 @@ function handleSettingsSelection(host: SlashCommandHost, value: SettingsSelectio
     case 'workflow':
       showWorkflowPicker(host);
       return;
+    case 'team':
+      void showTeamPicker(host);
+      return;
   }
 }
 
@@ -845,6 +848,9 @@ export async function handleSettingCommand(host: SlashCommandHost, args: string)
       return;
     case 'note':
       showNoteRulesPicker(host);
+      return;
+    case 'team':
+      await handleSettingTeam(host, subcommand, value);
       return;
     default:
       host.showError(`Unknown setting: ${section}`);
@@ -1191,4 +1197,85 @@ function showNumberPicker(
       },
     }),
   );
+}
+
+// ---------------------------------------------------------------------------
+// Team — department tree settings (config.toml `team.*`)
+// ---------------------------------------------------------------------------
+
+/** Schema bounds for `team.maxDepth` (see config/schema.ts). */
+const TEAM_MIN_DEPTH = 1;
+const TEAM_MAX_DEPTH = 5;
+/** Fallback when unset — mirrors DEFAULT_TEAM_MAX_DEPTH in session/team-tree.ts. */
+const TEAM_DEFAULT_DEPTH = 2;
+
+async function showTeamPicker(host: SlashCommandHost): Promise<void> {
+  let depth = TEAM_DEFAULT_DEPTH;
+  try {
+    const config = await host.harness.getConfig({ reload: true });
+    depth = config.team?.maxDepth ?? TEAM_DEFAULT_DEPTH;
+  } catch (error) {
+    host.showError(`Failed to read team settings: ${formatErrorMessage(error)}`);
+    return;
+  }
+
+  const options: ChoiceOption[] = [
+    {
+      value: 'max-depth',
+      label: `Max Department Depth: ${depth}`,
+      description:
+        'How many levels of sub-members a member may create. 1 keeps a flat team; higher values allow nested departments.',
+    },
+  ];
+
+  host.mountEditorReplacement(
+    new ChoicePickerComponent({
+      title: 'Team',
+      hint: '↑↓ navigate · Enter select · Esc back',
+      options,
+      onSelect: (value) => {
+        host.restoreEditor();
+        if (value === 'max-depth') showTeamDepthPicker(host, depth);
+      },
+      onCancel: () => {
+        host.restoreEditor();
+      },
+    }),
+  );
+}
+
+function showTeamDepthPicker(host: SlashCommandHost, current: number): void {
+  showNumberPicker(host, 'Max Department Depth', TEAM_MIN_DEPTH, TEAM_MAX_DEPTH, current, (v) => {
+    void applyTeamMaxDepth(host, v);
+  });
+}
+
+async function applyTeamMaxDepth(host: SlashCommandHost, maxDepth: number): Promise<void> {
+  try {
+    await host.harness.setConfig({ team: { maxDepth } });
+    host.showStatus(`Max department depth: ${maxDepth}`);
+  } catch (error) {
+    host.showError(`Failed to set max department depth: ${formatErrorMessage(error)}`);
+  }
+}
+
+async function handleSettingTeam(
+  host: SlashCommandHost,
+  subcommand: string | undefined,
+  value: string | undefined,
+): Promise<void> {
+  if (subcommand === undefined) {
+    await showTeamPicker(host);
+    return;
+  }
+  if (subcommand !== 'max-depth') {
+    host.showError('Usage: /setting team max-depth <1-5>');
+    return;
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < TEAM_MIN_DEPTH || parsed > TEAM_MAX_DEPTH) {
+    host.showError(`Usage: /setting team max-depth <${TEAM_MIN_DEPTH}-${TEAM_MAX_DEPTH}>`);
+    return;
+  }
+  await applyTeamMaxDepth(host, parsed);
 }

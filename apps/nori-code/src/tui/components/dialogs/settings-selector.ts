@@ -11,7 +11,8 @@ export type SettingsSelection =
   | 'coder-write'
   | 'note-rules'
   | 'read-only'
-  | 'workflow';
+  | 'workflow'
+  | 'team';
 
 const SETTINGS_OPTIONS: readonly ChoiceOption[] = [
   {
@@ -69,6 +70,11 @@ const SETTINGS_OPTIONS: readonly ChoiceOption[] = [
     label: 'Workflow',
     description: 'Configure review gate thresholds and auto-review behavior.',
   },
+  {
+    value: 'team',
+    label: 'Team',
+    description: 'Configure the team engineering tree, such as the maximum department depth.',
+  },
 ];
 
 function isSettingsSelection(value: string): value is SettingsSelection {
@@ -83,7 +89,8 @@ function isSettingsSelection(value: string): value is SettingsSelection {
     value === 'coder-write' ||
     value === 'note-rules' ||
     value === 'read-only' ||
-    value === 'workflow'
+    value === 'workflow' ||
+    value === 'team'
   );
 }
 

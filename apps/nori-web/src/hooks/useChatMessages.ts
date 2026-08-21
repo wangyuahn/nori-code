@@ -443,14 +443,14 @@ export function apiMessageToChat(m: Message): ChatMessage | null {
   const originKind = origin?.kind;
   const turnId = typeof m.metadata?.turn_id === 'string' ? m.metadata.turn_id : undefined;
   const rawText = messagePlainText(m);
-  // TeamDM is an internal prompt transport. It remains in the agent's model
-  // context, but must not reappear as a human-visible chat message when REST
-  // history is replayed after refresh.
+  // TeamDM and Chat are internal prompt transports. They remain in the
+  // agent's model context, but must not reappear as human-visible chat
+  // messages when REST history is replayed after refresh.
   const isLegacyTeamDm = m.role === 'user'
     && originKind === 'system_trigger'
     && (origin?.name === 'team_lead' || origin?.name === 'team_member')
     && /^\s*<system-reminder>/i.test(rawText);
-  if (m.role === 'user' && originKind === 'system_trigger' && (origin?.name === 'team_dm' || isLegacyTeamDm)) {
+  if (m.role === 'user' && originKind === 'system_trigger' && (origin?.name === 'team_dm' || origin?.name === 'team_chat' || isLegacyTeamDm)) {
     return null;
   }
   // Tool-result records are transport entries, not standalone assistant

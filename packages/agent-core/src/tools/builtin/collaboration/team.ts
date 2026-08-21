@@ -158,6 +158,31 @@ export class TeamDMTool implements BuiltinTool<TeamDMInput> {
   }
 }
 
+export const TeamChatInputSchema = z.object({
+  message: z.string().trim().min(1).max(4_000),
+  mentions: z.array(z.string().trim().min(1)).min(1).max(16),
+}).strict();
+export type TeamChatInput = z.infer<typeof TeamChatInputSchema>;
+
+export class TeamChatTool implements BuiltinTool<TeamChatInput> {
+  readonly name = 'TeamChat' as const;
+  readonly description = 'Post to your department\'s persistent group chat — siblings only, your parent never sees it. Mention who should stop and read now via mentions (agent_id) or ["all"]; unmentioned members are not interrupted. Chat is for staying aligned while working, not for review — use TeamDM/reports for that. Keep it short; finish your current step before replying if that\'s more useful than dropping it.';
+  readonly parameters = toInputJsonSchema(TeamChatInputSchema);
+
+  constructor(private readonly host: SessionSubagentHost) {}
+
+  resolveExecution(args: TeamChatInput): ToolExecution {
+    return {
+      description: 'Posting to department chat',
+      approvalRule: this.name,
+      execute: async (context) => {
+        const record = await this.host.sendChatMessage(args.message, args.mentions, context.signal);
+        return { output: JSON.stringify({ posted: record }) };
+      },
+    };
+  }
+}
+
 const DiscussionMembersSchema = z.object({
   agent_ids: z.array(z.string().trim().min(1)).min(1),
 }).strict();

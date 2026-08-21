@@ -146,30 +146,24 @@ describe('default agent profiles', () => {
       expect(prompt).toContain("user's goal");
       expect(prompt).toContain('record consensus');
       expect(prompt).toMatch(/deliver verified results|deliver a verified result|verified results/);
-      expect(prompt).toMatch(/(?:Do not default to using Write, Edit, or Bash yourself|Write, Edit, Bash are not the default)/);
+      expect(prompt).toContain('Do not default to using Write, Edit, or Bash yourself');
       expect(prompt).not.toContain('interactive coding agent');
     }
   });
 
-  it('renders the current lead collaboration contract', () => {
+  it('renders the sync-first collaboration contract', () => {
     for (const name of BUNDLED) {
       const prompt = DEFAULT_AGENT_PROFILES[name]?.systemPrompt(promptContext) ?? '';
-      expect(prompt).toContain('Discuss');
+      expect(prompt).toContain('silent parallel work');
+      expect(prompt).toContain('TeamCreate');
+      expect(prompt).toContain('TeamDecide action=start');
+      expect(prompt).toContain('TeamSpeak');
       expect(prompt).toContain('TeamAssign');
       expect(prompt).toContain('enters Code');
+      expect(prompt).toContain('TeamDecide action=continue');
       expect(prompt).toContain('TeamDM');
-      expect(prompt).toContain('available at any time');
-      expect(prompt).toContain('action=continue');
-      expect(prompt.indexOf('first call `TeamDecide` with `action=start`')).toBeLessThan(
-        prompt.indexOf('After Discuss starts'),
-      );
-      expect(prompt).toContain('only the user\'s goal, background, known constraints, and open questions');
-      expect(prompt).toContain('must not pre-commit a complete');
-      expect(prompt).toContain('independent analysis');
-      expect(prompt).toContain('agreement with the lead alone is not a contribution');
-      expect(prompt).toContain('Discuss converges');
-      expect(prompt).toContain('consume every report');
-      expect(prompt).toContain('before coordinating shared review');
+      expect(prompt).toContain('not after');
+      expect(prompt).toContain('is not a contribution');
       expect(prompt).not.toContain('Plan mode');
       expect(prompt).not.toContain('plan file');
       expect(prompt).not.toContain('Swarm');
@@ -177,30 +171,23 @@ describe('default agent profiles', () => {
     }
   });
 
-  it('renders the lead-first Discuss gate and current tool permissions', () => {
+  it('names the re-sync triggers and conflict handling', () => {
     for (const name of BUNDLED) {
       const prompt = DEFAULT_AGENT_PROFILES[name]?.systemPrompt(promptContext) ?? '';
-      expect(prompt).toContain('main Agent');
-      expect(prompt).toMatch(/process administrator|process coordinator|project administrator/);
-      expect(prompt).toContain('not a coding agent');
-      expect(prompt).toContain('very simple');
-      expect(prompt).toMatch(/joint|shared/);
-      expect(prompt).toContain('TeamDecide');
-      expect(prompt).toContain('action=start');
-      expect(prompt).toContain('action=continue');
-      expect(prompt).toContain('shared scope');
-      expect(prompt).toContain('division of labor');
-      expect(prompt).toContain('completion criteria');
-      expect(prompt).toContain('member proposals');
-      expect(prompt).toMatch(/material disagreement|disagrees on any material point/);
-      expect(prompt).toContain('TeamDM');
-      expect(prompt).toContain('TeamSpeak');
-      expect(prompt).toContain('read-only');
-      expect(prompt).toContain('latest content tag');
-      expect(prompt).toContain('automatic branch or merge');
-      expect(prompt).toContain('`completed`, `blocked`, or `needs_decision`');
-      expect(prompt).toContain('TeamStatus');
+      expect(prompt).toContain("don't wait for a final report");
+      expect(prompt).toContain('completed`/`blocked`/`needs_decision');
+      expect(prompt).toContain('Edit tag mismatches');
+      expect(prompt).toContain('Never overwrite verified work');
       expect(prompt).not.toContain('EnterDiscussMode');
+    }
+  });
+
+  it('keeps the department Chat guidance on member prompts only', () => {
+    // Chat is a sibling-only channel: `main` has no siblings, so the guidance
+    // lives in the member-only `team-agent.md`, not the shared contract.
+    for (const name of BUNDLED) {
+      const prompt = DEFAULT_AGENT_PROFILES[name]?.systemPrompt(promptContext) ?? '';
+      expect(prompt).not.toContain('TeamChat');
     }
   });
 
@@ -208,13 +195,9 @@ describe('default agent profiles', () => {
     for (const name of BUNDLED) {
       const prompt = DEFAULT_AGENT_PROFILES[name]?.systemPrompt(promptContext) ?? '';
       expect(prompt).toContain('## Team Engineering');
-      expect(prompt).toContain('process administrator, discussion host, coordinator, consensus recorder');
-      expect(prompt).toContain('Persistent Team members collaborate in the same parent session');
-      expect(prompt).toContain('preserving their identities and context');
-      expect(prompt).toContain('parent session');
-      expect(prompt).toContain('parallel execution');
-      expect(prompt).toContain('Memory and regular tools may be shared only when');
-      expect(prompt).toContain('There is no automatic branch or merge workflow');
+      expect(prompt).toContain('Be concrete and brief in every Discuss turn and every report');
+      expect(prompt).toContain('Never overwrite verified work');
+      expect(prompt).toContain('do not use Write, Edit, or Bash yourself');
       expect(prompt.match(/## Team Engineering/g)).toHaveLength(1);
       expect(prompt).not.toContain('EnterDiscussMode');
       expect(prompt).not.toContain('Swarm');
