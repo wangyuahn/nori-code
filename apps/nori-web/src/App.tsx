@@ -185,6 +185,23 @@ export function App() {
   };
   const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, activeTurnId, sessionStatus, agentTreeRevision, discussionTurnAgentId, departmentChat, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort } = useChatMessages(sessionId, activeAgentId, activeSession?.title);
   const globalApprovals = useGlobalApprovals();
+  // 团队智能体胶囊已删除，agent 列表改由这里直接轮询，供部门框与消息气泡使用。
+  useEffect(() => {
+    setSessionAgents([]);
+    if (!sessionId) return;
+    let disposed = false;
+    const load = async () => {
+      try {
+        const result = await api.sessions.getAgents(sessionId);
+        if (!disposed) setSessionAgents(result.items ?? []);
+      } catch {
+        // 轮询失败保持上一次列表，下一轮重试。
+      }
+    };
+    void load();
+    const timer = window.setInterval(() => { void load(); }, 4_000);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [sessionId, agentTreeRevision]);
   const browserPermissions = useBrowserPermissions();
   const sessionActiveAgentCount = countActiveAgents(activity, sessionId ?? undefined);
   const sessionTreeTokens = sessionAgents.reduce((total, agent) => total + (agent.tokens ?? 0), 0);
@@ -554,20 +571,6 @@ export function App() {
             onSelectWorkspace={() => { setActiveView('chat'); selectSessionAgent(null); }}
           />
           <div className="top-bar-actions">
-            {activeView === 'chat' && <SessionAgentTree
-              sessionId={sessionId}
-              selectedAgentId={activeAgentId}
-              backgroundTasks={backgroundTasks.tasks}
-              backgroundLoading={backgroundTasks.loading}
-              backgroundError={backgroundTasks.error}
-              hasGlobalActivity={effectiveGlobalActiveAgentCount > 0}
-              sessionStatus={sessionStatus}
-              agentTreeRevision={agentTreeRevision}
-              discussionTurnAgentId={discussionTurnAgentId}
-              onSelectAgent={selectSessionAgent}
-              onAgentsChange={updateSessionAgents}
-              onBackgroundTaskCancelled={backgroundTasks.markCancelled}
-            />}
             <div className="session-chip" title={activeSession?.id ?? tr('No active session', '无活动会话')}><span className={`status-dot${activeSession ? ' active' : ' idle'}`} /><span>{activeSession?.title || tr('No session', '无会话')}</span></div>
           </div>
           <WindowControls />

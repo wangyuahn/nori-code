@@ -1462,12 +1462,12 @@ select.input option {
    Nori Desktop shell refresh
    ========================================================================== */
 :root {
-  --nori-bg: #151515;
-  --nori-surface: #1c1c1c;
-  --nori-surface-raised: #232323;
-  --nori-surface-hover: #292929;
-  --nori-bg-elevated: #232323;
-  --nori-border: #303030;
+  --nori-bg: #181818;
+  --nori-surface: #1e1e1e;
+  --nori-surface-raised: #242424;
+  --nori-surface-hover: #262626;
+  --nori-bg-elevated: #222222;
+  --nori-border: #2b2b2b;
   --nori-text: #ffffff;
   --nori-text-secondary: #ffffff;
   --nori-text-muted: #c9c9c9;
@@ -1478,13 +1478,13 @@ select.input option {
   --nori-radius-sm: 8px;
   --nori-shadow: 0 18px 50px rgba(0, 0, 0, 0.24);
   color-scheme: dark;
-  --nori-shell: #151515;
-  --nori-topbar: #151515;
-  --nori-statusbar: #191919;
-  --nori-control: #202020;
-  --nori-control-hover: #292929;
-  --nori-control-active: #303030;
-  --nori-border-strong: #3a3a3a;
+  --nori-shell: #181818;
+  --nori-topbar: #181818;
+  --nori-statusbar: #1c1c1c;
+  --nori-control: #222222;
+  --nori-control-hover: #282828;
+  --nori-control-active: #2e2e2e;
+  --nori-border-strong: #343434;
   --nori-font-ui: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
 }
 
@@ -3479,7 +3479,6 @@ kbd {
 .workspace-chat-layout .workspace-inspector.inspector-overview-open { top: 14px; }
 .workspace-chat-layout:has(.inspector-view-open) > .chat-view { width: calc(100% - var(--inspector-effective-width) - 14px); }
 .workspace-chat-layout:has(.inspector-overview-open) > .chat-view { width: calc(100% - clamp(252px, 24vw, 340px) - 14px); }
-.workspace-chat-layout:has(.inspector-overview-auto-hide) > .chat-view { width: 100%; }
 .workspace-inspector-resizer { position: absolute; z-index: 25; top: 14px; right: calc(var(--inspector-effective-width) - 49px); bottom: 14px; display: none; width: 8px; overflow: hidden; padding: 0; border: 0; outline: 0; background: transparent; cursor: ew-resize; pointer-events: auto; touch-action: none; }
 .workspace-chat-layout:has(.inspector-view-open) > .workspace-inspector-resizer { display: block; }
 .sidebar-resizer,
@@ -3593,14 +3592,6 @@ kbd {
 .inspector-collapse-button { display: grid; width: calc(100% - 36px); min-height: 38px; flex: none; place-items: center; margin: 2px 18px 12px; padding: 0; border-top: 1px solid var(--nori-border) !important; border-radius: 0 0 10px 10px !important; color: var(--nori-text-secondary) !important; transition: color 160ms ease, background-color 160ms ease, transform 160ms ease; }
 .inspector-collapse-button:hover { color: var(--nori-text) !important; background: var(--nori-control-hover); transform: translateY(-1px); }
 .inspector-navigation.compact .inspector-collapse-button { margin: 4px 6px 7px; }
-.workspace-chat-layout .workspace-inspector.inspector-overview-auto-hide:not(.standalone) {
-  right: 0;
-  pointer-events: auto;
-  transform: translateX(calc(100% - 10px));
-  transition: width 260ms cubic-bezier(.2, .82, .2, 1), inset 260ms cubic-bezier(.2, .82, .2, 1), transform 240ms cubic-bezier(.2, .82, .2, 1);
-}
-.workspace-chat-layout .workspace-inspector.inspector-overview-auto-hide:not(.standalone):hover,
-.workspace-chat-layout .workspace-inspector.inspector-overview-auto-hide:not(.standalone):focus-within { transform: translateX(0); }
 .inspector-stage {
   display: flex;
   width: 0;
@@ -4672,8 +4663,12 @@ kbd {
 
 
 /* 右侧部门实时框：聊天视图变为 转录 | 部门框 两栏 */
-.chat-view { display: flex; align-items: stretch; min-width: 0; }
-.chat-view .chat-messages-shell { flex: 1 1 auto; min-width: 0; }
+/* 部门实时框：与消息流并排（shell 内部横向分栏），composer 保持全宽 */
+.chat-messages-shell { display: flex; align-items: stretch; }
+.chat-messages-shell > .chat-messages { flex: 1 1 auto; width: auto !important; height: auto !important; min-width: 0; min-height: 0; }
+.chat-messages-shell > .department-rail { position: relative; flex: 0 0 300px; max-height: 100%; }
+.chat-view .composer-context-strip,
+.chat-view .chat-composer-wrap { flex: none; }
 .department-rail {
   display: flex;
   flex-direction: column;
@@ -4742,3 +4737,157 @@ kbd {
 .discuss-badge { font-style: normal; color: var(--nori-accent, currentColor); border: 1px solid currentColor; border-radius: 999px; padding: 0 7px; font-size: calc(10px * var(--nori-ui-font-scale)); }
 .team-tree-empty { padding: 40px 16px; color: var(--nori-text-secondary); text-align: center; }
 .team-tree-footer { display: flex; align-items: center; gap: 7px; padding: 10px 6px 2px; color: var(--nori-text-secondary); font-size: calc(11px * var(--nori-ui-font-scale)); }
+
+
+/* 输入框上方的 Goal / Todo 平铺条 */
+.composer-context-strip { display: flex; flex-direction: column; gap: 4px; padding: 0 18px 6px; }
+.composer-goal-row {
+  display: flex; align-items: center; gap: 8px; min-width: 0;
+  padding: 5px 10px;
+  border: 1px solid var(--nori-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--nori-surface) 70%, transparent);
+  color: var(--nori-text-secondary);
+  font-size: calc(12px * var(--nori-ui-font-scale));
+}
+.composer-goal-row > svg { flex: none; }
+.composer-goal-objective { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--nori-text); }
+.composer-goal-status { flex: none; font-style: normal; color: var(--nori-cyan); }
+.composer-goal-row.goal-complete .composer-goal-status { color: var(--nori-ok, #3fb27f); }
+.composer-goal-actions { display: inline-flex; gap: 6px; margin-left: auto; flex: none; }
+.composer-goal-actions button {
+  padding: 1px 8px; border: 1px solid var(--nori-border); border-radius: 6px;
+  background: transparent; color: var(--nori-text-secondary);
+  font-size: calc(11px * var(--nori-ui-font-scale)); cursor: pointer;
+}
+.composer-goal-actions button:hover { color: var(--nori-text); border-color: var(--nori-text-secondary); }
+.composer-goal-actions button.danger:hover { color: #e07a6a; border-color: #e07a6a; }
+.composer-todos {
+  padding: 5px 10px;
+  border: 1px solid var(--nori-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--nori-surface) 70%, transparent);
+}
+.composer-todos-head { display: flex; align-items: center; gap: 7px; color: var(--nori-text-secondary); font-size: calc(11px * var(--nori-ui-font-scale)); }
+.composer-todos-head em { font-style: normal; margin-left: auto; }
+.composer-todos ul { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 0; max-height: 132px; overflow-y: auto; }
+.composer-todos li { display: flex; align-items: baseline; gap: 8px; padding: 1px 0; font-size: calc(12px * var(--nori-ui-font-scale)); color: var(--nori-text); }
+.composer-todos li i { flex: none; width: 12px; text-align: center; font-style: normal; color: var(--nori-text-muted); }
+.composer-todos li.todo-done span { color: var(--nori-text-muted); text-decoration: line-through; }
+.composer-todos li.todo-in_progress i { color: var(--nori-cyan); }
+
+
+/* ===== 工具面板彻底停靠（删除悬浮岛形态）===== */
+.workspace-chat-layout { display: flex; align-items: stretch; }
+.workspace-chat-layout > .chat-view { width: auto !important; flex: 1 1 auto; min-width: 0; }
+.workspace-inspector-resizer { display: none !important; }
+.workspace-chat-layout .workspace-inspector,
+.workspace-chat-layout .workspace-inspector.inspector-overview-open,
+.workspace-chat-layout .workspace-inspector.inspector-view-open {
+  position: static !important;
+  inset: auto !important;
+  z-index: auto;
+  display: flex;
+  flex: 0 0 clamp(252px, 21vw, 318px);
+  width: clamp(252px, 21vw, 318px);
+  height: auto;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0;
+  overflow: hidden;
+  border-left: 1px solid var(--nori-border);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--nori-surface) 55%, transparent);
+  box-shadow: none;
+  pointer-events: auto;
+  transition: none;
+}
+.inspector-navigation,
+.workspace-chat-layout .inspector-navigation {
+  width: 100%;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+  transition: none;
+  overflow-y: auto;
+}
+.inspector-overview-heading { padding: 11px 14px 6px; }
+.inspector-overview-heading strong { font-size: calc(12px * var(--nori-ui-font-scale)); font-weight: 600; color: var(--nori-text-muted); }
+.inspector-overview-heading span { display: none; }
+.inspector-activity-summary { margin: 0 14px 4px; padding-bottom: 8px; font-size: calc(10px * var(--nori-ui-font-scale)); }
+.inspector-activity-highlight strong { font-size: calc(11px * var(--nori-ui-font-scale)); }
+.inspector-tab-list { padding: 2px 6px 10px; gap: 1px; }
+.inspector-tab-list > button {
+  display: flex; align-items: center; gap: 9px;
+  min-height: 34px;
+  padding: 5px 8px;
+  border: none; border-radius: 7px;
+  background: transparent;
+  text-align: left;
+}
+.inspector-tab-list > button:hover { background: var(--nori-control-hover); transform: none; }
+.inspector-tab-list > button.active { background: color-mix(in srgb, var(--nori-cyan) 12%, transparent); }
+.inspector-nav-icon {
+  width: 20px; height: 20px; border-radius: 6px;
+  background: transparent;
+  color: var(--nori-text-secondary);
+  transform: none;
+}
+.inspector-tab-list > button:hover .inspector-nav-icon,
+.inspector-tab-list > button.active .inspector-nav-icon { color: var(--nori-cyan); background: transparent; transform: none; }
+.inspector-stage {
+  border: none;
+  border-left: 1px solid var(--nori-border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+@media (max-width: 760px) {
+  .workspace-chat-layout .workspace-inspector,
+  .workspace-chat-layout .workspace-inspector.inspector-view-open,
+  .workspace-chat-layout .workspace-inspector.inspector-overview-open {
+    position: static !important;
+    inset: auto !important;
+    flex: 0 0 min(280px, 62vw);
+    width: min(280px, 62vw);
+  }
+}
+
+
+/* ===== 左侧会话栏极简平铺 ===== */
+.session-project-header { min-height: 30px; padding: 3px 10px; }
+.session-project-copy small { display: none; }
+.session-project-copy strong { font-size: calc(11px * var(--nori-ui-font-scale)); color: var(--nori-text-muted); }
+.session-project-count { min-width: 0; padding: 0; border-radius: 0; background: transparent; color: var(--nori-text-muted); opacity: .8; }
+.session-project-items { gap: 1px; padding-left: 7px; }
+.session-project-items .sidebar-item-copy small { display: none; }
+.session-project-items .sidebar-item-copy strong { font-size: calc(12px * var(--nori-ui-font-scale)); font-weight: 450; color: var(--nori-text); }
+.sidebar-item-count { min-width: 0; padding: 0; border-radius: 0; background: transparent; color: var(--nori-text-muted); opacity: .75; }
+
+
+/* ===== 工具行：纯文本平铺（无卡片框）+ 恢复拖拽缩放 ===== */
+.inspector-overview-open .inspector-tab-list > button {
+  display: flex !important;
+  width: 100%;
+  min-height: 30px;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 8px;
+  border-bottom: none;
+  border-radius: 6px;
+}
+.inspector-overview-open .inspector-tab-list > button:hover { transform: none; }
+.inspector-tab-list em { min-width: 0; height: auto; padding: 0; border-radius: 0; background: transparent; opacity: .7; }
+.inspector-nav-copy strong { font-weight: 500; }
+.workspace-chat-layout .workspace-inspector-resizer {
+  display: block !important;
+  position: static;
+  z-index: auto;
+  top: auto; right: auto; bottom: auto;
+  flex: 0 0 5px;
+  width: 5px;
+  cursor: ew-resize;
+}

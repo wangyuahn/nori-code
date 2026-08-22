@@ -181,11 +181,11 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
   return <section
     className={`workspace-inspector${tab ? ' inspector-view-open' : ' inspector-overview-open'}${standalone ? ' standalone' : ''}`}
   >
-    {!standalone && <aside className={`inspector-navigation${tab ? ' compact' : ''}`} aria-label={tr('Inspector', '检查器')}>
+    {!standalone && <aside className="inspector-navigation" aria-label={tr('Inspector', '检查器')}>
       {tab === null && <header className="inspector-overview-heading"><div><span>{tr('Workspace', '工作区')}</span><strong>{tr('Tools', '工具')}</strong></div></header>}
       {tab === null && <WorkspaceActivitySummary mainWorking={mainWorking || isStreaming} agentCount={activeAgentCount} agentTokens={activeAgentTokens} />}
       <div className="inspector-tab-list" role="tablist" aria-label={tr('Inspector tools', '检查器工具')}>
-        {tabOrder.map(item => <InspectorTabButton key={item} tab={item} active={tab === item} compact={tab !== null} count={item === 'changes' ? changeCount : item === 'lsp' ? diagnosticCount : undefined} detail={inspectorTabDetail(item, { path, projectPath, sessionId, gitStatus, diagnosticCount, tr })} onClick={() => activateTab(item)} onMove={target => setTabOrder(previous => moveInspectorTab(previous, item, target))} />)}
+        {tabOrder.map(item => <InspectorTabButton key={item} tab={item} active={tab === item} compact={false} count={item === 'changes' ? changeCount : item === 'lsp' ? diagnosticCount : undefined} detail={inspectorTabDetail(item, { path, projectPath, sessionId, gitStatus, diagnosticCount, tr })} onClick={() => activateTab(item)} onMove={target => setTabOrder(previous => moveInspectorTab(previous, item, target))} />)}
       </div>
       {tab !== null && <button type="button" className="inspector-collapse-button" onClick={collapseInspector} title={tr('Collapse tool sidebar', '收起工具侧栏')} aria-label={tr('Collapse tool sidebar', '收起工具侧栏')}><Icon name="panel-left" size={17}/></button>}
     </aside>}
@@ -243,30 +243,15 @@ function WorkspaceActivitySummary({ mainWorking, agentCount, agentTokens }: { ma
   if (agentCount === 0 && !mainWorking) return null;
   const currentMainPhrase = mainPhrases[phraseIndex % mainPhrases.length];
   const currentAgentPhrase = agentPhrases[phraseIndex % agentPhrases.length];
-  const completedTodos = todos.filter(todo => todo.status === 'done').length;
-  const goalStatusLabel = goal === null
-    ? ''
-    : goal.status === 'active'
-      ? tr('Active', '进行中')
-      : goal.status === 'paused'
-        ? tr('Paused', '已暂停')
-        : goal.status === 'blocked'
-          ? tr('Blocked', '受阻')
-          : tr('Complete', '已完成');
-  const budgetItems = goal === null ? [] : [
-    goal.budget.turnBudget === null ? tr(`${goal.turnsUsed} turns`, `${goal.turnsUsed} 轮`) : tr(`${goal.turnsUsed}/${goal.budget.turnBudget} turns`, `${goal.turnsUsed}/${goal.budget.turnBudget} 轮`),
-    goal.budget.tokenBudget === null ? `${formatTokens(goal.tokensUsed)} tokens` : `${formatTokens(goal.tokensUsed)}/${formatTokens(goal.budget.tokenBudget)} tokens`,
-    formatGoalTime(goal.wallClockMs, tr),
-  ];
   const hasLiveActivity = mainWorking || agentCount > 0;
   const headline = mainWorking ? currentMainPhrase : currentAgentPhrase;
-  const icon = mainWorking ? 'sparkles' : agentCount > 0 ? 'git-branch' : goal ? 'target' : 'list';
+  const icon = mainWorking ? 'sparkles' : 'git-branch';
   const statusSummary = [
     mainWorking ? tr('Nori active', 'Nori 工作中') : '',
     agentCount > 0 ? tr(`${agentCount} agents`, `${agentCount} 个智能体`) : '',
   ].filter(Boolean).join(' · ');
 
-  return <section className={`inspector-activity-summary${goal ? ` goal-${goal.status}` : ''}`} aria-live={mainWorking || agentCount > 0 ? 'polite' : undefined}>
+  return <section className="inspector-activity-summary" aria-live={mainWorking || agentCount > 0 ? 'polite' : undefined}>
     {hasLiveActivity && <div className="inspector-activity-highlight">
       <span className="inspector-activity-icon"><Icon name={icon} size={14}/></span>
       <span><small>{statusSummary}</small><strong>{headline}</strong></span>

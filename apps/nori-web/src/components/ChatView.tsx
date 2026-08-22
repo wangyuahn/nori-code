@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type UIEvent } from 'react';
-import { api, type ApprovalRequest, type ModelCatalogItem, type PromptAttachment, type PromptExecutionOptions, type QuestionAnswer, type QuestionRequest, type Session, type SessionAgent, type SessionAgentChatResponse, type SessionAgentConfig, type SessionRealtimeStatus, type TeamChatMessage, type TokenUsage } from '../api/client';
+import { api, type ApprovalRequest, type GoalSnapshot, type ModelCatalogItem, type PromptAttachment, type PromptExecutionOptions, type QuestionAnswer, type QuestionRequest, type Session, type SessionAgent, type SessionAgentChatResponse, type SessionAgentConfig, type SessionRealtimeStatus, type TeamChatMessage, type TokenUsage } from '../api/client';
 import { apiMessageToChat, foldConversationTurns, mergeWorkBlocks, type ChatMessage, type QueuedPrompt, type TodoItem, type ToolCall, type WorkBlock } from '../hooks/useChatMessages';
 import { useBrowserPermissions, type BrowserPermissionRequest, type BrowserPermissionDecision } from '../hooks/useBrowser';
 import { useI18n } from '../i18n';
@@ -213,7 +213,7 @@ function ComposerSettingPicker({ id, label, ariaLabel, value, choices, open, dis
 }
 
 export function ChatView(props: ChatViewProps) {
-  const { session, agentId = 'main', sessionAgents = [], departmentChat, discussionActive = false, departmentRevision = 0, allSessions = [], messages, messagesLoading = false, streaming, thinking, workBlocks = [], isStreaming, streamingTurnId = null, activeAgentTokens, sessionStatus, compacting = false, models, modelsLoading, modelError, onSendMessage, onAbort, onRefreshModels, onModelChange, onThinkingChange, onPermissionChange, onRunSlashCommand, pendingApprovals = [], onResolveApproval, globalApprovals = [], onResolveGlobalApproval, onApprovalPermissionChange, approvalSessionTitles = {}, approvalResolvingIds = new Set(), approvalErrors = {}, onOpenApprovalSession, showApprovalPanel = true, pendingQuestions = [], onResolveQuestion, onDismissQuestion, queuedPrompts = [], onCancelQueuedPrompt, draftAgentConfig, rewindLimit = 10, onRewind, browserPermissionsOverride, onResolveBrowserPermissionOverride } = props;
+  const { session, agentId = 'main', sessionAgents = [], departmentChat, discussionActive = false, departmentRevision = 0, allSessions = [], messages, messagesLoading = false, streaming, thinking, workBlocks = [], isStreaming, streamingTurnId = null, activeAgentTokens, sessionStatus, compacting = false, models, modelsLoading, modelError, onSendMessage, onAbort, onRefreshModels, onModelChange, onThinkingChange, onPermissionChange, onRunSlashCommand, pendingApprovals = [], onResolveApproval, globalApprovals = [], onResolveGlobalApproval, onApprovalPermissionChange, approvalSessionTitles = {}, approvalResolvingIds = new Set(), approvalErrors = {}, onOpenApprovalSession, showApprovalPanel = true, pendingQuestions = [], onResolveQuestion, onDismissQuestion, queuedPrompts = [], onCancelQueuedPrompt, todos = [], onGoalControl, draftAgentConfig, rewindLimit = 10, onRewind, browserPermissionsOverride, onResolveBrowserPermissionOverride } = props;
   const { tr } = useI18n();
   const localBrowserPermissions = useBrowserPermissions();
   const browserPermissions = browserPermissionsOverride === undefined
@@ -892,8 +892,20 @@ export function ChatView(props: ChatViewProps) {
         return <button type="button" key={turn.id} data-turn-id={turn.id} className={highlightedTurnId === turn.id ? 'active' : ''} aria-current={activeTurnId === turn.id ? 'step' : undefined} aria-describedby={previewOpen ? previewId : undefined} onPointerEnter={() => setHoveredTurnId(turn.id)} onFocus={() => setHoveredTurnId(turn.id)} onBlur={() => setHoveredTurnId(null)} onClick={() => scrollToTurn(turn.id)} aria-label={tr(`Go to turn ${index + 1}: ${prompt}`, `跳转到第 ${index + 1} 轮：${prompt}`)}><i/>{previewOpen && <span id={previewId} className="chat-turn-preview" role="tooltip"><strong>{prompt}</strong>{response && <span>{response}</span>}</span>}</button>;
       })}
     </nav>}
+    {departmentChatActive && <DepartmentRail
+      sessionId={session?.id ?? null}
+      selfAgentId={agentId}
+      leaderAgentId={departmentChat?.department_leader_agent_id ?? null}
+      chatMessages={departmentChat?.messages ?? []}
+      sessionAgents={sessionAgents}
+      tab={departmentTab}
+      onTabChange={setDepartmentTab}
+      discussionActive={discussionActive}
+      discussionRevision={departmentRevision}
+    />}
     </div>
 
+    <ComposerContextStrip goal={sessionStatus?.goal ?? null} todos={todos} onGoalControl={onGoalControl}/>
     <div className="chat-composer-wrap">
       {!followOutput && <button className="chat-jump-latest" onClick={jumpToLatest} title={tr('Jump to latest', '回到最新消息')} aria-label={tr('Jump to latest', '回到最新消息')}><Icon name="chevron-down" size={16}/></button>}
       {pendingQuestions.length > 0 && onResolveQuestion && onDismissQuestion && <QuestionPanel requests={pendingQuestions} onSubmit={onResolveQuestion} onDismiss={onDismissQuestion}/>}
@@ -972,17 +984,6 @@ export function ChatView(props: ChatViewProps) {
         <footer><button type="button" onClick={() => setRewindRequest(null)}>{tr('Cancel', '取消')}</button><button type="button" className="primary" autoFocus onClick={() => void confirmRewind()}>{tr('Rewind', '回溯')}</button></footer>
       </section>
     </div>}
-    {departmentChatActive && <DepartmentRail
-      sessionId={session?.id ?? null}
-      selfAgentId={agentId}
-      leaderAgentId={departmentChat?.department_leader_agent_id ?? null}
-      chatMessages={departmentChat?.messages ?? []}
-      sessionAgents={sessionAgents}
-      tab={departmentTab}
-      onTabChange={setDepartmentTab}
-      discussionActive={discussionActive}
-      discussionRevision={departmentRevision}
-    />}
   </section>;
 }
 
@@ -1406,6 +1407,57 @@ function DepartmentRail({ sessionId, selfAgentId, leaderAgentId, chatMessages, s
 function messageTimeOf(message: ChatMessage): number {
   const parsed = Date.parse(message.createdAt ?? '');
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/** 输入框上方的 Goal / Todo 平铺条：一行目标 + 扁平待办列表，无卡片装饰。 */
+function ComposerContextStrip({ goal, todos, onGoalControl }: {
+  goal: GoalSnapshot | null;
+  todos: TodoItem[];
+  onGoalControl?: (action: 'pause' | 'resume' | 'cancel') => void | Promise<void>;
+}) {
+  const { tr } = useI18n();
+  if (goal === null && todos.length === 0) return null;
+  const goalStatusLabel = goal === null
+    ? ''
+    : goal.status === 'active'
+      ? tr('Active', '进行中')
+      : goal.status === 'paused'
+        ? tr('Paused', '已暂停')
+        : goal.status === 'blocked'
+          ? tr('Blocked', '受阻')
+          : tr('Complete', '已完成');
+  const done = todos.filter(todo => todo.status === 'done').length;
+  return (
+    <div className="composer-context-strip">
+      {goal !== null && <div className={`composer-goal-row goal-${goal.status}`}>
+        <Icon name="target" size={13}/>
+        <strong>{tr('Goal', '目标')}</strong>
+        <span className="composer-goal-objective" title={goal.objective}>{goal.objective}</span>
+        <em className="composer-goal-status">{goalStatusLabel}</em>
+        {onGoalControl !== undefined && goal.status !== 'complete' && (
+          <span className="composer-goal-actions">
+            {goal.status === 'active'
+              ? <button type="button" onClick={() => void onGoalControl('pause')}>{tr('Pause', '暂停')}</button>
+              : <button type="button" onClick={() => void onGoalControl('resume')}>{tr('Resume', '继续')}</button>}
+            <button type="button" className="danger" onClick={() => { if (window.confirm(tr('Cancel this goal?', '取消这个目标吗？'))) void onGoalControl('cancel'); }}>{tr('Cancel', '取消')}</button>
+          </span>
+        )}
+      </div>}
+      {todos.length > 0 && (
+        <div className="composer-todos">
+          <div className="composer-todos-head"><Icon name="list" size={12}/><strong>{tr('Todo list', '待办')}</strong><em>{done}/{todos.length}</em></div>
+          <ul>
+            {todos.map((todo, index) => (
+              <li key={`${todo.title}-${index}`} className={`todo-${todo.status}`}>
+                <i aria-hidden="true">{todo.status === 'done' ? '✓' : todo.status === 'in_progress' ? '▸' : '○'}</i>
+                <span>{todo.title}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ChatRailPane({ messages, selfAgentId, sessionAgents }: {
