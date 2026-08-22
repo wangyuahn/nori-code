@@ -1148,6 +1148,54 @@ describe('SessionService agent tree', () => {
   });
 });
 
+describe('SessionService department chat', () => {
+  it('serves the leader chat log to a member and nothing to a non-member', async () => {
+    const created = await svc.create({ metadata: { cwd: '/tmp/chat' } });
+    state.metas.set(created.id, {
+      title: 'Chat',
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      isCustomTitle: true,
+      agents: {
+        main: {
+          homedir: '/tmp/main',
+          type: 'main',
+          parentAgentId: null,
+          chat: {
+            nextMessageId: 2,
+            messages: [
+              { messageId: 1, agentId: 'agent_member', name: 'Member', message: 'cache key changed', mentions: ['all'], sentAt: '2026-08-20T00:00:00.000Z' },
+            ],
+          },
+        },
+        agent_member: {
+          homedir: '/tmp/member',
+          type: 'sub',
+          parentAgentId: 'main',
+          kind: 'team',
+          teamLeaderAgentId: 'main',
+          name: 'Member',
+        },
+      },
+      custom: {},
+    });
+
+    const memberView = await svc.getDepartmentChat(created.id, 'agent_member');
+    expect(memberView).toEqual({
+      department_leader_agent_id: 'main',
+      messages: [
+        { message_id: 1, agent_id: 'agent_member', name: 'Member', message: 'cache key changed', mentions: ['all'], sent_at: '2026-08-20T00:00:00.000Z' },
+      ],
+    });
+
+    // The parent never reads its department's chat; unknown ids are equally blind.
+    const mainView = await svc.getDepartmentChat(created.id, 'main');
+    expect(mainView).toEqual({ department_leader_agent_id: null, messages: [] });
+    const unknownView = await svc.getDepartmentChat(created.id, 'agent_ghost');
+    expect(unknownView).toEqual({ department_leader_agent_id: null, messages: [] });
+  });
+});
+
 describe('SessionService.archive', () => {
   it('calls bridge.rpc.archiveSession and returns { archived: true }', async () => {
     const created = await svc.create({ metadata: { cwd: '/tmp/d' } });

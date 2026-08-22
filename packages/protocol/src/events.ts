@@ -428,6 +428,15 @@ export interface DiscussionUpdatedEvent {
   readonly currentTurnAgentId?: string | null;
 }
 
+/** Emitted when a message is posted to a department's sibling-only Chat log. */
+export interface TeamChatUpdatedEvent {
+  readonly type: 'team.chat.updated';
+  /** The department leader whose metadata holds the chat log. */
+  readonly departmentLeaderAgentId: string;
+  /** The member that posted the message. */
+  readonly senderAgentId: string;
+}
+
 export interface SkillActivatedEvent {
   readonly type: 'skill.activated';
   readonly activationId: string;
@@ -698,6 +707,7 @@ export type AgentEvent =
   | ModelCatalogChangedEvent
   | GoalUpdatedEvent
   | DiscussionUpdatedEvent
+  | TeamChatUpdatedEvent
   | SkillActivatedEvent
   | PluginCommandActivatedEvent
   | TurnStartedEvent
@@ -1124,6 +1134,12 @@ export const discussionUpdatedEventSchema = z.object({
   currentTurnAgentId: z.string().min(1).nullable().optional(),
 }) satisfies z.ZodType<DiscussionUpdatedEvent>;
 
+export const teamChatUpdatedEventSchema = z.object({
+  type: z.literal('team.chat.updated'),
+  departmentLeaderAgentId: z.string().min(1),
+  senderAgentId: z.string().min(1),
+}) satisfies z.ZodType<TeamChatUpdatedEvent>;
+
 export const skillActivatedEventSchema = z.object({
   type: z.literal('skill.activated'),
   activationId: z.string(),
@@ -1377,6 +1393,7 @@ export const agentEventSchema = z.discriminatedUnion('type', [
   modelCatalogChangedEventSchema,
   goalUpdatedEventSchema,
   discussionUpdatedEventSchema,
+  teamChatUpdatedEventSchema,
   skillActivatedEventSchema,
   pluginCommandActivatedEventSchema,
   turnStartedEventSchema,

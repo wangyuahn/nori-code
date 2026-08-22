@@ -974,15 +974,10 @@ export class TurnFlow {
               await this.agent.fullCompaction.afterStep();
               deduper.endStep();
 
-              // A steered message (TeamDM, team Chat, background notification) waits
-              // for the current tool call to finish, then interrupts here rather than
-              // for the whole turn to end — "interrupt between tool calls" instead of
-              // "queue until this agent stops on its own", which is what let steers sit
-              // unread for a long, uninterrupted stretch of tool-only steps.
-              if (stopReason === 'tool_use' && this.steerBuffer.length > 0) {
-                return { stopTurn: true };
-              }
-
+              // A steered message (TeamDM, team Chat, background notification) is
+              // flushed by `beforeStep` before every LLM call, so it reaches the
+              // model at the next tool-call boundary without waiting for the turn
+              // to end on its own.
               // NORI workflow gate: terminal stops may need one more model pass
               // for review orchestration. This replaces the old passive
               // SuggestionEngine path, which appended suggestions but never

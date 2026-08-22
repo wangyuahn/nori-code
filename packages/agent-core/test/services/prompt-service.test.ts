@@ -307,6 +307,7 @@ function makeSessionService(): {
     createChild: vi.fn() as unknown as ISessionService['createChild'],
     getStatus: vi.fn() as unknown as ISessionService['getStatus'],
     listAgents: vi.fn() as unknown as ISessionService['listAgents'],
+    getDepartmentChat: vi.fn() as unknown as ISessionService['getDepartmentChat'],
     getSessionWarnings: vi.fn() as unknown as ISessionService['getSessionWarnings'],
     compact: vi.fn() as unknown as ISessionService['compact'],
     undo: vi.fn() as unknown as ISessionService['undo'],

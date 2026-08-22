@@ -3,7 +3,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api, getWebSocketProtocols, type ApprovalRequest, type GoalSnapshot, type Message, type MessageContent, type PromptAttachment, type PromptExecutionOptions, type QuestionAnswer, type QuestionRequest, type SessionRealtimeStatus, type TokenUsage } from '../api/client';
+import { api, getWebSocketProtocols, type ApprovalRequest, type GoalSnapshot, type Message, type MessageContent, type PromptAttachment, type PromptExecutionOptions, type QuestionAnswer, type QuestionRequest, type SessionAgentChatResponse, type SessionRealtimeStatus, type TokenUsage } from '../api/client';
 import { playNotificationSound } from '../notificationSounds';
 
 export interface ToolCall {
@@ -167,6 +167,8 @@ export interface UseChatMessagesResult {
   sessionStatus: SessionRealtimeStatus | null;
   agentTreeRevision: number;
   discussionTurnAgentId: string | null | undefined;
+  departmentChat: SessionAgentChatResponse;
+  refreshDepartmentChat: () => Promise<void>;
   refreshSessionStatus: () => Promise<SessionRealtimeStatus | null>;
   compacting: boolean;
   pendingApprovals: ApprovalRequest[];
@@ -1128,6 +1130,7 @@ export function useChatMessages(
   const [sessionStatus, setSessionStatus] = useState<SessionRealtimeStatus | null>(null);
   const [agentTreeRevision, setAgentTreeRevision] = useState(0);
   const [discussionTurnAgentId, setDiscussionTurnAgentId] = useState<string | null | undefined>(undefined);
+  const [departmentChat, setDepartmentChat] = useState<SessionAgentChatResponse>({ department_leader_agent_id: null, messages: [] });
   const [compacting, setCompacting] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
   const [pendingQuestions, setPendingQuestions] = useState<QuestionRequest[]>([]);
@@ -1299,6 +1302,18 @@ export function useChatMessages(
     return applyHistoryItems(data?.items ?? [], targetSessionId, targetAgentId, replace);
   }, [agentId, applyHistoryItems, sessionId]);
 
+  const refreshDepartmentChat = useCallback(async (targetSessionId = sessionId, targetAgentId = agentId) => {
+    if (!targetSessionId || targetAgentId === 'main') return;
+    try {
+      const chat = await api.sessions.getDepartmentChat(targetSessionId, targetAgentId);
+      if (hasCurrentScope(scopeRef, targetSessionId, targetAgentId)) {
+        setDepartmentChat(previous => preserveEqual(previous, chat));
+      }
+    } catch (error) {
+      console.error('Failed to load department chat:', error);
+    }
+  }, [agentId, sessionId]);
+
   useEffect(() => {
     setMessages([]);
     setMessagesLoading(Boolean(sessionId));
@@ -1320,6 +1335,7 @@ export function useChatMessages(
     setSessionStatus(null);
     setAgentTreeRevision(0);
     setDiscussionTurnAgentId(undefined);
+    setDepartmentChat({ department_leader_agent_id: null, messages: [] });
     setPendingQuestions([]);
     attentionRequestIdsRef.current = new Set([
       ...pendingApprovals.map(request => `approval:${request.approval_id}`),
@@ -1338,7 +1354,8 @@ export function useChatMessages(
       .finally(() => {
         if (hasCurrentScope(scopeRef, sessionId, agentId)) setMessagesLoading(false);
       });
-  }, [agentId, clearDraft, refreshHistory, sessionId]);
+    void refreshDepartmentChat(sessionId, agentId);
+  }, [agentId, clearDraft, refreshDepartmentChat, refreshHistory, sessionId]);
 
   useEffect(() => {
     const ids = [
@@ -1729,6 +1746,9 @@ export function useChatMessages(
                   .catch(error => console.error('Discussion history refresh failed:', error));
               }
               break;
+            case 'team.chat.updated':
+              void refreshDepartmentChat(sessionId, agentId);
+              break;
             case 'error':
               playNotificationSound('error');
               console.error('Stream error:', payload);
@@ -1781,7 +1801,7 @@ export function useChatMessages(
       wsRef.current?.close();
       wsRef.current = null;
     };
-  }, [agentId, clearDraft, finishLiveTurn, hydrateInFlight, refreshHistory, refreshSessionStatus, sessionId]);
+  }, [agentId, clearDraft, finishLiveTurn, hydrateInFlight, refreshDepartmentChat, refreshHistory, refreshSessionStatus, sessionId]);
 
   useEffect(() => {
     if (!isStreaming || !sessionId) return;
@@ -2069,7 +2089,7 @@ export function useChatMessages(
     await refreshQuestions();
   }, [agentId, refreshQuestions, sessionId]);
 
-  return { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, activeTurnId, sessionStatus: statusForSession(sessionStatus, sessionStatusScopeRef.current, chatScopeKey(sessionId, agentId)), agentTreeRevision, discussionTurnAgentId, refreshSessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort };
+  return { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, activeTurnId, sessionStatus: statusForSession(sessionStatus, sessionStatusScopeRef.current, chatScopeKey(sessionId, agentId)), agentTreeRevision, discussionTurnAgentId, departmentChat, refreshDepartmentChat: () => refreshDepartmentChat(), refreshSessionStatus, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort };
 }
 
 export function statusForSession(

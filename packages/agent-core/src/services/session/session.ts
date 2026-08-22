@@ -11,6 +11,7 @@ import {
   type PageResponse,
   type Session,
   type SessionAgentTreeResponse,
+  type SessionAgentChatResponse,
   type SessionChildCreate,
   type SessionCreate,
   type SessionFork,
@@ -60,6 +61,13 @@ export interface ISessionService {
   getStatus(id: string, agentId?: string, ensureResumed?: boolean): Promise<SessionStatusResponse>;
 
   listAgents(id: string): Promise<SessionAgentTreeResponse>;
+
+  /**
+   * The department Chat log visible from `agentId`. Only a team member sees
+   * its department's log; any other node (main, a lead, unknown id) gets an
+   * empty log with a null leader — the parent never reads its members' chat.
+   */
+  getDepartmentChat(id: string, agentId: string): Promise<SessionAgentChatResponse>;
 
   /** Returns active agent work without resuming or loading session transcripts. */
   listActiveAgentActivity?(): readonly SessionAgentActivity[];

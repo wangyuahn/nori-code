@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type UIEvent } from 'react';
-import { api, type ApprovalRequest, type ModelCatalogItem, type PromptAttachment, type PromptExecutionOptions, type QuestionAnswer, type QuestionRequest, type Session, type SessionAgent, type SessionAgentConfig, type SessionRealtimeStatus, type TokenUsage } from '../api/client';
-import { mergeWorkBlocks, type ChatMessage, type QueuedPrompt, type TodoItem, type ToolCall, type WorkBlock } from '../hooks/useChatMessages';
+import { api, type ApprovalRequest, type ModelCatalogItem, type PromptAttachment, type PromptExecutionOptions, type QuestionAnswer, type QuestionRequest, type Session, type SessionAgent, type SessionAgentChatResponse, type SessionAgentConfig, type SessionRealtimeStatus, type TeamChatMessage, type TokenUsage } from '../api/client';
+import { apiMessageToChat, foldConversationTurns, mergeWorkBlocks, type ChatMessage, type QueuedPrompt, type TodoItem, type ToolCall, type WorkBlock } from '../hooks/useChatMessages';
 import { useBrowserPermissions, type BrowserPermissionRequest, type BrowserPermissionDecision } from '../hooks/useBrowser';
 import { useI18n } from '../i18n';
 import { chatSlashCommandSuggestions, resolveChatSlashCommand, type ChatSlashCommand, type ChatSlashCommandName } from '../utils/chat-slash-commands';
@@ -22,6 +22,12 @@ export interface ChatViewProps {
   session: Session | null;
   agentId?: string;
   sessionAgents?: readonly SessionAgent[];
+  /** This member's department Chat log; null/absent for non-member views. */
+  departmentChat?: SessionAgentChatResponse | null;
+  /** True while a Discuss round is actively taking this member's turn. */
+  discussionActive?: boolean;
+  /** Bumps on tree/discussion updates so the rail can refetch. */
+  departmentRevision?: string | number;
   allSessions?: Session[];
   messages: ChatMessage[];
   messagesLoading?: boolean;
@@ -207,7 +213,7 @@ function ComposerSettingPicker({ id, label, ariaLabel, value, choices, open, dis
 }
 
 export function ChatView(props: ChatViewProps) {
-  const { session, agentId = 'main', sessionAgents = [], allSessions = [], messages, messagesLoading = false, streaming, thinking, workBlocks = [], isStreaming, streamingTurnId = null, activeAgentTokens, sessionStatus, compacting = false, models, modelsLoading, modelError, onSendMessage, onAbort, onRefreshModels, onModelChange, onThinkingChange, onPermissionChange, onRunSlashCommand, pendingApprovals = [], onResolveApproval, globalApprovals = [], onResolveGlobalApproval, onApprovalPermissionChange, approvalSessionTitles = {}, approvalResolvingIds = new Set(), approvalErrors = {}, onOpenApprovalSession, showApprovalPanel = true, pendingQuestions = [], onResolveQuestion, onDismissQuestion, queuedPrompts = [], onCancelQueuedPrompt, draftAgentConfig, rewindLimit = 10, onRewind, browserPermissionsOverride, onResolveBrowserPermissionOverride } = props;
+  const { session, agentId = 'main', sessionAgents = [], departmentChat, discussionActive = false, departmentRevision = 0, allSessions = [], messages, messagesLoading = false, streaming, thinking, workBlocks = [], isStreaming, streamingTurnId = null, activeAgentTokens, sessionStatus, compacting = false, models, modelsLoading, modelError, onSendMessage, onAbort, onRefreshModels, onModelChange, onThinkingChange, onPermissionChange, onRunSlashCommand, pendingApprovals = [], onResolveApproval, globalApprovals = [], onResolveGlobalApproval, onApprovalPermissionChange, approvalSessionTitles = {}, approvalResolvingIds = new Set(), approvalErrors = {}, onOpenApprovalSession, showApprovalPanel = true, pendingQuestions = [], onResolveQuestion, onDismissQuestion, queuedPrompts = [], onCancelQueuedPrompt, draftAgentConfig, rewindLimit = 10, onRewind, browserPermissionsOverride, onResolveBrowserPermissionOverride } = props;
   const { tr } = useI18n();
   const localBrowserPermissions = useBrowserPermissions();
   const browserPermissions = browserPermissionsOverride === undefined
@@ -246,6 +252,13 @@ export function ChatView(props: ChatViewProps) {
   const [permissionMenuOpen, setPermissionMenuOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [modelSettingOpen, setModelSettingOpen] = useState<'model' | 'thinking' | null>(null);
+  // Department rail: 开会 (Discuss statements) vs 交流 (sibling Chat log).
+  const [departmentTab, setDepartmentTab] = useState<'meeting' | 'chat'>('meeting');
+  const departmentChatActive = agentId !== 'main'
+    && (departmentChat?.department_leader_agent_id ?? null) !== null;
+  useEffect(() => {
+    if (discussionActive) setDepartmentTab('meeting');
+  }, [discussionActive]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const modelOverrideSessionRef = useRef<string | null>(null);
@@ -959,6 +972,17 @@ export function ChatView(props: ChatViewProps) {
         <footer><button type="button" onClick={() => setRewindRequest(null)}>{tr('Cancel', '取消')}</button><button type="button" className="primary" autoFocus onClick={() => void confirmRewind()}>{tr('Rewind', '回溯')}</button></footer>
       </section>
     </div>}
+    {departmentChatActive && <DepartmentRail
+      sessionId={session?.id ?? null}
+      selfAgentId={agentId}
+      leaderAgentId={departmentChat?.department_leader_agent_id ?? null}
+      chatMessages={departmentChat?.messages ?? []}
+      sessionAgents={sessionAgents}
+      tab={departmentTab}
+      onTabChange={setDepartmentTab}
+      discussionActive={discussionActive}
+      discussionRevision={departmentRevision}
+    />}
   </section>;
 }
 
@@ -1343,4 +1367,155 @@ function estimateStreamingTokens(text: string): number {
 
 function formatTokens(value: number): string {
   return new Intl.NumberFormat(undefined, { notation: value >= 10_000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(value);
+}
+
+
+/**
+ * 右侧部门实时框：开会（Discuss 发言流）与交流（兄弟成员群聊）两个标签。
+ * 自己的消息靠右，其他成员的靠左。人类只读——这是成员之间的通道。
+ */
+function DepartmentRail({ sessionId, selfAgentId, leaderAgentId, chatMessages, sessionAgents, tab, onTabChange, discussionActive, discussionRevision }: {
+  sessionId: string | null;
+  selfAgentId: string;
+  leaderAgentId: string | null;
+  chatMessages: TeamChatMessage[];
+  sessionAgents: readonly SessionAgent[];
+  tab: 'meeting' | 'chat';
+  onTabChange: (tab: 'meeting' | 'chat') => void;
+  discussionActive: boolean;
+  discussionRevision: string | number;
+}) {
+  const { tr } = useI18n();
+  return (
+    <aside className="department-rail" aria-label={tr('Department', '部门')}>
+      <nav className="department-tabs" role="tablist" aria-label={tr('Department views', '部门视图')}>
+        <button type="button" role="tab" aria-selected={tab === 'meeting'} className={tab === 'meeting' ? 'active' : ''} onClick={() => onTabChange('meeting')}>
+          {tr('Meeting', '开会')}{discussionActive && <i className="department-tab-dot" aria-label={tr('Meeting in progress', '会议进行中')} />}
+        </button>
+        <button type="button" role="tab" aria-selected={tab === 'chat'} className={tab === 'chat' ? 'active' : ''} onClick={() => onTabChange('chat')}>
+          {tr('Chat', '交流')}
+        </button>
+      </nav>
+      {tab === 'chat'
+        ? <ChatRailPane messages={chatMessages} selfAgentId={selfAgentId} sessionAgents={sessionAgents} />
+        : <DiscussRailPane sessionId={sessionId} leaderAgentId={leaderAgentId} selfAgentId={selfAgentId} sessionAgents={sessionAgents} revision={discussionRevision} />}
+    </aside>
+  );
+}
+
+function messageTimeOf(message: ChatMessage): number {
+  const parsed = Date.parse(message.createdAt ?? '');
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function ChatRailPane({ messages, selfAgentId, sessionAgents }: {
+  messages: TeamChatMessage[];
+  selfAgentId: string;
+  sessionAgents: readonly SessionAgent[];
+}) {
+  const { tr } = useI18n();
+  if (messages.length === 0) {
+    return <div className="department-rail-empty">{tr('No messages yet — members align here while working.', '还没有消息——成员工作时在这里交流。')}</div>;
+  }
+  return (
+    <div className="department-rail-body">
+      {messages.map(message => {
+        const own = message.agent_id === selfAgentId;
+        const agent = sessionAgents.find(candidate => candidate.agent_id === message.agent_id);
+        const name = agent?.name?.trim() || message.name || message.agent_id;
+        const mentions = message.mentions.filter(mention => mention !== 'all').map(mention =>
+          sessionAgents.find(candidate => candidate.agent_id === mention)?.name?.trim() || mention);
+        return (
+          <div key={message.message_id} className={'department-rail-row' + (own ? ' own' : '')}>
+            {!own && <div className="department-chat-avatar" aria-hidden="true"><span>{name.slice(0, 1)}</span></div>}
+            <div className="department-chat-bubble">
+              <div className="department-chat-meta">
+                {!own && <strong>{name}</strong>}
+                {message.mentions.includes('all') && <em>@{tr('all', '全体')}</em>}
+                {mentions.map(mention => <em key={mention}>@{mention}</em>)}
+                <time>{new Date(message.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
+              </div>
+              <div className="department-chat-text">{message.message}</div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DiscussRailPane({ sessionId, leaderAgentId, selfAgentId, sessionAgents, revision }: {
+  sessionId: string | null;
+  leaderAgentId: string | null;
+  selfAgentId: string;
+  sessionAgents: readonly SessionAgent[];
+  revision: string | number;
+}) {
+  const { tr } = useI18n();
+  const [rows, setRows] = useState<ChatMessage[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!sessionId || leaderAgentId === null) {
+      setRows([]);
+      setError(null);
+      return;
+    }
+    let disposed = false;
+    const load = async () => {
+      try {
+        // Prefer the department's active discussion; fall back to its most
+        // recent archived one so the meeting tab is never blank after a round.
+        const discussions = sessionAgents.filter(candidate =>
+          candidate.kind === 'discussion' && candidate.parent_agent_id === leaderAgentId);
+        const node = discussions.find(candidate => !candidate.archived) ?? discussions[discussions.length - 1];
+        if (node === undefined) {
+          if (!disposed) { setRows([]); setError(null); }
+          return;
+        }
+        const data = await api.sessions.getMessages(sessionId, { agent_id: node.agent_id, page_size: 100 });
+        if (disposed) return;
+        const mapped = (data.items ?? [])
+          .map(apiMessageToChat)
+          .filter((item): item is ChatMessage => item !== null)
+          .sort((a, b) => messageTimeOf(a) - messageTimeOf(b));
+        setRows(foldConversationTurns(mapped));
+        setError(null);
+      } catch (caught) {
+        if (!disposed) setError(caught instanceof Error ? caught.message : String(caught));
+      }
+    };
+    void load();
+    return () => { disposed = true; };
+  }, [sessionId, leaderAgentId, sessionAgents, revision]);
+  if (leaderAgentId === null) {
+    return <div className="department-rail-empty">{tr('No department.', '没有部门。')}</div>;
+  }
+  if (error !== null) {
+    return <div className="department-rail-empty">{error}</div>;
+  }
+  if (rows.length === 0) {
+    return <div className="department-rail-empty">{tr('No discussion yet. Open a Discuss round to start one.', '还没有讨论。开启一轮 Discuss 即可开始。')}</div>;
+  }
+  return (
+    <div className="department-rail-body">
+      {rows.map(row => {
+        const own = row.speaker?.id === selfAgentId || row.role === 'user';
+        const name = row.speaker?.name
+          ?? sessionAgents.find(candidate => candidate.agent_id === row.speaker?.id)?.name?.trim()
+          ?? tr('Lead', '主持');
+        return (
+          <div key={row.id} className={'department-rail-row' + (own ? ' own' : '')}>
+            {!own && <div className="department-chat-avatar" aria-hidden="true"><span>{name.slice(0, 1)}</span></div>}
+            <div className="department-chat-bubble">
+              <div className="department-chat-meta">
+                {!own && <strong>{name}</strong>}
+                {row.createdAt && <time>{new Date(row.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>}
+              </div>
+              <div className="department-chat-text">{row.text}</div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }

@@ -4582,3 +4582,163 @@ kbd {
   gap: calc(6px * var(--nori-ui-space-scale));
   padding: calc(4px * var(--nori-ui-space-scale)) calc(7px * var(--nori-ui-space-scale));
 }
+
+/* Department view: 开会 / 交流 tabs and the sibling Chat pane */
+.department-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 12px 0;
+  border-bottom: 1px solid var(--nori-border);
+  background: var(--nori-surface);
+}
+.department-tabs button {
+  position: relative;
+  padding: 6px 14px 7px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--nori-text-secondary);
+  font-size: calc(12px * var(--nori-ui-font-scale));
+  cursor: pointer;
+}
+.department-tabs button.active {
+  border-bottom-color: var(--nori-accent, currentColor);
+  color: var(--nori-text);
+}
+.department-tabs button:hover { color: var(--nori-text); }
+.department-tab-dot {
+  position: absolute;
+  top: 8px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--nori-accent, currentColor);
+}
+.department-chat-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+}
+.department-chat-row {
+  display: flex;
+  gap: 8px;
+  max-width: 85%;
+}
+.department-chat-row.own { margin-left: auto; justify-content: flex-end; }
+.department-chat-avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--nori-border);
+  border-radius: 50%;
+  color: var(--nori-text-secondary);
+  font-size: 12px;
+}
+.department-chat-bubble {
+  padding: 7px 10px;
+  border: 1px solid var(--nori-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--nori-surface) 84%, transparent);
+  min-width: 0;
+}
+.department-chat-row.own .department-chat-bubble {
+  background: color-mix(in srgb, var(--nori-accent, var(--nori-text)) 10%, var(--nori-surface));
+}
+.department-chat-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 2px;
+  color: var(--nori-text-secondary);
+  font-size: calc(11px * var(--nori-ui-font-scale));
+}
+.department-chat-meta em { font-style: normal; color: var(--nori-accent, var(--nori-text)); }
+.department-chat-text {
+  color: var(--nori-text);
+  font-size: calc(13px * var(--nori-ui-font-scale));
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.department-chat-empty {
+  padding: 24px 16px;
+  color: var(--nori-text-secondary);
+  font-size: calc(12px * var(--nori-ui-font-scale));
+  text-align: center;
+}
+
+
+/* 右侧部门实时框：聊天视图变为 转录 | 部门框 两栏 */
+.chat-view { display: flex; align-items: stretch; min-width: 0; }
+.chat-view .chat-messages-shell { flex: 1 1 auto; min-width: 0; }
+.department-rail {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 300px;
+  min-height: 0;
+  border-left: 1px solid var(--nori-border);
+  background: color-mix(in srgb, var(--nori-surface) 60%, transparent);
+}
+.department-rail .department-tabs { padding: 8px 10px 0; }
+.department-rail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+}
+.department-rail-row { display: flex; gap: 8px; max-width: 100%; }
+.department-rail-row.own { margin-left: auto; justify-content: flex-end; }
+.department-rail-empty { padding: 22px 14px; color: var(--nori-text-secondary); font-size: calc(12px * var(--nori-ui-font-scale)); text-align: center; }
+
+/* 团队树全屏页 */
+.team-tree-page { display: flex; flex-direction: column; gap: 0; height: 100%; overflow: hidden; }
+.team-tree-header {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
+  padding: 4px 6px 12px;
+}
+.team-tree-header h2 { margin: 4px 0 0; font-size: 20px; }
+.team-tree-legend { display: flex; gap: 14px; color: var(--nori-text-secondary); font-size: calc(11px * var(--nori-ui-font-scale)); }
+.team-tree-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.team-tree-legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.team-tree-legend i.tone-running { background: var(--nori-ok, #3fb27f); }
+.team-tree-legend i.tone-discuss { background: transparent; box-shadow: inset 0 0 0 2px var(--nori-accent, currentColor); }
+.team-tree-legend i.tone-idle { background: var(--nori-border); }
+.team-tree-legend i.tone-attention { background: #d9a13c; }
+.team-tree-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; border: 1px solid var(--nori-border); border-radius: 10px; background: color-mix(in srgb, var(--nori-surface) 55%, transparent); }
+.team-tree-canvas { position: relative; }
+.team-tree-edges { position: absolute; inset: 0; pointer-events: none; }
+.team-tree-edges path { fill: none; stroke: var(--nori-border); stroke-width: 1.5; }
+.team-node {
+  position: absolute;
+  display: flex; flex-direction: column; gap: 3px;
+  width: 188px; min-height: 62px;
+  padding: 9px 11px;
+  text-align: left;
+  border: 1px solid var(--nori-border);
+  border-radius: 9px;
+  background: var(--nori-surface);
+  color: var(--nori-text);
+  cursor: pointer;
+}
+.team-node:hover { border-color: var(--nori-text-secondary); }
+.team-node.root { border-color: var(--nori-text-secondary); }
+.team-node.discussing { border-color: var(--nori-accent, currentColor); box-shadow: 0 0 0 2px color-mix(in srgb, var(--nori-accent, currentColor) 35%, transparent); }
+.team-node-name { display: flex; align-items: center; gap: 7px; font-weight: 600; font-size: calc(13px * var(--nori-ui-font-scale)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.team-node-name i { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; }
+.team-node-name i.tone-running { background: var(--nori-ok, #3fb27f); animation: team-pulse 1.6s ease-in-out infinite; }
+.team-node-name i.tone-idle { background: var(--nori-border); }
+.team-node-name i.tone-attention { background: #d9a13c; }
+.team-node-name i.tone-muted { background: var(--nori-border); opacity: .6; }
+@keyframes team-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+.team-node-sub { display: flex; align-items: center; gap: 6px; color: var(--nori-text-secondary); font-size: calc(11px * var(--nori-ui-font-scale)); overflow: hidden; white-space: nowrap; }
+.team-node-sub q { quotes: none; overflow: hidden; text-overflow: ellipsis; opacity: .75; }
+.team-node-sub em { font-style: normal; flex: 0 0 auto; }
+.discuss-badge { font-style: normal; color: var(--nori-accent, currentColor); border: 1px solid currentColor; border-radius: 999px; padding: 0 7px; font-size: calc(10px * var(--nori-ui-font-scale)); }
+.team-tree-empty { padding: 40px 16px; color: var(--nori-text-secondary); text-align: center; }
+.team-tree-footer { display: flex; align-items: center; gap: 7px; padding: 10px 6px 2px; color: var(--nori-text-secondary); font-size: calc(11px * var(--nori-ui-font-scale)); }

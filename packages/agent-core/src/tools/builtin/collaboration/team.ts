@@ -166,7 +166,7 @@ export type TeamChatInput = z.infer<typeof TeamChatInputSchema>;
 
 export class TeamChatTool implements BuiltinTool<TeamChatInput> {
   readonly name = 'TeamChat' as const;
-  readonly description = 'Post to your department\'s persistent group chat — siblings only, your parent never sees it. Mention who should stop and read now via mentions (agent_id) or ["all"]; unmentioned members are not interrupted. Chat is for staying aligned while working, not for review — use TeamDM/reports for that. Keep it short; finish your current step before replying if that\'s more useful than dropping it.';
+  readonly description = 'Post to your department\'s persistent group chat — siblings only, your parent never sees it. Every message MUST start with @: begin the message text with @all or @agent-id1 @agent-id2 (also pass them in mentions); only mentioned members are interrupted. Chat is for staying aligned while working, not for review — use TeamDM/reports for that. Keep it short; finish your current step before replying if that\'s more useful than dropping it.';
   readonly parameters = toInputJsonSchema(TeamChatInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}

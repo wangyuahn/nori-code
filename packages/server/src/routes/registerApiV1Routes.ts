@@ -30,6 +30,7 @@ import { registerWorkspacesRoutes } from './workspaces';
 import { registerVaultRoutes } from './vault';
 import { registerPhaseRoute } from './phase';
 import { registerBrowserRoutes } from './browser';
+import { registerChatRoutes } from './chat';
 import { registerCronRoutes } from './cron';
 
 interface ApiV1AppHost {
@@ -102,6 +103,7 @@ export async function registerApiV1Routes(
     }
     registerSnapshotRoutes(apiV1 as unknown as Parameters<typeof registerSnapshotRoutes>[0], ix);
     registerMessagesRoutes(apiV1 as unknown as Parameters<typeof registerMessagesRoutes>[0], ix);
+    registerChatRoutes(apiV1 as unknown as Parameters<typeof registerChatRoutes>[0], ix);
     registerPromptsRoutes(apiV1 as unknown as Parameters<typeof registerPromptsRoutes>[0], ix);
     registerApprovalsRoutes(
       apiV1 as unknown as Parameters<typeof registerApprovalsRoutes>[0],

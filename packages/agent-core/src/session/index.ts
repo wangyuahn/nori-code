@@ -1007,6 +1007,17 @@ export class Session {
       },
     };
     await this.writeMetadata();
+    // Fan out one contentless notice per department member: WS subscriptions
+    // filter by the emitting agent id, so a member's open Chat view only
+    // receives events stamped with its own id. The leader emits nothing —
+    // the parent never participates in Chat.
+    for (const [agentId] of this.teamMemberMetadata(departmentLeaderAgentId)) {
+      this.getReadyAgent(agentId)?.emitEvent({
+        type: 'team.chat.updated',
+        departmentLeaderAgentId,
+        senderAgentId,
+      });
+    }
     return record;
   }
 

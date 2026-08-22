@@ -138,6 +138,7 @@ function makeSessionService(sessions: Map<string, Session>): ISessionService {
       throw new Error('not implemented');
     },
     listAgents: async () => ({ agents: [] }),
+    getDepartmentChat: async () => ({ department_leader_agent_id: null, messages: [] }),
     getSessionWarnings: async () => [],
     compact: async () => {
       throw new Error('not implemented');

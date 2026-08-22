@@ -139,6 +139,10 @@ exports[`API surface snapshot > matches the documented v1 route table and meta e
     ],
     [
       "GET",
+      "/api/v1/sessions/{session_id}/agents/{agent_id}/chat",
+    ],
+    [
+      "GET",
       "/api/v1/sessions/{session_id}/agents/{agent_id}/messages",
     ],
     [

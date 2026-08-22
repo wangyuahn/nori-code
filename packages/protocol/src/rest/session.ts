@@ -153,6 +153,28 @@ export const sessionAgentTreeResponseSchema = z.object({
 });
 export type SessionAgentTreeResponse = z.infer<typeof sessionAgentTreeResponseSchema>;
 
+/** One persisted message in a department's sibling-only Chat log. */
+export const teamChatMessageSchema = z.object({
+  message_id: z.number().int().positive(),
+  agent_id: sessionAgentIdSchema,
+  name: z.string().min(1),
+  message: z.string(),
+  mentions: z.array(sessionAgentIdSchema),
+  sent_at: z.string().datetime(),
+});
+export type TeamChatMessage = z.infer<typeof teamChatMessageSchema>;
+
+/**
+ * The department Chat log for one member. `department_leader_agent_id` is null
+ * when the requested node is not a team member — the parent never sees its
+ * department's chat, so a lead asking receives an empty log, not an error.
+ */
+export const sessionAgentChatResponseSchema = z.object({
+  department_leader_agent_id: sessionAgentIdSchema.nullable(),
+  messages: z.array(teamChatMessageSchema),
+});
+export type SessionAgentChatResponse = z.infer<typeof sessionAgentChatResponseSchema>;
+
 /** Lightweight cross-session activity used by global UI indicators. */
 export const sessionActivityItemSchema = z.object({
   session_id: z.string().min(1),

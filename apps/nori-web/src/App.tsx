@@ -5,6 +5,7 @@ import { CronJobPanel } from './components/CronJobPanel';
 import { AccountCenter } from './components/AccountCenter';
 import { CodeView } from './components/CodeView';
 import { SessionAgentTree } from './components/SessionAgentTree';
+import { TeamTreePage } from './components/TeamTreePage';
 import { Icon, type IconName } from './components/Icon';
 import { useSessions, usePhaseStatus, useServerStatus } from './hooks/useApi';
 import { useChatMessages } from './hooks/useChatMessages';
@@ -20,12 +21,13 @@ import { installSoundUnlock } from './notificationSounds';
 import { useGlobalApprovals } from './hooks/useGlobalApprovals';
 import { useBrowserPermissions } from './hooks/useBrowser';
 
-type View = 'chat' | 'dashboard' | 'cron' | 'account';
+type View = 'chat' | 'team' | 'dashboard' | 'cron' | 'account';
 type SidebarTab = 'sessions' | 'files';
 type InitialMessage = { text: string; attachments: PromptAttachment[]; options?: PromptExecutionOptions };
 
 const NAV_ITEMS: { key: View; icon: IconName; label: string }[] = [
   { key: 'chat', icon: 'chat', label: 'Chat' },
+  { key: 'team', icon: 'graph', label: 'Team' },
   { key: 'dashboard', icon: 'dashboard', label: 'Overview' },
   { key: 'cron', icon: 'clock', label: 'Cron Job' },
 ];
@@ -172,6 +174,7 @@ export function App() {
   }, [activeSession?.metadata?.cwd]);
   const viewLabels: Record<View, string> = {
     chat: tr('Chat', '对话'),
+    team: tr('Team', '团队'),
     dashboard: tr('Dashboard', '仪表盘'),
     cron: tr('Cron Job', '定时任务'),
     account: tr('My profile', '我的'),
@@ -180,11 +183,15 @@ export function App() {
     sessions: tr('Sessions', '会话'),
     files: tr('Files', '文件'),
   };
-  const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, activeTurnId, sessionStatus, agentTreeRevision, discussionTurnAgentId, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort } = useChatMessages(sessionId, activeAgentId, activeSession?.title);
+  const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, activeTurnId, sessionStatus, agentTreeRevision, discussionTurnAgentId, departmentChat, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort } = useChatMessages(sessionId, activeAgentId, activeSession?.title);
   const globalApprovals = useGlobalApprovals();
   const browserPermissions = useBrowserPermissions();
   const sessionActiveAgentCount = countActiveAgents(activity, sessionId ?? undefined);
   const sessionTreeTokens = sessionAgents.reduce((total, agent) => total + (agent.tokens ?? 0), 0);
+  // A Discuss round is actively taking this member's turn — polled from the
+  // agent tree every few seconds, so it does not depend on WS event delivery.
+  const activeDiscussionTurnAgentId = sessionAgents.find(candidate => candidate.agent_id === activeAgentId)?.discussion_turn_agent_id;
+  const discussionActive = activeDiscussionTurnAgentId != null && activeDiscussionTurnAgentId.length > 0;
   const effectiveGlobalActiveAgentCount = countActiveAgents(activity);
   const sessionTitles = Object.fromEntries(sessions.map(session => [session.id, session.title || session.id]));
 
@@ -364,6 +371,13 @@ export function App() {
 
   const renderContent = () => {
     switch (activeView) {
+      case 'team':
+        return (
+          <TeamTreePage
+            session={activeSession}
+            onSelectAgent={(_, agent) => { selectSessionAgent(agent.kind === 'main' ? null : agent); }}
+          />
+        );
       case 'dashboard':
         return (
           <div className="view-page view-page-wide">
@@ -409,6 +423,9 @@ export function App() {
             activeAgentCount={sessionActiveAgentCount}
             activeAgentTokens={sessionTreeTokens}
             sessionAgents={sessionAgents}
+            departmentChat={departmentChat}
+            discussionActive={discussionActive}
+            departmentRevision={agentTreeRevision}
             sessionStatus={sessionStatus}
             compacting={compacting}
             models={models}

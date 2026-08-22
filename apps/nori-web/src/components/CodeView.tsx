@@ -10,7 +10,7 @@ import {
 import { ChatView, type ChatViewProps } from './ChatView';
 import { WorkspaceInspector } from './WorkspaceInspector';
 import { useFilesystem } from '../hooks/useFilesystem';
-import type { ApprovalRequest, FsEntry, FsReadResponse, ModelCatalogItem, QuestionAnswer, QuestionRequest, Session, SessionAgent, SessionAgentConfig, SessionRealtimeStatus } from '../api/client';
+import type { ApprovalRequest, FsEntry, FsReadResponse, ModelCatalogItem, QuestionAnswer, QuestionRequest, Session, SessionAgent, SessionAgentChatResponse, SessionAgentConfig, SessionRealtimeStatus } from '../api/client';
 import type { BrowserPermissionDecision, BrowserPermissionRequest } from '../hooks/useBrowser';
 import type { ChatMessage, CodeChange, QueuedPrompt, TodoItem, WorkBlock } from '../hooks/useChatMessages';
 import { useI18n } from '../i18n';
@@ -26,6 +26,9 @@ interface CodeViewProps {
   session: Session | null;
   agentId?: string;
   sessionAgents?: readonly SessionAgent[];
+  departmentChat?: SessionAgentChatResponse;
+  discussionActive?: boolean;
+  departmentRevision?: string | number;
   allSessions?: Session[];
   messages: ChatMessage[];
   messagesLoading?: boolean;
@@ -80,6 +83,9 @@ export function CodeView({
   session,
   agentId = 'main',
   sessionAgents,
+  departmentChat,
+  discussionActive,
+  departmentRevision,
   allSessions,
   messages,
   messagesLoading,
@@ -242,6 +248,9 @@ export function CodeView({
         session={session}
         agentId={agentId}
         sessionAgents={sessionAgents}
+        departmentChat={departmentChat}
+        discussionActive={discussionActive}
+        departmentRevision={departmentRevision}
         allSessions={allSessions}
         messages={messages}
         messagesLoading={messagesLoading}

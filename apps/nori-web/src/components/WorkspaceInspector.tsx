@@ -13,7 +13,6 @@ const BrowserPanel = lazy(() => import('./BrowserPanel').then(module => ({ defau
 
 export type InspectorTab = 'preview' | 'changes' | 'browser' | 'git' | 'lsp' | 'terminal';
 const DEFAULT_INSPECTOR_TABS: InspectorTab[] = ['changes', 'preview', 'browser', 'git', 'lsp', 'terminal'];
-const INSPECTOR_PINNED_KEY = 'nori-inspector-overview-pinned';
 
 interface OpenInspectorTab {
   id: string;
@@ -55,7 +54,6 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
   const [openTabs, setOpenTabs] = useState<OpenInspectorTab[]>(() => initialActiveTab ? [{ id: initialActiveTabId!, tool: initialActiveTab }] : []);
   const [tabOrder, setTabOrder] = useState<InspectorTab[]>(loadInspectorTabOrder);
   const [toolPickerOpen, setToolPickerOpen] = useState(false);
-  const [overviewPinned, setOverviewPinned] = useState(loadInspectorPinned);
   const [textChangeCount, setTextChangeCount] = useState<number>();
   const [diagnosticCount, setDiagnosticCount] = useState<number>();
   const [revealLine, setRevealLine] = useState<number>();
@@ -179,25 +177,13 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
     setToolPickerOpen(false);
     setActiveTabId(null);
   };
-  const toggleInspectorPinned = () => {
-    setOverviewPinned(previous => {
-      const next = !previous;
-      try { localStorage.setItem(INSPECTOR_PINNED_KEY, String(next)); } catch { /* Keep the preference in memory. */ }
-      return next;
-    });
-  };
 
   return <section
-    className={`workspace-inspector${tab ? ' inspector-view-open' : ' inspector-overview-open'}${!overviewPinned && !tab ? ' inspector-overview-auto-hide' : ''}${standalone ? ' standalone' : ''}`}
-    onPointerLeave={event => {
-      if (overviewPinned || tab !== null) return;
-      const focused = document.activeElement;
-      if (focused instanceof HTMLElement && event.currentTarget.contains(focused)) focused.blur();
-    }}
+    className={`workspace-inspector${tab ? ' inspector-view-open' : ' inspector-overview-open'}${standalone ? ' standalone' : ''}`}
   >
     {!standalone && <aside className={`inspector-navigation${tab ? ' compact' : ''}`} aria-label={tr('Inspector', '检查器')}>
-      {tab === null && <header className="inspector-overview-heading"><div><span>{tr('Workspace', '工作区')}</span><strong>{tr('Tools', '工具')}</strong></div><button type="button" className={`inspector-pin-button${overviewPinned ? ' active' : ''}`} onClick={event => { toggleInspectorPinned(); if (event.detail > 0) event.currentTarget.blur(); }} title={overviewPinned ? tr('Auto-hide tool island', '自动隐藏工具岛') : tr('Keep tool island visible', '常驻工具岛')} aria-label={overviewPinned ? tr('Auto-hide tool island', '自动隐藏工具岛') : tr('Keep tool island visible', '常驻工具岛')}><Icon name="pin" size={15}/></button></header>}
-      {tab === null && <WorkspaceActivitySummary mainWorking={mainWorking || isStreaming} agentCount={activeAgentCount} agentTokens={activeAgentTokens} goal={goal} todos={todos} onGoalControl={onGoalControl}/>}
+      {tab === null && <header className="inspector-overview-heading"><div><span>{tr('Workspace', '工作区')}</span><strong>{tr('Tools', '工具')}</strong></div></header>}
+      {tab === null && <WorkspaceActivitySummary mainWorking={mainWorking || isStreaming} agentCount={activeAgentCount} agentTokens={activeAgentTokens} />}
       <div className="inspector-tab-list" role="tablist" aria-label={tr('Inspector tools', '检查器工具')}>
         {tabOrder.map(item => <InspectorTabButton key={item} tab={item} active={tab === item} compact={tab !== null} count={item === 'changes' ? changeCount : item === 'lsp' ? diagnosticCount : undefined} detail={inspectorTabDetail(item, { path, projectPath, sessionId, gitStatus, diagnosticCount, tr })} onClick={() => activateTab(item)} onMove={target => setTabOrder(previous => moveInspectorTab(previous, item, target))} />)}
       </div>
@@ -232,7 +218,7 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
   </section>;
 }
 
-function WorkspaceActivitySummary({ mainWorking, agentCount, agentTokens, goal, todos, onGoalControl }: { mainWorking: boolean; agentCount: number; agentTokens: number; goal: GoalSnapshot | null; todos: TodoItem[]; onGoalControl?: (action: 'pause' | 'resume' | 'cancel') => void | Promise<void> }) {
+function WorkspaceActivitySummary({ mainWorking, agentCount, agentTokens }: { mainWorking: boolean; agentCount: number; agentTokens: number }) {
   const { tr } = useI18n();
   const [phraseIndex, setPhraseIndex] = useState(0);
   const mainPhrases = [
@@ -254,7 +240,7 @@ function WorkspaceActivitySummary({ mainWorking, agentCount, agentTokens, goal, 
     return () => clearInterval(timer);
   }, [agentCount, mainWorking]);
 
-  if (agentCount === 0 && goal === null && todos.length === 0 && !mainWorking) return null;
+  if (agentCount === 0 && !mainWorking) return null;
   const currentMainPhrase = mainPhrases[phraseIndex % mainPhrases.length];
   const currentAgentPhrase = agentPhrases[phraseIndex % agentPhrases.length];
   const completedTodos = todos.filter(todo => todo.status === 'done').length;
@@ -287,23 +273,6 @@ function WorkspaceActivitySummary({ mainWorking, agentCount, agentTokens, goal, 
       {agentTokens > 0 && <em>{formatTokens(agentTokens)} tokens</em>}
     </div>}
     {agentCount > 0 && <p className="inspector-activity-line active"><span>{tr('Team members', '团队成员')}</span><strong>{currentAgentPhrase}{agentTokens > 0 ? ` · ${formatTokens(agentTokens)} tokens` : ''}</strong></p>}
-    {goal && <section className={`inspector-activity-card inspector-activity-goal goal-${goal.status}`}>
-      <header className="inspector-activity-card-heading inspector-activity-goal-heading"><span><Icon name="target" size={13}/><strong>{tr('Goal', '目标')}</strong></span><em>{goalStatusLabel}</em></header>
-      <div className="inspector-activity-card-divider"/>
-      <p className="inspector-activity-goal-objective">{goal.objective}</p>
-      <div className="inspector-activity-goal-meta">
-        <p><span>{tr('Budget', '预算')}</span><strong>{budgetItems.join(' · ')}</strong></p>
-        {goal.completionCriterion && <p><span>{tr('Done when', '完成标准')}</span><strong>{goal.completionCriterion}</strong></p>}
-        {goal.terminalReason && <p><span>{tr('Status note', '状态说明')}</span><strong>{goal.terminalReason}</strong></p>}
-      </div>
-      {onGoalControl && goal.status !== 'complete' && <div className="inspector-activity-actions">{goal.status === 'active' ? <button type="button" onClick={() => void onGoalControl('pause')}>{tr('Pause', '暂停')}</button> : <button type="button" onClick={() => void onGoalControl('resume')}>{tr('Resume', '继续')}</button>}<button type="button" className="danger" onClick={() => { if (window.confirm(tr('Cancel this goal?', '取消这个目标吗？'))) void onGoalControl('cancel'); }}>{tr('Cancel goal', '取消目标')}</button></div>}
-    </section>}
-    {todos.length > 0 && <section className="inspector-activity-card inspector-activity-todos">
-      <header className="inspector-activity-card-heading"><span><Icon name="list" size={13}/><strong>{tr('Todo list', '待办')}</strong></span></header>
-      <div className="inspector-activity-card-divider"/>
-      <div className="inspector-activity-todos-progress"><span>{tr('Progress', '进程')}</span><strong>{completedTodos}/{todos.length}</strong></div>
-      <ol>{todos.map((todo, index) => <li key={`${todo.title}-${index}`} className={`todo-${todo.status}`}><span className="inspector-todo-status"><Icon name={todo.status === 'done' ? 'check' : todo.status === 'in_progress' ? 'sparkles' : 'target'} size={10}/></span><span>{todo.title}</span></li>)}</ol>
-    </section>}
   </section>;
 }
 
@@ -365,10 +334,6 @@ function loadInspectorTabOrder(): InspectorTab[] {
     const valid = value.filter((item): item is InspectorTab => typeof item === 'string' && DEFAULT_INSPECTOR_TABS.includes(item as InspectorTab));
     return [...new Set([...valid, ...DEFAULT_INSPECTOR_TABS])];
   } catch { return DEFAULT_INSPECTOR_TABS; }
-}
-
-function loadInspectorPinned(): boolean {
-  try { return localStorage.getItem(INSPECTOR_PINNED_KEY) !== 'false'; } catch { return true; }
 }
 
 function moveInspectorTab(order: InspectorTab[], target: InspectorTab, source: InspectorTab): InspectorTab[] {

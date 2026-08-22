@@ -451,6 +451,21 @@ export interface Snapshot {
   [key: string]: unknown;
 }
 
+/** One persisted message in a department's sibling-only Chat log. */
+export interface TeamChatMessage {
+  message_id: number;
+  agent_id: string;
+  name: string;
+  message: string;
+  mentions: string[];
+  sent_at: string;
+}
+
+export interface SessionAgentChatResponse {
+  department_leader_agent_id: string | null;
+  messages: TeamChatMessage[];
+}
+
 export interface ConfigResponse {
   providers?: Record<string, unknown>;
   default_model?: string;
@@ -891,6 +906,9 @@ export function createClient(
           page_size: params?.page_size,
         }),
 
+      getDepartmentChat: (id: string, agentId: string) =>
+        request<SessionAgentChatResponse>(`/sessions/${encodeURIComponent(id)}/agents/${encodeURIComponent(agentId)}/chat`),
+
       sendPrompt: (
         sessionId: string,
         text: string,
@@ -1249,6 +1267,9 @@ export function createClient(
         before_id: params?.before_id,
         page_size: params?.page_size,
       }),
+
+    getDepartmentChat: (id: string, agentId: string) =>
+      request<SessionAgentChatResponse>(`/sessions/${encodeURIComponent(id)}/agents/${encodeURIComponent(agentId)}/chat`),
 
     sendPrompt: (
       sessionId: string,

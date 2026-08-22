@@ -14,6 +14,7 @@ import {
   type Session,
   type SessionAgentTreeNode,
   type SessionAgentTreeResponse,
+  type SessionAgentChatResponse,
   type SessionChildCreate,
   type SessionCreate,
   type SessionFork,
@@ -659,6 +660,26 @@ export class SessionService extends Disposable implements ISessionService {
         }),
     );
     return { agents: nodes };
+  }
+
+  async getDepartmentChat(id: string, agentId: string): Promise<SessionAgentChatResponse> {
+    await this.requireSummary(id);
+    await this.core.rpc.resumeSession({ sessionId: id });
+    const meta = await this.tryGetMeta(id);
+    const member = meta?.agents[agentId];
+    const leaderAgentId = member?.kind === 'team' ? member.teamLeaderAgentId : undefined;
+    if (leaderAgentId === undefined) {
+      return { department_leader_agent_id: null, messages: [] };
+    }
+    const messages = (meta?.agents[leaderAgentId]?.chat?.messages ?? []).map((record) => ({
+      message_id: record.messageId,
+      agent_id: record.agentId,
+      name: record.name,
+      message: record.message,
+      mentions: [...record.mentions],
+      sent_at: record.sentAt,
+    }));
+    return { department_leader_agent_id: leaderAgentId, messages };
   }
 
   listActiveAgentActivity(): readonly import('./session').SessionAgentActivity[] {
