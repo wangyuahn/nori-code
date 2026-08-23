@@ -91,8 +91,9 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
         ...this.sessionClients.getConnections(sid),
       ])
       : this.sessionClients.getConnections(sid);
+    const ignoreAgentFilter = globalEvent || isSessionWideEvent(event.type);
     for (const connection of targets) {
-      if (!globalEvent && !connection.acceptsAgentEvent(sid, event.agentId)) continue;
+      if (!ignoreAgentFilter && !connection.acceptsAgentEvent(sid, event.agentId)) continue;
       connection.send(envelope);
     }
   }
@@ -210,7 +211,21 @@ function filterReplayEvents(
   const afterCursor = entries.filter((entry) => entry.seq > cursorSeq);
   if (agentIds === undefined) return [...afterCursor];
   const selected = new Set(agentIds);
-  return afterCursor.filter((entry) => selected.has(entry.envelope.payload.agentId));
+  return afterCursor.filter(
+    (entry) => selected.has(entry.envelope.payload.agentId) || isSessionWideEvent(entry.envelope.type),
+  );
+}
+
+/**
+ * Collaboration events describe the session's shared state (a department chat
+ * log, a discussion transcript), not one agent's transcript. They are emitted
+ * by whichever agent happens to own the store, so the per-agent subscription
+ * filter would hide them from every other viewer; deliver them to all
+ * subscribers of the session instead. Unlike `isGlobalSessionEvent` these are
+ * not fanned out to connections that never subscribed to the session.
+ */
+function isSessionWideEvent(type: string): boolean {
+  return type === 'discussion.updated' || type === 'team.chat.updated';
 }
 
 function isGlobalSessionEvent(type: string): boolean {

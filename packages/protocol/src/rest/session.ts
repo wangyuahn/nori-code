@@ -145,6 +145,8 @@ export const sessionAgentTreeNodeSchema = z.object({
   archived: z.boolean(),
   /** The team member whose serial Discuss turn is currently running. */
   discussion_turn_agent_id: sessionAgentIdSchema.optional(),
+  /** Members taking part in this Discuss round; only discussion nodes carry it. */
+  discussion_participant_agent_ids: z.array(sessionAgentIdSchema).optional(),
 });
 export type SessionAgentTreeNode = z.infer<typeof sessionAgentTreeNodeSchema>;
 

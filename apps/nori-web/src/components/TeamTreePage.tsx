@@ -6,16 +6,56 @@
  * 正在 Discuss 发言的成员高亮描边；running/idle 等状态用圆点区分。
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 
 import { api, type Session, type SessionAgent } from '../api/client';
 import { useI18n } from '../i18n';
+import { discussionSpeakingAgentIds } from '../utils/team-discussion';
 import { Icon } from './Icon';
 
 const NODE_W = 188;
 const NODE_H = 62;
 const GAP_X = 26;
 const GAP_Y = 74;
+const CANVAS_PAD = 40;
+const MIN_SCALE = 0.3;
+const MAX_SCALE = 2.5;
+
+/** 画布视图：内容坐标经 translate + scale 映射到视口。 */
+export interface TreeView {
+  x: number;
+  y: number;
+  scale: number;
+}
+
+/**
+ * 把整棵树摆到视口正中：小树按 1:1 居中，大树缩到刚好放得下（只缩不放）。
+ * 树是从上往下长的，所以竖直方向装不下时顶到上边留一点余量，而不是切掉根。
+ */
+export function fitTreeView(content: { width: number; height: number }, viewport: { width: number; height: number }): TreeView {
+  if (viewport.width <= 0 || viewport.height <= 0 || content.width <= 0 || content.height <= 0) {
+    return { x: 0, y: 0, scale: 1 };
+  }
+  const margin = 24;
+  const scale = Math.max(MIN_SCALE, Math.min(1, (viewport.width - margin * 2) / content.width, (viewport.height - margin * 2) / content.height));
+  const scaledWidth = content.width * scale;
+  const scaledHeight = content.height * scale;
+  return {
+    x: (viewport.width - scaledWidth) / 2,
+    y: scaledHeight + margin * 2 > viewport.height ? margin : (viewport.height - scaledHeight) / 2,
+    scale,
+  };
+}
+
+/** 以视口里某个点为不动点缩放，和记忆图谱的手感一致。 */
+export function zoomTreeView(view: TreeView, nextScale: number, centerX: number, centerY: number): TreeView {
+  const scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, nextScale));
+  return {
+    scale,
+    x: centerX - (centerX - view.x) * (scale / view.scale),
+    y: centerY - (centerY - view.y) * (scale / view.scale),
+  };
+}
 
 interface PlacedNode {
   agent: SessionAgent;
@@ -134,6 +174,14 @@ export function TeamTreePage({ session, onSelectAgent }: {
   const [agents, setAgents] = useState<SessionAgent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const panRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
+  // 用户自己拖过/缩放过之后就不再自动重新居中，否则每 3 秒一次的刷新会把视图抢回去。
+  const adjustedRef = useRef(false);
+  const fitKeyRef = useRef('');
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
+  const [view, setView] = useState<TreeView>({ x: 0, y: 0, scale: 1 });
+  const [panning, setPanning] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!sessionId) {
@@ -162,6 +210,84 @@ export function TeamTreePage({ session, onSelectAgent }: {
   }, [refresh, sessionId]);
 
   const { placed, edges, width, height } = layoutTeamTree(agents);
+  const contentWidth = width + CANVAS_PAD * 2;
+  const contentHeight = height + CANVAS_PAD;
+  // 谁正在 Discuss 里发言只写在讨论节点上，而讨论节点不上画布，
+  // 所以要在 layout 过滤掉它们之前先把这一组人算出来。
+  const speakingAgentIds = discussionSpeakingAgentIds(agents);
+  // 只有真的画出画布时才有视口可测量、可挂监听。
+  const hasCanvas = sessionId !== null && error === null && placed.length > 0;
+
+  useEffect(() => {
+    const element = viewportRef.current;
+    if (element === null) return;
+    const measure = () => {
+      const rect = element.getBoundingClientRect();
+      setViewportSize(previous =>
+        Math.abs(previous.width - rect.width) < 1 && Math.abs(previous.height - rect.height) < 1
+          ? previous
+          : { width: rect.width, height: rect.height });
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [hasCanvas]);
+
+  const resetView = useCallback(() => {
+    adjustedRef.current = false;
+    setView(fitTreeView({ width: contentWidth, height: contentHeight }, viewportSize));
+  }, [contentWidth, contentHeight, viewportSize]);
+
+  // 默认居中：树的尺寸或视口变化时重新摆正，除非用户已经自己动过视图。
+  useEffect(() => {
+    const key = `${contentWidth}x${contentHeight}x${Math.round(viewportSize.width)}x${Math.round(viewportSize.height)}`;
+    if (fitKeyRef.current === key || adjustedRef.current) return;
+    fitKeyRef.current = key;
+    setView(fitTreeView({ width: contentWidth, height: contentHeight }, viewportSize));
+  }, [contentWidth, contentHeight, viewportSize]);
+
+  // 滚轮缩放要能 preventDefault 拦住页面滚动，所以只能自己挂非 passive 监听。
+  useEffect(() => {
+    const element = viewportRef.current;
+    if (element === null) return;
+    const onWheel = (event: globalThis.WheelEvent) => {
+      event.preventDefault();
+      const rect = element.getBoundingClientRect();
+      adjustedRef.current = true;
+      setView(previous => zoomTreeView(
+        previous,
+        previous.scale * Math.exp(-event.deltaY * 0.0015),
+        event.clientX - rect.left,
+        event.clientY - rect.top,
+      ));
+    };
+    element.addEventListener('wheel', onWheel, { passive: false });
+    return () => element.removeEventListener('wheel', onWheel);
+  }, [hasCanvas]);
+
+  const zoomBy = (factor: number) => {
+    adjustedRef.current = true;
+    setView(previous => zoomTreeView(previous, previous.scale * factor, viewportSize.width / 2, viewportSize.height / 2));
+  };
+  const startPan = (event: ReactPointerEvent<HTMLDivElement>) => {
+    // 卡片自己要能点开对话，所以只有按在空白处才开始拖动画布。
+    if (event.button !== 0 || (event.target as HTMLElement).closest('.team-node') !== null) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    panRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: view.x, originY: view.y };
+    setPanning(true);
+  };
+  const movePan = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const pan = panRef.current;
+    if (pan === null || pan.pointerId !== event.pointerId) return;
+    adjustedRef.current = true;
+    setView(previous => ({ ...previous, x: pan.originX + event.clientX - pan.startX, y: pan.originY + event.clientY - pan.startY }));
+  };
+  const endPan = () => {
+    panRef.current = null;
+    setPanning(false);
+  };
 
   return (
     <div className="view-page view-page-wide team-tree-page">
@@ -185,18 +311,33 @@ export function TeamTreePage({ session, onSelectAgent }: {
           : placed.length === 0
             ? <div className="team-tree-empty">{tr('No agents yet.', '还没有智能体。')}</div>
             : (
-              <div className="team-tree-scroll">
-                <div className="team-tree-canvas" style={{ width: width + 80, height: height + 60 }}>
-                  <svg className="team-tree-edges" width={width + 80} height={height + 60}>
+              <div
+                className={'team-tree-viewport' + (panning ? ' panning' : '')}
+                ref={viewportRef}
+                onPointerDown={startPan}
+                onPointerMove={movePan}
+                onPointerUp={endPan}
+                onPointerCancel={endPan}
+                onDoubleClick={resetView}
+              >
+                <div
+                  className="team-tree-canvas"
+                  style={{
+                    width: contentWidth,
+                    height: contentHeight,
+                    transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
+                  }}
+                >
+                  <svg className="team-tree-edges" width={contentWidth} height={contentHeight}>
                     {edges.map(({ from, to }) => {
                       const midY = from.y + NODE_H + GAP_Y / 2;
-                      const d = `M ${from.cx + 40} ${from.y + NODE_H} V ${midY} H ${to.cx + 40} V ${to.y}`;
+                      const d = `M ${from.cx + CANVAS_PAD} ${from.y + NODE_H} V ${midY} H ${to.cx + CANVAS_PAD} V ${to.y}`;
                       return <path key={`${from.agent.agent_id}-${to.agent.agent_id}`} d={d} />;
                     })}
                   </svg>
                   {placed.map(node => {
                     const tone = statusTone(node.agent);
-                    const discussing = node.agent.discussion_turn_agent_id === node.agent.agent_id;
+                    const discussing = speakingAgentIds.has(node.agent.agent_id);
                     return (
                       <button
                         key={node.agent.agent_id}
@@ -207,7 +348,7 @@ export function TeamTreePage({ session, onSelectAgent }: {
                           discussing ? 'discussing' : '',
                           node.agent.kind === 'main' ? 'root' : '',
                         ].join(' ').trim()}
-                        style={{ left: node.x + 40, top: node.y }}
+                        style={{ left: node.x + CANVAS_PAD, top: node.y }}
                         onClick={() => onSelectAgent(sessionId, node.agent)}
                         title={tr('Open conversation', '打开对话')}
                       >
@@ -225,6 +366,12 @@ export function TeamTreePage({ session, onSelectAgent }: {
                     );
                   })}
                 </div>
+                <div className="team-tree-controls">
+                  <button type="button" onClick={() => zoomBy(1.2)} aria-label={tr('Zoom in', '放大')}>+</button>
+                  <button type="button" onClick={() => zoomBy(1 / 1.2)} aria-label={tr('Zoom out', '缩小')}>−</button>
+                  <button type="button" onClick={resetView} aria-label={tr('Center the tree', '居中显示')}>{Math.round(view.scale * 100)}%</button>
+                </div>
+                <span className="team-tree-hint">{tr('Drag to pan · scroll to zoom · double-click to recenter', '拖动平移 · 滚轮缩放 · 双击回到居中')}</span>
               </div>
             )}
       <div className="team-tree-footer">

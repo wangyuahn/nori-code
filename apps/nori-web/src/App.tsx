@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Dashboard } from './components/Dashboard';
 import { useBackgroundTasks } from './hooks/useBackgroundTasks';
 import { CronJobPanel } from './components/CronJobPanel';
 import { AccountCenter } from './components/AccountCenter';
 import { CodeView } from './components/CodeView';
-import { SessionAgentTree } from './components/SessionAgentTree';
 import { TeamTreePage } from './components/TeamTreePage';
 import { Icon, type IconName } from './components/Icon';
 import { useSessions, usePhaseStatus, useServerStatus } from './hooks/useApi';
@@ -15,20 +13,20 @@ import { ProjectFolderPicker } from './components/ProjectFolderPicker';
 import { useI18n } from './i18n';
 import { modelThinkingOptions } from './utils/model-thinking';
 import { sessionAgentDisplayName } from './utils/session-agent';
+import { findAgentDiscussion } from './utils/team-discussion';
 import { loadRewindLimit } from './rewindPreferences';
 import type { ChatSlashCommandName } from './utils/chat-slash-commands';
 import { installSoundUnlock } from './notificationSounds';
 import { useGlobalApprovals } from './hooks/useGlobalApprovals';
 import { useBrowserPermissions } from './hooks/useBrowser';
 
-type View = 'chat' | 'team' | 'dashboard' | 'cron' | 'account';
+type View = 'chat' | 'team' | 'cron' | 'account';
 type SidebarTab = 'sessions' | 'files';
 type InitialMessage = { text: string; attachments: PromptAttachment[]; options?: PromptExecutionOptions };
 
 const NAV_ITEMS: { key: View; icon: IconName; label: string }[] = [
   { key: 'chat', icon: 'chat', label: 'Chat' },
   { key: 'team', icon: 'graph', label: 'Team' },
-  { key: 'dashboard', icon: 'dashboard', label: 'Overview' },
   { key: 'cron', icon: 'clock', label: 'Cron Job' },
 ];
 
@@ -84,7 +82,32 @@ export function App() {
   const [rewindLimit, setRewindLimit] = useState(loadRewindLimit);
   const [cronJobCount, setCronJobCount] = useState(0);
   const cronCountRequestRef = useRef(0);
+  // 用户自己动过下拉框之后就不再拿服务端默认值盖它。
+  const draftTouchedRef = useRef(false);
   useEffect(() => installSoundUnlock(), []);
+
+  // 设置页里的“默认权限模式 / 默认讨论模式”要真的管到新会话上：上面那份草稿写死
+  // 的 manual 会一路跟着 createSession 发出去，把用户在设置里选的值盖掉。
+  useEffect(() => {
+    let disposed = false;
+    void (async () => {
+      try {
+        const config = await api.getConfig();
+        if (disposed || draftTouchedRef.current) return;
+        setDraftAgentConfig(previous => ({
+          ...previous,
+          permission_mode: (config.default_permission_mode as SessionAgentConfig['permission_mode'])
+            ?? previous.permission_mode,
+          discuss_mode: typeof config.default_discuss_mode === 'boolean'
+            ? config.default_discuss_mode
+            : previous.discuss_mode,
+        }));
+      } catch {
+        // 读不到配置就用内置默认值，不打扰用户。
+      }
+    })();
+    return () => { disposed = true; };
+  }, []);
 
   useEffect(() => {
     persistSidebarExpanded(sidebarExpanded);
@@ -175,7 +198,6 @@ export function App() {
   const viewLabels: Record<View, string> = {
     chat: tr('Chat', '对话'),
     team: tr('Team', '团队'),
-    dashboard: tr('Dashboard', '仪表盘'),
     cron: tr('Cron Job', '定时任务'),
     account: tr('My profile', '我的'),
   };
@@ -186,14 +208,17 @@ export function App() {
   const { messages, messagesLoading, isStreaming, currentStreaming, currentThinking, currentWorkBlocks, activeTurnId, sessionStatus, agentTreeRevision, discussionTurnAgentId, departmentChat, compacting, pendingApprovals, pendingQuestions, queuedPrompts, todos, codeChanges, resolveApproval, resolveQuestion, dismissQuestion, sendMessage, cancelQueuedPrompt, rewindToPrompt, refreshMessages, abort } = useChatMessages(sessionId, activeAgentId, activeSession?.title);
   const globalApprovals = useGlobalApprovals();
   // 团队智能体胶囊已删除，agent 列表改由这里直接轮询，供部门框与消息气泡使用。
+  // 切换会话时由上面那个 effect 清空；这里不清，否则 agentTreeRevision 每次自增
+  // 都会把已经渲染出来的部门树闪成空的。
   useEffect(() => {
-    setSessionAgents([]);
     if (!sessionId) return;
     let disposed = false;
     const load = async () => {
       try {
         const result = await api.sessions.getAgents(sessionId);
-        if (!disposed) setSessionAgents(result.items ?? []);
+        // 每 4 秒一轮，返回内容通常与上一轮完全相同。复用上一次的数组身份，
+        // 让依赖 sessionAgents 的下游 effect（部门轨的讨论拉取）不会被轮询本身唤醒。
+        if (!disposed) setSessionAgents(previous => sameAgentList(previous, result.items ?? []) ? previous : (result.items ?? []));
       } catch {
         // 轮询失败保持上一次列表，下一轮重试。
       }
@@ -205,10 +230,10 @@ export function App() {
   const browserPermissions = useBrowserPermissions();
   const sessionActiveAgentCount = countActiveAgents(activity, sessionId ?? undefined);
   const sessionTreeTokens = sessionAgents.reduce((total, agent) => total + (agent.tokens ?? 0), 0);
-  // A Discuss round is actively taking this member's turn — polled from the
-  // agent tree every few seconds, so it does not depend on WS event delivery.
-  const activeDiscussionTurnAgentId = sessionAgents.find(candidate => candidate.agent_id === activeAgentId)?.discussion_turn_agent_id;
-  const discussionActive = activeDiscussionTurnAgentId != null && activeDiscussionTurnAgentId.length > 0;
+  // 与当前 agent 相关的 Discuss 轮次：它自己主持的，或它作为成员参加的。
+  // 轮次是树里独立的节点，所以不能从被查看 agent 自己的节点上读当前发言人；
+  // WS 事件给出的 discussionTurnAgentId 比轮询的树新，优先采用。
+  const activeDiscussion = findAgentDiscussion(sessionAgents, activeAgentId, discussionTurnAgentId);
   const effectiveGlobalActiveAgentCount = countActiveAgents(activity);
   const sessionTitles = Object.fromEntries(sessions.map(session => [session.id, session.title || session.id]));
 
@@ -270,6 +295,7 @@ export function App() {
 
   const changeThinking = async (effort: string) => {
     if (!activeSession) {
+      draftTouchedRef.current = true;
       setDraftAgentConfig(previous => ({ ...previous, thinking: effort }));
       return;
     }
@@ -278,6 +304,7 @@ export function App() {
 
   const changePermission = async (permissionMode: 'auto' | 'yolo' | 'manual') => {
     if (!activeSession) {
+      draftTouchedRef.current = true;
       setDraftAgentConfig(previous => ({ ...previous, permission_mode: permissionMode }));
       return;
     }
@@ -395,15 +422,6 @@ export function App() {
             onSelectAgent={(_, agent) => { selectSessionAgent(agent.kind === 'main' ? null : agent); }}
           />
         );
-      case 'dashboard':
-        return (
-          <div className="view-page view-page-wide">
-            <div className="view-stack">
-              <ViewHeader eyebrow={tr('Workspace', '工作区')} title={tr('Overview', '概览')} description={tr('Review workspace usage and knowledge captured by Nori.', '查看工作区用量与 Nori 沉淀的知识。')} />
-              <Dashboard sessions={sessions} models={models} />
-            </div>
-          </div>
-        );
       case 'cron':
         return (
           <div className="view-page">
@@ -441,7 +459,7 @@ export function App() {
             activeAgentTokens={sessionTreeTokens}
             sessionAgents={sessionAgents}
             departmentChat={departmentChat}
-            discussionActive={discussionActive}
+            discussion={activeDiscussion}
             departmentRevision={agentTreeRevision}
             sessionStatus={sessionStatus}
             compacting={compacting}
@@ -663,6 +681,40 @@ export function countActiveAgents(
 ): number {
   if (sessionId === undefined) return activity.length;
   return activity.filter(item => item.session_id === sessionId).length;
+}
+
+/**
+ * Whether two polled agent lists describe the same tree state. The poll runs
+ * every few seconds and usually returns identical rows; reusing the previous
+ * array identity keeps consumers from re-rendering on a poll that changed
+ * nothing. Every field the tree or the department rail reads is compared, so a
+ * real change still produces a new array.
+ */
+function sameAgentList(a: readonly SessionAgent[], b: readonly SessionAgent[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((agent, index) => {
+    const other = b[index];
+    return other !== undefined
+      && agent.agent_id === other.agent_id
+      && agent.name === other.name
+      && agent.kind === other.kind
+      && agent.role === other.role
+      && agent.status === other.status
+      && agent.parent_agent_id === other.parent_agent_id
+      && agent.archived === other.archived
+      && agent.tokens === other.tokens
+      && agent.last_active === other.last_active
+      && agent.summary === other.summary
+      && agent.assigned_task === other.assigned_task
+      && agent.mandate === other.mandate
+      && agent.team_report_status === other.team_report_status
+      && agent.team_report_summary === other.team_report_summary
+      && agent.team_report_received === other.team_report_received
+      && agent.discussion_turn_agent_id === other.discussion_turn_agent_id
+      // 参会名单会随邀请/移出变化，开会面板的头部要跟着刷新。
+      && (agent.discussion_participant_agent_ids ?? []).join(',')
+        === (other.discussion_participant_agent_ids ?? []).join(',');
+  });
 }
 
 export function buildAgentBreadcrumb(

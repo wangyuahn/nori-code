@@ -715,7 +715,9 @@ function canFoldAssistantWork(previous: ChatMessage, incoming: ChatMessage): boo
 function mergeAssistantWork(previous: ChatMessage, incoming: ChatMessage): ChatMessage {
   const previousText = previous.text.trim();
   const incomingText = incoming.text.trim();
-  const previousProgress = previousText && incomingText && previousText !== incomingText
+  // 合并意味着 previous 的文本不再是这一轮的结尾输出，所以它必须变成流水里的
+  // 一段输出块留在原位；否则它会被顶到所有工具行的后面，显示位置就错了。
+  const previousProgress = previousText && previousText !== incomingText
     ? createProgressBlock(`${previous.id}-turn-progress`, previous.text)
     : undefined;
   const blocks = mergeWorkBlocks(previous.workBlocks ?? [], [
@@ -725,7 +727,7 @@ function mergeAssistantWork(previous: ChatMessage, incoming: ChatMessage): ChatM
   return {
     ...previous,
     turnId: previous.turnId ?? incoming.turnId,
-    text: incomingText ? incoming.text : previous.text,
+    text: incomingText ? incoming.text : previousProgress === undefined ? previous.text : '',
     thinking: incoming.thinking ?? previous.thinking,
     workBlocks: blocks,
     toolCalls: mergeToolCalls(previous.toolCalls ?? [], incoming.toolCalls ?? []),
@@ -1354,8 +1356,25 @@ export function useChatMessages(
       .finally(() => {
         if (hasCurrentScope(scopeRef, sessionId, agentId)) setMessagesLoading(false);
       });
+    // 打开一个页面时，那一轮已经流过的思考与输出不会重播：订阅只送后续事件，而
+    // 历史记录要等这一步结束才成形。所以进入任何一个 agent 都必须先取一次
+    // in-flight 快照，否则切到正在工作的成员就是一片空白——团队里的成员几乎总是
+    // 在页面打开之前就已经开始跑了。
+    void hydrateInFlight(sessionId, agentId).catch(error => {
+      if (hasCurrentScope(scopeRef, sessionId, agentId)) console.error('Failed to sync in-flight turn:', error);
+    });
     void refreshDepartmentChat(sessionId, agentId);
-  }, [agentId, clearDraft, refreshDepartmentChat, refreshHistory, sessionId]);
+  }, [agentId, clearDraft, hydrateInFlight, refreshDepartmentChat, refreshHistory, sessionId]);
+
+  // Sibling Chat arrives as `team.chat.updated`, which the gateway only sends
+  // over a live socket. A reconnect drops whatever was posted while the socket
+  // was down, so poll the log as well — `preserveEqual` keeps the identity when
+  // nothing changed, so an unchanged poll causes no re-render.
+  useEffect(() => {
+    if (!sessionId || agentId === 'main') return;
+    const timer = window.setInterval(() => { void refreshDepartmentChat(sessionId, agentId); }, 8_000);
+    return () => { window.clearInterval(timer); };
+  }, [agentId, refreshDepartmentChat, sessionId]);
 
   useEffect(() => {
     const ids = [
@@ -1736,9 +1755,11 @@ export function useChatMessages(
             case 'discussion.updated':
               if (payload.currentTurnAgentId !== undefined) {
                 setDiscussionTurnAgentId(payload.currentTurnAgentId);
-              } else {
-                setAgentTreeRevision(previous => previous + 1);
               }
+              // Bump on every discussion event, not only on the ones without a
+              // turn hint: a new statement is what the department rail has to
+              // refetch for, and those arrive with the turn handoff.
+              setAgentTreeRevision(previous => previous + 1);
               void refreshSessionStatus()
                 .catch(error => console.error('Discussion status refresh failed:', error));
               if (payload.discussionAgentId === agentId) {

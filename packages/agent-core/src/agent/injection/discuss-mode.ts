@@ -56,7 +56,7 @@ function fullReminder(): string {
 }
 
 function sparseReminder(): string {
-  return 'Discuss is active for the main lead: read-only coordination. Use TeamDecide start for the first round or continue for later rounds, with your statement first. Members use TeamSpeak or abstain by skipping it. TeamAssign exits Discuss and starts Code.';
+  return 'Discuss is active for the main lead: read-only coordination. Use TeamDecide start for the first round or continue for later rounds, with your statement first. Members then speak one at a time, each reading every statement published before its turn, so ask for dissent and alternatives in your own statement. Members use TeamSpeak or abstain by skipping it. TeamAssign exits Discuss and starts Code.';
 }
 
 function exitReminder(): string {

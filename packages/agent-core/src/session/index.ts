@@ -23,7 +23,7 @@ import type { RuleConfig } from '../agent/turn/rule-engine';
 import type { NoriMemoryProvider } from '../tools/builtin/nori/types';
 import { renderPluginSessionStartReminder } from '../agent/injection/plugin-session-start';
 import { HookEngine, type HookDef } from './hooks';
-import type { PermissionManagerOptions, PermissionRule } from '../agent/permission';
+import type { PermissionManagerOptions, PermissionMode, PermissionRule } from '../agent/permission';
 import {
   appendWorkspaceAdditionalDir,
   normalizeAdditionalDirs,
@@ -68,6 +68,7 @@ import {
 } from './team-tree';
 import type { BrowserProvider, ToolServices } from '../tools/support/services';
 import TEAM_AGENT_PROMPT from './team-agent.md?raw';
+import TEAM_MEMBER_ROLE_PROMPT from './team-member-role.md?raw';
 import TEAM_ENGINEERING_PROMPT from '../profile/default/team-engineering.md?raw';
 import { FlagResolver, type ExperimentalFlagResolver } from '../flags';
 import { abortError } from '../utils/abort';
@@ -309,6 +310,11 @@ export class Session {
   >();
   /** Only the member currently scheduled by the serial discussion loop may publish. */
   private readonly activeTeamDiscussionTurns = new Map<string, string>();
+  /**
+   * 会话级权限模式：整个会话（主智能体 + 所有成员）共用同一个值。
+   * `applySessionPermissionMode` 写它，招人和 Discuss 结束后的重新配置都从它取值。
+   */
+  private sessionPermissionMode: PermissionMode | undefined;
 
   constructor(public readonly options: SessionOptions) {
     // Attach the per-session log sink up front so the constructor's
@@ -1007,17 +1013,17 @@ export class Session {
       },
     };
     await this.writeMetadata();
-    // Fan out one contentless notice per department member: WS subscriptions
-    // filter by the emitting agent id, so a member's open Chat view only
-    // receives events stamped with its own id. The leader emits nothing —
-    // the parent never participates in Chat.
-    for (const [agentId] of this.teamMemberMetadata(departmentLeaderAgentId)) {
-      this.getReadyAgent(agentId)?.emitEvent({
-        type: 'team.chat.updated',
-        departmentLeaderAgentId,
-        senderAgentId,
-      });
-    }
+    // One notice per posted message: `team.chat.updated` is session-wide state,
+    // so the gateway delivers it to every subscriber of the session regardless
+    // of the per-agent subscription filter. Emitting once (stamped with the
+    // sender) reaches members that have no live agent yet, which the old
+    // per-ready-member fan-out silently skipped.
+    void this.rpc.emitEvent({
+      type: 'team.chat.updated',
+      agentId: senderAgentId,
+      departmentLeaderAgentId,
+      senderAgentId,
+    });
     return record;
   }
 
@@ -1849,8 +1855,28 @@ export class Session {
       discussReadonly || (leader?.permission.toolsReadonly ?? false),
     );
     agent.permission.setMode(
-      discussReadonly ? 'manual' : (leader?.permission.mode ?? 'manual'),
+      discussReadonly ? 'manual' : (this.sessionPermissionMode ?? leader?.permission.mode ?? 'manual'),
     );
+  }
+
+  /**
+   * 权限模式是整个会话共用的一个开关。用户在任何一个智能体的窗口里选了 auto，
+   * 主智能体和所有团队成员都跟着变成 auto——而不是只有他当时正在看的那个窗口，
+   * 之后新招进来的成员也从这里取初始值。
+   *
+   * 唯一的例外是 Discuss 期间被强制只读的成员：那是讨论轮次的约束，不是用户的
+   * 权限选择，所以 `configureTeamAgentRuntime` 仍然把他们压回 manual。
+   * 临时子智能体（`sub`）不在这里改：它们没有自己的模式，本来就顺着父级继承。
+   */
+  applySessionPermissionMode(mode: PermissionMode): void {
+    this.sessionPermissionMode = mode;
+    const main = this.getReadyAgent('main');
+    if (main !== undefined && main.permission.mode !== mode) main.permission.setMode(mode);
+    for (const [agentId, meta] of Object.entries(this.metadata.agents)) {
+      if (meta.kind !== 'team') continue;
+      const agent = this.getReadyAgent(agentId);
+      if (agent !== undefined) this.configureTeamAgentRuntime(agent, meta);
+    }
   }
 
   private configureTeamMembers(leaderAgentId: string): void {
@@ -2207,10 +2233,11 @@ const TEAM_MANAGEMENT_TOOLS = [
 ] as const;
 
 /**
- * A member additionally speaks in its parent's discussion. `main` has no parent,
- * so it never takes a participant turn and does not get `TeamSpeak`.
+ * A member additionally speaks in its parent's discussion, chats with its
+ * siblings, and can put a blocking question to its parent. `main` has no
+ * parent, so it never takes a participant turn and gets none of these.
  */
-const TEAM_MEMBER_TOOLS = [...TEAM_MANAGEMENT_TOOLS, 'TeamSpeak', 'TeamChat'] as const;
+const TEAM_MEMBER_TOOLS = [...TEAM_MANAGEMENT_TOOLS, 'TeamSpeak', 'TeamChat', 'nori_ask_parent'] as const;
 
 
 function validateTeamIdentity(identity: TeamIdentity | undefined): asserts identity is TeamIdentity {
@@ -2243,6 +2270,17 @@ function defaultTeamProfile(): ResolvedAgentProfile {
   return profile;
 }
 
+/**
+ * Composes a member's prompt: identity, then the role correction, then the base
+ * profile prompt, the shared contract, and the member contract.
+ *
+ * The base prompt is a main-Agent prompt (every node can lead a department, so
+ * they share one profile set), which on its own would tell a member it is "the
+ * main Agent", that execution belongs to somebody else, and that it should not
+ * reach for Write/Edit/Bash — the opposite of what an assigned member must do.
+ * `<team_role>` states the override up front, before that text is read, and
+ * `## Team Agent` spells out the duties.
+ */
 function teamProfile(
   profile: ResolvedAgentProfile,
   identity: TeamIdentity,
@@ -2257,6 +2295,7 @@ function teamProfile(
         `Role: ${escapeTeamIdentity(identity.role)}`,
         `Mandate: ${escapeTeamIdentity(identity.mandate)}`,
         '</team_identity>',
+        TEAM_MEMBER_ROLE_PROMPT.trim(),
         basePrompt,
         basePrompt.includes('## Team Engineering') ? '' : TEAM_ENGINEERING_PROMPT.trim(),
         TEAM_AGENT_PROMPT.trim(),

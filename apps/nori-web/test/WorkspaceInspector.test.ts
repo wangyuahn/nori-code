@@ -14,8 +14,23 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   delete window.noriDesktop;
-  localStorage.removeItem('nori-inspector-overview-pinned');
+  localStorage.removeItem('nori-inspector-tab-order');
 });
+
+/**
+ * 工具不再有常驻侧栏：关闭时只有右上角的启动器，打开后靠标签条上的 `+`。
+ * 两处都用同一个 `.inspector-tool-menu`，所以测试统一走这个入口。
+ */
+async function openToolFromPicker(container: HTMLElement, label: RegExp): Promise<boolean> {
+  const opener = container.querySelector<HTMLButtonElement>('.inspector-launcher-pick, .inspector-add-tab');
+  if (opener === null) return false;
+  await act(async () => opener.click());
+  const entry = [...container.querySelectorAll<HTMLButtonElement>('.inspector-tool-menu button')]
+    .find(button => label.test(button.textContent ?? ''));
+  if (entry === undefined) return false;
+  await act(async () => entry.click());
+  return true;
+}
 
 describe('workspace change presentation', () => {
   it('detaches the native browser view when another inspector tab becomes active', async () => {
@@ -68,13 +83,9 @@ describe('workspace change presentation', () => {
         expect(desktop.browserSetVisible).toHaveBeenCalledWith(true);
       });
 
-      const previewButton = [...container.querySelectorAll<HTMLButtonElement>('.inspector-tab-list > button')]
-        .find(button => button.title === 'Preview' || button.title === '预览');
-      expect(previewButton).toBeDefined();
-      await act(async () => {
-        previewButton?.click();
-        await Promise.resolve();
-      });
+      const previewButton = await openToolFromPicker(container, /Preview|预览/);
+      expect(previewButton).toBe(true);
+      await act(async () => { await Promise.resolve(); });
 
       expect(container.querySelector('.browser-panel')).toBeNull();
       expect(desktop.browserSetVisible).toHaveBeenLastCalledWith(false);
@@ -84,108 +95,14 @@ describe('workspace change presentation', () => {
     }
   });
 
-  it('renders todos as distinct rows without repeating the first item in the headline', async () => {
+  it('opens a tool from the top-right launcher and closes the whole panel again', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
     try {
       await act(async () => {
         root.render(createElement(I18nProvider, null, createElement(WorkspaceInspector, {
-          sessionId: 'session-todo-island',
-          projectPath: '/project',
-          path: '',
-          file: null,
-          messages: [],
-          codeChanges: [],
-          gitStatus: null,
-          gitError: null,
-          gitLoading: false,
-          refreshGitStatus: vi.fn(async () => null),
-          isStreaming: false,
-          overviewFirst: true,
-          todos: [
-            { title: 'First task', status: 'done' },
-            { title: 'Second task', status: 'in_progress' },
-            { title: 'Third task', status: 'pending' },
-          ],
-        })));
-        await Promise.resolve();
-      });
-
-      expect(container.querySelectorAll('.inspector-activity-todos li')).toHaveLength(3);
-      expect(container.querySelector('.inspector-activity-card-heading')?.textContent).toContain('Todo list');
-      expect(container.querySelector('.inspector-activity-todos-progress')?.textContent).toContain('1/3');
-      expect(container.textContent?.match(/First task/g)).toHaveLength(1);
-      expect(container.textContent?.match(/Second task/g)).toHaveLength(1);
-    } finally {
-      await act(async () => root.unmount());
-      container.remove();
-    }
-  });
-
-  it('renders a structured goal card without repeating its objective in the activity header', async () => {
-    const container = document.createElement('div');
-    document.body.append(container);
-    const root = createRoot(container);
-    const goal: GoalSnapshot = {
-      goalId: 'goal-card',
-      objective: 'Finish the workspace migration.',
-      completionCriterion: 'All migration checks pass.',
-      status: 'active',
-      turnsUsed: 1,
-      tokensUsed: 1_200,
-      wallClockMs: 62_000,
-      budget: {
-        tokenBudget: 4_000,
-        turnBudget: 4,
-        wallClockBudgetMs: null,
-        remainingTokens: 2_800,
-        remainingTurns: 3,
-        remainingWallClockMs: null,
-        tokenBudgetReached: false,
-        turnBudgetReached: false,
-        wallClockBudgetReached: false,
-        overBudget: false,
-      },
-    };
-    try {
-      await act(async () => {
-        root.render(createElement(I18nProvider, null, createElement(WorkspaceInspector, {
-          sessionId: 'session-goal-card',
-          projectPath: '/project',
-          path: '',
-          file: null,
-          messages: [],
-          codeChanges: [],
-          gitStatus: null,
-          gitError: null,
-          gitLoading: false,
-          refreshGitStatus: vi.fn(async () => null),
-          isStreaming: false,
-          overviewFirst: true,
-          goal,
-        })));
-        await Promise.resolve();
-      });
-
-      expect(container.querySelector('.inspector-activity-goal')?.textContent).toContain('Finish the workspace migration.');
-      expect(container.querySelector('.inspector-activity-goal-heading')?.textContent).toContain('Active');
-      expect(container.querySelector('.inspector-activity-goal-meta')?.textContent).toContain('1/4 turns');
-      expect(container.querySelector('.inspector-activity-highlight')).toBeNull();
-    } finally {
-      await act(async () => root.unmount());
-      container.remove();
-    }
-  });
-
-  it('pins the tool island from its header and keeps sidebar collapse as a separate control', async () => {
-    const container = document.createElement('div');
-    document.body.append(container);
-    const root = createRoot(container);
-    try {
-      await act(async () => {
-        root.render(createElement(I18nProvider, null, createElement(WorkspaceInspector, {
-          sessionId: 'session-inspector-collapse',
+          sessionId: 'session-inspector-launcher',
           projectPath: '/project',
           path: '',
           file: null,
@@ -202,34 +119,125 @@ describe('workspace change presentation', () => {
       });
 
       const inspector = container.querySelector('.workspace-inspector')!;
-      const pinButton = () => container.querySelector<HTMLButtonElement>('.inspector-pin-button')!;
-      expect(pinButton().getAttribute('aria-label')).toMatch(/Auto-hide tool island|自动隐藏工具岛/);
+      expect(inspector.classList.contains('inspector-overview-open')).toBe(true);
+      // 关闭态不留任何常驻侧栏，只有右上角一枚启动器。
+      expect(container.querySelector('.inspector-navigation')).toBeNull();
+      const launcher = container.querySelector<HTMLButtonElement>('.inspector-launcher')!;
+      expect(launcher.textContent).toMatch(/Changes|更改/);
 
-      await act(async () => pinButton().click());
-      expect(inspector.classList.contains('inspector-overview-auto-hide')).toBe(true);
-      expect(pinButton().getAttribute('aria-label')).toMatch(/Keep tool island visible|常驻工具岛/);
-
-      await act(async () => pinButton().click());
-      expect(inspector.classList.contains('inspector-overview-auto-hide')).toBe(false);
-
-      const changesButton = [...container.querySelectorAll<HTMLButtonElement>('.inspector-tab-list > button')]
-        .find(button => button.textContent?.includes('Changes') || button.textContent?.includes('更改'))!;
-      await act(async () => changesButton.click());
+      await act(async () => launcher.click());
       expect(inspector.classList.contains('inspector-view-open')).toBe(true);
-      expect(container.querySelector('.inspector-pin-button')).toBeNull();
-      const collapseButton = container.querySelector<HTMLButtonElement>('.inspector-collapse-button')!;
-      expect(collapseButton.getAttribute('aria-label')).toMatch(/Collapse tool sidebar|收起工具侧栏/);
+      expect(container.querySelectorAll('.inspector-open-tab')).toHaveLength(1);
+      expect(container.querySelector('.inspector-launcher')).toBeNull();
 
+      const collapseButton = container.querySelector<HTMLButtonElement>('.inspector-collapse-button')!;
+      expect(collapseButton.getAttribute('aria-label')).toMatch(/Close tool panel|关闭工具面板/);
       await act(async () => collapseButton.click());
       expect(inspector.classList.contains('inspector-overview-open')).toBe(true);
       expect(inspector.classList.contains('inspector-view-open')).toBe(false);
+      expect(container.querySelector('.inspector-launcher')).not.toBeNull();
     } finally {
       await act(async () => root.unmount());
       container.remove();
     }
   });
 
-  it('reuses an existing tool tab from the island and lets the user close it', async () => {
+  it('shows the tool context header and toggles the expanded panel width', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(WorkspaceInspector, {
+          sessionId: 'session-inspector-context',
+          projectPath: '/project',
+          path: '',
+          file: null,
+          messages: [],
+          codeChanges: [],
+          gitStatus: { branch: 'master', ahead: 0, behind: 0, entries: {}, additions: 0, deletions: 0 },
+          gitError: null,
+          gitLoading: false,
+          refreshGitStatus: vi.fn(async () => null),
+          isStreaming: false,
+          initialTab: 'changes',
+        })));
+        await Promise.resolve();
+      });
+
+      const context = container.querySelector('.inspector-stage-context')!;
+      expect(context.querySelector('strong')?.textContent).toBe('master');
+      expect(context.querySelector('em')?.textContent).toMatch(/working tree|工作区/);
+
+      const inspector = container.querySelector('.workspace-inspector')!;
+      const expandButton = container.querySelector<HTMLButtonElement>('.inspector-expand-button')!;
+      expect(expandButton.getAttribute('aria-pressed')).toBe('false');
+      await act(async () => expandButton.click());
+      expect(inspector.classList.contains('inspector-expanded')).toBe(true);
+      expect(container.querySelector('.inspector-expand-button')?.getAttribute('aria-pressed')).toBe('true');
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('offers Meeting and Chat as tools only for an agent inside a department', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const renderInspector = async (props: Record<string, unknown>) => {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(WorkspaceInspector, {
+          sessionId: 'session-inspector-department',
+          projectPath: '/project',
+          path: '',
+          file: null,
+          messages: [],
+          codeChanges: [],
+          gitStatus: null,
+          gitError: null,
+          gitLoading: false,
+          refreshGitStatus: vi.fn(async () => null),
+          isStreaming: false,
+          overviewFirst: true,
+          ...props,
+        })));
+        await Promise.resolve();
+      });
+    };
+    const menuLabels = () => {
+      const entries = [...container.querySelectorAll<HTMLButtonElement>('.inspector-tool-menu button')];
+      return entries.map(button => button.querySelector('span')?.textContent ?? '');
+    };
+    try {
+      await renderInspector({ selfAgentId: 'main' });
+      await act(async () => container.querySelector<HTMLButtonElement>('.inspector-launcher-pick')!.click());
+      expect(menuLabels().some(label => /Meeting|开会/.test(label))).toBe(false);
+      expect(menuLabels().some(label => /Chat|交流/.test(label))).toBe(false);
+      await act(async () => container.querySelector<HTMLButtonElement>('.inspector-launcher-pick')!.click());
+
+      await renderInspector({
+        selfAgentId: 'member-1',
+        departmentChat: { department_leader_agent_id: 'lead-1', messages: [] },
+        sessionAgents: [
+          { agent_id: 'lead-1', kind: 'subagent', parent_agent_id: 'main', status: 'idle' },
+          { agent_id: 'discussion-1', kind: 'discussion', parent_agent_id: 'lead-1', status: 'idle' },
+        ],
+      });
+      expect(await openToolFromPicker(container, /Chat|交流/)).toBe(true);
+      expect(container.querySelector('.department-panel')).not.toBeNull();
+      expect(container.querySelector('.department-rail-empty')?.textContent).toMatch(/No messages yet|还没有消息/);
+
+      await act(async () => container.querySelector<HTMLButtonElement>('.inspector-add-tab')!.click());
+      expect(menuLabels().some(label => /Meeting|开会/.test(label))).toBe(true);
+      expect(menuLabels().some(label => /Chat|交流/.test(label))).toBe(true);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('reuses an existing tool tab from the picker and lets the user close it', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -252,13 +260,11 @@ describe('workspace change presentation', () => {
         await Promise.resolve();
       });
 
-      const changesButton = [...container.querySelectorAll<HTMLButtonElement>('.inspector-tab-list > button')]
-        .find(button => button.textContent?.includes('Changes') || button.textContent?.includes('更改'))!;
-      await act(async () => changesButton.click());
+      expect(await openToolFromPicker(container, /Changes|更改/)).toBe(true);
       expect(container.querySelectorAll('.inspector-open-tab')).toHaveLength(1);
 
       await act(async () => container.querySelector<HTMLButtonElement>('.inspector-collapse-button')!.click());
-      await act(async () => changesButton.click());
+      expect(await openToolFromPicker(container, /Changes|更改/)).toBe(true);
       expect(container.querySelectorAll('.inspector-open-tab')).toHaveLength(1);
       expect(container.querySelector('.workspace-inspector')?.classList.contains('inspector-view-open')).toBe(true);
 
@@ -785,10 +791,8 @@ describe('workspace change presentation', () => {
       const inspectorTabs = [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
       const changesTab = inspectorTabs
         .find(button => button.title === '更改' || button.title === 'Changes' || button.textContent?.includes('更改') || button.textContent?.includes('Changes'));
-      const browserTab = inspectorTabs
-        .find(button => button.title === '浏览器' || button.title === 'Browser' || button.textContent?.includes('浏览器') || button.textContent?.includes('Browser'));
       expect(changesTab).toBeDefined();
-      expect(browserTab).toBeDefined();
+      expect(inspectorTabs).toHaveLength(1);
       expect(inspectorTabs[0]).toBe(changesTab);
       expect(changesTab!.getAttribute('aria-selected')).toBe('true');
       expect(diff).toHaveBeenCalledTimes(1);

@@ -24,7 +24,7 @@ describe('PrimaryNavigation', () => {
       root.render(createElement(PrimaryNavigation, {
         activeView: 'chat',
         labels: {
-          chat: 'Chat', dashboard: 'Dashboard', cron: 'Cron Job',
+          chat: 'Chat', team: 'Team', cron: 'Cron Job',
           account: 'My profile',
         },
         cronJobCount: 3,
@@ -47,7 +47,7 @@ describe('PrimaryNavigation', () => {
       root.render(createElement(PrimaryNavigation, {
         activeView: 'chat',
         labels: {
-          chat: 'Chat', dashboard: 'Dashboard', cron: 'Cron Job',
+          chat: 'Chat', team: 'Team', cron: 'Cron Job',
           account: 'My profile',
         },
         cronJobCount: 0,
@@ -70,7 +70,7 @@ describe('PrimaryNavigation', () => {
       root.render(createElement(PrimaryNavigation, {
         activeView: 'chat',
         labels: {
-          chat: 'Chat', dashboard: 'Dashboard', cron: 'Cron Job',
+          chat: 'Chat', team: 'Team', cron: 'Cron Job',
           account: 'My profile',
         },
         cronJobCount: 0,
@@ -79,6 +79,9 @@ describe('PrimaryNavigation', () => {
     });
 
     expect(container.querySelector('button[title="Collaboration"]')).toBeNull();
+    // 仪表盘已被删掉：导航里只剩对话、团队、定时任务。
+    expect([...container.querySelectorAll('button')].map(node => node.title))
+      .toEqual(['Chat', 'Team', 'Cron Job']);
 
     await act(async () => { root.unmount(); });
   });

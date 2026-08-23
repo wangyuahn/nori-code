@@ -324,7 +324,8 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
         thinkingEffort,
       });
       if (permissionMode !== undefined) {
-        mainAgent.permission.setMode(permissionMode);
+        // 记成会话级模式，这样之后招进来的成员默认也是这个模式。
+        session.applySessionPermissionMode(permissionMode);
       }
       // New sessions start in Discuss unless the user explicitly disabled it.
       // Resumed sessions restore their own state and never re-apply this.

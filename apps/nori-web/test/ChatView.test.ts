@@ -1231,9 +1231,9 @@ describe('conversation presentation', () => {
       isStreaming: true,
     });
 
-    expect(container.querySelector('.live-work-elapsed')?.textContent).toBe('5s');
+    expect(container.querySelector('.chat-work-stream.live .work-stream-elapsed')?.textContent).toBe('5s');
     await act(async () => { vi.advanceTimersByTime(2_000); });
-    expect(container.querySelector('.live-work-elapsed')?.textContent).toBe('7s');
+    expect(container.querySelector('.chat-work-stream.live .work-stream-elapsed')?.textContent).toBe('7s');
 
     await act(async () => {
       root.render(createElement(I18nProvider, null, createElement(ChatView, {
@@ -1246,9 +1246,9 @@ describe('conversation presentation', () => {
         isStreaming: false,
       })));
     });
-    expect(container.querySelector('.work-process-elapsed')?.textContent).toBe('1m 05s');
+    expect(container.querySelector('.work-stream-elapsed')?.textContent).toBe('1m 05s');
     await act(async () => { vi.advanceTimersByTime(5_000); });
-    expect(container.querySelector('.work-process-elapsed')?.textContent).toBe('1m 05s');
+    expect(container.querySelector('.work-stream-elapsed')?.textContent).toBe('1m 05s');
     vi.useRealTimers();
   });
 
@@ -1268,11 +1268,12 @@ describe('conversation presentation', () => {
     expect(input.style.overflowY).toBe('auto');
   });
 
-  it('keeps live thought separate from normal output, then collapses the completed work', async () => {
+  it('groups thinking and tools in one collapsible box and keeps output at its own position', async () => {
     const blocks = [
       { id: 'thinking-1', type: 'thinking' as const, text: 'Inspecting the relevant call path.' },
       { id: 'tool-1', type: 'tool' as const, tool: { id: 'tool-1', name: 'ReadFile', args: { path: 'src/app.ts' }, result: 'ok' } },
       { id: 'progress-1', type: 'progress' as const, text: 'The target file is loaded.' },
+      { id: 'tool-2', type: 'tool' as const, tool: { id: 'tool-2', name: 'Bash', args: { command: 'ls' }, result: 'ok' } },
     ];
     const liveMessage = { id: 'assistant-1', role: 'assistant' as const, text: '' };
     const { container, props, root } = await renderChat({
@@ -1282,10 +1283,22 @@ describe('conversation presentation', () => {
     });
 
     expect(container.querySelector('.chat-work-process')).toBeNull();
-    const liveThought = container.querySelector<HTMLDetailsElement>('.live-thinking-block')!;
-    expect(liveThought.open).toBe(false);
-    expect(liveThought.textContent).toContain('Inspecting the relevant call path.');
-    expect(container.querySelector('.compact-tool-call')?.textContent).toContain('ReadFile');
+    // 段的顺序 = 块的顺序：工作框 → 模型输出 → 又一个工作框，输出留在原位。
+    const liveRows = [...container.querySelectorAll('.chat-work-stream.live > *')].slice(1).map(node => node.className);
+    expect(liveRows[0]).toContain('chat-work-group');
+    expect(liveRows[1]).toContain('transcript-assistant-output');
+    expect(liveRows[2]).toContain('chat-work-group');
+
+    const liveGroups = [...container.querySelectorAll<HTMLDetailsElement>('.chat-work-stream.live .chat-work-group')];
+    expect(liveGroups).toHaveLength(2);
+    // 正在跑的那一段自动展开，之前已经结束的段落保持收起。
+    expect(liveGroups[1]?.classList.contains('live')).toBe(true);
+    expect(liveGroups[1]?.open).toBe(true);
+    expect(liveGroups[0]?.open).toBe(false);
+    const groupRows = [...liveGroups[0]!.querySelectorAll('.work-group-body > *')].map(node => node.className);
+    expect(groupRows[0]).toContain('work-thinking-line');
+    expect(groupRows[1]).toContain('compact-tool-call');
+    expect(liveGroups[0]?.textContent).toContain('Inspecting the relevant call path.');
 
     await act(async () => {
       root.render(createElement(I18nProvider, null, createElement(ChatView, {
@@ -1296,21 +1309,43 @@ describe('conversation presentation', () => {
       })));
     });
 
-    const details = container.querySelector<HTMLDetailsElement>('.chat-work-process')!;
-    expect(details.open).toBe(false);
-    expect(details.textContent).toContain('Work process');
-    expect(details.textContent).toContain('1 tool');
-    expect(details.querySelector('.work-process-chevron')).not.toBeNull();
-    expect(details.querySelector('.work-process-status')).toBeNull();
+    const stream = container.querySelector<HTMLElement>('.chat-work-stream')!;
+    expect(container.querySelector('.chat-work-process')).toBeNull();
+    expect(stream.classList.contains('live')).toBe(false);
+    // 完成后两个工作框都收起，只留一行汇总；输出仍在两个框之间。
+    const groups = [...stream.querySelectorAll<HTMLDetailsElement>('.chat-work-group')];
+    expect(groups).toHaveLength(2);
+    expect(groups.every(group => !group.open)).toBe(true);
+    expect(groups[0]?.querySelector('.work-group-headline')?.textContent ?? '').toMatch(/tool|工具/);
+    expect(groups[1]?.querySelector('.work-group-headline')?.textContent ?? '').toMatch(/command|命令/);
     expect(container.querySelector('.chat-message-content:not(.transcript-assistant-output)')?.textContent).toContain('Finished.');
+    expect(container.querySelector('.transcript-assistant-output')?.textContent).toContain('The target file is loaded.');
 
+    // 展开工作框后，思考行自己也能折叠/展开。
     await act(async () => {
-      details.querySelector('summary')?.click();
+      groups[0]?.querySelector('summary')?.click();
       await Promise.resolve();
     });
-    expect(details.open).toBe(true);
-    expect(container.querySelector<HTMLDetailsElement>('.work-thinking-block')?.open).toBe(false);
-    expect(container.querySelector('.transcript-assistant-output')?.textContent).toContain('The target file is loaded.');
+    expect(groups[0]?.open).toBe(true);
+    const thought = groups[0]!.querySelector<HTMLDetailsElement>('.work-thinking-line')!;
+    expect(thought.open).toBe(false);
+    await act(async () => {
+      thought.querySelector('summary')?.click();
+      await Promise.resolve();
+    });
+    expect(thought.open).toBe(true);
+    expect(thought.querySelector('p')?.textContent).toContain('Inspecting the relevant call path.');
+
+    // 工具行仍是就地展开的一行。
+    const toolRow = groups[0]!.querySelector<HTMLDetailsElement>('.compact-tool-call')!;
+    expect(toolRow.open).toBe(false);
+    expect(toolRow.querySelector('.compact-tool-chevron')).not.toBeNull();
+    await act(async () => {
+      toolRow.querySelector('summary')?.click();
+      await Promise.resolve();
+    });
+    expect(toolRow.open).toBe(true);
+    expect(toolRow.querySelector('.compact-tool-detail')?.textContent).toContain('src/app.ts');
   });
 
   it('renders ordinary live text as normal assistant output while work is active', async () => {

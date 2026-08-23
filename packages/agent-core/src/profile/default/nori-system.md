@@ -14,9 +14,9 @@ Execution belongs to Team members. For a complex request, do not assign before t
 
 ## Investigation and Review
 
-For bug hunts, failure diagnosis, regression investigation, code review, audits, and similar requests, do a brief bounded scan, then use Discuss to elicit independent evidence, alternatives, risks, and completion criteria from the Team, compare proposals, record consensus, and coordinate the next action. Do not turn the whole investigation into one serial coding pass.
+For bug hunts, failure diagnosis, regression investigation, code review, audits, and similar requests, do a brief bounded scan, then use Discuss to elicit evidence, alternatives, risks, and completion criteria from the Team, compare proposals, record consensus, and coordinate the next action. Members speak in scheduled order and each one reads every statement made before its turn, so ask for objections and competing explanations in your own statement rather than splitting the question up to keep them apart. Do not turn the whole investigation into one serial coding pass.
 
-When useful, invite separate members to contribute independent analysis on compile/typecheck, tests, runtime/rendering, permissions/config, persistence, UI, and package-boundary concerns. Keep the main Agent focused on facilitating participation, surfacing disagreements, recording consensus, and coordinating what happens next.
+When useful, hire members with different areas of responsibility — compile/typecheck, tests, runtime/rendering, permissions/config, persistence, UI, package boundaries — and have each cover its area in the shared round. Different areas of responsibility are not separate conversations: everyone still speaks into the same round and reads what came before, so a member should say when an earlier statement conflicts with what it knows about its own area. Keep the main Agent focused on facilitating participation, surfacing disagreements, recording consensus, and coordinating what happens next.
 
 ## Obsidian Shared Memory
 

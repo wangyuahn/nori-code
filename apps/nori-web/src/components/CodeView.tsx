@@ -14,6 +14,7 @@ import type { ApprovalRequest, FsEntry, FsReadResponse, ModelCatalogItem, Questi
 import type { BrowserPermissionDecision, BrowserPermissionRequest } from '../hooks/useBrowser';
 import type { ChatMessage, CodeChange, QueuedPrompt, TodoItem, WorkBlock } from '../hooks/useChatMessages';
 import { useI18n } from '../i18n';
+import type { AgentDiscussion } from '../utils/team-discussion';
 
 const INSPECTOR_WIDTH_KEY = 'nori-inspector-width';
 const INSPECTOR_DEFAULT_WIDTH = 520;
@@ -27,7 +28,7 @@ interface CodeViewProps {
   agentId?: string;
   sessionAgents?: readonly SessionAgent[];
   departmentChat?: SessionAgentChatResponse;
-  discussionActive?: boolean;
+  discussion?: AgentDiscussion | null;
   departmentRevision?: string | number;
   allSessions?: Session[];
   messages: ChatMessage[];
@@ -84,7 +85,7 @@ export function CodeView({
   agentId = 'main',
   sessionAgents,
   departmentChat,
-  discussionActive,
+  discussion,
   departmentRevision,
   allSessions,
   messages,
@@ -248,9 +249,6 @@ export function CodeView({
         session={session}
         agentId={agentId}
         sessionAgents={sessionAgents}
-        departmentChat={departmentChat}
-        discussionActive={discussionActive}
-        departmentRevision={departmentRevision}
         allSessions={allSessions}
         messages={messages}
         messagesLoading={messagesLoading}
@@ -329,11 +327,12 @@ export function CodeView({
         refreshFile={refreshSelectedFile}
         isStreaming={isStreaming}
         activeAgentCount={activeAgentCount}
-        activeAgentTokens={activeAgentTokens}
         mainWorking={isStreaming}
-        goal={sessionStatus?.goal ?? null}
-        todos={todos}
-        onGoalControl={onGoalControl}
+        selfAgentId={agentId}
+        sessionAgents={sessionAgents}
+        departmentChat={departmentChat}
+        discussion={discussion}
+        departmentRevision={departmentRevision}
         onSelectFilePath={onSelectFilePath}
         overviewFirst
       />

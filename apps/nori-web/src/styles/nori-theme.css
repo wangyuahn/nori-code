@@ -8,6 +8,9 @@
   /* accent */
   --nori-cyan: #00BCD4;
   --nori-cyan-dim: rgba(0, 188, 212, 0.15);
+  /* 主题色的语义别名：部门气泡、发言指示这类“属于自己这方”的强调都用它，
+     换主题时只跟着 --nori-cyan 走。 */
+  --nori-accent: var(--nori-cyan);
   --nori-thinking: #9be8b0;
 
   /* backgrounds */
@@ -2479,8 +2482,6 @@ kbd {
 @keyframes browser-pulse { from { opacity: .25; } to { opacity: 1; } }
 
 /* Inline, ordered tool calls inside the reasoning transcript. */
-.work-reasoning-block + .compact-tool-call,
-.compact-tool-call + .work-reasoning-block { margin-top: 1px; }
 .compact-tool-call {
   display: grid;
   min-height: 29px;
@@ -2609,55 +2610,6 @@ kbd {
   display: inline-block;
   max-width: 100%;
   text-align: left;
-}
-.chat-work-process {
-  margin: 7px 0 11px;
-  overflow: hidden;
-  border: 1px solid var(--nori-border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--nori-surface) 84%, transparent);
-}
-.chat-work-process > summary {
-  display: grid;
-  grid-template-columns: 16px auto minmax(0, 1fr) 14px;
-  align-items: center;
-  gap: 7px;
-  min-height: 34px;
-  padding: 7px 10px;
-  color: var(--nori-text-secondary);
-  cursor: pointer;
-  list-style: none;
-  font-size: calc(11px * var(--nori-ui-font-scale));
-}
-.chat-work-process > summary::-webkit-details-marker { display: none; }
-.chat-work-process > summary::after {
-  content: '+';
-  grid-column: 4;
-  color: var(--nori-text-muted);
-  font-size: calc(14px * var(--nori-ui-font-scale));
-}
-.chat-work-process[open] > summary::after { content: '-'; }
-.chat-work-process > summary small {
-  overflow: hidden;
-  color: var(--nori-text-muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: calc(9px * var(--nori-ui-font-scale));
-}
-.chat-work-process-body {
-  display: grid;
-  gap: 8px;
-  padding: 10px;
-  border-top: 1px solid var(--nori-border);
-}
-.chat-work-process-body section { min-width: 0; }
-.chat-work-process-body pre {
-  max-height: 320px;
-  overflow: auto;
-  color: var(--nori-text-secondary);
-  font: calc(10px * var(--nori-ui-font-scale))/1.6 var(--nori-font);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 .composer-model-controls {
   display: flex;
@@ -3498,100 +3450,6 @@ kbd {
 .workspace-inspector-resizer:focus-visible::after,
 .workspace-chat-layout.inspector-resizing .workspace-inspector-resizer::after { opacity: 1; }
 .workspace-chat-layout.inspector-resizing > .chat-view, .workspace-chat-layout.inspector-resizing .workspace-inspector { transition: none; }
-.inspector-navigation {
-  display: flex;
-  width: 100%;
-  min-width: 0;
-  max-height: 100%;
-  flex-direction: column;
-  overflow: hidden;
-  border: 1px solid var(--nori-border-strong);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--nori-surface-raised) 96%, transparent);
-  box-shadow: 0 18px 44px rgba(0, 0, 0, .22);
-  pointer-events: auto;
-  transform-origin: right center;
-  transition: width 240ms cubic-bezier(.2, .82, .2, 1), border-radius 240ms ease, transform 240ms ease, box-shadow 240ms ease;
-}
-.inspector-overview-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 19px 18px 11px 20px; }
-.inspector-overview-heading > div { display: grid; min-width: 0; gap: 3px; }
-.inspector-overview-heading span { color: var(--nori-text-muted); font-size: calc(9px * var(--nori-ui-font-scale)); }
-.inspector-overview-heading strong { color: var(--nori-text); font-size: calc(18px * var(--nori-ui-font-scale)); letter-spacing: 0; }
-.inspector-pin-button { display: grid; width: 28px; height: 28px; flex: none; place-items: center; margin-top: -3px; padding: 0; border-radius: 8px; color: var(--nori-text-muted); transition: color 150ms ease, background-color 150ms ease, transform 150ms ease; }
-.inspector-pin-button:hover { color: var(--nori-text); background: var(--nori-control-hover); transform: scale(1.04); }
-.inspector-pin-button.active { color: var(--nori-cyan); background: color-mix(in srgb, var(--nori-cyan) 10%, transparent); }
-.inspector-activity-summary { display: grid; gap: 7px; margin: 0 18px 8px; padding: 0 0 10px; border-bottom: 1px solid var(--nori-border); color: var(--nori-text-secondary); font-size: calc(9px * var(--nori-ui-font-scale)); }
-.inspector-activity-highlight { display: grid; min-width: 0; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 7px; }
-.inspector-activity-icon { display: grid; width: 22px; height: 22px; place-items: center; color: var(--nori-cyan); }
-.inspector-activity-highlight > span:nth-child(2) { display: grid; min-width: 0; gap: 2px; }
-.inspector-activity-highlight small, .inspector-activity-highlight strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.inspector-activity-highlight small { color: var(--nori-text-muted); font-size: calc(8px * var(--nori-ui-font-scale)); }
-.inspector-activity-highlight strong { color: var(--nori-cyan); font-size: calc(10px * var(--nori-ui-font-scale)); font-weight: 650; }
-.inspector-activity-highlight em { color: var(--nori-text-muted); font: calc(8px * var(--nori-ui-font-scale)) var(--nori-font-mono); font-style: normal; white-space: nowrap; }
-.inspector-activity-line { display: grid; min-width: 0; grid-template-columns: 78px minmax(0, 1fr); gap: 7px; margin: 0; line-height: 1.45; }
-.inspector-activity-line > span, .inspector-activity-label { color: var(--nori-text-muted); }
-.inspector-activity-line strong { min-width: 0; overflow-wrap: anywhere; font-weight: 540; }
-.inspector-activity-line.active strong { color: var(--nori-cyan); font-weight: 620; }
-.inspector-activity-section { display: grid; gap: 4px; padding-top: 6px; border-top: 1px solid color-mix(in srgb, var(--nori-border) 70%, transparent); }
-.inspector-activity-card { display: grid; min-width: 0; overflow: hidden; border: 1px solid var(--nori-border-strong); border-radius: 8px; background: color-mix(in srgb, var(--nori-surface-raised) 94%, transparent); }
-.inspector-activity-card-heading { display: flex; min-height: 36px; align-items: center; padding: 7px 10px; }
-.inspector-activity-card-heading > span { display: flex; min-width: 0; align-items: center; gap: 7px; }
-.inspector-activity-card-heading svg { color: var(--nori-text-muted); }
-.inspector-activity-card-heading strong { overflow: hidden; color: var(--nori-text-secondary); font-size: calc(11px * var(--nori-ui-font-scale)); font-weight: 620; text-overflow: ellipsis; white-space: nowrap; }
-.inspector-activity-card-divider { height: 1px; margin: 0 10px; background: color-mix(in srgb, var(--nori-border) 78%, transparent); }
-.inspector-activity-goal-heading { justify-content: space-between; gap: 8px; }
-.inspector-activity-goal-heading em { flex: none; color: var(--nori-cyan); font-size: calc(9px * var(--nori-ui-font-scale)); font-style: normal; }
-.inspector-activity-goal.goal-paused .inspector-activity-goal-heading em { color: var(--nori-warning); }
-.inspector-activity-goal.goal-blocked .inspector-activity-goal-heading em { color: var(--nori-danger); }
-.inspector-activity-goal.goal-complete .inspector-activity-goal-heading em { color: var(--nori-success); }
-.inspector-activity-goal-objective { margin: 0; padding: 8px 10px 6px; color: var(--nori-text); font-size: calc(11px * var(--nori-ui-font-scale)); font-weight: 570; line-height: 1.5; overflow-wrap: anywhere; }
-.inspector-activity-goal-meta { display: grid; gap: 5px; padding: 2px 10px 9px; }
-.inspector-activity-goal-meta p { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 7px; margin: 0; color: var(--nori-text-secondary); font-size: calc(9px * var(--nori-ui-font-scale)); line-height: 1.45; }
-.inspector-activity-goal-meta p > span { color: var(--nori-text-muted); }
-.inspector-activity-goal-meta p > strong { min-width: 0; overflow-wrap: anywhere; font-weight: 540; }
-.inspector-activity-todos { min-height: 0; }
-.inspector-activity-todos-progress { display: flex; align-items: center; gap: 10px; padding: 8px 10px 4px; }
-.inspector-activity-todos-progress > span { color: var(--nori-text-muted); font-size: calc(10px * var(--nori-ui-font-scale)); }
-.inspector-activity-todos-progress > strong { color: var(--nori-success); font: calc(12px * var(--nori-ui-font-scale))/1 var(--nori-font-mono); font-weight: 620; }
-.inspector-activity-todos ol { display: grid; min-width: 0; max-height: min(36vh, 240px); gap: 3px; margin: 0; padding: 3px 10px 10px; overflow-y: auto; list-style: none; scrollbar-width: thin; }
-.inspector-activity-todos li { display: grid; min-width: 0; min-height: 24px; grid-template-columns: 18px minmax(0, 1fr); align-items: start; gap: 8px; padding: 2px 0; color: var(--nori-text-secondary); font-size: calc(10px * var(--nori-ui-font-scale)); line-height: 1.45; }
-.inspector-todo-status { display: grid; width: 17px; height: 17px; place-items: center; margin-top: 1px; border: 1px solid var(--nori-text-muted); border-radius: 50%; color: var(--nori-text-muted); }
-.inspector-activity-todos li > span:last-child { min-width: 0; overflow-wrap: anywhere; }
-.inspector-activity-todos li.todo-in_progress { color: var(--nori-warning); }
-.inspector-activity-todos li.todo-in_progress .inspector-todo-status { border-color: var(--nori-warning); color: var(--nori-warning); }
-.inspector-activity-todos li.todo-done { color: var(--nori-text-muted); text-decoration: line-through; }
-.inspector-activity-todos li.todo-done .inspector-todo-status { border-color: var(--nori-success); color: var(--nori-success); }
-.inspector-activity-summary.goal-blocked .inspector-activity-highlight strong { color: var(--nori-danger); }
-.inspector-activity-actions { display: flex; justify-content: flex-end; gap: 5px; padding: 7px 10px 9px; border-top: 1px solid color-mix(in srgb, var(--nori-border) 58%, transparent); }
-.inspector-activity-actions button { min-height: 23px; padding: 2px 7px; border: 1px solid var(--nori-border); border-radius: 4px; color: var(--nori-text-secondary); background: transparent; cursor: pointer; font-size: calc(8px * var(--nori-ui-font-scale)); }
-.inspector-activity-actions button:hover { color: var(--nori-text); background: var(--nori-control-hover); }
-.inspector-activity-actions button.danger { color: var(--nori-danger); }
-.inspector-tab-list { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; }
-.inspector-overview-open .inspector-tab-list { padding: 1px 18px 17px; overflow-y: auto; }
-.inspector-navigation button { border: 0; color: var(--nori-text-muted); background: transparent; cursor: pointer; }
-.inspector-overview-open .inspector-tab-list > button { display: grid; width: 100%; min-width: 0; min-height: 57px; grid-template-columns: 38px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 7px 2px; border-bottom: 1px solid var(--nori-border); text-align: left; }
-.inspector-overview-open .inspector-tab-list > button:last-child { border-bottom: 0; }
-.inspector-overview-open .inspector-tab-list > button:hover { color: var(--nori-text); transform: translateX(2px); }
-.inspector-nav-icon { display: grid; width: 36px; height: 36px; flex: none; place-items: center; border-radius: 11px; color: var(--nori-text-secondary); background: color-mix(in srgb, var(--nori-control) 78%, transparent); transition: color 160ms ease, background-color 160ms ease, transform 160ms ease; }
-.inspector-tab-list > button { transition: color 160ms ease, background-color 160ms ease, transform 160ms ease; }
-.inspector-tab-list > button:hover .inspector-nav-icon, .inspector-tab-list > button.active .inspector-nav-icon { color: var(--nori-cyan); background: var(--nori-control-hover); transform: scale(1.04); }
-.inspector-nav-copy { display: grid; min-width: 0; gap: 2px; }
-.inspector-nav-copy strong, .inspector-nav-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.inspector-nav-copy strong { color: var(--nori-text); font-size: calc(12px * var(--nori-ui-font-scale)); font-weight: 650; }
-.inspector-nav-copy small { color: var(--nori-text-muted); font-size: calc(9px * var(--nori-ui-font-scale)); }
-.inspector-tab-list em { display: grid; min-width: 20px; height: 20px; place-items: center; padding: 0 5px; border-radius: 10px; color: var(--nori-text-secondary); background: var(--nori-control-hover); font-size: calc(9px * var(--nori-ui-font-scale)); font-style: normal; }
-.inspector-navigation.compact { width: 50px; max-height: min(100%, 398px); flex: 0 0 50px; align-self: flex-start; border-radius: 12px; box-shadow: 0 14px 34px rgba(0, 0, 0, .22); }
-.inspector-navigation.compact .inspector-tab-list { align-items: center; gap: 4px; padding: 7px 6px 5px; overflow-y: auto; scrollbar-width: none; }
-.inspector-navigation.compact .inspector-tab-list::-webkit-scrollbar { display: none; }
-.inspector-navigation.compact .inspector-tab-list > button,
-.inspector-navigation.compact .inspector-collapse-button { position: relative; display: grid; width: 36px; height: 36px; flex: 0 0 36px; place-items: center; padding: 0; border-radius: 10px; }
-.inspector-navigation.compact button:hover { color: var(--nori-text); background: var(--nori-control-hover); transform: scale(1.04); }
-.inspector-navigation.compact button.active { color: var(--nori-cyan); background: color-mix(in srgb, var(--nori-cyan) 11%, var(--nori-control)); }
-.inspector-navigation.compact .inspector-nav-icon { width: auto; height: auto; border-radius: 0; color: inherit; background: transparent; transform: none; }
-.inspector-navigation.compact .inspector-tab-list em { position: absolute; top: 0; right: -1px; min-width: 14px; height: 14px; padding: 0 3px; color: var(--nori-bg); background: var(--nori-cyan); font-size: calc(7px * var(--nori-ui-font-scale)); }
-.inspector-collapse-button { display: grid; width: calc(100% - 36px); min-height: 38px; flex: none; place-items: center; margin: 2px 18px 12px; padding: 0; border-top: 1px solid var(--nori-border) !important; border-radius: 0 0 10px 10px !important; color: var(--nori-text-secondary) !important; transition: color 160ms ease, background-color 160ms ease, transform 160ms ease; }
-.inspector-collapse-button:hover { color: var(--nori-text) !important; background: var(--nori-control-hover); transform: translateY(-1px); }
-.inspector-navigation.compact .inspector-collapse-button { margin: 4px 6px 7px; }
 .inspector-stage {
   display: flex;
   width: 0;
@@ -3653,21 +3511,6 @@ kbd {
   .inspector-open-tab > button:first-child span { display: none; }
   .inspector-close-tab { width: 17px; height: 17px; top: 8px; right: 0; }
   .inspector-popout { display: none; }
-  .inspector-overview-heading { padding: 14px 13px 9px; }
-  .inspector-overview-heading strong { font-size: calc(15px * var(--nori-ui-font-scale)); }
-  .inspector-activity-summary { margin-inline: 13px; }
-}
-@media (max-width: 760px) {
-  .workspace-chat-layout .workspace-inspector { top: 8px; right: 8px; bottom: 8px; width: min(250px, calc(100% - 16px)); }
-  .workspace-chat-layout .workspace-inspector.inspector-view-open { width: calc(100% - 16px); }
-  .workspace-chat-layout:has(.inspector-view-open) > .chat-view { width: 100%; }
-  .workspace-inspector-resizer { display: none !important; }
-}
-@container workspace-chat (max-width: 760px) {
-  .workspace-chat-layout .workspace-inspector { top: 8px; right: 8px; bottom: 8px; width: min(250px, calc(100% - 16px)); }
-  .workspace-chat-layout .workspace-inspector.inspector-view-open { width: calc(100% - 16px); }
-.workspace-chat-layout > .chat-view { width: 100%; }
-  .workspace-inspector-resizer { display: none !important; }
 }
 .terminal-panel { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; background: #0f1115; }
 .terminal-error { display: flex; flex: none; align-items: center; gap: 7px; padding: 6px 9px; color: var(--nori-danger); background: color-mix(in srgb, var(--nori-danger) 9%, var(--nori-bg)); font-size: calc(9px * var(--nori-ui-font-scale)); }
@@ -3848,7 +3691,7 @@ kbd {
 .background-task-detail > button { align-self: flex-end; min-height: 27px; padding: 4px 8px; border: 1px solid var(--nori-danger); border-radius: 4px; color: var(--nori-danger); background: transparent; cursor: pointer; font-size: calc(9px * var(--nori-ui-font-scale)); }
 
 /* Final compactness overrides follow the older SubAgent and process rules above. */
-.chat-work-process-body .compact-tool-call > strong { display: block; margin: 0; color: var(--nori-text-secondary); font-size: calc(9px * var(--nori-ui-font-scale)); text-transform: none; }
+.chat-work-stream .compact-tool-call > strong { display: block; margin: 0; color: var(--nori-text-secondary); font-size: calc(9px * var(--nori-ui-font-scale)); text-transform: none; }
 .subagent-run .subagent-task-summary { min-height: 40px; padding: 5px 8px; }
 .subagent-run .subagent-task-output { max-height: 26rem; padding: 8px 10px; }
 
@@ -3864,14 +3707,6 @@ kbd {
 
 /* Initial-page usage overview. */
 .view-page-wide .view-stack { container-type: inline-size; }
-.dashboard-layout { display: grid; grid-template-columns: minmax(300px, 1fr) minmax(340px, 42%); align-items: start; gap: 16px; }
-.dashboard-main { display: flex; min-width: 0; flex-direction: column; gap: 16px; }
-.dashboard-usage { position: sticky; top: 0; min-width: 0; }
-.dashboard-usage .initial-usage { width: 100%; margin-top: 0; }
-.dashboard-connection-stat { display: flex; align-items: center; gap: 8px; }
-.dashboard-connection-stat > span:last-child { font-size: calc(18px * var(--nori-ui-font-scale)); font-weight: 600; white-space: nowrap; }
-.dashboard-subagent-stat { color: var(--nori-cyan); font-size: calc(20px * var(--nori-ui-font-scale)); font-weight: 700; line-height: 1.35; }
-.dashboard-vault-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; text-align: center; }
 .chat-welcome:has(.initial-usage) { justify-content: flex-start; padding-top: 24px; }
 .chat-welcome:has(.initial-usage) .welcome-mark { width: 46px; height: 46px; margin-bottom: 12px; border-radius: 12px; }
 .chat-welcome:has(.initial-usage) h2 { font-size: calc(25px * var(--nori-ui-font-scale)); }
@@ -3921,16 +3756,10 @@ kbd {
 [data-theme="light"] .codex-layout .chat-input-area { background: color-mix(in srgb, #fff 76%, transparent); }
 
 @media (max-width: 760px) {
-  .dashboard-layout { grid-template-columns: minmax(0, 1fr); }
-  .dashboard-usage { position: static; grid-row: 1; }
   .initial-usage-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .usage-heatmap { height: 68px; grid-template-rows: repeat(7, 7px); gap: 3px; }
 }
 
-@container (max-width: 655px) {
-  .dashboard-layout { grid-template-columns: minmax(0, 1fr); }
-  .dashboard-usage { position: static; }
-}
 
 .change-load-status { display: flex; min-height: 30px; align-items: center; gap: 7px; padding: 5px 2px; color: var(--nori-text-muted); font-size: calc(9px * var(--nori-ui-font-scale)); }
 .change-load-status.error { color: var(--nori-danger); }
@@ -4230,49 +4059,35 @@ kbd {
   .composer-setting-options,
   .composer-setting-options > button,
   .chat-turn-rail,
-  .chat-turn-rail button i,
-  .work-process-chevron { transition: none; }
+  .chat-turn-rail button i { transition: none; }
 }
 
-.chat-work-process { margin: 5px 0 12px; overflow: visible; border: 0; border-radius: 0; background: transparent; }
-.chat-work-process > summary { display: flex; min-height: 32px; align-items: center; gap: 7px; padding: 3px 0 7px; border: 0; border-bottom: 1px solid color-mix(in srgb, var(--nori-border) 82%, transparent); color: var(--nori-text-secondary); }
-.chat-work-process > summary::after { display: none; content: none; }
-.work-process-title { flex: none; color: var(--nori-text-secondary); font-size: calc(11px * var(--nori-ui-font-scale)); font-weight: 620; }
-.work-process-elapsed { flex: none; color: var(--nori-text-muted); font: calc(10px * var(--nori-ui-font-scale))/1 var(--nori-font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.work-process-meta { min-width: 0; overflow: hidden; color: var(--nori-text-muted); font-size: calc(10px * var(--nori-ui-font-scale)); text-overflow: ellipsis; white-space: nowrap; }
-.work-process-chevron { flex: none; margin-left: 1px; color: var(--nori-text-muted); transform: rotate(0deg); transition: transform 160ms ease, color 160ms ease; }
-.chat-work-process[open] > summary .work-process-chevron { color: var(--nori-text-secondary); transform: rotate(90deg); }
-.chat-work-process-body { display: grid; gap: 6px; margin: 3px 0 2px; padding: 5px 0 4px; border: 0; }
-.work-reasoning-block, .work-progress-block { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 7px; min-width: 0; padding: 3px 0; }
-.work-step-indicator, .compact-tool-icon { display: grid; width: 20px; height: 20px; place-items: center; border: 0; border-radius: 5px; color: var(--nori-text-muted); background: var(--nori-control); }
-.work-reasoning-block > div, .work-progress-block > div { min-width: 0; }
-.chat-work-process-body .work-reasoning-block strong, .chat-work-process-body .work-progress-block strong { margin: 1px 0 2px; color: var(--nori-text-secondary); font-size: calc(10px * var(--nori-ui-font-scale)); font-weight: 650; text-transform: none; }
-.work-reasoning-block p { max-height: 260px; margin: 0; overflow: auto; color: var(--nori-text-muted); font: calc(11px * var(--nori-ui-font-scale))/1.6 var(--nori-font); white-space: pre-wrap; overflow-wrap: anywhere; }
-.work-progress-content { min-width: 0; max-height: 320px; overflow: auto; color: var(--nori-text-secondary); font-size: calc(11px * var(--nori-ui-font-scale)); line-height: 1.6; overflow-wrap: anywhere; }
-.work-progress-content .markdown-view { color: inherit; font-size: inherit; }
-.work-progress-content .markdown-view > :first-child { margin-top: 0; }
-.work-progress-content .markdown-view > :last-child { margin-bottom: 0; }
-.work-progress-block.active .work-step-indicator { color: var(--nori-cyan); }
-.work-progress-content .streaming-cursor { height: 12px; margin-left: 3px; vertical-align: -2px; }
-.compact-tool-call { min-height: 30px; padding: 3px 0; border: 0; border-radius: 0; background: transparent; }
-.compact-tool-call > summary { grid-template-columns: 20px minmax(0, 1fr) auto; gap: 7px; }
-.compact-tool-copy { display: grid; min-width: 0; gap: 1px; }
-.chat-work-process-body .compact-tool-copy strong { display: block; margin: 0; color: var(--nori-text-secondary); font-size: calc(10px * var(--nori-ui-font-scale)); font-weight: 650; text-transform: none; }
-.compact-tool-copy > span { overflow: hidden; color: var(--nori-text-muted); font: calc(9px * var(--nori-ui-font-scale))/1.35 var(--nori-font-mono); text-overflow: ellipsis; white-space: nowrap; }
-.compact-tool-call > small, .compact-tool-call > summary > small { padding-right: 2px; }
+/* ===== 工作流水：平铺的一行行，没有“工作过程”外层折叠 ===== */
+.chat-work-stream { display: grid; gap: 5px; margin: 4px 0 10px; }
+.work-stream-status { display: flex; align-items: center; gap: 6px; min-height: 19px; color: var(--nori-text-muted); font-size: calc(10px * var(--nori-ui-font-scale)); }
+.work-stream-status > svg { color: var(--nori-accent); }
+.work-stream-elapsed { margin-left: auto; color: var(--nori-text-muted); font: calc(9px * var(--nori-ui-font-scale))/1 var(--nori-font-mono); font-variant-numeric: tabular-nums; }
+/* 思考就地显示（不再是折叠层）：暗淡的斜体正文，插在工具行中间。 */
+.work-thinking-line { display: grid; gap: 2px; padding: 1px 0 2px; }
+.work-thinking-label { display: flex; align-items: center; gap: 5px; color: var(--nori-text-muted); font-size: calc(9px * var(--nori-ui-font-scale)); }
+.work-thinking-label > svg { color: var(--nori-thinking); }
+.work-thinking-line > p { max-height: 260px; margin: 0; overflow: auto; color: var(--nori-text-muted); font: italic calc(11px * var(--nori-ui-font-scale))/1.6 var(--nori-font); white-space: pre-wrap; overflow-wrap: anywhere; }
+.work-thinking-line.live > p { max-height: none; }
+/* 工具调用：一行一条（`Read foo.tsx ›`），点一下就地展开细节。 */
+.compact-tool-call { min-height: 24px; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.compact-tool-call > summary { grid-template-columns: 18px minmax(0, 1fr) auto 12px; align-items: center; gap: 6px; min-height: 24px; }
+.compact-tool-call .compact-tool-icon { width: 17px; height: 17px; border-radius: 4px; color: var(--nori-text-muted); background: transparent; }
+.compact-tool-call > summary:hover .compact-tool-icon { color: var(--nori-accent); }
+.compact-tool-copy { display: flex; min-width: 0; align-items: baseline; gap: 6px; }
+.chat-work-stream .compact-tool-copy strong { flex: none; margin: 0; color: var(--nori-text-secondary); font-size: calc(10px * var(--nori-ui-font-scale)); font-weight: 650; text-transform: none; }
+.compact-tool-copy > span { min-width: 0; overflow: hidden; color: var(--nori-text-muted); font: calc(9px * var(--nori-ui-font-scale))/1.35 var(--nori-font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.compact-tool-call > small, .compact-tool-call > summary > small { padding-right: 0; }
+.compact-tool-chevron { flex: none; color: var(--nori-text-muted); transition: transform .16s ease; }
+.compact-tool-call[open] .compact-tool-chevron { transform: rotate(90deg); }
+.compact-tool-call[open] > summary .compact-tool-icon { color: var(--nori-accent); }
+.chat-work-stream .compact-tool-detail { padding: 5px 0 6px 24px; }
 
-/* Live turns remain a transcript: ordinary model text is not a grey process card. */
-.live-work-stream { display: grid; gap: 8px; margin: 5px 0 11px; }
-.live-work-status { display: flex; align-items: center; gap: 6px; min-height: 20px; color: var(--nori-text-muted); font-size: calc(10px * var(--nori-ui-font-scale)); }
-.live-work-status > svg { color: var(--nori-cyan); }
-.live-work-elapsed { margin-left: auto; color: var(--nori-text-muted); font: calc(9px * var(--nori-ui-font-scale))/1 var(--nori-font-mono); font-variant-numeric: tabular-nums; }
-.thought-disclosure { margin: 0; border: 0; background: transparent; }
-.thought-disclosure > summary { display: flex; align-items: center; gap: 6px; min-height: 22px; color: var(--nori-text-muted); cursor: pointer; list-style: none; font-size: calc(10px * var(--nori-ui-font-scale)); }
-.thought-disclosure > summary::-webkit-details-marker { display: none; }
-.thought-disclosure > summary > svg:first-child { color: var(--nori-text-muted); }
-.thought-disclosure > summary > svg:last-child { margin-left: 1px; transition: transform .16s ease; }
-.thought-disclosure[open] > summary > svg:last-child { transform: rotate(90deg); }
-.thought-disclosure > p { max-height: 260px; margin: 3px 0 2px; overflow: auto; color: var(--nori-text-muted); font: calc(11px * var(--nori-ui-font-scale))/1.6 var(--nori-font); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Ordinary model text stays a transcript line, never a grey process card. */
 .context-injection-row { margin: 0; border: 0; background: transparent; }
 .context-injection-row > summary { display: flex; min-width: 0; align-items: center; gap: 6px; min-height: 22px; color: var(--nori-text-muted); cursor: pointer; list-style: none; font-size: calc(10px * var(--nori-ui-font-scale)); }
 .context-injection-row > summary::-webkit-details-marker { display: none; }
@@ -4320,8 +4135,6 @@ kbd {
   .composer-model-menu { min-width: 0; flex: 1; }
   .composer-model-trigger { width: 100%; max-width: none; }
   .composer-toolbar .composer-mode-options { gap: 8px; }
-  .chat-work-process > summary { grid-template-columns: 20px minmax(0, 1fr) auto 14px; }
-  .chat-work-process > summary small { display: none; }
 }
 
 @media (max-width: 560px) {
@@ -4574,70 +4387,42 @@ kbd {
   padding: calc(4px * var(--nori-ui-space-scale)) calc(7px * var(--nori-ui-space-scale));
 }
 
-/* Department view: 开会 / 交流 tabs and the sibling Chat pane */
-.department-tabs {
+/* 部门工具（开会 / 交流）：作为检查器里的一个工具页显示，人类只读。
+   自己这方的气泡用主题色区分，其他成员靠左带首字母头像。 */
+.department-panel { display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; }
+.department-rail-body {
   display: flex;
-  gap: 2px;
-  padding: 6px 12px 0;
-  border-bottom: 1px solid var(--nori-border);
-  background: var(--nori-surface);
-}
-.department-tabs button {
-  position: relative;
-  padding: 6px 14px 7px;
-  border: none;
-  border-bottom: 2px solid transparent;
-  background: none;
-  color: var(--nori-text-secondary);
-  font-size: calc(12px * var(--nori-ui-font-scale));
-  cursor: pointer;
-}
-.department-tabs button.active {
-  border-bottom-color: var(--nori-accent, currentColor);
-  color: var(--nori-text);
-}
-.department-tabs button:hover { color: var(--nori-text); }
-.department-tab-dot {
-  position: absolute;
-  top: 8px;
-  right: 4px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--nori-accent, currentColor);
-}
-.department-chat-pane {
-  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 10px;
-  padding: 14px 16px;
+  padding: 12px;
+  overflow-y: auto;
 }
-.department-chat-row {
-  display: flex;
-  gap: 8px;
-  max-width: 85%;
-}
-.department-chat-row.own { margin-left: auto; justify-content: flex-end; }
+.department-rail-row { display: flex; max-width: 100%; gap: 8px; }
+.department-rail-row.own { margin-left: auto; justify-content: flex-end; }
+.department-rail-empty { padding: 22px 14px; color: var(--nori-text-secondary); font-size: calc(12px * var(--nori-ui-font-scale)); text-align: center; }
 .department-chat-avatar {
   display: grid;
-  place-items: center;
-  flex: 0 0 auto;
   width: 26px;
   height: 26px;
+  flex: 0 0 auto;
+  place-items: center;
   border: 1px solid var(--nori-border);
   border-radius: 50%;
   color: var(--nori-text-secondary);
   font-size: 12px;
 }
 .department-chat-bubble {
+  min-width: 0;
   padding: 7px 10px;
   border: 1px solid var(--nori-border);
   border-radius: 8px;
   background: color-mix(in srgb, var(--nori-surface) 84%, transparent);
-  min-width: 0;
 }
-.department-chat-row.own .department-chat-bubble {
-  background: color-mix(in srgb, var(--nori-accent, var(--nori-text)) 10%, var(--nori-surface));
+.department-rail-row.own .department-chat-bubble {
+  border-color: color-mix(in srgb, var(--nori-accent) 42%, var(--nori-border));
+  background: color-mix(in srgb, var(--nori-accent) 13%, var(--nori-surface));
 }
 .department-chat-meta {
   display: flex;
@@ -4647,49 +4432,32 @@ kbd {
   color: var(--nori-text-secondary);
   font-size: calc(11px * var(--nori-ui-font-scale));
 }
-.department-chat-meta em { font-style: normal; color: var(--nori-accent, var(--nori-text)); }
+.department-chat-meta em { color: var(--nori-accent); font-style: normal; }
 .department-chat-text {
   color: var(--nori-text);
   font-size: calc(13px * var(--nori-ui-font-scale));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.department-chat-empty {
-  padding: 24px 16px;
+/* 「谁正在发言」的行内提示，贴在会议记录末尾。 */
+.department-rail-turn {
+  display: flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 6px;
   color: var(--nori-text-secondary);
-  font-size: calc(12px * var(--nori-ui-font-scale));
-  text-align: center;
+  font-size: calc(11px * var(--nori-ui-font-scale));
+  font-style: italic;
 }
-
-
-/* 右侧部门实时框：聊天视图变为 转录 | 部门框 两栏 */
-/* 部门实时框：与消息流并排（shell 内部横向分栏），composer 保持全宽 */
-.chat-messages-shell { display: flex; align-items: stretch; }
-.chat-messages-shell > .chat-messages { flex: 1 1 auto; width: auto !important; height: auto !important; min-width: 0; min-height: 0; }
-.chat-messages-shell > .department-rail { position: relative; flex: 0 0 300px; max-height: 100%; }
-.chat-view .composer-context-strip,
-.chat-view .chat-composer-wrap { flex: none; }
-.department-rail {
-  display: flex;
-  flex-direction: column;
-  flex: 0 0 300px;
-  min-height: 0;
-  border-left: 1px solid var(--nori-border);
-  background: color-mix(in srgb, var(--nori-surface) 60%, transparent);
+.department-rail-turn::before {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--nori-accent);
+  content: '';
+  animation: team-pulse 1.6s ease-in-out infinite;
 }
-.department-rail .department-tabs { padding: 8px 10px 0; }
-.department-rail-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 12px;
-}
-.department-rail-row { display: flex; gap: 8px; max-width: 100%; }
-.department-rail-row.own { margin-left: auto; justify-content: flex-end; }
-.department-rail-empty { padding: 22px 14px; color: var(--nori-text-secondary); font-size: calc(12px * var(--nori-ui-font-scale)); text-align: center; }
 
 /* 团队树全屏页 */
 .team-tree-page { display: flex; flex-direction: column; gap: 0; height: 100%; overflow: hidden; }
@@ -4705,7 +4473,42 @@ kbd {
 .team-tree-legend i.tone-discuss { background: transparent; box-shadow: inset 0 0 0 2px var(--nori-accent, currentColor); }
 .team-tree-legend i.tone-idle { background: var(--nori-border); }
 .team-tree-legend i.tone-attention { background: #d9a13c; }
-.team-tree-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; border: 1px solid var(--nori-border); border-radius: 10px; background: color-mix(in srgb, var(--nori-surface) 55%, transparent); }
+/* 团队树是张画布：空白处拖动平移、滚轮缩放，所以自己不滚动。 */
+.team-tree-viewport {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--nori-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--nori-surface) 55%, transparent);
+  cursor: grab;
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+.team-tree-viewport.panning { cursor: grabbing; }
+.team-tree-viewport .team-tree-canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+.team-tree-controls { position: absolute; right: 10px; bottom: 10px; display: flex; gap: 5px; }
+.team-tree-controls button {
+  min-width: 30px;
+  height: 26px;
+  padding: 0 7px;
+  border: 1px solid var(--nori-border);
+  border-radius: 7px;
+  background: var(--nori-surface);
+  color: var(--nori-text-secondary);
+  cursor: pointer;
+  font-size: calc(11px * var(--nori-ui-font-scale));
+}
+.team-tree-controls button:hover { border-color: var(--nori-text-secondary); color: var(--nori-text); }
+.team-tree-hint {
+  position: absolute;
+  bottom: 14px;
+  left: 12px;
+  color: var(--nori-text-muted);
+  font-size: calc(10px * var(--nori-ui-font-scale));
+  pointer-events: none;
+}
 .team-tree-canvas { position: relative; }
 .team-tree-edges { position: absolute; inset: 0; pointer-events: none; }
 .team-tree-edges path { fill: none; stroke: var(--nori-border); stroke-width: 1.5; }
@@ -4777,85 +4580,6 @@ kbd {
 .composer-todos li.todo-in_progress i { color: var(--nori-cyan); }
 
 
-/* ===== 工具面板彻底停靠（删除悬浮岛形态）===== */
-.workspace-chat-layout { display: flex; align-items: stretch; }
-.workspace-chat-layout > .chat-view { width: auto !important; flex: 1 1 auto; min-width: 0; }
-.workspace-inspector-resizer { display: none !important; }
-.workspace-chat-layout .workspace-inspector,
-.workspace-chat-layout .workspace-inspector.inspector-overview-open,
-.workspace-chat-layout .workspace-inspector.inspector-view-open {
-  position: static !important;
-  inset: auto !important;
-  z-index: auto;
-  display: flex;
-  flex: 0 0 clamp(252px, 21vw, 318px);
-  width: clamp(252px, 21vw, 318px);
-  height: auto;
-  align-items: stretch;
-  justify-content: flex-start;
-  gap: 0;
-  overflow: hidden;
-  border-left: 1px solid var(--nori-border);
-  border-radius: 0;
-  background: color-mix(in srgb, var(--nori-surface) 55%, transparent);
-  box-shadow: none;
-  pointer-events: auto;
-  transition: none;
-}
-.inspector-navigation,
-.workspace-chat-layout .inspector-navigation {
-  width: 100%;
-  border: none;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  transform: none;
-  transition: none;
-  overflow-y: auto;
-}
-.inspector-overview-heading { padding: 11px 14px 6px; }
-.inspector-overview-heading strong { font-size: calc(12px * var(--nori-ui-font-scale)); font-weight: 600; color: var(--nori-text-muted); }
-.inspector-overview-heading span { display: none; }
-.inspector-activity-summary { margin: 0 14px 4px; padding-bottom: 8px; font-size: calc(10px * var(--nori-ui-font-scale)); }
-.inspector-activity-highlight strong { font-size: calc(11px * var(--nori-ui-font-scale)); }
-.inspector-tab-list { padding: 2px 6px 10px; gap: 1px; }
-.inspector-tab-list > button {
-  display: flex; align-items: center; gap: 9px;
-  min-height: 34px;
-  padding: 5px 8px;
-  border: none; border-radius: 7px;
-  background: transparent;
-  text-align: left;
-}
-.inspector-tab-list > button:hover { background: var(--nori-control-hover); transform: none; }
-.inspector-tab-list > button.active { background: color-mix(in srgb, var(--nori-cyan) 12%, transparent); }
-.inspector-nav-icon {
-  width: 20px; height: 20px; border-radius: 6px;
-  background: transparent;
-  color: var(--nori-text-secondary);
-  transform: none;
-}
-.inspector-tab-list > button:hover .inspector-nav-icon,
-.inspector-tab-list > button.active .inspector-nav-icon { color: var(--nori-cyan); background: transparent; transform: none; }
-.inspector-stage {
-  border: none;
-  border-left: 1px solid var(--nori-border);
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
-@media (max-width: 760px) {
-  .workspace-chat-layout .workspace-inspector,
-  .workspace-chat-layout .workspace-inspector.inspector-view-open,
-  .workspace-chat-layout .workspace-inspector.inspector-overview-open {
-    position: static !important;
-    inset: auto !important;
-    flex: 0 0 min(280px, 62vw);
-    width: min(280px, 62vw);
-  }
-}
-
-
 /* ===== 左侧会话栏极简平铺 ===== */
 .session-project-header { min-height: 30px; padding: 3px 10px; }
 .session-project-copy small { display: none; }
@@ -4867,27 +4591,244 @@ kbd {
 .sidebar-item-count { min-width: 0; padding: 0; border-radius: 0; background: transparent; color: var(--nori-text-muted); opacity: .75; }
 
 
-/* ===== 工具行：纯文本平铺（无卡片框）+ 恢复拖拽缩放 ===== */
-.inspector-overview-open .inspector-tab-list > button {
-  display: flex !important;
-  width: 100%;
-  min-height: 30px;
-  grid-template-columns: none;
-  align-items: center;
-  gap: 9px;
-  padding: 4px 8px;
-  border-bottom: none;
-  border-radius: 6px;
-}
-.inspector-overview-open .inspector-tab-list > button:hover { transform: none; }
-.inspector-tab-list em { min-width: 0; height: auto; padding: 0; border-radius: 0; background: transparent; opacity: .7; }
-.inspector-nav-copy strong { font-weight: 500; }
-.workspace-chat-layout .workspace-inspector-resizer {
-  display: block !important;
-  position: static;
+
+
+/* ===== 工具面板：右上角启动器 + 标签页 + 四角圆角浮层 ===== */
+/* 没有常驻的工具侧栏：关闭时检查器完全让位（零宽），只在布局右上角留一枚
+   「图标 + 工具名」启动器；打开后才占 --inspector-panel-width，并以四角都是
+   圆角的卡片浮在布局里，不和 chat 抢版面。 */
+.workspace-chat-layout { display: flex; align-items: stretch; }
+.workspace-chat-layout > .chat-view { width: auto !important; flex: 1 1 auto; min-width: 0; }
+.workspace-chat-layout .workspace-inspector,
+.workspace-chat-layout .workspace-inspector.inspector-overview-open,
+.workspace-chat-layout .workspace-inspector.inspector-view-open {
+  position: static !important;
+  inset: auto !important;
   z-index: auto;
-  top: auto; right: auto; bottom: auto;
-  flex: 0 0 5px;
+  display: flex;
+  height: auto;
+  align-items: stretch;
+  justify-content: flex-end;
+  gap: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transition: flex-basis 220ms cubic-bezier(.2, .82, .2, 1);
+}
+/* 关闭态：不占位也不吃点击，只有启动器自己把 pointer-events 收回来。 */
+.workspace-chat-layout .workspace-inspector.inspector-overview-open {
+  width: 0;
+  min-width: 0;
+  flex: 0 0 0;
+  padding: 0;
+  pointer-events: none;
+}
+/* 打开态宽度：优先用用户拖出来的宽度，但绝不把对话挤到 360px 以下——
+   这里的布局宽度是“视口减去左侧栏”，所以只能用 min()/max() 自己算，
+   媒体查询看的是视口宽，在窄布局 + 宽视口时根本不触发。 */
+.workspace-chat-layout .workspace-inspector.inspector-view-open {
+  width: var(--inspector-panel-width);
+  max-width: calc(100% - 360px);
+  flex: 0 0 auto;
+  padding: 10px 10px 10px 0;
+  pointer-events: auto;
+}
+.workspace-chat-layout .workspace-inspector.inspector-view-open.inspector-expanded {
+  width: max(var(--inspector-panel-width), 74%);
+  max-width: calc(100% - 220px);
+  flex: 0 0 auto;
+}
+
+/* 右上角启动器：一枚图标 + 工具名，右半边的箭头展开工具选择菜单。 */
+.inspector-launcher-dock {
+  position: absolute;
+  z-index: 26;
+  top: 10px;
+  right: 12px;
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--nori-border);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--nori-surface-raised) 92%, transparent);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .18);
+  pointer-events: auto;
+}
+.inspector-launcher-dock.open { border-color: var(--nori-border-strong); }
+.inspector-launcher,
+.inspector-launcher-pick {
+  display: flex;
+  min-height: 26px;
+  align-items: center;
+  padding: 0 8px;
+  border: 0;
+  color: var(--nori-text-muted);
+  background: transparent;
+  cursor: pointer;
+  transition: color 140ms ease, background-color 140ms ease;
+}
+.inspector-launcher { position: relative; gap: 6px; border-radius: 8px 0 0 8px; font-size: calc(10px * var(--nori-ui-font-scale)); font-weight: 560; }
+.inspector-launcher-pick { padding: 0 5px; border-left: 1px solid var(--nori-border); border-radius: 0 8px 8px 0; }
+.inspector-launcher:hover,
+.inspector-launcher-pick:hover { color: var(--nori-text); background: var(--nori-control-hover); }
+.inspector-launcher-live {
+  position: absolute;
+  top: 3px;
+  right: 2px;
   width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--nori-accent);
+  animation: team-pulse 1.6s ease-in-out infinite;
+}
+.inspector-launcher-dock .inspector-tool-menu { top: 32px; right: 0; }
+.inspector-tool-menu button small { margin-left: auto; color: var(--nori-text-muted); font-size: calc(8px * var(--nori-ui-font-scale)); }
+
+/* 打开态：四角都是圆角的浮层卡片（Claude 的面板风格）。 */
+.workspace-chat-layout .inspector-stage,
+.workspace-chat-layout .inspector-stage.open {
+  width: 100%;
+  height: 100%;
+  border: 1px solid var(--nori-border-strong);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--nori-surface) 88%, var(--nori-bg));
+  box-shadow: 0 12px 34px rgba(0, 0, 0, .22);
+}
+.workspace-chat-layout .inspector-panel-tabs { border-radius: 11px 11px 0 0; background: transparent; }
+.workspace-chat-layout .inspector-open-tab:first-child { border-top-left-radius: 11px; }
+.workspace-chat-layout .inspector-content { border-radius: 0 0 11px 11px; }
+
+/* 面板上下文头部：`master → working tree`。 */
+.inspector-stage-context {
+  display: flex;
+  min-height: 25px;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 0 11px;
+  border-bottom: 1px solid var(--nori-border);
+  color: var(--nori-text-muted);
+  font-size: calc(9px * var(--nori-ui-font-scale));
+}
+.inspector-stage-context svg { flex: none; opacity: .75; }
+.inspector-stage-context strong { color: var(--nori-text-secondary); font-weight: 620; }
+.inspector-stage-context em { min-width: 0; overflow: hidden; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 缩放手柄：只有工具打开时才存在，作为 flex 项排在 chat 与卡片之间。
+   `relative`（而不是 static）是关键：::after 高亮是 inset:0 的绝对定位元素，
+   一旦手柄自身不定位，高亮就会以 .workspace-chat-layout 为参照铺满整块布局，
+   既画错位置又用 pointer-events 吃掉所有点击。 */
+.workspace-chat-layout > .workspace-inspector-resizer { display: none; }
+.workspace-chat-layout:has(.inspector-view-open) > .workspace-inspector-resizer { display: block; }
+.workspace-chat-layout .workspace-inspector-resizer {
+  position: relative;
+  z-index: auto;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  width: 5px;
+  flex: 0 0 5px;
   cursor: ew-resize;
 }
+@media (max-width: 760px) {
+  .workspace-chat-layout .workspace-inspector.inspector-view-open { width: min(320px, 78vw); max-width: none; flex: 0 0 auto; }
+  .workspace-chat-layout .workspace-inspector.inspector-view-open.inspector-expanded { width: calc(100% - 10px); max-width: none; flex: 0 0 auto; }
+}
+
+
+
+/* ===== 工作分组：连续的思考 + 工具调用收在一个框里，输出文本自己成段 ===== */
+.chat-work-group {
+  overflow: hidden;
+  border: 1px solid var(--nori-border);
+  border-radius: 10px;
+  background: var(--nori-surface);
+}
+.chat-work-group > summary {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  cursor: pointer;
+  list-style: none;
+}
+.chat-work-group > summary::-webkit-details-marker { display: none; }
+.chat-work-group > summary:hover { background: var(--nori-surface-hover); }
+.chat-work-group .work-group-icon { display: flex; flex: none; color: var(--nori-text-muted); }
+.chat-work-group.live .work-group-icon { color: var(--nori-accent); }
+.work-group-headline {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--nori-text-muted);
+  font-size: calc(10px * var(--nori-ui-font-scale));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.work-group-chevron { flex: none; margin-left: auto; color: var(--nori-text-muted); transition: transform .16s ease; }
+.chat-work-group[open] > summary .work-group-chevron { transform: rotate(90deg); }
+.work-group-body {
+  display: grid;
+  gap: 3px;
+  padding: 4px 10px 7px;
+  border-top: 1px solid var(--nori-border);
+}
+/* 思考行也能折叠：合起来只留首行预览，展开后是完整的暗淡斜体正文。 */
+.work-thinking-line > summary {
+  display: flex;
+  min-height: 22px;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+}
+.work-thinking-line > summary::-webkit-details-marker { display: none; }
+.work-thinking-preview {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--nori-text-muted);
+  font: italic calc(9px * var(--nori-ui-font-scale))/1.35 var(--nori-font);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.work-thinking-chevron { flex: none; margin-left: auto; color: var(--nori-text-muted); transition: transform .16s ease; }
+.work-thinking-line[open] > summary .work-thinking-chevron { transform: rotate(90deg); }
+
+/* ===== 开会头部：议题 + 主持人 + 参会名单（会是父级开的，人类只看） ===== */
+.meeting-header {
+  display: grid;
+  flex: none;
+  gap: 6px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--nori-border);
+  background: var(--nori-surface);
+}
+.meeting-header-topic { display: flex; min-width: 0; align-items: baseline; gap: 7px; }
+.meeting-header-topic strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--nori-text);
+  font-size: calc(12px * var(--nori-ui-font-scale));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.meeting-header-label {
+  flex: none;
+  color: var(--nori-text-muted);
+  font-size: calc(9px * var(--nori-ui-font-scale));
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.meeting-header-people { display: flex; flex-wrap: wrap; gap: 4px; }
+.meeting-header-chip {
+  padding: 2px 8px;
+  border: 1px solid var(--nori-border);
+  border-radius: 999px;
+  background: var(--nori-bg);
+  color: var(--nori-text-secondary);
+  font-size: calc(9px * var(--nori-ui-font-scale));
+}
+.meeting-header-chip.lead { border-color: var(--nori-accent); color: var(--nori-text); }
+:root { --nori-css-stamp: 4; }
+

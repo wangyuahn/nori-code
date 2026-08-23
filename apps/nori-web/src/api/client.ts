@@ -140,6 +140,8 @@ export interface SessionAgent {
   summary?: string;
   archived?: boolean;
   discussion_turn_agent_id?: string;
+  /** Members taking part in this Discuss round; only discussion nodes carry it. */
+  discussion_participant_agent_ids?: readonly string[];
 }
 
 interface SessionAgentTreeWireNode {
@@ -159,6 +161,7 @@ interface SessionAgentTreeWireNode {
   last_active: string;
   archived: boolean;
   discussion_turn_agent_id?: string;
+  discussion_participant_agent_ids?: string[];
 }
 
 const SESSION_AGENT_KINDS: readonly SessionAgentKind[] = ['main', 'team', 'discussion', 'independent'];
@@ -193,6 +196,7 @@ function toSessionAgent(node: SessionAgentTreeWireNode): SessionAgent {
     last_active: node.last_active,
     archived: node.archived,
     discussion_turn_agent_id: node.discussion_turn_agent_id,
+    discussion_participant_agent_ids: node.discussion_participant_agent_ids,
   };
 }
 

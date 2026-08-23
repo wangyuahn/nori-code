@@ -656,6 +656,9 @@ export class SessionService extends Disposable implements ISessionService {
             ...(agent.discussion?.currentTurnAgentId === undefined
               ? {}
               : { discussion_turn_agent_id: agent.discussion.currentTurnAgentId }),
+            ...(agent.discussion === undefined
+              ? {}
+              : { discussion_participant_agent_ids: [...agent.discussion.participantAgentIds] }),
           };
         }),
     );

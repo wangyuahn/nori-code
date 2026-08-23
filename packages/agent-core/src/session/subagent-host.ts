@@ -4,7 +4,6 @@ import {
 } from '@nori-code/kosong';
 
 import type { Agent } from '../agent';
-import { isBackgroundTaskTerminal } from '../agent/background';
 import type { PromptOrigin } from '../agent/context';
 import { DenyAllPermissionPolicy } from '../agent/permission/policies/deny-all';
 import { InMemoryAgentRecordPersistence } from '../agent/records';
@@ -19,7 +18,6 @@ import {
   abortError,
   createDeadlineAbortSignal,
   linkAbortSignal,
-  userCancellationReason,
 } from '../utils/abort';
 import type {
   Session,
@@ -384,7 +382,10 @@ export class SessionSubagentHost {
    *
    * Delivery force-injects into every mentioned recipient via `turn.steer`,
    * which the loop now interrupts at the next tool-call boundary rather than
-   * waiting for the recipient's turn to end on its own.
+   * waiting for the recipient's turn to end on its own. The send resolves once
+   * each recipient has the message queued or a turn launched — it deliberately
+   * does not wait for their replies, so chatting stays cheap enough to use
+   * mid-task.
    */
   async sendChatMessage(
     message: string,
@@ -403,7 +404,12 @@ export class SessionSubagentHost {
       : members.filter(([agentId]) => agentId !== this.ownerAgentId && mentions.includes(agentId));
     const unknown = mentions.filter((id) => id !== 'all' && !members.some(([agentId]) => agentId === id));
     if (unknown.length > 0) {
-      throw new Error(`Chat mention target(s) not found in this department: ${unknown.join(', ')}`);
+      const siblings = members.filter(([agentId]) => agentId !== this.ownerAgentId).map(([agentId]) => agentId);
+      throw new Error(
+        `Chat mention target(s) not in this department: ${unknown.join(', ')}. `
+        + `Chat only reaches your siblings (${siblings.length > 0 ? siblings.join(', ') : 'none'}) or "all"; `
+        + 'to reach your lead use TeamDM or nori_ask_parent instead.',
+      );
     }
     const record = await this.session.postTeamChatMessage(
       leaderAgentId,
@@ -429,7 +435,11 @@ export class SessionSubagentHost {
       // An idle member with no launched turn has nothing to steer into; Chat
       // is best-effort delivery, so it is skipped rather than failing the send.
       if (start.kind === 'unstarted') return;
-      await runAgentTurnToCompletion(agent, signal);
+      // Delivery ends once the recipient's turn is launched. Awaiting that turn
+      // would make the sender pay for every sibling's full reply — a department
+      // chatting during work would serialize into a chain of blocked members.
+      // The recipient's own lifecycle governs the turn, not the sender's signal.
+      void runAgentTurnToCompletion(agent).catch(() => undefined);
     }));
     return record;
   }
@@ -953,21 +963,6 @@ export class SessionSubagentHost {
     };
   }
 
-  private teamMemberPromptOrigin(
-    meta: { readonly name?: string } | undefined,
-    speakerId = this.ownerAgentId,
-  ): PromptOrigin {
-    return {
-      kind: 'system_trigger',
-      name: 'team_member',
-      speaker: {
-        from: 'team',
-        speakerId,
-        speakerName: meta?.name ?? '团队成员',
-      },
-    };
-  }
-
   private teamDirectMessagePromptOrigin(
     sender: { readonly name?: string } | undefined,
     speakerId: string,
@@ -1082,12 +1077,47 @@ export class SessionSubagentHost {
 
     try {
       await runAgentTurnToCompletion(answerer, controller.signal);
-      return lastAssistantText(answerer);
+      const answer = lastAssistantText(answerer);
+      this.recordAskParentExchange(parent, childId, question, answer);
+      return answer;
     } finally {
       clearTimeout(timeout);
     }
   }
 
+  /**
+   * Files the question and the answer into the real parent's transcript.
+   *
+   * The answer itself comes from a throwaway clone of the parent, so without
+   * this the parent (and the human watching it) would never learn that a child
+   * asked anything — the child would act on guidance the parent has no record
+   * of giving. This only appends context: it never starts or steers a turn, so
+   * a working parent is not interrupted and picks the exchange up on its next.
+   */
+  private recordAskParentExchange(
+    parent: Agent,
+    childId: string,
+    question: string,
+    answer: string,
+  ): void {
+    const meta = this.session.getAgentMetadata(childId);
+    const childName = meta?.name ?? childId;
+    const text = [
+      `[${childName} (${childId}) asked you]`,
+      question.trim(),
+      '',
+      '[Answered on your behalf from your own context]',
+      answer.trim().length > 0 ? answer.trim() : '(no answer produced)',
+    ].join('\n');
+    parent.context.appendUserMessage(
+      [{ type: 'text', text: `<system-reminder>\n${text}\n</system-reminder>` }],
+      {
+        kind: 'system_trigger',
+        name: 'ask_parent',
+        speaker: { from: 'sub', speakerId: childId, speakerName: childName },
+      },
+    );
+  }
 }
 
 export interface TeamDiscussionStatement {
@@ -1132,7 +1162,13 @@ function discussionRoundPrompt(
   return [
     'Your scheduled discussion turn has started.',
     'Call TeamSpeak with your concise final position. Not calling TeamSpeak records this turn as skipped (abstention); your reasoning stays private.',
-    updates.length === 0 ? '' : `Unread shared statements:\n${updates}`,
+    updates.length === 0
+      ? ''
+      : [
+        'Statements already made in this round, in the order they were made — you speak after them:',
+        updates,
+        'Answer them: build on what holds, name what you would do differently and why. Repeating a point that was already made is not a contribution.',
+      ].join('\n\n'),
   ].filter(Boolean).join('\n\n');
 }
 
@@ -1164,14 +1200,6 @@ function wrapTeamDirectMessage(message: string): string {
 /** Chat wraps with the sender's name inline — it is a group channel, not a 1:1 line. */
 function wrapTeamChatMessage(senderName: string, message: string): string {
   return `<system-reminder>\n[Chat] ${senderName}: ${message.trim()}\n</system-reminder>`;
-}
-
-function escapeXmlAttribute(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;');
 }
 
 /** Compaction defers new prompts, so it is the first thing a scheduler waits out. */

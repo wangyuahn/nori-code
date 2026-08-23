@@ -1629,7 +1629,7 @@ describe('SessionSubagentHost', () => {
 
     const memberHost = new SessionSubagentHost(session, 'agent-member');
     await expect(memberHost.sendChatMessage('Hello.', ['agent-ghost'], signal))
-      .rejects.toThrow('Chat mention target(s) not found in this department: agent-ghost');
+      .rejects.toThrow('Chat mention target(s) not in this department: agent-ghost');
   });
 
   it('does not claim delivery when an idle TeamDM cannot start or is cancelled', async () => {

@@ -276,6 +276,47 @@ describe('WS broadcast + per-session seq (W5.2)', () => {
     allAgents.ws.close();
   });
 
+  it('delivers collaboration events to agent-filtered subscribers regardless of the emitting agent', async () => {
+    const r = await spawn();
+    const filtered = await openConn(wsUrl(r.address));
+    await helloAndSubscribeAgent(filtered, 'filtered', 'sid_collab', ['agent_viewer']);
+
+    await waitFor(() =>
+      r.services.invokeFunction(
+        (acc) => acc.get(ISessionClientsService).subscriberCount('sid_collab') === 1,
+      ),
+    );
+
+    // A discussion transcript and a department chat log belong to the session,
+    // not to whichever agent happens to own the store — so they must reach a
+    // viewer subscribed to a different agent, while ordinary per-agent events
+    // from that same emitter stay filtered out.
+    const bus = r.services.invokeFunction((acc) => acc.get(IEventService));
+    bus.publish({
+      type: 'discussion.updated',
+      sessionId: 'sid_collab',
+      agentId: 'agent_lead',
+    } as unknown as Event);
+    bus.publish({
+      type: 'team.chat.updated',
+      sessionId: 'sid_collab',
+      agentId: 'agent_lead',
+    } as unknown as Event);
+    bus.publish({ type: 'other.event', sessionId: 'sid_collab', agentId: 'agent_lead' } as unknown as Event);
+    bus.publish({ type: 'own.event', sessionId: 'sid_collab', agentId: 'agent_viewer' } as unknown as Event);
+
+    const discussion = await receiveType(filtered, 'discussion.updated', 1000);
+    const chat = await receiveType(filtered, 'team.chat.updated', 1000);
+    expect(discussion.seq).toBe(1);
+    expect(chat.seq).toBe(2);
+
+    // `own.event` (seq=4) arriving proves `other.event` (seq=3) was dropped.
+    const own = await receiveType(filtered, 'own.event', 1000);
+    expect(own.seq).toBe(4);
+
+    filtered.ws.close();
+  });
+
   it('per-session seq counters are independent across subscribers and sessions', async () => {
     const r = await spawn();
     const a = await openConn(wsUrl(r.address));

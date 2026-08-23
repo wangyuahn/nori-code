@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent, type UIEvent } from 'react';
-import { api, type ApprovalRequest, type GoalSnapshot, type ModelCatalogItem, type PromptAttachment, type PromptExecutionOptions, type QuestionAnswer, type QuestionRequest, type Session, type SessionAgent, type SessionAgentChatResponse, type SessionAgentConfig, type SessionRealtimeStatus, type TeamChatMessage, type TokenUsage } from '../api/client';
-import { apiMessageToChat, foldConversationTurns, mergeWorkBlocks, type ChatMessage, type QueuedPrompt, type TodoItem, type ToolCall, type WorkBlock } from '../hooks/useChatMessages';
+import { api, type ApprovalRequest, type GoalSnapshot, type ModelCatalogItem, type PromptAttachment, type PromptExecutionOptions, type QuestionAnswer, type QuestionRequest, type Session, type SessionAgent, type SessionAgentConfig, type SessionRealtimeStatus, type TokenUsage } from '../api/client';
+import { mergeWorkBlocks, type ChatMessage, type QueuedPrompt, type TodoItem, type ToolCall, type WorkBlock } from '../hooks/useChatMessages';
 import { useBrowserPermissions, type BrowserPermissionRequest, type BrowserPermissionDecision } from '../hooks/useBrowser';
 import { useI18n } from '../i18n';
 import { chatSlashCommandSuggestions, resolveChatSlashCommand, type ChatSlashCommand, type ChatSlashCommandName } from '../utils/chat-slash-commands';
@@ -22,12 +22,6 @@ export interface ChatViewProps {
   session: Session | null;
   agentId?: string;
   sessionAgents?: readonly SessionAgent[];
-  /** This member's department Chat log; null/absent for non-member views. */
-  departmentChat?: SessionAgentChatResponse | null;
-  /** True while a Discuss round is actively taking this member's turn. */
-  discussionActive?: boolean;
-  /** Bumps on tree/discussion updates so the rail can refetch. */
-  departmentRevision?: string | number;
   allSessions?: Session[];
   messages: ChatMessage[];
   messagesLoading?: boolean;
@@ -213,7 +207,7 @@ function ComposerSettingPicker({ id, label, ariaLabel, value, choices, open, dis
 }
 
 export function ChatView(props: ChatViewProps) {
-  const { session, agentId = 'main', sessionAgents = [], departmentChat, discussionActive = false, departmentRevision = 0, allSessions = [], messages, messagesLoading = false, streaming, thinking, workBlocks = [], isStreaming, streamingTurnId = null, activeAgentTokens, sessionStatus, compacting = false, models, modelsLoading, modelError, onSendMessage, onAbort, onRefreshModels, onModelChange, onThinkingChange, onPermissionChange, onRunSlashCommand, pendingApprovals = [], onResolveApproval, globalApprovals = [], onResolveGlobalApproval, onApprovalPermissionChange, approvalSessionTitles = {}, approvalResolvingIds = new Set(), approvalErrors = {}, onOpenApprovalSession, showApprovalPanel = true, pendingQuestions = [], onResolveQuestion, onDismissQuestion, queuedPrompts = [], onCancelQueuedPrompt, todos = [], onGoalControl, draftAgentConfig, rewindLimit = 10, onRewind, browserPermissionsOverride, onResolveBrowserPermissionOverride } = props;
+  const { session, agentId = 'main', sessionAgents = [], allSessions = [], messages, messagesLoading = false, streaming, thinking, workBlocks = [], isStreaming, streamingTurnId = null, activeAgentTokens, sessionStatus, compacting = false, models, modelsLoading, modelError, onSendMessage, onAbort, onRefreshModels, onModelChange, onThinkingChange, onPermissionChange, onRunSlashCommand, pendingApprovals = [], onResolveApproval, globalApprovals = [], onResolveGlobalApproval, onApprovalPermissionChange, approvalSessionTitles = {}, approvalResolvingIds = new Set(), approvalErrors = {}, onOpenApprovalSession, showApprovalPanel = true, pendingQuestions = [], onResolveQuestion, onDismissQuestion, queuedPrompts = [], onCancelQueuedPrompt, todos = [], onGoalControl, draftAgentConfig, rewindLimit = 10, onRewind, browserPermissionsOverride, onResolveBrowserPermissionOverride } = props;
   const { tr } = useI18n();
   const localBrowserPermissions = useBrowserPermissions();
   const browserPermissions = browserPermissionsOverride === undefined
@@ -252,13 +246,6 @@ export function ChatView(props: ChatViewProps) {
   const [permissionMenuOpen, setPermissionMenuOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [modelSettingOpen, setModelSettingOpen] = useState<'model' | 'thinking' | null>(null);
-  // Department rail: 开会 (Discuss statements) vs 交流 (sibling Chat log).
-  const [departmentTab, setDepartmentTab] = useState<'meeting' | 'chat'>('meeting');
-  const departmentChatActive = agentId !== 'main'
-    && (departmentChat?.department_leader_agent_id ?? null) !== null;
-  useEffect(() => {
-    if (discussionActive) setDepartmentTab('meeting');
-  }, [discussionActive]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const modelOverrideSessionRef = useRef<string | null>(null);
@@ -876,7 +863,7 @@ export function ChatView(props: ChatViewProps) {
     <div className="chat-messages" ref={messagesScrollRef} onScroll={handleMessagesScroll}>
       {messagesLoading ? <div className="chat-history-loading" role="status"><span className="spinner"/><strong>{tr('Loading conversation…', '正在加载会话…')}</strong></div> : messages.length === 0 ? <div className="chat-welcome"><div className="welcome-mark"><Icon name="sparkles" size={27}/></div><span className="eyebrow">{tr('Your thoughtful coding partner', '你的智能编程伙伴')}</span><h2>{session ? tr('What should we make better?', '我们要改进什么？') : tr('What would you like to work on?', '你想从哪里开始？')}</h2><p>{session ? tr('Ask Nori to inspect code, plan a feature, fix a bug, or validate an API integration.', '让 Nori 检查代码、规划功能、修复缺陷或验证 API 集成。') : tr('Choose a project folder to start a new task, or open an existing conversation from the sidebar. You can also type below now.', '选择一个项目文件夹开始新任务，或打开已有对话。你也可以直接在下方输入。')}</p><UsageOverview sessions={allSessions} models={models}/><div className="starter-grid">{STARTERS.map(item => <button key={item.title} className="starter-card" onClick={() => void handleSend(tr(item.prompt, item.promptZh))}><Icon name="sparkles" size={16}/><span><strong>{tr(item.title, item.titleZh)}</strong><small>{tr(item.prompt, item.promptZh)}</small></span></button>)}</div></div> : presentedMessages.map(({ message, workStartedAt }) => <MessageBubble key={message.id} message={message} sessionAgents={sessionAgents} workStartedAt={workStartedAt} rewindCount={rewindCounts.get(message.id)} rewindDisabled={isStreaming || rewinding} onRewind={requestRewind} live={message.id === continuationMessageId ? { streaming, thinking, workBlocks, stopping, onAbort: handleAbort } : undefined}/>) }
 
-      {isStreaming && !streamingContinuesAssistant && <div className="chat-message chat-message-assistant chat-message-streaming"><div className="message-body"><div className="chat-message-role">Nori <span>{pendingApprovals.length > 0 || browserPermissions.pending.length > 0 ? tr('waiting for permission', '等待授权') : tr('working', '工作中')}</span></div>{standaloneLiveBlocks.length > 0 ? <LiveWorkStream blocks={standaloneLiveBlocks} activeProgressId={standaloneLiveProgressId} startedAt={latestUserStartedAt}/> : <div className="chat-message-content"><span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span><span className="streaming-cursor"/></div>}{streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(streaming))} tokens</div>}<button className="chat-abort-btn" onClick={() => void handleAbort()} disabled={stopping}><Icon name="stop" size={13}/> {stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button></div></div>}
+      {isStreaming && !streamingContinuesAssistant && <div className="chat-message chat-message-assistant chat-message-streaming"><div className="message-body"><div className="chat-message-role">Nori <span>{pendingApprovals.length > 0 || browserPermissions.pending.length > 0 ? tr('waiting for permission', '等待授权') : tr('working', '工作中')}</span></div>{standaloneLiveBlocks.length > 0 ? <WorkStream blocks={standaloneLiveBlocks} live activeProgressId={standaloneLiveProgressId} startedAt={latestUserStartedAt}/> : <div className="chat-message-content"><span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span><span className="streaming-cursor"/></div>}{streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(streaming))} tokens</div>}<button className="chat-abort-btn" onClick={() => void handleAbort()} disabled={stopping}><Icon name="stop" size={13}/> {stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button></div></div>}
       <div ref={messagesEndRef}/>
     </div>
     {turnPreviews.length > 0 && <nav className="chat-turn-rail" style={{ height: `${Math.min(360, Math.max(54, turnPreviews.length * 14))}px` }} aria-label={tr('Conversation turns', '对话轮次')} onPointerMove={event => {
@@ -892,17 +879,6 @@ export function ChatView(props: ChatViewProps) {
         return <button type="button" key={turn.id} data-turn-id={turn.id} className={highlightedTurnId === turn.id ? 'active' : ''} aria-current={activeTurnId === turn.id ? 'step' : undefined} aria-describedby={previewOpen ? previewId : undefined} onPointerEnter={() => setHoveredTurnId(turn.id)} onFocus={() => setHoveredTurnId(turn.id)} onBlur={() => setHoveredTurnId(null)} onClick={() => scrollToTurn(turn.id)} aria-label={tr(`Go to turn ${index + 1}: ${prompt}`, `跳转到第 ${index + 1} 轮：${prompt}`)}><i/>{previewOpen && <span id={previewId} className="chat-turn-preview" role="tooltip"><strong>{prompt}</strong>{response && <span>{response}</span>}</span>}</button>;
       })}
     </nav>}
-    {departmentChatActive && <DepartmentRail
-      sessionId={session?.id ?? null}
-      selfAgentId={agentId}
-      leaderAgentId={departmentChat?.department_leader_agent_id ?? null}
-      chatMessages={departmentChat?.messages ?? []}
-      sessionAgents={sessionAgents}
-      tab={departmentTab}
-      onTabChange={setDepartmentTab}
-      discussionActive={discussionActive}
-      discussionRevision={departmentRevision}
-    />}
     </div>
 
     <ComposerContextStrip goal={sessionStatus?.goal ?? null} todos={todos} onGoalControl={onGoalControl}/>
@@ -1024,6 +1000,29 @@ function discussionSpeakerDisplayName(
   return speaker?.from === 'lead' ? tr('Main lead', '主代理') : tr('Discussion member', '讨论成员');
 }
 
+/**
+ * 发言人角色标签。`sub` 是子代理向上问的那一路（nori_ask_parent），
+ * 原来会掉到 else 分支被标成「主持」，反了。
+ */
+function discussionSpeakerRoleLabel(
+  from: NonNullable<ChatMessage['speaker']>['from'] | undefined,
+  tr: (english: string, chinese: string) => string,
+): string {
+  switch (from) {
+    case 'team':
+      return tr('Team', '团队');
+    case 'sub':
+      return tr('Subagent', '子代理');
+    case 'user':
+      return tr('User', '用户');
+    case 'system':
+      return tr('System', '系统');
+    case 'lead':
+    case undefined:
+      return tr('Lead', '主持');
+  }
+}
+
 function MessageBubble({ message, sessionAgents, workStartedAt, rewindCount, rewindDisabled = false, onRewind, live }: { message: ChatMessage; sessionAgents: readonly SessionAgent[]; workStartedAt?: number; rewindCount?: number; rewindDisabled?: boolean; onRewind?: (count: number) => void | Promise<void>; live?: LiveAssistantContinuation }) {
   const { tr } = useI18n();
   const isUser = message.role === 'user';
@@ -1051,10 +1050,10 @@ function MessageBubble({ message, sessionAgents, workStartedAt, rewindCount, rew
     : undefined;
   const discussionName = discussionSpeakerDisplayName(message.speaker, sessionAgents, tr);
   return <article data-chat-turn-id={isUser ? message.id : undefined} className={'chat-message ' + (isUser ? 'chat-message-user' : isDiscussion ? 'chat-message-discussion' : isSystem ? 'chat-message-system' : 'chat-message-assistant')}>
-    {isSystem && <div className="message-avatar"><span>{isDiscussion ? '·' : '!'}</span></div>}<div className="message-body">{(!isUser || (rewindCount !== undefined && onRewind !== undefined)) && <div className="chat-message-role">{!isUser && (isDiscussion ? `${discussionName} · ${message.speaker?.from === 'team' ? tr('Team', '团队') : tr('Lead', '主持')}` : isSystem ? tr('System', '系统') : 'Nori')}{isUser && rewindCount && onRewind && <button className="message-rewind-btn" disabled={rewindDisabled} onClick={() => { void onRewind(rewindCount); }} title={tr('Rewind to before this prompt', '回溯到此提问之前')}><Icon name="refresh" size={12}/>{tr('Rewind', '回溯')}</button>}</div>}
+    {isSystem && <div className="message-avatar"><span>{isDiscussion ? '·' : '!'}</span></div>}<div className="message-body">{(!isUser || (rewindCount !== undefined && onRewind !== undefined)) && <div className="chat-message-role">{!isUser && (isDiscussion ? `${discussionName} · ${discussionSpeakerRoleLabel(message.speaker?.from, tr)}` : isSystem ? tr('System', '系统') : 'Nori')}{isUser && rewindCount && onRewind && <button className="message-rewind-btn" disabled={rewindDisabled} onClick={() => { void onRewind(rewindCount); }} title={tr('Rewind to before this prompt', '回溯到此提问之前')}><Icon name="refresh" size={12}/>{tr('Rewind', '回溯')}</button>}</div>}
       {onlyContext
         ? displayedBlocks.map(block => block.type === 'context' ? <ContextInjectionRow key={block.id} block={block}/> : null)
-        : hasWork ? <WorkProcess blocks={displayedBlocks} live={live !== undefined} activeProgressId={liveProgressId} startedAt={workStartedAt} durationMs={live === undefined ? workDurationMs : undefined}/> : null}
+        : hasWork ? <WorkStream blocks={displayedBlocks} live={live !== undefined} activeProgressId={liveProgressId} startedAt={workStartedAt} durationMs={live === undefined ? workDurationMs : undefined}/> : null}
       {message.images && message.images.length > 0 && <div className="chat-message-images">{message.images.map((image, index) => <img key={`${image.src.slice(0, 80)}-${String(index)}`} src={image.src} alt={image.alt} loading="lazy" />)}</div>}
       {message.files && message.files.length > 0 && <div className="composer-attachments chat-message-attachments">{message.files.map((file, index) => <div className="composer-attachment attachment-file" key={`${file.name}-${String(file.size ?? 0)}-${String(index)}`}><span className="composer-file-icon"><Icon name="files" size={19}/></span><span title={file.name}>{file.name}</span></div>)}</div>}
       {text && <div className="chat-message-content">{isUser || isSystem ? text : <MarkdownView content={text} />}</div>}{message.usage && <TokenUsageLine usage={message.usage} />}{live && <button className="chat-abort-btn" onClick={() => void live.onAbort()} disabled={live.stopping}><Icon name="stop" size={13}/> {live.stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button>}{message.createdAt && <time className="chat-message-time">{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>}
@@ -1083,87 +1082,118 @@ function summarizeContextSource(args: unknown): string {
   return 'harness';
 }
 
-function WorkProcess({ blocks, live = false, activeProgressId, startedAt, durationMs }: { blocks: WorkBlock[]; live?: boolean; activeProgressId?: string; startedAt?: number; durationMs?: number }) {
+/**
+ * 工作流水：不再有“工作过程”折叠层，所有块都平铺成一条条行——
+ * 思考直接就地显示，输出内容原样显示，工具调用各自是一行可展开的折叠行。
+ */
+function WorkStream({ blocks, live = false, activeProgressId, startedAt, durationMs }: { blocks: WorkBlock[]; live?: boolean; activeProgressId?: string; startedAt?: number; durationMs?: number }) {
   const { tr } = useI18n();
-  const [open, setOpen] = useState(live);
   const fallbackStartedAtRef = useRef(Date.now());
   const [clockNow, setClockNow] = useState(Date.now);
-  const toolCount = blocks.filter(block => block.type === 'tool').length;
-  const reasoningCount = blocks.filter(block => block.type === 'thinking').length;
-  const progressCount = blocks.filter(block => block.type === 'progress').length;
-  const label = [
-    reasoningCount > 0 ? tr('thought', '思考') : '',
-    toolCount > 0 ? tr(`${toolCount} tool${toolCount === 1 ? '' : 's'}`, `调用 ${toolCount} 个工具`) : '',
-    progressCount > 0 ? tr(`${progressCount} updates`, `${progressCount} 条进展`) : '',
-  ].filter(Boolean).join(' + ');
-  useLayoutEffect(() => {
-    setOpen(live);
-  }, [live]);
   useEffect(() => {
     if (!live) return;
     setClockNow(Date.now());
     const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [live, startedAt]);
-  const effectiveStartedAt = startedAt ?? fallbackStartedAtRef.current;
-  const elapsedMs = durationMs ?? Math.max(0, clockNow - effectiveStartedAt);
+  const elapsedMs = durationMs ?? Math.max(0, clockNow - (startedAt ?? fallbackStartedAtRef.current));
   const elapsedLabel = live || durationMs !== undefined ? formatElapsedDuration(elapsedMs) : undefined;
 
-  return <details className={`chat-work-process${live ? ' live' : ''}`} open={open} onToggle={event => {
-    setOpen(event.currentTarget.open);
-  }}>
+  return <div className={`chat-work-stream${live ? ' live' : ''}`}>
+    {elapsedLabel && <div className="work-stream-status">
+      {live && <><Icon name="sparkles" size={12}/><span>{tr('Working', '处理中')}</span></>}
+      <time className="work-stream-elapsed" title={tr(`Elapsed ${elapsedLabel}`, `耗时 ${elapsedLabel}`)}>{elapsedLabel}</time>
+    </div>}
+    {segmentWorkBlocks(blocks).map((segment, index, all) => segment.kind === 'output'
+      ? <TranscriptOutput key={segment.id} text={segment.text} streaming={live && segment.id === activeProgressId}/>
+      : <WorkGroup key={segment.id} blocks={segment.blocks} live={live && index === all.length - 1}/>)}
+  </div>;
+}
+
+/**
+ * 一段工作 = 连续的思考 / 工具调用 / 上下文注入；模型的输出文本自己单独成段，
+ * 所以输出永远留在它真实发生的位置，不会被推到所有工具行的后面。
+ */
+export type WorkSegment =
+  | { kind: 'work'; id: string; blocks: WorkBlock[] }
+  | { kind: 'output'; id: string; text: string };
+
+export function segmentWorkBlocks(blocks: WorkBlock[]): WorkSegment[] {
+  const segments: WorkSegment[] = [];
+  for (const block of blocks) {
+    if (block.type === 'progress') {
+      segments.push({ kind: 'output', id: block.id, text: block.text });
+      continue;
+    }
+    const last = segments.at(-1);
+    if (last?.kind === 'work') last.blocks.push(block);
+    else segments.push({ kind: 'work', id: block.id, blocks: [block] });
+  }
+  return segments;
+}
+
+/** 连续的思考与工具调用收进一个可折叠的框，折叠时只留一行汇总。 */
+function WorkGroup({ blocks, live = false }: { blocks: WorkBlock[]; live?: boolean }) {
+  const { tr } = useI18n();
+  const [open, setOpen] = useState(live);
+  useEffect(() => { if (!live) setOpen(false); }, [live]);
+  const running = blocks.some(block => block.type === 'tool'
+    && block.tool.result === undefined && block.tool.endedAt === undefined && block.tool.isError !== true);
+  return <details className={`chat-work-group${live ? ' live' : ''}`} open={open} onToggle={event => { setOpen(event.currentTarget.open); }}>
     <summary>
-      <span className="work-process-title">{tr('Work process', '工作过程')}</span>
-      {elapsedLabel && <span className="work-process-elapsed" title={tr(`Elapsed ${elapsedLabel}`, `耗时 ${elapsedLabel}`)}>{elapsedLabel}</span>}
-      {label && <span className="work-process-meta">{label}</span>}
-      <Icon className="work-process-chevron" name="chevron-right" size={11}/>
+      <span className="work-group-icon"><Icon name={running ? 'sparkles' : 'check'} size={12}/></span>
+      <span className="work-group-headline">{summarizeWorkGroup(blocks, tr)}</span>
+      <Icon className="work-group-chevron" name="chevron-right" size={11}/>
     </summary>
-    <div className="chat-work-process-body">{blocks.map(block => {
-      if (block.type === 'thinking') {
-        return <ThoughtDisclosure key={block.id} text={block.text}/>;
-      }
-      if (block.type === 'progress') {
-        const isActive = live && block.id === activeProgressId;
-        return <TranscriptOutput key={block.id} text={block.text} streaming={isActive}/>;
-      }
-      if (block.type === 'context') {
-        return <ContextInjectionRow key={block.id} block={block}/>;
-      }
-      return <CompactToolCall key={block.id} tool={block.tool}/>;
-    })}</div>
+    <div className="work-group-body">
+      {blocks.map(block => {
+        if (block.type === 'thinking') return <ThinkingLine key={block.id} text={block.text} live={live}/>;
+        if (block.type === 'context') return <ContextInjectionRow key={block.id} block={block}/>;
+        if (block.type === 'tool') return <CompactToolCall key={block.id} tool={block.tool}/>;
+        return null;
+      })}
+    </div>
   </details>;
 }
 
-function LiveWorkStream({ blocks, activeProgressId, startedAt }: { blocks: WorkBlock[]; activeProgressId?: string; startedAt?: number }) {
-  const { tr } = useI18n();
-  const fallbackStartedAtRef = useRef(Date.now());
-  const [clockNow, setClockNow] = useState(Date.now);
-  useEffect(() => {
-    const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-  const elapsedLabel = formatElapsedDuration(Math.max(0, clockNow - (startedAt ?? fallbackStartedAtRef.current)));
+function isCommandToolName(name: string): boolean {
+  return /bash|shell|terminal|command|exec/i.test(name);
+}
 
-  return <div className="live-work-stream">
-    <div className="live-work-status"><Icon name="sparkles" size={12}/><span>{tr('Working', '处理中')}</span><time className="live-work-elapsed" title={tr(`Elapsed ${elapsedLabel}`, `耗时 ${elapsedLabel}`)}>{elapsedLabel}</time></div>
-    {blocks.map(block => {
-      if (block.type === 'thinking') return <ThoughtDisclosure key={block.id} text={block.text} live/>;
-      if (block.type === 'context') return <ContextInjectionRow key={block.id} block={block}/>;
-      if (block.type === 'tool') return <CompactToolCall key={block.id} tool={block.tool}/>;
-      const active = block.id === activeProgressId;
-      return <TranscriptOutput key={block.id} text={block.text} streaming={active}/>;
-    })}
-  </div>;
+/** 折叠时那一行汇总：跑了几条命令、动了几个文件、一共几次工具调用。 */
+function summarizeWorkGroup(blocks: WorkBlock[], tr: (en: string, zh: string) => string): string {
+  const tools = blocks.flatMap(block => block.type === 'tool' ? [block.tool] : []);
+  const commands = tools.filter(tool => isCommandToolName(tool.name)).length;
+  const created = tools.filter(tool => /^(write|createfile)$/i.test(tool.name)).length;
+  const edited = tools.filter(tool => /^(edit|multiedit|notebookedit|apply_?patch)$/i.test(tool.name)).length;
+  const thoughts = blocks.filter(block => block.type === 'thinking').length;
+  const contexts = blocks.filter(block => block.type === 'context').length;
+  const parts: string[] = [];
+  if (commands > 0) parts.push(tr(`Ran ${String(commands)} command${commands === 1 ? '' : 's'}`, `运行 ${String(commands)} 条命令`));
+  if (created > 0) parts.push(tr(`created ${String(created)} file${created === 1 ? '' : 's'}`, `新建 ${String(created)} 个文件`));
+  if (edited > 0) parts.push(tr(`edited ${String(edited)} file${edited === 1 ? '' : 's'}`, `编辑 ${String(edited)} 处`));
+  if (tools.length > 0) parts.push(tr(`used ${String(tools.length)} tool${tools.length === 1 ? '' : 's'}`, `共 ${String(tools.length)} 次工具调用`));
+  if (thoughts > 0) parts.push(tr(`${String(thoughts)} thought${thoughts === 1 ? '' : 's'}`, `${String(thoughts)} 段思考`));
+  if (contexts > 0) parts.push(tr(`${String(contexts)} context injection${contexts === 1 ? '' : 's'}`, `${String(contexts)} 次上下文注入`));
+  if (parts.length === 0) return tr('Worked quietly', '静默处理');
+  return parts.join(tr(', ', '、'));
 }
 
 function TranscriptOutput({ text, streaming = false }: { text: string; streaming?: boolean }) {
   return <div className="chat-message-content transcript-assistant-output"><MarkdownView content={text} streaming={streaming}/>{streaming && <span className="streaming-cursor"/>}</div>;
 }
 
-function ThoughtDisclosure({ text, live = false }: { text: string; live?: boolean }) {
+function ThinkingLine({ text, live = false }: { text: string; live?: boolean }) {
   const { tr } = useI18n();
-  return <details className={`thought-disclosure${live ? ' live-thinking-block' : ' work-thinking-block'}`}>
-    <summary><Icon name="sparkles" size={12}/><span>{tr('Thought', '思考')}</span><Icon name="chevron-right" size={11}/></summary>
+  const [open, setOpen] = useState(live);
+  useEffect(() => { if (!live) setOpen(false); }, [live]);
+  const preview = text.trim().split('\n').find(line => line.trim().length > 0) ?? '';
+  return <details className={`work-thinking-line${live ? ' live' : ''}`} open={open} onToggle={event => { setOpen(event.currentTarget.open); }}>
+    <summary>
+      <span className="work-thinking-label"><Icon name="sparkles" size={11}/>{tr('Thinking', '思考')}</span>
+      <span className="work-thinking-preview">{preview}</span>
+      <Icon className="work-thinking-chevron" name="chevron-right" size={11}/>
+    </summary>
     <p>{text}</p>
   </details>;
 }
@@ -1199,6 +1229,7 @@ function CompactToolCall({ tool }: { tool: ToolCall }) {
       <span className="compact-tool-icon"><Icon name={toolCallIcon(tool.name)} size={12}/></span>
       <span className="compact-tool-copy"><strong>{tool.name}</strong>{summary && <span>{summary}</span>}</span>
       <small className={running ? 'running' : tool.isError ? 'error' : 'done'}>{statusLabel}</small>
+      <Icon className="compact-tool-chevron" name="chevron-right" size={11}/>
     </summary>
     <dl className="compact-tool-detail">
       {fields.map(field => (
@@ -1370,45 +1401,6 @@ function formatTokens(value: number): string {
   return new Intl.NumberFormat(undefined, { notation: value >= 10_000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(value);
 }
 
-
-/**
- * 右侧部门实时框：开会（Discuss 发言流）与交流（兄弟成员群聊）两个标签。
- * 自己的消息靠右，其他成员的靠左。人类只读——这是成员之间的通道。
- */
-function DepartmentRail({ sessionId, selfAgentId, leaderAgentId, chatMessages, sessionAgents, tab, onTabChange, discussionActive, discussionRevision }: {
-  sessionId: string | null;
-  selfAgentId: string;
-  leaderAgentId: string | null;
-  chatMessages: TeamChatMessage[];
-  sessionAgents: readonly SessionAgent[];
-  tab: 'meeting' | 'chat';
-  onTabChange: (tab: 'meeting' | 'chat') => void;
-  discussionActive: boolean;
-  discussionRevision: string | number;
-}) {
-  const { tr } = useI18n();
-  return (
-    <aside className="department-rail" aria-label={tr('Department', '部门')}>
-      <nav className="department-tabs" role="tablist" aria-label={tr('Department views', '部门视图')}>
-        <button type="button" role="tab" aria-selected={tab === 'meeting'} className={tab === 'meeting' ? 'active' : ''} onClick={() => onTabChange('meeting')}>
-          {tr('Meeting', '开会')}{discussionActive && <i className="department-tab-dot" aria-label={tr('Meeting in progress', '会议进行中')} />}
-        </button>
-        <button type="button" role="tab" aria-selected={tab === 'chat'} className={tab === 'chat' ? 'active' : ''} onClick={() => onTabChange('chat')}>
-          {tr('Chat', '交流')}
-        </button>
-      </nav>
-      {tab === 'chat'
-        ? <ChatRailPane messages={chatMessages} selfAgentId={selfAgentId} sessionAgents={sessionAgents} />
-        : <DiscussRailPane sessionId={sessionId} leaderAgentId={leaderAgentId} selfAgentId={selfAgentId} sessionAgents={sessionAgents} revision={discussionRevision} />}
-    </aside>
-  );
-}
-
-function messageTimeOf(message: ChatMessage): number {
-  const parsed = Date.parse(message.createdAt ?? '');
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 /** 输入框上方的 Goal / Todo 平铺条：一行目标 + 扁平待办列表，无卡片装饰。 */
 function ComposerContextStrip({ goal, todos, onGoalControl }: {
   goal: GoalSnapshot | null;
@@ -1460,114 +1452,3 @@ function ComposerContextStrip({ goal, todos, onGoalControl }: {
   );
 }
 
-function ChatRailPane({ messages, selfAgentId, sessionAgents }: {
-  messages: TeamChatMessage[];
-  selfAgentId: string;
-  sessionAgents: readonly SessionAgent[];
-}) {
-  const { tr } = useI18n();
-  if (messages.length === 0) {
-    return <div className="department-rail-empty">{tr('No messages yet — members align here while working.', '还没有消息——成员工作时在这里交流。')}</div>;
-  }
-  return (
-    <div className="department-rail-body">
-      {messages.map(message => {
-        const own = message.agent_id === selfAgentId;
-        const agent = sessionAgents.find(candidate => candidate.agent_id === message.agent_id);
-        const name = agent?.name?.trim() || message.name || message.agent_id;
-        const mentions = message.mentions.filter(mention => mention !== 'all').map(mention =>
-          sessionAgents.find(candidate => candidate.agent_id === mention)?.name?.trim() || mention);
-        return (
-          <div key={message.message_id} className={'department-rail-row' + (own ? ' own' : '')}>
-            {!own && <div className="department-chat-avatar" aria-hidden="true"><span>{name.slice(0, 1)}</span></div>}
-            <div className="department-chat-bubble">
-              <div className="department-chat-meta">
-                {!own && <strong>{name}</strong>}
-                {message.mentions.includes('all') && <em>@{tr('all', '全体')}</em>}
-                {mentions.map(mention => <em key={mention}>@{mention}</em>)}
-                <time>{new Date(message.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
-              </div>
-              <div className="department-chat-text">{message.message}</div>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function DiscussRailPane({ sessionId, leaderAgentId, selfAgentId, sessionAgents, revision }: {
-  sessionId: string | null;
-  leaderAgentId: string | null;
-  selfAgentId: string;
-  sessionAgents: readonly SessionAgent[];
-  revision: string | number;
-}) {
-  const { tr } = useI18n();
-  const [rows, setRows] = useState<ChatMessage[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    if (!sessionId || leaderAgentId === null) {
-      setRows([]);
-      setError(null);
-      return;
-    }
-    let disposed = false;
-    const load = async () => {
-      try {
-        // Prefer the department's active discussion; fall back to its most
-        // recent archived one so the meeting tab is never blank after a round.
-        const discussions = sessionAgents.filter(candidate =>
-          candidate.kind === 'discussion' && candidate.parent_agent_id === leaderAgentId);
-        const node = discussions.find(candidate => !candidate.archived) ?? discussions[discussions.length - 1];
-        if (node === undefined) {
-          if (!disposed) { setRows([]); setError(null); }
-          return;
-        }
-        const data = await api.sessions.getMessages(sessionId, { agent_id: node.agent_id, page_size: 100 });
-        if (disposed) return;
-        const mapped = (data.items ?? [])
-          .map(apiMessageToChat)
-          .filter((item): item is ChatMessage => item !== null)
-          .sort((a, b) => messageTimeOf(a) - messageTimeOf(b));
-        setRows(foldConversationTurns(mapped));
-        setError(null);
-      } catch (caught) {
-        if (!disposed) setError(caught instanceof Error ? caught.message : String(caught));
-      }
-    };
-    void load();
-    return () => { disposed = true; };
-  }, [sessionId, leaderAgentId, sessionAgents, revision]);
-  if (leaderAgentId === null) {
-    return <div className="department-rail-empty">{tr('No department.', '没有部门。')}</div>;
-  }
-  if (error !== null) {
-    return <div className="department-rail-empty">{error}</div>;
-  }
-  if (rows.length === 0) {
-    return <div className="department-rail-empty">{tr('No discussion yet. Open a Discuss round to start one.', '还没有讨论。开启一轮 Discuss 即可开始。')}</div>;
-  }
-  return (
-    <div className="department-rail-body">
-      {rows.map(row => {
-        const own = row.speaker?.id === selfAgentId || row.role === 'user';
-        const name = row.speaker?.name
-          ?? sessionAgents.find(candidate => candidate.agent_id === row.speaker?.id)?.name?.trim()
-          ?? tr('Lead', '主持');
-        return (
-          <div key={row.id} className={'department-rail-row' + (own ? ' own' : '')}>
-            {!own && <div className="department-chat-avatar" aria-hidden="true"><span>{name.slice(0, 1)}</span></div>}
-            <div className="department-chat-bubble">
-              <div className="department-chat-meta">
-                {!own && <strong>{name}</strong>}
-                {row.createdAt && <time>{new Date(row.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>}
-              </div>
-              <div className="department-chat-text">{row.text}</div>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}

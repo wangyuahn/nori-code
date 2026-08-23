@@ -167,7 +167,11 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
   }
 
   async setPermission({ agentId, ...payload }: AgentScopedPayload<SetPermissionPayload>) {
-    return (await this.getAgent(agentId)).setPermission(payload);
+    // 权限是整个会话的一个设置：在哪个智能体上改都一样，改完主智能体和所有成员
+    // 一起生效。先落到目标智能体（telemetry 记在它头上），再铺开到全会话。
+    const result = await (await this.getAgent(agentId)).setPermission(payload);
+    this.session.applySessionPermissionMode(payload.mode);
+    return result;
   }
 
   async setNoriRuntimeSettings({

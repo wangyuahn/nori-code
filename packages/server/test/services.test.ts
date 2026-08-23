@@ -591,6 +591,54 @@ describe('WSBroadcastService (WS transport pump)', () => {
     bus.dispose();
   });
 
+  it('keeps collaboration events for agent-filtered live delivery and replay', async () => {
+    const clients = new FakeSessionClients();
+    const viewer = fakeConn('conn_viewer', ['agent-viewer']);
+    clients.subscribe(viewer, 'sid_collab');
+    const bus = new EventService();
+    const broadcast = new WSBroadcastService(
+      bus,
+      testLogger,
+      clients,
+      new FakeConnectionRegistry(),
+      makeEnv(),
+    );
+
+    // Both are emitted by whichever agent owns the store, so an agent filter
+    // must not hide them from the other participants of the same session.
+    bus.publish({
+      type: 'discussion.updated',
+      sessionId: 'sid_collab',
+      agentId: 'agent-lead',
+    } as unknown as Event);
+    bus.publish({
+      type: 'team.chat.updated',
+      sessionId: 'sid_collab',
+      agentId: 'agent-lead',
+    } as unknown as Event);
+    bus.publish({
+      type: 'turn.started',
+      sessionId: 'sid_collab',
+      agentId: 'agent-lead',
+      turnId: 1,
+      origin: { kind: 'user' },
+    } as unknown as Event);
+    await broadcast._drainForTest('sid_collab');
+
+    expect(viewer.sent).toMatchObject([
+      { type: 'discussion.updated', seq: 1 },
+      { type: 'team.chat.updated', seq: 2 },
+    ]);
+
+    const replay = await broadcast.getBufferedSince('sid_collab', { seq: 0 }, ['agent-viewer']);
+    expect(replay.events.map(entry => entry.envelope.type)).toEqual([
+      'discussion.updated',
+      'team.chat.updated',
+    ]);
+    broadcast.dispose();
+    bus.dispose();
+  });
+
 
   it('getSnapshotState clears the in-flight turn after turn.ended', async () => {
     const bus = new EventService();

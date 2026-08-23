@@ -1,9 +1,11 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { api, type FsDiffResponse, type FsGitStatusResponse, type FsReadResponse, type GoalSnapshot } from '../api/client';
-import type { ChatMessage, CodeChange, TodoItem } from '../hooks/useChatMessages';
+import { api, type FsDiffResponse, type FsGitStatusResponse, type FsReadResponse, type SessionAgent, type SessionAgentChatResponse } from '../api/client';
+import type { ChatMessage, CodeChange } from '../hooks/useChatMessages';
 import type { GitStatusRefreshOptions } from '../hooks/useFilesystem';
 import { useI18n } from '../i18n';
 import { editLineOperationsDiff } from '../utils/edit-line-ops';
+import type { AgentDiscussion } from '../utils/team-discussion';
+import { DepartmentChatPanel, DepartmentMeetingPanel } from './DepartmentPanel';
 import { FilePreview } from './FilePreview';
 import { Icon } from './Icon';
 import { LspPanel } from './LspPanel';
@@ -11,8 +13,8 @@ import { LspPanel } from './LspPanel';
 const TerminalPanel = lazy(() => import('./TerminalPanel').then(module => ({ default: module.TerminalPanel })));
 const BrowserPanel = lazy(() => import('./BrowserPanel').then(module => ({ default: module.BrowserPanel })));
 
-export type InspectorTab = 'preview' | 'changes' | 'browser' | 'git' | 'lsp' | 'terminal';
-const DEFAULT_INSPECTOR_TABS: InspectorTab[] = ['changes', 'preview', 'browser', 'git', 'lsp', 'terminal'];
+export type InspectorTab = 'preview' | 'changes' | 'browser' | 'git' | 'lsp' | 'terminal' | 'meeting' | 'chat';
+const DEFAULT_INSPECTOR_TABS: InspectorTab[] = ['changes', 'preview', 'browser', 'git', 'lsp', 'terminal', 'meeting', 'chat'];
 
 interface OpenInspectorTab {
   id: string;
@@ -36,17 +38,19 @@ interface WorkspaceInspectorProps {
   isStreaming: boolean;
   mainWorking?: boolean;
   activeAgentCount?: number;
-  activeAgentTokens?: number;
-  goal?: GoalSnapshot | null;
-  todos?: TodoItem[];
-  onGoalControl?: (action: 'pause' | 'resume' | 'cancel') => void | Promise<void>;
+  /** 当前视角的 agent，用于区分开会/交流里“自己这方”的气泡。 */
+  selfAgentId?: string;
+  sessionAgents?: readonly SessionAgent[];
+  departmentChat?: SessionAgentChatResponse | null;
+  discussion?: AgentDiscussion | null;
+  departmentRevision?: string | number;
   onSelectFilePath?: (path: string) => void;
   initialTab?: InspectorTab;
   standalone?: boolean;
   overviewFirst?: boolean;
 }
 
-export function WorkspaceInspector({ sessionId, projectPath, path, file, loading, messages, codeChanges, gitStatus, gitError, gitLoading, refreshGitStatus, refreshMessages, refreshFile, isStreaming, mainWorking = false, activeAgentCount = 0, activeAgentTokens = 0, goal = null, todos = [], onGoalControl, onSelectFilePath, initialTab, standalone = false, overviewFirst = false }: WorkspaceInspectorProps) {
+export function WorkspaceInspector({ sessionId, projectPath, path, file, loading, messages, codeChanges, gitStatus, gitError, gitLoading, refreshGitStatus, refreshMessages, refreshFile, isStreaming, mainWorking = false, activeAgentCount = 0, selfAgentId = 'main', sessionAgents = [], departmentChat, discussion = null, departmentRevision = 0, onSelectFilePath, initialTab, standalone = false, overviewFirst = false }: WorkspaceInspectorProps) {
   const { tr } = useI18n();
   const initialActiveTab = standalone || !overviewFirst ? initialTab ?? 'changes' : initialTab ?? null;
   const initialActiveTabId = initialActiveTab ? `${initialActiveTab}-initial` : null;
@@ -54,14 +58,46 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
   const [openTabs, setOpenTabs] = useState<OpenInspectorTab[]>(() => initialActiveTab ? [{ id: initialActiveTabId!, tool: initialActiveTab }] : []);
   const [tabOrder, setTabOrder] = useState<InspectorTab[]>(loadInspectorTabOrder);
   const [toolPickerOpen, setToolPickerOpen] = useState(false);
+  const [launcherPickerOpen, setLauncherPickerOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [textChangeCount, setTextChangeCount] = useState<number>();
   const [diagnosticCount, setDiagnosticCount] = useState<number>();
   const [revealLine, setRevealLine] = useState<number>();
   const previewRefreshRef = useRef({ path: '', mutationKey: '' });
   const toolPickerRef = useRef<HTMLDivElement>(null);
+  const launcherRef = useRef<HTMLDivElement>(null);
+  const autoOpenedMeetingRef = useRef<string | null>(null);
   const nextTabIdRef = useRef(1);
   const activeTab = openTabs.find(item => item.id === activeTabId);
   const tab = activeTab?.tool ?? null;
+
+  // 交流只存在于成员之间；开会对主持人也要出现——轮次挂在主持人名下。
+  const departmentChatLeaderAgentId = departmentChat?.department_leader_agent_id ?? null;
+  const chatAvailable = selfAgentId !== 'main' && departmentChatLeaderAgentId !== null;
+  // 自己手下有成员，就意味着自己是能召集讨论的那个父级——哪怕现在还没开过一轮。
+  const leadsADepartment = sessionAgents.some(candidate =>
+    candidate.parent_agent_id === selfAgentId && candidate.kind !== 'discussion' && candidate.archived !== true);
+  // 会议记录节点：先看自己召集的轮次，再看自己所在部门的轮次；同一主持人下优先活跃的
+  // 那一轮，否则回落到最近一轮，这样一轮结束后开会工具不会变空。
+  const discussionNodeAgentId = useMemo(() => {
+    if (discussion !== null) return discussion.discussionAgentId;
+    const leaders = [leadsADepartment ? selfAgentId : null, departmentChatLeaderAgentId]
+      .filter((candidate): candidate is string => candidate !== null);
+    for (const leaderAgentId of leaders) {
+      const rounds = sessionAgents.filter(candidate =>
+        candidate.kind === 'discussion' && candidate.parent_agent_id === leaderAgentId);
+      const round = rounds.find(candidate => candidate.archived !== true) ?? rounds.at(-1);
+      if (round !== undefined) return round.agent_id;
+    }
+    return null;
+  }, [discussion, leadsADepartment, selfAgentId, departmentChatLeaderAgentId, sessionAgents]);
+  // 开会是部门语境里的常驻工具：轮次由父级自己召集，人类得随时能打开来看。
+  const meetingAvailable = discussion !== null || discussionNodeAgentId !== null || leadsADepartment || chatAvailable;
+  /** 开会/交流只有在这个 agent 真的处在部门里时才是可用工具。 */
+  const toolAvailable = (item: InspectorTab) =>
+    item === 'meeting' ? meetingAvailable : item === 'chat' ? chatAvailable : true;
+  const availableTools = tabOrder.filter(toolAvailable);
+  const launcherTool = tab ?? availableTools[0] ?? 'changes';
 
   useEffect(() => {
     if (!path || standalone) return;
@@ -78,12 +114,15 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
   }, [path, standalone]);
 
   useEffect(() => {
-    if (!toolPickerOpen) return;
+    if (!toolPickerOpen && !launcherPickerOpen) return;
     const closePicker = (event: PointerEvent) => {
       if (!toolPickerRef.current?.contains(event.target as Node)) setToolPickerOpen(false);
+      if (!launcherRef.current?.contains(event.target as Node)) setLauncherPickerOpen(false);
     };
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === 'Escape') setToolPickerOpen(false);
+      if (event.key !== 'Escape') return;
+      setToolPickerOpen(false);
+      setLauncherPickerOpen(false);
     };
     document.addEventListener('pointerdown', closePicker);
     window.addEventListener('keydown', closeOnEscape);
@@ -91,11 +130,30 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
       document.removeEventListener('pointerdown', closePicker);
       window.removeEventListener('keydown', closeOnEscape);
     };
-  }, [toolPickerOpen]);
+  }, [launcherPickerOpen, toolPickerOpen]);
 
   useEffect(() => {
     setTextChangeCount(undefined);
   }, [projectPath]);
+
+  // 一轮 Discuss 真的开起来时自动把开会工具推到前面（每轮只推一次，
+  // 用户手动关掉后不再抢回来）。
+  useEffect(() => {
+    const roundId = discussion?.discussionAgentId ?? null;
+    if (standalone || roundId === null) return;
+    if (autoOpenedMeetingRef.current === roundId) return;
+    autoOpenedMeetingRef.current = roundId;
+    setOpenTabs(previous => {
+      const existing = [...previous].reverse().find(item => item.tool === 'meeting');
+      if (existing) {
+        setActiveTabId(existing.id);
+        return previous;
+      }
+      const created = { id: `meeting-${nextTabIdRef.current++}`, tool: 'meeting' as const };
+      setActiveTabId(created.id);
+      return [...previous, created];
+    });
+  }, [discussion?.discussionAgentId, standalone]);
 
   const latestCodeChange = codeChanges[0];
   const codeChangeRefreshKey = latestCodeChange
@@ -138,6 +196,7 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
     setOpenTabs(previous => [...previous, created]);
     setActiveTabId(created.id);
     setToolPickerOpen(false);
+    setLauncherPickerOpen(false);
     if (item === 'git') void refreshGitStatus();
   };
   const activateTab = (item: InspectorTab) => {
@@ -148,6 +207,7 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
     }
     setActiveTabId(existing.id);
     setToolPickerOpen(false);
+    setLauncherPickerOpen(false);
     if (item === 'git') void refreshGitStatus();
   };
   const closeTab = (tabId: string) => {
@@ -163,6 +223,8 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
     if (item === 'preview') return <FilePreview path={path} file={file} loading={loading} revealLine={revealLine} onRefresh={refreshFile} />;
     if (item === 'changes') return <ChangesPanel sessionId={sessionId} projectPath={projectPath} status={gitStatus} messages={messages} codeChanges={codeChanges} onRefreshGitStatus={refreshGitStatus} onRefreshMessages={refreshMessages} onPreviewFile={onSelectFilePath ? previewFile : undefined} onCountChange={setTextChangeCount} />;
     if (item === 'git') return <GitPanel sessionId={sessionId} projectPath={projectPath} status={gitStatus} error={gitError} loading={gitLoading} onRefresh={refreshGitStatus} />;
+    if (item === 'meeting') return <DepartmentMeetingPanel sessionId={sessionId} discussionAgentId={discussionNodeAgentId} selfAgentId={selfAgentId} sessionAgents={sessionAgents} turnAgentId={discussion?.turnAgentId ?? null} revision={departmentRevision} />;
+    if (item === 'chat') return <DepartmentChatPanel messages={departmentChat?.messages ?? []} selfAgentId={selfAgentId} sessionAgents={sessionAgents} />;
     if (item === 'lsp') return <LspPanel sessionId={sessionId} path={path} onDiagnosticCountChange={setDiagnosticCount} onReveal={(targetPath, line) => { if (targetPath !== path) onSelectFilePath?.(targetPath); setRevealLine(line + 1); const existing = [...openTabs].reverse().find(candidate => candidate.tool === 'preview'); if (existing) setActiveTabId(existing.id); else openTab('preview'); }} />;
     // BrowserPanel owns a native WebContentsView. CSS-hidden inspector pages remain
     // mounted, so the inactive browser page must be unmounted to detach that view.
@@ -175,21 +237,46 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
 
   const collapseInspector = () => {
     setToolPickerOpen(false);
+    setLauncherPickerOpen(false);
+    setExpanded(false);
     setActiveTabId(null);
   };
 
+  const detailContext = { path, projectPath, sessionId, gitStatus, diagnosticCount, changeCount, discussion, tr };
+  const launcherMeta = inspectorTabMeta(launcherTool, tr);
+  const toolMenu = (onPick: (item: InspectorTab) => void) => <div className="inspector-tool-menu" role="menu">
+    {availableTools.map(item => {
+      const meta = inspectorTabMeta(item, tr);
+      // 副标题和工具名一样时不重复渲染（否则会出现“浏览器 浏览器”“LSP LSP”）。
+      const detail = inspectorTabDetail(item, detailContext);
+      return <button
+        type="button"
+        role="menuitem"
+        key={item}
+        draggable
+        onDragStart={event => event.dataTransfer.setData('text/nori-inspector-tab', item)}
+        onDragOver={event => event.preventDefault()}
+        onDrop={event => { event.preventDefault(); const source = event.dataTransfer.getData('text/nori-inspector-tab') as InspectorTab; if (DEFAULT_INSPECTOR_TABS.includes(source)) setTabOrder(previous => moveInspectorTab(previous, item, source)); }}
+        onClick={() => onPick(item)}
+      ><Icon name={meta.icon} size={14}/><span>{meta.label}</span>{detail !== meta.label && <small>{detail}</small>}</button>;
+    })}
+  </div>;
+
   return <section
-    className={`workspace-inspector${tab ? ' inspector-view-open' : ' inspector-overview-open'}${standalone ? ' standalone' : ''}`}
+    className={`workspace-inspector${tab ? ' inspector-view-open' : ' inspector-overview-open'}${expanded ? ' inspector-expanded' : ''}${standalone ? ' standalone' : ''}`}
   >
-    {!standalone && <aside className="inspector-navigation" aria-label={tr('Inspector', '检查器')}>
-      {tab === null && <header className="inspector-overview-heading"><div><span>{tr('Workspace', '工作区')}</span><strong>{tr('Tools', '工具')}</strong></div></header>}
-      {tab === null && <WorkspaceActivitySummary mainWorking={mainWorking || isStreaming} agentCount={activeAgentCount} agentTokens={activeAgentTokens} />}
-      <div className="inspector-tab-list" role="tablist" aria-label={tr('Inspector tools', '检查器工具')}>
-        {tabOrder.map(item => <InspectorTabButton key={item} tab={item} active={tab === item} compact={false} count={item === 'changes' ? changeCount : item === 'lsp' ? diagnosticCount : undefined} detail={inspectorTabDetail(item, { path, projectPath, sessionId, gitStatus, diagnosticCount, tr })} onClick={() => activateTab(item)} onMove={target => setTabOrder(previous => moveInspectorTab(previous, item, target))} />)}
-      </div>
-      {tab !== null && <button type="button" className="inspector-collapse-button" onClick={collapseInspector} title={tr('Collapse tool sidebar', '收起工具侧栏')} aria-label={tr('Collapse tool sidebar', '收起工具侧栏')}><Icon name="panel-left" size={17}/></button>}
-    </aside>}
-    <div className={`inspector-stage${tab ? ' open' : ''}`} aria-hidden={tab === null}>
+    {!standalone && tab === null && <div className={`inspector-launcher-dock${launcherPickerOpen ? ' open' : ''}`} ref={launcherRef}>
+      <button type="button" className="inspector-launcher" onClick={() => activateTab(launcherTool)} title={tr(`Open ${launcherMeta.label}`, `打开${launcherMeta.label}`)}>
+        <Icon name={launcherMeta.icon} size={13}/>
+        <span>{launcherMeta.label}</span>
+        {(mainWorking || isStreaming || activeAgentCount > 0) && <i className="inspector-launcher-live" aria-hidden="true"/>}
+      </button>
+      <button type="button" className="inspector-launcher-pick" onClick={() => setLauncherPickerOpen(previous => !previous)} aria-expanded={launcherPickerOpen} title={tr('Choose tool', '选择工具')} aria-label={tr('Choose tool', '选择工具')}>
+        <Icon name="chevron-down" size={13}/>
+      </button>
+      {launcherPickerOpen && toolMenu(activateTab)}
+    </div>}
+    {(standalone || tab !== null) && <div className="inspector-stage open">
       {!standalone && <header className="inspector-panel-tabs">
         <div className="inspector-open-tabs" role="tablist" aria-label={tr('Open inspector tools', '已打开的检查器工具')}>
           {openTabs.map((item, index) => {
@@ -206,78 +293,27 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
         <div className="inspector-panel-actions">
           <div className={`inspector-tool-picker${toolPickerOpen ? ' open' : ''}`} ref={toolPickerRef}>
             <button type="button" className="inspector-add-tab" onClick={() => setToolPickerOpen(previous => !previous)} title={tr('Open tool', '打开工具')} aria-label={tr('Open tool', '打开工具')} aria-expanded={toolPickerOpen}><Icon name="plus" size={14}/></button>
-            {toolPickerOpen && <div className="inspector-tool-menu" role="menu">{tabOrder.map(item => { const meta = inspectorTabMeta(item, tr); return <button type="button" role="menuitem" key={item} onClick={() => openTab(item)}><Icon name={meta.icon} size={14}/><span>{meta.label}</span></button>; })}</div>}
+            {toolPickerOpen && toolMenu(openTab)}
           </div>
           {tab && <button type="button" className="inspector-popout" onClick={() => openInspectorWindow(tab, sessionId, path)} title={tr('Open in separate window', '在独立窗口中打开')} aria-label={tr('Open in separate window', '在独立窗口中打开')}><Icon name="external" size={14}/></button>}
+          <button type="button" className="inspector-expand-button" onClick={() => setExpanded(previous => !previous)} title={expanded ? tr('Shrink panel', '收窄面板') : tr('Expand panel', '展开面板')} aria-label={expanded ? tr('Shrink panel', '收窄面板') : tr('Expand panel', '展开面板')} aria-pressed={expanded}><Icon name={expanded ? 'restore' : 'maximize'} size={13}/></button>
+          <button type="button" className="inspector-collapse-button" onClick={collapseInspector} title={tr('Close tool panel', '关闭工具面板')} aria-label={tr('Close tool panel', '关闭工具面板')}><Icon name="close" size={14}/></button>
         </div>
       </header>}
+      {!standalone && tab !== null && <div className="inspector-stage-context">
+        <Icon name={inspectorTabMeta(tab, tr).icon} size={12}/>
+        <strong>{inspectorTabContext(tab, detailContext)}</strong>
+        {/* 没有分支/项目名时两段会退化成同一个词，那就只留一段，不画“工作区 → 工作区”。 */}
+        {inspectorTabDetail(tab, detailContext) !== inspectorTabContext(tab, detailContext) && <>
+          <span aria-hidden="true">→</span>
+          <em>{inspectorTabDetail(tab, detailContext)}</em>
+        </>}
+      </div>}
       <div className="inspector-content">
         {openTabs.map(item => <div className={`inspector-tool-page${activeTabId === item.id ? ' active' : ''}`} key={item.id} aria-hidden={activeTabId !== item.id}>{renderTool(item)}</div>)}
       </div>
-    </div>
-  </section>;
-}
-
-function WorkspaceActivitySummary({ mainWorking, agentCount, agentTokens }: { mainWorking: boolean; agentCount: number; agentTokens: number }) {
-  const { tr } = useI18n();
-  const [phraseIndex, setPhraseIndex] = useState(0);
-  const mainPhrases = [
-    tr('Nori is tracing the threads…', 'Nori 正在理清线索…'),
-    tr('Nori is sharpening the answer…', 'Nori 正在打磨答案…'),
-    tr('Nori is fitting the pieces together…', 'Nori 正在拼好思路…'),
-    tr('Nori is checking the gears…', 'Nori 正在检查齿轮…'),
-  ];
-  const agentPhrases = [
-    tr('Agents are exploring in parallel…', '智能体正在并行探索…'),
-    tr('Agents are comparing notes…', '智能体正在交换发现…'),
-    tr('Agents are mapping the code…', '智能体正在绘制代码脉络…'),
-    tr('Agents are gathering results…', '智能体正在汇总成果…'),
-  ];
-  useEffect(() => {
-    if (!mainWorking && agentCount === 0) return;
-    setPhraseIndex(0);
-    const timer = setInterval(() => setPhraseIndex(current => current + 1), 3_200);
-    return () => clearInterval(timer);
-  }, [agentCount, mainWorking]);
-
-  if (agentCount === 0 && !mainWorking) return null;
-  const currentMainPhrase = mainPhrases[phraseIndex % mainPhrases.length];
-  const currentAgentPhrase = agentPhrases[phraseIndex % agentPhrases.length];
-  const hasLiveActivity = mainWorking || agentCount > 0;
-  const headline = mainWorking ? currentMainPhrase : currentAgentPhrase;
-  const icon = mainWorking ? 'sparkles' : 'git-branch';
-  const statusSummary = [
-    mainWorking ? tr('Nori active', 'Nori 工作中') : '',
-    agentCount > 0 ? tr(`${agentCount} agents`, `${agentCount} 个智能体`) : '',
-  ].filter(Boolean).join(' · ');
-
-  return <section className="inspector-activity-summary" aria-live={mainWorking || agentCount > 0 ? 'polite' : undefined}>
-    {hasLiveActivity && <div className="inspector-activity-highlight">
-      <span className="inspector-activity-icon"><Icon name={icon} size={14}/></span>
-      <span><small>{statusSummary}</small><strong>{headline}</strong></span>
-      {agentTokens > 0 && <em>{formatTokens(agentTokens)} tokens</em>}
     </div>}
-    {agentCount > 0 && <p className="inspector-activity-line active"><span>{tr('Team members', '团队成员')}</span><strong>{currentAgentPhrase}{agentTokens > 0 ? ` · ${formatTokens(agentTokens)} tokens` : ''}</strong></p>}
   </section>;
-}
-
-function formatGoalTime(milliseconds: number, tr: (en: string, zh: string) => string): string {
-  const minutes = Math.max(0, Math.floor(milliseconds / 60_000));
-  if (minutes < 1) return tr('<1 min', '<1 分钟');
-  if (minutes < 60) return tr(`${minutes} min`, `${minutes} 分钟`);
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  return tr(`${hours}h ${remainder}m`, `${hours} 小时 ${remainder} 分钟`);
-}
-
-function formatTokens(value: number): string {
-  return new Intl.NumberFormat(undefined, { notation: value >= 10_000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(value);
-}
-
-function InspectorTabButton({ tab, active, compact, count, detail, onClick, onMove }: { tab: InspectorTab; active: boolean; compact: boolean; count?: number; detail?: string; onClick: () => void; onMove: (target: InspectorTab) => void }) {
-  const { tr } = useI18n();
-  const meta = inspectorTabMeta(tab, tr);
-  return <button type="button" role="tab" draggable aria-selected={active} className={active ? 'active' : ''} title={compact ? meta.label : undefined} onClick={onClick} onDragStart={event => event.dataTransfer.setData('text/nori-inspector-tab', tab)} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const source = event.dataTransfer.getData('text/nori-inspector-tab') as InspectorTab; if (DEFAULT_INSPECTOR_TABS.includes(source)) onMove(source); }}><span className="inspector-nav-icon"><Icon name={meta.icon} size={compact ? 16 : 18}/></span>{!compact && <span className="inspector-nav-copy"><strong>{meta.label}</strong>{detail && <small>{detail}</small>}</span>}{count !== undefined && count > 0 ? <em>{count}</em> : null}{!compact && <Icon name="chevron-right" size={15}/>}</button>;
 }
 
 function moveOpenInspectorTab(order: OpenInspectorTab[], target: string, source: string): OpenInspectorTab[] {
@@ -290,13 +326,40 @@ function moveOpenInspectorTab(order: OpenInspectorTab[], target: string, source:
   return next;
 }
 
-function inspectorTabDetail(tab: InspectorTab, context: { path: string; projectPath?: string; sessionId: string | null; gitStatus: FsGitStatusResponse | null; diagnosticCount?: number; tr: (en: string, zh: string) => string }): string {
-  const { path, projectPath, sessionId, gitStatus, diagnosticCount, tr } = context;
+interface InspectorToolContext {
+  path: string;
+  projectPath?: string;
+  sessionId: string | null;
+  gitStatus: FsGitStatusResponse | null;
+  diagnosticCount?: number;
+  changeCount?: number;
+  discussion?: AgentDiscussion | null;
+  tr: (en: string, zh: string) => string;
+}
+
+/** 面板上下文头部左侧那一段（图里的 `master`）。 */
+function inspectorTabContext(tab: InspectorTab, context: InspectorToolContext): string {
+  const { path, projectPath, gitStatus, tr } = context;
+  const workspaceName = projectPath ? splitDisplayPath(projectPath.replaceAll('\\', '/')).fileName : tr('Workspace', '工作区');
+  if (tab === 'changes' || tab === 'git') return gitStatus?.branch || workspaceName;
+  if (tab === 'preview') return path ? splitDisplayPath(projectRelativePath(path, projectPath)).directory || workspaceName : workspaceName;
+  if (tab === 'meeting') return tr('Meeting', '开会');
+  if (tab === 'chat') return tr('Department', '部门');
+  return workspaceName;
+}
+
+function inspectorTabDetail(tab: InspectorTab, context: InspectorToolContext): string {
+  const { path, projectPath, sessionId, gitStatus, diagnosticCount, changeCount, discussion, tr } = context;
   if (tab === 'preview') return path ? splitDisplayPath(projectRelativePath(path, projectPath)).fileName : tr('No file selected', '未选择文件');
   if (tab === 'git') return gitStatus?.branch || tr('Repository', '仓库');
   if (tab === 'lsp') return diagnosticCount === undefined ? 'LSP' : tr(`${diagnosticCount} diagnostics`, `${diagnosticCount} 条诊断`);
   if (tab === 'terminal') return sessionId ? tr('Current session', '当前会话') : tr('No session', '无会话');
   if (tab === 'browser') return tr('Browser', '浏览器');
+  if (tab === 'meeting') return discussion ? tr('In progress', '进行中') : tr('Latest round', '最近一轮');
+  if (tab === 'chat') return tr('Members', '成员之间');
+  if (tab === 'changes') return changeCount === undefined || changeCount === 0
+    ? tr('working tree', '工作区')
+    : tr(`working tree · ${changeCount} files`, `工作区 · ${changeCount} 个文件`);
   return projectPath ? splitDisplayPath(projectPath.replaceAll('\\', '/')).fileName : tr('Workspace', '工作区');
 }
 
@@ -308,6 +371,8 @@ function inspectorTabMeta(tab: InspectorTab, tr: (en: string, zh: string) => str
     git: { icon: 'git-branch' as const, label: 'Git' },
     lsp: { icon: 'target' as const, label: 'LSP' },
     terminal: { icon: 'terminal' as const, label: tr('Terminal', '终端') },
+    meeting: { icon: 'graph' as const, label: tr('Meeting', '开会') },
+    chat: { icon: 'chat' as const, label: tr('Chat', '交流') },
   };
   return values[tab];
 }
