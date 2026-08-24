@@ -1,5 +1,72 @@
 # Changelog
 
+## v2.0.0-pre.0 (2026-08-24)
+
+The major bump is one change: delegation. The temporary SubAgent is gone, and Team Engineering — a durable department tree whose members talk to each other — is now the only way Nori hands work to another agent.
+
+### Team Engineering
+
+SubAgent spawned a throwaway child per task and read back its final report. That is fan-out, not a team: every child worked alone, mismatched assumptions surfaced only at "done", and reconciling them at the end threw finished work away. The failure mode Team Engineering exists to prevent is not disorganization — it is silent parallel work.
+
+- **Departments instead of a flat pool.** Every agent may now hire its own members with `TeamCreate` and chair its own department, bounded by `team.maxDepth` (default `2`, maximum `5`). A Discuss round is scoped to one department — a parent plus its direct members — and a node never chairs and participates at the same time. The depth bound exists because each level multiplies how many agents one request can hire, and an over-hired team that never talks is the exact failure being prevented.
+- **Discuss opens the work rather than ending it.** The chair opens with `TeamDecide action=start` carrying the goal, the constraints and the open questions — no fixed plan yet. Members then speak in turn with `TeamSpeak`, and each speaker is handed every statement already published in the round: the chair's opening first, then each earlier member's position. That sequential visibility is what separates Discuss from parallel fan-out — a later speaker is expected to extend, sharpen or contradict what it just read, with reasons, and bare agreement counts as no contribution. `TeamAssign` is what closes the round and enters Code, and `TeamDecide action=continue` reopens one mid-flight when the plan changes, when two members are about to touch the same ground, or when progress stalls — instead of waiting for everyone to report "done" and reconciling the differences too late to be cheap.
+- **A meeting cannot quietly become an implementation.** While a round is open, `Write`, `Edit`, `Bash`, `TaskStop`, `CronCreate` and `CronDelete` are denied to everyone including the chair, with a denial message that names the way out: read with `Read`, `Grep` and `Glob`, then `TeamAssign`.
+- **Members reach each other, not only upward.** Peers hired by the same parent share a `TeamChat` channel and reach any single agent by id with `TeamDM`, so overlapping files, corrections and finished-work handoffs settle peer to peer while the parent receives results. Reachability is now the three named relations — parent, sibling, member; before this, a mid-tree node could reach its parent and its siblings but not the members it had just hired. A parent does not read its members' chat, and `nori_ask_parent` is the one blocking channel, reserved for a decision only the parent holds.
+- **Members can see who owns what before touching it.** `TeamStatus` now reports `colleagues` alongside `members`: each peer's role, observable `idle`/`running` status, assigned task, and whether it has reported to the shared parent yet. A `running` peer is to be left to finish rather than repeated or taken over.
+- **Management follows the tree, not the root.** `TeamCreate`, `TeamAssign`, `TeamDecide`, `TeamDiscussInvite` and `TeamDiscussKick` are gated on team-manager status instead of on being the main agent, so a Team Agent can actually run the department it was given — while a discussion transcript still cannot.
+- **The member contract was rewritten to match the code.** `team-agent.md` told members that "Team management belongs to the main Agent" while the code handed them every management tool. It now carries the department rules: execution is the member's job, hire only for work you can name right now, split by file, send the working detail to the peer who continues your part and one `completed` / `blocked` / `needs_decision` report to your parent, and never overwrite a newer verified change — on an Edit tag mismatch, stop and renegotiate the boundary.
+
+### Team Engineering in the UI
+
+- Add a full-screen **Team** page: the department tree drawn as a tidy tree with `main` at the top and right-angle connectors, drag to pan, scroll to zoom, double-click to recenter. Each card carries the member's name, its role, and the mandate it was assigned, a status dot for running / idle / needs-you, and a highlighted outline while that member is speaking in Discuss.
+- Move Discuss and Chat into the inspector as two tools instead of a fixed rail competing with the conversation for width. Both are read-only for the human — the channels belong to the members — and the local side's bubbles are tinted.
+- Remove the Dashboard page. Team state now lives on the Team page and in the inspector panels.
+- Render Team tool calls in the transcript with real detail: `TeamCreate` members, `TeamAssign` assignments (a null task reads as "cleared", which is how an assignment is revoked), and `TeamDM` / `TeamBroadcast` / `TeamSpeak` messages — with no recipient row for `TeamSpeak`, which addresses a whole department rather than one agent.
+
+### Removed
+
+- The `SubAgent` tool and its profile plumbing. Two spawn paths meant two state sources for one question — who is working right now — so the temporary path is removed rather than kept alongside Team.
+- The `kind: 'agent'` background-task arm. `backgroundTaskInfoSchema` is now `process | question`, with no `paused` and no `subagentType`.
+- The `'sub'` node kind, leaving `main | team | discussion | independent`. An unknown kind from a newer server now falls back to `independent` and renders as a plain transcript instead of crashing the tree.
+- The TUI subagent surface: `agent-group`, `subagent-progress`, its estimator, `subagent-event-handler` and `background-agent-status`.
+- `AgentInfo.subagentTask` and `ContextProjection.subagent` in the visualizer. Recordings made before the removal still load — the dropped dimension is ignored rather than synthesized.
+
+### Fixes
+
+- Member status could stay `running` forever. `SessionService` had two status ladders — one behind `get()` reading the event cache, one behind `listAgents()`/`getStatus()` aware of the runtime — so a dropped terminal event left a member looking busy and Discuss skipped it as unavailable. Both now derive status in one place, and a submitted prompt whose turn has not begun counts as running, so the UI no longer flickers idle between submit and `turn.started`.
+- Team wake-ups could silently drop input. The prompt entry point returned `number | null`, conflating "another turn holds the agent" with "compaction deferred this and nobody picked it up" — the first is recoverable by steering, the second means the input has no carrier. It now reports `started` / `busy` / `deferred`, and each caller applies its own policy: broadcast skips a member it cannot wake, DM and assign fail loudly instead of claiming a delivery that never happened, and scheduled prompts stop livelocking.
+- One assistant turn rendered as several separate work processes, most visibly in team sessions. Steps carry a turn id but were grouped by adjacency, so anything recorded between two steps of the same turn — a discussion statement, a failed-turn error row — ended the group and scattered the turn across the history and live areas. Steps are now looked up by turn id, while a real user message still closes open groups so post-steer work is not folded above the message that asked for it.
+- The inspector popout passed the session title where the chat hook expects an agent id, so history was requested for `agent_id=<title>` and every transcript event was filtered out. The popout showed nothing but what streamed in after it opened.
+- Harness injections were recorded once per step. Dynamic injectors re-run on every step, so one logical injection was split across the wire log and shown to the user repeatedly. It now records only on change.
+- Remove seven `typeof this.session.x === 'function'` guards — production code branching on the shape of a test double. Two were harmful: one fabricated a persisted discussion that was never persisted, the other silently dropped the chair's opening statement.
+- Stop rendering a whole assistant reply as one preformatted code block. A model that has to open with the `<nori-session-title>` tag sometimes fenced the entire answer as HTML, and because a nested block's closing fence terminates the outer one under CommonMark, the title tag, the headings and the bold text all landed inside a single code block with a copy button. A whole-answer fence whose info string is empty or markup-ish is now unwrapped when its body reads as prose, and the title instruction says outright not to fence the reply.
+- Replace the Goal/Todo strip above the composer. Its filled plate used a colour nearly identical to the page background, so only the 1px border showed — an empty box as wide as the input sitting on top of the conversation. The strip now carries a gradient over its own height, fully transparent at the top, with no border and no hard edge at any point.
+- Fix the Team card layout. Role and mandate shared one flex row, where the fixed-width role won and the mandate collapsed to its automatic minimum width of zero — two or three characters and an ellipsis. The mandate now has a row of its own, clamped to two lines, and every card is a uniform size so connectors meet the card's bottom edge.
+- The desktop tray's `updateTray`/`TrayState` were never called from anywhere, leaving a permanently "idle" phase row and a label that could never fire. The tray is rewritten to the menu it actually shows.
+
+### Linux packaging
+
+- Install the application icon into `/usr/share/icons/hicolor` at 16 through 1024 px, so the deb and the AppImage show the Nori logo in the launcher and the dock instead of a generic placeholder.
+- Force `chrome-sandbox` to `root:root` mode `4755` from the deb's post-install script. Ubuntu 23.10 and later default `kernel.apparmor_restrict_unprivileged_userns=1`, under which Electron refuses to start with `FATAL:setuid_sandbox_host.cc(163)` unless the sandbox helper is setuid root.
+- Both packaging files were untracked, so a clean CI checkout could never have produced a working Linux build.
+
+### Also
+
+- Request macOS signing and notarization in the Nori Work release workflow and forward the Apple credentials to the build, so the dmg and zip open on any Mac instead of being refused by Gatekeeper as damaged. Requires the Apple secrets to be configured on the repository.
+- Rename the four workflow environment variables still spelled `KIMI_*` to their `NORI_*` names, which is what the build scripts read.
+- Add `GET /sessions/{session_id}/agents/{agent_id}/system-prompt`, exposing the prompt an agent is actually running with.
+- Keep provider model refresh from flattening model metadata: input modalities and context-window sizes now survive an OAuth catalog refresh.
+- Continue a response that stopped on the provider's output limit instead of leaving the turn truncated.
+- Add `dsh-nori-loop` and `dsh-nori-memory`: Nori's loop state machine and its Obsidian-style memory vault, ported as DeepSeek Harness plugins.
+
+### Verification
+
+- agent-core: 3421 passed, 4 expected-fail, 1 todo, across 219 files.
+- nori-web: 269 passed across 29 files.
+- protocol: 521 passed across 30 files.
+- server: 732 passed, 1 failed — `test/fileLaunch.test.ts` asserts Windows `cmd /c start` arguments and cannot pass on a Linux host.
+- Known debt, not introduced here: 66 tests across 25 files in `apps/nori-code` fail. They assert either the pre-rename `kimi-code` home directory, user-agent header and command names, or TUI slash commands the registry has not exposed since before the previous tag. The count moved from 68 to 66 only because SubAgent's own tests were deleted with the feature.
+
 ## v1.0.0-pre.5 (2026-07-22)
 
 ### Fixes

@@ -53,7 +53,13 @@ jobs:
     with:
       upload-artifact-prefix: nori-work-release
       retention-days: 14
-      sign-macos: false
+      sign-macos: true
+    secrets:
+      APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_NOTARIZATION_KEY_P8: ${{ secrets.APPLE_NOTARIZATION_KEY_P8 }}
+      APPLE_NOTARIZATION_KEY_ID: ${{ secrets.APPLE_NOTARIZATION_KEY_ID }}
+      APPLE_NOTARIZATION_ISSUER_ID: ${{ secrets.APPLE_NOTARIZATION_ISSUER_ID }}
 
   publish-release:
     name: Publish GitHub Release
@@ -64,6 +70,9 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout tagged source
+        uses: actions/checkout@v6
+
       - name: Download desktop installers
         uses: actions/download-artifact@v8
         with:
@@ -93,21 +102,47 @@ jobs:
           done
           printf '%s\n' "${expected_assets[@]}"
 
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.validate-release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#nori-work-v}"
+          notes_file="$RUNNER_TEMP/release-notes.md"
+          # Publish the hand-written CHANGELOG section for this version. Generated
+          # notes are just a list of commit subjects, which says nothing useful.
+          awk -v want="v$version" '
+            /^## / { if (inside) exit; inside = ($2 == want); next }
+            inside { print }
+          ' CHANGELOG.md > "$notes_file"
+          if [[ -s "$notes_file" ]]; then
+            echo "notes-file=$notes_file" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::CHANGELOG.md has no '## v$version' section; falling back to generated notes."
+          fi
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.validate-release.outputs.tag }}
+          NOTES_FILE: ${{ steps.notes.outputs.notes-file }}
         shell: bash
         run: |
           set -euo pipefail
           version="${RELEASE_TAG#nori-work-v}"
-          prerelease_args=()
+          release_args=()
           if [[ "$version" == *-* ]]; then
-            prerelease_args+=(--prerelease)
+            release_args+=(--prerelease)
+          fi
+          if [[ -n "${NOTES_FILE:-}" ]]; then
+            release_args+=(--notes-file "$NOTES_FILE")
+          else
+            release_args+=(--generate-notes)
           fi
           gh release create "$RELEASE_TAG" release-artifacts/* \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --title "Nori Work $version" \
-            "${prerelease_args[@]}" \
-            --generate-notes
+            "${release_args[@]}"
