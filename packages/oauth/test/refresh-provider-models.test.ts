@@ -107,6 +107,56 @@ describe('refreshProviderModels', () => {
     expect(harness.config().defaultModel).toBe('custom/gpt-new');
   });
 
+  // A gateway describes a model in its own dialect. Reading only one dialect is
+  // how an image-capable 1M-context model came back as text-only 128K.
+  it('reads context window and input modalities from an OpenRouter-shaped catalog', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      data: [
+        {
+          id: 'stealth/ox-alpha',
+          name: 'Ox Alpha',
+          context_length: 1_000_000,
+          architecture: {
+            modality: 'text+image->text',
+            input_modalities: ['text', 'image'],
+            output_modalities: ['text'],
+          },
+          supported_parameters: ['tools', 'reasoning'],
+          top_provider: { context_length: 1_000_000, max_completion_tokens: 64_000 },
+        },
+        {
+          id: 'vendor/audio-chat',
+          max_input_tokens: 262_144,
+          input_modalities: ['text', 'audio'],
+        },
+      ],
+    })));
+    const harness = makeHost({
+      providers: {
+        openrouter: {
+          type: 'openai',
+          baseUrl: 'https://openrouter.ai/api/v1',
+          apiKey: 'secret',
+        },
+      },
+      models: {},
+    });
+
+    await refreshProviderModels(harness.host, { providerId: 'openrouter' });
+
+    const alpha = harness.config().models?.['openrouter/stealth/ox-alpha'];
+    expect(alpha).toEqual(expect.objectContaining({
+      model: 'stealth/ox-alpha',
+      displayName: 'Ox Alpha',
+      maxContextSize: 1_000_000,
+    }));
+    expect(alpha?.capabilities).toEqual(expect.arrayContaining(['tool_use', 'image_in', 'thinking']));
+    const audio = harness.config().models?.['openrouter/vendor/audio-chat'];
+    expect(audio?.maxContextSize).toBe(262_144);
+    expect(audio?.capabilities).toEqual(expect.arrayContaining(['audio_in']));
+    expect(audio?.capabilities).not.toContain('image_in');
+  });
+
   it('infers OpenCode-compatible GPT-5 efforts when a manual provider only returns model IDs', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
       data: [{ id: 'gpt-5.4' }, { id: 'gpt-5.4(auto)' }],

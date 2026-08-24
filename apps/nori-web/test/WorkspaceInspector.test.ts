@@ -1,10 +1,10 @@
-import { act, createElement } from 'react';
+import { act, createElement, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api, type FsGitStatusResponse, type FsReadResponse, type GoalSnapshot } from '../src/api/client';
 import type { ChatMessage, CodeChange } from '../src/hooks/useChatMessages';
 import { useFilesystem } from '../src/hooks/useFilesystem';
-import { WorkspaceInspector, changedLineStats, collectAttributions, collectToolCodeChanges, combinedCodeChangeDiff, diffPathsToLoad, hasTextChanges, mergeCodeChanges, splitDisplayPath } from '../src/components/WorkspaceInspector';
+import { WorkspaceInspector, changedLineStats, latestBrowserToolKey, collectAttributions, collectToolCodeChanges, combinedCodeChangeDiff, diffPathsToLoad, hasTextChanges, mergeCodeChanges, splitDisplayPath } from '../src/components/WorkspaceInspector';
 import { I18nProvider } from '../src/i18n';
 import type { NoriBrowserState, NoriDesktopAPI } from '../src/types/nori-desktop';
 
@@ -985,3 +985,106 @@ function previewFile(path: string): FsReadResponse {
     is_binary: false,
   };
 }
+
+/**
+ * Selecting a file must bring the preview forward, and a browser tool call must
+ * bring the browser forward. Both broke the same way: the new tab's id was minted
+ * inside a state updater, and StrictMode runs updaters twice — so the id kept in
+ * the tab list was not the id the panel had marked active, and the inspector sat
+ * there open and empty.
+ */
+describe('tools that open themselves', () => {
+  const baseProps = {
+    sessionId: 'session-auto-open',
+    projectPath: '/project',
+    file: null,
+    messages: [] as ChatMessage[],
+    codeChanges: [] as CodeChange[],
+    gitStatus: null,
+    gitError: null,
+    gitLoading: false,
+    isStreaming: false,
+    overviewFirst: true,
+  };
+
+  it('opens the preview for the selected file, under StrictMode', async () => {
+    vi.spyOn(api.sessions.fs, 'read').mockResolvedValue({
+      path: 'src/main.ts',
+      content: 'export const answer = 42;\n',
+    } as unknown as FsReadResponse);
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const render = async (props: Record<string, unknown>) => {
+      await act(async () => {
+        root.render(createElement(StrictMode, null, createElement(I18nProvider, null,
+          createElement(WorkspaceInspector, { ...baseProps, refreshGitStatus: vi.fn(async () => null), ...props }))));
+        await Promise.resolve();
+      });
+    };
+    try {
+      await render({ path: '' });
+      expect(container.querySelector('.inspector-open-tab')).toBeNull();
+
+      await render({ path: 'src/main.ts' });
+      const openTabs = [...container.querySelectorAll('.inspector-open-tab')].map(tab => tab.textContent ?? '');
+      expect(openTabs.some(label => /Preview|预览/.test(label))).toBe(true);
+      // The panel is actually showing that tab, not just listing it.
+      expect(container.querySelector('.file-preview, .file-preview-state')).not.toBeNull();
+      expect(container.querySelector('.workspace-inspector')?.className).toContain('inspector-view-open');
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('opens the browser when the model calls the browser tool', async () => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    const render = async (props: Record<string, unknown>) => {
+      await act(async () => {
+        root.render(createElement(StrictMode, null, createElement(I18nProvider, null,
+          createElement(WorkspaceInspector, { ...baseProps, path: '', refreshGitStatus: vi.fn(async () => null), ...props }))));
+        await Promise.resolve();
+      });
+    };
+    try {
+      await render({ messages: [] });
+      expect(container.querySelector('.inspector-open-tab')).toBeNull();
+
+      await render({
+        messages: [{
+          id: 'msg_1',
+          role: 'assistant',
+          text: '',
+          toolCalls: [{ id: 'call_1', name: 'Browser', args: { action: 'navigate', url: 'https://example.test' } }],
+        }] as ChatMessage[],
+      });
+      const openTabs = [...container.querySelectorAll('.inspector-open-tab')].map(tab => tab.textContent ?? '');
+      expect(openTabs.some(label => /Browser|浏览器/.test(label))).toBe(true);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('identifies the newest browser call and ignores everything else', () => {
+    const message = (id: string, name: string, callId: string): ChatMessage => ({
+      id,
+      role: 'assistant',
+      text: '',
+      toolCalls: [{ id: callId, name, args: {} }],
+    });
+    expect(latestBrowserToolKey([message('m1', 'Read', 'c1')])).toBeUndefined();
+    expect(latestBrowserToolKey([
+      message('m1', 'Browser', 'c1'),
+      message('m2', 'Read', 'c2'),
+    ])).toBe(['m1', 'c1', 'Browser'].join('\u0000'));
+    // A second call to the same tool is a new key, so the panel comes back.
+    expect(latestBrowserToolKey([
+      message('m1', 'Browser', 'c1'),
+      message('m2', 'Browser', 'c2'),
+    ])).toBe(['m2', 'c2', 'Browser'].join('\u0000'));
+  });
+});

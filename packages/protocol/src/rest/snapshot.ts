@@ -52,6 +52,19 @@ export const inFlightTurnSchema = z.object({
   assistant_text: z.string(),
   /** Thinking text accumulated from `thinking.delta` so far. */
   thinking_text: z.string(),
+  /**
+   * Assistant text since the current step began.
+   *
+   * `assistant_text` spans the whole turn, which is what `offset` on a delta
+   * frame is measured against. But a turn's completed steps are already durable
+   * — a client reading history has them, interleaved with the tool calls they
+   * ran between. Only the open step is missing, so this is the part a client
+   * appends live; using the turn-wide text instead collapses every earlier
+   * narration into one block after the tools that came between them.
+   */
+  step_assistant_text: z.string().optional(),
+  /** Thinking text since the current step began; see `step_assistant_text`. */
+  step_thinking_text: z.string().optional(),
   /** Tool calls started but without a `tool.result` yet. */
   running_tools: z.array(inFlightToolCallSchema),
   /** Daemon prompt_id of the active prompt, if the turn was started by IPromptService. */

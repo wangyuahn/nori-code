@@ -1488,3 +1488,97 @@ function approvalRequest(): ApprovalRequest {
     expires_at: '2026-07-15T00:05:00.000Z',
   };
 }
+
+/**
+ * Inside a live work group, only the last block can still be running. A thinking
+ * block that already has a tool call after it is finished — rendering it as live
+ * is what produced "the tools below are running but the thinking box above never
+ * closed".
+ */
+describe('live work group boundaries', () => {
+  const liveMessage = {
+    id: 'assistant-live',
+    role: 'assistant' as const,
+    text: '',
+    turnId: 'turn-1',
+    workBlocks: [
+      { id: 'think-1', type: 'thinking' as const, text: 'Weighing the options.' },
+      { id: 'tool-1', type: 'tool' as const, tool: { id: 'tool-1', name: 'Read', args: { path: 'src/a.ts' } } },
+    ],
+  };
+
+  it('closes a thinking block once a tool call follows it', async () => {
+    const { container } = await renderChat({
+      messages: [{ id: 'user-1', role: 'user', text: 'go' }, liveMessage],
+      isStreaming: true,
+      streamingTurnId: 'turn-1',
+      workBlocks: liveMessage.workBlocks,
+    });
+
+    const group = container.querySelector('.chat-work-group');
+    expect(group?.classList.contains('live')).toBe(true);
+    const thinking = container.querySelector('.work-thinking-line');
+    expect(thinking).not.toBeNull();
+    expect(thinking?.classList.contains('live')).toBe(false);
+  });
+
+  it('keeps the trailing thinking block live while it is still being written', async () => {
+    const blocks = [
+      { id: 'tool-1', type: 'tool' as const, tool: { id: 'tool-1', name: 'Read', args: {}, result: 'ok' } },
+      { id: 'think-2', type: 'thinking' as const, text: 'Now deciding.' },
+    ];
+    const { container } = await renderChat({
+      messages: [{ id: 'user-1', role: 'user', text: 'go' }, { ...liveMessage, workBlocks: blocks }],
+      isStreaming: true,
+      streamingTurnId: 'turn-1',
+      workBlocks: blocks,
+    });
+
+    expect(container.querySelector('.work-thinking-line')?.classList.contains('live')).toBe(true);
+  });
+});
+
+/**
+ * The goal/todo strip lives inside the composer, so it is exactly as wide as the
+ * input box, and it collapses to one line — a nine-item todo list used to push the
+ * conversation off the screen and could not be folded away.
+ */
+describe('composer goal and todo strip', () => {
+  const todos = [
+    { title: 'create the project skeleton', status: 'done' as const },
+    { title: 'write the palette module', status: 'in_progress' as const },
+    { title: 'verify in the browser', status: 'pending' as const },
+  ];
+
+  afterEach(() => { localStorage.removeItem('nori-composer-context-open'); });
+
+  it('renders inside the composer and folds to a single summary line', async () => {
+    const { container } = await renderChat({ todos });
+
+    const strip = container.querySelector<HTMLDetailsElement>('.composer-context-strip');
+    expect(strip).not.toBeNull();
+    // Same box as the input: the strip is a child of the composer wrap.
+    expect(strip!.closest('.chat-composer-wrap')).not.toBeNull();
+    expect(strip!.open).toBe(true);
+    // The summary carries the count and the item being worked on.
+    expect(strip!.querySelector('summary')?.textContent).toContain('1/3');
+    expect(strip!.querySelector('.composer-context-summary')?.textContent).toBe('write the palette module');
+
+    await act(async () => {
+      strip!.open = false;
+      strip!.dispatchEvent(new Event('toggle'));
+    });
+    expect(localStorage.getItem('nori-composer-context-open')).toBe('false');
+  });
+
+  it('stays folded on the next render once the reader folded it', async () => {
+    localStorage.setItem('nori-composer-context-open', 'false');
+    const { container } = await renderChat({ todos });
+    expect(container.querySelector<HTMLDetailsElement>('.composer-context-strip')?.open).toBe(false);
+  });
+
+  it('shows nothing when there is no goal and no todo', async () => {
+    const { container } = await renderChat({ todos: [] });
+    expect(container.querySelector('.composer-context-strip')).toBeNull();
+  });
+});

@@ -192,6 +192,9 @@ interface WsPayload {
   message?: string;
   message_id?: string;
   turnId?: number;
+  step?: number;
+  /** `turn.step.completed`: why the step ended — `tool_use` means more is coming. */
+  finishReason?: string;
   toolCallId?: string;
   id?: string;
   name?: string;
@@ -1030,10 +1033,46 @@ export function mergeHistory(previous: ChatMessage[], remote: ChatMessage[]): Ch
   return foldConversationTurns([...byId.values()].sort((a, b) => messageTime(a) - messageTime(b)));
 }
 
-function reconcileHistory(_previous: ChatMessage[], remote: ChatMessage[]): ChatMessage[] {
+/**
+ * A REST replace is authoritative for everything the server records — but a
+ * failure notice is not recorded anywhere: it is signalled once, on the socket.
+ * Dropping it on the next refresh is how a failed round ends up looking like it
+ * simply never happened, with no way to see what went wrong.
+ */
+export function isClientNoticeId(id: string): boolean {
+  return id.startsWith('turn-error-') || id.startsWith('stream-error-');
+}
+
+/**
+ * What the reader gets to see about a failed turn. The provider's own wording is
+ * the useful part — "max output tokens exceeded", an auth failure, a rate limit —
+ * so it leads, with the code kept for anything that has to be looked up or
+ * reported, and a fallback for a failure that arrived with no detail at all.
+ */
+export function turnFailureText(error: { message?: string; code?: string; details?: unknown } | undefined): string {
+  const message = error?.message?.trim();
+  const code = error?.code?.trim();
+  if (message && code) return `${message}\n\n\`${code}\``;
+  if (message) return message;
+  if (code) return `Turn failed: \`${code}\``;
+  return 'Turn failed without a reported cause.';
+}
+
+export function reconcileHistory(previous: ChatMessage[], remote: ChatMessage[]): ChatMessage[] {
   // A replace is an authoritative REST snapshot. Never rename its stable
   // message ids to temporary UI ids by matching message text.
-  return foldConversationTurns(remote);
+  const folded = foldConversationTurns(remote);
+  const notices = previous.filter(message => isClientNoticeId(message.id)
+    && !folded.some(candidate => candidate.id === message.id));
+  if (notices.length === 0) return folded;
+  const result = [...folded];
+  for (const notice of notices) {
+    const at = notice.createdAt === undefined
+      ? result.length
+      : result.findIndex(candidate => messageTime(candidate) > messageTime(notice));
+    result.splice(at < 0 ? result.length : at, 0, notice);
+  }
+  return result;
 }
 
 function normalizeEventType(type: string): string {
@@ -1238,17 +1277,24 @@ export function useChatMessages(
     if (!inFlight) return false;
     const snapshotTurnId = String(inFlight.turn_id);
     const isSameTurn = activeTurnIdRef.current === snapshotTurnId;
+    // Only the open step is missing from history: every completed step of this
+    // turn is durable and arrives through refreshHistory, already interleaved
+    // with the tools that ran between the narrations. Rendering the turn-wide
+    // text here would repeat all of it as one block below those tools.
+    const stepAssistantText = inFlight.step_assistant_text ?? inFlight.assistant_text;
+    const stepThinkingText = inFlight.step_thinking_text ?? inFlight.thinking_text;
     const restoredProgress = inFlight.running_tools.length > 0
-      ? createProgressBlock(`snapshot-progress-${inFlight.turn_id}`, inFlight.assistant_text)
+      ? createProgressBlock(`snapshot-progress-${inFlight.turn_id}`, stepAssistantText)
       : undefined;
+    // The refs stay turn-wide: a delta's offset is measured against the whole turn.
     assistantRawRef.current = inFlight.assistant_text;
     thinkingRawRef.current = inFlight.thinking_text;
     activeTurnIdRef.current = snapshotTurnId;
     setActiveTurnId(snapshotTurnId);
     activeToolCallsRef.current.clear();
     const snapshotBlocks: WorkBlock[] = [
-      ...(inFlight.thinking_text.trim()
-        ? [{ id: `snapshot-thinking-${inFlight.turn_id}`, type: 'thinking' as const, text: inFlight.thinking_text }]
+      ...(stepThinkingText.trim()
+        ? [{ id: `snapshot-thinking-${inFlight.turn_id}`, type: 'thinking' as const, text: stepThinkingText }]
         : []),
       ...(restoredProgress === undefined ? [] : [restoredProgress]),
       ...inFlight.running_tools.map(tool => {
@@ -1263,10 +1309,10 @@ export function useChatMessages(
       : snapshotBlocks;
     liveWorkBlocksRef.current = restoredBlocks;
     if (!preservesLiveBlocks) {
-      streamingRef.current = restoredProgress === undefined ? inFlight.assistant_text : '';
-      thinkingRef.current = inFlight.thinking_text;
-      setCurrentStreaming(restoredProgress === undefined ? stripGeneratedSessionTitle(inFlight.assistant_text) : '');
-      setCurrentThinking(inFlight.thinking_text);
+      streamingRef.current = restoredProgress === undefined ? stepAssistantText : '';
+      thinkingRef.current = stepThinkingText;
+      setCurrentStreaming(restoredProgress === undefined ? stripGeneratedSessionTitle(stepAssistantText) : '');
+      setCurrentThinking(stepThinkingText);
     }
     setCurrentWorkBlocks(restoredBlocks);
     lastStreamActivityAtRef.current = Date.now();
@@ -1639,20 +1685,35 @@ export function useChatMessages(
               setIsStreaming(true);
               break;
             }
-            case 'turn.step.completed':
+            case 'turn.step.completed': {
               turnUsageRef.current = addTokenUsage(turnUsageRef.current, normalizeWireUsage(payload.usage));
+              // A step that ends in tool calls narrated its work: that text is
+              // durable now and history carries it as one block in this
+              // position, so close the live block here too. Otherwise the next
+              // step keeps growing it, and one blob of every narration ends up
+              // rendering after all the tools that ran between them. A step
+              // that ended the turn holds the final answer, which belongs to
+              // the row itself, so it stays in the stream buffer.
+              const stepProgress = payload.finishReason !== 'tool_use' ? undefined : createProgressBlock(
+                `live-step-progress-${payload.turnId ?? 'turn'}-${payload.step ?? liveWorkBlocksRef.current.length}`,
+                streamingRef.current,
+              );
+              if (stepProgress !== undefined) {
+                streamingRef.current = '';
+                setCurrentStreaming('');
+                liveWorkBlocksRef.current = [...liveWorkBlocksRef.current, stepProgress];
+                setCurrentWorkBlocks(liveWorkBlocksRef.current);
+              }
               break;
+            }
             case 'turn.ended':
               if (payload.reason === 'failed') {
-                const errorMessage = payload.error?.message;
-                if (errorMessage) {
                 setMessages(previous => mergeHistory(previous, [{
                   id: `turn-error-${sessionId}-${agentId}-${String(payload.turnId ?? Date.now())}`,
                   role: 'system',
-                  text: errorMessage,
+                  text: turnFailureText(payload.error),
                   createdAt: new Date().toISOString(),
                 }]));
-                }
               }
               // A turn can finish immediately before prompt.completed. Keep
               // the streamed work visible until that prompt-level terminal

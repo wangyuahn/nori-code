@@ -23,6 +23,12 @@ export interface ChatWithRetryInput {
   readonly stepUuid: string;
   readonly maxAttempts?: number;
   readonly log?: Logger | undefined;
+  /**
+   * Called once per retry, before the next attempt starts. The next attempt
+   * re-streams the message from the beginning, so a caller holding partial
+   * stream state uses this to drop it.
+   */
+  readonly onRetry?: (() => void) | undefined;
 }
 
 export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatResponse> {
@@ -51,6 +57,7 @@ export async function chatWithRetry(input: ChatWithRetryInput): Promise<LLMChatR
 
       const delayMs = delays[attempt - 1] ?? 0;
       input.params.signal.throwIfAborted();
+      input.onRetry?.();
       input.dispatchEvent({
         type: 'step.retrying',
         turnId: input.turnId,

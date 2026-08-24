@@ -139,7 +139,7 @@ export type TeamDMInput = z.infer<typeof TeamDMInputSchema>;
 
 export class TeamDMTool implements BuiltinTool<TeamDMInput> {
   readonly name = 'TeamDM' as const;
-  readonly description = 'Send a private message at any time, in Discuss or Code, for coordination or progress. Reach a member of your own department, or your direct parent. For a task report, set report_status to completed, blocked, or needs_decision and provide report_summary; ordinary messages without report_status are never classified as reports. TeamSpeak is only for formal Discuss turns.';
+  readonly description = 'Send a private message at any time, in Discuss or Code, for coordination, handoff, or progress. Three kinds of recipient are reachable by agent_id: a peer in your own department (the members your parent hired alongside you), a member you hired yourself, and your direct parent. Peers reach each other directly here — your parent is a recipient, not a relay. For a task report, set report_status to completed, blocked, or needs_decision and provide report_summary; a report always travels to your parent. Ordinary messages without report_status are never classified as reports. TeamSpeak is only for formal Discuss turns.';
   readonly parameters = toInputJsonSchema(TeamDMInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}
@@ -166,7 +166,7 @@ export type TeamChatInput = z.infer<typeof TeamChatInputSchema>;
 
 export class TeamChatTool implements BuiltinTool<TeamChatInput> {
   readonly name = 'TeamChat' as const;
-  readonly description = 'Post to your department\'s persistent group chat — siblings only, your parent never sees it. Every message MUST start with @: begin the message text with @all or @agent-id1 @agent-id2 (also pass them in mentions); only mentioned members are interrupted. Chat is for staying aligned while working, not for review — use TeamDM/reports for that. Keep it short; finish your current step before replying if that\'s more useful than dropping it.';
+  readonly description = 'Post to your department\'s persistent group chat — the peers your parent hired alongside you, who all read it; your parent does not. This is the working channel during Code: current progress, a decision you just made that changes someone else\'s assumption, a file you are about to touch, and handoff — when your part is done, name here the peer who continues it, the files, their state, and what is left, so the work moves peer to peer. Every message MUST start with @: begin the message text with @all or @agent-id1 @agent-id2 (also pass them in mentions); only mentioned members are interrupted. Keep it short — one point per message, sent when it matters. Finish your current step before replying if that is more useful than dropping it. Reviews and status reports go to your parent with TeamDM.';
   readonly parameters = toInputJsonSchema(TeamChatInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}

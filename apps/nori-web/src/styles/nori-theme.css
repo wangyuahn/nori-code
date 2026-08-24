@@ -3125,6 +3125,8 @@ kbd {
 .markdown-view li + li { margin-top: .25em; }
 .markdown-view code { padding: .12em .35em; border: 1px solid var(--nori-border); border-radius: 4px; color: var(--nori-text); background: var(--nori-control); font-family: var(--nori-font-mono); font-size: .92em; }
 .markdown-view pre { padding: 14px; overflow: auto; border: 1px solid var(--nori-border); border-radius: 6px; background: var(--nori-bg); }
+/* 模型开了个代码围栏但没写内容：不要留一个空框在答案末尾 */
+.markdown-view pre.markdown-code-empty { display: none; }
 .markdown-view pre code { padding: 0; border: 0; background: transparent; }
 .markdown-view .markdown-code-block { position: relative; padding-top: 38px; }
 .markdown-code-copy { position: absolute; top: 7px; right: 7px; min-width: 54px; height: 25px; padding: 0 9px; border: 1px solid var(--nori-border); border-radius: 4px; color: var(--nori-text-muted); background: var(--nori-control); font: calc(11px * var(--nori-ui-font-scale))/1 var(--nori-font-sans); cursor: pointer; }
@@ -4063,12 +4065,16 @@ kbd {
 }
 
 /* ===== 工作流水：平铺的一行行，没有“工作过程”外层折叠 ===== */
-.chat-work-stream { display: grid; gap: 5px; margin: 4px 0 10px; }
+.chat-work-stream { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; margin: 4px 0 10px; }
 .work-stream-status { display: flex; align-items: center; gap: 6px; min-height: 19px; color: var(--nori-text-muted); font-size: calc(10px * var(--nori-ui-font-scale)); }
 .work-stream-status > svg { color: var(--nori-accent); }
 .work-stream-elapsed { margin-left: auto; color: var(--nori-text-muted); font: calc(9px * var(--nori-ui-font-scale))/1 var(--nori-font-mono); font-variant-numeric: tabular-nums; }
 /* 思考就地显示（不再是折叠层）：暗淡的斜体正文，插在工具行中间。 */
-.work-thinking-line { display: grid; gap: 2px; padding: 1px 0 2px; }
+/* 一段几千字没有换行机会的推理，max-content 宽度能到四五千像素。grid 的 auto
+   轨道会按 max-content 撑开，于是 pre-wrap 根本不换行，文字和它的底色一起跑到框
+   外面去——所以工作流里每一层 grid 的轨道都必须写成 minmax(0, 1fr)。 */
+.work-thinking-line { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 1px 0 2px; min-width: 0; }
+.work-thinking-line > p, .context-injection-row > pre { min-width: 0; }
 .work-thinking-label { display: flex; align-items: center; gap: 5px; color: var(--nori-text-muted); font-size: calc(9px * var(--nori-ui-font-scale)); }
 .work-thinking-label > svg { color: var(--nori-thinking); }
 .work-thinking-line > p { max-height: 260px; margin: 0; overflow: auto; color: var(--nori-text-muted); font: italic calc(11px * var(--nori-ui-font-scale))/1.6 var(--nori-font); white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -4088,7 +4094,7 @@ kbd {
 .chat-work-stream .compact-tool-detail { padding: 5px 0 6px 24px; }
 
 /* Ordinary model text stays a transcript line, never a grey process card. */
-.context-injection-row { margin: 0; border: 0; background: transparent; }
+.context-injection-row { margin: 0; border: 0; background: transparent; min-width: 0; }
 .context-injection-row > summary { display: flex; min-width: 0; align-items: center; gap: 6px; min-height: 22px; color: var(--nori-text-muted); cursor: pointer; list-style: none; font-size: calc(10px * var(--nori-ui-font-scale)); }
 .context-injection-row > summary::-webkit-details-marker { display: none; }
 .context-injection-row > summary > svg:first-child { flex: none; color: var(--nori-text-muted); }
@@ -4542,8 +4548,27 @@ kbd {
 .team-tree-footer { display: flex; align-items: center; gap: 7px; padding: 10px 6px 2px; color: var(--nori-text-secondary); font-size: calc(11px * var(--nori-ui-font-scale)); }
 
 
-/* 输入框上方的 Goal / Todo 平铺条 */
-.composer-context-strip { display: flex; flex-direction: column; gap: 4px; padding: 0 18px 6px; }
+/* 输入框上方的 Goal / Todo 条：可折叠，宽度跟着 composer 走 */
+.composer-context-strip { margin: 0 0 6px; }
+.composer-context-strip > summary {
+  display: flex; align-items: center; gap: 7px; min-width: 0;
+  padding: 3px 4px; cursor: pointer; list-style: none;
+  color: var(--nori-text-secondary); font-size: calc(11px * var(--nori-ui-font-scale));
+}
+.composer-context-strip > summary::-webkit-details-marker { display: none; }
+.composer-context-strip > summary > svg { flex: none; }
+.composer-context-strip > summary em { flex: none; font-style: normal; color: var(--nori-text-muted); }
+.composer-context-summary {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--nori-text-muted);
+}
+.composer-context-chevron { flex: none; color: var(--nori-text-muted); transition: transform 120ms ease; }
+.composer-context-strip[open] > summary .composer-context-chevron { transform: rotate(90deg); }
+.composer-context-strip[open] > summary { margin-bottom: 4px; }
+/* 展开后标题行由 summary 承担，正文里的重复标题收起来 */
+.composer-context-strip .composer-todos-head { display: none; }
+.composer-context-strip .composer-goal-row + .composer-todos { margin-top: 4px; }
+.composer-context-strip .composer-todos ul { margin-top: 0; }
 .composer-goal-row {
   display: flex; align-items: center; gap: 8px; min-width: 0;
   padding: 5px 10px;
@@ -4770,6 +4795,7 @@ kbd {
 .chat-work-group[open] > summary .work-group-chevron { transform: rotate(90deg); }
 .work-group-body {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 3px;
   padding: 4px 10px 7px;
   border-top: 1px solid var(--nori-border);

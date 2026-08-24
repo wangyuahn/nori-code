@@ -11,6 +11,7 @@ import { ErrorCodes, type KimiErrorPayload } from '../errors';
 import { isAbortError } from '../loop/errors';
 import type { PromptStartResult } from '../rpc';
 import type {
+  TeamStatusColleague,
   TeamStatusMember,
   TeamStatusResult,
 } from '../tools/builtin/collaboration/team-status';
@@ -464,14 +465,41 @@ export class SessionSubagentHost {
         this.session.notifyRunningTeamMember(agentId, meta.assignedAt);
       }
     }
+    const colleagues = this.departmentColleagues();
     return {
       agent_id: this.ownerAgentId,
+      ...(colleagues.parentAgentId === undefined ? {} : { parent_agent_id: colleagues.parentAgentId }),
       member_count: members.length,
-      message: members.length === 0
-        ? 'No direct persistent Team Agents.'
-        : 'Direct persistent Team Agent status.',
+      message: statusMessage(members.length, colleagues.peers.length),
       members,
+      ...(colleagues.peers.length === 0 ? {} : { colleagues: colleagues.peers }),
     };
+  }
+
+  /**
+   * The caller's own department: the parent that hired it and the peers hired
+   * alongside it. Read from metadata and already-resumed agents only — a peer
+   * that is running is resumed by definition, so an idle peer never has to be
+   * loaded just to be listed.
+   */
+  private departmentColleagues(): {
+    readonly parentAgentId: string | undefined;
+    readonly peers: readonly TeamStatusColleague[];
+  } {
+    const self = this.session.getAgentMetadata(this.ownerAgentId);
+    const parentAgentId = self?.kind === 'team' ? self.teamLeaderAgentId : undefined;
+    if (parentAgentId === undefined) return { parentAgentId: undefined, peers: [] };
+    const peers = this.session.teamMemberMetadata(parentAgentId)
+      .filter(([agentId]) => agentId !== this.ownerAgentId)
+      .map(([agentId, meta]): TeamStatusColleague => ({
+        agent_id: agentId,
+        name: meta.name ?? null,
+        role: meta.role ?? null,
+        status: this.session.getReadyAgent(agentId)?.turn.hasActiveTurn === true ? 'running' : 'idle',
+        assigned_task: meta.assignedTask ?? meta.teamReport?.task ?? null,
+        report_status: meta.teamReport?.status ?? 'unreported',
+      }));
+    return { parentAgentId, peers };
   }
 
   async inviteToDiscussion(agentIds: readonly string[]): Promise<TeamDiscussionMeta> {
@@ -1195,6 +1223,17 @@ function parseTeamVote(text: string): TeamVote['vote'] {
 
 function wrapTeamDirectMessage(message: string): string {
   return `<system-reminder>\n${message.trim()}\n</system-reminder>`;
+}
+
+/** One line naming both halves of the result, so neither list reads as the whole team. */
+function statusMessage(memberCount: number, colleagueCount: number): string {
+  const own = memberCount === 0
+    ? 'No members hired by you'
+    : `${String(memberCount)} member(s) hired by you`;
+  const department = colleagueCount === 0
+    ? 'no peers in your own department'
+    : `${String(colleagueCount)} peer(s) in your own department, reachable directly with TeamChat or TeamDM`;
+  return `${own}; ${department}.`;
 }
 
 /** Chat wraps with the sender's name inline — it is a group channel, not a 1:1 line. */

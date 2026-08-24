@@ -61,6 +61,14 @@ export function MarkdownView({
     for (const pre of article.querySelectorAll('pre')) {
       const code = pre.querySelector('code');
       if (!code) continue;
+      // A fence the model opened and never filled renders as an empty box; with
+      // a Copy button bolted on it reads as a broken UI element at the end of the
+      // answer. There is nothing to copy and nothing to show, so drop the box.
+      if ((code.textContent ?? '').trim().length === 0) {
+        pre.classList.add('markdown-code-empty');
+        cleanups.push(() => pre.classList.remove('markdown-code-empty'));
+        continue;
+      }
       pre.classList.add('markdown-code-block');
       const button = document.createElement('button');
       button.type = 'button';

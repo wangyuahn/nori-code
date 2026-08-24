@@ -108,6 +108,67 @@ function isChatModel(id: string): boolean {
   return !lower.includes('embedding') && !/(^|[-_/])embed($|[-_/])/.test(lower);
 }
 
+/**
+ * Input modalities a model accepts, from whichever shape the endpoint uses.
+ *
+ * OpenAI-style `/models` responses say nothing about modalities, so gateways
+ * each invented their own field: models.dev nests `modalities.input`, OpenRouter
+ * nests `architecture.input_modalities` (plus a `modality` string like
+ * `text+image->text`), and some proxies put `input_modalities` at the top level.
+ * Reading only one of them is why an image-capable model came back as text-only.
+ */
+function inputModalities(record: ProviderRecord): Set<string> {
+  const found = new Set<string>();
+  const architecture = recordField(record, 'architecture');
+  const lists = [
+    recordField(record, 'modalities')?.['input'],
+    architecture?.['input_modalities'],
+    architecture?.['inputModalities'],
+    record['input_modalities'],
+    record['inputModalities'],
+  ];
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      if (typeof item === 'string') found.add(item.trim().toLowerCase());
+    }
+  }
+  // `text+image->text`: everything left of the arrow is an input modality.
+  const modality = typeof architecture?.['modality'] === 'string' ? architecture['modality'] : undefined;
+  if (modality !== undefined) {
+    for (const item of modality.split('->')[0]?.split('+') ?? []) {
+      const normalized = item.trim().toLowerCase();
+      if (normalized.length > 0) found.add(normalized);
+    }
+  }
+  return found;
+}
+
+/** OpenRouter reports what a model accepts as request parameters. */
+function supportedParameters(record: ProviderRecord): Set<string> {
+  const raw = record['supported_parameters'] ?? record['supportedParameters'];
+  const found = new Set<string>();
+  if (!Array.isArray(raw)) return found;
+  for (const item of raw) {
+    if (typeof item === 'string') found.add(item.trim().toLowerCase());
+  }
+  return found;
+}
+
+/** Context window, from whichever field the endpoint reports it in. */
+function contextSizeFor(record: ProviderRecord): number | undefined {
+  return positiveInteger(
+    record['context_window'],
+    record['context_length'],
+    record['max_context_size'],
+    record['inputTokenLimit'],
+    record['max_input_tokens'],
+    record['max_input_length'],
+    recordField(record, 'top_provider')?.['context_length'],
+    recordField(record, 'limit')?.['context'],
+  );
+}
+
 function capabilitiesFor(
   record: ProviderRecord,
   id: string,
@@ -121,18 +182,22 @@ function capabilitiesFor(
       if (typeof item === 'string') capabilities.add(item);
     }
   }
+  const parameters = supportedParameters(record);
   const reasoning = record['reasoning'] ?? record['supports_reasoning'] ?? record['supportsThinking'];
-  if (reasoning === true || (efforts?.length ?? 0) > 0 || (reasoning !== false && /(^|[-_.])(o[134]|reason|thinking)/i.test(id))) capabilities.add('thinking');
+  if (
+    reasoning === true
+    || (efforts?.length ?? 0) > 0
+    || parameters.has('reasoning')
+    || parameters.has('include_reasoning')
+    || (reasoning !== false && /(^|[-_.])(o[134]|reason|thinking)/i.test(id))
+  ) capabilities.add('thinking');
   if (record['supports_image_in'] === true || record['supportsImageInput'] === true) capabilities.add('image_in');
   if (record['supports_audio_in'] === true || record['supportsAudioInput'] === true) capabilities.add('audio_in');
   if (record['supports_video_in'] === true || record['supportsVideoInput'] === true) capabilities.add('video_in');
-  const modalities = recordField(record, 'modalities');
-  const inputs = modalities?.['input'];
-  if (Array.isArray(inputs)) {
-    if (inputs.includes('image')) capabilities.add('image_in');
-    if (inputs.includes('audio')) capabilities.add('audio_in');
-    if (inputs.includes('video')) capabilities.add('video_in');
-  }
+  const inputs = inputModalities(record);
+  if (inputs.has('image')) capabilities.add('image_in');
+  if (inputs.has('audio')) capabilities.add('audio_in');
+  if (inputs.has('video')) capabilities.add('video_in');
   return [...capabilities];
 }
 
@@ -143,6 +208,8 @@ function thinkingSupportFor(
 ): boolean | undefined {
   const reasoning = record['reasoning'] ?? record['supports_reasoning'] ?? record['supportsThinking'];
   if (typeof reasoning === 'boolean') return reasoning || (efforts?.length ?? 0) > 0;
+  const parameters = supportedParameters(record);
+  if (parameters.has('reasoning') || parameters.has('include_reasoning')) return true;
   if ((efforts?.length ?? 0) > 0 || /(^|[-_.])(o[134]|reason|thinking)/i.test(id)) return true;
   return undefined;
 }
@@ -176,7 +243,7 @@ function normalizeModels(
     models.set(id, {
       id,
       displayName: stringField(record, 'display_name') ?? stringField(record, 'displayName') ?? stringField(record, 'name'),
-      maxContextSize: positiveInteger(record['context_window'], record['context_length'], record['max_context_size'], record['inputTokenLimit']),
+      maxContextSize: contextSizeFor(record),
       capabilities: capabilitiesFor(record, id, efforts, endpointCapabilities),
       thinkingSupport: reasoning.supported ?? thinkingSupportFor(record, id, efforts),
       supportEfforts: efforts,
@@ -239,7 +306,7 @@ async function enrichModelsFromCatalog(
     return {
       ...model,
       displayName: stringField(record, 'name') ?? model.displayName,
-      maxContextSize: positiveInteger(limit?.['context']) ?? model.maxContextSize,
+      maxContextSize: positiveInteger(limit?.['context']) ?? contextSizeFor(record) ?? model.maxContextSize,
       capabilities: [...new Set([...(model.capabilities ?? []), ...catalogCapabilities])],
       thinkingSupport: reasoning.supported ?? thinkingSupportFor(record, model.id, efforts) ?? model.thinkingSupport,
       supportEfforts: efforts ?? model.supportEfforts,

@@ -114,6 +114,26 @@ const GOAL_CONTINUATION_PROMPT = [
   'and do not ask the user for input unless a real blocker prevents progress.',
 ].join(' ');
 
+/**
+ * How many times one turn may resume after the provider cut the message at the
+ * output token limit. Each resume is a full step, so the cap keeps a model that
+ * never converges from spending the whole step budget on one answer.
+ */
+const OUTPUT_LIMIT_CONTINUATIONS_PER_TURN = 3;
+
+/**
+ * Sent when a step ends with `max_tokens`: the message is a cut sentence rather
+ * than an answer, so the turn resumes it instead of handing the user half a
+ * reply and an error.
+ */
+const OUTPUT_LIMIT_CONTINUATION_PROMPT = [
+  'Your previous message reached the output token limit and was cut off mid-text.',
+  'Continue it from exactly where it stopped, as if you had never paused: same message, same',
+  'format, next character onward. Repeating what you already wrote or restarting with a preamble',
+  'duplicates it for the reader. If what remains is long, finish the current section and stop at a',
+  'clean boundary — you will be asked to continue again.',
+].join(' ');
+
 export class TurnFlow {
   private steerBuffer: BufferedSteer[] = [];
   private turnId = -1;
@@ -871,6 +891,7 @@ export class TurnFlow {
   private async runStepLoop(turnId: number, signal: AbortSignal): Promise<LoopTurnStopReason> {
     let stopHookContinuationUsed = false;
     let goalOutcomeMessageContinuationUsed = false;
+    let outputLimitContinuations = 0;
     this.pendingGoalOutcomeContinuation = false;
     const deduper = new ToolCallDeduplicator({ telemetry: this.agent.telemetry });
     await this.agent.mcp?.waitForInitialLoad(signal);
@@ -1037,7 +1058,26 @@ export class TurnFlow {
               const flushedSteer = this.flushSteerBuffer();
               signal.throwIfAborted();
 
-              // 2. After UpdateGoal marks a goal terminal, ask the model for one
+              // 2. An output-limit stop is a sentence cut in half, not an answer.
+              //    Resume the same message so a long reply finishes on its own
+              //    instead of surfacing as half an answer plus an error. Bounded
+              //    per turn, and it runs before the goal/gate passes because
+              //    those read the assistant's last message as if it were whole.
+              if (ctx.stopReason === 'max_tokens'
+                && outputLimitContinuations < OUTPUT_LIMIT_CONTINUATIONS_PER_TURN
+                && hasStepBudgetRemaining(loopControl?.maxStepsPerTurn, ctx.stepNumber)) {
+                outputLimitContinuations += 1;
+                this.agent.context.appendUserMessage(
+                  [{ type: 'text', text: OUTPUT_LIMIT_CONTINUATION_PROMPT }],
+                  { kind: 'system_trigger', name: 'output_limit_continuation' },
+                );
+                this.agent.telemetry.track('turn_output_limit_continuation', {
+                  attempt: outputLimitContinuations,
+                });
+                return { continue: true };
+              }
+
+              // 3. After UpdateGoal marks a goal terminal, ask the model for one
               //    final user-facing outcome message before the turn ends.
               //    Prefer this over the workflow gate: complete/blocked already
               //    cleared or parked the goal.
@@ -1055,7 +1095,7 @@ export class TurnFlow {
                 return { continue: true };
               }
 
-              // 3. Continue once when the Nori workflow gate injected a review
+              // 4. Continue once when the Nori workflow gate injected a review
               //    instruction at terminal stop.
               if (this.pendingNoriWorkflowGateContinuation) {
                 this.pendingNoriWorkflowGateContinuation = false;
@@ -1066,11 +1106,11 @@ export class TurnFlow {
                 return { continue: true };
               }
 
-              // 4. Steers that were only buffered (no goal/gate pending) still
+              // 5. Steers that were only buffered (no goal/gate pending) still
               //    need one model pass.
               if (flushedSteer) return { continue: true };
 
-              // 5. The external Stop hook gets exactly one continuation; the cap
+              // 6. The external Stop hook gets exactly one continuation; the cap
               //    is intentionally separate from (and does not cap) goal mode.
               if (!stopHookContinuationUsed) {
                 const stopBlock = await this.agent.hooks?.triggerBlock('Stop', {
@@ -1091,7 +1131,7 @@ export class TurnFlow {
                 }
               }
 
-              // 6. Otherwise stop. Goal continuation is no longer driven here:
+              // 7. Otherwise stop. Goal continuation is no longer driven here:
               //    each goal turn is an ordinary turn, and the goal driver decides
               //    whether to run another after this one ends.
               return { continue: false };

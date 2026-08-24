@@ -2158,12 +2158,15 @@ describe('Session.createAgent', () => {
     expect(member.agent.config.systemPrompt).toContain('### Managing your own department');
     expect(member.agent.config.systemPrompt).toContain('Hire for work you can name right now');
     expect(member.agent.config.systemPrompt).not.toContain('Team management belongs to the main Agent');
-    expect(member.agent.config.systemPrompt).toContain('do not call `Write`, `Edit`, or `Bash`');
+    expect(member.agent.config.systemPrompt).toContain('`Write`, `Edit`, and `Bash` are denied until it closes');
     expect(member.agent.config.systemPrompt).not.toContain('SubAgent');
-    expect(member.agent.config.systemPrompt).toContain('Use `TeamDM` any time');
-    expect(member.agent.config.systemPrompt).toContain('`TeamChat` is your department\'s persistent group channel');
-    expect(member.agent.config.systemPrompt).toContain('you may finish the step you are on before replying');
-    expect(member.agent.config.systemPrompt).toContain('Work only on the task your parent assigned');
+    expect(member.agent.config.systemPrompt).toContain('exactly one agent: a peer, a member you hired, or your parent');
+    expect(member.agent.config.systemPrompt).toContain('every peer in your department, all at once');
+    // The routing rule the member must not get wrong: a handoff goes to the peer
+    // that continues the work, never up to the parent to be passed along.
+    expect(member.agent.config.systemPrompt).toContain('Your parent is a recipient in its own right, never a relay');
+    expect(member.agent.config.systemPrompt).toContain('hand it to the peer who continues it');
+    expect(member.agent.config.systemPrompt).toContain('Work on the task your parent assigned you');
     expect(member.agent.config.systemPrompt).toContain('latest content tag');
     expect(member.agent.config.systemPrompt).toContain('Edit tag mismatch');
     expect(member.agent.config.systemPrompt).toContain('automatic branch or merge');
@@ -2584,7 +2587,12 @@ describe('Session.createAgent', () => {
     expect(assignedText).toContain('current contents and latest content tag');
     expect(assignedText).toContain('Edit tag mismatches');
     expect(assignedText).toContain('automatic branch or merge');
-    expect(assignedText).toContain('progress, blockers, and decision requests');
+    expect(assignedText).toContain('risks, version conflicts, and decision requests');
+    // Code-phase routing: peers coordinate and hand off in Chat, the parent gets
+    // the report. An assignment that only mentions the parent is what makes a
+    // member ask its parent to pass a handoff along.
+    expect(assignedText).toContain('runs peer to peer in `TeamChat`');
+    expect(assignedText).toContain('addressed to the peer who continues from here');
     expect(assignedText).toContain('Files or behavior verified');
     expect(assignedText).toContain('Verification actually run');
     expect(assignedText).toContain('Remaining risks, conflicts, or blockers');
@@ -2921,8 +2929,9 @@ describe('Session.createAgent', () => {
     });
     await expect(new SessionSubagentHost(session, member.id).getTeamStatus()).resolves.toMatchObject({
       agent_id: member.id,
+      parent_agent_id: main.id,
       member_count: 0,
-      message: 'No direct persistent Team Agents.',
+      message: 'No members hired by you; no peers in your own department.',
       members: [],
     });
 
@@ -2941,6 +2950,59 @@ describe('Session.createAgent', () => {
       member_count: 0,
       members: [],
     });
+  });
+
+  // A member that cannot see its own department has no way to name the peer a
+  // handoff belongs to, and asks its parent to pass the work along instead.
+  it('shows a member the peers hired alongside it, and the lead none', async () => {
+    const session = new Session({
+      id: 'test-department-team-status',
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      initializeMainAgent: false,
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const memberOptions = (name: string, role: string) => ({
+      kind: 'team' as const,
+      parentAgentId: main.id,
+      teamLeaderAgentId: main.id,
+      profile: contextProfile(),
+      teamIdentity: { name, mandate: `${name} mandate.`, role },
+    });
+    const builder = await session.createAgent({ type: 'sub' }, memberOptions('Builder', 'builder'));
+    const reviewer = await session.createAgent({ type: 'sub' }, memberOptions('Reviewer', 'reviewer'));
+    await session.assignTeamTasks(main.id, [
+      { agentId: builder.id, task: 'Write the parser.' },
+      { agentId: reviewer.id, task: 'Review the parser.' },
+    ]);
+
+    const fromBuilder = await new SessionSubagentHost(session, builder.id).getTeamStatus();
+    expect(fromBuilder).toMatchObject({
+      agent_id: builder.id,
+      parent_agent_id: main.id,
+      member_count: 0,
+      colleagues: [{
+        agent_id: reviewer.id,
+        name: 'Reviewer',
+        role: 'reviewer',
+        status: 'idle',
+        assigned_task: 'Review the parser.',
+        report_status: 'unreported',
+      }],
+    });
+    // A peer's own report belongs to the shared parent; only its status travels.
+    expect(fromBuilder.colleagues?.[0]).not.toHaveProperty('report_summary');
+    expect(fromBuilder.message).toContain('1 peer(s) in your own department');
+
+    // The lead is in nobody's department, so it sees its members and no peers.
+    const fromMain = await new SessionSubagentHost(session, main.id).getTeamStatus();
+    expect(fromMain.colleagues).toBeUndefined();
+    expect(fromMain.parent_agent_id).toBeUndefined();
+    expect(fromMain.member_count).toBe(2);
   });
 });
 

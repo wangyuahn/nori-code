@@ -35,6 +35,13 @@ interface TurnAccum {
   turnId: number;
   assistantText: string;
   thinkingText: string;
+  /**
+   * Text since the current step began. The turn-wide fields stay whole because
+   * delta offsets are measured against them; these two are what a client can
+   * append without duplicating the completed steps it already read from history.
+   */
+  stepAssistantText: string;
+  stepThinkingText: string;
   tools: Map<string, ToolAccum>;
 }
 
@@ -56,9 +63,20 @@ export class InFlightTurnTracker {
           turnId: event.turnId,
           assistantText: '',
           thinkingText: '',
+          stepAssistantText: '',
+          stepThinkingText: '',
           tools: new Map(),
         });
         this.bySession.set(sessionId, turns);
+        return {};
+      }
+      case 'turn.step.started': {
+        // The previous step is durable now, so its text reaches a client through
+        // history. Start the step-scoped accumulators over.
+        const turn = turns.get(agentId);
+        if (!turn || turn.turnId !== event.turnId) return {};
+        turn.stepAssistantText = '';
+        turn.stepThinkingText = '';
         return {};
       }
       case 'turn.ended': {
@@ -71,6 +89,7 @@ export class InFlightTurnTracker {
         if (!turn || turn.turnId !== event.turnId) return {};
         const offset = turn.assistantText.length;
         turn.assistantText += event.delta;
+        turn.stepAssistantText += event.delta;
         return { offset };
       }
       case 'thinking.delta': {
@@ -78,6 +97,7 @@ export class InFlightTurnTracker {
         if (!turn || turn.turnId !== event.turnId) return {};
         const offset = turn.thinkingText.length;
         turn.thinkingText += event.delta;
+        turn.stepThinkingText += event.delta;
         return { offset };
       }
       case 'tool.call.started': {
@@ -129,6 +149,8 @@ export class InFlightTurnTracker {
       turn_id: turn.turnId,
       assistant_text: turn.assistantText,
       thinking_text: turn.thinkingText,
+      step_assistant_text: turn.stepAssistantText,
+      step_thinking_text: turn.stepThinkingText,
       running_tools,
     };
   }

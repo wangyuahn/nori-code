@@ -272,3 +272,44 @@ describe('MarkdownView code blocks', () => {
     }
   });
 });
+
+/**
+ * A model that opens a fence and stops — or wraps a bare title tag in one — used
+ * to leave an empty bordered box with a Copy button under the answer.
+ */
+describe('MarkdownView empty code fences', () => {
+  const render = async (content: string) => {
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(createElement(I18nProvider, null, createElement(MarkdownView, { content })));
+    });
+    return { container, root };
+  };
+
+  it('drops an unfilled fence instead of offering to copy nothing', async () => {
+    const { container, root } = await render('Answer done.\n\n```html\n```');
+    try {
+      expect(container.querySelector('.markdown-code-copy')).toBeNull();
+      const empty = container.querySelector('pre.markdown-code-empty');
+      expect(empty).not.toBeNull();
+      expect(getComputedStyle(empty!).display === 'none' || empty!.classList.contains('markdown-code-empty')).toBe(true);
+      expect(container.textContent).toContain('Answer done.');
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('still renders a fence that has content', async () => {
+    const { container, root } = await render('```ts\nconst a = 1;\n```');
+    try {
+      expect(container.querySelector('pre.markdown-code-empty')).toBeNull();
+      expect(container.querySelector('.markdown-code-copy')).not.toBeNull();
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+});

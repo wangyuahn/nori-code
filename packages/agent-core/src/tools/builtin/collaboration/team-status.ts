@@ -21,11 +21,30 @@ export interface TeamStatusMember {
   readonly report_received?: boolean;
 }
 
+/**
+ * A peer in the caller's own department: hired by the same parent, reachable
+ * directly with TeamChat or TeamDM. Its report to the shared parent is that
+ * parent's to read, so only the status travels here — enough to see whether a
+ * peer has already handed its part over.
+ */
+export interface TeamStatusColleague {
+  readonly agent_id: string;
+  readonly name: string | null;
+  readonly role: string | null;
+  readonly status: 'idle' | 'running';
+  readonly assigned_task: string | null;
+  readonly report_status: 'unreported' | 'completed' | 'blocked' | 'needs_decision';
+}
+
 export interface TeamStatusResult {
   readonly agent_id: string;
   readonly member_count: number;
   readonly message: string;
   readonly members: readonly TeamStatusMember[];
+  /** The parent that hired the caller; absent for the main Agent. */
+  readonly parent_agent_id?: string;
+  /** Peers in the caller's own department, excluding the caller. */
+  readonly colleagues?: readonly TeamStatusColleague[];
 }
 
 export class TeamStatusTool implements BuiltinTool<TeamStatusInput> {

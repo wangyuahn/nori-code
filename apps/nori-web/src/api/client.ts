@@ -447,6 +447,14 @@ export interface Snapshot {
     turn_id: number;
     assistant_text: string;
     thinking_text: string;
+    /**
+     * Text since the current step began. The turn-wide fields above are what a
+     * delta's `offset` is measured against; these are what may be *rendered*
+     * live, because every completed step of the turn already reaches the client
+     * through history — interleaved with the tools that ran between them.
+     */
+    step_assistant_text?: string;
+    step_thinking_text?: string;
     running_tools: Array<{ tool_call_id: string; name: string; args?: unknown }>;
     current_prompt_id?: string;
   } | null;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../src/api/client';
-import { apiMessageToChat, applyRealtimeStatusEvent, canApplyGeneratedSessionTitle, chatFilesFromPromptAttachments, chatScopeKey, confirmOptimisticUserMessage, fallbackSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, isTransientChatMessageId, latestTodos, liveAssistantMessage, mergeHistory, mergeInFlightWorkBlocks, promptForRewind, RealtimeEventDeduper, RealtimeSubscriptionGate, shouldFinishAbortedPrompt, shouldIgnoreTranscriptEvent, splitUploadedFileMarkup, statusForSession, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
+import { apiMessageToChat, applyRealtimeStatusEvent, isClientNoticeId, reconcileHistory, turnFailureText, canApplyGeneratedSessionTitle, chatFilesFromPromptAttachments, chatScopeKey, confirmOptimisticUserMessage, fallbackSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, isTransientChatMessageId, latestTodos, liveAssistantMessage, mergeHistory, mergeInFlightWorkBlocks, promptForRewind, RealtimeEventDeduper, RealtimeSubscriptionGate, shouldFinishAbortedPrompt, shouldIgnoreTranscriptEvent, splitUploadedFileMarkup, statusForSession, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
 
 describe('session-bound realtime status', () => {
   const status = {
@@ -921,3 +921,51 @@ function message(input: { id?: string; role: Message['role']; text: string; orig
     ...(input.originKind ? { metadata: { origin: { kind: input.originKind } } } : {}),
   };
 }
+
+/**
+ * A failed turn is the one moment the reader most needs the transcript to hold
+ * still: the round's output plus what went wrong. The authoritative refresh that
+ * follows the failure used to replace the list wholesale, taking the error notice
+ * with it.
+ */
+describe('failed turns keep their output and their cause', () => {
+  const remote = [
+    { id: 'msg_1', role: 'user' as const, text: 'do the thing', createdAt: '2026-08-24T10:00:00.000Z' },
+    { id: 'msg_2', role: 'assistant' as const, text: 'half an answ', createdAt: '2026-08-24T10:00:05.000Z' },
+  ];
+
+  it('keeps a client error notice through an authoritative replace, in transcript order', () => {
+    const notice = {
+      id: 'turn-error-session-a-main-7',
+      role: 'system' as const,
+      text: 'max output tokens exceeded',
+      createdAt: '2026-08-24T10:00:06.000Z',
+    };
+    const reconciled = reconcileHistory([...remote, notice], remote);
+
+    expect(reconciled.map(message => message.id)).toEqual(['msg_1', 'msg_2', 'turn-error-session-a-main-7']);
+    expect(reconciled.at(-1)?.text).toBe('max output tokens exceeded');
+  });
+
+  it('drops the local notice once the server reports the same id', () => {
+    const notice = { id: 'stream-error-1', role: 'system' as const, text: 'boom', createdAt: '2026-08-24T10:00:06.000Z' };
+    const authoritative = [...remote, { ...notice, text: 'boom (from server)' }];
+
+    expect(reconcileHistory([...remote, notice], authoritative).filter(m => m.id === 'stream-error-1'))
+      .toEqual([expect.objectContaining({ text: 'boom (from server)' })]);
+  });
+
+  it('only treats client-generated ids as notices to preserve', () => {
+    expect(isClientNoticeId('turn-error-a-main-1')).toBe(true);
+    expect(isClientNoticeId('stream-error-123')).toBe(true);
+    expect(isClientNoticeId('msg_probe_0001')).toBe(false);
+  });
+
+  it('shows the provider wording, and keeps the code for reporting', () => {
+    expect(turnFailureText({ message: 'max output tokens exceeded', code: 'provider_api_error' }))
+      .toBe('max output tokens exceeded\n\n`provider_api_error`');
+    expect(turnFailureText({ message: 'rate limited' })).toBe('rate limited');
+    expect(turnFailureText({ code: 'provider_rate_limit' })).toBe('Turn failed: `provider_rate_limit`');
+    expect(turnFailureText(undefined)).toBe('Turn failed without a reported cause.');
+  });
+});

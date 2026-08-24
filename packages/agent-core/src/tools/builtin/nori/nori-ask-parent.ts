@@ -20,15 +20,19 @@ export const NoriAskParentInputSchema = z
 
 type NoriAskParentInput = z.infer<typeof NoriAskParentInputSchema>;
 
-const DESCRIPTION = `Ask the parent agent for guidance, clarification, or a decision.
+const DESCRIPTION = `Ask the parent agent for a decision only it can make.
 
-This is a model-callable API for subagents. Call it as soon as you are blocked by
-requirements, priority, or scope ambiguity — asking early is cheaper than working
-on a wrong assumption, and guessing silently is the failure this exists to
-prevent. The parent has the broader task context. The answer comes back on this
-call, and the exchange is filed into the parent's own transcript, so ask one
-concrete question and include what the parent needs to answer it. Do not use this
-to ask the end user directly.`;
+This is a model-callable API for subagents. Its subject is intent, scope,
+priority, or a trade-off between members — the things your parent holds and you
+do not. Call it as soon as one of those blocks you: asking early is cheaper than
+working on a wrong assumption, and guessing silently is the failure this exists
+to prevent. The answer comes back on this call, and the exchange is filed into
+the parent's own transcript, so ask one concrete question and include what the
+parent needs to answer it.
+
+Work that a peer in your department owns goes to that peer: TeamChat for the
+group, TeamDM for one of them. Both reach them directly. Do not use this to ask
+the end user directly.`;
 
 export class NoriAskParentTool implements BuiltinTool<NoriAskParentInput> {
   readonly name = 'nori_ask_parent' as const;

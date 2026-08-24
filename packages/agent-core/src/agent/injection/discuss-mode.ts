@@ -60,5 +60,5 @@ function sparseReminder(): string {
 }
 
 function exitReminder(): string {
-  return 'Discuss ended. TeamAssign starts Code for assigned members; re-enter Discuss when more coordination is needed.';
+  return 'Discuss ended; Code has started. Assigned members execute their task and keep each other current in TeamChat: progress, a decision that changes what a peer assumed, a file about to be touched, and handoff of finished work — addressed to the peer who continues it, with the files, their state, and what is left. A completed/blocked/needs_decision report goes to the parent with TeamDM. Re-enter Discuss when the plan itself has to change.';
 }

@@ -151,3 +151,72 @@ describe('mount-time in-flight hydration', () => {
     expect(latest.currentWorkBlocks).toMatchObject([{ type: 'thinking', text: 'Member one is mid-turn.' }]);
   });
 });
+
+/**
+ * `assistant_text` on the snapshot spans the whole turn, because a delta's
+ * `offset` is measured against it. Rendering that as the live block repeats every
+ * earlier narration as one lump below the tools that ran between them — the
+ * "all the output ends up at the bottom" bug. Only the open step is live.
+ */
+describe('step-scoped in-flight text', () => {
+  it('renders only the open step, not the whole turn, when both are offered', async () => {
+    stubTransport({
+      'agent-1': {
+        in_flight_turn: {
+          turn_id: 9,
+          assistant_text: 'First narration. Second narration. Third narration.',
+          thinking_text: 'first thought. second thought.',
+          step_assistant_text: 'Third narration.',
+          step_thinking_text: 'second thought.',
+          running_tools: [],
+        },
+        pending_approvals: [],
+        pending_questions: [],
+      } as unknown as Snapshot,
+    });
+
+    let latest!: UseChatMessagesResult;
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => {
+      root.render(createElement(Probe, {
+        sessionId: 'session-team',
+        agentId: 'agent-1',
+        onState: state => { latest = state; },
+      }));
+      await Promise.resolve();
+    });
+
+    expect(latest.currentStreaming).toBe('Third narration.');
+    expect(latest.currentThinking).toBe('second thought.');
+    expect(latest.currentWorkBlocks).toMatchObject([
+      { type: 'thinking', text: 'second thought.' },
+    ]);
+    expect(container.textContent).not.toContain('First narration.');
+  });
+
+  it('falls back to the turn-wide text when the server does not report a step', async () => {
+    stubTransport({
+      'agent-1': runningSnapshot(9, 'only thought', 'only narration'),
+    });
+
+    let latest!: UseChatMessagesResult;
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => {
+      root.render(createElement(Probe, {
+        sessionId: 'session-team',
+        agentId: 'agent-1',
+        onState: state => { latest = state; },
+      }));
+      await Promise.resolve();
+    });
+
+    expect(latest.currentStreaming).toBe('only narration');
+    expect(latest.currentThinking).toBe('only thought');
+  });
+});

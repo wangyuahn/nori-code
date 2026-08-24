@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type FsDiffResponse, type FsGitStatusResponse, type FsReadResponse, type SessionAgent, type SessionAgentChatResponse } from '../api/client';
 import type { ChatMessage, CodeChange } from '../hooks/useChatMessages';
 import type { GitStatusRefreshOptions } from '../hooks/useFilesystem';
@@ -19,6 +19,28 @@ const DEFAULT_INSPECTOR_TABS: InspectorTab[] = ['changes', 'preview', 'browser',
 interface OpenInspectorTab {
   id: string;
   tool: InspectorTab;
+}
+
+/**
+ * 打开的工具页 + 当前选中的那一页 + 下一个 id，合成一个状态。
+ *
+ * 它们必须在同一次更新里一起算出来。原来 tabs 和 activeId 是两个 state，新页的 id
+ * 又是在 `setOpenTabs` 的 updater 里自增一个 ref 得到的——StrictMode 会把 updater
+ * 跑两遍，于是留在 tabs 里的 id 和 activeId 记住的那个不是同一个，`openTabs.find`
+ * 找不到当前页，面板就成了「开着但一片空白」：点文件不弹预览正是这么丢的。
+ */
+interface InspectorTabsState {
+  tabs: OpenInspectorTab[];
+  activeId: string | null;
+  nextId: number;
+}
+
+/** 打开一个工具页：已经开着就切过去，否则新开一页。 */
+function openToolTab(state: InspectorTabsState, tool: InspectorTab): InspectorTabsState {
+  const existing = [...state.tabs].reverse().find(item => item.tool === tool);
+  if (existing) return state.activeId === existing.id ? state : { ...state, activeId: existing.id };
+  const created: OpenInspectorTab = { id: `${tool}-${String(state.nextId)}`, tool };
+  return { tabs: [...state.tabs, created], activeId: created.id, nextId: state.nextId + 1 };
 }
 
 interface WorkspaceInspectorProps {
@@ -54,8 +76,28 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
   const { tr } = useI18n();
   const initialActiveTab = standalone || !overviewFirst ? initialTab ?? 'changes' : initialTab ?? null;
   const initialActiveTabId = initialActiveTab ? `${initialActiveTab}-initial` : null;
-  const [activeTabId, setActiveTabId] = useState<string | null>(initialActiveTabId);
-  const [openTabs, setOpenTabs] = useState<OpenInspectorTab[]>(() => initialActiveTab ? [{ id: initialActiveTabId!, tool: initialActiveTab }] : []);
+  const [tabsState, setTabsState] = useState<InspectorTabsState>(() => ({
+    tabs: initialActiveTab ? [{ id: initialActiveTabId!, tool: initialActiveTab }] : [],
+    activeId: initialActiveTabId,
+    nextId: 1,
+  }));
+  const openTabs = tabsState.tabs;
+  const activeTabId = tabsState.activeId;
+  const setActiveTabId = useCallback((id: string | null) => {
+    setTabsState(previous => (previous.activeId === id ? previous : { ...previous, activeId: id }));
+  }, []);
+  const setOpenTabs = useCallback((
+    next: OpenInspectorTab[] | ((previous: OpenInspectorTab[]) => OpenInspectorTab[]),
+  ) => {
+    setTabsState(previous => ({
+      ...previous,
+      tabs: typeof next === 'function' ? next(previous.tabs) : next,
+    }));
+  }, []);
+  /** 打开（或切到）一个工具页。 */
+  const showTool = useCallback((tool: InspectorTab) => {
+    setTabsState(previous => openToolTab(previous, tool));
+  }, []);
   const [tabOrder, setTabOrder] = useState<InspectorTab[]>(loadInspectorTabOrder);
   const [toolPickerOpen, setToolPickerOpen] = useState(false);
   const [launcherPickerOpen, setLauncherPickerOpen] = useState(false);
@@ -67,7 +109,7 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
   const toolPickerRef = useRef<HTMLDivElement>(null);
   const launcherRef = useRef<HTMLDivElement>(null);
   const autoOpenedMeetingRef = useRef<string | null>(null);
-  const nextTabIdRef = useRef(1);
+  const autoOpenedBrowserRef = useRef<string | null>(null);
   const activeTab = openTabs.find(item => item.id === activeTabId);
   const tab = activeTab?.tool ?? null;
 
@@ -99,19 +141,11 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
   const availableTools = tabOrder.filter(toolAvailable);
   const launcherTool = tab ?? availableTools[0] ?? 'changes';
 
+  // 选中一个文件就把预览推到前面——这是「点文件自动弹预览」那个行为本身。
   useEffect(() => {
     if (!path || standalone) return;
-    setOpenTabs(previous => {
-      const existing = [...previous].reverse().find(item => item.tool === 'preview');
-      if (existing) {
-        setActiveTabId(existing.id);
-        return previous;
-      }
-      const created = { id: `preview-${nextTabIdRef.current++}`, tool: 'preview' as const };
-      setActiveTabId(created.id);
-      return [...previous, created];
-    });
-  }, [path, standalone]);
+    showTool('preview');
+  }, [path, showTool, standalone]);
 
   useEffect(() => {
     if (!toolPickerOpen && !launcherPickerOpen) return;
@@ -143,17 +177,17 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
     if (standalone || roundId === null) return;
     if (autoOpenedMeetingRef.current === roundId) return;
     autoOpenedMeetingRef.current = roundId;
-    setOpenTabs(previous => {
-      const existing = [...previous].reverse().find(item => item.tool === 'meeting');
-      if (existing) {
-        setActiveTabId(existing.id);
-        return previous;
-      }
-      const created = { id: `meeting-${nextTabIdRef.current++}`, tool: 'meeting' as const };
-      setActiveTabId(created.id);
-      return [...previous, created];
-    });
-  }, [discussion?.discussionAgentId, standalone]);
+    showTool('meeting');
+  }, [discussion?.discussionAgentId, showTool, standalone]);
+
+  // 模型开始用浏览器：那一页得自己弹出来，不然人看不到它在点什么。
+  const browserToolKey = useMemo(() => latestBrowserToolKey(messages), [messages]);
+  useEffect(() => {
+    if (standalone || browserToolKey === undefined) return;
+    if (autoOpenedBrowserRef.current === browserToolKey) return;
+    autoOpenedBrowserRef.current = browserToolKey;
+    showTool('browser');
+  }, [browserToolKey, showTool, standalone]);
 
   const latestCodeChange = codeChanges[0];
   const codeChangeRefreshKey = latestCodeChange
@@ -187,25 +221,20 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
   const previewFile = (targetPath: string) => {
     onSelectFilePath?.(targetPath);
     setRevealLine(undefined);
-    const existing = [...openTabs].reverse().find(item => item.tool === 'preview');
-    if (existing) setActiveTabId(existing.id);
-    else openTab('preview');
+    showTool('preview');
   };
+  /** 工具选择器里的「再开一个」：总是新开一页，比如第二个终端。 */
   const openTab = (item: InspectorTab) => {
-    const created = { id: `${item}-${nextTabIdRef.current++}`, tool: item };
-    setOpenTabs(previous => [...previous, created]);
-    setActiveTabId(created.id);
+    setTabsState(previous => {
+      const created: OpenInspectorTab = { id: `${item}-${String(previous.nextId)}`, tool: item };
+      return { tabs: [...previous.tabs, created], activeId: created.id, nextId: previous.nextId + 1 };
+    });
     setToolPickerOpen(false);
     setLauncherPickerOpen(false);
     if (item === 'git') void refreshGitStatus();
   };
   const activateTab = (item: InspectorTab) => {
-    const existing = [...openTabs].reverse().find(candidate => candidate.tool === item);
-    if (!existing) {
-      openTab(item);
-      return;
-    }
-    setActiveTabId(existing.id);
+    showTool(item);
     setToolPickerOpen(false);
     setLauncherPickerOpen(false);
     if (item === 'git') void refreshGitStatus();
@@ -225,7 +254,7 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
     if (item === 'git') return <GitPanel sessionId={sessionId} projectPath={projectPath} status={gitStatus} error={gitError} loading={gitLoading} onRefresh={refreshGitStatus} />;
     if (item === 'meeting') return <DepartmentMeetingPanel sessionId={sessionId} discussionAgentId={discussionNodeAgentId} selfAgentId={selfAgentId} sessionAgents={sessionAgents} turnAgentId={discussion?.turnAgentId ?? null} revision={departmentRevision} />;
     if (item === 'chat') return <DepartmentChatPanel messages={departmentChat?.messages ?? []} selfAgentId={selfAgentId} sessionAgents={sessionAgents} />;
-    if (item === 'lsp') return <LspPanel sessionId={sessionId} path={path} onDiagnosticCountChange={setDiagnosticCount} onReveal={(targetPath, line) => { if (targetPath !== path) onSelectFilePath?.(targetPath); setRevealLine(line + 1); const existing = [...openTabs].reverse().find(candidate => candidate.tool === 'preview'); if (existing) setActiveTabId(existing.id); else openTab('preview'); }} />;
+    if (item === 'lsp') return <LspPanel sessionId={sessionId} path={path} onDiagnosticCountChange={setDiagnosticCount} onReveal={(targetPath, line) => { if (targetPath !== path) onSelectFilePath?.(targetPath); setRevealLine(line + 1); showTool('preview'); }} />;
     // BrowserPanel owns a native WebContentsView. CSS-hidden inspector pages remain
     // mounted, so the inactive browser page must be unmounted to detach that view.
     if (item === 'browser' && activeTabId !== tabItem.id) return null;
@@ -284,7 +313,7 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
             const duplicateCount = openTabs.filter(candidate => candidate.tool === item.tool).length;
             const ordinal = openTabs.slice(0, index + 1).filter(candidate => candidate.tool === item.tool).length;
             const label = duplicateCount > 1 ? `${meta.label} ${ordinal}` : meta.label;
-            return <div key={item.id} className={`inspector-open-tab${activeTabId === item.id ? ' active' : ''}`} draggable onDragStart={event => event.dataTransfer.setData('text/nori-open-inspector-tab', item.id)} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const source = event.dataTransfer.getData('text/nori-open-inspector-tab'); if (openTabs.some(candidate => candidate.id === source)) setOpenTabs(previous => moveOpenInspectorTab(previous, item.id, source)); }}>
+            return <div key={item.id} className={`inspector-open-tab${activeTabId === item.id ? ' active' : ''}`} draggable onDragStart={event => event.dataTransfer.setData('text/nori-open-inspector-tab', item.id)} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const source = event.dataTransfer.getData('text/nori-open-inspector-tab'); if (openTabs.some(candidate => candidate.id === source)) setOpenTabs((previous: OpenInspectorTab[]) => moveOpenInspectorTab(previous, item.id, source)); }}>
               <button type="button" role="tab" aria-selected={activeTabId === item.id} onClick={() => { setActiveTabId(item.id); if (item.tool === 'git') void refreshGitStatus(); }} title={label}><Icon name={meta.icon} size={13}/><span>{label}</span></button>
               <button type="button" className="inspector-close-tab" onClick={() => closeTab(item.id)} title={tr(`Close ${label} tab`, `关闭${label}标签页`)} aria-label={tr(`Close ${label} tab`, `关闭${label}标签页`)}><Icon name="close" size={11}/></button>
             </div>;
@@ -401,6 +430,31 @@ function openInspectorWindow(tab: InspectorTab, sessionId: string | null, path: 
   if (sessionId) params.set('session', sessionId);
   if (path) params.set('path', path);
   window.open(`${window.location.pathname}${window.location.search}#${params}`, `nori-inspector-${tab}`, 'popup,width=720,height=760');
+}
+
+/**
+ * The most recent browser tool call, identified so a repeat call is a new id.
+ *
+ * The browser is the one tool whose result is only meaningful on screen: the
+ * model drives a real page, and the human has to watch it. So a call to it opens
+ * the browser tool the same way selecting a file opens the preview.
+ */
+export function latestBrowserToolKey(messages: ChatMessage[]): string | undefined {
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex--) {
+    const message = messages[messageIndex];
+    if (!message) continue;
+    const tools = message.toolCalls ?? [];
+    for (let toolIndex = tools.length - 1; toolIndex >= 0; toolIndex--) {
+      const tool = tools[toolIndex];
+      if (!tool || !isBrowserToolName(tool.name)) continue;
+      return [message.id, tool.id ?? '', tool.name].join(' ');
+    }
+  }
+  return undefined;
+}
+
+function isBrowserToolName(name: string): boolean {
+  return /^(nori_)?browser(_|$)/i.test(name.trim());
 }
 
 function latestToolMutationKey(messages: ChatMessage[]): string | undefined {

@@ -14,6 +14,8 @@ import {
   isRecoverableRequestStructureError,
   type ContentPart,
   type Message,
+  type TextPart,
+  type ThinkPart,
   type TokenUsage,
 } from '@nori-code/kosong';
 import type { Logger } from '#/logging/types';
@@ -108,20 +110,24 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
     step: currentStep,
   });
 
+  const streaming = createChatStreamingCallbacks({
+    dispatchEvent,
+    turnId,
+    currentStep,
+    stepUuid,
+  });
   const chatParams: LLMChatParams = {
     messages,
     tools: tools ?? [],
     signal,
-    ...createChatStreamingCallbacks({
-      dispatchEvent,
-      turnId,
-      currentStep,
-      stepUuid,
-    }),
+    ...streaming.callbacks,
   };
   const retryInput = {
     llm,
     dispatchEvent,
+    // A retry re-streams the whole message from the start, so whatever the failed
+    // attempt had already streamed is superseded rather than recorded.
+    onRetry: () => { streaming.discardPending(); },
     turnId,
     currentStep,
     stepUuid,
@@ -130,72 +136,91 @@ export async function executeLoopStep(deps: ExecuteLoopStepDeps): Promise<{
   } as const;
   let response: LLMChatResponse;
   try {
-    response = await chatWithRetry({ ...retryInput, params: chatParams });
+    try {
+      response = await chatWithRetry({ ...retryInput, params: chatParams });
+    } catch (error) {
+      const mediaFallback = omitMediaAfterProviderRejection(messages);
+      if (isRecoverableMediaRequestError(error) && mediaFallback.omittedCount > 0) {
+        signal.throwIfAborted();
+        log?.warn('provider rejected media; resending once with text placeholders', {
+          turnStep: `${turnId}.${String(currentStep)}`,
+          model: llm.modelName,
+          omittedCount: mediaFallback.omittedCount,
+          error: errorMessage(error),
+        });
+        streaming.discardPending();
+        try {
+          response = await chatWithRetry({
+            ...retryInput,
+            params: { ...chatParams, messages: mediaFallback.messages },
+          });
+        } catch (fallbackError) {
+          log?.error('media fallback resend was rejected by provider', {
+            turnStep: `${turnId}.${String(currentStep)}`,
+            model: llm.modelName,
+            originalError: errorMessage(error),
+            fallbackError: errorMessage(fallbackError),
+          });
+          throw fallbackError;
+        }
+        log?.info('recovered after media fallback resend', {
+          turnStep: `${turnId}.${String(currentStep)}`,
+        });
+      } else {
+        // A structural request rejection (tool_use/tool_result pairing, empty or
+        // whitespace-only text, non-user first message, non-alternating roles) means
+        // the projected history is not wire-compliant for a strict provider — and
+        // since the same history is re-sent every turn, the session would stay stuck
+        // on this error forever. Resend ONCE with a strict, guaranteed-compliant
+        // rebuild (every open call closed, stray results dropped, leading non-user
+        // trimmed, consecutive assistants merged) as a last resort. Any other error,
+        // or a host that supplied no strict builder, propagates unchanged.
+        if (buildMessagesStrict === undefined || !isRecoverableRequestStructureError(error)) throw error;
+        signal.throwIfAborted();
+        log?.warn('provider rejected request structure; resending with strict projection', {
+          turnStep: `${turnId}.${String(currentStep)}`,
+          model: llm.modelName,
+        });
+        const strictMessages = await buildMessagesStrict();
+        signal.throwIfAborted();
+        streaming.discardPending();
+        try {
+          response = await chatWithRetry({
+            ...retryInput,
+            params: { ...chatParams, messages: strictMessages },
+          });
+        } catch (strictError) {
+          // The strictly-sanitized rebuild was still rejected — our wire-compliance
+          // repair did not cover this case. Surface it loudly: the session is stuck
+          // and this is the signal we need to diagnose the gap.
+          log?.error('strict resend still rejected by provider; request remains wire-invalid', {
+            turnStep: `${turnId}.${String(currentStep)}`,
+            model: llm.modelName,
+            originalError: errorMessage(error),
+            strictError: errorMessage(strictError),
+          });
+          throw strictError;
+        }
+        log?.info('recovered after strict resend', {
+          turnStep: `${turnId}.${String(currentStep)}`,
+        });
+      }
+    }
   } catch (error) {
-    const mediaFallback = omitMediaAfterProviderRejection(messages);
-    if (isRecoverableMediaRequestError(error) && mediaFallback.omittedCount > 0) {
-      signal.throwIfAborted();
-      log?.warn('provider rejected media; resending once with text placeholders', {
+    // The step never reached a response: an abort, a dropped stream, or a
+    // provider error. Whatever text or reasoning had already streamed is real
+    // output the reader watched arrive, so record it before the failure
+    // propagates — otherwise the turn ends and the message is simply gone.
+    // A failure to record must not replace the error that caused it.
+    try {
+      await streaming.flushPending();
+    } catch (flushError) {
+      log?.warn('could not record partial content after a failed step', {
         turnStep: `${turnId}.${String(currentStep)}`,
-        model: llm.modelName,
-        omittedCount: mediaFallback.omittedCount,
-        error: errorMessage(error),
-      });
-      try {
-        response = await chatWithRetry({
-          ...retryInput,
-          params: { ...chatParams, messages: mediaFallback.messages },
-        });
-      } catch (fallbackError) {
-        log?.error('media fallback resend was rejected by provider', {
-          turnStep: `${turnId}.${String(currentStep)}`,
-          model: llm.modelName,
-          originalError: errorMessage(error),
-          fallbackError: errorMessage(fallbackError),
-        });
-        throw fallbackError;
-      }
-      log?.info('recovered after media fallback resend', {
-        turnStep: `${turnId}.${String(currentStep)}`,
-      });
-    } else {
-      // A structural request rejection (tool_use/tool_result pairing, empty or
-      // whitespace-only text, non-user first message, non-alternating roles) means
-      // the projected history is not wire-compliant for a strict provider — and
-      // since the same history is re-sent every turn, the session would stay stuck
-      // on this error forever. Resend ONCE with a strict, guaranteed-compliant
-      // rebuild (every open call closed, stray results dropped, leading non-user
-      // trimmed, consecutive assistants merged) as a last resort. Any other error,
-      // or a host that supplied no strict builder, propagates unchanged.
-      if (buildMessagesStrict === undefined || !isRecoverableRequestStructureError(error)) throw error;
-      signal.throwIfAborted();
-      log?.warn('provider rejected request structure; resending with strict projection', {
-        turnStep: `${turnId}.${String(currentStep)}`,
-        model: llm.modelName,
-      });
-      const strictMessages = await buildMessagesStrict();
-      signal.throwIfAborted();
-      try {
-        response = await chatWithRetry({
-          ...retryInput,
-          params: { ...chatParams, messages: strictMessages },
-        });
-      } catch (strictError) {
-        // The strictly-sanitized rebuild was still rejected — our wire-compliance
-        // repair did not cover this case. Surface it loudly: the session is stuck
-        // and this is the signal we need to diagnose the gap.
-        log?.error('strict resend still rejected by provider; request remains wire-invalid', {
-          turnStep: `${turnId}.${String(currentStep)}`,
-          model: llm.modelName,
-          originalError: errorMessage(error),
-          strictError: errorMessage(strictError),
-        });
-        throw strictError;
-      }
-      log?.info('recovered after strict resend', {
-        turnStep: `${turnId}.${String(currentStep)}`,
+        error: errorMessage(flushError),
       });
     }
+    throw error;
   }
   const usage = response.usage;
   const usageResult = await recordUsage(usage);
@@ -385,48 +410,83 @@ function stepEndProviderDiagnostics(
   };
 }
 
+/**
+ * Streaming callbacks plus the two controls the step needs when a provider call
+ * does not reach a response.
+ *
+ * A content part is what gets recorded; deltas only drive the live view. So a
+ * stream that dies mid-block — a dropped connection, an abort, a provider error
+ * — would leave the recorded assistant message empty while the reader watched
+ * text arrive. `flushPending` records that text as a part instead, and
+ * `discardPending` drops it before a resend re-streams the same block.
+ */
+interface StepStreaming {
+  readonly callbacks: ChatStreamingCallbacks;
+  flushPending(): Promise<void>;
+  discardPending(): void;
+}
+
 function createChatStreamingCallbacks(deps: {
   readonly dispatchEvent: LoopEventDispatcher;
   readonly turnId: string;
   readonly currentStep: number;
   readonly stepUuid: string;
-}): ChatStreamingCallbacks {
+}): StepStreaming {
   const { dispatchEvent, turnId, currentStep, stepUuid } = deps;
+  let pendingText = '';
+  let pendingThinking = '';
+
+  const emitPart = async (part: TextPart | ThinkPart): Promise<void> => {
+    await dispatchEvent({
+      type: 'content.part',
+      uuid: randomUUID(),
+      turnId,
+      step: currentStep,
+      stepUuid,
+      part,
+    });
+  };
 
   return {
-    onTextDelta: (delta) => {
-      dispatchEvent({ type: 'text.delta', delta });
+    callbacks: {
+      onTextDelta: (delta) => {
+        pendingText += delta;
+        dispatchEvent({ type: 'text.delta', delta });
+      },
+      onThinkDelta: (delta) => {
+        pendingThinking += delta;
+        dispatchEvent({ type: 'thinking.delta', delta });
+      },
+      onToolCallDelta: (delta) => {
+        dispatchEvent({
+          type: 'tool.call.delta',
+          toolCallId: delta.toolCallId,
+          name: delta.name,
+          argumentsPart: delta.argumentsPart,
+        });
+      },
+      onTextPart: async (part) => {
+        // The provider closed the block: this part supersedes the deltas that
+        // built it, so they are no longer pending.
+        pendingText = '';
+        await emitPart(part);
+      },
+      onThinkPart: async (part) => {
+        pendingThinking = '';
+        await emitPart(part);
+      },
     },
-    onThinkDelta: (delta) => {
-      dispatchEvent({ type: 'thinking.delta', delta });
+    async flushPending() {
+      const thinking = pendingThinking;
+      const text = pendingText;
+      pendingThinking = '';
+      pendingText = '';
+      if (thinking.length > 0) await emitPart({ type: 'think', think: thinking });
+      if (text.length > 0) await emitPart({ type: 'text', text });
     },
-    onToolCallDelta: (delta) => {
-      dispatchEvent({
-        type: 'tool.call.delta',
-        toolCallId: delta.toolCallId,
-        name: delta.name,
-        argumentsPart: delta.argumentsPart,
-      });
-    },
-    onTextPart: async (part) => {
-      await dispatchEvent({
-        type: 'content.part',
-        uuid: randomUUID(),
-        turnId,
-        step: currentStep,
-        stepUuid,
-        part,
-      });
-    },
-    onThinkPart: async (part) => {
-      await dispatchEvent({
-        type: 'content.part',
-        uuid: randomUUID(),
-        turnId,
-        step: currentStep,
-        stepUuid,
-        part,
-      });
+    discardPending() {
+      pendingText = '';
+      pendingThinking = '';
     },
   };
 }

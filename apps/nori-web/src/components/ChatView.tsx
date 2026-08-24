@@ -881,7 +881,6 @@ export function ChatView(props: ChatViewProps) {
     </nav>}
     </div>
 
-    <ComposerContextStrip goal={sessionStatus?.goal ?? null} todos={todos} onGoalControl={onGoalControl}/>
     <div className="chat-composer-wrap">
       {!followOutput && <button className="chat-jump-latest" onClick={jumpToLatest} title={tr('Jump to latest', '回到最新消息')} aria-label={tr('Jump to latest', '回到最新消息')}><Icon name="chevron-down" size={16}/></button>}
       {pendingQuestions.length > 0 && onResolveQuestion && onDismissQuestion && <QuestionPanel requests={pendingQuestions} onSubmit={onResolveQuestion} onDismiss={onDismissQuestion}/>}
@@ -898,6 +897,7 @@ export function ChatView(props: ChatViewProps) {
       />}
       {rewinding && <div className="chat-rewind-status" role="status" aria-live="polite"><span className="spinner spinner-small"/><span>{tr('Rewinding conversation and workspace…', '正在回溯对话和工作区…')}</span></div>}
       {rewindError && <div className="chat-rewind-status error" role="alert"><Icon name="alert" size={14}/><span>{rewindError}</span><button type="button" onClick={() => setRewindError(null)} aria-label={tr('Dismiss rewind error', '关闭回溯错误')}><Icon name="close" size={12}/></button></div>}
+      <ComposerContextStrip goal={sessionStatus?.goal ?? null} todos={todos} onGoalControl={onGoalControl}/>
       <div className={'chat-input-area' + (input || attachments.length > 0 ? ' has-value' : '') + (modelNotice ? ' missing-model' : '')}>
       {queuedPrompts.length > 0 && <div className="composer-queue"><span>{tr('Queued', '排队中')} {queuedPrompts.length}</span>{queuedPrompts.map(prompt => <div key={prompt.id} title={prompt.text}><span>{prompt.text}</span>{onCancelQueuedPrompt && <button type="button" onClick={() => void onCancelQueuedPrompt(prompt.id)} title={tr('Remove queued prompt', '移除排队消息')} aria-label={tr('Remove queued prompt', '移除排队消息')}><Icon name="close" size={11}/></button>}</div>)}</div>}
       {(attachments.length > 0 || attachmentsLoading) && <div className="composer-attachments">{attachments.map(item => <div className={`composer-attachment attachment-${item.attachment.kind}`} key={item.id}>{item.preview ? <img src={item.preview} alt={item.name}/> : <span className="composer-file-icon"><Icon name="files" size={19}/></span>}<span title={item.name}>{item.name}</span><button type="button" onClick={() => removeAttachment(item)} aria-label={tr('Remove file', '移除文件')}><Icon name="close" size={12}/></button></div>)}{attachmentsLoading && <div className="composer-attachment composer-attachment-loading"><span className="composer-file-icon"><span className="spinner spinner-small"/></span><span>{tr('Uploading…', '正在上传…')}</span></div>}</div>}
@@ -1146,8 +1146,12 @@ function WorkGroup({ blocks, live = false }: { blocks: WorkBlock[]; live?: boole
       <Icon className="work-group-chevron" name="chevron-right" size={11}/>
     </summary>
     <div className="work-group-body">
-      {blocks.map(block => {
-        if (block.type === 'thinking') return <ThinkingLine key={block.id} text={block.text} live={live}/>;
+      {blocks.map((block, index) => {
+        // 只有这一组的最后一块才可能还在写。一段思考后面已经跟了工具调用，说明它
+        // 早就结束了——继续按“正在思考”那样摊开来显示，就成了「下面工具都跑起来了，
+        // 上面的思考框还没收」的那个显示错。
+        const blockLive = live && index === blocks.length - 1;
+        if (block.type === 'thinking') return <ThinkingLine key={block.id} text={block.text} live={blockLive}/>;
         if (block.type === 'context') return <ContextInjectionRow key={block.id} block={block}/>;
         if (block.type === 'tool') return <CompactToolCall key={block.id} tool={block.tool}/>;
         return null;
@@ -1401,13 +1405,23 @@ function formatTokens(value: number): string {
   return new Intl.NumberFormat(undefined, { notation: value >= 10_000 ? 'compact' : 'standard', maximumFractionDigits: 1 }).format(value);
 }
 
-/** 输入框上方的 Goal / Todo 平铺条：一行目标 + 扁平待办列表，无卡片装饰。 */
+const CONTEXT_STRIP_OPEN_KEY = 'nori-composer-context-open';
+
+function loadContextStripOpen(): boolean {
+  return localStorage.getItem(CONTEXT_STRIP_OPEN_KEY) !== 'false';
+}
+
+/**
+ * 输入框上方的 Goal / Todo 条：折叠时只留一行摘要，展开是目标行 + 扁平待办列表。
+ * 它活在 composer 内部，所以宽度始终跟输入框一致。
+ */
 function ComposerContextStrip({ goal, todos, onGoalControl }: {
   goal: GoalSnapshot | null;
   todos: TodoItem[];
   onGoalControl?: (action: 'pause' | 'resume' | 'cancel') => void | Promise<void>;
 }) {
   const { tr } = useI18n();
+  const [open, setOpen] = useState(loadContextStripOpen);
   if (goal === null && todos.length === 0) return null;
   const goalStatusLabel = goal === null
     ? ''
@@ -1419,8 +1433,27 @@ function ComposerContextStrip({ goal, todos, onGoalControl }: {
           ? tr('Blocked', '受阻')
           : tr('Complete', '已完成');
   const done = todos.filter(todo => todo.status === 'done').length;
+  // 折叠时那一行要说点标题之外的东西：正在做的那条待办，没有就说下一条。
+  const summary = goal !== null
+    ? goal.objective
+    : (todos.find(todo => todo.status === 'in_progress') ?? todos.find(todo => todo.status !== 'done'))?.title ?? '';
   return (
-    <div className="composer-context-strip">
+    <details
+      className="composer-context-strip"
+      open={open}
+      onToggle={event => {
+        const next = event.currentTarget.open;
+        setOpen(next);
+        localStorage.setItem(CONTEXT_STRIP_OPEN_KEY, String(next));
+      }}
+    >
+      <summary>
+        <Icon name={goal !== null ? 'target' : 'list'} size={12}/>
+        <strong>{goal !== null ? tr('Goal', '目标') : tr('Todo list', '待办')}</strong>
+        {summary && <span className="composer-context-summary" title={summary}>{summary}</span>}
+        {todos.length > 0 && <em>{done}/{todos.length}</em>}
+        <Icon className="composer-context-chevron" name="chevron-right" size={11}/>
+      </summary>
       {goal !== null && <div className={`composer-goal-row goal-${goal.status}`}>
         <Icon name="target" size={13}/>
         <strong>{tr('Goal', '目标')}</strong>
@@ -1448,7 +1481,7 @@ function ComposerContextStrip({ goal, todos, onGoalControl }: {
           </ul>
         </div>
       )}
-    </div>
+    </details>
   );
 }
 

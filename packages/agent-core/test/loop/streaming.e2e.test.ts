@@ -198,3 +198,125 @@ describe('runTurn — streaming callbacks', () => {
     expect(stepEnd).toBeGreaterThan(lastContent);
   });
 });
+
+/**
+ * Only a completed content part is recorded, so a stream that dies mid-block
+ * used to leave the assistant message empty — the reader watched text arrive and
+ * then the whole round vanished on the next history read. The step records the
+ * accumulated deltas as a part before letting the failure propagate.
+ */
+describe('runTurn — partial content survives a failed step', () => {
+  const failMidStream = (deltas: readonly string[], thinking?: readonly string[]) =>
+    new StreamingLLM(async (params) => {
+      for (const delta of thinking ?? []) params.onThinkDelta?.(delta);
+      for (const delta of deltas) params.onTextDelta?.(delta);
+      throw new Error('terminated');
+    });
+
+  it('records the text and reasoning that streamed before the provider failed', async () => {
+    const sink = new CollectingSink();
+    const context = new RecordingContext();
+    await expect(runTurn({
+      turnId: 'turn-fail',
+      signal: new AbortController().signal,
+      llm: failMidStream(['Here is half ', 'a sentence'], ['weighing it']),
+      buildMessages: context.buildMessages,
+      dispatchEvent: createLoopEventDispatcher({
+        appendTranscriptRecord: context.appendTranscriptRecord,
+        emitLiveEvent: sink.emit,
+      }),
+    })).rejects.toThrow('terminated');
+
+    // Reasoning first, then text: the order the reader saw them in.
+    expect(context.contentParts().map((c) => c.part)).toEqual([
+      { type: 'think', think: 'weighing it' },
+      { type: 'text', text: 'Here is half a sentence' },
+    ]);
+    // Same open step as the envelope, so it lands in that assistant message.
+    const stepUuid = context.stepBegins()[0]?.uuid;
+    expect(context.contentParts().every((c) => c.stepUuid === stepUuid)).toBe(true);
+  });
+
+  it('records the partial answer when the user aborts mid-stream', async () => {
+    const controller = new AbortController();
+    const context = new RecordingContext();
+    const llm = new StreamingLLM(async (params) => {
+      params.onTextDelta?.('as far as I got');
+      controller.abort();
+      params.signal.throwIfAborted();
+      return makeEndTurnResponse('unreachable');
+    });
+
+    const result = await runTurn({
+      turnId: 'turn-abort',
+      signal: controller.signal,
+      llm,
+      buildMessages: context.buildMessages,
+      dispatchEvent: createLoopEventDispatcher({
+        appendTranscriptRecord: context.appendTranscriptRecord,
+      }),
+    });
+
+    expect(result.stopReason).toBe('aborted');
+    expect(context.contentParts().map((c) => c.part)).toEqual([
+      { type: 'text', text: 'as far as I got' },
+    ]);
+  });
+
+  it('keeps the completed part and drops nothing when the provider closed the block itself', async () => {
+    const context = new RecordingContext();
+    const llm = new StreamingLLM(async (params) => {
+      params.onTextDelta?.('done');
+      await params.onTextPart?.({ type: 'text', text: 'done' });
+      throw new Error('terminated after the block closed');
+    });
+
+    await expect(runTurn({
+      turnId: 'turn-closed-block',
+      signal: new AbortController().signal,
+      llm,
+      buildMessages: context.buildMessages,
+      dispatchEvent: createLoopEventDispatcher({
+        appendTranscriptRecord: context.appendTranscriptRecord,
+      }),
+    })).rejects.toThrow('terminated after the block closed');
+
+    // The part superseded its deltas, so the flush must not duplicate it.
+    expect(context.contentParts().map((c) => c.part)).toEqual([{ type: 'text', text: 'done' }]);
+  });
+
+  it('drops the failed attempt\'s stream when a retry re-sends the message', async () => {
+    const context = new RecordingContext();
+    let attempt = 0;
+    const llm: LLM = {
+      systemPrompt: '',
+      modelName: 'retrying',
+      isRetryableError: () => true,
+      async chat(params: LLMChatParams): Promise<LLMChatResponse> {
+        attempt += 1;
+        if (attempt === 1) {
+          params.onTextDelta?.('first attempt text');
+          throw new Error('terminated');
+        }
+        params.onTextDelta?.('second attempt text');
+        await params.onTextPart?.({ type: 'text', text: 'second attempt text' });
+        return makeEndTurnResponse('second attempt text');
+      },
+    };
+
+    await runTurn({
+      turnId: 'turn-retry',
+      signal: new AbortController().signal,
+      llm,
+      buildMessages: context.buildMessages,
+      dispatchEvent: createLoopEventDispatcher({
+        appendTranscriptRecord: context.appendTranscriptRecord,
+      }),
+    });
+
+    expect(attempt).toBe(2);
+    expect(context.contentParts().map((c) => c.part)).toEqual([
+      { type: 'text', text: 'second attempt text' },
+    ]);
+  });
+});
