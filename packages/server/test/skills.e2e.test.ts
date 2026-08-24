@@ -15,7 +15,7 @@
  *
  * **Bootstrap strategy**: same as tools.e2e — spawn the real server with a
  * sandboxed HOME. Project skills are seeded under
- * `<cwd>/.kimi-code/skills/<name>/SKILL.md` BEFORE the session is created,
+ * `<cwd>/.nori-code/skills/<name>/SKILL.md` BEFORE the session is created,
  * because the registry scans skill roots at session construction.
  *
  * **Activation success**: `TurnFlow.prompt` enqueues asynchronously, so the
@@ -129,9 +129,9 @@ async function createSession(r: RunningServer): Promise<string> {
   return env.data.id;
 }
 
-/** Seed a project skill bundle at `<cwd>/.kimi-code/skills/<name>/SKILL.md`. */
+/** Seed a project skill bundle at `<cwd>/.nori-code/skills/<name>/SKILL.md`. */
 function seedProjectSkill(name: string, frontmatterType?: string): void {
-  const dir = join(workspaceDir, '.kimi-code', 'skills', name);
+  const dir = join(workspaceDir, '.nori-code', 'skills', name);
   mkdirSync(dir, { recursive: true });
   const typeLine = frontmatterType === undefined ? '' : `type: ${frontmatterType}\n`;
   writeFileSync(

@@ -13,10 +13,12 @@ import { useI18n } from '../i18n';
 import { discussionSpeakingAgentIds } from '../utils/team-discussion';
 import { Icon } from './Icon';
 
-const NODE_W = 188;
-const NODE_H = 62;
+// 卡片是三行：名字、角色、职责。职责最多两行，所以高度按三行内容定，
+// 竖直间距相应收窄，整棵树的行距和之前基本一致。
+const NODE_W = 212;
+const NODE_H = 94;
 const GAP_X = 26;
-const GAP_Y = 74;
+const GAP_Y = 58;
 const CANVAS_PAD = 40;
 const MIN_SCALE = 0.3;
 const MAX_SCALE = 2.5;
@@ -360,8 +362,8 @@ export function TeamTreePage({ session, onSelectAgent }: {
                           {discussing
                             ? <em className="discuss-badge">{tr('Discussing', '讨论中')}</em>
                             : <em>{node.agent.role || statusText(node.agent)}</em>}
-                          {node.agent.mandate && <q>{node.agent.mandate}</q>}
                         </span>
+                        {node.agent.mandate && <q className="team-node-task" title={node.agent.mandate}>{node.agent.mandate}</q>}
                       </button>
                     );
                   })}

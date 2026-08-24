@@ -4521,8 +4521,9 @@ kbd {
 .team-node {
   position: absolute;
   display: flex; flex-direction: column; gap: 3px;
-  width: 188px; min-height: 62px;
+  width: 212px; min-height: 94px;
   padding: 9px 11px;
+  overflow: hidden;
   text-align: left;
   border: 1px solid var(--nori-border);
   border-radius: 9px;
@@ -4540,16 +4541,31 @@ kbd {
 .team-node-name i.tone-attention { background: #d9a13c; }
 .team-node-name i.tone-muted { background: var(--nori-border); opacity: .6; }
 @keyframes team-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
-.team-node-sub { display: flex; align-items: center; gap: 6px; color: var(--nori-text-secondary); font-size: calc(11px * var(--nori-ui-font-scale)); overflow: hidden; white-space: nowrap; }
-.team-node-sub q { quotes: none; overflow: hidden; text-overflow: ellipsis; opacity: .75; }
-.team-node-sub em { font-style: normal; flex: 0 0 auto; }
+.team-node-sub { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--nori-text-secondary); font-size: calc(11px * var(--nori-ui-font-scale)); }
+.team-node-sub em { min-width: 0; font-style: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 职责单独一行、最多两行：和角色挤在同一行时 flex 会先满足 flex:0 0 auto 的角色，
+   再把 overflow:hidden 的职责压到自动最小宽度 0，结果只剩两三个字加省略号。 */
+.team-node-task {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  quotes: none; overflow: hidden;
+  color: var(--nori-text-secondary); opacity: .75;
+  font-size: calc(11px * var(--nori-ui-font-scale)); line-height: 1.36;
+}
 .discuss-badge { font-style: normal; color: var(--nori-accent, currentColor); border: 1px solid currentColor; border-radius: 999px; padding: 0 7px; font-size: calc(10px * var(--nori-ui-font-scale)); }
 .team-tree-empty { padding: 40px 16px; color: var(--nori-text-secondary); text-align: center; }
 .team-tree-footer { display: flex; align-items: center; gap: 7px; padding: 10px 6px 2px; color: var(--nori-text-secondary); font-size: calc(11px * var(--nori-ui-font-scale)); }
 
 
-/* 输入框上方的 Goal / Todo 条：可折叠，宽度跟着 composer 走 */
-.composer-context-strip { margin: 0 0 6px; }
+/* 输入框上方的 Goal / Todo 条：可折叠，宽度跟着 composer 走。
+   不画边框、不铺底板 —— 原来那块 color-mix(--nori-surface 70%) 的填充和页面底色
+   几乎一样，只有 1px 边框看得见，等于在消息上多出一个跟输入框同宽的空框子。
+   改成一段渐变：顶端完全透明，往下渐渐带上输入框的色调，长度就是条子自身高度，
+   条子展开多高渐变就多长，任何位置都没有硬边。 */
+.composer-context-strip {
+  margin: 0 0 6px;
+  border-radius: 10px 10px 0 0;
+  background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--nori-surface) 55%, transparent));
+}
 .composer-context-strip > summary {
   display: flex; align-items: center; gap: 7px; min-width: 0;
   padding: 3px 4px; cursor: pointer; list-style: none;
@@ -4569,12 +4585,11 @@ kbd {
 .composer-context-strip .composer-todos-head { display: none; }
 .composer-context-strip .composer-goal-row + .composer-todos { margin-top: 4px; }
 .composer-context-strip .composer-todos ul { margin-top: 0; }
+/* 不加边框和半透明底板：这两块本来是浮在消息流上方的，半透明深色叠上去就是一层
+   遮罩。背景交给 .chat-composer-wrap 的渐变，条子本身只是文字。 */
 .composer-goal-row {
   display: flex; align-items: center; gap: 8px; min-width: 0;
-  padding: 5px 10px;
-  border: 1px solid var(--nori-border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--nori-surface) 70%, transparent);
+  padding: 3px 4px;
   color: var(--nori-text-secondary);
   font-size: calc(12px * var(--nori-ui-font-scale));
 }
@@ -4591,10 +4606,7 @@ kbd {
 .composer-goal-actions button:hover { color: var(--nori-text); border-color: var(--nori-text-secondary); }
 .composer-goal-actions button.danger:hover { color: #e07a6a; border-color: #e07a6a; }
 .composer-todos {
-  padding: 5px 10px;
-  border: 1px solid var(--nori-border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--nori-surface) 70%, transparent);
+  padding: 0 4px;
 }
 .composer-todos-head { display: flex; align-items: center; gap: 7px; color: var(--nori-text-secondary); font-size: calc(11px * var(--nori-ui-font-scale)); }
 .composer-todos-head em { font-style: normal; margin-left: auto; }
@@ -4754,6 +4766,8 @@ kbd {
   bottom: auto;
   width: 5px;
   flex: 0 0 5px;
+  /* 手柄和工具卡片一样上下留 10px：高亮描边跟着手柄走，不超出卡片上下边缘。 */
+  margin: 10px 0;
   cursor: ew-resize;
 }
 @media (max-width: 760px) {

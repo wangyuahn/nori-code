@@ -5,6 +5,7 @@
  *
  *   GET    /sessions/{sid}/messages         query: ListMessages   data: Page<Message>
  *   GET    /sessions/{sid}/messages/{mid}   -                     data: Message
+ *   GET    /sessions/{sid}/agents/{aid}/system-prompt             data: SessionAgentSystemPromptResponse
  *
  * Validation: query is coerced + checked by `messagesListQueryCoercion`
  * (`z.coerce.number()` for `page_size`, mutex re-asserted via superRefine,
@@ -29,8 +30,9 @@ import {
   getMessageResponseSchema,
   listMessagesResponseSchema,
   messageRoleSchema,
+  sessionAgentSystemPromptResponseSchema,
 } from '@nori-code/protocol';
-import { IMessageService, MessageNotFoundError, SessionNotFoundError, type IInstantiationService } from '@nori-code/agent-core';
+import { ISessionService, IMessageService, MessageNotFoundError, SessionNotFoundError, type IInstantiationService } from '@nori-code/agent-core';
 import { z } from 'zod';
 
 
@@ -151,6 +153,37 @@ export function registerMessagesRoutes(
     listAgentRoute.path,
     listAgentRoute.options,
     listAgentRoute.handler as Parameters<MessageRouteHost['get']>[2],
+  );
+
+  // GET /sessions/{session_id}/agents/{agent_id}/system-prompt -------------
+  const agentSystemPromptRoute = defineRoute(
+    {
+      method: 'GET',
+      path: '/sessions/{session_id}/agents/{agent_id}/system-prompt',
+      params: sessionAgentIdParamSchema,
+      success: { data: sessionAgentSystemPromptResponseSchema },
+      errors: {
+        [ErrorCode.SESSION_NOT_FOUND]: {},
+      },
+      description: 'Get the effective system prompt of an agent within a session',
+      tags: ['messages'],
+    },
+    async (req, reply) => {
+      try {
+        const { session_id, agent_id } = req.params;
+        const result = await ix.invokeFunction((a) =>
+          a.get(ISessionService).getAgentSystemPrompt(session_id, agent_id),
+        );
+        reply.send(okEnvelope(result, req.id));
+      } catch (err) {
+        sendMappedError(reply, req.id, err);
+      }
+    },
+  );
+  app.get(
+    agentSystemPromptRoute.path,
+    agentSystemPromptRoute.options,
+    agentSystemPromptRoute.handler as Parameters<MessageRouteHost['get']>[2],
   );
 
   // GET /sessions/{session_id}/messages/{message_id} -------------------

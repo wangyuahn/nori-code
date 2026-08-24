@@ -4,6 +4,8 @@
  * Uses a fake UrlFetcher to test tool behaviour in isolation.
  */
 
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -406,7 +408,11 @@ describe('BrowserTool', () => {
       action: 'navigate',
       url: 'file:///C:/workspace/demo/index.html',
     })).toMatchObject({
-      accesses: [{ kind: 'file', operation: 'read', path: 'C:\\workspace\\demo\\index.html' }],
+      accesses: [{
+        kind: 'file',
+        operation: 'read',
+        path: fileURLToPath('file:///C:/workspace/demo/index.html'),
+      }],
     });
   });
 

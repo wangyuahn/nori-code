@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../src/api/client';
-import { apiMessageToChat, applyRealtimeStatusEvent, isClientNoticeId, reconcileHistory, turnFailureText, canApplyGeneratedSessionTitle, chatFilesFromPromptAttachments, chatScopeKey, confirmOptimisticUserMessage, fallbackSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, isTransientChatMessageId, latestTodos, liveAssistantMessage, mergeHistory, mergeInFlightWorkBlocks, promptForRewind, RealtimeEventDeduper, RealtimeSubscriptionGate, shouldFinishAbortedPrompt, shouldIgnoreTranscriptEvent, splitUploadedFileMarkup, statusForSession, stripGeneratedSessionTitle } from '../src/hooks/useChatMessages';
+import { apiMessageToChat, applyRealtimeStatusEvent, isClientNoticeId, reconcileHistory, turnFailureText, canApplyGeneratedSessionTitle, chatFilesFromPromptAttachments, chatScopeKey, confirmOptimisticUserMessage, fallbackSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, isTransientChatMessageId, latestTodos, liveAssistantMessage, mergeHistory, mergeInFlightWorkBlocks, promptForRewind, RealtimeEventDeduper, RealtimeSubscriptionGate, shouldFinishAbortedPrompt, shouldIgnoreTranscriptEvent, splitUploadedFileMarkup, statusForSession, stripGeneratedSessionTitle, unwrapWholeAnswerCodeFence } from '../src/hooks/useChatMessages';
 
 describe('session-bound realtime status', () => {
   const status = {
@@ -155,6 +155,51 @@ describe('main transcript projection', () => {
     expect(generatedSessionTitle(answer)).toBe('修复标题');
     expect(stripGeneratedSessionTitle(answer)).toBe('完成。');
     expect(fallbackSessionTitle('修复模型标题显示问题，并保留项目会话。')).toBe('修复模型标题显示问题，并保留项目会话。');
+  });
+
+  it('unwraps an answer the model fenced as html so it renders as markdown', () => {
+    const answer = [
+      '```html',
+      '<nori-session-title>修复解析</nori-session-title>',
+      '',
+      '## 结论',
+      '',
+      '**已修复**，运行 `pnpm test`：',
+      '',
+      '```bash',
+      'pnpm test',
+      '```',
+      '',
+      '就这些。',
+      '```',
+    ].join('\n');
+
+    expect(generatedSessionTitle(answer)).toBe('修复解析');
+    const stripped = stripGeneratedSessionTitle(answer);
+    expect(stripped.startsWith('## 结论')).toBe(true);
+    expect(stripped).toContain('```bash\npnpm test\n```');
+    expect(stripped).not.toContain('```html');
+  });
+
+  it('unwraps the outer fence while it is still streaming, before any closer arrives', () => {
+    expect(stripGeneratedSessionTitle('```html\n<nori-session-title>修复解析</nori-session-title>\n\n## 结'))
+      .toBe('## 结');
+    expect(unwrapWholeAnswerCodeFence('~~~markdown\n<nori-session-title>标题</nori-session-title>\n正文'))
+      .toBe('<nori-session-title>标题</nori-session-title>\n正文');
+  });
+
+  it('leaves genuine code blocks and raw-markdown answers fenced', () => {
+    const bash = '```bash\npnpm test\n```';
+    expect(unwrapWholeAnswerCodeFence(bash)).toBe(bash);
+
+    const page = '```html\n<div class="card">\n  <span>hi</span>\n</div>\n```';
+    expect(unwrapWholeAnswerCodeFence(page)).toBe(page);
+
+    const rawMarkdown = '```markdown\n# 标题\n\n正文\n```';
+    expect(unwrapWholeAnswerCodeFence(rawMarkdown)).toBe(rawMarkdown);
+
+    const prose = '这是普通回复，**加粗**正常。';
+    expect(unwrapWholeAnswerCodeFence(prose)).toBe(prose);
   });
 
   it('only repairs missing or reminder-polluted automatic titles', () => {
@@ -490,7 +535,13 @@ describe('main transcript projection', () => {
       speaker: { from: 'team', name: '缓存审查员' },
     });
     expect(teamSpeak?.workBlocks).toBeUndefined();
-    expect(teamDm).toBeNull();
+    // A team DM is injected context, not a chat bubble: it renders as a
+    // context-injection row attributed to its speaker.
+    expect(teamDm).toMatchObject({
+      role: 'assistant',
+      text: '',
+      workBlocks: [{ type: 'context', source: 'team-dm · Alpha', content: '请检查缓存键。' }],
+    });
 
     const legacyTeamDm = apiMessageToChat({
       id: 'legacy-team-dm',
@@ -505,7 +556,10 @@ describe('main transcript projection', () => {
         },
       },
     });
-    expect(legacyTeamDm).toBeNull();
+    expect(legacyTeamDm).toMatchObject({
+      role: 'assistant',
+      workBlocks: [{ type: 'context', source: 'team-dm · 缓存审查员', content: '旧版私信。' }],
+    });
   });
 
   it('keeps each assistant message around a hidden wake-up trigger', () => {
@@ -524,8 +578,11 @@ describe('main transcript projection', () => {
       { id: 'u1', role: 'user' as const, text: 'Run a SubAgent', createdAt: '2026-07-14T00:00:00.000Z' },
       { id: 'a1', role: 'assistant' as const, text: 'The SubAgent is running.', createdAt: '2026-07-14T00:00:01.000Z' },
     ];
+    // The wake-up is recorded as a silent boundary row; it answers a background
+    // event, not the user's command, so it must break the command group.
     const completedAfterWake = [
-      { id: 'a2', role: 'assistant' as const, text: 'The SubAgent finished.', createdAt: '2026-07-14T00:00:02.000Z' },
+      { id: 'wake', role: 'system' as const, text: '', turnBoundary: true as const, createdAt: '2026-07-14T00:00:02.000Z' },
+      { id: 'a2', role: 'assistant' as const, text: 'The SubAgent finished.', createdAt: '2026-07-14T00:00:03.000Z' },
     ];
 
     expect(mergeHistory(previous, completedAfterWake)).toMatchObject([
@@ -538,6 +595,7 @@ describe('main transcript projection', () => {
   it('preserves distinct persisted wake-up messages even when their text is identical', () => {
     const previous = [
       { id: 'assistant-a', role: 'assistant' as const, text: 'Done.', createdAt: '2026-07-14T00:00:01.000Z' },
+      { id: 'wake', role: 'system' as const, text: '', turnBoundary: true as const, createdAt: '2026-07-14T00:00:01.500Z' },
     ];
     const incoming = [
       { id: 'assistant-b', role: 'assistant' as const, text: 'Done.', createdAt: '2026-07-14T00:00:02.000Z' },
@@ -639,19 +697,18 @@ describe('main transcript projection', () => {
     expect(merged).toEqual([report]);
   });
 
-  it('keeps consecutive assistant messages as independent transcript rows', () => {
+  it('folds consecutive assistant messages of one command into a single row', () => {
     const folded = foldConversationTurns([
       { id: 'a1', role: 'assistant', text: 'I will inspect the files.' },
       { id: 'a2', role: 'assistant', text: 'The issue is in the event projector.' },
     ]);
-    expect(folded).toHaveLength(2);
-    expect(folded.map(message => message.text)).toEqual([
-      'I will inspect the files.',
-      'The issue is in the event projector.',
-    ]);
+    expect(folded).toHaveLength(1);
+    expect(folded[0]?.text).toBe('The issue is in the event projector.');
+    expect(folded[0]?.workBlocks?.map(block => block.type)).toEqual(['progress']);
+    expect(folded[0]?.workBlocks?.[0]).toMatchObject({ type: 'progress', text: 'I will inspect the files.' });
   });
 
-  it('keeps a retried assistant answer after the visible system error that caused it', () => {
+  it('folds a retried answer into the same command row while the error stays visible', () => {
     const folded = foldConversationTurns([
       { id: 'u', role: 'user', text: 'question' },
       { id: 'a1', role: 'assistant', text: 'first answer' },
@@ -661,10 +718,10 @@ describe('main transcript projection', () => {
 
     expect(folded.map(message => [message.id, message.role, message.text])).toEqual([
       ['u', 'user', 'question'],
-      ['a1', 'assistant', 'first answer'],
+      ['a1', 'assistant', 'retry answer'],
       ['error', 'system', 'turn failed'],
-      ['a2', 'assistant', 'retry answer'],
     ]);
+    expect(folded[1]?.workBlocks?.[0]).toMatchObject({ type: 'progress', text: 'first answer' });
   });
 
   it('keeps one turn in one work process when a discussion statement lands between its steps', () => {
@@ -784,7 +841,7 @@ describe('main transcript projection', () => {
     }]);
   });
 
-  it('keeps independent messages stable when history is projected again', () => {
+  it('keeps folded command rows stable when history is projected again', () => {
     const once = foldConversationTurns([
       {
         id: 'step-1',
@@ -798,10 +855,8 @@ describe('main transcript projection', () => {
     const twice = foldConversationTurns(once);
 
     expect(twice).toEqual(once);
-    expect(twice.map(message => message.text)).toEqual([
-      'I am applying the change.',
-      'The change is complete and verified.',
-    ]);
+    expect(twice).toHaveLength(1);
+    expect(twice[0]?.text).toBe('The change is complete and verified.');
   });
 
   it('folds tool results into the assistant turn that called them', () => {
@@ -828,13 +883,14 @@ describe('main transcript projection', () => {
     })!;
 
     const folded = foldConversationTurns([first, result, second]);
-    expect(folded[0]?.workBlocks?.map(block => block.type)).toEqual(['thinking', 'tool']);
+    expect(folded).toHaveLength(1);
+    expect(folded[0]?.workBlocks?.map(block => block.type)).toEqual(['thinking', 'tool', 'thinking']);
     expect(folded[0]?.toolCalls).toMatchObject([{
       id: 'edit-1',
       result: 'Content tag mismatch',
       isError: true,
     }]);
-    expect(folded[1]?.text).toBe('Done.');
+    expect(folded[0]?.text).toBe('Done.');
   });
 
   it('drops an orphan tool result without inventing the name tool', () => {

@@ -60,13 +60,24 @@ module.exports = {
   },
 
   linux: {
-    icon: 'build/icon.png',
+    // A directory, not a single PNG: electron-builder installs one hicolor
+    // entry per file, and launchers only look at the standard sizes. Shipping
+    // just build/icon.png landed a lone 1024x1024 entry that no icon theme
+    // resolves, so the launcher fell back to a generic cog.
+    icon: 'build/icons',
     executableName: 'nori-work',
     category: 'Development',
     target: ['AppImage', 'deb'],
     artifactName: 'Nori-Work-${version}-${arch}.${ext}',
     maintainer: 'Nori',
     protocols: [{ name: 'Nori Work', schemes: ['nori-work'] }],
+  },
+
+  deb: {
+    // Replaces electron-builder's after-install.tpl so chrome-sandbox is always
+    // setuid root; see the script's header for why the upstream probe is wrong
+    // on Ubuntu 23.10+.
+    afterInstall: 'build/deb-after-install.sh',
   },
 
   publish: {

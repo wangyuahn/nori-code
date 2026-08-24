@@ -858,9 +858,23 @@ export function ChatView(props: ChatViewProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const [agentSystemPrompt, setAgentSystemPrompt] = useState<string | null>(null);
+  useEffect(() => {
+    if (currentSessionId === null) {
+      setAgentSystemPrompt(null);
+      return;
+    }
+    let disposed = false;
+    api.sessions.getAgentSystemPrompt(currentSessionId, agentId)
+      .then(prompt => { if (!disposed) setAgentSystemPrompt(prompt ?? null); })
+      .catch(() => { if (!disposed) setAgentSystemPrompt(null); });
+    return () => { disposed = true; };
+  }, [currentSessionId, agentId]);
+
   return <section className="chat-view" aria-label={tr('Conversation', '对话')}>
     <div className="chat-messages-shell">
     <div className="chat-messages" ref={messagesScrollRef} onScroll={handleMessagesScroll}>
+      {messages.length > 0 && agentSystemPrompt !== null && <ContextInjectionRow block={{ id: 'agent-system-prompt', type: 'context', source: 'system-prompt', content: agentSystemPrompt }} label={tr('System prompt', '系统提示词')}/>}
       {messagesLoading ? <div className="chat-history-loading" role="status"><span className="spinner"/><strong>{tr('Loading conversation…', '正在加载会话…')}</strong></div> : messages.length === 0 ? <div className="chat-welcome"><div className="welcome-mark"><Icon name="sparkles" size={27}/></div><span className="eyebrow">{tr('Your thoughtful coding partner', '你的智能编程伙伴')}</span><h2>{session ? tr('What should we make better?', '我们要改进什么？') : tr('What would you like to work on?', '你想从哪里开始？')}</h2><p>{session ? tr('Ask Nori to inspect code, plan a feature, fix a bug, or validate an API integration.', '让 Nori 检查代码、规划功能、修复缺陷或验证 API 集成。') : tr('Choose a project folder to start a new task, or open an existing conversation from the sidebar. You can also type below now.', '选择一个项目文件夹开始新任务，或打开已有对话。你也可以直接在下方输入。')}</p><UsageOverview sessions={allSessions} models={models}/><div className="starter-grid">{STARTERS.map(item => <button key={item.title} className="starter-card" onClick={() => void handleSend(tr(item.prompt, item.promptZh))}><Icon name="sparkles" size={16}/><span><strong>{tr(item.title, item.titleZh)}</strong><small>{tr(item.prompt, item.promptZh)}</small></span></button>)}</div></div> : presentedMessages.map(({ message, workStartedAt }) => <MessageBubble key={message.id} message={message} sessionAgents={sessionAgents} workStartedAt={workStartedAt} rewindCount={rewindCounts.get(message.id)} rewindDisabled={isStreaming || rewinding} onRewind={requestRewind} live={message.id === continuationMessageId ? { streaming, thinking, workBlocks, stopping, onAbort: handleAbort } : undefined}/>) }
 
       {isStreaming && !streamingContinuesAssistant && <div className="chat-message chat-message-assistant chat-message-streaming"><div className="message-body"><div className="chat-message-role">Nori <span>{pendingApprovals.length > 0 || browserPermissions.pending.length > 0 ? tr('waiting for permission', '等待授权') : tr('working', '工作中')}</span></div>{standaloneLiveBlocks.length > 0 ? <WorkStream blocks={standaloneLiveBlocks} live activeProgressId={standaloneLiveProgressId} startedAt={latestUserStartedAt}/> : <div className="chat-message-content"><span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span><span className="streaming-cursor"/></div>}{streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(streaming))} tokens</div>}<button className="chat-abort-btn" onClick={() => void handleAbort()} disabled={stopping}><Icon name="stop" size={13}/> {stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button></div></div>}
@@ -1202,13 +1216,13 @@ function ThinkingLine({ text, live = false }: { text: string; live?: boolean }) 
   </details>;
 }
 
-function ContextInjectionRow({ block }: { block: Extract<WorkBlock, { type: 'context' }> }) {
+function ContextInjectionRow({ block, label }: { block: Extract<WorkBlock, { type: 'context' }>; label?: string }) {
   const { tr } = useI18n();
   const hasContent = Boolean(block.content?.trim());
   return <details className={`context-injection-row${block.isError ? ' error' : ''}`}>
     <summary>
       <Icon name="document" size={13}/>
-      <span>{tr('Context injection', '上下文注入')}</span>
+      <span>{label ?? tr('Context injection', '上下文注入')}</span>
       <span className="context-injection-separator">·</span>
       <span className="context-injection-source">{block.source}</span>
       {hasContent && <Icon className="context-injection-chevron" name="chevron-right" size={11}/>}

@@ -921,6 +921,11 @@ export function createClient(
       getDepartmentChat: (id: string, agentId: string) =>
         request<SessionAgentChatResponse>(`/sessions/${encodeURIComponent(id)}/agents/${encodeURIComponent(agentId)}/chat`),
 
+      getAgentSystemPrompt: async (id: string, agentId: string) => {
+        const response = await request<{ system_prompt?: string }>(`/sessions/${encodeURIComponent(id)}/agents/${encodeURIComponent(agentId)}/system-prompt`);
+        return response.system_prompt;
+      },
+
       sendPrompt: (
         sessionId: string,
         text: string,

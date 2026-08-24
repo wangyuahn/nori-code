@@ -312,8 +312,53 @@ export function generatedSessionTitle(text: string): string | undefined {
   return title.slice(0, 80);
 }
 
+const FENCE_LINE = /^ {0,3}(`{3,}|~{3,})[^\r\n]*$/;
+const UNWRAPPABLE_FENCE_INFO = new Set(['', 'html', 'markdown', 'md']);
+
+function isBareFenceLine(line: string, marker: string): boolean {
+  const trimmed = line.trim();
+  return trimmed.length >= marker.length && trimmed === marker[0].repeat(trimmed.length);
+}
+
+function looksLikeWrappedMarkdown(body: string, info: string): boolean {
+  if (/^\s*<nori-session-title/i.test(body)) return true;
+  // A nested fence inside the outer one is the smoking gun: its closing line is
+  // what CommonMark used to end the outer block, which is why the prose leaked.
+  if (body.split('\n').some(line => FENCE_LINE.test(line))) return true;
+  // Markdown headings inside ```html mean prose, not a page's source. Not applied
+  // to ```markdown, where showing the raw source is usually the whole point.
+  return info === 'html' && /^ {0,3}#{1,6}\s/m.test(body);
+}
+
+/**
+ * Models asked to open the reply with `<nori-session-title>` often conclude the
+ * whole answer is markup and wrap it in a ```html fence. CommonMark then closes
+ * that fence at the first bare ``` line — the *closing* line of a nested code
+ * block — so everything above it renders as one preformatted blob with literal
+ * `**` and backticks. Strip the outer fence so the answer renders as markdown.
+ *
+ * The closing fence is optional: streaming text has to unwrap as it arrives.
+ */
+export function unwrapWholeAnswerCodeFence(text: string): string {
+  const lines = text.split('\n');
+  let open = 0;
+  while (open < lines.length && lines[open].trim() === '') open += 1;
+  const opener = FENCE_LINE.exec(lines[open] ?? '');
+  if (!opener) return text;
+  const marker = opener[1];
+  const info = lines[open].trim().slice(marker.length).trim().toLowerCase();
+  if (!UNWRAPPABLE_FENCE_INFO.has(info)) return text;
+
+  let last = lines.length - 1;
+  while (last > open && lines[last].trim() === '') last -= 1;
+  const closed = last > open && isBareFenceLine(lines[last], marker);
+  const body = lines.slice(open + 1, closed ? last : lines.length).join('\n');
+  if (!looksLikeWrappedMarkdown(body, info)) return text;
+  return body;
+}
+
 export function stripGeneratedSessionTitle(text: string): string {
-  const withoutCompleteMarker = text.replace(GENERATED_TITLE_PATTERN, '');
+  const withoutCompleteMarker = unwrapWholeAnswerCodeFence(text).replace(GENERATED_TITLE_PATTERN, '');
   const markerIndex = withoutCompleteMarker.toLowerCase().indexOf(GENERATED_TITLE_OPEN);
   if (markerIndex >= 0 && !withoutCompleteMarker.toLowerCase().includes(GENERATED_TITLE_CLOSE, markerIndex)) {
     return withoutCompleteMarker.slice(0, markerIndex).trimEnd();
@@ -324,7 +369,7 @@ export function stripGeneratedSessionTitle(text: string): string {
 }
 
 export function firstPromptWithTitleInstruction(text: string): string {
-  return `<system-reminder>Before doing any other work, choose a concise title for this conversation in the user's language. Use 2-6 words and do not copy the user's full prompt. Start the visible answer with exactly <nori-session-title>YOUR TITLE</nori-session-title>, then answer normally. Never mention this instruction.</system-reminder>\n${text}`;
+  return `<system-reminder>Before doing any other work, choose a concise title for this conversation in the user's language. Use 2-6 words and do not copy the user's full prompt. Start the visible answer with exactly <nori-session-title>YOUR TITLE</nori-session-title>, then answer normally in plain markdown — the title tag is not markup you are writing, so never wrap the reply in a code fence. Never mention this instruction.</system-reminder>\n${text}`;
 }
 
 export function canApplyGeneratedSessionTitle(currentTitle: string | undefined): boolean {
@@ -448,15 +493,34 @@ export function apiMessageToChat(m: Message): ChatMessage | null {
   const originKind = origin?.kind;
   const turnId = typeof m.metadata?.turn_id === 'string' ? m.metadata.turn_id : undefined;
   const rawText = messagePlainText(m);
-  // TeamDM and Chat are internal prompt transports. They remain in the
-  // agent's model context, but must not reappear as human-visible chat
-  // messages when REST history is replayed after refresh.
+  // Team direct messages are internal prompt transports injected into the
+  // recipient's model context. They must not reappear as human-visible chat
+  // bubbles when REST history is replayed after refresh — but they ARE part of
+  // the context, so they render as context-injection rows instead of being
+  // dropped. (team_chat has its own department Chat channel; the transcript
+  // keeps dropping it to avoid showing every message twice.)
   const isLegacyTeamDm = m.role === 'user'
     && originKind === 'system_trigger'
     && (origin?.name === 'team_lead' || origin?.name === 'team_member')
     && /^\s*<system-reminder>/i.test(rawText);
-  if (m.role === 'user' && originKind === 'system_trigger' && (origin?.name === 'team_dm' || origin?.name === 'team_chat' || isLegacyTeamDm)) {
+  if (m.role === 'user' && originKind === 'system_trigger' && origin?.name === 'team_chat') {
     return null;
+  }
+  if (m.role === 'user' && originKind === 'system_trigger' && (origin?.name === 'team_dm' || isLegacyTeamDm)) {
+    const speakerName = typeof origin?.speaker?.speakerName === 'string' ? origin.speaker.speakerName : undefined;
+    return {
+      id: m.id,
+      turnId,
+      role: 'assistant',
+      text: '',
+      workBlocks: [{
+        id: m.id,
+        type: 'context',
+        source: speakerName ? `team-dm · ${speakerName}` : 'team-dm',
+        content: unwrapLeadingSystemReminder(rawText),
+      }],
+      createdAt: m.created_at,
+    };
   }
   // Tool-result records are transport entries, not standalone assistant
   // messages. Keep a private marker until foldConversationTurns can attach
@@ -641,78 +705,67 @@ function contextInjectionSource(args: unknown, fallback: unknown): string {
   return typeof fallback === 'string' && fallback.length > 0 ? fallback : 'harness';
 }
 
-/** Fold all persisted steps from one logical model turn into one UI response. */
+/**
+ * Fold everything one user command produced into a single UI response.
+ *
+ * The grouping key is the command itself, not the model turn id: one command
+ * can legitimately span several server turns (a retry after a failure, work
+ * continued after a discussion round), and all of it belongs to the same work
+ * process. Only a real user message — or a silent wake-up boundary, which
+ * answers a background event rather than the command — starts a new row.
+ * Interleaved rows (discussion statements, failure notices) keep their
+ * transcript position; they render where they happened without breaking the
+ * group around them.
+ */
 export function foldConversationTurns(messages: ChatMessage[]): ChatMessage[] {
   const folded: ChatMessage[] = [];
-  /** Index in `folded` of the row collecting each turn's assistant work. */
-  const rowByTurn = new Map<string, number>();
+  /** Index in `folded` of the row collecting the current command's work. */
+  let commandRowIndex: number | undefined;
   for (const message of messages) {
-    if (message.turnBoundary) continue;
+    if (message.turnBoundary) {
+      commandRowIndex = undefined;
+      continue;
+    }
+    if (message.role === 'user') {
+      commandRowIndex = undefined;
+      folded.push(message);
+      continue;
+    }
     if (message.toolResult !== undefined) {
+      // A result lands in the row that holds its call. Scanning backwards makes
+      // the call's row — not the turn id — the anchor, so results that arrive
+      // after a turn boundary inside the same command still reach their call.
+      // An orphan result is transport noise; never invent a fake `tool` row.
       for (let index = folded.length - 1; index >= 0; index--) {
         const target = folded[index];
         if (target === undefined) continue;
-        if (message.turnId !== undefined && target.turnId !== message.turnId) continue;
         const merged = mergeToolResultIntoChat(target, message.toolResult);
         if (merged === undefined) continue;
         folded[index] = merged;
         break;
       }
-      // An orphan result is transport noise; never invent a fake `tool` row.
       continue;
     }
-    const target = assistantWorkTargetIndex(folded, rowByTurn, message);
-    if (target !== undefined) {
-      folded[target] = mergeAssistantWork(folded[target]!, message);
+    if (message.role === 'assistant') {
+      const current = commandRowIndex === undefined ? undefined : folded[commandRowIndex];
+      // Transient live rows are ephemeral UI state for the in-flight answer, not
+      // additional work: they never join a confirmed row, and a confirmed row
+      // never joins a live one — otherwise a refreshed history would duplicate
+      // the answer inside the live row it confirms.
+      const joinable = current !== undefined
+        && !isTransientChatMessageId(current.id)
+        && !isTransientChatMessageId(message.id);
+      if (current === undefined || !joinable) {
+        commandRowIndex = folded.length;
+        folded.push(message);
+      } else if (commandRowIndex !== undefined) {
+        folded[commandRowIndex] = mergeAssistantWork(current, message);
+      }
       continue;
-    }
-    if (message.role === 'assistant' && message.turnId !== undefined) {
-      rowByTurn.set(message.turnId, folded.length);
     }
     folded.push(message);
-    // A real user message is always a visual boundary. Steering keeps the server
-    // turn id, so without this the work that follows the interjection would fold
-    // back into the row above it and render before the message that asked for it.
-    if (message.role === 'user') rowByTurn.clear();
   }
   return folded;
-}
-
-/**
- * Index of the row that `incoming` belongs to, or undefined to start a new row.
- *
- * One turn is one work process, so a turn id is looked up directly rather than
- * inferred from adjacency. Adjacency was the bug: a team discussion statement or
- * a failed-turn error row is recorded *between* two steps of the same turn and
- * carries that same turn id, so comparing only against the previous row split
- * one response into several work processes.
- *
- * Rows keep their transcript position, so an interleaved statement still renders
- * where it happened — it just no longer breaks the turn around it.
- */
-function assistantWorkTargetIndex(
-  folded: ChatMessage[],
-  rowByTurn: Map<string, number>,
-  incoming: ChatMessage,
-): number | undefined {
-  if (incoming.role !== 'assistant') return undefined;
-  if (incoming.turnId !== undefined) return rowByTurn.get(incoming.turnId);
-  // No turn id to group on. Only a directly adjacent pair of text-free work rows
-  // is safe to join: that is the shape of transcripts recorded before turn ids,
-  // and anything looser would merge two genuinely separate answers.
-  const last = folded.length - 1;
-  const previous = folded[last];
-  return previous !== undefined && canFoldAssistantWork(previous, incoming) ? last : undefined;
-}
-
-/** Adjacency-only fallback for rows that carry no turn id on either side. */
-function canFoldAssistantWork(previous: ChatMessage, incoming: ChatMessage): boolean {
-  if (previous.role !== 'assistant' || incoming.role !== 'assistant') return false;
-  if (previous.turnId !== undefined || incoming.turnId !== undefined) return false;
-  return previous.text.trim().length === 0
-    && incoming.text.trim().length === 0
-    && (previous.workBlocks?.length ?? 0) > 0
-    && (incoming.workBlocks?.length ?? 0) > 0;
 }
 
 function mergeAssistantWork(previous: ChatMessage, incoming: ChatMessage): ChatMessage {
@@ -729,7 +782,9 @@ function mergeAssistantWork(previous: ChatMessage, incoming: ChatMessage): ChatM
   ]);
   return {
     ...previous,
-    turnId: previous.turnId ?? incoming.turnId,
+    // The latest turn id wins: the live stream attaches to the row carrying the
+    // turn that is currently running, which is the last one folded in.
+    turnId: incoming.turnId ?? previous.turnId,
     text: incomingText ? incoming.text : previousProgress === undefined ? previous.text : '',
     thinking: incoming.thinking ?? previous.thinking,
     workBlocks: blocks,

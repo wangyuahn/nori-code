@@ -15,6 +15,7 @@ import {
   type SessionAgentTreeNode,
   type SessionAgentTreeResponse,
   type SessionAgentChatResponse,
+  type SessionAgentSystemPromptResponse,
   type SessionChildCreate,
   type SessionCreate,
   type SessionFork,
@@ -683,6 +684,14 @@ export class SessionService extends Disposable implements ISessionService {
       sent_at: record.sentAt,
     }));
     return { department_leader_agent_id: leaderAgentId, messages };
+  }
+
+  async getAgentSystemPrompt(id: string, agentId: string): Promise<SessionAgentSystemPromptResponse> {
+    await this.requireSummary(id);
+    await this.core.rpc.resumeSession({ sessionId: id });
+    const config = await this.core.rpc.getConfig({ sessionId: id, agentId });
+    const systemPrompt = config.systemPrompt?.trim();
+    return systemPrompt ? { system_prompt: systemPrompt } : {};
   }
 
   listActiveAgentActivity(): readonly import('./session').SessionAgentActivity[] {

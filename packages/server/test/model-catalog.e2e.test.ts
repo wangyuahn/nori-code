@@ -139,19 +139,23 @@ describe('model/provider catalog routes', () => {
     expect(env.data?.items).toEqual([
       {
         provider: 'kimi',
+        provider_name: 'kimi',
         model: 'k2',
         display_name: 'Kimi K2',
         max_context_size: 131072,
         capabilities: ['thinking'],
+        supports_thinking: true,
       },
       {
         provider: 'kimi',
+        provider_name: 'kimi',
         model: 'turbo',
         display_name: 'Kimi Turbo',
         max_context_size: 32768,
       },
       {
         provider: 'openai',
+        provider_name: 'openai',
         model: 'gpt4o',
         display_name: 'gpt-4o',
         max_context_size: 128000,
@@ -169,15 +173,18 @@ describe('model/provider catalog routes', () => {
     expect(listEnv.data?.items).toEqual([
       {
         id: 'kimi',
+        name: 'kimi',
         type: 'kimi',
         base_url: 'https://api.example.test/v1',
         default_model: 'k2',
         has_api_key: true,
+        api_key_length: 7,
         status: 'connected',
         models: ['k2', 'turbo'],
       },
       {
         id: 'openai',
+        name: 'openai',
         type: 'openai',
         has_api_key: false,
         status: 'unconfigured',
@@ -193,10 +200,12 @@ describe('model/provider catalog routes', () => {
     expect(singleEnv.code).toBe(0);
     expect(singleEnv.data).toEqual({
       id: 'kimi',
+      name: 'kimi',
       type: 'kimi',
       base_url: 'https://api.example.test/v1',
       default_model: 'k2',
       has_api_key: true,
+      api_key_length: 7,
       status: 'connected',
       models: ['k2', 'turbo'],
     });
@@ -217,6 +226,7 @@ describe('model/provider catalog routes', () => {
       default_model: 'turbo',
       model: {
         provider: 'kimi',
+        provider_name: 'kimi',
         model: 'turbo',
         display_name: 'Kimi Turbo',
         max_context_size: 32768,
@@ -270,7 +280,7 @@ describe('model/provider catalog routes', () => {
       refreshOAuthProviderModels: async () => ({
         changed: [
           {
-            provider_id: 'managed:kimi-code',
+            provider_id: 'managed:nori-code',
             provider_name: 'Kimi Code',
             added: 1,
             removed: 0,
@@ -299,7 +309,7 @@ describe('model/provider catalog routes', () => {
     expect(env.data).toEqual({
       changed: [
         {
-          provider_id: 'managed:kimi-code',
+          provider_id: 'managed:nori-code',
           provider_name: 'Kimi Code',
           added: 1,
           removed: 0,
@@ -318,7 +328,7 @@ describe('model/provider catalog routes', () => {
     const refreshProviderModels = vi.fn(async () => ({
       changed: [
         {
-          provider_id: 'managed:kimi-code',
+          provider_id: 'managed:nori-code',
           provider_name: 'Kimi Code',
           added: 2,
           removed: 1,
@@ -375,14 +385,14 @@ describe('model/provider catalog routes', () => {
 
     const res = await appOf(r).inject({
       method: 'POST',
-      url: '/api/v1/providers/managed%3Akimi-code:refresh',
+      url: '/api/v1/providers/managed%3Anori-code:refresh',
       payload: {},
     });
 
     expect(res.statusCode).toBe(200);
     expect(envelopeOf<unknown>(res.json()).code).toBe(0);
     expect(refreshProviderModels).toHaveBeenCalledWith({
-      providerId: 'managed:kimi-code',
+      providerId: 'managed:nori-code',
     });
   });
 
@@ -392,7 +402,7 @@ describe('model/provider catalog routes', () => {
 
     const res = await appOf(r).inject({
       method: 'POST',
-      url: '/api/v1/providers/managed%3Akimi-code:test',
+      url: '/api/v1/providers/managed%3Anori-code:test',
       payload: {},
     });
 
@@ -401,7 +411,7 @@ describe('model/provider catalog routes', () => {
       code: 0,
       data: { ok: true, message: 'Provider is ready.' },
     });
-    expect(testProvider).toHaveBeenCalledWith('managed:kimi-code');
+    expect(testProvider).toHaveBeenCalledWith('managed:nori-code');
   });
 
   it('rejects unsupported provider actions', async () => {

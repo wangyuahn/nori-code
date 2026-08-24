@@ -12,6 +12,7 @@ import {
   type Session,
   type SessionAgentTreeResponse,
   type SessionAgentChatResponse,
+  type SessionAgentSystemPromptResponse,
   type SessionChildCreate,
   type SessionCreate,
   type SessionFork,
@@ -68,6 +69,9 @@ export interface ISessionService {
    * empty log with a null leader — the parent never reads its members' chat.
    */
   getDepartmentChat(id: string, agentId: string): Promise<SessionAgentChatResponse>;
+
+  /** The effective system prompt of one agent transcript; empty when unknown. */
+  getAgentSystemPrompt(id: string, agentId: string): Promise<SessionAgentSystemPromptResponse>;
 
   /** Returns active agent work without resuming or loading session transcripts. */
   listActiveAgentActivity?(): readonly SessionAgentActivity[];

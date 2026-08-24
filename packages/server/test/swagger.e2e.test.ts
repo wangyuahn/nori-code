@@ -135,7 +135,7 @@ describe('Swagger / OpenAPI', () => {
     const doc = res.json() as Record<string, unknown>;
     expect(doc['openapi']).toMatch(/^3\.\d+\.\d+$/);
     expect(typeof doc['info']).toBe('object');
-    expect((doc['info'] as Record<string, unknown>)['title']).toBe('Kimi Code Server API');
+    expect((doc['info'] as Record<string, unknown>)['title']).toBe('Nori Code Server API');
     expect(typeof (doc['info'] as Record<string, unknown>)['version']).toBe('string');
 
     const paths = doc['paths'] as Record<string, unknown>;

@@ -177,6 +177,16 @@ export const sessionAgentChatResponseSchema = z.object({
 });
 export type SessionAgentChatResponse = z.infer<typeof sessionAgentChatResponseSchema>;
 
+/**
+ * The effective system prompt of one agent transcript. `system_prompt` is
+ * omitted when the agent has not prepared a profile yet (never resumed, or a
+ * dormant transcript without persisted config).
+ */
+export const sessionAgentSystemPromptResponseSchema = z.object({
+  system_prompt: z.string().min(1).optional(),
+});
+export type SessionAgentSystemPromptResponse = z.infer<typeof sessionAgentSystemPromptResponseSchema>;
+
 /** Lightweight cross-session activity used by global UI indicators. */
 export const sessionActivityItemSchema = z.object({
   session_id: z.string().min(1),

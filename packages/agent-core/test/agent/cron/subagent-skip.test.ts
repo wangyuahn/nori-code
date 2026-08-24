@@ -11,8 +11,9 @@
  *      listener count stays put.
  *   3. The three Cron tools (`CronCreate` / `CronList` / `CronDelete`)
  *      are NOT registered in the subagent's tool manager.
- *   4. `type: 'main'` and `type: 'independent'` keep the old behaviour
- *      — listener bound, tools registered.
+ *   4. `type: 'main'` keeps the old behaviour — listener bound, tools
+ *      registered. `type: 'independent'` behaves like `sub`: no
+ *      CronManager, no timers/listeners, no Cron tools.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -70,18 +71,19 @@ describe('Agent + Cron — subagent suppression', () => {
     }
   });
 
-  it("type='independent': start() runs, tools registered", () => {
+  it("type='independent': cron suppressed like subagents", () => {
     if (process.platform === 'win32') return;
 
     const before = process.listenerCount('SIGUSR1');
     const ctx = testAgent({ type: 'independent' });
 
-    expect(process.listenerCount('SIGUSR1')).toBe(before + 1);
+    expect(ctx.agent.cron).toBeNull();
+    expect(process.listenerCount('SIGUSR1')).toBe(before);
 
     ctx.configure({ tools: [...CRON_TOOL_NAMES] });
     const toolNames = ctx.agent.tools.data().map((info) => info.name);
     for (const name of CRON_TOOL_NAMES) {
-      expect(toolNames).toContain(name);
+      expect(toolNames).not.toContain(name);
     }
   });
 });

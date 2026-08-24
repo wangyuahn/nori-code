@@ -47,4 +47,24 @@ png.save(BUILD / 'icon.png', optimize=True)
 png.save(BUILD / 'icon.ico', format='ICO', sizes=[(16,16),(20,20),(24,24),(32,32),(40,40),(48,48),(64,64),(128,128),(256,256)])
 # Pillow writes a multi-resolution Apple icon family.
 png.save(BUILD / 'icon.icns', format='ICNS', append_images=[png.resize((s,s), resample) for s in (16,32,64,128,256,512)])
-print('generated', *(str(BUILD / f'icon.{ext}') for ext in ('svg','png','ico','icns')), sep='\n')
+
+# Linux needs a real icon *set*, not one large PNG. electron-builder maps each
+# file in `linux.icon` to /usr/share/icons/hicolor/<size>x<size>/apps/, and the
+# hicolor theme is only searched at these standard sizes — a lone 1024x1024
+# entry is invisible to launchers and taskbars, which then fall back to a
+# generic cog. Every size is downsampled from the 4096px master rather than
+# from icon.png so the small ones stay crisp.
+LINUX_SIZES = (16, 24, 32, 48, 64, 128, 256, 512, 1024)
+ICONS = BUILD / 'icons'
+ICONS.mkdir(parents=True, exist_ok=True)
+for stale in ICONS.glob('*.png'):
+    stale.unlink()
+for size in LINUX_SIZES:
+    img.resize((size, size), resample).save(ICONS / f'{size}x{size}.png', optimize=True)
+
+print(
+    'generated',
+    *(str(BUILD / f'icon.{ext}') for ext in ('svg', 'png', 'ico', 'icns')),
+    *(str(ICONS / f'{size}x{size}.png') for size in LINUX_SIZES),
+    sep='\n',
+)
