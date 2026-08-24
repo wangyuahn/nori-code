@@ -52,7 +52,8 @@ SubAgent spawned a throwaway child per task and read back its final report. That
 
 ### Also
 
-- Request macOS signing and notarization in the Nori Work release workflow and forward the Apple credentials to the build, so the dmg and zip open on any Mac instead of being refused by Gatekeeper as damaged. Requires the Apple secrets to be configured on the repository.
+- Request macOS signing and notarization in the Nori Work release workflow and forward the Apple credentials to the build, so the dmg and zip open on any Mac instead of being refused by Gatekeeper as damaged. If a credential is missing the macOS job warns and builds unsigned rather than failing, because one absent secret must not take down a release that also carries the Windows and Linux artifacts.
+- Publish the hand-written changelog section as the release notes instead of a generated list of commit subjects.
 - Rename the four workflow environment variables still spelled `KIMI_*` to their `NORI_*` names, which is what the build scripts read.
 - Add `GET /sessions/{session_id}/agents/{agent_id}/system-prompt`, exposing the prompt an agent is actually running with.
 - Keep provider model refresh from flattening model metadata: input modalities and context-window sizes now survive an OAuth catalog refresh.
