@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Component, lazy, Suspense, useCallback, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from 'react';
 import { useBackgroundTasks } from './hooks/useBackgroundTasks';
 import { CronJobPanel } from './components/CronJobPanel';
 import { AccountCenter } from './components/AccountCenter';
 import { CodeView } from './components/CodeView';
-import { SessionMapPage } from './components/SessionMapPage';
 import { Icon, type IconName } from './components/Icon';
 import { useSessions, usePhaseStatus, useServerStatus } from './hooks/useApi';
 import { useChatMessages } from './hooks/useChatMessages';
@@ -21,6 +20,11 @@ import { installSoundUnlock } from './notificationSounds';
 import { useGlobalApprovals } from './hooks/useGlobalApprovals';
 import { useBrowserPermissions } from './hooks/useBrowser';
 
+/** Lazy: Map must never block Chat boot if SessionMapPage/d3-force fails to evaluate. */
+const SessionMapPage = lazy(() =>
+  import('./components/SessionMapPage').then((module) => ({ default: module.SessionMapPage })),
+);
+
 type View = 'chat' | 'team' | 'cron' | 'account';
 type SidebarTab = 'sessions' | 'files';
 type InitialMessage = { text: string; attachments: PromptAttachment[]; options?: PromptExecutionOptions };
@@ -37,6 +41,41 @@ const SIDEBAR_TABS: { key: SidebarTab; icon: IconName; label: string }[] = [
 ];
 
 const SIDEBAR_EXPANDED_STORAGE_KEY = 'nori-sidebar-expanded';
+
+/** Keeps Chat usable when Conversation Map throws during render or lazy import. */
+class MapViewBoundary extends Component<
+  { children: ReactNode; onBackToChat: () => void; fallbackLabel: string; backLabel: string },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error): { error: Error } {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo): void {
+    console.error('[nori-web] Conversation Map crashed', error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="view-page view-page-wide">
+          <div className="view-stack" style={{ padding: 24, gap: 12 }}>
+            <p>{this.props.fallbackLabel}</p>
+            <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, opacity: 0.75 }}>
+              {this.state.error.message}
+            </pre>
+            <button type="button" className="btn" onClick={this.props.onBackToChat}>
+              {this.props.backLabel}
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function loadSidebarExpanded(): boolean {
   try {
@@ -463,28 +502,44 @@ export function App() {
     switch (activeView) {
       case 'team':
         return (
-          <SessionMapPage
-            sessions={sessions}
-            activeSessionId={sessionId ?? undefined}
-            onOpenSession={(id) => {
-              switchSession(id);
-              selectSessionAgent(null);
-              setActiveView('chat');
-              closeSidebarOnNarrowViewport();
-            }}
-            onOpenAgent={(hostSessionId, agent) => {
-              setPendingAgentOpen({ sessionId: hostSessionId, agent });
-              if (hostSessionId === sessionId) {
-                setActiveAgentSelection({ sessionId: hostSessionId, agent });
-              } else {
-                setActiveAgentSelection(null);
-              }
-              switchSession(hostSessionId);
-              setActiveView('chat');
-              closeSidebarOnNarrowViewport();
-            }}
-            onGraphChanged={() => { void refreshSessions(); }}
-          />
+          <MapViewBoundary
+            onBackToChat={() => setActiveView('chat')}
+            fallbackLabel={tr('Conversation Map failed to load.', '对话地图加载失败。')}
+            backLabel={tr('Back to Chat', '返回对话')}
+          >
+            <Suspense
+              fallback={(
+                <div className="view-page view-page-wide session-map-page">
+                  <div className="session-map-stage session-map-stage-empty">
+                    {tr('Loading map…', '地图加载中…')}
+                  </div>
+                </div>
+              )}
+            >
+              <SessionMapPage
+                sessions={sessions}
+                activeSessionId={sessionId ?? undefined}
+                onOpenSession={(id) => {
+                  switchSession(id);
+                  selectSessionAgent(null);
+                  setActiveView('chat');
+                  closeSidebarOnNarrowViewport();
+                }}
+                onOpenAgent={(hostSessionId, agent) => {
+                  setPendingAgentOpen({ sessionId: hostSessionId, agent });
+                  if (hostSessionId === sessionId) {
+                    setActiveAgentSelection({ sessionId: hostSessionId, agent });
+                  } else {
+                    setActiveAgentSelection(null);
+                  }
+                  switchSession(hostSessionId);
+                  setActiveView('chat');
+                  closeSidebarOnNarrowViewport();
+                }}
+                onGraphChanged={() => { void refreshSessions(); }}
+              />
+            </Suspense>
+          </MapViewBoundary>
         );
       case 'cron':
         return (
