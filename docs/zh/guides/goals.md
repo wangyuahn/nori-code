@@ -137,7 +137,7 @@ Agent 有时会很快完成一个目标。如果一次只能安排一个目标�
 在非交互式 prompt 模式中，只支持创建目标：
 
 ```sh
-kimi -p "/goal 修复 checkout 测试失败"
+nori -p "/goal 修复 checkout 测试失败"
 ```
 
 Prompt 模式在目标完成时以退出码 `0` 退出，在目标阻塞时以 `3` 退出，在目标暂停时以 `6` 退出。`/goal next` 和其它管理命令都是 TUI 控制命令。

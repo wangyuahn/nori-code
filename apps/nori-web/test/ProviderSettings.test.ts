@@ -88,8 +88,8 @@ describe('provider model persistence', () => {
     await act(async () => root.unmount());
   });
 
-  it('uses arrays for custom_models in both discovery modes', () => {
-    expect(providerCustomModelsForPatch(true, ['legacy-model'])).toEqual([]);
+  it('keeps extra models when auto discovery is on', () => {
+    expect(providerCustomModelsForPatch(true, ['stealth/ox-alpha'])).toEqual(['stealth/ox-alpha']);
     expect(providerCustomModelsForPatch(false, ['deepseek-v4-flash'])).toEqual(['deepseek-v4-flash']);
   });
 
@@ -160,6 +160,7 @@ describe('provider model persistence', () => {
     for (let attempt = 0; attempt < 10 && container.querySelector('.provider-editor') === null; attempt++) {
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
     }
+    expect(container.querySelector('.custom-model-editor')).not.toBeNull();
     await act(async () => container.querySelector<HTMLButtonElement>('.provider-editor .btn-primary')!.click());
     for (let attempt = 0; attempt < 10 && setDefault.mock.calls.length === 0; attempt++) {
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });

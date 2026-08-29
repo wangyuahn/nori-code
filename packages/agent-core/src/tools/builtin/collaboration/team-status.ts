@@ -19,6 +19,8 @@ export interface TeamStatusMember {
   readonly report_status?: 'unreported' | 'completed' | 'blocked' | 'needs_decision' | null;
   readonly report_summary?: string | null;
   readonly report_received?: boolean;
+  /** Mounted child session id when TeamCreate created a real session. */
+  readonly session_id?: string;
 }
 
 /**

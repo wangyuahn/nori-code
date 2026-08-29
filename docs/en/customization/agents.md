@@ -1,6 +1,8 @@
 # Agents and Sub-Agents
 
-Every session in Kimi Code CLI is driven by a **main Agent**. The main Agent understands the user's intent, plans steps, calls tools, and when needed dispatches **sub-agents** to handle more focused sub-tasks — for example, exploring an unfamiliar codebase, reviewing multiple implementations in parallel, or planning a large refactor without touching the main context.
+Every session in Nori Code CLI is driven by a **main Agent**. The main Agent understands the user's intent, plans steps, calls tools, and when needed dispatches **sub-agents** to handle more focused sub-tasks — for example, exploring an unfamiliar codebase, reviewing multiple implementations in parallel, or planning a large refactor without touching the main context.
+
+In Nori Code CLI 2.0, the main Agent also leads a **department tree** of durable **team partners** (`TeamCreate`). Partners are real child sessions on the conversation map; they Discuss, receive assignments, and execute work while the lead stays read-only by default. Temporary **SubAgents** remain the tool for bounded delegation inside a single session archive. See [Team engineering](../guides/team-engineering.md) for the full workflow.
 
 A sub-agent receives a task description from the main Agent, works in its own isolated context, and then returns its conclusions. It does not communicate with the user directly, and its intermediate reasoning and tool call records do not mix into the main Agent's history.
 
@@ -12,7 +14,7 @@ Use `/setting readonly off` when you want the main Agent to perform direct file 
 
 ## Built-in Sub-Agents
 
-Kimi Code CLI includes four built-in sub-agents, ready to use out of the box, each aimed at a different task shape:
+Nori Code CLI includes four built-in sub-agents, ready to use out of the box, each aimed at a different task shape:
 
 - **`nori-coder`**: The default sub-agent — a read-only coding orchestrator that plans, decomposes, and delegates implementation to SubAgent children. It analyzes the codebase and coordinates work but does NOT write code directly.
 - **`coder`**: A general-purpose software engineering assistant that can read and write files, execute commands, search code, and land concrete changes. Prefer `nori-coder` for new work.
@@ -48,7 +50,7 @@ If you need a particular type of tool to be permanently unavailable inside sub-a
 
 ## Instruction Files
 
-Global Kimi-specific instructions can live at `$KIMI_CODE_HOME/AGENTS.md` (default: `~/.kimi-code/AGENTS.md`). When you relocate the data root with `KIMI_CODE_HOME`, this global instruction file moves with it. Generic cross-tool instructions can still live under `~/.agents/AGENTS.md` in the real OS home, and project-level instructions remain under the project tree, for example `.kimi-code/AGENTS.md` or `AGENTS.md`.
+Global Nori-specific instructions can live at `$NORI_CODE_HOME/AGENTS.md` (default: `~/.nori-code/AGENTS.md`). When you relocate the data root with `NORI_CODE_HOME`, this global instruction file moves with it. Generic cross-tool instructions can still live under `~/.agents/AGENTS.md` in the real OS home, and project-level instructions remain under the project tree, for example `.nori-code/AGENTS.md` or `AGENTS.md`.
 
 ## Storage Location in the Session Directory
 
@@ -60,5 +62,6 @@ Session directories, wire files, and task records are all local debug materials 
 
 ## Next steps
 
+- [Team engineering](../guides/team-engineering.md) — department tree, conversation map, and Discuss/Assign workflow
 - [Hooks](./hooks.md) — Trigger local script notifications or interceptions at key points such as sub-agent completion
 - [Agent Skills](./skills.md) — Inject specialized knowledge and workflows into sub-agents

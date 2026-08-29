@@ -262,6 +262,28 @@ export class HttpClient {
       body,
     );
   }
+  mountSession(
+    sid: string,
+    body: { parent_session_id: string; role?: string; mandate?: string },
+  ): Promise<Session> {
+    return this.request('POST', `/sessions/${encodeURIComponent(sid)}:mount`, body);
+  }
+  unmountSession(sid: string): Promise<Session> {
+    return this.request('POST', `/sessions/${encodeURIComponent(sid)}:unmount`, {});
+  }
+  remountSession(
+    sid: string,
+    body: { parent_session_id: string; role?: string; mandate?: string },
+  ): Promise<Session> {
+    return this.request('POST', `/sessions/${encodeURIComponent(sid)}:remount`, body);
+  }
+  getSessionGraph(query?: {
+    include_archive?: boolean;
+    exclude_empty?: boolean;
+    status?: Session['status'];
+  }): Promise<{ nodes: Session[]; edges: Array<{ child_session_id: string; parent_session_id: string }> }> {
+    return this.request('GET', `/sessions/graph${qs(query)}`, undefined);
+  }
 
   // ── Terminals ──────────────────────────────────────────────────────────
   listTerminals(sid: string): Promise<ListTerminalsResponse> {

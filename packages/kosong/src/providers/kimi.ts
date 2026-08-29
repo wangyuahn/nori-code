@@ -40,6 +40,11 @@ import {
   type ToolCallIdPolicy,
 } from './tool-call-id';
 export interface KimiOptions {
+  /**
+   * Name to report as {@link ChatProvider.name}, e.g. the `[providers.x]` key
+   * from the host's config. Defaults to the wire name (`kimi`).
+   */
+  providerName?: string | undefined;
   apiKey?: string | undefined;
   baseUrl?: string | undefined;
   model: string;
@@ -374,6 +379,8 @@ export class KimiChatProvider implements ChatProvider {
   private _files: KimiFiles | undefined;
 
   constructor(options: KimiOptions) {
+    const providerName = options.providerName?.trim();
+    if (providerName !== undefined && providerName.length > 0) this.name = providerName;
     const apiKey = options.apiKey;
     this._apiKey = apiKey === undefined || apiKey.length === 0 ? undefined : apiKey;
     this._baseUrl = options.baseUrl ?? process.env['KIMI_BASE_URL'] ?? '';

@@ -103,7 +103,7 @@ export function convertOpenAIError(error: unknown): ChatProviderError {
   // APIError with a status code => status error
   if (error instanceof OpenAIAPIError && typeof error.status === 'number') {
     const reqId = error.requestID ?? null;
-    return normalizeAPIStatusError(error.status, error.message, reqId);
+    return normalizeAPIStatusError(error.status, gatewayErrorMessage(error), reqId);
   }
   // Base APIError with no status and no body => transport-layer failure.
   // When the error has a body (e.g. SSE error events from the server),
@@ -127,6 +127,44 @@ export function convertOpenAIError(error: unknown): ChatProviderError {
     return classifyBaseApiError(error.message);
   }
   return new ChatProviderError(`Error: ${String(error)}`);
+}
+
+/** Longest upstream error body we inline before truncating. */
+const GATEWAY_RAW_DETAIL_LIMIT = 600;
+
+/**
+ * Build the user-facing message for an OpenAI-SDK status error.
+ *
+ * `error.message` is only `${status} ${body.error.message}`, and aggregators put
+ * the actual cause one level down: OpenRouter answers a failing upstream with
+ * `{"error":{"message":"Provider returned error","code":403,
+ * "metadata":{"provider_name":"…","raw":"…"}}}`. Surfacing just the outer
+ * message produced "403 Provider returned error" and nothing to act on — the
+ * user could not tell which upstream refused, or why. Append whatever the
+ * gateway nested so the reason travels with the status.
+ */
+function gatewayErrorMessage(error: OpenAIAPIError): string {
+  const base = error.message;
+  const metadata = (error.error as { metadata?: unknown } | null | undefined)?.metadata;
+  if (typeof metadata !== 'object' || metadata === null) return base;
+
+  const { provider_name: providerName, raw } = metadata as {
+    provider_name?: unknown;
+    raw?: unknown;
+  };
+  const parts: string[] = [];
+  if (typeof providerName === 'string' && providerName.length > 0) {
+    parts.push(`upstream: ${providerName}`);
+  }
+  const detail = typeof raw === 'string' ? raw : raw === undefined ? undefined : JSON.stringify(raw);
+  if (detail !== undefined && detail.length > 0) {
+    parts.push(
+      detail.length > GATEWAY_RAW_DETAIL_LIMIT
+        ? `${detail.slice(0, GATEWAY_RAW_DETAIL_LIMIT)}…`
+        : detail,
+    );
+  }
+  return parts.length === 0 ? base : `${base} (${parts.join(' — ')})`;
 }
 /** Shape of a function-type tool call (subset used by the guard). */
 export interface FunctionToolCallShape {

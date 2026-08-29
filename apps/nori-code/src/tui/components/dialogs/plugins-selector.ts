@@ -535,8 +535,8 @@ export class PluginsPanelComponent extends Container implements Focusable {
       tab === 'installed'
         ? this.installedHint()
         : tab === 'custom'
-          ? ' Tab switch · Enter install · Esc cancel'
-          : ' Tab switch · ↑↓ navigate · Enter open/install · Esc cancel';
+          ? ' Tab toggle tab · Enter install · Esc cancel'
+          : ' Tab toggle tab · ↑↓ navigate · Enter open/install · Esc cancel';
     const lines: string[] = [
       chalk.hex(colors.primary)('─'.repeat(width)),
       chalk.hex(colors.primary).bold(' Plugins'),
@@ -578,7 +578,7 @@ export class PluginsPanelComponent extends Container implements Focusable {
     const plugin = this.opts.installed[this.selectedIndex];
     const hasUpdate = plugin !== undefined && this.installedUpdateStatus(plugin) !== undefined;
     const enter = hasUpdate ? 'Enter update' : 'Enter details';
-    return ` Tab switch · Space toggle · D remove · M MCP · ${enter} · I details · R reload · Esc cancel`;
+    return ` Tab toggle tab · Space toggle · D remove · M MCP · ${enter} · I details · R reload · Esc cancel`;
   }
 
   private installedUpdateStatus(

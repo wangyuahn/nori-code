@@ -1142,7 +1142,9 @@ describe('Agent turn flow', () => {
     const configPayload = configLogs[0]?.payload as Record<string, unknown>;
     expect(configPayload).toMatchObject({
       turnStep: '0.1',
-      provider: 'kimi',
+      // The config key the user picked, not the wire protocol it speaks — the
+      // harness registers this provider as `test-provider`.
+      provider: 'test-provider',
       model: 'mock-model',
       modelAlias: 'mock-model',
       toolCount: 0,

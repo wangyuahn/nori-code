@@ -14,9 +14,12 @@ import {
   listSessionChildrenQuerySchema,
   listSessionChildrenResponseSchema,
   listSessionsQuerySchema,
+  mountSessionRequestSchema,
+  remountSessionRequestSchema,
   sessionAgentQuerySchema,
   sessionAgentTreeResponseSchema,
   sessionActivityResponseSchema,
+  sessionGraphResponseSchema,
   sessionStatusResponseSchema,
   updateSessionProfileRequestSchema,
   updateSessionRequestSchema,
@@ -286,6 +289,28 @@ describe('createSessionChildRequestSchema', () => {
 
   it('rejects non-object metadata', () => {
     expect(createSessionChildRequestSchema.safeParse({ metadata: 'x' }).success).toBe(false);
+  });
+});
+
+describe('mountSessionRequestSchema', () => {
+  it('requires parent_session_id and accepts optional identity fields', () => {
+    expect(mountSessionRequestSchema.parse({ parent_session_id: 'sess_p' })).toEqual({
+      parent_session_id: 'sess_p',
+    });
+    expect(
+      remountSessionRequestSchema.parse({
+        parent_session_id: 'sess_p',
+        role: 'lead',
+        mandate: 'ship it',
+      }),
+    ).toMatchObject({ role: 'lead', mandate: 'ship it' });
+    expect(mountSessionRequestSchema.safeParse({}).success).toBe(false);
+    expect(
+      sessionGraphResponseSchema.parse({
+        nodes: [],
+        edges: [{ child_session_id: 'a', parent_session_id: 'b' }],
+      }).edges,
+    ).toHaveLength(1);
   });
 });
 

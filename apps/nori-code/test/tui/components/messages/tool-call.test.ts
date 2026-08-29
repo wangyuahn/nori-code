@@ -150,10 +150,20 @@ describe('ToolCallComponent', () => {
 
     component.setExpanded(true);
 
-    const expanded = strip(component.render(100).join('\n'));
+    const expandedLines = component.render(100);
+    const expanded = strip(expandedLines.join('\n'));
     expect(expanded).toContain('line4');
     expect(expanded).toContain('line5');
     expect(expanded).not.toContain('ctrl+o to expand');
+
+    component.setExpanded(false);
+    const recollapsedLines = component.render(100);
+    const recollapsed = strip(recollapsedLines.join('\n'));
+    expect(recollapsed).toContain('line1');
+    expect(recollapsed).toContain('line3');
+    expect(recollapsed).not.toContain('line4');
+    expect(recollapsed).toContain('... (2 more lines, ctrl+o to expand)');
+    expect(recollapsedLines.length).toBeLessThan(expandedLines.length);
   });
 
   it('renders live Bash output while the command is running', () => {

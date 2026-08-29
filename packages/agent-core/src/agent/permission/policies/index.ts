@@ -29,7 +29,7 @@ export function createPermissionDecisionPolicies(agent: Agent): PermissionPolicy
     new AutoModeAskUserQuestionDenyPermissionPolicy(agent),
     // Discuss: Write/Edit/Bash and related mutating tools → deny.
     new DiscussModeGuardDenyPermissionPolicy(agent),
-    // tools_readonly: deny Write/Edit/Bash when readonly is active.
+    // tools_readonly: deny Write/Edit in every permission mode (auto/yolo/manual).
     new ReadonlyPermissionPolicy(agent),
     // User-configured deny rule matches → deny.
     new UserConfiguredDenyPermissionPolicy(agent),

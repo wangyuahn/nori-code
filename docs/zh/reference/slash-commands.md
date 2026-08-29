@@ -1,6 +1,6 @@
 # 斜杠命令
 
-斜杠命令是 Kimi Code CLI 在交互式 TUI 中提供的内置控制命令，涵盖账号配置、会话管理、模式切换、信息查询等操作。在输入框中输入 `/` 即可触发命令补全，候选列表随后续字符实时过滤；命令的别名也会一并参与匹配。
+斜杠命令是 Nori Code CLI 在交互式 TUI 中提供的内置控制命令，涵盖账号配置、会话管理、模式切换、信息查询等操作。在输入框中输入 `/` 即可触发命令补全，候选列表随后续字符实时过滤；命令的别名也会一并参与匹配。
 
 输入完整命令名后按 `Enter` 执行。如果输入的 `/` 开头内容不匹配任何内置或 Skill 命令，则按普通消息发送给 Agent。
 
@@ -22,7 +22,7 @@
 | `/editor` | — | 配置 `Ctrl-G` 调起的外部编辑器 | 是 |
 | `/theme` | — | 切换终端 UI 配色主题 | 是 |
 
-`/settings` 也可以用 `/setting` 别名直接修改运行时设置。常用的 Nori 子命令包括 `/setting readonly on|off`（拦截或允许主 Agent 直接 `Write` / `Edit`）、`/setting coder write on|off`（授予或撤销编码子 Agent 的直接写权限）、`/setting depth <n>`（设置 SubAgent 嵌套深度）和 `/setting auto`（打开引导式配置）。
+`/settings` 也可以用 `/setting` 别名直接修改运行时设置。常用的 Nori 子命令包括 `/setting readonly on|off`（拦截或允许主 Agent 直接 `Write` / `Edit`）、`/setting coder write on|off`（授予或撤销编码子 Agent 的直接写权限）、`/setting depth <n>`（设置 SubAgent 嵌套深度）、`/setting auto`（打开引导式配置）、`/setting loop`（循环与 Goal 限制；`/setting loop steps <n>`、`/setting loop goal-turns <n>`、`/setting loop idle <n>` 可直接设值）、`/setting memory`（Memory 向量检索）和 `/setting default-discuss on|off`（新会话是否默认进入 Discuss 模式）。
 
 ## 会话管理
 
@@ -37,8 +37,9 @@
 | `/undo [<count>]` | — | 从当前上下文撤销最近的提示词。不带数量时打开选择器；带数量时撤销对应条数。最后一次上下文压缩之前的提示词不能撤销 | 否 |
 | `/init` | — | 分析当前代码库并生成 `AGENTS.md` | 否 |
 | `/export-md [<path>]` | `/export` | 将当前会话导出为 Markdown 文件 | 否 |
-| `/export-debug-zip` | — | 将当前会话导出为调试用 ZIP 压缩包（与 [`kimi export`](./kimi-command.md#kimi-export) 行为一致） | 否 |
-| `/add-dir [<path>]` | — | 为当前会话添加额外的工作目录。不带路径（或传入 `list`）运行时列出已配置的目录。添加时可选择是否将目录记入项目的 `.kimi-code/local.toml` | 否 |
+| `/export-debug-zip` | — | 将当前会话导出为调试用 ZIP 压缩包（与 [`nori export`](./kimi-command.md#nori-export) 行为一致） | 否 |
+| `/add-dir [<path>]` | — | 为当前会话添加额外的工作目录。不带路径（或传入 `list`）运行时列出已配置的目录。添加时可选择是否将目录记入项目的 `.nori-code/local.toml` | 否 |
+| `/web` | — | 按需启动本地 Nori 服务，在 Web UI 中打开当前会话并退出终端。浏览器 URL 留在 `/`，通过 `#token=` 与 `#session=` 传递（不要用 `/sessions/:id`，Vite `base: './'` 下会黑屏）。桌面打开失败时留在 TUI 并打印可复制 URL | 是 |
 
 ## 模式与运行控制
 
@@ -47,6 +48,9 @@
 | `/yolo [on\|off]` | `/yes` | 切换 YOLO 模式。不带参数时翻转；显式传 `on`/`off` 时强制设置。开启后跳过普通工具调用审批；不会改变 Discuss 的只读限制 | 是 |
 | `/auto [on\|off]` | — | 切换 auto 权限模式。开启后工具审批自动处理，Agent 不会向用户提问 | 是 |
 | `/plan [on\|off]` | — | 切换 Discuss。不带参数时翻转；显式传 `on`/`off` 时强制设置。命令名为兼容性保留 | 是 |
+| `/discuss [on\|off]` | — | 切换 Discuss（与 `/plan` 相同）。Shift-Tab 也可切换 | 是 |
+| `/team [settings]` | `/agents` | 打开已雇佣成员的会话，或浏览汇报与本回合 Discuss 发言。Enter 打开选中成员（Main 回到主会话）。Tab 查看详情。讨论节点打开 Discuss 栏。`/team settings` 设置最大部门深度 | 是 |
+| `/map` | — | 浏览当前工作目录的会话地图（挂载森林）。Enter 打开会话；M 挂载（先子后父）；U 卸载。详见[团队工程](../guides/team-engineering.md) | 是 |
 | `/plan clear` | — | 清除旧计划状态 | 否 |
 | `/subagent on\|off` | — | 开启或关闭 SubAgent 模式，但不发送提示词。 | 否 |
 | `/subagent <task>` | — | 先开启 SubAgent 模式，再把 `<task>` 作为普通提示词发送。如果该轮次正常完成，SubAgent 模式会自动关闭。若当前是 `manual` 权限模式，启动前会提示是否切换到 `auto` 或 `yolo`。 | 否 |
@@ -89,10 +93,10 @@
 在非交互式 prompt 模式中，只有创建形式会启动目标模式：
 
 ```sh
-kimi -p "/goal 修复 checkout 测试失败"
+nori -p "/goal 修复 checkout 测试失败"
 ```
 
-Prompt 模式在目标完成时以退出码 `0` 退出，在目标阻塞时以 `3` 退出，在目标暂停时以 `6` 退出。其它 `/goal` 子命令，包括 `next`，都是 TUI 控制命令，不由 `kimi -p` 处理。
+Prompt 模式在目标完成时以退出码 `0` 退出，在目标阻塞时以 `3` 退出，在目标暂停时以 `6` 退出。其它 `/goal` 子命令，包括 `next`，都是 TUI 控制命令，不由 `nori -p` 处理。
 
 ## 信息与状态
 
@@ -101,21 +105,22 @@ Prompt 模式在目标完成时以退出码 `0` 退出，在目标阻塞时以 `
 | `/help` | `/h`、`/?` | 显示快捷键和所有可用命令 | 是 |
 | `/btw [问题]` | — | 在 fork 出的子 Agent 中打开旁路对话，不改变当前主 Agent 轮次；不带问题时会先打开面板等待输入 | 是 |
 | `/usage` | — | 显示 token 用量、上下文占用以及配额信息 | 是 |
-| `/status` | — | 显示当前会话运行时状态：版本、模型、工作目录、权限模式等 | 是 |
-| `/mcp` | — | 列出当前会话中的 MCP server 及连接状态 | 是 |
+| `/status` | — | 显示当前会话运行时状态：版本、模型、工作目录、权限模式、团队发言/报告等 | 是 |
+| `/skills` | — | 以可搜索列表浏览已安装 Skill；Enter 运行 Skill，若需要参数则回填 `/name ` | 是 |
+| `/mcp` | — | 显示当前会话中的 MCP server 及连接状态 | 是 |
 | `/plugins` | — | 打开交互式 plugin 管理器 | 是 |
-| `/version` | — | 显示 Kimi Code CLI 版本号 | 是 |
+| `/version` | — | 显示 Nori Code CLI 版本号 | 是 |
 | `/feedback` | — | 提交反馈，可附加诊断日志和代码库上下文 | 是 |
 
 ## 退出
 
 | 命令 | 别名 | 说明 | 随时可用 |
 | --- | --- | --- | --- |
-| `/exit` | `/quit`、`/q` | 退出 Kimi Code CLI | 否 |
+| `/exit` | `/quit`、`/q` | 退出 Nori Code CLI | 否 |
 
 ## 内置 Skill 命令
 
-Kimi Code CLI 随包内置了一组 Skill，直接以 `/<name>` 形式出现在斜杠命令面板中。与外部 Skill 不同，它们不需要 `skill:` 前缀，开箱即用。
+Nori Code CLI 随包内置了一组 Skill，直接以 `/<name>` 形式出现在斜杠命令面板中。与外部 Skill 不同，它们不需要 `skill:` 前缀，开箱即用。
 
 | 命令 | 说明 |
 | --- | --- |
@@ -147,7 +152,9 @@ Kimi Code CLI 随包内置了一组 Skill，直接以 `/<name>` 形式出现在�
 
 为方便输入，外部 Skill 命令同时支持省略 `skill:` 前缀的简写形式 `/<name>`，前提是该名称未被系统斜杠命令占用——即 `/code-style` 会回退匹配到 `/skill:code-style`。
 
-Kimi Code CLI 随包内置的 Skill 会直接以 `/<name>` 形式出现在斜杠命令面板中。例如，`/mcp-config` 用于配置 MCP server 和处理 MCP OAuth 登录，`/custom-theme [附加文本]` 用于进入自定义主题流程，创建或编辑 TUI 主题。
+`/skills` 以可搜索列表打开同一批 Skill。Enter 会直接运行无参 Skill；需要附加文本时则把 `/name ` 填回编辑器。
+
+Nori Code CLI 随包内置的 Skill 会直接以 `/<name>` 形式出现在斜杠命令面板中。例如，`/mcp-config` 用于配置 MCP server 和处理 MCP OAuth 登录，`/custom-theme [附加文本]` 用于进入自定义主题流程，创建或编辑 TUI 主题。
 
 ::: info 说明
 所有 Skill 命令仅在空闲状态下可用。`flow` 类型的 Skill 同样通过 `/skill:<name>` 暴露，没有独立的 `/flow:` 命名空间。

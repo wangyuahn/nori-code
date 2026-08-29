@@ -13,6 +13,7 @@ import {
   fetchCatalog,
   inferWireType,
   type Catalog,
+  type KimiConfigPatch,
   type ThinkingEffort,
 } from '@nori-code/sdk';
 import { createKimiCodeUserAgent } from '#/cli/version';
@@ -22,6 +23,10 @@ import {
   CustomRegistryImportDialogComponent,
   type CustomRegistryImportResult,
 } from '../components/dialogs/custom-registry-import';
+import { ExtraEffortTogglesComponent } from '../components/dialogs/extra-effort-toggles';
+import {
+  ProviderExtrasListComponent,
+} from '../components/dialogs/provider-extras-list';
 import {
   ProviderManagerComponent,
   type ProviderManagerOptions,
@@ -29,6 +34,13 @@ import {
 import { TabbedModelSelectorComponent } from '../components/dialogs/tabbed-model-selector';
 import { DEFAULT_OAUTH_PROVIDER_NAME } from '../constant/kimi-tui';
 import { formatErrorMessage } from '../utils/event-payload';
+import {
+  extraModelAliasPatch,
+  extraModelIds,
+  extraModelsFromConfig,
+  type ExtraModelDraft,
+  type ExtraThinkingMode,
+} from '../utils/provider-extras';
 import { thinkingEffortToConfig } from '../utils/thinking-config';
 import {
   promptApiKey,
@@ -55,6 +67,11 @@ function buildProviderManagerOptions(host: SlashCommandHost): ProviderManagerOpt
     onAdd: () => {
       void handleProviderAdd(host).catch((error: unknown) => {
         host.showError(`Add provider failed: ${formatErrorMessage(error)}`);
+      });
+    },
+    onOpenExtras: (providerIds) => {
+      void openProviderExtras(host, providerIds).catch((error: unknown) => {
+        host.showError(`Extra models failed: ${formatErrorMessage(error)}`);
       });
     },
     onDeleteSource: (providerIds) => {
@@ -126,6 +143,258 @@ function reopenProviderManager(host: SlashCommandHost): void {
   const options = buildProviderManagerOptions(host);
   const component = new ProviderManagerComponent(options);
   host.mountEditorReplacement(component);
+}
+
+async function openProviderExtras(
+  host: SlashCommandHost,
+  providerIds: readonly string[],
+): Promise<void> {
+  if (providerIds.length === 0) {
+    reopenProviderManager(host);
+    return;
+  }
+  if (providerIds.length === 1) {
+    showProviderExtrasList(host, providerIds[0]!);
+    return;
+  }
+  const providerId = await promptProviderId(host, providerIds);
+  if (providerId === undefined) {
+    reopenProviderManager(host);
+    return;
+  }
+  showProviderExtrasList(host, providerId);
+}
+
+function promptProviderId(
+  host: SlashCommandHost,
+  providerIds: readonly string[],
+): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const picker = new ChoicePickerComponent({
+      title: 'Select provider',
+      hint: '↑↓ navigate · Enter select · Esc cancel',
+      options: providerIds.map((id) => ({ value: id, label: id })),
+      onSelect: (value) => {
+        resolve(value);
+      },
+      onCancel: () => {
+        resolve(undefined);
+      },
+    });
+    host.mountEditorReplacement(picker);
+  });
+}
+
+function showProviderExtrasList(host: SlashCommandHost, providerId: string): void {
+  const drafts = extraModelsFromConfig(
+    host.state.appState.availableProviders[providerId],
+    host.state.appState.availableModels,
+    providerId,
+  );
+  host.mountEditorReplacement(
+    new ProviderExtrasListComponent({
+      providerId,
+      drafts,
+      onAdd: (modelId) => {
+        void persistProviderExtras(host, providerId, [
+          ...drafts,
+          { id: modelId, thinking: 'unsupported', supportEfforts: [], defaultEffort: '' },
+        ]).then(() => {
+          showProviderExtrasList(host, providerId);
+        });
+      },
+      onEdit: (draft) => {
+        void editExtraThinking(host, providerId, drafts, draft);
+      },
+      onDelete: (modelId) => {
+        void persistProviderExtras(
+          host,
+          providerId,
+          drafts.filter((draft) => draft.id !== modelId),
+        ).then(() => {
+          showProviderExtrasList(host, providerId);
+        });
+      },
+      onClose: () => {
+        reopenProviderManager(host);
+      },
+    }),
+  );
+}
+
+async function editExtraThinking(
+  host: SlashCommandHost,
+  providerId: string,
+  drafts: readonly ExtraModelDraft[],
+  draft: ExtraModelDraft,
+): Promise<void> {
+  const thinking = await promptExtraThinking(host, draft.thinking);
+  if (thinking === undefined) {
+    showProviderExtrasList(host, providerId);
+    return;
+  }
+  let next: ExtraModelDraft = {
+    ...draft,
+    thinking,
+    supportEfforts: thinking === 'efforts' ? draft.supportEfforts : [],
+    defaultEffort: thinking === 'efforts' ? draft.defaultEffort : '',
+  };
+  if (thinking === 'efforts') {
+    const efforts = await promptExtraEfforts(host, next.supportEfforts);
+    if (efforts === undefined) {
+      showProviderExtrasList(host, providerId);
+      return;
+    }
+    if (efforts.length === 0) {
+      host.showError('Pick at least one thinking effort.');
+      showProviderExtrasList(host, providerId);
+      return;
+    }
+    const defaultEffort = await promptDefaultEffort(host, efforts, next.defaultEffort);
+    if (defaultEffort === undefined) {
+      showProviderExtrasList(host, providerId);
+      return;
+    }
+    next = { ...next, supportEfforts: efforts, defaultEffort };
+  }
+  await persistProviderExtras(
+    host,
+    providerId,
+    drafts.map((item) => (item.id === draft.id ? next : item)),
+  );
+  showProviderExtrasList(host, providerId);
+}
+
+function promptExtraThinking(
+  host: SlashCommandHost,
+  current: ExtraThinkingMode,
+): Promise<ExtraThinkingMode | undefined> {
+  return new Promise((resolve) => {
+    const picker = new ChoicePickerComponent({
+      title: 'Thinking for extra model',
+      hint: '↑↓ navigate · Enter select · Esc cancel',
+      currentValue: current,
+      options: [
+        {
+          value: 'unsupported',
+          label: 'No thinking',
+          description: 'Hide the effort picker for this model.',
+        },
+        {
+          value: 'toggle',
+          label: 'Thinking toggle',
+          description: 'On / off only — no named effort list.',
+        },
+        {
+          value: 'efforts',
+          label: 'Thinking efforts',
+          description: 'Named efforts such as low / medium / high (stealth, ox-alpha, …).',
+        },
+      ],
+      onSelect: (value) => {
+        resolve(value as ExtraThinkingMode);
+      },
+      onCancel: () => {
+        resolve(undefined);
+      },
+    });
+    host.mountEditorReplacement(picker);
+  });
+}
+
+function promptExtraEfforts(
+  host: SlashCommandHost,
+  selected: readonly string[],
+): Promise<readonly string[] | undefined> {
+  return new Promise((resolve) => {
+    const picker = new ExtraEffortTogglesComponent({
+      selected,
+      onSubmit: (efforts) => {
+        resolve(efforts);
+      },
+      onCancel: () => {
+        resolve(undefined);
+      },
+    });
+    host.mountEditorReplacement(picker);
+  });
+}
+
+function promptDefaultEffort(
+  host: SlashCommandHost,
+  efforts: readonly string[],
+  current: string,
+): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const picker = new ChoicePickerComponent({
+      title: 'Default thinking effort',
+      hint: '↑↓ navigate · Enter select · Esc cancel',
+      currentValue: efforts.includes(current) ? current : efforts[0],
+      options: efforts.map((effort) => ({ value: effort, label: effort })),
+      onSelect: (value) => {
+        resolve(value);
+      },
+      onCancel: () => {
+        resolve(undefined);
+      },
+    });
+    host.mountEditorReplacement(picker);
+  });
+}
+
+async function persistProviderExtras(
+  host: SlashCommandHost,
+  providerId: string,
+  drafts: readonly ExtraModelDraft[],
+): Promise<void> {
+  const nextDrafts = drafts.filter((draft, index) => {
+    const id = draft.id.trim();
+    if (id.length === 0) return false;
+    return drafts.findIndex((item) => item.id.trim() === id) === index;
+  });
+  const nextIds = extraModelIds(nextDrafts);
+  try {
+    const config = await host.harness.getConfig();
+    const previous = extraModelsFromConfig(
+      config.providers[providerId],
+      config.models ?? {},
+      providerId,
+    );
+    const models: NonNullable<KimiConfigPatch['models']> = {};
+    for (const removed of extraModelIds(previous).filter((id) => !nextIds.includes(id))) {
+      models[`${providerId}/${removed}`] = null;
+    }
+    for (const draft of nextDrafts) {
+      const existing =
+        config.models?.[`${providerId}/${draft.id}`] ?? config.models?.[draft.id];
+      models[`${providerId}/${draft.id}`] = extraModelAliasPatch(
+        providerId,
+        draft,
+        existing,
+      ) as NonNullable<KimiConfigPatch['models']>[string];
+    }
+    const existingProvider = config.providers[providerId];
+    const updated = await host.harness.setConfig({
+      providers: {
+        [providerId]: {
+          ...existingProvider,
+          customModels: nextIds,
+        },
+      },
+      models,
+    });
+    host.setAppState({
+      availableProviders: updated.providers ?? {},
+      availableModels: updated.models ?? {},
+    });
+    host.showStatus(
+      nextIds.length === 0
+        ? `Cleared extra models on ${providerId}.`
+        : `Saved ${String(nextIds.length)} extra model${nextIds.length === 1 ? '' : 's'} on ${providerId}. Auto-discover stays on.`,
+    );
+  } catch (error) {
+    host.showError(`Failed to save extra models: ${formatErrorMessage(error)}`);
+  }
 }
 
 function promptProviderAddSource(

@@ -56,6 +56,7 @@ export type {
   QuestionBackgroundTaskInfo,
   ReloadSummary,
   ResumedAgentState,
+  SessionMeta,
   ServicesConfig,
   ShellEnvironment,
   SkillSummary,
@@ -221,6 +222,32 @@ export interface SessionSummary {
   readonly archived?: boolean | undefined;
   readonly metadata?: JsonObject | undefined;
   readonly additionalDirs?: readonly string[];
+}
+
+export interface SessionGraphEdgeSummary {
+  readonly childSessionId: string;
+  readonly parentSessionId: string;
+}
+
+export interface SessionGraphSummary {
+  readonly nodes: readonly SessionSummary[];
+  readonly edges: readonly SessionGraphEdgeSummary[];
+}
+
+export interface MountSessionInput {
+  readonly sessionId: string;
+  readonly parentSessionId: string;
+  readonly role?: string;
+  readonly mandate?: string;
+}
+
+export interface UnmountSessionInput {
+  readonly sessionId: string;
+}
+
+export interface GetSessionGraphOptions {
+  readonly workDir?: string;
+  readonly includeArchive?: boolean;
 }
 
 export interface AddAdditionalDirResult {

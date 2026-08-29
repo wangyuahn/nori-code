@@ -338,6 +338,7 @@ export class ToolCallComponent extends Container {
   setExpanded(expanded: boolean): void {
     if (this.expanded === expanded) return;
     this.expanded = expanded;
+    this.renderCache = undefined;
     // rebuildBody (not rebuildContent) so the args-driven call preview
     // — which is what carries Write content / Edit diff — re-renders
     // with the new line cap. rebuildContent only touches result-driven

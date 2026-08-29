@@ -77,14 +77,15 @@ export async function loadPluginMarketplace(
   options: LoadPluginMarketplaceOptions,
 ): Promise<PluginMarketplace> {
   const configuredSource = options.source ?? process.env[NORI_CODE_PLUGIN_MARKETPLACE_URL_ENV];
-  const location = resolveMarketplaceLocation(
-    configuredSource ?? NORI_CODE_PLUGIN_MARKETPLACE_URL,
-    options.workDir,
-  );
   const fetchImpl = options.fetchImpl ?? fetch;
   let raw: string;
   try {
+    const location = resolveMarketplaceLocation(
+      configuredSource ?? NORI_CODE_PLUGIN_MARKETPLACE_URL,
+      options.workDir,
+    );
     raw = await readMarketplaceText(location, fetchImpl);
+    return withLatestVersions(parsePluginMarketplace(raw, location), fetchImpl);
   } catch (error) {
     const fallback =
       configuredSource === undefined ? await getSourceCheckoutMarketplaceLocation() : undefined;
@@ -92,7 +93,6 @@ export async function loadPluginMarketplace(
     raw = await readMarketplaceText(fallback, fetchImpl);
     return withLatestVersions(parsePluginMarketplace(raw, fallback), fetchImpl);
   }
-  return withLatestVersions(parsePluginMarketplace(raw, location), fetchImpl);
 }
 
 async function withLatestVersions(

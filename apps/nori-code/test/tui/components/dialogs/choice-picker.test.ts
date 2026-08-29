@@ -106,10 +106,16 @@ describe('ChoicePickerComponent', () => {
       onSelect,
       onCancel,
     });
-    const settingsOutput = settings.render(120).map(strip);
-    expect(settingsOutput).toContain('  ❯ Model');
-    expect(settingsOutput).toContain('    Switch the active model and thinking mode.');
-    expect(settingsOutput).toContain('    Turn automatic CLI updates on or off.');
+    const settingsOutput = settings.render(120).map(strip).join('\n');
+    expect(settingsOutput).toContain('Model');
+    expect(settingsOutput).toContain('Switch the active model and thinking mode.');
+    expect(settingsOutput).toContain('Turn automatic CLI updates on or off.');
+    expect(settingsOutput).toContain('Default Discuss');
+    expect(settingsOutput).toContain('Start new sessions in Discuss mode.');
+    expect(settingsOutput).toContain('Loop limits');
+    expect(settingsOutput).toContain('Limit steps per turn, goal turns, and background idle wake.');
+    expect(settingsOutput).toContain('Memory');
+    expect(settingsOutput).toContain('Configure vector search for semantic memory retrieval.');
 
     const upgradePreference = new UpdatePreferenceSelectorComponent({
       currentValue: true,

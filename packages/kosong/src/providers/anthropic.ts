@@ -77,6 +77,11 @@ function normalizeAnthropicStopReason(raw: string | null | undefined): {
   }
 }
 export interface AnthropicOptions {
+  /**
+   * Name to report as {@link ChatProvider.name}, e.g. the `[providers.x]` key
+   * from the host's config. Defaults to the wire name (`anthropic`).
+   */
+  providerName?: string | undefined;
   apiKey?: string | undefined;
   baseUrl?: string | undefined;
   model: string;
@@ -940,6 +945,8 @@ export class AnthropicChatProvider implements ChatProvider {
   private _explicitMaxTokens: boolean;
 
   constructor(options: AnthropicOptions) {
+    const providerName = options.providerName?.trim();
+    if (providerName !== undefined && providerName.length > 0) this.name = providerName;
     this._model = options.model;
     this._stream = options.stream ?? true;
     this._metadata = options.metadata;

@@ -16,6 +16,9 @@ import {
   type SessionChildCreate,
   type SessionCreate,
   type SessionFork,
+  type SessionGraphResponse,
+  type SessionMount,
+  type SessionRemount,
   type SessionStatusResponse,
   type SessionWarning,
   type SessionUpdate,
@@ -58,6 +61,18 @@ export interface ISessionService {
   listChildren(id: string, query: SessionListQuery): Promise<PageResponse<Session>>;
 
   createChild(id: string, input: SessionChildCreate): Promise<Session>;
+
+  /** Mount `id` under `parent_session_id` (single parent; rejects cycles). */
+  mount(id: string, input: SessionMount): Promise<Session>;
+
+  /** Clear mount so `id` becomes a top-level session. */
+  unmount(id: string): Promise<Session>;
+
+  /** Remount `id` under a new parent (same as mount with a different parent). */
+  remount(id: string, input: SessionRemount): Promise<Session>;
+
+  /** All visible sessions plus mount edges derived from `parent_session_id`. */
+  getGraph(query?: SessionListQuery): Promise<SessionGraphResponse>;
 
   getStatus(id: string, agentId?: string, ensureResumed?: boolean): Promise<SessionStatusResponse>;
 
@@ -117,6 +132,17 @@ export class SessionNotFoundError extends Error {
     super(`session ${sessionId} does not exist`);
     this.name = 'SessionNotFoundError';
     this.sessionId = sessionId;
+  }
+}
+
+export class SessionMountCycleError extends Error {
+  readonly sessionId: string;
+  readonly parentSessionId: string;
+  constructor(sessionId: string, parentSessionId: string) {
+    super(`mounting session ${sessionId} under ${parentSessionId} would create a cycle`);
+    this.name = 'SessionMountCycleError';
+    this.sessionId = sessionId;
+    this.parentSessionId = parentSessionId;
   }
 }
 

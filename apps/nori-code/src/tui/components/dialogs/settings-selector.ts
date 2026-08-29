@@ -12,7 +12,10 @@ export type SettingsSelection =
   | 'note-rules'
   | 'read-only'
   | 'workflow'
-  | 'team';
+  | 'team'
+  | 'default-discuss'
+  | 'loop'
+  | 'memory';
 
 const SETTINGS_OPTIONS: readonly ChoiceOption[] = [
   {
@@ -24,6 +27,11 @@ const SETTINGS_OPTIONS: readonly ChoiceOption[] = [
     value: 'permission',
     label: 'Permission',
     description: 'Choose how tool actions are approved.',
+  },
+  {
+    value: 'default-discuss',
+    label: 'Default Discuss',
+    description: 'Start new sessions in Discuss mode.',
   },
   {
     value: 'theme',
@@ -75,6 +83,16 @@ const SETTINGS_OPTIONS: readonly ChoiceOption[] = [
     label: 'Team',
     description: 'Configure the team engineering tree, such as the maximum department depth.',
   },
+  {
+    value: 'loop',
+    label: 'Loop limits',
+    description: 'Limit steps per turn, goal turns, and background idle wake.',
+  },
+  {
+    value: 'memory',
+    label: 'Memory',
+    description: 'Configure vector search for semantic memory retrieval.',
+  },
 ];
 
 function isSettingsSelection(value: string): value is SettingsSelection {
@@ -90,7 +108,10 @@ function isSettingsSelection(value: string): value is SettingsSelection {
     value === 'note-rules' ||
     value === 'read-only' ||
     value === 'workflow' ||
-    value === 'team'
+    value === 'team' ||
+    value === 'default-discuss' ||
+    value === 'loop' ||
+    value === 'memory'
   );
 }
 
@@ -103,6 +124,7 @@ export class SettingsSelectorComponent extends ChoicePickerComponent {
   constructor(opts: SettingsSelectorOptions) {
     super({
       title: 'Settings',
+      pageSize: 20,
       options: [...SETTINGS_OPTIONS],
       onSelect: (value) => {
         if (isSettingsSelection(value)) opts.onSelect(value);

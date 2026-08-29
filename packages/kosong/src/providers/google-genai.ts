@@ -73,6 +73,11 @@ function normalizeGoogleGenAIFinishReason(raw: unknown): {
   }
 }
 export interface GoogleGenAIOptions {
+  /**
+   * Name to report as {@link ChatProvider.name}, e.g. the `[providers.x]` key
+   * from the host's config. Defaults to the wire name (`google_genai`).
+   */
+  providerName?: string | undefined;
   apiKey?: string | undefined;
   model: string;
   /**
@@ -697,6 +702,8 @@ export class GoogleGenAIChatProvider implements ChatProvider {
   private _clientFactory: ((auth: ProviderRequestAuth) => GenAIClient) | undefined;
 
   constructor(options: GoogleGenAIOptions) {
+    const providerName = options.providerName?.trim();
+    if (providerName !== undefined && providerName.length > 0) this.name = providerName;
     this._model = options.model;
     this._vertexai = options.vertexai ?? false;
     this._stream = options.stream ?? true;

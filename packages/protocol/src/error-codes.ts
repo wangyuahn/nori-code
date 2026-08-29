@@ -101,6 +101,8 @@ export const ErrorCode = {
   FS_ALREADY_EXISTS: 40919,
   /** vault note 在打开后被其他写入修改 */
   VAULT_NOTE_CONFLICT: 40920,
+  /** 会话挂载会形成环（A→…→A） */
+  SESSION_MOUNT_CYCLE: 40921,
 
   /** approval 60s 超时 */
   APPROVAL_EXPIRED: 41001,
@@ -197,6 +199,7 @@ export const ErrorCodeReason: Readonly<Record<ErrorCode, string>> = {
   [ErrorCode.GOAL_OBJECTIVE_TOO_LONG]: 'goal.objective_too_long',
   [ErrorCode.FS_ALREADY_EXISTS]: 'fs.already_exists',
   [ErrorCode.VAULT_NOTE_CONFLICT]: 'vault.note_conflict',
+  [ErrorCode.SESSION_MOUNT_CYCLE]: 'session.mount_cycle',
 
   [ErrorCode.APPROVAL_EXPIRED]: 'approval.expired',
   [ErrorCode.QUESTION_EXPIRED]: 'question.expired',

@@ -1,6 +1,6 @@
 # Keyboard Shortcuts
 
-Kimi Code CLI's TUI interactive mode supports a set of keyboard shortcuts. The shortcuts are organized into five groups by usage context: general input, mode switching, during streaming, tool output control, the approval panel, and popup navigation. Type `/help` in the TUI at any time to open the built-in shortcut reference.
+Nori Code CLI's TUI interactive mode supports a set of keyboard shortcuts. The shortcuts are organized into five groups by usage context: general input, mode switching, during streaming, tool output control, the approval panel, and popup navigation. Type `/help` in the TUI at any time to open the built-in shortcut reference.
 
 ## General Shortcuts
 
@@ -13,8 +13,9 @@ The following keys are always available in the input box:
 | `↑` / `↓` | Browse input history |
 | `Esc` | Close a popup / cancel completion / interrupt streaming output or context compaction |
 | `Ctrl-C` | Interrupt the current streaming output, or clear the input box |
-| `Ctrl-D` | Exit Kimi Code CLI when the input box is empty |
+| `Ctrl-D` | Exit Nori Code CLI when the input box is empty |
 | `Ctrl-T` | Expand or collapse the todo list when it is truncated |
+| `Ctrl-Y` | Show or hide the Discuss / Chat pane |
 
 Pressing `Ctrl-C` **during streaming** cancels immediately — no second confirmation needed.
 
@@ -70,6 +71,28 @@ Pressing `Ctrl-S` causes the model to see your message at the next interruptible
 | `Ctrl-O` | Expand or collapse tool output |
 
 When collapsed tool call results exist in the history, press `Ctrl-O` to toggle between collapsed and expanded views.
+
+## Team pane
+
+`/team` opens a partner's own session (messages and input follow that member, within Discuss / permission limits). Press Enter on Main to return to the lead session.
+
+While Discuss is on, the bottom Discuss pane is a read-only meeting track (who is speaking and what they said). Otherwise it shows department Chat. `Ctrl-Y` or idle `Esc` hides the pane; hiding it does not leave Discuss or the member session.
+
+## Conversation map (`/map`)
+
+`/map` opens the session mount browser for the current working directory. Keys inside the browser:
+
+| Shortcut | Function |
+| --- | --- |
+| `↑` / `↓` | Move selection |
+| `←` / `→` | Page when the list is long |
+| Type | Filter rows |
+| `Enter` | Open the selected session |
+| `M` | Mount: select child row, then parent row (optional role/mandate prompts) |
+| `U` | Unmount the selected session when it has a parent |
+| `Esc` | Cancel mount selection, clear search, or close the browser |
+
+See [Team engineering](../guides/team-engineering.md) for mount semantics and the Web Map view.
 
 ## Approval Panel
 

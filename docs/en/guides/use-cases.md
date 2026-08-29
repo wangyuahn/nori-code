@@ -1,10 +1,10 @@
 # Common use cases
 
-This page collects typical Kimi Code CLI scenarios along with ready-to-use prompt examples — copy them as-is or adapt them to your needs.
+This page collects typical Nori Code CLI scenarios along with ready-to-use prompt examples — copy them as-is or adapt them to your needs.
 
 ## Understanding an unfamiliar project
 
-When taking over an unfamiliar repository, a good first step is to use `kimi --plan` or press `Shift-Tab` to enter Discuss, a read-only team meeting for research before execution:
+When taking over an unfamiliar repository, a good first step is to use `nori --discuss` or press `Shift-Tab` to enter Discuss, a read-only team meeting for research before execution:
 
 ```
 Give me an overview of this repository's architecture. Specifically:
@@ -81,7 +81,7 @@ src/parser/markdown.ts currently has almost no tests. Please add a unit test sui
 Extract the repeated "read body → validate → log → respond" pattern in src/handlers into a middleware. Run the tests afterwards to make sure existing behavior is unchanged.
 ```
 
-For multi-file refactors, use Discuss first to collect the team's statements. You can also use `/fork` to create an experimental branch — if you don't like the result, just switch back to the original session.
+For multi-file refactors, use Discuss first to collect the team's statements. Browse hired partners with `/team` or the mount forest with `/map`. You can also use `/fork` to create an experimental branch — if you don't like the result, just switch back to the original session.
 
 ## One-off scripts and automation
 
@@ -121,9 +121,9 @@ Check the production health endpoint every hour and let me know if anything look
 Come back in about 10 minutes and check whether the build has finished.
 ```
 
-Scheduled tasks are bound to their session — closing the terminal is fine, and they are reloaded and continue firing when you run `kimi resume` on the same session. They are not carried into brand-new sessions. Recurring tasks expire after 7 days — the agent receives a `stale` signal on the final trigger and decides whether to stop or renew based on your original instructions.
+Scheduled tasks are bound to their session — closing the terminal is fine, and they are reloaded and continue firing when you run `nori resume` on the same session. They are not carried into brand-new sessions. Recurring tasks expire after 7 days — the agent receives a `stale` signal on the final trigger and decides whether to stop or renew based on your original instructions.
 
-To see what tasks are currently pending, just ask the agent (it calls the read-only `CronList` tool). To cancel a task, tell the agent to remove it or reference its 8-character ID. For the full tool reference, see [Scheduled tasks](../reference/tools.md#scheduled-tasks). The global kill switch is `KIMI_DISABLE_CRON=1`.
+To see what tasks are currently pending, just ask the agent (it calls the read-only `CronList` tool). To cancel a task, tell the agent to remove it or reference its 8-character ID. For the full tool reference, see [Scheduled tasks](../reference/tools.md#scheduled-tasks). The global kill switch is `NORI_DISABLE_CRON=1`.
 
 ## Generating and maintaining documentation
 
@@ -139,7 +139,7 @@ For every public function under src/api that is missing a docstring, add a docum
 Based on the command implementations in src/cli, generate a draft command reference listing each subcommand, its arguments, and default values. Put it in docs/en/reference for me to review later.
 ```
 
-When you need a record or a retrospective, use `kimi export <sessionId>` to package the session as a ZIP, or use `/export-md` inside the TUI to export a readable Markdown transcript.
+When you need a record or a retrospective, use `nori export <sessionId>` to package the session as a ZIP, or use `/export-md` inside the TUI to export a readable Markdown transcript.
 
 ## Next steps
 

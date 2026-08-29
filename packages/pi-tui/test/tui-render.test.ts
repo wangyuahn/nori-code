@@ -771,6 +771,164 @@ describe("TUI differential rendering", () => {
 
 		tui.stop();
 	});
+
+	it("pins to the new bottom when collapsing a tall mid-buffer block (ctrl+o)", async () => {
+		const terminal = new VirtualTerminal(40, 8);
+		const tui = new TUI(terminal);
+		const chat = new TestComponent();
+		const editor = new TestComponent();
+		tui.addChild(chat);
+		tui.addChild(editor);
+
+		chat.lines = [
+			"user: please inspect",
+			...Array.from({ length: 40 }, (_, i) => `tool-line-${i + 1}`),
+			"assistant: done with the file",
+		];
+		editor.lines = ["> prompt"];
+		tui.start();
+		await terminal.waitForRender();
+
+		chat.lines = [
+			"user: please inspect",
+			"tool-line-1",
+			"tool-line-2",
+			"tool-line-3",
+			"... (37 more lines, ctrl+o to expand)",
+			"assistant: done with the file",
+		];
+		tui.requestRender();
+		await terminal.waitForRender();
+
+		const collapsed = terminal.getViewport();
+		const joined = collapsed.join("\n");
+		assert.ok(
+			joined.includes("assistant: done with the file"),
+			`viewport lost current assistant: ${JSON.stringify(collapsed)}`,
+		);
+		assert.ok(joined.includes("> prompt"), `viewport lost prompt: ${JSON.stringify(collapsed)}`);
+		const nonEmpty = collapsed.filter((line) => line.trim().length > 0);
+		assert.ok(nonEmpty.length >= 2, `viewport collapsed to blanks: ${JSON.stringify(collapsed)}`);
+
+		chat.lines = [
+			"user: please inspect",
+			...Array.from({ length: 40 }, (_, i) => `tool-line-${i + 1}`),
+			"assistant: done with the file",
+		];
+		tui.requestRender();
+		await terminal.waitForRender();
+		const reexpanded = terminal.getViewport().join("\n");
+		assert.ok(
+			reexpanded.includes("assistant: done with the file") || reexpanded.includes("> prompt"),
+			`re-expand lost current turn: ${JSON.stringify(terminal.getViewport())}`,
+		);
+
+		tui.stop();
+	});
+
+	it("does not blank the viewport when collapsing a tall block that is on screen", async () => {
+		const terminal = new VirtualTerminal(40, 8);
+		const tui = new TUI(terminal);
+		const chat = new TestComponent();
+		const editor = new TestComponent();
+		tui.addChild(chat);
+		tui.addChild(editor);
+
+		chat.lines = [...Array.from({ length: 20 }, (_, i) => `tool-line-${i + 1}`), "assistant: now"];
+		editor.lines = ["> prompt"];
+		tui.start();
+		await terminal.waitForRender();
+
+		chat.lines = ["tool-line-1", "tool-line-2", "tool-line-3", "... (17 more lines)", "assistant: now"];
+		tui.requestRender();
+		await terminal.waitForRender();
+
+		const collapsed = terminal.getViewport();
+		const joined = collapsed.join("\n");
+		assert.ok(joined.includes("assistant: now"), `lost assistant: ${JSON.stringify(collapsed)}`);
+		assert.ok(joined.includes("> prompt"), `lost prompt: ${JSON.stringify(collapsed)}`);
+		assert.ok(
+			collapsed.filter((line) => line.trim().length > 0).length >= 2,
+			`blank viewport: ${JSON.stringify(collapsed)}`,
+		);
+
+		tui.stop();
+	});
+
+	it("pins to the new welcome when replacing a tall transcript (/new)", async () => {
+		const terminal = new VirtualTerminal(40, 8);
+		const tui = new TUI(terminal);
+		const chat = new TestComponent();
+		const editor = new TestComponent();
+		const footer = new TestComponent();
+		tui.addChild(chat);
+		tui.addChild(editor);
+		tui.addChild(footer);
+
+		const welcome = ["Welcome to Nori", "Session: ses-old", "Model: kimi"];
+		chat.lines = [
+			...welcome,
+			...Array.from({ length: 80 }, (_, i) => `old-msg-${i + 1}`),
+		];
+		editor.lines = ["> prompt"];
+		footer.lines = ["ctrl-c to exit"];
+		tui.start();
+		await terminal.waitForRender();
+
+		const before = terminal.getViewport().join("\n");
+		assert.ok(before.includes("old-msg-"), `expected a scrolled transcript, got: ${JSON.stringify(terminal.getViewport())}`);
+		assert.ok(!before.includes("Welcome to Nori"), "welcome should already be above the viewport");
+
+		// /new keeps a short welcome prefix (session id may change) and the
+		// editor/footer, dropping the entire transcript. Height falls farther
+		// than a ctrl+o collapse.
+		chat.lines = ["Welcome to Nori", "Session: ses-new", "Model: kimi"];
+		tui.requestRender();
+		await terminal.waitForRender();
+
+		const after = terminal.getViewport();
+		const joined = after.join("\n");
+		assert.ok(joined.includes("Welcome to Nori"), `viewport missed new welcome: ${JSON.stringify(after)}`);
+		assert.ok(joined.includes("> prompt"), `viewport missed editor: ${JSON.stringify(after)}`);
+		assert.ok(joined.includes("ctrl-c to exit"), `viewport missed footer: ${JSON.stringify(after)}`);
+		assert.ok(!joined.includes("old-msg-"), `stale transcript still on screen: ${JSON.stringify(after)}`);
+		assert.ok(
+			after.filter((line) => line.trim().length > 0).length >= 3,
+			`viewport collapsed to blanks: ${JSON.stringify(after)}`,
+		);
+
+		tui.stop();
+	});
+
+	it("does not blank the viewport when a tall transcript shrinks to a few lines", async () => {
+		const terminal = new VirtualTerminal(40, 8);
+		const tui = new TUI(terminal);
+		const chat = new TestComponent();
+		const editor = new TestComponent();
+		tui.addChild(chat);
+		tui.addChild(editor);
+
+		chat.lines = Array.from({ length: 60 }, (_, i) => `turn-${i + 1}`);
+		editor.lines = ["> prompt"];
+		tui.start();
+		await terminal.waitForRender();
+
+		chat.lines = ["welcome"];
+		tui.requestRender();
+		await terminal.waitForRender();
+
+		const after = terminal.getViewport();
+		const joined = after.join("\n");
+		assert.ok(joined.includes("welcome"), `viewport missed welcome: ${JSON.stringify(after)}`);
+		assert.ok(joined.includes("> prompt"), `viewport missed editor: ${JSON.stringify(after)}`);
+		assert.ok(!joined.includes("turn-60"), `stale bottom of old transcript still on screen: ${JSON.stringify(after)}`);
+		assert.ok(
+			after.filter((line) => line.trim().length > 0).length >= 2,
+			`viewport collapsed to blanks: ${JSON.stringify(after)}`,
+		);
+
+		tui.stop();
+	});
 });
 
 

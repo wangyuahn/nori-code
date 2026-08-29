@@ -1,6 +1,6 @@
 import { ensureDaemon } from '#/cli/sub/server/daemon';
 import { tryResolveServerToken } from '#/cli/sub/server/shared';
-import { openUrl } from '#/utils/open-url';
+import { openUrlAsync } from '#/utils/open-url';
 import { getDataDir } from '#/utils/paths';
 
 import { ChoicePickerComponent } from '../components/dialogs/choice-picker';
@@ -67,16 +67,29 @@ export async function handleWebCommand(host: SlashCommandHost): Promise<void> {
 
   // Resolve the persistent token so the opened browser auto-authenticates via
   // the `#token=` fragment — matching the `nori web` subcommand. Show the URL
-  // and token in green under the status line so they can be copied before the
-  // terminal exits. Best-effort: an older/never-started server has no token
-  // file, so we fall back to the plain URL and skip the token line.
+  // and token so they can be copied if the desktop opener fails. Best-effort:
+  // an older/never-started server has no token file, so we fall back to the
+  // session hash without a token and warn that the Web UI may ask to sign in.
   const token = tryResolveServerToken(getDataDir());
   const url = webSessionUrl(origin, sessionId, token);
   host.showStatus(`open ${url}`, 'success');
   if (token !== undefined) {
     host.showStatus(`Token:    ${token}`, 'success');
+  } else {
+    host.showStatus(
+      'No server token found. The Web UI may ask you to sign in; copy the URL above if the browser stays blank.',
+      'warning',
+    );
   }
-  openUrl(url);
+
+  const opened = await openUrlAsync(url);
+  if (!opened.ok) {
+    host.showError(
+      `Could not open a browser (${opened.error ?? 'unknown error'}). Copy the URL above, or run: nori web`,
+    );
+    return;
+  }
+
   host.setExitOpenUrl(url);
   await host.stop();
 }
@@ -85,8 +98,15 @@ export async function handleWebCommand(host: SlashCommandHost): Promise<void> {
  * Build the deep-link URL the web UI recognises for a session. When a token is
  * known it rides in the `#token=` fragment (never sent to the server, so never
  * logged), so the browser authenticates on load just like `nori web`.
+ *
+ * nori-web is built with `base: './'` for the desktop file:// load, so a path
+ * like `/sessions/:id` resolves `./assets/*` under `/sessions/` and the page
+ * stays black. Keep the launch URL on `/` and pass session + token in the hash.
  */
 export function webSessionUrl(origin: string, sessionId: string, token?: string): string {
-  const base = `${origin.replace(/\/+$/, '')}/sessions/${encodeURIComponent(sessionId)}`;
-  return token === undefined ? base : `${base}#token=${token}`;
+  const base = origin.replace(/\/+$/, '');
+  const hash = new URLSearchParams();
+  if (token !== undefined) hash.set('token', token);
+  hash.set('session', sessionId);
+  return `${base}/#${hash.toString()}`;
 }

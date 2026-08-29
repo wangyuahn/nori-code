@@ -14,8 +14,10 @@ export {
   handleEditorCommand,
   handleModelCommand,
   handleDiscussCommand,
+  handlePlanCommand,
   handleSettingPermission,
   handleThemeCommand,
+  handleSettingCommand,
   showExperimentsPanel,
   showModelPicker,
   showPermissionPicker,
@@ -27,6 +29,8 @@ export { handleReloadCommand, handleReloadTuiCommand } from './reload';
 export { handleGoalCommand, parseGoalCommand } from './goal';
 export { goalArgumentCompletions } from './registry';
 export { handleForkCommand, handleInitCommand, handleTitleCommand } from './session';
+export { handleTeamCommand } from './team';
+export { handleMapCommand } from './map';
 export { handleUndoCommand } from './undo';
 export { handleWebCommand } from './web';
 export {

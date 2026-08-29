@@ -20,8 +20,13 @@ import type {
   KimiConfigPatch,
   KimiHostIdentity,
   ListSessionsOptions,
+  MountSessionInput,
+  GetSessionGraphOptions,
+  SessionGraphSummary,
+  UnmountSessionInput,
   RenameSessionInput,
   ResumeSessionInput,
+  SessionMeta,
   ReloadSessionInput,
   SessionSummary,
   TelemetryClient,
@@ -216,6 +221,36 @@ export class KimiHarness {
 
   async listSessions(options: ListSessionsOptions = {}): Promise<readonly SessionSummary[]> {
     return this.rpc.listSessions(options);
+  }
+
+  async getSessionGraph(options: GetSessionGraphOptions = {}): Promise<SessionGraphSummary> {
+    return this.rpc.getSessionGraph(options);
+  }
+
+  async getSessionMetadata(sessionId: string): Promise<SessionMeta> {
+    const active = this.activeSessions.get(sessionId);
+    if (active !== undefined) return active.getSessionMetadata();
+    const session = await this.resumeSession({ id: sessionId });
+    try {
+      return await session.getSessionMetadata();
+    } finally {
+      // Metadata probing is used by map/browser views and must not turn every
+      // dormant session into a live core session. Only the temporary wrapper
+      // created above is closed; callers' already-active sessions remain open.
+      await session.close();
+    }
+  }
+
+  async mountSession(input: MountSessionInput): Promise<SessionSummary> {
+    return this.rpc.mountSession(input);
+  }
+
+  async remountSession(input: MountSessionInput): Promise<SessionSummary> {
+    return this.rpc.remountSession(input);
+  }
+
+  async unmountSession(input: UnmountSessionInput): Promise<SessionSummary> {
+    return this.rpc.unmountSession(input);
   }
 
   async getConfig(options: GetConfigOptions = {}): Promise<KimiConfig> {

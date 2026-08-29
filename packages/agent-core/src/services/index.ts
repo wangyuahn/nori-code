@@ -125,6 +125,7 @@ export { ConfigService } from './config/configService';
 export {
   ISessionService,
   SessionNotFoundError,
+  SessionMountCycleError,
   SessionUndoUnavailableError,
   toProtocolSession,
 } from './session/session';

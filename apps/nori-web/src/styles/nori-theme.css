@@ -1681,6 +1681,7 @@ kbd {
 
 .content-area { padding: 0; background: transparent; }
 .content-area-chat { overflow: hidden; }
+.content-area-team { overflow: hidden; padding: 0; }
 .view-page { min-height: 100%; padding: 30px clamp(20px, 4vw, 56px); }
 .view-page > * { width: min(920px, 100%); margin-inline: auto; }
 .view-page-wide > * { width: min(1180px, 100%); }
@@ -4554,6 +4555,626 @@ kbd {
 .discuss-badge { font-style: normal; color: var(--nori-accent, currentColor); border: 1px solid currentColor; border-radius: 999px; padding: 0 7px; font-size: calc(10px * var(--nori-ui-font-scale)); }
 .team-tree-empty { padding: 40px 16px; color: var(--nori-text-secondary); text-align: center; }
 .team-tree-footer { display: flex; align-items: center; gap: 7px; padding: 10px 6px 2px; color: var(--nori-text-secondary); font-size: calc(11px * var(--nori-ui-font-scale)); }
+
+/* Conversation map: full-bleed blueprint stage; chrome floats over the canvas. */
+.session-map-page.view-page {
+  padding: 0;
+  height: 100%;
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  position: relative;
+}
+.session-map-page.view-page-wide > * {
+  width: 100%;
+  max-width: none;
+  margin-inline: 0;
+}
+.session-map-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  overscroll-behavior: contain;
+  background-color: color-mix(in srgb, var(--nori-bg, #0c0f14) 92%, #1a2332);
+  background-image: radial-gradient(circle, color-mix(in srgb, #5b8def 35%, transparent) 1px, transparent 1.2px);
+  background-size: 18px 18px;
+  background-position: 0 0;
+}
+.session-map-stage.panning { cursor: grabbing; }
+.session-map-stage.binding-note { cursor: cell; }
+.session-map-stage.note-mode { cursor: crosshair; }
+.session-map-stage.marqueeing { cursor: crosshair; }
+.session-map-stage-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--nori-text-secondary);
+  pointer-events: none;
+  z-index: 1;
+}
+.session-map-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+}
+.session-map-edges {
+  position: absolute;
+  pointer-events: none;
+  overflow: visible;
+}
+.session-map-edges path {
+  fill: none;
+  stroke: color-mix(in srgb, #5b8def 55%, var(--nori-border));
+  stroke-width: 1.6;
+  opacity: 0.85;
+}
+.session-map-float {
+  position: absolute;
+  z-index: 5;
+  pointer-events: auto;
+}
+.session-map-float-top {
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px 16px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--nori-border) 70%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--nori-bg, #0c0f14) 78%, transparent);
+  backdrop-filter: blur(10px);
+  /* Empty chrome must not steal IN-port hits under the header. */
+  pointer-events: none;
+}
+.session-map-float-top > * {
+  pointer-events: auto;
+}
+.session-map-float-title {
+  min-width: 0;
+  flex: 1 1 180px;
+}
+.session-map-float-title h2 {
+  margin: 0;
+  font-size: calc(16px * var(--nori-ui-font-scale));
+  font-weight: 600;
+}
+.session-map-float-zoom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.session-map-zoom-btn {
+  min-width: 28px;
+  padding-inline: 0;
+  text-align: center;
+}
+.session-map-hint {
+  left: 12px;
+  bottom: 10px;
+  right: 12px;
+  color: var(--nori-text-muted);
+  font-size: calc(10px * var(--nori-ui-font-scale));
+  pointer-events: none;
+  text-shadow: 0 1px 2px color-mix(in srgb, var(--nori-bg) 80%, transparent);
+}
+/* Bottom toast: never parks on top of node cards / IN ports mid-canvas. */
+.session-map-error {
+  top: auto;
+  bottom: 34px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(480px, calc(100% - 48px));
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, #d96b6b 55%, var(--nori-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--nori-bg, #0c0f14) 85%, #5a2020);
+  color: #f0c2c2;
+  font-size: calc(12px * var(--nori-ui-font-scale));
+  z-index: 12;
+}
+.session-map-error.sticky {
+  border-color: color-mix(in srgb, #d96b6b 75%, var(--nori-border));
+  box-shadow: 0 8px 24px color-mix(in srgb, #000 40%, transparent);
+}
+.session-map-hint-toast {
+  top: auto;
+  bottom: 34px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(420px, calc(100% - 48px));
+  padding: 7px 14px;
+  border: 1px solid color-mix(in srgb, #6ea8ff 45%, var(--nori-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--nori-bg, #0c0f14) 88%, #1a2840);
+  color: color-mix(in srgb, #9bc5ff 85%, var(--nori-text));
+  font-size: calc(12px * var(--nori-ui-font-scale));
+  z-index: 11;
+  pointer-events: none;
+}
+.session-map-busy-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  cursor: wait;
+  pointer-events: all;
+  background: color-mix(in srgb, var(--nori-bg, #0c0f14) 12%, transparent);
+}
+.session-map-stage.busy { cursor: wait; }
+.session-map-error-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.session-map-error-close {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.session-map-error-close:hover {
+  background: color-mix(in srgb, #d96b6b 30%, transparent);
+}
+.session-map-search {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--nori-border);
+  background: color-mix(in srgb, var(--nori-surface, transparent) 70%, transparent);
+  color: var(--nori-text);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: calc(12px * var(--nori-ui-font-scale));
+}
+.session-map-count {
+  margin-top: 2px;
+  color: var(--nori-text-secondary);
+  font-size: calc(11px * var(--nori-ui-font-scale));
+}
+.session-map-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.session-map-search-wrap .session-map-search {
+  padding-right: 28px;
+}
+.session-map-search-clear {
+  position: absolute;
+  right: 6px;
+  border: none;
+  background: transparent;
+  color: var(--nori-text-secondary);
+  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  line-height: 1;
+}
+.session-map-annotation {
+  position: absolute;
+  z-index: 1;
+  box-sizing: border-box;
+  border: 1.5px dashed color-mix(in srgb, var(--map-ann-color, #3b82f6) 75%, transparent);
+  background: color-mix(in srgb, var(--map-ann-color, #3b82f6) 12%, transparent);
+  border-radius: 8px;
+  pointer-events: auto;
+  cursor: pointer;
+}
+.session-map-annotation.editing,
+.session-map-annotation.binding {
+  border-style: solid;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--map-ann-color) 40%, transparent);
+}
+.session-map-annotation-title {
+  position: absolute;
+  left: 8px;
+  top: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--map-ann-color, #3b82f6) 85%, var(--nori-text));
+  max-width: calc(100% - 16px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-map-annotation-empty {
+  position: absolute;
+  right: 8px;
+  bottom: 4px;
+  font-size: 10px;
+  color: var(--nori-text-secondary);
+  opacity: 0.8;
+}
+.session-map-node {
+  z-index: 3;
+  position: absolute;
+  box-sizing: border-box;
+  width: 220px;
+  height: 96px !important;
+  min-height: 96px;
+  max-height: 96px;
+  /* Override .team-node { overflow:hidden } — that clipped ports into half-circles
+     and sheared glyphs mid-character. */
+  overflow: visible !important;
+  padding: 12px 12px 16px;
+  cursor: grab;
+  touch-action: none;
+}
+.session-map-node:hover,
+.session-map-node:focus-within {
+  z-index: 4;
+}
+.session-map-node:active { cursor: grabbing; }
+.session-map-node-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.session-map-node .team-node-name {
+  display: -webkit-box !important;
+  font-size: calc(13px * var(--nori-ui-font-scale));
+  line-height: 1.25;
+  max-height: 2.5em;
+  white-space: normal;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-map-node .team-node-sub {
+  display: block !important;
+  flex: 0 0 auto;
+  line-height: 1.25;
+  white-space: nowrap !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-map-node .team-node-task {
+  display: block !important;
+  flex: 0 0 auto;
+  line-height: 1.25;
+  max-height: none;
+  -webkit-line-clamp: unset !important;
+  -webkit-box-orient: initial !important;
+  white-space: nowrap !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-map-port {
+  position: absolute;
+  left: 50%;
+  width: 18px;
+  height: 18px;
+  margin-left: -9px;
+  border-radius: 50%;
+  border: 2px solid #6ea8ff;
+  background: #0f1624;
+  box-shadow:
+    0 0 0 3px #0c0f14,
+    inset 0 0 0 1px color-mix(in srgb, #6ea8ff 35%, transparent);
+  z-index: 20;
+  cursor: crosshair;
+  pointer-events: auto;
+  touch-action: none;
+}
+.session-map-port::before {
+  content: '';
+  position: absolute;
+  /* Fat invisible hit pad — UE pins are easy to grab. Matches the
+     PORT_HIT_RADIUS (36 world units = 9px port + 27px pad at scale 1) so the
+     DOM grab area and the drop hit-test agree. */
+  inset: -27px;
+  border-radius: 50%;
+}
+.session-map-stage.wiring .session-map-port {
+  background: #6ea8ff;
+  border-color: #9bc5ff;
+}
+.session-map-port:hover,
+.session-map-port:focus-visible {
+  background: #6ea8ff;
+  border-color: #9bc5ff;
+  box-shadow:
+    0 0 0 3px #0c0f14,
+    0 0 12px color-mix(in srgb, #6ea8ff 60%, transparent);
+}
+.session-map-port-in {
+  top: -11px;
+}
+.session-map-port-in.connected {
+  background: #3d9a5f;
+  border-color: #7dcea0;
+}
+.session-map-port-out {
+  bottom: -11px;
+}
+.session-map-stage.wiring .session-map-port.wire-highlight {
+  background: #6ea8ff;
+  border-color: #b8d4ff;
+  box-shadow:
+    0 0 0 3px #0c0f14,
+    0 0 14px color-mix(in srgb, #6ea8ff 70%, transparent);
+}
+.session-map-stage.wiring .session-map-port.wire-snap {
+  background: #9bc5ff;
+  border-color: #fff;
+  transform: scale(1.15);
+}
+.session-map-node.wire-target-valid {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #6ea8ff 55%, transparent);
+}
+.session-map-node.wire-target-snap {
+  box-shadow: inset 0 0 0 2px #6ea8ff;
+}
+.session-map-stage.wiring { cursor: crosshair; }
+.session-map-wire-preview {
+  position: absolute;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 5;
+}
+.session-map-wire-preview path {
+  fill: none;
+  stroke: #6ea8ff;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+.session-map-marquee {
+  position: absolute;
+  z-index: 2;
+  border: 1px solid #6ea8ff;
+  background: color-mix(in srgb, #6ea8ff 18%, transparent);
+  pointer-events: none;
+  box-sizing: border-box;
+}
+.session-map-node.selected {
+  box-shadow: inset 0 0 0 2px #6ea8ff;
+}
+.session-map-context-menu {
+  position: fixed;
+  z-index: 40;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid color-mix(in srgb, var(--nori-border) 80%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--nori-bg, #0c0f14) 92%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 24px color-mix(in srgb, #000 45%, transparent);
+}
+.session-map-context-menu button {
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--nori-text);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.session-map-context-menu button:hover {
+  background: var(--nori-hover, color-mix(in srgb, var(--nori-text) 8%, transparent));
+}
+.session-map-context-menu button.danger {
+  color: #f87171;
+}
+.session-map-tool-hint {
+  font-size: 11px;
+  color: var(--nori-text-secondary);
+  align-self: center;
+}
+.session-map-search-inline {
+  flex: 1 1 220px;
+  max-width: 360px;
+  min-width: 160px;
+  position: relative;
+  align-self: center;
+}
+.session-map-node.member {
+  border-color: color-mix(in srgb, var(--nori-accent, #6aa84f) 55%, var(--nori-border));
+}
+.session-map-note-editor {
+  right: 12px;
+  bottom: 36px;
+  left: auto;
+  max-width: min(420px, calc(100% - 24px));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--nori-border) 70%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--nori-bg, #0c0f14) 82%, transparent);
+  backdrop-filter: blur(10px);
+}
+.session-map-note-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--nori-text-secondary);
+}
+.session-map-note-editor input[type='text'],
+.session-map-note-editor input:not([type]) {
+  border: 1px solid var(--nori-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--nori-text);
+  padding: 6px 8px;
+  min-width: 140px;
+}
+.session-map-list-scroll {
+  overflow: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.session-map-list-item {
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--nori-text);
+  border-radius: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.session-map-list-item:hover,
+.session-map-list-item.active {
+  border-color: var(--nori-border);
+  background: var(--nori-hover, color-mix(in srgb, var(--nori-text) 6%, transparent));
+}
+.session-map-list-title {
+  font-size: calc(13px * var(--nori-ui-font-scale));
+  font-weight: 600;
+}
+.session-map-list-meta {
+  color: var(--nori-text-secondary);
+  font-size: calc(11px * var(--nori-ui-font-scale));
+}
+.session-map-node.top-level {
+  box-shadow: inset 0 0 0 1px var(--nori-border);
+}
+.session-map-node.active {
+  box-shadow: inset 0 0 0 2px var(--nori-accent, currentColor);
+}
+.session-map-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.session-map-tool {
+  border: 1px solid color-mix(in srgb, var(--nori-border) 80%, transparent);
+  background: color-mix(in srgb, var(--nori-surface, transparent) 40%, transparent);
+  color: var(--nori-text-secondary);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.session-map-tool.active,
+.session-map-tool:hover {
+  color: var(--nori-text);
+  border-color: var(--nori-text-secondary);
+}
+.session-map-unmount {
+  position: absolute;
+  left: 8px;
+  bottom: 6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid var(--nori-border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--nori-text-secondary);
+}
+.session-map-unmount:hover {
+  color: var(--nori-text);
+  border-color: var(--nori-text-secondary);
+}
+.session-map-draft-node {
+  position: absolute;
+  z-index: 8;
+  width: 260px;
+  box-sizing: border-box;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid #3d9a5f;
+  border-radius: 8px;
+  background: color-mix(in srgb, #0f1624 92%, #1a3a28);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, #3d9a5f 35%, transparent),
+    0 12px 28px color-mix(in srgb, #000 45%, transparent);
+  color: var(--nori-text);
+  pointer-events: auto;
+  touch-action: none;
+}
+.session-map-draft-node h3 {
+  margin: 0;
+  font-size: calc(13px * var(--nori-ui-font-scale));
+  font-weight: 600;
+  color: #7dcea0;
+}
+.session-map-draft-meta {
+  margin: 0;
+  font-size: 11px;
+  color: var(--nori-text-secondary);
+  line-height: 1.35;
+}
+.session-map-draft-node label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--nori-text-secondary);
+}
+.session-map-draft-node input,
+.session-map-draft-node textarea {
+  border: 1px solid color-mix(in srgb, #3d9a5f 40%, var(--nori-border));
+  border-radius: 6px;
+  background: color-mix(in srgb, #0c0f14 80%, transparent);
+  color: var(--nori-text);
+  padding: 6px 8px;
+  font: inherit;
+  resize: vertical;
+}
+.session-map-draft-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+.session-map-draft-actions .primary {
+  border-color: #3d9a5f;
+  color: #b8f0cc;
+}
+@media (max-width: 900px) {
+  .session-map-float-top {
+    flex-direction: column;
+  }
+  .session-map-float-zoom {
+    margin-left: 0;
+  }
+}
 
 
 /* 输入框上方的 Goal / Todo 条：可折叠，宽度跟着 composer 走。

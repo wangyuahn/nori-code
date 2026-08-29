@@ -26,6 +26,7 @@ import type {
   ReloadSummary,
   ResumedSessionState,
   ResumedSessionSummary,
+  SessionMeta,
   SessionStatus,
   SessionSummary,
   SessionUsage,
@@ -266,6 +267,11 @@ export class Session {
   async getStatus(): Promise<SessionStatus> {
     this.ensureOpen();
     return this.rpc.getStatus({ sessionId: this.id });
+  }
+
+  async getSessionMetadata(): Promise<SessionMeta> {
+    this.ensureOpen();
+    return this.rpc.getSessionMetadata({ sessionId: this.id });
   }
 
   async listSkills(): Promise<readonly SkillSummary[]> {

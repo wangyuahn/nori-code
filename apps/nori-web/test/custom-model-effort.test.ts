@@ -123,6 +123,36 @@ describe('custom model effort persistence', () => {
     }]);
   });
 
+  it('does not hydrate unlisted aliases when extras-only mode is on', () => {
+    expect(parseCustomModelDrafts([], {
+      'openrouter/gpt-new': {
+        provider: 'openrouter',
+        model: 'gpt-new',
+      },
+    }, 'openrouter', { includeUnlistedAliases: false })).toEqual([
+      expect.objectContaining({ id: '' }),
+    ]);
+    expect(parseCustomModelDrafts(['stealth/ox-alpha'], {
+      'openrouter/gpt-new': {
+        provider: 'openrouter',
+        model: 'gpt-new',
+      },
+      'openrouter/stealth/ox-alpha': {
+        provider: 'openrouter',
+        model: 'stealth/ox-alpha',
+        thinkingSupport: true,
+        supportEfforts: ['low', 'medium', 'high'],
+        defaultEffort: 'medium',
+      },
+    }, 'openrouter', { includeUnlistedAliases: false })).toEqual([
+      expect.objectContaining({
+        id: 'stealth/ox-alpha',
+        thinking: 'efforts',
+        supportEfforts: ['low', 'medium', 'high'],
+      }),
+    ]);
+  });
+
   it('exposes the same chat effort choices as discovered models after save', () => {
     const item = customModelToCatalogItem('ds', {
       id: 'reasoner',
@@ -132,6 +162,7 @@ describe('custom model effort persistence', () => {
     });
     expect(modelThinkingOptions(item)).toEqual({
       choices: [
+        { value: 'off', kind: 'fast' },
         { value: 'low', kind: 'effort' },
         { value: 'medium', kind: 'effort' },
         { value: 'high', kind: 'effort' },

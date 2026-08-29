@@ -1,6 +1,7 @@
 import type { Session } from '@nori-code/sdk';
 
 import { AssistantMessageComponent } from '../components/messages/assistant-message';
+import { DiscussUtteranceComponent } from '../components/messages/discuss-utterance';
 import { currentWorkingTip } from '../components/chrome/working-tips';
 import { CompactionComponent } from '../components/dialogs/compaction';
 import { ReadGroupComponent } from '../components/messages/read-group';
@@ -43,6 +44,7 @@ export class StreamingUIController {
   private pendingAssistantFlush = false;
   private pendingThinkingFlush = false;
   readonly pendingToolCallFlushIds = new Set<string>();
+  private readonly pendingDiscussFlushIds = new Set<string>();
 
   // ---------------------------------------------------------------------------
   // Streaming runtime state (private — accessed via semantic methods below)
@@ -53,6 +55,10 @@ export class StreamingUIController {
   private _assistantDraft = '';
   private _thinkingDraft = '';
   private _streamingBlock: { component: AssistantMessageComponent; entry: TranscriptEntry } | null = null;
+  private readonly _discussBlocks = new Map<
+    string,
+    { component: DiscussUtteranceComponent; entry: TranscriptEntry; draft: string }
+  >();
   private _activeThinkingComponent: ThinkingComponent | undefined = undefined;
   private _activeCompactionBlock: CompactionComponent | undefined = undefined;
   private _activeToolCalls = new Map<string, ToolCallBlockData>();
@@ -105,6 +111,63 @@ export class StreamingUIController {
     }
     this._assistantDraft += delta;
     this.pendingAssistantFlush = true;
+  }
+
+  appendDiscussDelta(agentId: string, speakerName: string, delta: string, turnId?: string): void {
+    this.setDiscussUtterance(agentId, speakerName, delta, { turnId, speaking: true, replace: false });
+  }
+
+  setDiscussUtterance(
+    agentId: string,
+    speakerName: string,
+    text: string,
+    opts?: { turnId?: string; speaking?: boolean; replace?: boolean },
+  ): void {
+    let block = this._discussBlocks.get(agentId);
+    if (block === undefined) {
+      const speaking = opts?.speaking !== false;
+      const entry: TranscriptEntry = {
+        id: nextTranscriptId(),
+        kind: 'discuss_utterance',
+        turnId: opts?.turnId,
+        renderMode: 'plain',
+        content: '',
+        speakerName,
+        speakerAgentId: agentId,
+        speaking,
+      };
+      const component = new DiscussUtteranceComponent(speakerName, speaking);
+      block = { component, entry, draft: '' };
+      this._discussBlocks.set(agentId, block);
+      this.host.pushTranscriptEntry(entry);
+      this.host.state.transcriptContainer.addChild(component);
+    }
+    block.draft = opts?.replace === true ? text : block.draft + text;
+    if (opts?.speaking !== undefined) {
+      block.entry.speaking = opts.speaking;
+    }
+    this.pendingDiscussFlushIds.add(agentId);
+  }
+
+  finalizeDiscussUtterance(agentId: string): void {
+    this.flushNow();
+    const block = this._discussBlocks.get(agentId);
+    if (block === undefined) return;
+    block.entry.content = block.draft;
+    block.entry.speaking = false;
+    block.component.updateContent(block.draft, { speaking: false });
+    this._discussBlocks.delete(agentId);
+    this.pendingDiscussFlushIds.delete(agentId);
+    this.host.state.ui.requestRender();
+  }
+
+  resetDiscussStreams(): void {
+    for (const block of this._discussBlocks.values()) {
+      block.entry.speaking = false;
+      block.component.updateContent(block.draft, { speaking: false });
+    }
+    this._discussBlocks.clear();
+    this.pendingDiscussFlushIds.clear();
   }
 
   hasThinkingDraft(): boolean {
@@ -195,6 +258,16 @@ export class StreamingUIController {
     const startedAtMs = existing?.startedAtMs ?? Date.now();
     this._streamingToolCallArguments.set(id, { name, argumentsText, startedAtMs });
     this.pendingToolCallFlushIds.add(id);
+  }
+
+  /** Keep parsed args but do not paint a collapsed tool-output card. */
+  suppressToolCallPreview(id: string): void {
+    this.pendingToolCallFlushIds.delete(id);
+  }
+
+  discardToolCallStream(id: string): void {
+    this.pendingToolCallFlushIds.delete(id);
+    this._streamingToolCallArguments.delete(id);
   }
 
   getStreamingToolCallPreview(
@@ -289,7 +362,8 @@ export class StreamingUIController {
     return (
       this.pendingAssistantFlush ||
       this.pendingThinkingFlush ||
-      this.pendingToolCallFlushIds.size > 0
+      this.pendingToolCallFlushIds.size > 0 ||
+      this.pendingDiscussFlushIds.size > 0
     );
   }
 
@@ -309,6 +383,7 @@ export class StreamingUIController {
     this.pendingAssistantFlush = false;
     this.pendingThinkingFlush = false;
     this.pendingToolCallFlushIds.clear();
+    this.pendingDiscussFlushIds.clear();
   }
 
   scheduleFlush(): void {
@@ -335,9 +410,11 @@ export class StreamingUIController {
     const shouldFlushThinking = this.pendingThinkingFlush;
     const shouldFlushAssistant = this.pendingAssistantFlush;
     const toolCallIds = [...this.pendingToolCallFlushIds];
+    const discussIds = [...this.pendingDiscussFlushIds];
     this.pendingThinkingFlush = false;
     this.pendingAssistantFlush = false;
     this.pendingToolCallFlushIds.clear();
+    this.pendingDiscussFlushIds.clear();
 
     if (shouldFlushThinking && this._thinkingDraft.length > 0) {
       this.onThinkingUpdate(this._thinkingDraft);
@@ -345,8 +422,17 @@ export class StreamingUIController {
     if (shouldFlushAssistant) {
       this.onStreamingTextUpdate(this._assistantDraft);
     }
+    for (const id of discussIds) {
+      const block = this._discussBlocks.get(id);
+      if (block === undefined) continue;
+      block.entry.content = block.draft;
+      block.component.updateContent(block.draft, { speaking: block.entry.speaking === true });
+    }
     for (const id of toolCallIds) {
       this.flushToolCallPreview(id);
+    }
+    if (discussIds.length > 0) {
+      this.host.state.ui.requestRender();
     }
   }
 
@@ -386,6 +472,7 @@ export class StreamingUIController {
     this._assistantDraft = '';
     this._streamingBlock = null;
     this._thinkingDraft = '';
+    this.resetDiscussStreams();
     this.disposeActiveThinkingComponent();
   }
 
@@ -414,6 +501,7 @@ export class StreamingUIController {
     const completedTurnKey =
       this._currentTurnId ?? `local:${String(state.appState.streamingStartTime)}`;
     this.finalizeLiveTextBuffers('idle');
+    this.resetDiscussStreams();
     this.resetToolCallState();
     this._currentTurnId = undefined;
 

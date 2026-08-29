@@ -188,3 +188,22 @@ describe('getServerToken', () => {
     ]);
   });
 });
+
+describe('sessionIdFromLocation', () => {
+  it('reads the /web deep-link session id and ignores other paths', async () => {
+    const { sessionIdFromLocation } = await import('../src/hooks/useApi');
+    expect(sessionIdFromLocation('/sessions/abc-123')).toBe('abc-123');
+    expect(sessionIdFromLocation('/sessions/abc%2F1')).toBe('abc/1');
+    expect(sessionIdFromLocation('/sessions/abc-123/')).toBe('abc-123');
+    expect(sessionIdFromLocation('/')).toBeNull();
+    expect(sessionIdFromLocation('/sessions')).toBeNull();
+    expect(sessionIdFromLocation('/sessions/abc/extra')).toBeNull();
+  });
+
+  it('prefers hash and query session ids so /web can stay on /', async () => {
+    const { sessionIdFromLocation } = await import('../src/hooks/useApi');
+    expect(sessionIdFromLocation('/', '#token=tok-1&session=ses-1')).toBe('ses-1');
+    expect(sessionIdFromLocation('/', '', '?session=ses-q')).toBe('ses-q');
+    expect(sessionIdFromLocation('/sessions/from-path', '#session=from-hash')).toBe('from-hash');
+  });
+});

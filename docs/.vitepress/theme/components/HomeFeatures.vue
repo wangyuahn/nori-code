@@ -21,57 +21,57 @@ interface Feature {
 const highlights = computed<Highlight[]>(() => isZh.value
   ? [
       {
-        icon: '⚡',
-        title: '极速轻量',
-        desc: '一行命令装好的单文件 CLI，毫秒级启动，无需 Node.js，零环境干扰。',
+        icon: '👥',
+        title: '团队工程',
+        desc: 'TeamCreate 雇佣持久伙伴会话；先 Discuss 再 TeamAssign，成员在部门树中执行。',
       },
       {
-        icon: '🎬',
-        title: '视频也能输入',
-        desc: '屏幕录像、演示视频拖进对话——画面替你说清需求。',
+        icon: '🗺️',
+        title: '会话地图',
+        desc: '用 parent_session_id 连接会话；TUI 的 /map 与 Nori Work Map 浏览挂载森林。',
       },
       {
-        icon: '🎨',
-        title: '精致 TUI',
-        desc: '为长时间、专注的 Agent 会话精心打磨的交互界面。',
+        icon: '🧭',
+        title: '只读协调者',
+        desc: '主 Agent 默认只读协调；用 /team 打开伙伴会话，SubAgent 仍负责有界临时委派。',
       },
     ]
   : [
       {
-        icon: '⚡',
-        title: 'Fast & lightweight',
-        desc: 'Single-binary install with millisecond startup — no Node.js, no PATH gymnastics.',
+        icon: '👥',
+        title: 'Team engineering',
+        desc: 'TeamCreate hires durable partner sessions. Discuss first, then TeamAssign — members execute in the department tree.',
       },
       {
-        icon: '🎬',
-        title: 'Video input',
-        desc: 'Drop a screen recording or demo clip in chat; the agent reads the frames and acts on them.',
+        icon: '🗺️',
+        title: 'Conversation map',
+        desc: 'Sessions link via parent_session_id. Browse the mount forest with /map in the TUI or Map in Nori Work.',
       },
       {
-        icon: '🎨',
-        title: 'Polished TUI',
-        desc: 'A carefully tuned interface designed for long, focused agent sessions.',
+        icon: '🧭',
+        title: 'Read-only lead',
+        desc: 'The main Agent coordinates by default. Open partners with /team; SubAgent still handles bounded temporary work.',
       },
     ])
 
 const features = computed<Feature[]>(() => isZh.value
   ? [
       {
+        icon: '👥',
+        title: '团队工程',
+        desc: '部门树、Discuss/Assign、/team 与 /map 的完整工作流。',
+        href: '/zh/guides/team-engineering',
+      },
+      {
         icon: '🧩',
         title: 'Agent Skills',
-        desc: '把团队的工作流程封装成 Kimi 随时调用的技能，不必每次都重新解释。',
+        desc: '把团队的工作流程封装成随时调用的技能，不必每次都重新解释。',
         href: '/zh/customization/skills',
       },
       {
-        icon: '🪝',
-        title: 'Hooks',
-        desc: '在生命周期关键点注入脚本，做格式化、审批、通知或任意自定义逻辑。',
-        href: '/zh/customization/hooks',
-      },
-      {
         icon: '🤖',
-        title: 'Sub-agents',
-        desc: '并行派发独立任务，每个子 agent 自带上下文，主对话保持清爽。',
+        title: 'Agent 与 SubAgent',
+        desc: '持久团队伙伴与有界临时 SubAgent 并存；主对话保持清爽。',
         href: '/zh/customization/agents',
       },
       {
@@ -83,21 +83,21 @@ const features = computed<Feature[]>(() => isZh.value
     ]
   : [
       {
+        icon: '👥',
+        title: 'Team engineering',
+        desc: 'Department tree, Discuss/Assign, and the full /team and /map workflow.',
+        href: '/en/guides/team-engineering',
+      },
+      {
         icon: '🧩',
         title: 'Agent Skills',
-        desc: "Package your team's workflows into skills Kimi can invoke on demand.",
+        desc: "Package your team's workflows into skills Nori can invoke on demand.",
         href: '/en/customization/skills',
       },
       {
-        icon: '🪝',
-        title: 'Hooks',
-        desc: 'Inject scripts at lifecycle checkpoints — formatting, approvals, notifications, anything.',
-        href: '/en/customization/hooks',
-      },
-      {
         icon: '🤖',
-        title: 'Sub-agents',
-        desc: 'Dispatch isolated tasks in parallel, each with its own context — main thread stays clean.',
+        title: 'Agents and SubAgents',
+        desc: 'Durable team partners plus bounded temporary SubAgents — main thread stays clean.',
         href: '/en/customization/agents',
       },
       {
@@ -108,15 +108,15 @@ const features = computed<Feature[]>(() => isZh.value
       }
     ])
 
-const highlightsTitle = computed(() => isZh.value ? '开箱即得' : 'Ready out of the box')
+const highlightsTitle = computed(() => isZh.value ? '2.0 开箱即得' : 'Ready in 2.0')
 const highlightsLede = computed(() => isZh.value
-  ? '装好就能用，关键能力默认就绪。'
-  : 'Install once. The essentials are already there.')
+  ? '团队工程与会话地图默认就绪。'
+  : 'Team engineering and the conversation map ship ready to use.')
 
-const featuresTitle = computed(() => isZh.value ? '按需扩展' : 'Extend it your way')
+const featuresTitle = computed(() => isZh.value ? '按需深入' : 'Go deeper')
 const featuresLede = computed(() => isZh.value
-  ? '内置可编程的扩展点，按自己的方式塑造工作流。'
-  : 'Programmable extension points to shape the workflow around you.')
+  ? '从团队工作流到 Skills、Agent 与 MCP，按自己的方式扩展。'
+  : 'From team workflows to Skills, agents, and MCP — extend it your way.')
 
 const ctaText = computed(() => isZh.value ? '了解' : 'Learn more')
 </script>

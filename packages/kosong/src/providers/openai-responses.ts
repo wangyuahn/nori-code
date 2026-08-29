@@ -334,6 +334,11 @@ function formatResponsesFailedResponse(response: RawObject): string {
 }
 
 export interface OpenAIResponsesOptions {
+  /**
+   * Name to report as {@link ChatProvider.name}, e.g. the `[providers.x]` key
+   * from the host's config. Defaults to the wire name (`openai-responses`).
+   */
+  providerName?: string | undefined;
   apiKey?: string | undefined;
   baseUrl?: string | undefined;
   model: string;
@@ -991,6 +996,8 @@ export class OpenAIResponsesChatProvider implements ChatProvider {
   private _clientFactory: ((auth: ProviderRequestAuth) => OpenAI) | undefined;
 
   constructor(options: OpenAIResponsesOptions) {
+    const providerName = options.providerName?.trim();
+    if (providerName !== undefined && providerName.length > 0) this.name = providerName;
     const apiKey = options.apiKey ?? process.env['OPENAI_API_KEY'];
     this._apiKey = apiKey === undefined || apiKey.length === 0 ? undefined : apiKey;
     this._baseUrl = options.baseUrl ?? 'https://api.openai.com/v1';

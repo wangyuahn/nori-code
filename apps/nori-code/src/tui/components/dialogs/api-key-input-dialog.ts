@@ -14,7 +14,7 @@ export type ApiKeyInputResult =
   | { readonly kind: 'ok'; readonly value: string }
   | { readonly kind: 'cancel' };
 
-const FOOTER = 'Enter to submit  ·  Esc to cancel';
+const FOOTER = 'Enter submit · Esc cancel';
 
 function maskInputLine(raw: string): string {
   const prefix = '> ';

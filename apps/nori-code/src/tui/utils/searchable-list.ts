@@ -38,7 +38,7 @@ export interface SearchableListView<T> {
 }
 
 export class SearchableList<T> {
-  private readonly items: readonly T[];
+  private items: readonly T[];
   private readonly toSearchText: (item: T) => string;
   private readonly pageSize: number;
   private readonly searchable: boolean;
@@ -51,6 +51,21 @@ export class SearchableList<T> {
     this.pageSize = opts.pageSize ?? DEFAULT_PAGE_SIZE;
     this.searchable = opts.searchable ?? false;
     this.cursor = Math.max(opts.initialIndex ?? 0, 0);
+  }
+
+  /**
+   * Replace the underlying items while preserving the active query and, when
+   * possible, the previously selected row (via {@link sameItem}).
+   */
+  replaceItems(items: readonly T[], sameItem?: (left: T, right: T) => boolean): void {
+    const previous = this.selected();
+    this.items = items;
+    if (previous === undefined || sameItem === undefined) {
+      this.cursor = Math.min(this.cursor, Math.max(0, this.filtered().length - 1));
+      return;
+    }
+    const nextIndex = this.filtered().findIndex((item) => sameItem(item, previous));
+    this.cursor = nextIndex >= 0 ? nextIndex : Math.min(this.cursor, Math.max(0, this.filtered().length - 1));
   }
 
   filtered(): readonly T[] {

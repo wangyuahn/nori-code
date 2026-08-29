@@ -1,10 +1,10 @@
 # @nori-code/agent-core
 
-The unified agent engine for Kimi Code.
+The unified agent engine for Nori Code (sessions, Team/SubAgent, tools, permissions).
 
-Part of the [Kimi Code](https://github.com/MoonshotAI/kimi-code) monorepo.
+User-facing **team engineering** (department tree, conversation map, Discuss/Assign): see [`docs/en/guides/team-engineering.md`](../../docs/en/guides/team-engineering.md).
 
-See the main repository for documentation, issues, and contribution guidelines.
+Part of the [nori-code](https://github.com/wangyuahn/nori-code) monorepo.
 
 ## License
 

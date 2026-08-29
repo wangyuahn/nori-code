@@ -98,25 +98,46 @@ export class SessionSubagentHost {
 
   async createTeam(
     members: readonly TeamIdentity[],
-  ): Promise<Array<{ readonly agentId: string; readonly identity: TeamIdentity }>> {
+  ): Promise<Array<{
+    readonly agentId: string;
+    readonly sessionId?: string;
+    readonly identity: TeamIdentity;
+  }>> {
     this.assertDepartmentManager();
     this.preflightTeamCreation(members);
-    const created: Array<{ readonly agentId: string; readonly identity: TeamIdentity }> = [];
+    const created: Array<{
+      readonly agentId: string;
+      readonly sessionId?: string;
+      readonly identity: TeamIdentity;
+    }> = [];
     try {
       for (const identity of members) {
         const { id } = await this.session.createTeamMember(this.ownerAgentId, identity);
-        created.push({ agentId: id, identity });
+        const mountedSessionId = this.session.getAgentMetadata(id)?.mountedSessionId;
+        created.push({
+          agentId: id,
+          identity,
+          ...(mountedSessionId === undefined ? {} : { sessionId: mountedSessionId }),
+        });
       }
     } catch (error) {
       // Profile bootstrapping can still fail after a successful preflight. Do
       // not leave the durable first members behind when a later one fails.
+      // dismissTeamMembers already deletes each hire's mounted child session.
       if (created.length > 0) {
-        await this.session.dismissTeamMembers(
-          this.ownerAgentId,
-          created.map(({ agentId }) => agentId),
-          'Rolling back an incomplete TeamCreate operation.',
-          true,
-        ).catch(() => undefined);
+        try {
+          await this.session.dismissTeamMembers(
+            this.ownerAgentId,
+            created.map(({ agentId }) => agentId),
+            'Rolling back an incomplete TeamCreate operation.',
+            true,
+          );
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [error, cleanupError],
+            'TeamCreate failed and could not be rolled back.',
+          );
+        }
       }
       throw error;
     }
@@ -317,13 +338,17 @@ export class SessionSubagentHost {
     // Reports travel upward only, so a report's recipient is the sender's parent
     // by definition. `main` has no parent and therefore never reports.
     const reportToParent = report;
-    if (reportToParent !== undefined) {
-      if (relation !== 'parent') {
-        throw new Error('Team reports must be sent by a Team Agent to its direct parent.');
-      }
-      await this.session.recordTeamReport(this.ownerAgentId, reportToParent.status, reportToParent.summary);
+    if (reportToParent !== undefined && relation !== 'parent') {
+      throw new Error('Team reports must be sent by a Team Agent to its direct parent.');
     }
     const recipient = await this.session.ensureAgentResumed(targetAgentId);
+    // Do not persist a report until the recipient has accepted the message
+    // path. Otherwise a failed resume/compaction wait/prompt leaves the parent
+    // believing that work was reported even though no TeamDM was delivered.
+    const recordReport = async (): Promise<void> => {
+      if (reportToParent === undefined) return;
+      await this.session.recordTeamReport(this.ownerAgentId, reportToParent.status, reportToParent.summary);
+    };
     // TeamDM is an internal prompt transport. Keep it in the recipient's
     // model context, but tag it distinctly so transcript projections can
     // avoid rendering it as a normal user/Discuss message after refresh.
@@ -346,6 +371,7 @@ export class SessionSubagentHost {
     const recipientBusy = recipient.turn.hasActiveTurn;
     if (recipientBusy) {
       recipient.turn.steer(input, origin);
+      await recordReport();
       if (reportToParent !== undefined) {
         void runAgentTurnToCompletion(recipient)
           .then(() => this.session.acknowledgeTeamReport(this.ownerAgentId))
@@ -356,6 +382,7 @@ export class SessionSubagentHost {
     const start = await startAgentPrompt(recipient, input, origin, signal);
     if (start.kind === 'busy') {
       recipient.turn.steer(input, origin);
+      await recordReport();
       if (reportToParent !== undefined) {
         void runAgentTurnToCompletion(recipient)
           .then(() => this.session.acknowledgeTeamReport(this.ownerAgentId))
@@ -369,6 +396,7 @@ export class SessionSubagentHost {
     if (start.kind === 'unstarted') {
       throw new Error(`TeamDM target "${targetAgentId}" could not start a turn.`);
     }
+    await recordReport();
     await runAgentTurnToCompletion(recipient, signal);
     if (reportToParent !== undefined) {
       await this.session.acknowledgeTeamReport(this.ownerAgentId);
@@ -460,6 +488,7 @@ export class SessionSubagentHost {
         report_status: meta.teamReport?.status ?? null,
         report_summary: meta.teamReport?.summary ?? null,
         report_received: meta.teamReport?.receivedAt !== undefined,
+        ...(meta.mountedSessionId === undefined ? {} : { session_id: meta.mountedSessionId }),
       });
       if (agent.turn.hasActiveTurn && meta.assignedAt !== undefined) {
         this.session.notifyRunningTeamMember(agentId, meta.assignedAt);
@@ -548,6 +577,18 @@ export class SessionSubagentHost {
     await this.session.lockTeamAssignments(this.ownerAgentId);
   }
 
+  /**
+   * Whether this department has anyone in it.
+   *
+   * Discuss is a meeting, and a meeting of one is a deadlock: the read-only
+   * guard blocks Write/Edit/Bash, and the only tool that leaves Discuss
+   * (TeamAssign) requires at least one member to assign to. `DiscussMode` uses
+   * this to keep itself off until a department actually exists.
+   */
+  hasTeamMembers(): boolean {
+    return this.session.teamMemberMetadata(this.ownerAgentId).length > 0;
+  }
+
   async decideTeamDiscussion(
     action: 'start' | 'continue' | 'archive' | 'vote',
     topic: string | undefined,
@@ -562,6 +603,13 @@ export class SessionSubagentHost {
       const discussionTopic = topic?.trim() ?? '';
       if (discussionTopic.length === 0) throw new Error('A discussion topic is required.');
       const participants = participantAgentIds ?? this.session.teamMemberMetadata(this.ownerAgentId).map(([id]) => id);
+      // A discussion with nobody in it still locks team writes and still puts
+      // the chair in Discuss, where Write/Edit/Bash are denied and the only way
+      // out (TeamAssign) needs a member to assign to. Refuse instead of opening
+      // a meeting that cannot be closed.
+      if (participants.length === 0) {
+        throw new Error('Cannot start a discussion with no participants. Hire members with TeamCreate first, or just do the work yourself.');
+      }
       const created = await this.session.createTeamDiscussion(
         this.ownerAgentId,
         discussionTopic,

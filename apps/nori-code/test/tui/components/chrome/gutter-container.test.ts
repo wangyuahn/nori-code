@@ -48,6 +48,18 @@ describe('GutterContainer', () => {
     expect(c.render(20)).toEqual([]);
   });
 
+  it('does not reuse a tall cache after clear() (e.g. /new)', () => {
+    const c = new GutterContainer(2, 2);
+    for (let i = 0; i < 20; i++) {
+      c.addChild(new FakeChild(() => [`old-${String(i)}`]));
+    }
+    expect(c.render(20)).toHaveLength(20);
+
+    c.clear();
+    c.addChild(new FakeChild(() => ['welcome']));
+    expect(c.render(20)).toEqual(['  welcome']);
+  });
+
   it('preserves ANSI sequences within child lines (only the leading pad is plain)', () => {
     const colored = '[31mred[0m';
     const c = new GutterContainer(2, 2);

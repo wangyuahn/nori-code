@@ -9,6 +9,7 @@ import type { AuthFlowController } from '../controllers/auth-flow';
 import type { BtwPanelController } from '../controllers/btw-panel';
 import type { StreamingUIController } from '../controllers/streaming-ui';
 import type { TasksBrowserController } from '../controllers/tasks-browser';
+import type { TeamViewController } from '../controllers/team-view';
 import { tryHandleDanceCommand } from '../easter-eggs/dance';
 import type { ResolvedTheme } from '../theme/colors';
 import type { TUIState } from '../tui-state';
@@ -27,8 +28,10 @@ import {
   handleEffortCommand,
   handleModelCommand,
   handleDiscussCommand,
+  handlePlanCommand,
   handleSettingPermission,
   handleThemeCommand,
+  handleSettingCommand,
   showExperimentsPanel,
   showModelPicker,
   showPermissionPicker,
@@ -50,6 +53,9 @@ import {
   handleInitCommand,
   handleTitleCommand,
 } from './session';
+import { showSkillsSelector } from './skills';
+import { handleTeamCommand } from './team';
+import { handleMapCommand } from './map';
 import { handleUndoCommand } from './undo';
 import { handleWebCommand } from './web';
 
@@ -68,6 +74,7 @@ export {
   handleDiscussCommand,
   handleSettingPermission,
   handleThemeCommand,
+  handleSettingCommand,
   showModelPicker,
   showExperimentsPanel,
   showPermissionPicker,
@@ -84,6 +91,8 @@ export {
   handleInitCommand,
   handleTitleCommand,
 } from './session';
+export { handleTeamCommand } from './team';
+export { handleMapCommand } from './map';
 export { handleUndoCommand } from './undo';
 export { handleWebCommand } from './web';
 
@@ -149,6 +158,7 @@ export interface SlashCommandHost {
   readonly streamingUI: StreamingUIController;
   readonly btwPanelController: BtwPanelController;
   readonly tasksBrowserController: TasksBrowserController;
+  readonly teamViewController: TeamViewController;
   readonly authFlow: AuthFlowController;
 }
 
@@ -266,6 +276,9 @@ async function handleBuiltInSlashCommand(
     case 'mcp':
       void showMcpServers(host);
       return;
+    case 'skills':
+      void showSkillsSelector(host);
+      return;
     case 'plugins':
       void handlePluginsCommand(host, args);
       return;
@@ -300,7 +313,7 @@ async function handleBuiltInSlashCommand(
       showPermissionPicker(host);
       return;
     case 'settings':
-      showSettingsSelector(host);
+      await handleSettingCommand(host, args);
       return;
     case 'usage':
       void showUsage(host);
@@ -325,6 +338,15 @@ async function handleBuiltInSlashCommand(
       return;
     case 'discuss':
       await handleDiscussCommand(host, args);
+      return;
+    case 'plan':
+      await handlePlanCommand(host, args);
+      return;
+    case 'team':
+      await handleTeamCommand(host, args);
+      return;
+    case 'map':
+      await handleMapCommand(host);
       return;
     case 'compact':
       await handleCompactCommand(host, args);

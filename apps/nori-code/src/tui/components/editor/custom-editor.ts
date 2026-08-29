@@ -130,6 +130,7 @@ export class CustomEditor extends Editor {
   public onCtrlD?: () => void;
   public onCtrlC?: () => void;
   public onToggleToolExpand?: () => void;
+  public onToggleDepartmentPane?: () => void;
   public onOpenExternalEditor?: () => void;
   public onCtrlS?: () => void;
   /** Return `true` to consume Ctrl+B; return `false`/`undefined` to fall through to the editor default (cursor-left). */
@@ -387,6 +388,11 @@ export class CustomEditor extends Editor {
 
     if (matchesKey(normalized, Key.ctrl('o'))) {
       this.onToggleToolExpand?.();
+      return;
+    }
+
+    if (matchesKey(normalized, Key.ctrl('y'))) {
+      this.onToggleDepartmentPane?.();
       return;
     }
 

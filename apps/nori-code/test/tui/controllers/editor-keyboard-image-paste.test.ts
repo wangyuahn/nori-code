@@ -45,6 +45,8 @@ function createPasteHarness(): PasteHarness {
     },
     session: undefined,
     btwPanelController: { closeOrCancel: vi.fn(() => false) },
+    teamViewController: { hide: vi.fn(() => false), scrollPane: vi.fn(() => false), toggle: vi.fn() },
+    cancelViewingAgent: vi.fn(),
     track: vi.fn(),
     showError: vi.fn(),
     openUndoSelector: vi.fn(),

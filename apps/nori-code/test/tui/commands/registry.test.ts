@@ -4,6 +4,8 @@ import {
   parseSlashInput,
   resolveSlashCommandAvailability,
   addDirArgumentCompletions,
+  teamArgumentCompletions,
+  settingArgumentCompletions,
   sortSlashCommands,
   type KimiSlashCommand,
 } from '#/tui/commands/index';
@@ -142,12 +144,15 @@ describe('built-in slash command registry', () => {
         'reload-tui',
         'sessions',
         'settings',
+        'skills',
         'status',
+        'team',
         'theme',
         'title',
         'undo',
         'usage',
         'version',
+        'web',
         'yolo',
       ]),
     );
@@ -161,5 +166,31 @@ describe('built-in slash command registry', () => {
     expect(reloadTui).toBeDefined();
     expect(resolveSlashCommandAvailability(reload!, '')).toBe('idle-only');
     expect(resolveSlashCommandAvailability(reloadTui!, '')).toBe('always');
+  });
+
+  it('registers team with settings completions and agents alias', () => {
+    const team = findBuiltInSlashCommand('team');
+    expect(team).toBeDefined();
+    expect(findBuiltInSlashCommand('agents')?.name).toBe('team');
+    expect(resolveSlashCommandAvailability(team!, '')).toBe('always');
+    expect(teamArgumentCompletions('')?.map((item) => item.value)).toEqual(['settings']);
+    expect(teamArgumentCompletions('set')?.map((item) => item.value)).toEqual(['settings']);
+  });
+
+  it('offers settings section completions including loop and memory', () => {
+    expect(findBuiltInSlashCommand('settings')?.name).toBe('settings');
+    expect(settingArgumentCompletions('')?.map((item) => item.value)).toEqual(
+      expect.arrayContaining(['loop', 'memory', 'default-discuss']),
+    );
+    expect(settingArgumentCompletions('loop')).toBeNull();
+    expect(settingArgumentCompletions('loop ')?.map((item) => item.value)).toEqual([
+      'loop steps',
+      'loop goal-turns',
+      'loop idle',
+    ]);
+    expect(settingArgumentCompletions('default-discuss ')?.map((item) => item.value)).toEqual([
+      'default-discuss on',
+      'default-discuss off',
+    ]);
   });
 });

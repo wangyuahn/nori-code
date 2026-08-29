@@ -140,6 +140,8 @@ describe('plugins selector dialogs', () => {
     expect(out).toContain('Custom');
     expect(out).toContain('? Superpowers  enabled');
     expect(out).toContain('Space toggle');
+    expect(out).toContain('Tab toggle tab');
+    expect(out).not.toContain('Tab switch');
     expect(out).toContain('1 installed');
   });
 
@@ -368,6 +370,7 @@ describe('plugins selector dialogs', () => {
     const { panel, onSelect } = makePanel({ initialTab: 'custom' });
     const out = strip(renderRaw(panel));
     expect(out).toContain('Install from a GitHub URL');
+    expect(out).toContain('Tab toggle tab');
     expect(out).toContain('╭');
 
     for (const ch of 'https://github.com/owner/repo') {

@@ -25,6 +25,96 @@ const ADD_DIR_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
   { value: 'list', description: 'Show configured additional workspace directories' },
 ];
 
+const TEAM_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
+  { value: 'settings', description: 'Configure max department depth' },
+];
+
+const SETTINGS_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
+  { value: 'auto', description: 'Guided setup' },
+  { value: 'coder', description: 'Coder write access' },
+  { value: 'default-discuss', description: 'Start new sessions in Discuss' },
+  { value: 'editor', description: 'External editor' },
+  { value: 'loop', description: 'Loop and goal limits' },
+  { value: 'memory', description: 'Memory vector search' },
+  { value: 'model', description: 'Switch model' },
+  { value: 'note', description: 'Note rules' },
+  { value: 'permission', description: 'Permission mode' },
+  { value: 'readonly', description: 'Main-agent write block' },
+  { value: 'team', description: 'Department depth' },
+  { value: 'theme', description: 'UI theme' },
+  { value: 'workflow', description: 'Review gates' },
+];
+
+const SETTINGS_LOOP_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
+  { value: 'steps', description: 'Max steps per turn' },
+  { value: 'goal-turns', description: 'Max goal continuation turns' },
+  { value: 'idle', description: 'Goal background idle minutes' },
+];
+
+const ON_OFF_ARG_COMPLETIONS: readonly ArgCompletionSpec[] = [
+  { value: 'on', description: 'Enable' },
+  { value: 'off', description: 'Disable' },
+];
+
+/** Argument autocompletion for the `/team` command. */
+export function teamArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
+  return completeLeadingArg(TEAM_ARG_COMPLETIONS, argumentPrefix);
+}
+
+/** Argument autocompletion for `/settings` / `/setting`. */
+export function settingArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
+  const loopMatch = argumentPrefix.match(/^loop\s+(\S*)$/i);
+  if (loopMatch !== null) {
+    return (
+      completeLeadingArg(SETTINGS_LOOP_ARG_COMPLETIONS, loopMatch[1] ?? '')?.map((item) => ({
+        ...item,
+        value: `loop ${item.value}`,
+      })) ?? null
+    );
+  }
+  const discussMatch = argumentPrefix.match(/^default-discuss\s+(\S*)$/i);
+  if (discussMatch !== null) {
+    return (
+      completeLeadingArg(ON_OFF_ARG_COMPLETIONS, discussMatch[1] ?? '')?.map((item) => ({
+        ...item,
+        value: `default-discuss ${item.value}`,
+      })) ?? null
+    );
+  }
+  const readonlyMatch = argumentPrefix.match(/^readonly\s+(\S*)$/i);
+  if (readonlyMatch !== null) {
+    return (
+      completeLeadingArg(ON_OFF_ARG_COMPLETIONS, readonlyMatch[1] ?? '')?.map((item) => ({
+        ...item,
+        value: `readonly ${item.value}`,
+      })) ?? null
+    );
+  }
+  const coderWriteMatch = argumentPrefix.match(/^coder\s+write\s+(\S*)$/i);
+  if (coderWriteMatch !== null) {
+    return (
+      completeLeadingArg(ON_OFF_ARG_COMPLETIONS, coderWriteMatch[1] ?? '')?.map((item) => ({
+        ...item,
+        value: `coder write ${item.value}`,
+      })) ?? null
+    );
+  }
+  const coderMatch = argumentPrefix.match(/^coder\s+(\S*)$/i);
+  if (coderMatch !== null) {
+    const writeItems = completeLeadingArg(
+      [{ value: 'write', description: 'Coder write access' }],
+      coderMatch[1] ?? '',
+    );
+    return (
+      writeItems?.map((item) => ({
+        ...item,
+        value: `coder ${item.value}`,
+      })) ?? null
+    );
+  }
+  return completeLeadingArg(SETTINGS_ARG_COMPLETIONS, argumentPrefix);
+}
+
 /** Argument autocompletion for the `/goal` command (subcommands). */
 export function goalArgumentCompletions(argumentPrefix: string): AutocompleteItem[] | null {
   const nextMatch = argumentPrefix.match(/^next\s+(\S*)$/i);
@@ -150,12 +240,37 @@ export const BUILTIN_SLASH_COMMANDS = [
     description: 'Open TUI settings',
     priority: 100,
     availability: 'always',
+    argumentHint: '[section]',
+    completeArgs: settingArgumentCompletions,
   },
   {
     name: 'discuss',
     aliases: [],
-    description: 'Toggle Discuss mode',
+    description: 'Toggle Discuss (needs hired partners)',
     priority: 100,
+    availability: 'always',
+  },
+  {
+    name: 'plan',
+    aliases: [],
+    description: 'Toggle Discuss (compatibility name for /discuss)',
+    priority: 100,
+    availability: (args) => (args.trim() === 'clear' ? 'idle-only' : 'always'),
+  },
+  {
+    name: 'team',
+    aliases: ['agents'],
+    description: 'Open a team member session, or browse reports and Discuss',
+    priority: 90,
+    availability: 'always',
+    argumentHint: '[settings]',
+    completeArgs: teamArgumentCompletions,
+  },
+  {
+    name: 'map',
+    aliases: [],
+    description: 'Browse the conversation map and manage session mounts',
+    priority: 88,
     availability: 'always',
   },
   {
@@ -216,6 +331,13 @@ export const BUILTIN_SLASH_COMMANDS = [
     name: 'mcp',
     aliases: [],
     description: 'Show MCP server status',
+    priority: 60,
+    availability: 'always',
+  },
+  {
+    name: 'skills',
+    aliases: [],
+    description: 'Browse and run installed skills',
     priority: 60,
     availability: 'always',
   },

@@ -18,6 +18,7 @@ import type { ImageAttachmentStore } from '../utils/image-attachment-store';
 import type { PendingExit, QueuedMessage } from '../types';
 import type { TUIState } from '../tui-state';
 import type { BtwPanelController } from './btw-panel';
+import type { TeamViewController } from './team-view';
 
 export interface EditorKeyboardHost {
   state: TUIState;
@@ -26,6 +27,8 @@ export interface EditorKeyboardHost {
 
   handleUserInput(text: string): void;
   readonly btwPanelController: BtwPanelController;
+  readonly teamViewController: TeamViewController;
+  cancelViewingAgent(): void;
   steerMessage(session: Session, input: string[]): void;
   recallLastQueued(): QueuedMessage | undefined;
   showError(msg: string): void;
@@ -149,6 +152,10 @@ export class EditorKeyboardController {
         this.clearPendingUndoEsc();
         return;
       }
+      if (host.teamViewController.hide()) {
+        this.clearPendingUndoEsc();
+        return;
+      }
       // Idle: a second Esc within the double-tap window opens the undo selector.
       if (this.pendingUndoEsc !== null) {
         this.clearPendingUndoEsc();
@@ -181,6 +188,11 @@ export class EditorKeyboardController {
     editor.onToggleToolExpand = () => {
       host.track('shortcut_expand');
       host.toggleToolOutputExpansion();
+    };
+
+    editor.onToggleDepartmentPane = () => {
+      host.track('shortcut_department_pane');
+      host.teamViewController.toggle();
     };
 
     editor.onToggleTodoExpand = (): boolean => {
@@ -254,6 +266,7 @@ export class EditorKeyboardController {
 
     editor.onUpArrowEmpty = () => {
       if (host.btwPanelController.scroll('up')) return true;
+      if (host.teamViewController.scrollPane('up')) return true;
       if (host.state.appState.streamingPhase === 'idle' && !host.state.appState.isCompacting) return false;
       const recalled = host.recallLastQueued();
       if (recalled !== undefined) {
@@ -272,7 +285,10 @@ export class EditorKeyboardController {
       return false;
     };
 
-    editor.onDownArrowEmpty = () => host.btwPanelController.scroll('down');
+    editor.onDownArrowEmpty = () => {
+      if (host.btwPanelController.scroll('down')) return true;
+      return host.teamViewController.scrollPane('down');
+    };
 
     editor.onPasteImage = async () => this.handleClipboardImagePaste();
   }
@@ -331,7 +347,7 @@ export class EditorKeyboardController {
     // Cancel any running `!` shell command (treated as a streaming phase) in
     // addition to the agent turn, so Esc / Ctrl+C interrupts it too.
     this.host.cancelRunningShellCommand();
-    void this.host.session?.cancel();
+    this.host.cancelViewingAgent();
   }
 
   private cancelCurrentCompaction(): void {

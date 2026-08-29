@@ -33,6 +33,7 @@ export interface TUIState {
   todoPanel: TodoPanelComponent;
   queueContainer: Container;
   btwPanelContainer: Container;
+  departmentPaneContainer: Container;
   editorContainer: Container;
   footer: FooterComponent;
   editor: CustomEditor;
@@ -66,6 +67,7 @@ export function createTUIState(options: KimiTUIOptions): TUIState {
   const todoPanel = new TodoPanelComponent();
   const queueContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
   const btwPanelContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
+  const departmentPaneContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
   const editorContainer = new GutterContainer(CHROME_GUTTER, CHROME_GUTTER);
   const editor = new CustomEditor(ui);
   const footer = new FooterComponent({ ...initialAppState }, () => {
@@ -81,6 +83,7 @@ export function createTUIState(options: KimiTUIOptions): TUIState {
     todoPanel,
     queueContainer,
     btwPanelContainer,
+    departmentPaneContainer,
     editorContainer,
     editor,
     footer,

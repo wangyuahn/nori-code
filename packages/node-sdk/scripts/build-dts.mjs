@@ -20,6 +20,24 @@ const workspacePackages = new Map([
   ['@nori-code/kosong', 'kosong'],
 ]);
 
+/**
+ * Matches every specifier that must be redirected into the emitted `.d.ts` tree:
+ * a `#/…` self-reference, or one of the workspace packages we inline.
+ *
+ * Derived from `workspacePackages` rather than spelled out a second time. The
+ * scope names used to be hardcoded here, so the rebrand renamed the map keys and
+ * left the pattern matching `@moonshot-ai/…` — every `@nori-code/…` import then
+ * survived the rewrite, api-extractor followed it through node_modules into raw
+ * `src/` instead of the temp tree, and died on the first `#/` specifier it found
+ * there ("could not resolve module name"). One list cannot drift from itself.
+ */
+const workspaceSpecifierPattern = new RegExp(
+  `(["'])(#\\/[^"']+|(?:${[...workspacePackages.keys()]
+    .map((name) => name.replaceAll(/[$()*+.?[\\\]^{|}]/g, '\\$&'))
+    .join('|')})(?:\\/[^"']+)?)\\1`,
+  'g',
+);
+
 try {
   await rm(tempDir, { recursive: true, force: true });
   await run('tsc', tscBinPath, ['-p', 'tsconfig.dts.json']);
@@ -105,7 +123,7 @@ async function rewriteWorkspaceSpecifiers() {
           `import { GoogleGenAI as GenAIClient } from '${providerClientSpecifier}';`,
         );
       const updated = providerClientText.replaceAll(
-        /(["'])(#\/[^"']+|@moonshot-ai\/(?:agent-core|kaos|kimi-code-oauth|kosong)(?:\/[^"']+)?)\1/g,
+        workspaceSpecifierPattern,
         (_match, quote, specifier) => {
           const resolved = resolveSpecifier({
             currentFile: file,

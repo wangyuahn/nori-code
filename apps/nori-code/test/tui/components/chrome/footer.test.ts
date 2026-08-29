@@ -59,6 +59,7 @@ const appState: AppState = {
   availableModels: {},
   availableProviders: {},
   mcpServersSummary: null,
+  teamAgents: [],
 };
 
 describe('FooterComponent', () => {
@@ -186,5 +187,124 @@ describe('FooterComponent displayName override', () => {
 
     expect(footer.render(120).join('\n')).toContain('Custom Name');
     expect(footer.render(120).join('\n')).not.toContain('Remote Name');
+  });
+
+  it('shows readonly and a team count when partners are hired', () => {
+    const footer = new FooterComponent({
+      ...appState,
+      toolsReadonly: true,
+      discussMode: false,
+      teamAgents: [
+        { agentId: 'main', kind: 'main', name: 'Main', parentAgentId: null },
+        { agentId: 'reviewer', kind: 'team', name: 'Reviewer', parentAgentId: 'main' },
+      ],
+    });
+    const out = footer.render(160).join('\n').replaceAll(/\u001B\[[0-9;]*m/g, '');
+    expect(out).toContain('readonly');
+    expect(out).toContain('[team 1]');
+  });
+
+  it('shows the viewed partner name in the footer', () => {
+    const footer = new FooterComponent({
+      ...appState,
+      viewingAgentId: 'reviewer',
+      teamAgents: [
+        { agentId: 'main', kind: 'main', name: 'Main', parentAgentId: null },
+        { agentId: 'reviewer', kind: 'team', name: 'Reviewer', parentAgentId: 'main' },
+      ],
+    });
+    const out = footer.render(160).join('\n').replaceAll(/\u001B\[[0-9;]*m/g, '');
+    expect(out).toContain('Reviewer');
+  });
+
+  it('shows the department speaker without lighting an outsider', () => {
+    const footer = new FooterComponent({
+      ...appState,
+      teamAgents: [
+        { agentId: 'main', kind: 'main', name: 'Main', parentAgentId: null },
+        { agentId: 'reviewer', kind: 'team', name: 'Reviewer', parentAgentId: 'main' },
+        {
+          agentId: 'discuss-1',
+          kind: 'discussion',
+          name: 'Discussion',
+          parentAgentId: 'main',
+          discussionTurnAgentId: 'reviewer',
+        },
+      ],
+    });
+    const out = footer.render(160).join('\n').replaceAll(/\u001B\[[0-9;]*m/g, '');
+    expect(out).toContain('speak:Reviewer');
+  });
+
+  it('keeps discuss, team, speak, and model on an 80-column row', () => {
+    const footer = new FooterComponent({
+      ...appState,
+      discussMode: true,
+      toolsReadonly: false,
+      workDir: '/home/user/very/long/project/path/that/should/drop',
+      teamAgents: [
+        { agentId: 'main', kind: 'main', name: 'Main', parentAgentId: null },
+        { agentId: 'reviewer', kind: 'team', name: 'Reviewer', parentAgentId: 'main' },
+        {
+          agentId: 'discuss-1',
+          kind: 'discussion',
+          name: 'Discussion',
+          parentAgentId: 'main',
+          discussionTurnAgentId: 'reviewer',
+        },
+      ],
+      availableModels: {
+        'kimi-k2': {
+          provider: 'managed:kimi-code',
+          model: 'kimi-k2',
+          maxContextSize: 262144,
+          displayName: 'Kimi K2',
+        },
+      },
+      goal: {
+        goalId: 'g1',
+        objective: 'Ship the footer',
+        status: 'active',
+        turnsUsed: 7,
+        tokensUsed: 1000,
+        wallClockMs: 240_000,
+        budget: {
+          tokenBudget: null,
+          turnBudget: 20,
+          wallClockBudgetMs: null,
+          remainingTokens: null,
+          remainingTurns: 13,
+          remainingWallClockMs: null,
+          tokenBudgetReached: false,
+          turnBudgetReached: false,
+          wallClockBudgetReached: false,
+          overBudget: false,
+        },
+      },
+    });
+    footer.setBackgroundCounts({ processTasks: 3, questionTasks: 2 });
+    const out = footer.render(80).join('\n').replaceAll(/\u001B\[[0-9;]*m/g, '');
+    expect(out).toContain('discuss');
+    expect(out).toContain('[team 1]');
+    expect(out).toContain('speak:Reviewer');
+    expect(out).toContain('Kimi K2');
+  });
+
+  it('shows a warning report badge when a partner is blocked', () => {
+    const footer = new FooterComponent({
+      ...appState,
+      teamAgents: [
+        { agentId: 'main', kind: 'main', name: 'Main', parentAgentId: null },
+        {
+          agentId: 'reviewer',
+          kind: 'team',
+          name: 'Reviewer',
+          parentAgentId: 'main',
+          reportStatus: 'blocked',
+        },
+      ],
+    });
+    const out = footer.render(160).join('\n').replaceAll(/\u001B\[[0-9;]*m/g, '');
+    expect(out).toContain('[report!]');
   });
 });

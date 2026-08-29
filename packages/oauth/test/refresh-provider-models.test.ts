@@ -5,6 +5,7 @@ import {
   type RefreshProviderHost,
 } from '../src/refresh-provider-models';
 import { isOfficialKimiCodingEndpoint } from '../src/provider-capabilities';
+import { fallbackReasoningMetadata } from '../src/reasoning-options';
 import type { ManagedKimiConfigShape } from '../src/custom-registry';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -151,6 +152,8 @@ describe('refreshProviderModels', () => {
       maxContextSize: 1_000_000,
     }));
     expect(alpha?.capabilities).toEqual(expect.arrayContaining(['tool_use', 'image_in', 'thinking']));
+    expect(alpha?.thinkingSupport).toBe(true);
+    expect(alpha?.supportEfforts).toEqual(['low', 'medium', 'high']);
     const audio = harness.config().models?.['openrouter/vendor/audio-chat'];
     expect(audio?.maxContextSize).toBe(262_144);
     expect(audio?.capabilities).toEqual(expect.arrayContaining(['audio_in']));
@@ -438,5 +441,68 @@ describe('refreshProviderModels', () => {
     );
     expect(result.failed[0]?.reason).toContain('HTTP 401');
     expect(harness.config().models?.['custom/existing']).toBeDefined();
+  });
+
+  it('keeps extra custom aliases that the catalog does not list', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      data: [{ id: 'gpt-new', context_window: 200000 }],
+    })));
+    const harness = makeHost({
+      providers: {
+        openrouter: {
+          type: 'openai',
+          baseUrl: 'https://openrouter.ai/api/v1',
+          apiKey: 'secret',
+          autoDiscover: true,
+          customModels: ['stealth/ox-alpha'],
+        },
+      },
+      models: {
+        'openrouter/stale': {
+          provider: 'openrouter',
+          model: 'stale',
+          maxContextSize: 4096,
+        },
+        'openrouter/stealth/ox-alpha': {
+          provider: 'openrouter',
+          model: 'stealth/ox-alpha',
+          maxContextSize: 1_000_000,
+          thinkingSupport: true,
+          supportEfforts: ['low', 'medium', 'high'],
+          defaultEffort: 'medium',
+        },
+      },
+    });
+
+    await refreshProviderModels(harness.host, { providerId: 'openrouter' });
+
+    expect(harness.config().models?.['openrouter/gpt-new']).toEqual(
+      expect.objectContaining({ model: 'gpt-new' }),
+    );
+    expect(harness.config().models?.['openrouter/stale']).toBeUndefined();
+    expect(harness.config().models?.['openrouter/stealth/ox-alpha']).toEqual(
+      expect.objectContaining({
+        model: 'stealth/ox-alpha',
+        maxContextSize: 1_000_000,
+        supportEfforts: ['low', 'medium', 'high'],
+      }),
+    );
+  });
+});
+
+describe('fallbackReasoningMetadata', () => {
+  it('keeps legacy glm models boolean while exposing efforts for glm-5.3+', () => {
+    expect(fallbackReasoningMetadata('openai', 'glm-5', true)).toEqual({
+      supported: true,
+      efforts: undefined,
+    });
+    expect(fallbackReasoningMetadata('openai', 'glm-5.2', true)).toEqual({
+      supported: true,
+      efforts: ['high', 'max'],
+    });
+    expect(fallbackReasoningMetadata('openai', 'glm-5.3-flash', true)).toEqual({
+      supported: true,
+      efforts: ['low', 'high', 'max'],
+    });
   });
 });

@@ -1,6 +1,6 @@
 # 内置工具
 
-内置工具是 Kimi Code CLI 随核心引擎提供的工具集，无需安装 MCP server 即可使用。Agent 在每次对话中会根据任务需要自动选择并调用这些工具；用户可以通过权限审批界面查看每次工具调用的细节。
+内置工具是 Nori Code CLI 随核心引擎提供的工具集，无需安装 MCP server 即可使用。Agent 在每次对话中会根据任务需要自动选择并调用这些工具；用户可以通过权限审批界面查看每次工具调用的细节。
 
 与 MCP 工具相比，内置工具由运行时直接管理，生命周期与会话绑定，无需外部进程。两者都遵循统一的审批机制：**只读类工具**（如 `Read`、`Grep`、`Glob`）默认自动放行，**写入与执行类工具**（如 `Write`、`Edit`、`Bash`）默认需要用户审批。Nori 的会话级只读设置会拦截直接 `Write` 和 `Edit`，但不会移除文件读取工具，也不会拦截 `Bash`；`Bash` 仍按当前权限模式和规则处理。YOLO 模式下普通工具调用的审批会被跳过。Discuss 通过 TeamAssign 或 UI 切换进入 Code，不再走计划文件审批。
 
@@ -88,12 +88,15 @@ Discuss 是只读团队开会。新会话默认进入该状态（用户可关闭
 | `TeamDecide` | 自动放行 | 开会或在执行后投票 |
 | `TeamSpeak` | 自动放行 | 发布讨论发言；不调用会将本轮记录为 skipped（弃权） |
 | `TeamAssign` | 自动放行 | 分配任务；成功后离开 Discuss 进入 Code |
+| `TeamDismiss` | 自动放行 | 解除部门成员并删除其挂载子会话 |
 | `AskUserQuestion` | 自动放行 | 向用户提问以获取结构化输入 |
 | `Skill` | 自动放行 | 调用已注册的 inline Skill |
 
 **`SubAgent`** 是统一的临时代理入口。可用 `prompt_template` + `items`、`tasks`（含 `depends_on` DAG）或 `resume_agent_ids` 一次启动一个或多个完整子会话。完成后归档到父会话，可再打开。一次模型响应若调用 `SubAgent`，该调用必须是该响应中的唯一工具调用。Discuss 期间不要用 SubAgent，先 TeamAssign。
 
-**`TeamCreate`** 每个成员必须有唯一的 `name`、`role`、`mandate`。**`TeamDecide`** `action=start` 必须有 `topic` 和主持 `statement`。成员只用 `TeamSpeak` 发言。执行后 `action=vote` 不要求 Discuss；全队投票（`discuss_again` / `proceed` / `abstain`），含 `task=null` 的成员。
+**`TeamCreate`** 每个成员必须有唯一的 `name`、`role`、`mandate`；每次雇佣会创建挂载在调用者下的真实子会话（在会话地图上可见）。**`TeamDismiss`** 从部门移除成员并删除对应子会话；需提供 `reason`，仅在确认中断进行中的任务后用 `confirm_active=true` 重试。**`TeamDecide`** `action=start` 必须有 `topic` 和主持 `statement`。成员只用 `TeamSpeak` 发言。执行后 `action=vote` 不要求 Discuss；全队投票（`discuss_again` / `proceed` / `abstain`），含 `task=null` 的成员。
+
+挂载变更会刷新各会话 system prompt 中的 **`<session_self>`**，并可能在下一回合注入 **`<session_mount_changed>`**。这只是身份与拓扑，**不是** transcript 共享。详见[团队工程](../guides/team-engineering.md#身份模型session_self-与挂载变更)。
 
 **`AskUserQuestion`** 以结构化多选题的形式向用户提问，适用于需要消歧或选择方案的场景。`questions` 参数接受 1–4 道题，每道题需提供 `question`（以 `?` 结尾）、`options`（2–4 个选项，每项含 `label` 和 `description`）以及可选的 `header`（最多 12 字符）和 `multi_select`（默认 false）。系统自动附加"其他"选项。`background` 为 true 时启动后台问题任务并立即返回任务 ID。宿主未实现交互式提问能力时返回失败提示，Agent 应改为在文本回复中直接提问。
 
@@ -132,7 +135,7 @@ Nori 专用工具在内置工具集上增加共享记忆、文档写入和已配
 
 ## 定时任务
 
-定时任务工具允许 Agent 把一段 prompt 在未来某个时间重新注入到当前会话——既可以是一次性提醒，也可以是按 cron 周期触发的任务（定期巡检、每日报表、部署监控等）。计划绑定到会话，执行 `kimi resume` 后仍然有效，但不会带入全新的会话。单个会话最多保留 50 个生效中的定时任务。设置 `KIMI_DISABLE_CRON=1` 可整体禁用，详见[环境变量](../configuration/env-vars.md#运行时开关)。
+定时任务工具允许 Agent 把一段 prompt 在未来某个时间重新注入到当前会话——既可以是一次性提醒，也可以是按 cron 周期触发的任务（定期巡检、每日报表、部署监控等）。计划绑定到会话，执行 `nori --continue` 后仍然有效，但不会带入全新的会话。单个会话最多保留 50 个生效中的定时任务。设置 `NORI_DISABLE_CRON=1` 可整体禁用，详见[环境变量](../configuration/env-vars.md#运行时开关)。
 
 | 工具 | 默认审批 | 说明 |
 | --- | --- | --- |

@@ -309,11 +309,9 @@ function agentKey(agent: { id: string }): string {
 
   const loopApi = {
     state,
-    planFold,
     loadConfig,
     computeInjection,
     phaseOf,
-    planActiveOf,
     getPhases(): Record<string, string> {
       const out: Record<string, string> = {};
       for (const [k, v] of state.phases) out[k] = v;
@@ -343,10 +341,8 @@ function agentKey(agent: { id: string }): string {
     },
     resetAgent(agentId: string): void {
       state.phases.delete(agentId);
-      state.planWasActive.delete(agentId);
       state.injected.delete(agentId);
       state.pendingRules.delete(agentId);
-      planFold.delete(agentId);
     },
   };
   noriCore.loop = loopApi;

@@ -35,6 +35,10 @@ import type {
   KimiConfig,
   KimiConfigPatch,
   ListSessionsOptions,
+  MountSessionInput,
+  GetSessionGraphOptions,
+  SessionGraphSummary,
+  UnmountSessionInput,
   McpServerInfo,
   McpStartupMetrics,
   NoriRuntimeSettings,
@@ -44,6 +48,7 @@ import type {
   ReloadSummary,
   CompactOptions,
   SessionStatus,
+  SessionMeta,
   SessionUsage,
   SetNoriRuntimeSettingsInput,
   PromptInput,
@@ -183,6 +188,31 @@ export abstract class SDKRpcClientBase {
   async listSessions(input: ListSessionsOptions = {}): Promise<readonly SessionSummary[]> {
     const rpc = await this.getRpc();
     return rpc.listSessions(input);
+  }
+
+  async getSessionGraph(input: GetSessionGraphOptions = {}): Promise<SessionGraphSummary> {
+    const rpc = await this.getRpc();
+    return rpc.getSessionGraph(input);
+  }
+
+  async mountSession(input: MountSessionInput): Promise<SessionSummary> {
+    const rpc = await this.getRpc();
+    return rpc.mountSession(input);
+  }
+
+  async remountSession(input: MountSessionInput): Promise<SessionSummary> {
+    const rpc = await this.getRpc();
+    return rpc.remountSession(input);
+  }
+
+  async unmountSession(input: UnmountSessionInput): Promise<SessionSummary> {
+    const rpc = await this.getRpc();
+    return rpc.unmountSession(input);
+  }
+
+  async getSessionMetadata(input: SessionIdRpcInput): Promise<SessionMeta> {
+    const rpc = await this.getRpc();
+    return rpc.getSessionMetadata({ sessionId: input.sessionId });
   }
 
   async renameSession(input: RenameSessionInput): Promise<void> {

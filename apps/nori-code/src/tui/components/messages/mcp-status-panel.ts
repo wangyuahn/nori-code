@@ -30,23 +30,25 @@ const SUMMARY_ORDER: readonly McpServerInfo['status'][] = [
   'disabled',
 ];
 
-function statusPainter(
-  status: McpServerInfo['status'],
-): (text: string) => string {
+export function mcpStatusLabel(status: McpServerInfo['status']): string {
+  return STATUS_LABEL[status];
+}
+
+export function paintMcpStatus(status: McpServerInfo['status'], text: string): string {
   switch (status) {
     case 'connected':
-      return (text) => currentTheme.fg('success', text);
+      return currentTheme.fg('success', text);
     case 'failed':
-      return (text) => currentTheme.fg('error', text);
+      return currentTheme.fg('error', text);
     case 'needs-auth':
     case 'pending':
-      return (text) => currentTheme.fg('warning', text);
+      return currentTheme.fg('warning', text);
     case 'disabled':
-      return (text) => currentTheme.fg('textDim', text);
+      return currentTheme.fg('textDim', text);
   }
 }
 
-function formatToolCount(server: McpServerInfo): string {
+export function formatMcpToolCount(server: McpServerInfo): string {
   if (server.status === 'disabled') return '—';
   return `${server.toolCount} tool${server.toolCount === 1 ? '' : 's'}`;
 }
@@ -64,7 +66,7 @@ function formatToolsAvailable(count: number): string {
  * of whitespace to a single space keeps the error on one row, which the
  * panel then truncates to the available width.
  */
-function formatErrorLine(error: string): string {
+export function formatMcpErrorLine(error: string): string {
   return error.trim().replaceAll(/\s+/g, ' ');
 }
 
@@ -123,13 +125,14 @@ export function buildMcpStatusReportLines(options: McpStatusReportOptions): stri
   );
 
   for (const server of servers) {
-    const status = statusPainter(
+    const status = paintMcpStatus(
       server.status,
-    )(STATUS_LABEL[server.status].padEnd(statusWidth));
+      mcpStatusLabel(server.status).padEnd(statusWidth),
+    );
     lines.push(
       `  ${value(server.name.padEnd(nameWidth))}  ${status}  ${muted(
         server.transport.padEnd(transportWidth),
-      )}  ${value(formatToolCount(server))}`,
+      )}  ${value(formatMcpToolCount(server))}`,
     );
 
     if (
@@ -137,7 +140,7 @@ export function buildMcpStatusReportLines(options: McpStatusReportOptions): stri
       server.error !== undefined &&
       server.error.trim().length > 0
     ) {
-      lines.push(`    ${muted('error:')} ${error(formatErrorLine(server.error))}`);
+      lines.push(`    ${muted('error:')} ${error(formatMcpErrorLine(server.error))}`);
     }
     if (server.status === 'needs-auth') {
       lines.push(`    ${muted('action:')} ${value(`run /mcp-config login ${server.name}`)}`);

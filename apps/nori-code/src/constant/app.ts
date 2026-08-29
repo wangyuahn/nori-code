@@ -3,7 +3,15 @@ import { ErrorCodes } from '@nori-code/sdk';
 export const PRODUCT_NAME = 'Nori Code';
 export const CLI_COMMAND_NAME = 'nori';
 export const PROCESS_NAME = 'nori-code';
-export const NORI_TERMINAL_LOGO = ['█   █', '██  █', '█ █ █', '█  ██', '█   █'] as const;
+// Desk-pet mascot: leaf sprout on a round face (nori / seaweed vibe).
+// Block + box glyphs only — single-width, safe in Tilix / VS Code terminals.
+export const NORI_TERMINAL_LOGO = [
+  '   ▞▚    ',
+  ' ▄████▄  ',
+  '▐ ·  · ▌ ',
+  '▐  ▗▖  ▌ ',
+  ' ▀████▀  ',
+] as const;
 export const NORI_TERMINAL_LOGO_COLOR = '#00D7D7';
 
 // Used in telemetry app names and HTTP User-Agent headers.

@@ -1358,6 +1358,20 @@ describe('SessionSubagentHost', () => {
     expect(session.createTeamDiscussion).not.toHaveBeenCalled();
   });
 
+  it('rejects TeamDecide start when the department has no members', async () => {
+    const session = teamSessionDouble({
+      metadata: { agents: {} },
+      activeTeamDiscussion: vi.fn(() => undefined),
+      teamMemberMetadata: vi.fn(() => []),
+      createTeamDiscussion: vi.fn(),
+    });
+    const host = new SessionSubagentHost(session, 'main');
+
+    await expect(host.decideTeamDiscussion('start', 'plan the change', undefined, signal))
+      .rejects.toThrow('Cannot start a discussion with no participants');
+    expect(session.createTeamDiscussion).not.toHaveBeenCalled();
+  });
+
   it('rolls back the automatic Discuss entry when TeamDecide start cannot create its transcript', async () => {
     const session = new Session({
       id: 'test-team-discussion-start-rollback',
@@ -2560,11 +2574,14 @@ describe('Session.createAgent', () => {
     expect(second.agent.teamWriteLocked).toBe(true);
     expect(first.agent.permission.toolsReadonly).toBe(true);
     expect(second.agent.permission.toolsReadonly).toBe(true);
+    // Main readonly must not cascade: Code-phase members still write after assign.
+    main.agent.permission.setToolsReadonly(true);
     await host.assignTeam([
       { agentId: first.id, task: 'Implement the focused change.' },
       { agentId: second.id, task: null },
     ], signal);
     expect(main.agent.discussMode.isActive).toBe(false);
+    expect(main.agent.permission.toolsReadonly).toBe(true);
     expect(first.agent.teamWriteLocked).toBe(false);
     expect(second.agent.teamWriteLocked).toBe(false);
     expect(first.agent.permission.toolsReadonly).toBe(false);
@@ -2751,6 +2768,431 @@ describe('Session.createAgent', () => {
     expect(session.agents.has(member.id)).toBe(false);
     expect(session.agents.has(temporary.id)).toBe(false);
     expect(session.getAgentMetadata(unrelated.id)).toBeDefined();
+  });
+
+  it('clears dismissed descendants from surviving discussion state', async () => {
+    const session = new Session({
+      id: 'test-team-dismiss-discussion-state',
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      initializeMainAgent: false,
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const parent = await session.createAgent(
+      { type: 'sub' },
+      {
+        kind: 'team',
+        parentAgentId: main.id,
+        teamLeaderAgentId: main.id,
+        profile: contextProfile(),
+        teamIdentity: { name: 'Parent', mandate: 'Lead.', role: 'lead' },
+      },
+    );
+    const child = await session.createAgent(
+      { type: 'sub' },
+      {
+        kind: 'team',
+        parentAgentId: parent.id,
+        teamLeaderAgentId: parent.id,
+        profile: contextProfile(),
+        teamIdentity: { name: 'Child', mandate: 'Build.', role: 'builder' },
+      },
+    );
+    const created = await session.createTeamDiscussion(main.id, 'Review the tree.', [parent.id]);
+    session.beginTeamDiscussionTurn(created.id, parent.id);
+    await session.flushMetadata();
+
+    await session.dismissTeamMembers(main.id, [parent.id], 'Department changed.', true);
+
+    const discussion = session.getAgentMetadata(created.id)?.discussion;
+    expect(discussion).toMatchObject({
+      participantAgentIds: [],
+      status: 'archived',
+      currentTurnAgentId: undefined,
+      readCursors: {},
+    });
+  });
+
+  it('TeamDismiss deletes the mounted child session created by TeamCreate', async () => {
+    const deleteMountedMember = vi.fn(async () => undefined);
+    const session = new Session({
+      id: 'test-team-dismiss-mounted-session',
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      initializeMainAgent: false,
+      deleteMountedMember,
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const member = await session.createAgent(
+      { type: 'sub' },
+      {
+        kind: 'team',
+        parentAgentId: main.id,
+        teamLeaderAgentId: main.id,
+        profile: contextProfile(),
+        teamIdentity: {
+          name: 'Reviewer',
+          mandate: 'Review PRs.',
+          role: 'reviewer',
+        },
+        mountedSessionId: 'sess-mounted-reviewer',
+      },
+    );
+    const refreshSystemPrompt = vi.spyOn(main.agent, 'refreshSystemPrompt');
+
+    await session.dismissTeamMembers(main.id, [member.id], 'Role retired.', false);
+
+    expect(session.getAgentMetadata(member.id)).toBeUndefined();
+    expect(deleteMountedMember).toHaveBeenCalledWith('sess-mounted-reviewer');
+    expect(refreshSystemPrompt).toHaveBeenCalled();
+  });
+
+  it('TeamDismiss persists agent removal before deleting mounted sessions', async () => {
+    const events: string[] = [];
+    const writeText = vi.fn(async () => {
+      events.push('writeMetadata');
+      return 0;
+    });
+    const deleteMountedMember = vi.fn(async () => {
+      events.push('deleteMounted');
+    });
+    const session = new Session({
+      id: 'test-team-dismiss-order',
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText,
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      initializeMainAgent: false,
+      deleteMountedMember,
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const member = await session.createAgent(
+      { type: 'sub' },
+      {
+        kind: 'team',
+        parentAgentId: main.id,
+        teamLeaderAgentId: main.id,
+        profile: contextProfile(),
+        teamIdentity: {
+          name: 'Reviewer',
+          mandate: 'Review PRs.',
+          role: 'reviewer',
+        },
+        mountedSessionId: 'sess-mounted-reviewer',
+      },
+    );
+    events.length = 0;
+
+    await session.dismissTeamMembers(main.id, [member.id], 'Role retired.', false);
+
+    expect(session.getAgentMetadata(member.id)).toBeUndefined();
+    const writeIndex = events.indexOf('writeMetadata');
+    const deleteIndex = events.indexOf('deleteMounted');
+    expect(writeIndex).toBeGreaterThanOrEqual(0);
+    expect(deleteIndex).toBeGreaterThan(writeIndex);
+  });
+
+  it('TeamDismiss keeps agents when metadata cannot be persisted and skips mount deletion', async () => {
+    const writeText = vi.fn().mockResolvedValue(0);
+    const deleteMountedMember = vi.fn(async () => undefined);
+    const session = new Session({
+      id: 'test-team-dismiss-metadata-abort',
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText,
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      initializeMainAgent: false,
+      deleteMountedMember,
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const member = await session.createAgent(
+      { type: 'sub' },
+      {
+        kind: 'team',
+        parentAgentId: main.id,
+        teamLeaderAgentId: main.id,
+        profile: contextProfile(),
+        teamIdentity: {
+          name: 'Reviewer',
+          mandate: 'Review PRs.',
+          role: 'reviewer',
+        },
+        mountedSessionId: 'sess-mounted-reviewer',
+      },
+    );
+    writeText.mockRejectedValue(new Error('disk full'));
+
+    await expect(
+      session.dismissTeamMembers(main.id, [member.id], 'Role retired.', false),
+    ).rejects.toThrow(/could not be persisted/);
+
+    expect(session.getAgentMetadata(member.id)?.mountedSessionId).toBe('sess-mounted-reviewer');
+    expect(deleteMountedMember).not.toHaveBeenCalled();
+  });
+
+  it('TeamDismiss still removes all agents when one mounted session delete fails', async () => {
+    const deleteMountedMember = vi.fn(async (sessionId: string) => {
+      if (sessionId === 'sess-b') throw new Error('delete B failed');
+    });
+    const session = new Session({
+      id: 'test-team-dismiss-partial-mount-delete',
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      initializeMainAgent: false,
+      deleteMountedMember,
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const memberA = await session.createAgent(
+      { type: 'sub' },
+      {
+        kind: 'team',
+        parentAgentId: main.id,
+        teamLeaderAgentId: main.id,
+        profile: contextProfile(),
+        teamIdentity: { name: 'A', mandate: 'A', role: 'a' },
+        mountedSessionId: 'sess-a',
+      },
+    );
+    const memberB = await session.createAgent(
+      { type: 'sub' },
+      {
+        kind: 'team',
+        parentAgentId: main.id,
+        teamLeaderAgentId: main.id,
+        profile: contextProfile(),
+        teamIdentity: { name: 'B', mandate: 'B', role: 'b' },
+        mountedSessionId: 'sess-b',
+      },
+    );
+
+    await expect(
+      session.dismissTeamMembers(main.id, [memberA.id, memberB.id], 'Clean up.', true),
+    ).rejects.toThrow(/cleanup errors/);
+
+    expect(session.getAgentMetadata(memberA.id)).toBeUndefined();
+    expect(session.getAgentMetadata(memberB.id)).toBeUndefined();
+    expect(deleteMountedMember).toHaveBeenCalledWith('sess-a');
+    expect(deleteMountedMember).toHaveBeenCalledWith('sess-b');
+  });
+
+  it('rolls a team agent back when metadata persistence fails', async () => {
+    const writeText = vi.fn().mockResolvedValue(0);
+    const session = new Session({
+      id: 'test-team-create-metadata-rollback',
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText,
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      initializeMainAgent: false,
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    writeText.mockRejectedValueOnce(new Error('metadata write failed'));
+
+    await expect(session.createTeamMember(main.id, {
+      name: 'Reviewer',
+      mandate: 'Review changes.',
+      role: 'reviewer',
+    })).rejects.toThrow('metadata write failed');
+
+    expect(session.teamMemberMetadata(main.id)).toEqual([]);
+    expect(session.agents.has('agent-0')).toBe(false);
+  });
+
+  it('attach/detachMountedTeamMember sync map mounts without deleting the child session', async () => {
+    const deleteMountedMember = vi.fn(async () => undefined);
+    const refreshSessionSelf = vi.fn(async () => undefined);
+    const session = new Session({
+      id: 'test-mount-sync-team-agent',
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      initializeMainAgent: false,
+      deleteMountedMember,
+      refreshSessionSelf,
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+
+    const attached = await session.attachMountedTeamMember({
+      mountedSessionId: 'sess-map-child',
+      identity: {
+        name: 'Map Child',
+        role: 'builder',
+        mandate: 'Build features',
+      },
+    });
+    expect(session.getAgentMetadata(attached.agentId)).toMatchObject({
+      kind: 'team',
+      teamLeaderAgentId: main.id,
+      mountedSessionId: 'sess-map-child',
+      name: 'Map Child',
+      role: 'builder',
+      mandate: 'Build features',
+    });
+    expect(session.teamMemberMetadata(main.id).map(([id]) => id)).toEqual([attached.agentId]);
+
+    const again = await session.attachMountedTeamMember({
+      mountedSessionId: 'sess-map-child',
+      identity: {
+        name: 'Map Child',
+        role: 'owner',
+        mandate: 'Own the module',
+      },
+    });
+    expect(again.agentId).toBe(attached.agentId);
+    expect(session.getAgentMetadata(attached.agentId)?.role).toBe('owner');
+    expect(main.agent.config.systemPrompt).toContain('- sess-map-child | Map Child');
+    expect(main.agent.config.systemPrompt).not.toContain(`- ${attached.agentId} | Map Child`);
+
+    const detached = await session.detachMountedTeamMember('sess-map-child');
+    expect(detached.detachedAgentIds).toEqual([attached.agentId]);
+    expect(session.getAgentMetadata(attached.agentId)).toBeUndefined();
+    expect(session.teamMemberMetadata(main.id)).toEqual([]);
+    expect(deleteMountedMember).not.toHaveBeenCalled();
+    expect(refreshSessionSelf).toHaveBeenCalledTimes(3);
+  });
+
+  it('rolls back a newly attached mounted team member when identity refresh fails', async () => {
+    const refreshSessionSelf = vi.fn()
+      .mockRejectedValueOnce(new Error('identity refresh failed'));
+    const session = new Session({
+      id: 'test-mount-attach-rollback',
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      initializeMainAgent: false,
+      refreshSessionSelf,
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+
+    await expect(session.attachMountedTeamMember({
+      mountedSessionId: 'sess-map-child',
+      identity: {
+        name: 'Map Child',
+        role: 'builder',
+        mandate: 'Build features',
+      },
+    })).rejects.toThrow('identity refresh failed');
+
+    expect(session.teamMemberMetadata(main.id)).toEqual([]);
+    expect(session.agents.has('agent-0')).toBe(false);
+    expect(refreshSessionSelf).toHaveBeenCalledTimes(2);
+  });
+
+  it('exits Discuss when the last department member is dismissed', async () => {
+    const session = new Session({
+      id: 'test-team-dismiss-last-member-discuss',
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      initializeMainAgent: false,
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const member = await session.createAgent(
+      { type: 'sub' },
+      {
+        kind: 'team',
+        parentAgentId: main.id,
+        teamLeaderAgentId: main.id,
+        profile: contextProfile(),
+        teamIdentity: {
+          name: 'Builder',
+          mandate: 'Implement only assigned work.',
+          role: 'builder',
+        },
+      },
+    );
+    await main.agent.discussMode.enter();
+    expect(main.agent.discussMode.isActive).toBe(true);
+    const logRecord = vi.spyOn(main.agent.records, 'logRecord');
+
+    await session.dismissTeamMembers(main.id, [member.id], 'No longer needed.', true);
+
+    expect(logRecord).toHaveBeenCalledWith({ type: 'discuss_mode.exit', id: undefined });
+    expect(main.agent.discussMode.isActive).toBe(false);
+  });
+
+  it('exits Discuss when dismissal removes every participant from an active discussion', async () => {
+    const session = new Session({
+      id: 'test-team-dismiss-discussion-participant',
+      kaos: createFakeKaos({
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        writeText: vi.fn().mockResolvedValue(0),
+      }),
+      homedir: '/tmp/kimi-session',
+      rpc: createSessionRpc(),
+      initializeMainAgent: false,
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const participant = await session.createAgent(
+      { type: 'sub' },
+      {
+        kind: 'team',
+        parentAgentId: main.id,
+        teamLeaderAgentId: main.id,
+        profile: contextProfile(),
+        teamIdentity: {
+          name: 'Participant',
+          mandate: 'Participate in review.',
+          role: 'reviewer',
+        },
+      },
+    );
+    await session.createAgent(
+      { type: 'sub' },
+      {
+        kind: 'team',
+        parentAgentId: main.id,
+        teamLeaderAgentId: main.id,
+        profile: contextProfile(),
+        teamIdentity: {
+          name: 'Survivor',
+          mandate: 'Continue the department.',
+          role: 'builder',
+        },
+      },
+    );
+    const discussion = await session.createTeamDiscussion(
+      main.id,
+      'Review the participant lifecycle.',
+      [participant.id],
+    );
+    const logRecord = vi.spyOn(main.agent.records, 'logRecord');
+
+    await session.dismissTeamMembers(main.id, [participant.id], 'Participant retired.', true);
+
+    expect(session.getAgentMetadata(discussion.id)?.discussion).toMatchObject({
+      participantAgentIds: [],
+      status: 'archived',
+    });
+    expect(logRecord).toHaveBeenCalledWith({ type: 'discuss_mode.exit', id: undefined });
+    expect(main.agent.discussMode.isActive).toBe(false);
   });
 
   it('reports direct Team Agent identity, observable status, and assigned task', async () => {

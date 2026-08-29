@@ -2,6 +2,7 @@ import type {
   AgentReplayRecord,
   ContextMessage,
   GoalChange,
+  KimiHarness,
   PermissionMode,
   PromptOrigin,
   ResumedAgentState,
@@ -10,6 +11,7 @@ import type {
 } from '@nori-code/sdk';
 
 import { ToolCallComponent } from '../components/messages/tool-call';
+import { MAIN_AGENT_ID } from '../constant/kimi-tui';
 import { currentTheme } from '../theme';
 import type { TodoItem } from '../components/chrome/todo-panel';
 import type { AppState, ToolResultBlockData, TranscriptEntry } from '../types';
@@ -47,10 +49,12 @@ type GoalReplayLifecycleChange = GoalChange & { readonly kind: 'lifecycle' };
 
 export interface SessionReplayHost {
   state: TUIState;
+  readonly harness: KimiHarness;
   readonly streamingUI: StreamingUIController;
   readonly sessionEventHandler: SessionEventHandler;
   setAppState(patch: Partial<AppState>): void;
   showError(msg: string): void;
+  showStatus?(msg: string): void;
   appendTranscriptEntry(entry: TranscriptEntry): void;
   mergeAllTurnSteps(): void;
 }
@@ -74,18 +78,31 @@ function unescapeBashXml(text: string): string {
 export class SessionReplayRenderer {
   constructor(private readonly host: SessionReplayHost) {}
 
-  async hydrateFromReplay(session: Session): Promise<boolean> {
+  async hydrateFromReplay(session: Session, agentId: string = MAIN_AGENT_ID): Promise<boolean> {
     this.host.setAppState({ isReplaying: true });
     try {
-      const main = session.getResumeState()?.agents['main'];
-      if (main === undefined) {
+      const agents = session.getResumeState()?.agents;
+      const agent = agents?.[agentId];
+      if (agent !== undefined) {
+        this.hydrateSnapshot(agent, agentId);
+        this.renderRecords(agent);
+        this.host.mergeAllTurnSteps();
+        return true;
+      }
+
+      if (agentId === MAIN_AGENT_ID) {
         this.host.showError('Session history is unavailable for this session.');
         return false;
       }
 
-      this.hydrateSnapshot(main);
-      this.renderRecords(main);
-      this.host.mergeAllTurnSteps();
+      const history = await this.loadContextHistory(session, agentId);
+      if (history !== undefined && history.length > 0) {
+        this.renderHistory(history);
+        this.host.mergeAllTurnSteps();
+      }
+      this.host.showStatus?.(
+        'Opened this member. History may be incomplete until the session is reloaded.',
+      );
       return true;
     } catch (error) {
       const message = formatErrorMessage(error);
@@ -100,10 +117,50 @@ export class SessionReplayRenderer {
   // Snapshot hydration
   // ---------------------------------------------------------------------------
 
-  private hydrateSnapshot(agent: ResumedAgentState): void {
-    this.host.setAppState(appStateFromResumeAgent(agent));
+  private hydrateSnapshot(agent: ResumedAgentState, agentId: string = MAIN_AGENT_ID): void {
+    const snapshot = appStateFromResumeAgent(agent);
+    if (agentId !== MAIN_AGENT_ID) {
+      this.host.setAppState({
+        contextTokens: snapshot.contextTokens,
+        maxContextTokens: snapshot.maxContextTokens,
+        contextUsage: snapshot.contextUsage,
+      });
+      this.hydrateTodoPanel(agent);
+      this.hydrateBackgroundState(agent);
+      return;
+    }
+    this.host.setAppState(snapshot);
     this.hydrateTodoPanel(agent);
     this.hydrateBackgroundState(agent);
+  }
+
+  private async loadContextHistory(
+    session: Session,
+    agentId: string,
+  ): Promise<readonly ContextMessage[] | undefined> {
+    if (typeof session.getContext !== 'function') return undefined;
+    try {
+      const context = await this.host.harness.withInteractiveAgent(agentId, () =>
+        session.getContext(),
+      );
+      return context.history;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private renderHistory(history: readonly ContextMessage[]): void {
+    const context = createReplayRenderContext();
+    const records: AgentReplayRecord[] = history.map((message) => ({
+      type: 'message',
+      time: 0,
+      message,
+    }));
+    for (const record of limitReplayRecordsByTurn(records, REPLAY_TURN_LIMIT)) {
+      this.renderRecord(context, record);
+    }
+    this.flushAssistant(context);
+    this.cleanupRuntime(context);
   }
 
   private hydrateTodoPanel(agent: ResumedAgentState): void {

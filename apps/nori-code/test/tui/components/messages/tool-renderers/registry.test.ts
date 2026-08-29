@@ -212,6 +212,26 @@ describe('tool-result registry', () => {
     expect(out).not.toContain('"goalId"');
   });
 
+  it('TeamCreate glance lists hired members', () => {
+    const renderer = pickResultRenderer('TeamCreate');
+    const out = strip(
+      joinRender(
+        renderer(
+          call('TeamCreate', { members: [{ name: 'Reviewer', role: 'code review' }] }),
+          result('{"members":[]}'),
+          ctx,
+        ),
+      ),
+    );
+    expect(out).toContain('Hired Reviewer (code review)');
+  });
+
+  it('TeamStatus glance is registered', () => {
+    const renderer = pickResultRenderer('TeamStatus');
+    const out = strip(joinRender(renderer(call('TeamStatus'), result('{}'), ctx)));
+    expect(out).toContain('Checked team status');
+  });
+
   it('UpdateGoal success renders no redundant body', () => {
     const renderer = pickResultRenderer('UpdateGoal');
     const out = joinRender(

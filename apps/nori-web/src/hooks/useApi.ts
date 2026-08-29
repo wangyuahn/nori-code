@@ -29,6 +29,41 @@ function mergeAgentConfig(
   return merged;
 }
 
+/**
+ * Resolve the session the SPA should open. Prefer hash/query `session=` —
+ * CLI `/web` uses `/#token=...&session=id` so Vite `base: './'` assets
+ * resolve from `/`. Path `/sessions/:id` is still accepted for older bookmarks.
+ */
+export function sessionIdFromLocation(pathname: string, hash = '', search = ''): string | null {
+  const hashParams = new URLSearchParams(hash.replace(/^#/, ''));
+  const fromHash = hashParams.get('session')?.trim();
+  if (fromHash) return fromHash;
+  const queryParams = new URLSearchParams(search.replace(/^\?/, ''));
+  const fromQuery = queryParams.get('session')?.trim();
+  if (fromQuery) return fromQuery;
+  const match = /^\/sessions\/([^/]+)\/?$/.exec(pathname);
+  if (!match?.[1]) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
+
+function syncSessionLocation(sessionId: string | null): void {
+  if (typeof window === 'undefined') return;
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  if (sessionId !== null && sessionId.length > 0) hashParams.set('session', sessionId);
+  else hashParams.delete('session');
+  const hash = hashParams.toString();
+  // Stay on `/` so relative `./assets/*` keep resolving. Path-style
+  // `/sessions/:id` is still parsed on first load for older links.
+  const path = window.location.pathname.startsWith('/sessions/') ? '/' : (window.location.pathname || '/');
+  const next = `${path}${hash.length > 0 ? `#${hash}` : ''}`;
+  const current = `${window.location.pathname}${window.location.hash}`;
+  if (current !== next) window.history.replaceState(null, '', next);
+}
+
 export function useVaultNotes(typeFilter?: string) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
@@ -166,7 +201,11 @@ export function useConfig() {
 
 export function useSessions() {
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(() => (
+    typeof window === 'undefined'
+      ? null
+      : sessionIdFromLocation(window.location.pathname, window.location.hash, window.location.search)
+  ));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -235,6 +274,7 @@ export function useSessions() {
       }
       setSessions(previous => [created, ...previous.filter(session => session.id !== created.id)]);
       setSessionId(created.id);
+      syncSessionLocation(created.id);
       void refresh();
       return created.id;
     } catch (e) {
@@ -247,6 +287,7 @@ export function useSessions() {
 
   const switchSession = useCallback((id: string | null) => {
     setSessionId(id);
+    syncSessionLocation(id);
   }, []);
 
   const archiveSession = useCallback(async (id: string) => {

@@ -11,23 +11,27 @@ import {
   createSessionRequestSchema,
   forkSessionRequestSchema,
   listSessionChildrenResponseSchema,
+  mountSessionRequestSchema,
   pageResponseSchema,
+  remountSessionRequestSchema,
   sessionAbortResponseSchema,
   sessionAgentQuerySchema,
   sessionAgentTreeResponseSchema,
   sessionActivityResponseSchema,
+  sessionGraphResponseSchema,
   sessionSchema,
   sessionWarningsResponseSchema,
   sessionStatusResponseSchema,
   sessionStatusSchema,
   startBtwSessionResponseSchema,
+  unmountSessionRequestSchema,
   updateSessionProfileRequestSchema,
   undoSessionRequestSchema,
   undoSessionResponseSchema,
   workspaceIdSchema,
   type Event,
 } from '@nori-code/protocol';
-import { IPromptService, ISessionService, SessionNotFoundError, SessionUndoUnavailableError, ErrorCodes, KimiError, IWorkspaceRegistry, WorkspaceNotFoundError, IEventService, type IInstantiationService, type SessionClientTelemetry } from '@nori-code/agent-core';
+import { IPromptService, ISessionService, SessionMountCycleError, SessionNotFoundError, SessionUndoUnavailableError, ErrorCodes, KimiError, IWorkspaceRegistry, WorkspaceNotFoundError, IEventService, type IInstantiationService, type SessionClientTelemetry } from '@nori-code/agent-core';
 import { z } from 'zod';
 
 
@@ -134,6 +138,9 @@ const sessionActionRequestSchema = z.preprocess(
   z.object({
     title: z.string().min(1).optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
+    parent_session_id: z.string().min(1).optional(),
+    role: z.string().min(1).optional(),
+    mandate: z.string().min(1).optional(),
     instruction: z.string().optional(),
     count: z.number().int().positive().optional(),
     page_size: z.number().int().min(1).max(100).optional(),
@@ -309,6 +316,59 @@ export function registerSessionsRoutes(
   );
   app.get(listRoute.path, listRoute.options, listRoute.handler as Parameters<SessionRouteHost['get']>[2]);
 
+  const graphRoute = defineRoute(
+    {
+      method: 'GET',
+      path: '/sessions/graph',
+      querystring: sessionsListQueryCoercion,
+      success: { data: sessionGraphResponseSchema },
+      errors: {
+        [ErrorCode.VALIDATION_FAILED]: { detailsSchema },
+        [ErrorCode.WORKSPACE_NOT_FOUND]: {},
+      },
+      description: 'Session mount graph (nodes + parent edges)',
+      tags: ['sessions'],
+      operationId: 'getSessionGraph',
+    },
+    async (req, reply) => {
+      try {
+        const raw = req.query;
+        const baseQuery = {
+          before_id: raw.before_id,
+          after_id: raw.after_id,
+          page_size: raw.page_size,
+          status: raw.status,
+          includeArchive: raw.include_archive,
+          excludeEmpty: raw.exclude_empty,
+        };
+        let query;
+        if (raw.workspace_id !== undefined) {
+          const registry = ix.invokeFunction((a) => a.get(IWorkspaceRegistry));
+          let root: string;
+          try {
+            root = await registry.resolveRoot(raw.workspace_id);
+          } catch (err) {
+            if (err instanceof WorkspaceNotFoundError) {
+              reply.send(
+                errEnvelope(ErrorCode.WORKSPACE_NOT_FOUND, err.message, req.id),
+              );
+              return;
+            }
+            throw err;
+          }
+          query = { ...baseQuery, workDir: root };
+        } else {
+          query = baseQuery;
+        }
+        const graph = await ix.invokeFunction((a) => a.get(ISessionService).getGraph(query));
+        reply.send(okEnvelope(graph, req.id));
+      } catch (err) {
+        sendMappedError(reply, req.id, err);
+      }
+    },
+  );
+  app.get(graphRoute.path, graphRoute.options, graphRoute.handler as Parameters<SessionRouteHost['get']>[2]);
+
   const activityRoute = defineRoute(
     {
       method: 'GET',
@@ -445,6 +505,7 @@ export function registerSessionsRoutes(
         [ErrorCode.VALIDATION_FAILED]: { detailsSchema },
         [ErrorCode.SESSION_NOT_FOUND]: {},
         [ErrorCode.SESSION_BUSY]: {},
+        [ErrorCode.SESSION_MOUNT_CYCLE]: {},
         [ErrorCode.COMPACTION_UNABLE]: {},
         [ErrorCode.SESSION_UNDO_UNAVAILABLE]: {},
       },
@@ -457,7 +518,7 @@ export function registerSessionsRoutes(
         const { tail } = req.params;
         const parsed = parseActionSuffix({
           tail,
-          allowedActions: ['fork', 'compact', 'undo', 'abort', 'btw', 'archive', 'delete'] as const,
+          allowedActions: ['fork', 'compact', 'undo', 'abort', 'btw', 'archive', 'delete', 'mount', 'unmount', 'remount'] as const,
           resourceLabel: 'session',
         });
         if (parsed.kind !== 'action') {
@@ -477,6 +538,33 @@ export function registerSessionsRoutes(
           const body = forkSessionRequestSchema.parse(req.body);
           const session = await ix.invokeFunction((a) =>
             a.get(ISessionService).fork(parsed.id, body),
+          );
+          reply.send(okEnvelope(session, req.id));
+          return;
+        }
+
+        if (parsed.action === 'mount') {
+          const body = mountSessionRequestSchema.parse(req.body);
+          const session = await ix.invokeFunction((a) =>
+            a.get(ISessionService).mount(parsed.id, body),
+          );
+          reply.send(okEnvelope(session, req.id));
+          return;
+        }
+
+        if (parsed.action === 'remount') {
+          const body = remountSessionRequestSchema.parse(req.body);
+          const session = await ix.invokeFunction((a) =>
+            a.get(ISessionService).remount(parsed.id, body),
+          );
+          reply.send(okEnvelope(session, req.id));
+          return;
+        }
+
+        if (parsed.action === 'unmount') {
+          unmountSessionRequestSchema.parse(req.body ?? {});
+          const session = await ix.invokeFunction((a) =>
+            a.get(ISessionService).unmount(parsed.id),
           );
           reply.send(okEnvelope(session, req.id));
           return;
@@ -703,6 +791,10 @@ function sendMappedError(
 ): void {
   if (err instanceof SessionNotFoundError) {
     reply.send(errEnvelope(ErrorCode.SESSION_NOT_FOUND, err.message, requestId));
+    return;
+  }
+  if (err instanceof SessionMountCycleError) {
+    reply.send(errEnvelope(ErrorCode.SESSION_MOUNT_CYCLE, err.message, requestId));
     return;
   }
   if (err instanceof WorkspaceNotFoundError) {

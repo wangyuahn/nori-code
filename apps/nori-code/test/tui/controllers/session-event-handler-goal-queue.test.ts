@@ -52,6 +52,7 @@ function makeHost(options: { createGoalRejects?: boolean } = {}) {
         streamingPhase: 'waiting',
         model: 'kimi-model',
         permissionMode: 'auto',
+        teamAgents: [],
       },
       queuedMessages: [],
       theme: { palette: getBuiltInPalette('dark') },
@@ -89,6 +90,7 @@ function makeHost(options: { createGoalRejects?: boolean } = {}) {
     sendQueuedMessage: vi.fn(),
     shiftQueuedMessage: vi.fn(),
     btwPanelController: { routeEvent: vi.fn(() => false) },
+    teamViewController: { routeEvent: vi.fn(), seedFromSession: vi.fn() },
     tasksBrowserController: {},
   };
   host.setAppState.mockImplementation((patch: Record<string, unknown>) => {
@@ -445,5 +447,32 @@ describe('SessionEventHandler goal queue promotion', () => {
     expect(session.createGoal).not.toHaveBeenCalled();
     expect(host.sendNormalUserInput).not.toHaveBeenCalled();
     expect(host.sendQueuedMessage).not.toHaveBeenCalled();
+  });
+
+  it('handleStatusUpdate applies context fields without throwing', () => {
+    const { host } = makeHost();
+    const handler = new SessionEventHandler(host);
+
+    expect(() => {
+      handler.handleEvent(
+        {
+          type: 'agent.status.updated',
+          sessionId: 's1',
+          agentId: 'main',
+          contextUsage: 0.42,
+          contextTokens: 1000,
+          maxContextTokens: 2000,
+        },
+        vi.fn(),
+      );
+    }).not.toThrow();
+
+    expect(host.setAppState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contextUsage: 0.42,
+        contextTokens: 1000,
+        maxContextTokens: 2000,
+      }),
+    );
   });
 });

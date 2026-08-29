@@ -11,7 +11,10 @@ Nori orchestrates multiple AI agents to plan, implement, review, and persist kno
 ![Nori Work browser workspace](docs/images/nori-work-browser.png)
 
 > [!NOTE]
-> **v1.0.0 is the first stable Nori Code and Nori Work release.** Existing Nori Work installations are fully replaced during upgrade while user data is preserved.
+> **v2.0** adds **team engineering**: a department tree of durable partner sessions, Discuss/Assign before Code, and a **conversation map** (`/map` in the TUI, **Map** in Nori Work) linked by `parent_session_id`. Identity is injected via `<session_self>` and mount-change notices — not transcript copying.
+
+> [!NOTE]
+> **v1.0.0** was the first stable Nori Code and Nori Work release. Existing Nori Work installations are fully replaced during upgrade while user data is preserved.
 
 ### What's included in v1.0.0
 
@@ -52,6 +55,9 @@ Most AI coding tools are **single-agent chat shells**: one model, one context, o
 
 ### 🧠 Multi-Agent DAG Orchestration
 SubAgent splits a task into parallel sub-agents with explicit dependency chaining. A multi-file refactor dispatches `{ plan, implement-1, implement-2, verify, review }` concurrently — no manual turn-by-turn handholding.
+
+### 👥 Team engineering (2.0)
+`TeamCreate` hires durable partners as **mounted child sessions** on the conversation map. Discuss (`TeamDecide` / `TeamSpeak`) gathers statements before `TeamAssign` enters Code; the main Agent stays read-only while members execute. `/team` opens partner sessions; `/map` manages mounts. `TeamDismiss` removes partners and deletes their sessions. Web **Map** mirrors the same forest with pan/zoom and local annotations.
 
 ### 📚 Persistent Project Memory
 Every decision, review, and pattern lands in an Obsidian-compatible vault with `[[wiki-links]]`. The planner searches it automatically before each implementation phase. Cross-session knowledge means Nori gets smarter about *your project* over time.
@@ -95,6 +101,7 @@ Memory notes use vault-relative `[[folder/note|Title]]` links. Nori Work renders
 | P0 | **Nori Work — System Tray / Notifications** | ✅ Implemented |
 | P0 | **Nori Work — Secure Preload Bridge** | ✅ Implemented |
 | P1 | **Agent Browser Tool** — navigation, snapshots, interaction, uploads, diagnostics, and annotations | ✅ Implemented |
+| P0 | **Team engineering** — department tree, Discuss/Assign, conversation map, `/team` / `/map` | ✅ Implemented |
 
 ---
 

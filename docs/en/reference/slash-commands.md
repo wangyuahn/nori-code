@@ -1,6 +1,6 @@
 # Slash Commands
 
-Slash commands are built-in control commands provided by Kimi Code CLI in the interactive TUI, covering account configuration, session management, mode switching, information queries, and more. Type `/` in the input box to trigger command completion — the candidate list filters in real time as you continue typing; command aliases are also matched.
+Slash commands are built-in control commands provided by Nori Code CLI in the interactive TUI, covering account configuration, session management, mode switching, information queries, and more. Type `/` in the input box to trigger command completion — the candidate list filters in real time as you continue typing; command aliases are also matched.
 
 After typing the full command name, press `Enter` to execute. If the `/`-prefixed input does not match any built-in or Skill command, it is sent to the Agent as a regular message.
 
@@ -22,7 +22,7 @@ Some commands are only available in the idle state. Executing these commands whi
 | `/editor` | — | Configure the external editor launched by `Ctrl-G` | Yes |
 | `/theme` | — | Switch the terminal UI color theme | Yes |
 
-`/settings` also accepts the `/setting` alias for direct runtime changes. Common Nori subcommands are `/setting readonly on|off` (block or allow direct `Write` / `Edit` by the main Agent), `/setting coder write on|off` (grant or revoke direct write access for coding subagents), `/setting depth <n>` (set SubAgent nesting depth), and `/setting auto` (open the guided setup).
+`/settings` also accepts the `/setting` alias for direct runtime changes. Common Nori subcommands are `/setting readonly on|off` (block or allow direct `Write` / `Edit` by the main Agent), `/setting coder write on|off` (grant or revoke direct write access for coding subagents), `/setting depth <n>` (set SubAgent nesting depth), `/setting auto` (open the guided setup), `/setting loop` (loop and goal limits; `/setting loop steps <n>`, `/setting loop goal-turns <n>`, and `/setting loop idle <n>` set a value directly), `/setting memory` (vector search for Memory retrieval), and `/setting default-discuss on|off` (whether new sessions start in Discuss mode).
 
 ## Session Management
 
@@ -39,8 +39,9 @@ Some commands are only available in the idle state. Executing these commands whi
 | `/reload-tui` | — | Reload only the `tui.toml` UI preferences (theme, editor, notifications, etc.) without rebuilding the session | Yes |
 | `/init` | — | Analyze the current codebase and generate `AGENTS.md` | No |
 | `/export-md [<path>]` | `/export` | Export the current session as a Markdown file | No |
-| `/export-debug-zip` | — | Export the current session as a debug ZIP archive (same behavior as [`kimi export`](./kimi-command.md#kimi-export)) | No |
-| `/add-dir [<path>]` | — | Add an extra workspace directory to the current session. Run without a path (or with `list`) to list configured directories. When adding, choose whether to remember the directory for the project in `.kimi-code/local.toml` | No |
+| `/export-debug-zip` | — | Export the current session as a debug ZIP archive (same behavior as [`nori export`](./kimi-command.md#nori-export)) | No |
+| `/add-dir [<path>]` | — | Add an extra workspace directory to the current session. Run without a path (or with `list`) to list configured directories. When adding, choose whether to remember the directory for the project in `.nori-code/local.toml` | No |
+| `/web` | — | Start the local Nori server if needed, open the current session in the Web UI, and exit the terminal. The browser URL stays on `/` and carries `#token=` plus `#session=` (never `/sessions/:id`, which blacks out Vite `base: './'`). If the desktop opener fails, the TUI stays open and prints a copyable URL | Yes |
 
 ## Modes & Run Control
 
@@ -49,6 +50,9 @@ Some commands are only available in the idle state. Executing these commands whi
 | `/yolo [on\|off]` | `/yes` | Toggle YOLO mode. Without arguments, flips the current state; explicitly passing `on`/`off` forces the setting. When enabled, skips approval for regular tool calls; Discuss exit approval is not affected | Yes |
 | `/auto [on\|off]` | — | Toggle auto permission mode. When enabled, tool approvals are handled automatically and the Agent will not ask the user questions | Yes |
 | `/plan [on\|off]` | — | Toggle Discuss. Without arguments, flips the current state; explicitly passing `on`/`off` forces the setting. The command name is retained for compatibility | Yes |
+| `/discuss [on\|off]` | — | Toggle Discuss (same as `/plan`). Shift-Tab also toggles Discuss | Yes |
+| `/team [settings]` | `/agents` | Open a hired partner's session, or browse reports and this-round Discuss speech. Enter opens the selected member (Main returns to the lead session). Tab shows details. A discussion row opens the Discuss pane. `/team settings` sets max department depth | Yes |
+| `/map` | — | Browse the conversation map (session mount forest) for the current working directory. Enter opens a session; M mount (child then parent); U unmount. See [Team engineering](../guides/team-engineering.md) | Yes |
 | `/plan clear` | — | Clear legacy plan state | No |
 | `/subagent on\|off` | — | Turn SubAgent mode on or off without sending a prompt. | No |
 | `/subagent <task>` | — | Turn SubAgent mode on, then send `<task>` as a normal prompt. If the turn completes normally, SubAgent mode turns off automatically. In `manual` permission mode, Nori Code asks whether to switch to `auto` or `yolo` before starting. | No |
@@ -91,10 +95,10 @@ If an upcoming goal needs to start with `manage`, put `--` after `next`:
 In non-interactive prompt mode, only the create forms start goal mode:
 
 ```sh
-kimi -p "/goal Fix the failing checkout test"
+nori -p "/goal Fix the failing checkout test"
 ```
 
-Prompt mode exits with code `0` when the goal completes, `3` when it blocks, and `6` when it pauses. Other `/goal` subcommands, including `next`, are TUI controls and are not handled by `kimi -p`.
+Prompt mode exits with code `0` when the goal completes, `3` when it blocks, and `6` when it pauses. Other `/goal` subcommands, including `next`, are TUI controls and are not handled by `nori -p`.
 
 ## Information & Status
 
@@ -103,21 +107,22 @@ Prompt mode exits with code `0` when the goal completes, `3` when it blocks, and
 | `/help` | `/h`, `/?` | Show keyboard shortcuts and all available commands | Yes |
 | `/btw [question]` | — | Open a side conversation in a forked sub-Agent without affecting the current main Agent turn; without a question, opens the panel first to wait for input | Yes |
 | `/usage` | — | Show token usage, context consumption, and quota information | Yes |
-| `/status` | — | Show the current session runtime state: version, model, working directory, permission mode, etc. | Yes |
-| `/mcp` | — | List MCP servers and their connection status in the current session | Yes |
+| `/status` | — | Show the current session runtime state: version, model, working directory, permission mode, team speaking/reports, etc. | Yes |
+| `/skills` | — | Browse installed skills in a searchable list; Enter runs a skill or fills `/name ` when it takes arguments | Yes |
+| `/mcp` | — | Show MCP servers and their connection status in the current session | Yes |
 | `/plugins` | — | Open the interactive plugin manager | Yes |
-| `/version` | — | Display the Kimi Code CLI version number | Yes |
+| `/version` | — | Display the Nori Code CLI version number | Yes |
 | `/feedback` | — | Submit feedback with optional diagnostic logs and codebase context | Yes |
 
 ## Exit
 
 | Command | Alias | Description | Always available |
 | --- | --- | --- | --- |
-| `/exit` | `/quit`, `/q` | Exit Kimi Code CLI | No |
+| `/exit` | `/quit`, `/q` | Exit Nori Code CLI | No |
 
 ## Built-in skill commands
 
-Kimi Code CLI ships with a set of built-in Skills that appear directly as `/<name>` slash commands. Unlike external Skills, they do not require the `skill:` prefix and are available out of the box.
+Nori Code CLI ships with a set of built-in Skills that appear directly as `/<name>` slash commands. Unlike external Skills, they do not require the `skill:` prefix and are available out of the box.
 
 | Command | Description |
 | --- | --- |
@@ -149,7 +154,9 @@ For example, a child Skill named `review` inside a parent Skill named `code-styl
 
 For convenience, external Skill commands also support a shorthand form that omits the `skill:` prefix — `/<name>` — as long as the name is not taken by a system slash command. That is, `/code-style` falls back to matching `/skill:code-style`.
 
-Built-in Skills shipped with Kimi Code CLI appear directly as `/<name>` in the slash command panel. For example, `/mcp-config` helps configure MCP servers and handle MCP OAuth login, and `/custom-theme [extra text]` invokes the custom-theme workflow to create or edit a TUI theme.
+`/skills` opens the same catalog as a searchable list. Enter runs a skill with no arguments, or fills `/name ` in the editor when the skill takes extra text.
+
+Built-in Skills shipped with Nori Code CLI appear directly as `/<name>` in the slash command panel. For example, `/mcp-config` helps configure MCP servers and handle MCP OAuth login, and `/custom-theme [extra text]` invokes the custom-theme workflow to create or edit a TUI theme.
 
 ::: info
 All Skill commands are only available in the idle state. `flow`-type Skills are also exposed via `/skill:<name>` — there is no separate `/flow:` namespace.

@@ -29,6 +29,7 @@ export function parseCustomModelDrafts(
   customModelIds: readonly string[],
   aliases: Record<string, unknown> | undefined,
   providerId: string,
+  options?: { includeUnlistedAliases?: boolean },
 ): CustomModelDraft[] {
   const drafts: CustomModelDraft[] = [];
   const seen = new Set<string>();
@@ -41,7 +42,7 @@ export function parseCustomModelDrafts(
     const alias = scopedAlias ?? (isAliasForProvider(legacyAlias, providerId) ? legacyAlias : undefined);
     drafts.push(aliasToCustomModelDraft(id, alias));
   }
-  if (aliases !== undefined) {
+  if ((options?.includeUnlistedAliases ?? true) && aliases !== undefined) {
     for (const [modelId, alias] of Object.entries(aliases)) {
       if (!isAliasForProvider(alias, providerId)) continue;
       const id = modelIdFromAlias(modelId, alias);
@@ -103,9 +104,14 @@ export function customModelAliasPatch(
   return patch;
 }
 
-export function validateCustomModelDrafts(drafts: readonly CustomModelDraft[]): string | undefined {
+export function validateCustomModelDrafts(
+  drafts: readonly CustomModelDraft[],
+  options?: { requireAtLeastOne?: boolean },
+): string | undefined {
   const ids = customModelIds(drafts);
-  if (ids.length === 0) return 'Add at least one custom model when automatic discovery is disabled.';
+  if ((options?.requireAtLeastOne ?? true) && ids.length === 0) {
+    return 'Add at least one custom model when automatic discovery is disabled.';
+  }
   for (const draft of drafts) {
     if (!draft.id.trim()) continue;
     const contextLength = parseContextLength(draft.contextLength);

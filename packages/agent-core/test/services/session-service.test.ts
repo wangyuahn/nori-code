@@ -58,6 +58,7 @@ interface FakeBridgeState {
   usages: Map<string, UsageStatus>;
   /** Live per-agent runtime phase, keyed `sessionId:agentId`. Absent = idle. */
   runtimePhases: Map<string, AgentRuntimeState>;
+  injectedReminders: Array<{ sessionId: string; agentId: string; content: string; variant?: string }>;
 }
 
 function makeFakeBridge(state: FakeBridgeState): ICoreProcessService {
@@ -77,6 +78,14 @@ function makeFakeBridge(state: FakeBridgeState): ICoreProcessService {
           title: undefined,
         };
         state.sessions.push(created);
+        state.metas.set(id, {
+          title: '',
+          createdAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString(),
+          isCustomTitle: false,
+          agents: {},
+          custom: { ...(payload.metadata ?? {}) },
+        });
         return created;
       }),
     listSessions: vi
@@ -168,6 +177,33 @@ function makeFakeBridge(state: FakeBridgeState): ICoreProcessService {
       .mockImplementation(
         async (payload: WithSessionId<UpdateSessionMetadataPayload>) => {
           state.metadataPatches.set(payload.sessionId, payload.metadata);
+          const custom = payload.metadata.custom;
+          if (custom !== undefined && typeof custom === 'object' && custom !== null) {
+            const index = state.sessions.findIndex((s) => s.id === payload.sessionId);
+            if (index >= 0) {
+              const summary = state.sessions[index]!;
+              state.sessions[index] = {
+                ...summary,
+                metadata: { ...custom } as SessionSummary['metadata'],
+              };
+            }
+            const existing = state.metas.get(payload.sessionId);
+            if (existing !== undefined) {
+              state.metas.set(payload.sessionId, {
+                ...existing,
+                custom: { ...custom } as SessionMeta['custom'],
+              });
+            } else {
+              state.metas.set(payload.sessionId, {
+                title: '',
+                createdAt: new Date(0).toISOString(),
+                updatedAt: new Date(0).toISOString(),
+                isCustomTitle: false,
+                agents: {},
+                custom: { ...custom } as SessionMeta['custom'],
+              });
+            }
+          }
         },
       ),
     getSessionMetadata: vi
@@ -228,6 +264,92 @@ function makeFakeBridge(state: FakeBridgeState): ICoreProcessService {
       toolsReadonly: false,
     }),
     getGoal: vi.fn().mockResolvedValue({ goal: null }),
+    injectSystemReminder: vi.fn().mockImplementation(
+      async (payload: {
+        sessionId: string;
+        agentId: string;
+        content: string;
+        variant?: string;
+      }) => {
+        state.injectedReminders.push(payload);
+        const ctx = state.contexts.get(payload.sessionId) ?? { history: [], tokenCount: 0 };
+        state.contexts.set(payload.sessionId, {
+          ...ctx,
+          history: [
+            ...ctx.history,
+            {
+              role: 'user',
+              content: [{ type: 'text', text: `<system-reminder>\n${payload.content}\n</system-reminder>` }],
+              toolCalls: [],
+              origin: { kind: 'injection', variant: payload.variant ?? 'mount_changed' },
+            },
+          ],
+        });
+      },
+    ),
+    detachMountedTeamMember: vi.fn().mockImplementation(
+      async (payload: { sessionId: string; mountedSessionId: string }) => {
+        const meta = state.metas.get(payload.sessionId);
+        if (meta === undefined) {
+          return { detachedAgentIds: [] };
+        }
+        const detachedAgentIds: string[] = [];
+        const nextAgents = { ...meta.agents };
+        for (const [agentId, agent] of Object.entries(meta.agents)) {
+          if (agent.kind === 'team' && agent.mountedSessionId === payload.mountedSessionId) {
+            delete nextAgents[agentId];
+            detachedAgentIds.push(agentId);
+          }
+        }
+        if (detachedAgentIds.length > 0) {
+          state.metas.set(payload.sessionId, { ...meta, agents: nextAgents });
+        }
+        return { detachedAgentIds };
+      },
+    ),
+    attachMountedTeamMember: vi.fn().mockImplementation(
+      async (payload: {
+        sessionId: string;
+        mountedSessionId: string;
+        identity: { name: string; role: string; mandate: string };
+        teamLeaderAgentId?: string;
+      }) => {
+        const meta = state.metas.get(payload.sessionId) ?? {
+          title: '',
+          createdAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString(),
+          isCustomTitle: false,
+          agents: {},
+          custom: {},
+        };
+        const leaderAgentId = payload.teamLeaderAgentId ?? 'main';
+        const agents = { ...meta.agents };
+        if (agents['main'] === undefined) {
+          agents['main'] = {
+            homedir: '/tmp/main',
+            type: 'main',
+            parentAgentId: null,
+          };
+        }
+        const existingId = Object.entries(agents).find(
+          ([, agent]) => agent.kind === 'team' && agent.mountedSessionId === payload.mountedSessionId,
+        )?.[0];
+        const agentId = existingId ?? `agent_mount_${Object.keys(agents).length}`;
+        agents[agentId] = {
+          homedir: `/tmp/${agentId}`,
+          type: 'sub',
+          parentAgentId: leaderAgentId,
+          kind: 'team',
+          teamLeaderAgentId: leaderAgentId,
+          name: payload.identity.name,
+          role: payload.identity.role,
+          mandate: payload.identity.mandate,
+          mountedSessionId: payload.mountedSessionId,
+        };
+        state.metas.set(payload.sessionId, { ...meta, agents });
+        return { agentId };
+      },
+    ),
   };
   return {
     rpc: rpc as CoreRPC,
@@ -255,6 +377,7 @@ function freshState(): FakeBridgeState {
     postUndoContexts: new Map(),
     usages: new Map(),
     runtimePhases: new Map(),
+    injectedReminders: [],
   };
 }
 
@@ -272,6 +395,7 @@ function textMessage(
 }
 
 let state: FakeBridgeState;
+let bridge: ICoreProcessService;
 let svc: SessionService;
 let promptStub: ReturnType<typeof makePromptServiceStub>;
 let approvalStub: ReturnType<typeof makeApprovalServiceStub>;
@@ -400,8 +524,9 @@ beforeEach(() => {
     approvalService: approvalStub.approvalService,
     questionService: questionStub.questionService,
   });
+  bridge = makeFakeBridge(state);
   svc = new SessionService(
-    makeFakeBridge(state),
+    bridge,
     eventBus.eventService,
     instantiation,
     approvalStub.approvalService,
@@ -984,7 +1109,7 @@ describe('SessionService.fork', () => {
 });
 
 describe('SessionService children', () => {
-  it('creates a child session through forkSession with child metadata', async () => {
+  it('creates an empty child session and mounts it under the parent', async () => {
     const source = await svc.create({
       metadata: { cwd: '/tmp/child', source: true },
       title: 'Parent title',
@@ -998,19 +1123,15 @@ describe('SessionService children', () => {
       },
     });
 
-    expect(state.forkPayloads).toEqual([
-      {
-        sessionId: source.id,
-        id: undefined,
-        title: 'Child: Parent title',
-        metadata: {
-          parent_session_id: source.id,
-          child_session_kind: 'child',
-          topic: 'btw',
-        },
+    expect(state.forkPayloads).toEqual([]);
+    expect(state.createPayloads.at(-1)).toMatchObject({
+      workDir: '/tmp/child',
+      metadata: {
+        cwd: '/tmp/child',
+        topic: 'btw',
       },
-    ]);
-    expect(child.id).toMatch(/^sess_fork_/);
+    });
+    expect(child.id).toMatch(/^sess_/);
     expect(child.title).toBe('Child: Parent title');
     expect(child.metadata).toMatchObject({
       cwd: '/tmp/child',
@@ -1018,6 +1139,23 @@ describe('SessionService children', () => {
       child_session_kind: 'child',
       topic: 'btw',
     });
+    expect(child.metadata).not.toHaveProperty('source');
+  });
+
+  it('deletes the created child when mounting fails', async () => {
+    const source = await svc.create({
+      metadata: { cwd: '/tmp/child-rollback' },
+      title: 'Parent',
+    });
+    vi.mocked(bridge.rpc.attachMountedTeamMember).mockRejectedValueOnce(
+      new Error('team-agent attach failed'),
+    );
+
+    await expect(svc.createChild(source.id, { title: 'Child' }))
+      .rejects.toThrow('team-agent attach failed');
+
+    expect(state.sessions).toHaveLength(1);
+    expect(state.deletedIds).toHaveLength(1);
   });
 
   it('lists only direct children for a parent session', async () => {
@@ -1059,6 +1197,316 @@ describe('SessionService children', () => {
   });
 });
 
+describe('SessionService mount', () => {
+  it('mounts, remounts, rejects cycles, and promotes children on delete', async () => {
+    const { SessionMountCycleError } = await import('../../src/services/session/session');
+    const a = await svc.create({ metadata: { cwd: '/tmp/mount' }, title: 'A' });
+    const b = await svc.create({ metadata: { cwd: '/tmp/mount' }, title: 'B' });
+    const c = await svc.create({ metadata: { cwd: '/tmp/mount' }, title: 'C' });
+
+    const mounted = await svc.mount(b.id, { parent_session_id: a.id, role: 'member' });
+    expect(mounted.metadata).toMatchObject({
+      parent_session_id: a.id,
+      child_session_kind: 'child',
+      mount_role: 'member',
+    });
+
+    await svc.mount(c.id, { parent_session_id: b.id });
+    await expect(svc.mount(a.id, { parent_session_id: c.id })).rejects.toBeInstanceOf(
+      SessionMountCycleError,
+    );
+
+    const remounted = await svc.remount(c.id, { parent_session_id: a.id });
+    expect(remounted.metadata['parent_session_id']).toBe(a.id);
+
+    const underA = await svc.listChildren(a.id, {});
+    expect(underA.items.map((item) => item.id).toSorted()).toEqual([b.id, c.id].toSorted());
+
+    await svc.delete(a.id);
+    expect(state.deletedIds).toContain(a.id);
+    const bAfter = await svc.get(b.id);
+    const cAfter = await svc.get(c.id);
+    expect(bAfter.metadata['parent_session_id']).toBeUndefined();
+    expect(cAfter.metadata['parent_session_id']).toBeUndefined();
+    expect(bAfter.metadata['mount_role']).toBeUndefined();
+    expect(cAfter.metadata['mount_role']).toBeUndefined();
+    expect(bAfter.metadata['mount_mandate']).toBeUndefined();
+    expect(cAfter.metadata['mount_mandate']).toBeUndefined();
+
+    const graph = await svc.getGraph({});
+    expect(graph.nodes.map((n) => n.id)).toEqual(
+      expect.arrayContaining([b.id, c.id]),
+    );
+    expect(graph.edges).toEqual([]);
+  });
+
+  it('repairs a missing same-parent Team agent on an idempotent remount', async () => {
+    const parent = await svc.create({ metadata: { cwd: '/tmp/remount-repair' }, title: 'Parent' });
+    const child = await svc.create({ metadata: { cwd: '/tmp/remount-repair' }, title: 'Child' });
+    await svc.mount(child.id, {
+      parent_session_id: parent.id,
+      role: 'reviewer',
+      mandate: 'Review changes',
+    });
+
+    const parentMeta = state.metas.get(parent.id)!;
+    state.metas.set(parent.id, { ...parentMeta, agents: {} });
+
+    await svc.remount(child.id, { parent_session_id: parent.id });
+
+    expect(
+      Object.values(state.metas.get(parent.id)?.agents ?? {}).some(
+        (agent) => agent.kind === 'team' && agent.mountedSessionId === child.id,
+      ),
+    ).toBe(true);
+  });
+
+  it('unmounts a session back to top-level', async () => {
+    const parent = await svc.create({ metadata: { cwd: '/tmp/unmount' }, title: 'P' });
+    const child = await svc.create({ metadata: { cwd: '/tmp/unmount' }, title: 'C' });
+    await svc.mount(child.id, { parent_session_id: parent.id });
+    const unmounted = await svc.unmount(child.id);
+    expect(unmounted.metadata['parent_session_id']).toBeUndefined();
+    expect((await svc.listChildren(parent.id, {})).items).toEqual([]);
+  });
+
+  it('rolls an unmount back when team-agent synchronization fails', async () => {
+    const parent = await svc.create({ metadata: { cwd: '/tmp/unmount-rollback' }, title: 'P' });
+    const child = await svc.create({ metadata: { cwd: '/tmp/unmount-rollback' }, title: 'C' });
+    await svc.mount(child.id, {
+      parent_session_id: parent.id,
+      role: 'reviewer',
+      mandate: 'Review changes',
+    });
+    vi.spyOn(bridge.rpc, 'detachMountedTeamMember').mockRejectedValueOnce(
+      new Error('detach failed'),
+    );
+
+    await expect(svc.unmount(child.id)).rejects.toThrow('detach failed');
+
+    expect((await svc.get(child.id)).metadata).toMatchObject({
+      parent_session_id: parent.id,
+      mount_role: 'reviewer',
+      mount_mandate: 'Review changes',
+    });
+    expect(
+      Object.values(state.metas.get(parent.id)?.agents ?? {}).some(
+        (agent) => agent.kind === 'team' && agent.mountedSessionId === child.id,
+      ),
+    ).toBe(true);
+  });
+
+  it('syncs dual-write team agents so Discuss/Assign members match the mount tree', async () => {
+    const oldParent = await svc.create({ metadata: { cwd: '/tmp/sync-team' }, title: 'Old' });
+    const newParent = await svc.create({ metadata: { cwd: '/tmp/sync-team' }, title: 'New' });
+    const child = await svc.create({ metadata: { cwd: '/tmp/sync-team' }, title: 'Worker' });
+
+    await svc.mount(child.id, {
+      parent_session_id: oldParent.id,
+      role: 'reviewer',
+      mandate: 'Review PRs',
+    });
+    const oldMembers = Object.values(state.metas.get(oldParent.id)?.agents ?? {}).filter(
+      (agent) => agent.kind === 'team' && agent.mountedSessionId === child.id,
+    );
+    expect(oldMembers).toHaveLength(1);
+    expect(oldMembers[0]).toMatchObject({
+      teamLeaderAgentId: 'main',
+      role: 'reviewer',
+      mandate: 'Review PRs',
+      name: 'Worker',
+    });
+
+    await svc.remount(child.id, {
+      parent_session_id: newParent.id,
+      role: 'owner',
+      mandate: 'Own the module',
+    });
+    expect(
+      Object.values(state.metas.get(oldParent.id)?.agents ?? {}).filter(
+        (agent) => agent.kind === 'team' && agent.mountedSessionId === child.id,
+      ),
+    ).toHaveLength(0);
+    const newMembers = Object.values(state.metas.get(newParent.id)?.agents ?? {}).filter(
+      (agent) => agent.kind === 'team' && agent.mountedSessionId === child.id,
+    );
+    expect(newMembers).toHaveLength(1);
+    expect(newMembers[0]).toMatchObject({
+      teamLeaderAgentId: 'main',
+      role: 'owner',
+      mandate: 'Own the module',
+      name: 'Worker',
+    });
+
+    await svc.unmount(child.id);
+    expect(
+      Object.values(state.metas.get(newParent.id)?.agents ?? {}).filter(
+        (agent) => agent.kind === 'team' && agent.mountedSessionId === child.id,
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('detaches dual-write team agents when delete promotes children to top-level', async () => {
+    const parent = await svc.create({ metadata: { cwd: '/tmp/promote-team' }, title: 'Parent' });
+    const child = await svc.create({ metadata: { cwd: '/tmp/promote-team' }, title: 'Child' });
+    await svc.mount(child.id, { parent_session_id: parent.id, role: 'member' });
+    expect(
+      Object.values(state.metas.get(parent.id)?.agents ?? {}).some(
+        (agent) => agent.kind === 'team' && agent.mountedSessionId === child.id,
+      ),
+    ).toBe(true);
+
+    // Seed a stale dual-write on an unrelated host (nested TeamCreate style).
+    const host = await svc.create({ metadata: { cwd: '/tmp/promote-team' }, title: 'Host' });
+    state.metas.set(host.id, {
+      title: 'Host',
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      isCustomTitle: true,
+      agents: {
+        main: { homedir: '/tmp/main', type: 'main', parentAgentId: null },
+        agent_stale: {
+          homedir: '/tmp/stale',
+          type: 'sub',
+          parentAgentId: 'main',
+          kind: 'team',
+          teamLeaderAgentId: 'main',
+          name: 'Stale',
+          role: 'member',
+          mandate: 'stale',
+          mountedSessionId: child.id,
+        },
+      },
+      custom: {},
+    });
+
+    await svc.delete(parent.id);
+    expect((await svc.get(child.id)).metadata['parent_session_id']).toBeUndefined();
+    expect(
+      Object.values(state.metas.get(host.id)?.agents ?? {}).some(
+        (agent) => agent.mountedSessionId === child.id,
+      ),
+    ).toBe(false);
+  });
+
+  it('detaches a mounted team agent when its session is deleted directly', async () => {
+    const parent = await svc.create({ metadata: { cwd: '/tmp/delete-mounted' }, title: 'Parent' });
+    const child = await svc.create({ metadata: { cwd: '/tmp/delete-mounted' }, title: 'Child' });
+    await svc.mount(child.id, {
+      parent_session_id: parent.id,
+      role: 'worker',
+      mandate: 'Own the task',
+    });
+
+    await svc.delete(child.id);
+
+    expect(state.sessions.some((session) => session.id === child.id)).toBe(false);
+    expect(
+      Object.values(state.metas.get(parent.id)?.agents ?? {}).some(
+        (agent) => agent.kind === 'team' && agent.mountedSessionId === child.id,
+      ),
+    ).toBe(false);
+  });
+
+  it('cleans stale team agents even when the deleted session has no parent link', async () => {
+    const host = await svc.create({ metadata: { cwd: '/tmp/delete-stale-mounted' }, title: 'Host' });
+    const child = await svc.create({ metadata: { cwd: '/tmp/delete-stale-mounted' }, title: 'Child' });
+    const hostMeta = state.metas.get(host.id)!;
+    state.metas.set(host.id, {
+      ...hostMeta,
+      agents: {
+        ...hostMeta.agents,
+        stale_member: {
+          homedir: '/tmp/stale-member',
+          type: 'sub',
+          parentAgentId: 'main',
+          kind: 'team',
+          teamLeaderAgentId: 'main',
+          name: 'Stale member',
+          role: 'reviewer',
+          mandate: 'Review changes',
+          mountedSessionId: child.id,
+        },
+      },
+    });
+
+    await svc.delete(child.id);
+
+    expect(state.metas.get(host.id)?.agents['stale_member']).toBeUndefined();
+  });
+
+  it('rolls session deletion back when the core delete fails', async () => {
+    const parent = await svc.create({ metadata: { cwd: '/tmp/delete-rollback' }, title: 'Parent' });
+    const child = await svc.create({ metadata: { cwd: '/tmp/delete-rollback' }, title: 'Child' });
+    const grandchild = await svc.create({ metadata: { cwd: '/tmp/delete-rollback' }, title: 'Grandchild' });
+    await svc.mount(child.id, { parent_session_id: parent.id, role: 'worker' });
+    await svc.mount(grandchild.id, { parent_session_id: child.id, role: 'reviewer' });
+    vi.mocked(bridge.rpc.deleteSession).mockRejectedValueOnce(new Error('delete failed'));
+
+    await expect(svc.delete(child.id)).rejects.toThrow('delete failed');
+
+    expect((await svc.get(child.id)).metadata).toMatchObject({
+      parent_session_id: parent.id,
+      mount_role: 'worker',
+    });
+    expect((await svc.get(grandchild.id)).metadata).toMatchObject({
+      parent_session_id: child.id,
+      mount_role: 'reviewer',
+    });
+    expect(
+      Object.values(state.metas.get(parent.id)?.agents ?? {}).some(
+        (agent) => agent.kind === 'team' && agent.mountedSessionId === child.id,
+      ),
+    ).toBe(true);
+    expect(
+      Object.values(state.metas.get(child.id)?.agents ?? {}).some(
+        (agent) => agent.kind === 'team' && agent.mountedSessionId === grandchild.id,
+      ),
+    ).toBe(true);
+  });
+
+  it('notifies subject, new parent, old parent, and direct children on remount', async () => {
+    const oldParent = await svc.create({ metadata: { cwd: '/tmp/notify' }, title: 'Old' });
+    const newParent = await svc.create({ metadata: { cwd: '/tmp/notify' }, title: 'New' });
+    const subject = await svc.create({ metadata: { cwd: '/tmp/notify' }, title: 'Subject' });
+    const child = await svc.create({ metadata: { cwd: '/tmp/notify' }, title: 'Child' });
+    await svc.mount(subject.id, { parent_session_id: oldParent.id, role: 'reviewer' });
+    await svc.mount(child.id, { parent_session_id: subject.id });
+    state.injectedReminders = [];
+    eventBus.events.length = 0;
+
+    await svc.remount(subject.id, {
+      parent_session_id: newParent.id,
+      role: 'owner',
+      mandate: 'Own the module',
+    });
+    await vi.waitFor(() => {
+      expect(state.injectedReminders.length).toBeGreaterThanOrEqual(4);
+    });
+
+    const mountEvents = eventBus.events.filter(
+      (event) => (event as { type?: string }).type === 'event.session.mount_changed',
+    ) as Array<{
+      sessionId: string;
+      recipient_role: string;
+      change: { session_id: string; reason: string };
+    }>;
+    const rolesBySession = Object.fromEntries(
+      mountEvents.map((event) => [event.sessionId, event.recipient_role]),
+    );
+    expect(rolesBySession[subject.id]).toBe('subject');
+    expect(rolesBySession[oldParent.id]).toBe('old_parent');
+    expect(rolesBySession[newParent.id]).toBe('new_parent');
+    expect(rolesBySession[child.id]).toBe('direct_child');
+    expect(mountEvents[0]?.change.reason).toBe('remount');
+
+    const notified = new Set(state.injectedReminders.map((entry) => entry.sessionId));
+    expect(notified).toEqual(new Set([subject.id, oldParent.id, newParent.id, child.id]));
+    expect(state.injectedReminders.some((entry) => entry.content.includes('<session_mount_changed>'))).toBe(true);
+    expect(state.metas.get(subject.id)?.custom['session_self']).toContain('<session_self>');
+  });
+});
+
 describe('SessionService agent tree', () => {
   it('lists metadata agents with per-agent runtime status and best-effort usage', async () => {
     const created = await svc.create({ metadata: { cwd: '/tmp/agent-tree' } });
@@ -1079,6 +1527,7 @@ describe('SessionService agent tree', () => {
           mandate: 'Review behavior',
           title: 'Legacy title',
           intro: 'Legacy intro',
+          mountedSessionId: 'sess_mounted_reviewer',
         },
       },
       custom: {},
@@ -1111,6 +1560,7 @@ describe('SessionService agent tree', () => {
         role: 'reviewer',
         mandate: 'Review behavior',
         status: 'running',
+        mounted_session_id: 'sess_mounted_reviewer',
       }),
     ]));
     const reviewer = tree.agents.find(agent => agent.id === 'agent_reviewer');

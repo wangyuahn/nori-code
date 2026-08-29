@@ -1,5 +1,9 @@
 import type { Session, SkillSummary } from '@nori-code/sdk';
 
+import { SkillsSelectorComponent, type SkillPickerItem } from '../components/dialogs/skills-selector';
+import { LLM_NOT_SET_MESSAGE } from '../constant/kimi-tui';
+import { formatErrorMessage } from '../utils/event-payload';
+import type { SlashCommandHost } from './dispatch';
 import type { KimiSlashCommand } from './types';
 
 export type SkillListSession = Pick<Session, 'listSkills'>;
@@ -15,6 +19,54 @@ export function isUserActivatableSkill(skill: SkillSummary): boolean {
     skill.type === 'prompt' ||
     skill.type === 'inline' ||
     skill.type === 'flow'
+  );
+}
+
+/** Heuristic: SkillSummary has no arguments field. */
+export function skillNeedsArguments(skill: SkillSummary): boolean {
+  if (skill.type === 'prompt') return true;
+  return /[\[$<]/.test(skill.description);
+}
+
+export async function showSkillsSelector(host: SlashCommandHost): Promise<void> {
+  const session = host.session;
+  if (session === undefined) {
+    host.showError(LLM_NOT_SET_MESSAGE);
+    return;
+  }
+  let skills: readonly SkillSummary[];
+  try {
+    skills = await session.listSkills();
+  } catch (error) {
+    host.showError(`Failed to load skills: ${formatErrorMessage(error)}`);
+    return;
+  }
+
+  const built = buildSkillSlashCommands(skills);
+  const byName = new Map(skills.map((skill) => [skill.name, skill]));
+  const items: SkillPickerItem[] = [];
+  for (const command of built.commands) {
+    const skillName = built.commandMap.get(command.name) ?? command.name;
+    const skill = byName.get(skillName);
+    if (skill === undefined) continue;
+    items.push({ slashName: command.name, skill });
+  }
+
+  host.mountEditorReplacement(
+    new SkillsSelectorComponent({
+      items,
+      onSelect: (item) => {
+        if (skillNeedsArguments(item.skill)) {
+          host.restoreInputText(`/${item.slashName} `);
+          return;
+        }
+        host.restoreEditor();
+        host.sendSkillActivation(session, item.skill.name, '');
+      },
+      onCancel: () => {
+        host.restoreEditor();
+      },
+    }),
   );
 }
 

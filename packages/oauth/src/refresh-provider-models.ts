@@ -422,6 +422,12 @@ function sameStringSet(left: readonly string[], right: readonly string[]): boole
   return right.every(value => values.has(value));
 }
 
+function extraModelIdsFromProvider(provider: ProviderRecord): Set<string> {
+  const raw = provider['customModels'] ?? provider['custom_models'];
+  if (!Array.isArray(raw)) return new Set();
+  return new Set(raw.flatMap(id => typeof id === 'string' && id.trim() ? [id.trim()] : []));
+}
+
 export async function refreshProviderModels(
   host: RefreshProviderHost,
   options: RefreshProviderOptions = {},
@@ -449,7 +455,11 @@ export async function refreshProviderModels(
       const discovered = await discoverModels(providerId, provider, host);
       if (discovered.length === 0) throw new Error('Provider returned no usable chat models.');
       const current = aliasesForProvider(config, providerId);
-      if (sameModels(current, discovered)) {
+      const extraIds = extraModelIdsFromProvider(provider);
+      const discoveredIds = new Set(discovered.map(model => model.id));
+      const extraAliases = current.filter(([, alias]) => extraIds.has(alias.model) && !discoveredIds.has(alias.model));
+      const discoveredCurrent = current.filter(([, alias]) => !extraIds.has(alias.model) || discoveredIds.has(alias.model));
+      if (sameModels(discoveredCurrent, discovered) && extraAliases.every(([key]) => config.models?.[key] !== undefined)) {
         unchanged.push(providerId);
         continue;
       }
@@ -474,8 +484,11 @@ export async function refreshProviderModels(
           defaultEffort: model.defaultEffort ?? existing?.defaultEffort,
         };
       }
+      for (const [key, alias] of extraAliases) {
+        nextModels[key] = alias;
+      }
 
-      const oldIds = new Set(current.map(([, alias]) => alias.model));
+      const oldIds = new Set(discoveredCurrent.map(([, alias]) => alias.model));
       const nextIds = new Set(discovered.map((model) => model.id));
       const added = [...nextIds].filter((id) => !oldIds.has(id)).length;
       const removed = [...oldIds].filter((id) => !nextIds.has(id)).length;

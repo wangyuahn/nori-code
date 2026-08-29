@@ -32,6 +32,7 @@ function fakeInitialAppState(): AppState {
     availableProviders: {},
     sessionTitle: null,
     mcpServersSummary: null,
+    teamAgents: [],
   };
 }
 
@@ -54,6 +55,7 @@ describe('createTUIState', () => {
     expect(state.activityContainer).toBeDefined();
     expect(state.todoPanelContainer).toBeDefined();
     expect(state.queueContainer).toBeDefined();
+    expect(state.departmentPaneContainer).toBeDefined();
     expect(state.editorContainer).toBeDefined();
     expect(state.editor).toBeDefined();
     expect(state.footer).toBeDefined();

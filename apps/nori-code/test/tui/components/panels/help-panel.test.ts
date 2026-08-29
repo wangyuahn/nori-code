@@ -22,11 +22,17 @@ describe('HelpPanelComponent', () => {
       onClose: () => {},
     });
     const out = strip(panel.render(80).join('\n'));
-    expect(out).toMatch(/help/);
+    expect(out).toMatch(/Help/);
+    expect(out).toMatch(/↑↓ scroll · Esc cancel/);
     expect(out).toMatch(/Keyboard shortcuts/);
     expect(out).toMatch(/Shift-Tab/);
     expect(out).toMatch(/Ctrl-O/);
+    expect(out).toMatch(/Ctrl-Y/);
     expect(out).toMatch(/Shift-Enter \/ Ctrl-J/);
+    expect(out).toMatch(/!/);
+    expect(out).toMatch(/Ctrl-V \/ Alt-V/);
+    expect(out).toMatch(/Ctrl--/);
+    expect(out).toMatch(/Esc Esc/);
     expect(out).toMatch(/Slash commands/);
     expect(out).toMatch(/\/exit \(\/quit, \/q\)/);
     expect(out).toMatch(/Exit/);
@@ -41,6 +47,7 @@ describe('HelpPanelComponent', () => {
         cmd('mcp-config', 'M'),
       ],
       onClose: () => {},
+      maxVisible: 40,
     });
     const out = strip(panel.render(80).join('\n'));
     const alphaIdx = out.indexOf('/alpha');

@@ -1,6 +1,8 @@
 import { createDecorator } from '../../di';
 import { effectiveModelAlias, type KimiConfig, type ModelAlias, type ProviderConfig } from '../../config';
 import {
+  defaultEffortFromList,
+  fallbackReasoningMetadata,
   isOfficialKimiCodingEndpoint,
   OFFICIAL_KIMI_CODING_INPUT_CAPABILITIES,
 } from '@nori-code/oauth';
@@ -73,6 +75,23 @@ export function toProtocolModel(
       capabilities.add(capability);
     }
   }
+  const supportsThinking = effective.thinkingSupport
+    ?? (capabilities.has('thinking') || capabilities.has('always_thinking') ? true : undefined);
+  // Stale aliases may only have thinkingSupport (boolean on/off) after an older
+  // discovery pass. Re-apply the same family fallback used during refresh so
+  // Web/Desktop catalog consumers see multi-level efforts without a re-fetch.
+  let supportEfforts = effective.supportEfforts;
+  let defaultEffort = effective.defaultEffort;
+  if (
+    supportsThinking === true
+    && (supportEfforts === undefined || supportEfforts.length === 0)
+  ) {
+    const inferred = fallbackReasoningMetadata(provider?.type, effective.model, true);
+    if (inferred.efforts !== undefined && inferred.efforts.length > 0) {
+      supportEfforts = inferred.efforts;
+      defaultEffort = defaultEffort ?? defaultEffortFromList(inferred.efforts);
+    }
+  }
   return {
     provider: effective.provider,
     provider_name: provider?.name ?? effective.provider,
@@ -80,10 +99,9 @@ export function toProtocolModel(
     display_name: effective.displayName ?? effective.model,
     max_context_size: effective.maxContextSize,
     capabilities: capabilities.size > 0 ? [...capabilities] : undefined,
-    supports_thinking: effective.thinkingSupport
-      ?? (capabilities.has('thinking') || capabilities.has('always_thinking') ? true : undefined),
-    support_efforts: effective.supportEfforts,
-    default_effort: effective.defaultEffort,
+    supports_thinking: supportsThinking,
+    support_efforts: supportEfforts,
+    default_effort: defaultEffort,
   };
 }
 
@@ -125,8 +143,8 @@ export function modelIdsForProvider(
 ): string[] {
   const provider = config.providers?.[providerId];
   const customModels = provider?.customModels;
-  if (customModels !== undefined && (provider?.autoDiscover === false || customModels.length > 0)) {
-    return [...customModels];
+  if (provider?.autoDiscover === false) {
+    return [...(customModels ?? [])];
   }
   const models = config.models ?? {};
   return Object.entries(models)

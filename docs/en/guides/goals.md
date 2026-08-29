@@ -137,7 +137,7 @@ In `manual` permission mode, goal work may pause for tool call approval. For una
 In non-interactive prompt mode, only goal creation is supported:
 
 ```sh
-kimi -p "/goal Fix the failing checkout test"
+nori -p "/goal Fix the failing checkout test"
 ```
 
 Prompt mode exits with code `0` when the goal completes, `3` when it blocks, and `6` when it pauses. `/goal next` and other management commands are TUI controls.

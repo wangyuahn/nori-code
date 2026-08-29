@@ -1,10 +1,12 @@
 # @nori-code/server
 
-Local REST + WebSocket server that exposes the Kimi Code SDK over a stable wire
-protocol. It hosts `agent-core` sessions and serves them under a single
-`/api/v1` prefix. This package is **private** — it is not published on its own;
-it ships inside the `kimi` CLI (`apps/nori-code`) and is launched via
-`kimi server run`.
+Local REST + WebSocket server that exposes the Nori Code SDK over a stable wire
+protocol. It hosts `agent-core` sessions (including team mounts / conversation map)
+and serves them under a single `/api/v1` prefix. This package is **private** — it
+is not published on its own; it ships inside the `nori` CLI (`apps/nori-code`)
+and is launched via `nori server run`.
+
+Team engineering overview: [`docs/en/guides/team-engineering.md`](../../docs/en/guides/team-engineering.md).
 
 ## What it does
 

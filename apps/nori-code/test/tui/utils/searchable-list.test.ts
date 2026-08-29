@@ -97,4 +97,15 @@ describe('SearchableList', () => {
     expect(search.handleKey(BACKSPACE)).toBe(true);
     expect(search.view().query).toBe('');
   });
+
+  it('replaceItems preserves the selected row identity when possible', () => {
+    const list = make({ initialIndex: 3 });
+    expect(list.selected()).toBe('item03');
+    list.replaceItems(
+      ['item01', 'item03', 'item09'],
+      (left, right) => left === right,
+    );
+    expect(list.selected()).toBe('item03');
+    expect(list.view().items).toEqual(['item01', 'item03', 'item09']);
+  });
 });

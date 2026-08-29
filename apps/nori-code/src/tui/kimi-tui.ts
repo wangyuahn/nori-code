@@ -58,12 +58,13 @@ import {
 import { CompactionComponent } from './components/dialogs/compaction';
 import { HelpPanelComponent } from './components/dialogs/help-panel';
 import { QuestionDialogComponent } from './components/dialogs/question-dialog';
-import { SessionPickerComponent, type SessionRow } from './components/dialogs/session-picker';
+import { SessionPickerComponent, sessionPickerVisibleCount, type SessionRow } from './components/dialogs/session-picker';
 import {
   FileMentionProvider,
   type SlashAutocompleteCommand,
 } from './components/editor/file-mention-provider';
 import { AssistantMessageComponent } from './components/messages/assistant-message';
+import { DiscussUtteranceComponent } from './components/messages/discuss-utterance';
 import { BackgroundAgentStatusComponent } from './components/messages/background-agent-status';
 import { CronMessageComponent } from './components/messages/cron-message';
 import { buildGoalMarker } from './components/messages/goal-markers';
@@ -101,6 +102,7 @@ import { SessionEventHandler } from './controllers/session-event-handler';
 import { SessionReplayRenderer } from './controllers/session-replay';
 import { StreamingUIController } from './controllers/streaming-ui';
 import { TasksBrowserController } from './controllers/tasks-browser';
+import { TeamViewController } from './controllers/team-view';
 import { installRainbowDance } from './easter-eggs/dance';
 import { adaptPanelResponse } from './reverse-rpc/approval/adapter';
 import { ApprovalController } from './reverse-rpc/approval/controller';
@@ -131,7 +133,9 @@ import { ImageAttachmentStore, type ImageAttachment } from './utils/image-attach
 import { extractMediaAttachments } from './utils/image-placeholder';
 import { hasPatchChanges } from './utils/object-patch';
 import { sessionRowsForPicker } from './utils/session-picker-rows';
+import { teamAgentsFromSessionMetadata } from './utils/team-tree';
 import { combineStartupNotice, isOAuthLoginRequiredError } from './utils/startup';
+import { thinkingEffortFromConfig } from './utils/thinking-config';
 import { installTerminalFocusTracking } from './utils/terminal-focus';
 import { notifyTerminalOnce } from './utils/terminal-notification';
 import { installTerminalThemeTracking } from './utils/terminal-theme';
@@ -214,6 +218,8 @@ function createInitialAppState(input: KimiTUIStartupInput): AppState {
     sessionTitle: null,
     goal: null,
     mcpServersSummary: null,
+    teamAgents: [],
+    viewingAgentId: 'main',
     banner: undefined,
   };
 }
@@ -270,6 +276,7 @@ export class KimiTUI {
   readonly btwPanelController: BtwPanelController;
   readonly sessionEventHandler: SessionEventHandler;
   readonly sessionReplay: SessionReplayRenderer;
+  readonly teamViewController: TeamViewController;
   readonly tasksBrowserController: TasksBrowserController;
   readonly editorKeyboard: EditorKeyboardController;
 
@@ -294,6 +301,12 @@ export class KimiTUI {
 
   /** URL opened in the browser just before exit (e.g. by `/web`); printed by onExit. */
   public exitOpenUrl: string | undefined;
+
+  /** True after `--discuss` actually entered Discuss on a resumed session. */
+  private startupDiscussApplied = false;
+
+  /** In-flight lazy create so concurrent first sends share one session. */
+  private sessionEnsurePromise: Promise<Session> | undefined;
 
   track(event: string, properties?: Parameters<KimiHarness['track']>[1]): void {
     this.harness.track(event, properties);
@@ -340,6 +353,7 @@ export class KimiTUI {
     this.btwPanelController = new BtwPanelController(this);
     this.sessionEventHandler = new SessionEventHandler(this);
     this.sessionReplay = new SessionReplayRenderer(this);
+    this.teamViewController = new TeamViewController(this);
     this.tasksBrowserController = new TasksBrowserController(this);
     this.editorKeyboard = new EditorKeyboardController(this, this.imageStore);
     this.editorKeyboard.install();
@@ -697,15 +711,30 @@ export class KimiTUI {
             });
             shouldReplayHistory = true;
           } else {
-            session = await this.harness.createSession(createSessionOptions);
+            // --continue with nothing to resume: stay sessionless until first send.
+            await this.hydrateSessionlessAppState();
             this.startupNotice = combineStartupNotice(
               this.startupNotice,
-              `No sessions to continue under "${workDir}"; starting a fresh session.`,
+              `No sessions to continue under "${workDir}"; starting without a session.`,
             );
+            if (startup.discuss) {
+              this.startupNotice = combineStartupNotice(
+                this.startupNotice,
+                'Discuss needs a department. Hire partners with TeamCreate, then Shift-Tab or /discuss.',
+              );
+            }
           }
         }
       } else {
-        session = await this.harness.createSession(createSessionOptions);
+        // Fresh `nori` start: do not create an empty session until the user
+        // sends a message, runs a shell command, or explicitly `/new`.
+        await this.hydrateSessionlessAppState();
+        if (startup.discuss) {
+          this.startupNotice = combineStartupNotice(
+            this.startupNotice,
+            'Discuss needs a department. Hire partners with TeamCreate, then Shift-Tab or /discuss.',
+          );
+        }
       }
       if (session !== undefined && shouldReplayHistory) {
         await this.applyStartupModesToResumedSession(session);
@@ -720,13 +749,35 @@ export class KimiTUI {
     }
 
     if (session === undefined) {
-      throw new Error('Startup session was not initialized.');
+      this.applyStartupPermissionAndDiscussToAppState();
+      this.state.startupState = 'ready';
+      return false;
     }
     await this.setSession(session);
     await this.syncRuntimeState(session);
     this.applyStartupPermissionAndDiscussToAppState();
     this.state.startupState = 'ready';
     return shouldReplayHistory;
+  }
+
+  /** Populate model/footer state from config without creating a session. */
+  private async hydrateSessionlessAppState(): Promise<void> {
+    const config = await this.harness.getConfig({ reload: true });
+    const availableModels = config.models ?? {};
+    const availableProviders = config.providers ?? {};
+    const model = this.options.startup.model ?? config.defaultModel ?? '';
+    const selected = model.length > 0 ? availableModels[model] : undefined;
+    this.setAppState({
+      availableModels,
+      availableProviders,
+      sessionId: '',
+      model,
+      thinkingEffort: thinkingEffortFromConfig(config.thinking) ?? 'off',
+      maxContextTokens: selected?.maxContextSize ?? 0,
+      contextTokens: 0,
+      contextUsage: 0,
+      sessionTitle: null,
+    });
   }
 
   async stop(exitCode?: number): Promise<void> {
@@ -856,6 +907,7 @@ export class KimiTUI {
     ui.addChild(this.state.activityContainer);
     ui.addChild(this.state.todoPanelContainer);
     ui.addChild(this.state.queueContainer);
+    ui.addChild(this.state.departmentPaneContainer);
     ui.addChild(this.state.btwPanelContainer);
     ui.addChild(this.state.editorContainer);
     // Footer is mounted later (mountFooter), not here.
@@ -918,11 +970,25 @@ export class KimiTUI {
   }
 
   private runShellCommandFromInput(command: string): void {
-    const session = this.session;
-    if (session === undefined) {
-      this.showError('No active session for shell command.');
+    if (this.session === undefined) {
+      void this.runShellCommandFromInputAsync(command);
       return;
     }
+    this.executeShellCommand(this.session, command);
+  }
+
+  private async runShellCommandFromInputAsync(command: string): Promise<void> {
+    let session: Session;
+    try {
+      session = await this.ensureSession();
+    } catch (error) {
+      this.handleEnsureSessionFailure(error, `!${command}`);
+      return;
+    }
+    this.executeShellCommand(session, command);
+  }
+
+  private executeShellCommand(session: Session, command: string): void {
     // Echo the command locally (bash-input) with a `$` prompt. The agent also
     // records it for resume; this is the live view.
     this.appendTranscriptEntry({
@@ -956,7 +1022,9 @@ export class KimiTUI {
 
     this.track('shell_command');
 
-    void session.runShellCommand(command, { commandId }).then(
+    void this.teamViewController.withViewingAgent(() =>
+      session.runShellCommand(command, { commandId }),
+    ).then(
       ({ stdout, stderr, isError, backgrounded }) => {
         this.finishShellOutput(commandId, stdout, stderr, isError, backgrounded);
       },
@@ -982,11 +1050,19 @@ export class KimiTUI {
     stream.taskId = event.taskId;
   }
 
+  cancelViewingAgent(): void {
+    const session = this.session;
+    if (session === undefined) return;
+    void this.teamViewController.withViewingAgent(() => session.cancel()).catch((error: unknown) => {
+      this.showError(`Failed to cancel: ${formatErrorMessage(error)}`);
+    });
+  }
+
   cancelRunningShellCommand(): void {
     const session = this.session;
     if (session === undefined) return;
     for (const commandId of this.shellOutputStreams.keys()) {
-      void session.cancelShellCommand(commandId).catch((error: unknown) => {
+      void this.teamViewController.withViewingAgent(() => session.cancelShellCommand(commandId)).catch((error: unknown) => {
         this.showError(`Failed to cancel shell command: ${formatErrorMessage(error)}`);
       });
     }
@@ -1042,7 +1118,7 @@ export class KimiTUI {
     if (!this.validateMediaCapabilities(extraction)) return;
     const session = this.session;
     if (session === undefined) {
-      this.showError(LLM_NOT_SET_MESSAGE);
+      void this.sendNormalUserInputAsync(text, extraction);
       return;
     }
     if (extraction.hasMedia) {
@@ -1056,6 +1132,82 @@ export class KimiTUI {
     }
     this.updateQueueDisplay();
     this.state.ui.requestRender();
+  }
+
+  private async sendNormalUserInputAsync(
+    text: string,
+    extraction: ReturnType<typeof extractMediaAttachments>,
+  ): Promise<void> {
+    let session: Session;
+    try {
+      session = await this.ensureSession();
+    } catch (error) {
+      this.handleEnsureSessionFailure(error, text);
+      return;
+    }
+    if (extraction.hasMedia) {
+      this.sendMessage(session, text, {
+        hasMedia: true,
+        parts: extraction.parts,
+        imageAttachmentIds: extraction.imageAttachmentIds,
+      });
+    } else {
+      this.sendMessage(session, text);
+    }
+    this.updateQueueDisplay();
+    this.state.ui.requestRender();
+  }
+
+  private handleEnsureSessionFailure(error: unknown, restoreText: string): void {
+    if (isOAuthLoginRequiredError(error)) {
+      this.authFlow.enterLoginRequiredStartupState();
+      if (this.startupNotice !== undefined) {
+        this.showStatus(this.startupNotice);
+        this.startupNotice = undefined;
+      }
+      this.restoreInputText(restoreText);
+      return;
+    }
+    this.showError(`Failed to start a session: ${formatErrorMessage(error)}`);
+    this.restoreInputText(restoreText);
+  }
+
+  /** Create and wire a session on first use (send / shell / login model activate). */
+  async ensureSession(): Promise<Session> {
+    if (this.session !== undefined) return this.session;
+    if (this.sessionEnsurePromise !== undefined) return this.sessionEnsurePromise;
+    this.sessionEnsurePromise = (async () => {
+      const created = await this.createSessionFromCurrentState();
+      return this.activateCreatedSession(created);
+    })().finally(() => {
+      this.sessionEnsurePromise = undefined;
+    });
+    return this.sessionEnsurePromise;
+  }
+
+  private async activateCreatedSession(session: Session): Promise<Session> {
+    this.resetSessionRuntime();
+    await this.setSession(session);
+    this.setAppState({ sessionId: session.id });
+    try {
+      await this.activateRuntime();
+      await this.syncRuntimeState(session);
+    } catch (error) {
+      this.sessionEventHandler.startSubscription();
+      throw error;
+    }
+    try {
+      await this.refreshSkillCommands(this.session);
+      await this.refreshPluginCommands(this.session);
+    } catch {
+      /* keep the new session usable even if dynamic skills fail */
+    }
+    this.sessionEventHandler.startSubscription();
+    void this.showSessionWarnings(session);
+    void this.showConfigWarningsIfAny();
+    void this.fetchSessions();
+    this.updateTerminalTitle();
+    return session;
   }
 
   private validateMediaCapabilities(
@@ -1131,7 +1283,7 @@ export class KimiTUI {
   ): void {
     this.state.queuedMessages.push({
       text,
-      agentId: this.harness.interactiveAgentId,
+      agentId: this.teamViewController.viewingAgentId(),
       parts: options?.parts,
       imageAttachmentIds:
         options?.imageAttachmentIds !== undefined && options.imageAttachmentIds.length > 0
@@ -1199,17 +1351,21 @@ export class KimiTUI {
     this.beginSessionRequest();
 
     const sdkInput = options?.parts ?? input;
-    void session.prompt(sdkInput).catch((error: unknown) => {
-      const message = formatErrorMessage(error);
-      this.failSessionRequest(`Failed to send: ${message}`);
+    this.teamViewController.withViewingAgent(() => {
+      void session.prompt(sdkInput).catch((error: unknown) => {
+        const message = formatErrorMessage(error);
+        this.failSessionRequest(`Failed to send: ${message}`);
+      });
     });
   }
 
   sendSkillActivation(session: Session, skillName: string, skillArgs: string): void {
     this.beginSessionRequest();
-    void session.activateSkill(skillName, skillArgs).catch((error: unknown) => {
-      const message = formatErrorMessage(error);
-      this.failSessionRequest(`Skill "${skillName}" failed: ${message}`);
+    this.teamViewController.withViewingAgent(() => {
+      void session.activateSkill(skillName, skillArgs).catch((error: unknown) => {
+        const message = formatErrorMessage(error);
+        this.failSessionRequest(`Skill "${skillName}" failed: ${message}`);
+      });
     });
   }
 
@@ -1220,9 +1376,11 @@ export class KimiTUI {
     args: string,
   ): void {
     this.beginSessionRequest();
-    void session.activatePluginCommand(pluginId, commandName, args).catch((error: unknown) => {
-      const message = formatErrorMessage(error);
-      this.failSessionRequest(`Command "${pluginId}:${commandName}" failed: ${message}`);
+    this.teamViewController.withViewingAgent(() => {
+      void session.activatePluginCommand(pluginId, commandName, args).catch((error: unknown) => {
+        const message = formatErrorMessage(error);
+        this.failSessionRequest(`Command "${pluginId}:${commandName}" failed: ${message}`);
+      });
     });
   }
 
@@ -1262,7 +1420,7 @@ export class KimiTUI {
       });
     }
 
-    void session.steer(input.join('\n\n')).catch((error: unknown) => {
+    void this.teamViewController.withViewingAgent(() => session.steer(input.join('\n\n'))).catch((error: unknown) => {
       const message = formatErrorMessage(error);
       this.showError(`Failed to steer: ${message}`);
     });
@@ -1336,8 +1494,18 @@ export class KimiTUI {
       'additionalDirs' in patch &&
       !sameStringArrays(this.state.appState.additionalDirs, patch.additionalDirs ?? []);
     const busyChanged = 'streamingPhase' in patch || 'isCompacting' in patch;
+    const discussTurningOn =
+      'discussMode' in patch &&
+      patch.discussMode === true &&
+      this.state.appState.discussMode !== true;
+    const discussTurningOff =
+      'discussMode' in patch &&
+      patch.discussMode === false &&
+      this.state.appState.discussMode === true;
     Object.assign(this.state.appState, patch);
     if ('discussMode' in patch) this.updateEditorBorderHighlight();
+    if (discussTurningOn) this.teamViewController.onDiscussModeChanged(true);
+    else if (discussTurningOff) this.teamViewController.onDiscussModeChanged(false);
     this.state.footer.setState(this.state.appState);
     this.updateActivityPane();
     if (busyChanged) {
@@ -1420,7 +1588,9 @@ export class KimiTUI {
       contextUsage: status.contextUsage,
       sessionTitle: session.summary?.title ?? null,
       goal: goalResult.goal,
+      teamAgents: teamAgentsFromSessionMetadata(session.getResumeState()?.sessionMetadata),
     });
+    this.teamViewController.seedFromSession(session);
     this.syncAdditionalDirs(session);
   }
 
@@ -1433,21 +1603,30 @@ export class KimiTUI {
     }
     if (startup.discuss) {
       const status = await session.getStatus();
-      if (!status.discussMode) {
+      if (status.discussMode) {
+        this.startupDiscussApplied = true;
+        return;
+      }
+      try {
         await session.setDiscussMode(true);
+        this.startupDiscussApplied = true;
+      } catch (error) {
+        this.startupNotice = combineStartupNotice(this.startupNotice, formatErrorMessage(error));
       }
     }
   }
 
   // Re-apply startup flags that the user explicitly passed on the command line.
   // syncRuntimeState and session-replay hydration can both read stale persisted
-  // values, so this guarantees the footer reflects the CLI intent.
+  // values, so this guarantees the footer reflects the CLI intent. Discuss is
+  // only forced after the session actually entered it — a new session has no
+  // department, so `--discuss` must not paint a locked footer.
   private applyStartupPermissionAndDiscussToAppState(): void {
     const { startup } = this.options;
     if (startup.permission) {
       this.setAppState({ permissionMode: startup.permission });
     }
-    if (startup.discuss) {
+    if (startup.discuss && this.startupDiscussApplied) {
       this.setAppState({ discussMode: true });
     }
   }
@@ -1530,6 +1709,7 @@ export class KimiTUI {
     this.sessionEventHandler.resetRuntimeState();
     this.tasksBrowserController.close();
     this.btwPanelController.clear();
+    this.teamViewController.reset();
     this.state.footer.setBackgroundCounts({ processTasks: 0, questionTasks: 0 });
     this.streamingUI.setTodoList([]);
     this.streamingUI.setTurnId(undefined);
@@ -1651,29 +1831,15 @@ export class KimiTUI {
       return;
     }
 
-    this.resetSessionRuntime();
-    await this.setSession(session);
-    this.setAppState({ sessionId: session.id });
     try {
-      await this.activateRuntime();
-      await this.syncRuntimeState(session);
+      await this.activateCreatedSession(session);
     } catch (error) {
-      this.sessionEventHandler.startSubscription();
       const msg = formatErrorMessage(error);
       this.showError(`Post-create setup failed: ${msg}`);
       return;
     }
-    try {
-      await this.refreshSkillCommands(this.session);
-      await this.refreshPluginCommands(this.session);
-    } catch {
-      /* keep the new session usable even if dynamic skills fail */
-    }
-    this.sessionEventHandler.startSubscription();
     this.clearTranscriptAndRedraw();
     this.showStatus(`Started a new session (${session.id}).`);
-    void this.showSessionWarnings(session);
-    void this.showConfigWarningsIfAny();
   }
 
   /** Surface config.toml load warnings (degraded or kept-previous config) in the status bar. */
@@ -1737,6 +1903,14 @@ export class KimiTUI {
           return new GoalCompletionMessageComponent(entry.content);
         }
         const component = new AssistantMessageComponent();
+        component.updateContent(entry.content);
+        return component;
+      }
+      case 'discuss_utterance': {
+        const component = new DiscussUtteranceComponent(
+          entry.speakerName ?? 'Partner',
+          entry.speaking === true,
+        );
         component.updateContent(entry.content);
         return component;
       }
@@ -1866,6 +2040,22 @@ export class KimiTUI {
     this.renderWelcome();
   }
 
+  prepareTranscriptForAgentView(agentId: string): void {
+    this.streamingUI.discardPending();
+    this.state.transcriptEntries = [];
+    this.streamingUI.disposeActiveCompactionBlock();
+    this.streamingUI.resetLiveText();
+    this.streamingUI.resetToolUi();
+    this.sessionEventHandler.stopAllMcpServerStatusSpinners();
+    this.disposeTranscriptChildren();
+    this.state.transcriptContainer.clear();
+    this.clearTerminalInlineImages();
+    this.state.todoPanel.clear();
+    this.state.todoPanelContainer.clear();
+    this.imageStore.clear();
+    if (agentId === MAIN_AGENT_ID) this.renderWelcome();
+  }
+
   private isTurnBoundaryComponent(child: Component): boolean {
     if (
       !(child instanceof UserMessageComponent) &&
@@ -1981,6 +2171,7 @@ export class KimiTUI {
         continue;
       }
       if (child instanceof AssistantMessageComponent) continue;
+      if (child instanceof DiscussUtteranceComponent) continue;
       stepIndices.push(i);
     }
 
@@ -2052,6 +2243,7 @@ export class KimiTUI {
         const child = children[i]!;
         if (child instanceof StepSummaryComponent) summaryIndex = i;
         else if (child instanceof AssistantMessageComponent) continue;
+        else if (child instanceof DiscussUtteranceComponent) continue;
         else stepIndices.push(i);
       }
 
@@ -2668,6 +2860,7 @@ export class KimiTUI {
         onToggleScope: (selectedSessionId: string) => {
           void this.toggleSessionPickerScope(selectedSessionId);
         },
+        maxVisibleSessions: sessionPickerVisibleCount(this.state.terminal.rows),
       }),
     );
   }

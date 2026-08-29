@@ -45,7 +45,7 @@ export function reasoningMetadataFromRecord(
 ): ReasoningMetadata {
   const explicitSupport = booleanValue(
     record['reasoning'] ?? record['supports_reasoning'] ?? record['supportsThinking'],
-  );
+  ) ?? (hasReasoningParameter(record) ? true : undefined);
   const explicitEfforts = reasoningEffortsFromRecord(record);
   const hasDeclaredOptions = Object.prototype.hasOwnProperty.call(record, 'reasoning_options');
   if (explicitSupport === false) return { supported: false, efforts: undefined };
@@ -75,13 +75,15 @@ export function fallbackReasoningMetadata(
   }
 
   // OpenCode deliberately exposes these families as fixed/boolean thinking.
+  // Newer GLM 5.2+ / 5.3+ advertise adjustable efforts in models.dev — keep
+  // those out of the boolean bucket so discovery does not collapse to on/off.
   if (
     id.includes('deepseek-chat')
     || id.includes('deepseek-reasoner')
     || id.includes('deepseek-r1')
     || id.includes('deepseek-v3')
     || id.includes('minimax')
-    || (id.includes('glm') && !isGlm52(id))
+    || (id.includes('glm') && !isGlm52(id) && !isGlm53Plus(id))
     || id.includes('kimi')
     || id.includes('k2p')
     || id.includes('qwen')
@@ -97,6 +99,7 @@ export function fallbackReasoningMetadata(
     return { supported: true, efforts: anthropicReasoningEfforts(id) };
   }
 
+  if (isGlm53Plus(id)) return { supported: true, efforts: ['low', 'high', 'max'] };
   if (isGlm52(id)) return { supported: true, efforts: ['high', 'max'] };
   if (id.includes('deepseek-v4')) {
     return { supported: true, efforts: ['low', 'medium', 'high', 'max'] };
@@ -180,6 +183,20 @@ function googleReasoningEfforts(id: string): string[] {
 
 function isGlm52(id: string): boolean {
   return ['glm-5.2', 'glm-5-2', 'glm-5p2'].some(value => id.includes(value));
+}
+
+/** GLM 5.3+ (and 6+) expose low/high/max efforts in models.dev catalogs. */
+function isGlm53Plus(id: string): boolean {
+  return /glm-5(?:[.-][3-9]|p[3-9])/.test(id) || /glm-[6-9]/.test(id);
+}
+
+function hasReasoningParameter(record: Record<string, unknown>): boolean {
+  const raw = record['supported_parameters'] ?? record['supportedParameters'];
+  if (!Array.isArray(raw)) return false;
+  return raw.some(item => typeof item === 'string' && (
+    item.trim().toLowerCase() === 'reasoning'
+    || item.trim().toLowerCase() === 'include_reasoning'
+  ));
 }
 
 function booleanValue(value: unknown): boolean | undefined {

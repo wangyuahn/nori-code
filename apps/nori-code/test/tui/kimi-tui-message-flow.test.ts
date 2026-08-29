@@ -12,11 +12,12 @@ import type { ApprovalRequest, ApprovalResponse, Event } from '@nori-code/sdk';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ApprovalPanelComponent } from '#/tui/components/dialogs/approval-panel';
-import { NORI_CODE_PLUGIN_MARKETPLACE_URL } from '#/constant/app';
 import { MOON_SPINNER_FRAMES } from '#/tui/constant/rendering';
 import { BtwPanelComponent } from '#/tui/components/panes/btw-panel';
 import { WelcomeComponent } from '#/tui/components/chrome/welcome';
 import { ModelSelectorComponent } from '#/tui/components/dialogs/model-selector';
+import { McpStatusListComponent } from '#/tui/components/dialogs/mcp-status-list';
+import { SkillsSelectorComponent } from '#/tui/components/dialogs/skills-selector';
 import { TabbedModelSelectorComponent } from '#/tui/components/dialogs/tabbed-model-selector';
 import { UndoSelectorComponent } from '#/tui/components/dialogs/undo-selector';
 import {
@@ -87,6 +88,14 @@ interface MessageDriver {
   persistInputHistory(text: string): Promise<void>;
   sendQueuedMessage(session: unknown, item: QueuedMessage): void;
   getCurrentSessionId(): string;
+  toggleToolOutputExpansion(): void;
+  teamViewController: {
+    switchTo(agentId: string, name: string): Promise<void>;
+    hide(): boolean;
+    reveal(): boolean;
+    isPaneVisible(): boolean;
+    viewingAgentId(): string;
+  };
 }
 
 interface FeedbackDriver extends MessageDriver {
@@ -109,7 +118,9 @@ interface ModelSelectorDriver extends MessageDriver {
   ): Promise<{ alias: string; thinking: boolean } | undefined>;
 }
 
-function makeStartupInput(): KimiTUIStartupInput {
+function makeStartupInput(
+  cliOptions: Partial<KimiTUIStartupInput['cliOptions']> = {},
+): KimiTUIStartupInput {
   return {
     cliOptions: {
       session: undefined,
@@ -120,6 +131,7 @@ function makeStartupInput(): KimiTUIStartupInput {
       outputFormat: undefined,
       prompt: undefined,
       skillsDirs: [],
+      ...cliOptions,
     },
     tuiConfig: {
       theme: 'dark',
@@ -276,12 +288,21 @@ async function makeDriver(
   session: ReturnType<typeof makeSession>;
   harness: ReturnType<typeof makeHarness>;
 }> {
-  const harness = makeHarness(session, harnessOverrides);
-  const driver = new KimiTUI(harness as never, makeStartupInput()) as unknown as MessageDriver;
+  const harness = makeHarness(session, {
+    listSessions: vi.fn(async () => [{ id: session.id, workDir: '/tmp/proj-a' }]),
+    ...harnessOverrides,
+  });
+  const driver = new KimiTUI(
+    harness as never,
+    makeStartupInput({ continue: true }),
+  ) as unknown as MessageDriver;
   vi.spyOn(driver.state.ui, 'requestRender').mockImplementation(() => {});
   vi.spyOn(driver.state.terminal, 'setProgress').mockImplementation(() => {});
   driver.persistInputHistory = vi.fn(async () => {});
   await driver.init();
+  // Startup may resume/create; clear so tests assert only post-init calls.
+  harness.resumeSession.mockClear();
+  harness.createSession.mockClear();
   return { driver, session, harness };
 }
 
@@ -516,7 +537,7 @@ command = "vim"
       expect.objectContaining({
         content: 'useful feedback',
         sessionId: 'ses-1',
-        version: 'kimi-code-0.0.0-test',
+        version: 'nori-code-0.0.0-test',
         model: 'k2',
       }),
     );
@@ -946,10 +967,7 @@ command = "vim"
         throw new Error('permission setup failed');
       }),
     });
-    const createSession = vi
-      .fn()
-      .mockResolvedValueOnce(initialSession)
-      .mockResolvedValueOnce(failedSession);
+    const createSession = vi.fn().mockResolvedValueOnce(failedSession);
     const { driver } = await makeDriver(initialSession, { createSession });
     vi.mocked(failedSession.onEvent).mockClear();
 
@@ -1210,7 +1228,7 @@ command = "vim"
     driver.handleUserInput('/auto on');
 
     await vi.waitFor(() => {
-      expect(stripSgr(renderTranscript(driver))).toContain('Auto mode: ON');
+      expect(stripSgr(renderTranscript(driver))).toContain('Permission mode: auto');
     });
 
     driver.handleUserInput('/undo 10');
@@ -1230,7 +1248,7 @@ command = "vim"
     const transcript = stripSgr(renderTranscript(driver));
     expect(transcript).not.toContain('hello');
     expect(transcript).not.toContain('Cannot undo 10 prompts');
-    expect(transcript).toContain('Auto mode: ON');
+    expect(transcript).toContain('Permission mode: auto');
     expect(driver.state.appState.permissionMode).toBe('auto');
   });
 
@@ -1330,8 +1348,8 @@ command = "vim"
 
   it('removes debug timing status from undone turns', async () => {
     const { driver, session } = await makeDriver();
-    const previousDebug = process.env['KIMI_CODE_DEBUG'];
-    process.env['KIMI_CODE_DEBUG'] = '1';
+    const previousDebug = process.env['NORI_CODE_DEBUG'];
+    process.env['NORI_CODE_DEBUG'] = '1';
     try {
       driver.handleUserInput('hello');
       driver.sessionEventHandler.handleEvent(
@@ -1364,9 +1382,9 @@ command = "vim"
       expect(transcript).not.toContain('[Debug]');
     } finally {
       if (previousDebug === undefined) {
-        delete process.env['KIMI_CODE_DEBUG'];
+        delete process.env['NORI_CODE_DEBUG'];
       } else {
-        process.env['KIMI_CODE_DEBUG'] = previousDebug;
+        process.env['NORI_CODE_DEBUG'] = previousDebug;
       }
     }
   });
@@ -1856,6 +1874,460 @@ command = "vim"
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('renders Discuss partner speech in the main transcript with a speaker label', async () => {
+    const { driver } = await makeDriver();
+    driver.state.appState.discussMode = true;
+    driver.state.appState.teamAgents = [
+      { agentId: 'main', kind: 'main', name: 'Main', parentAgentId: null },
+      { agentId: 'reviewer', kind: 'team', name: 'Reviewer', parentAgentId: 'main' },
+      {
+        agentId: 'discuss-1',
+        kind: 'discussion',
+        name: 'Discussion',
+        parentAgentId: 'main',
+        discussionTurnAgentId: 'reviewer',
+        discussionParticipantAgentIds: ['reviewer'],
+      },
+    ];
+
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'assistant.delta',
+        agentId: 'reviewer',
+        sessionId: 'ses-1',
+        turnId: 2,
+        delta: 'The footer should drop tips first.',
+      } as Event,
+      vi.fn(),
+    );
+    driver.streamingUI.flushNow();
+
+    let transcript = stripSgr(renderTranscript(driver));
+    expect(transcript).toContain('Reviewer');
+    expect(transcript).toContain('speaking');
+    expect(transcript).toContain('The footer should drop tips first.');
+
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'turn.ended',
+        agentId: 'reviewer',
+        sessionId: 'ses-1',
+        turnId: 2,
+        reason: 'completed',
+      } as Event,
+      vi.fn(),
+    );
+
+    transcript = stripSgr(renderTranscript(driver));
+    expect(transcript).toContain('Reviewer');
+    expect(transcript).toContain('The footer should drop tips first.');
+    expect(transcript).not.toContain('speaking');
+  });
+
+  it('does not put partner tool calls into the main transcript during Discuss', async () => {
+    const { driver } = await makeDriver();
+    driver.state.appState.discussMode = true;
+    driver.state.appState.teamAgents = [
+      { agentId: 'main', kind: 'main', name: 'Main', parentAgentId: null },
+      { agentId: 'reviewer', kind: 'team', name: 'Reviewer', parentAgentId: 'main' },
+      {
+        agentId: 'discuss-1',
+        kind: 'discussion',
+        name: 'Discussion',
+        parentAgentId: 'main',
+        discussionParticipantAgentIds: ['reviewer'],
+      },
+    ];
+
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'tool.call.started',
+        agentId: 'reviewer',
+        sessionId: 'ses-1',
+        turnId: 2,
+        toolCallId: 'tc-1',
+        name: 'Read',
+        args: { path: 'README.md' },
+      } as Event,
+      vi.fn(),
+    );
+    driver.streamingUI.flushNow();
+
+    const transcript = stripSgr(renderTranscript(driver));
+    expect(transcript).not.toContain('Read');
+    expect(transcript).not.toContain('README.md');
+  });
+
+  it('still swallows partner speech when Discuss is off', async () => {
+    const { driver } = await makeDriver();
+    driver.state.appState.discussMode = false;
+    driver.state.appState.teamAgents = [
+      { agentId: 'main', kind: 'main', name: 'Main', parentAgentId: null },
+      { agentId: 'reviewer', kind: 'team', name: 'Reviewer', parentAgentId: 'main' },
+    ];
+
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'assistant.delta',
+        agentId: 'reviewer',
+        sessionId: 'ses-1',
+        turnId: 2,
+        delta: 'should not appear',
+      } as Event,
+      vi.fn(),
+    );
+    driver.streamingUI.flushNow();
+
+    expect(stripSgr(renderTranscript(driver))).not.toContain('should not appear');
+  });
+
+  it('shows a one-line status when a partner posts in department chat', async () => {
+    const { driver } = await makeDriver();
+    driver.state.appState.teamAgents = [
+      { agentId: 'main', kind: 'main', name: 'Main', parentAgentId: null },
+      { agentId: 'reviewer', kind: 'team', name: 'Reviewer', parentAgentId: 'main' },
+    ];
+
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'team.chat.updated',
+        agentId: 'reviewer',
+        sessionId: 'ses-1',
+        departmentLeaderAgentId: 'main',
+        senderAgentId: 'reviewer',
+      } as Event,
+      vi.fn(),
+    );
+
+    expect(stripSgr(renderTranscript(driver))).toContain('Reviewer posted in department chat');
+  });
+
+  it('keeps independent subagent speech off the Discuss transcript', async () => {
+    const { driver } = await makeDriver();
+    driver.state.appState.discussMode = true;
+    driver.state.appState.teamAgents = [
+      { agentId: 'main', kind: 'main', name: 'Main', parentAgentId: null },
+      {
+        agentId: 'reviewer',
+        kind: 'team',
+        name: 'Reviewer',
+        parentAgentId: 'main',
+      },
+      {
+        agentId: 'btw-1',
+        kind: 'independent',
+        name: 'Side question',
+        parentAgentId: 'main',
+      },
+      {
+        agentId: 'discuss-1',
+        kind: 'discussion',
+        name: 'Discussion',
+        parentAgentId: 'main',
+        discussionParticipantAgentIds: ['reviewer'],
+      },
+    ];
+
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'assistant.delta',
+        agentId: 'btw-1',
+        sessionId: 'ses-1',
+        turnId: 9,
+        delta: 'independent should stay off the lead transcript',
+      } as Event,
+      vi.fn(),
+    );
+    driver.streamingUI.flushNow();
+
+    expect(stripSgr(renderTranscript(driver))).not.toContain(
+      'independent should stay off the lead transcript',
+    );
+  });
+
+  it('renders TeamSpeak from a partner as labeled Discuss speech', async () => {
+    const { driver } = await makeDriver();
+    driver.state.appState.discussMode = true;
+    driver.state.appState.teamAgents = [
+      { agentId: 'main', kind: 'main', name: 'Main', parentAgentId: null },
+      { agentId: 'geodesist', kind: 'team', name: 'geodesist', parentAgentId: 'main' },
+      {
+        agentId: 'discuss-1',
+        kind: 'discussion',
+        name: 'Discussion',
+        parentAgentId: 'main',
+        discussionTurnAgentId: 'geodesist',
+        discussionParticipantAgentIds: ['geodesist'],
+      },
+    ];
+
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'tool.call.started',
+        agentId: 'geodesist',
+        sessionId: 'ses-1',
+        turnId: 3,
+        toolCallId: 'ts-1',
+        name: 'TeamSpeak',
+        args: { message: 'Use a canvas and CSS animation for the accretion disk.' },
+      } as Event,
+      vi.fn(),
+    );
+
+    const transcript = stripSgr(renderTranscript(driver));
+    expect(transcript).toContain('geodesist');
+    expect(transcript).toContain('Use a canvas and CSS animation for the accretion disk.');
+    expect(transcript).not.toContain('speaking');
+    expect(transcript).not.toContain('ctrl+o to expand');
+  });
+
+  it('streams TeamSpeak arguments into the Discuss block while the speaker is live', async () => {
+    const { driver } = await makeDriver();
+    driver.state.appState.discussMode = true;
+    driver.state.appState.teamAgents = [
+      { agentId: 'main', kind: 'main', name: 'Main', parentAgentId: null },
+      { agentId: 'geodesist', kind: 'team', name: 'geodesist', parentAgentId: 'main' },
+    ];
+
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'tool.call.delta',
+        agentId: 'geodesist',
+        sessionId: 'ses-1',
+        turnId: 3,
+        toolCallId: 'ts-1',
+        name: 'TeamSpeak',
+        argumentsPart: '{"message":"Start with a dark canvas',
+      } as Event,
+      vi.fn(),
+    );
+    driver.streamingUI.flushNow();
+
+    let transcript = stripSgr(renderTranscript(driver));
+    expect(transcript).toContain('geodesist');
+    expect(transcript).toContain('speaking');
+    expect(transcript).toContain('Start with a dark canvas');
+
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'tool.call.started',
+        agentId: 'geodesist',
+        sessionId: 'ses-1',
+        turnId: 3,
+        toolCallId: 'ts-1',
+        name: 'TeamSpeak',
+        args: { message: 'Start with a dark canvas and orbiting photons.' },
+      } as Event,
+      vi.fn(),
+    );
+
+    transcript = stripSgr(renderTranscript(driver));
+    expect(transcript).toContain('Start with a dark canvas and orbiting photons.');
+    expect(transcript).not.toContain('speaking');
+  });
+
+  it('renders the chair TeamDecide statement as Discuss speech', async () => {
+    const { driver } = await makeDriver();
+    driver.state.appState.discussMode = true;
+    driver.state.appState.teamAgents = [
+      { agentId: 'main', kind: 'main', name: 'Main', parentAgentId: null },
+      { agentId: 'geodesist', kind: 'team', name: 'geodesist', parentAgentId: 'main' },
+    ];
+
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'tool.call.started',
+        agentId: 'main',
+        sessionId: 'ses-1',
+        turnId: 1,
+        toolCallId: 'td-1',
+        name: 'TeamDecide',
+        args: {
+          action: 'start',
+          topic: 'HTML black hole',
+          statement: 'Please propose an HTML black hole and name the biggest risk.',
+        },
+      } as Event,
+      vi.fn(),
+    );
+
+    const transcript = stripSgr(renderTranscript(driver));
+    expect(transcript).toContain('Main');
+    expect(transcript).toContain('Please propose an HTML black hole and name the biggest risk.');
+  });
+
+  it('keeps Discuss speech visible after ctrl+o collapses tool output', async () => {
+    const { driver } = await makeDriver();
+    driver.state.appState.discussMode = true;
+    driver.state.appState.teamAgents = [
+      { agentId: 'main', kind: 'main', name: 'Main', parentAgentId: null },
+      { agentId: 'geodesist', kind: 'team', name: 'geodesist', parentAgentId: 'main' },
+      {
+        agentId: 'discuss-1',
+        kind: 'discussion',
+        name: 'Discussion',
+        parentAgentId: 'main',
+        discussionParticipantAgentIds: ['geodesist'],
+      },
+    ];
+
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'assistant.delta',
+        agentId: 'geodesist',
+        sessionId: 'ses-1',
+        turnId: 4,
+        delta: 'The event horizon should be a CSS radial gradient.',
+      } as Event,
+      vi.fn(),
+    );
+    driver.streamingUI.flushNow();
+
+    const longOutput = Array.from({ length: 162 }, (_, i) => `tool-line-${String(i + 1)}`).join('\n');
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'tool.call.started',
+        agentId: 'main',
+        sessionId: 'ses-1',
+        turnId: 1,
+        toolCallId: 'tc-long',
+        name: 'UnknownTool',
+        args: {},
+      } as Event,
+      vi.fn(),
+    );
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'tool.result',
+        agentId: 'main',
+        sessionId: 'ses-1',
+        turnId: 1,
+        toolCallId: 'tc-long',
+        output: longOutput,
+      } as Event,
+      vi.fn(),
+    );
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'assistant.delta',
+        agentId: 'main',
+        sessionId: 'ses-1',
+        turnId: 1,
+        delta: 'Current turn after the tool.',
+      } as Event,
+      vi.fn(),
+    );
+    driver.streamingUI.flushNow();
+
+    const collapsedLines = driver.state.transcriptContainer.render(120);
+    const collapsed = stripSgr(collapsedLines.join('\n'));
+    expect(collapsed).toContain('The event horizon should be a CSS radial gradient.');
+    expect(collapsed).toContain('Current turn after the tool.');
+    expect(collapsed).toContain('ctrl+o to expand');
+    expect(collapsed).not.toContain('tool-line-162');
+
+    driver.toggleToolOutputExpansion();
+    const expandedLines = driver.state.transcriptContainer.render(120);
+    const expanded = stripSgr(expandedLines.join('\n'));
+    expect(expanded).toContain('The event horizon should be a CSS radial gradient.');
+    expect(expanded).toContain('Current turn after the tool.');
+    expect(expanded).toContain('tool-line-162');
+    expect(expandedLines.length).toBeGreaterThan(collapsedLines.length);
+
+    driver.toggleToolOutputExpansion();
+    const recollapsedLines = driver.state.transcriptContainer.render(120);
+    const recollapsed = stripSgr(recollapsedLines.join('\n'));
+    expect(recollapsed).toContain('The event horizon should be a CSS radial gradient.');
+    expect(recollapsed).toContain('Current turn after the tool.');
+    expect(recollapsed).not.toContain('tool-line-162');
+    expect(recollapsed).toContain('ctrl+o to expand');
+    expect(recollapsedLines.length).toBeLessThan(expandedLines.length);
+    expect(recollapsedLines.length).toBeGreaterThan(0);
+  });
+
+  it('paints a partner tool into the main view after opening that member', async () => {
+    const { driver } = await makeDriver();
+    driver.state.appState.teamAgents = [
+      { agentId: 'main', kind: 'main', name: 'Main', parentAgentId: null },
+      { agentId: 'reviewer', kind: 'team', name: 'Reviewer', parentAgentId: 'main' },
+    ];
+
+    await driver.teamViewController.switchTo('reviewer', 'Reviewer');
+    expect(driver.teamViewController.viewingAgentId()).toBe('reviewer');
+
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'assistant.delta',
+        agentId: 'reviewer',
+        sessionId: 'ses-1',
+        turnId: 2,
+        delta: 'Reviewer session text',
+      } as Event,
+      vi.fn(),
+    );
+    driver.streamingUI.flushNow();
+
+    const transcript = stripSgr(renderTranscript(driver));
+    expect(transcript).toContain('Reviewer session text');
+
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'assistant.delta',
+        agentId: 'main',
+        sessionId: 'ses-1',
+        turnId: 1,
+        delta: 'lead should stay off this member view',
+      } as Event,
+      vi.fn(),
+    );
+    driver.streamingUI.flushNow();
+    expect(stripSgr(renderTranscript(driver))).not.toContain('lead should stay off this member view');
+  });
+
+  it('does not mix /btw answers into Discuss utterance blocks', async () => {
+    const session = makeSession();
+    const { driver } = await makeDriver(session);
+    driver.state.appState.discussMode = true;
+    driver.state.appState.teamAgents = [
+      { agentId: 'main', kind: 'main', name: 'Main', parentAgentId: null },
+      { agentId: 'geodesist', kind: 'team', name: 'geodesist', parentAgentId: 'main' },
+      {
+        agentId: 'agent-btw',
+        kind: 'independent',
+        name: 'Side question',
+        parentAgentId: 'main',
+      },
+    ];
+    await openBtwPanel(driver, session);
+
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'assistant.delta',
+        agentId: 'agent-btw',
+        sessionId: 'ses-1',
+        turnId: 8,
+        delta: 'btw-only answer that must stay in the panel',
+      } as Event,
+      vi.fn(),
+    );
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'assistant.delta',
+        agentId: 'geodesist',
+        sessionId: 'ses-1',
+        turnId: 4,
+        delta: 'Meeting speech belongs in the transcript.',
+      } as Event,
+      vi.fn(),
+    );
+    driver.streamingUI.flushNow();
+
+    const transcript = stripSgr(renderTranscript(driver));
+    expect(transcript).toContain('Meeting speech belongs in the transcript.');
+    expect(transcript).not.toContain('btw-only answer that must stay in the panel');
+    expect(stripSgr(renderBtwPanel(driver))).toContain('btw-only answer that must stay in the panel');
   });
 
   it('coalesces streaming tool-call argument preview updates', async () => {
@@ -2423,10 +2895,7 @@ command = "vim"
   it('cancels a running /btw panel when starting a new session clears it', async () => {
     const initialSession = makeSession({ id: 'ses-initial' });
     const nextSession = makeSession({ id: 'ses-next' });
-    const createSession = vi
-      .fn()
-      .mockResolvedValueOnce(initialSession)
-      .mockResolvedValueOnce(nextSession);
+    const createSession = vi.fn().mockResolvedValueOnce(nextSession);
     const { driver, harness } = await makeDriver(initialSession, { createSession });
     const cancelledAgentIds: string[] = [];
     initialSession.cancel.mockImplementation(async () => {
@@ -2731,7 +3200,7 @@ command = "vim"
     );
 
     const transcript = stripSgr(renderTranscript(driver));
-    expect(transcript).toContain('OAuth login expired. Send /login to login.');
+    expect(transcript).toContain('OAuth login expired. Send /provider to login.');
     expect(transcript).not.toContain('[auth.login_required]');
     expect(transcript).not.toContain('/export-debug-zip');
   });
@@ -2756,6 +3225,60 @@ command = "vim"
     expect(transcript).toContain('If this persists, run `/export-debug-zip`');
     expect(transcript).toContain("Please don't share it publicly");
     expect(transcript).not.toContain('kimi export');
+  });
+
+  it('paints a failed turn error only once when a trailing error carries the same turnId', async () => {
+    const { driver } = await makeDriver();
+    const failed = {
+      code: 'provider.api_error',
+      message: 'boom',
+      details: { turnId: 'turn-dup' },
+    };
+
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'turn.ended',
+        agentId: 'main',
+        sessionId: 'ses-1',
+        turnId: 'turn-dup',
+        reason: 'failed',
+        error: failed,
+      } as unknown as Event,
+      vi.fn(),
+    );
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'error',
+        agentId: 'main',
+        sessionId: 'ses-1',
+        code: 'provider.api_error',
+        message: 'boom',
+        details: { turnId: 'turn-dup' },
+        retryable: false,
+      } as Event,
+      vi.fn(),
+    );
+
+    const transcript = stripSgr(renderTranscript(driver));
+    expect(transcript.split('[provider.api_error]').length - 1).toBe(1);
+  });
+
+  it('does not paint a trailing turn-scoped error when turn.ended already carried the failure', async () => {
+    const { driver } = await makeDriver();
+    driver.sessionEventHandler.handleEvent(
+      {
+        type: 'error',
+        agentId: 'main',
+        sessionId: 'ses-1',
+        code: 'provider.api_error',
+        message: 'boom',
+        details: { turnId: 'turn-only-error' },
+        retryable: false,
+      } as Event,
+      vi.fn(),
+    );
+
+    expect(stripSgr(renderTranscript(driver))).not.toContain('[provider.api_error]');
   });
 
   it('shows concise provider filter text for filtered session errors', async () => {
@@ -2836,11 +3359,13 @@ command = "vim"
       expect(getStatus).toHaveBeenCalledTimes(previousStatusCalls + 1);
       const output = stripSgr(driver.state.transcriptContainer.render(120).join('\n'));
       expect(output).toContain(' Status ');
-      expect(output).toContain('>_ Kimi Code');
+      expect(output).toContain('>_ Nori Code');
       expect(output).toContain('Model');
       expect(output).toContain('thinking high');
       expect(output).toContain('Permissions  auto');
       expect(output).toContain('Discuss      on');
+      expect(output).toContain('Speaking     —');
+      expect(output).toContain('Reports      all clear');
       expect(output).toContain('Context window');
       expect(output).toContain('25.0%');
     });
@@ -2884,9 +3409,9 @@ command = "vim"
 
     await vi.waitFor(() => {
       expect(listMcpServers).toHaveBeenCalledTimes(previousCalls + 1);
-      const output = stripSgr(driver.state.transcriptContainer.render(140).join('\n'));
-      expect(output).toContain(' MCP (4) ');
-      expect(output).toContain('Servers');
+      expect(driver.state.editorContainer.children[0]).toBeInstanceOf(McpStatusListComponent);
+      const output = stripSgr(driver.state.editorContainer.children[0]!.render(140).join('\n'));
+      expect(output).toContain('MCP');
       expect(output).toContain('local-tools');
       expect(output).toContain('connected');
       expect(output).toContain('stdio');
@@ -2899,7 +3424,9 @@ command = "vim"
       expect(output).toContain('/mcp-config login linear');
       expect(output).toContain('disabled-tools');
       expect(output).toContain('disabled');
-      expect(output).toContain('1 connected · 1 needs auth · 1 failed · 1 disabled · 2 tools available');
+      expect(stripSgr(driver.state.transcriptContainer.render(140).join('\n'))).not.toContain(
+        'local-tools',
+      );
     });
   });
 
@@ -2912,8 +3439,10 @@ command = "vim"
     driver.handleUserInput('/mcp');
 
     await vi.waitFor(() => {
-      const output = stripSgr(driver.state.transcriptContainer.render(120).join('\n'));
-      expect(output).toContain('No MCP servers configured. Run /mcp-config to add one.');
+      expect(driver.state.editorContainer.children[0]).toBeInstanceOf(McpStatusListComponent);
+      const output = stripSgr(driver.state.editorContainer.children[0]!.render(120).join('\n'));
+      expect(output).toContain('No MCP servers');
+      expect(output).toContain('run /mcp-config');
     });
   });
 
@@ -2930,6 +3459,45 @@ command = "vim"
     await vi.waitFor(() => {
       const output = stripSgr(driver.state.transcriptContainer.render(120).join('\n'));
       expect(output).toContain('Error: Failed to load MCP servers: rpc unavailable');
+    });
+  });
+
+  it('opens /skills as a searchable list and activates a no-arg skill', async () => {
+    const session = makeSession({
+      listSkills: vi.fn(async () => [
+        {
+          name: 'mcp-config',
+          description: 'Configure MCP servers',
+          path: '/skills/mcp-config/SKILL.md',
+          source: 'builtin',
+          type: 'inline',
+        },
+        {
+          name: 'review',
+          description: 'Review the change',
+          path: '/skills/review/SKILL.md',
+          source: 'project',
+          type: 'prompt',
+        },
+      ]),
+    });
+    const { driver } = await makeDriver(session);
+
+    driver.handleUserInput('/skills');
+
+    await vi.waitFor(() => {
+      expect(driver.state.editorContainer.children[0]).toBeInstanceOf(SkillsSelectorComponent);
+    });
+    const panel = driver.state.editorContainer.children[0] as SkillsSelectorComponent;
+    const output = stripSgr(panel.render(120).join('\n'));
+    expect(output).toContain('Skills');
+    expect(output).toContain('(type to search)');
+    expect(output).toContain('mcp-config');
+    expect(output).toContain('skill:review');
+
+    panel.handleInput('\r');
+    await vi.waitFor(() => {
+      expect(session.activateSkill).toHaveBeenCalledWith('mcp-config', '');
     });
   });
 
@@ -3037,6 +3605,15 @@ command = "vim"
       expect(stripSgr(panel.render(120).join('\n'))).toContain('Kimi Datasource');
     });
     panel.handleInput('\r');
+
+    await vi.waitFor(() => {
+      expect(driver.state.editorContainer.children[0]).toBeInstanceOf(
+        PluginInstallTrustConfirmComponent,
+      );
+    });
+    const confirm = driver.state.editorContainer.children[0] as PluginInstallTrustConfirmComponent;
+    confirm.handleInput('\u001B[B'); // switch from "Exit" to "Trust and install"
+    confirm.handleInput('\r');
 
     await vi.waitFor(() => {
       expect(session.installPlugin).toHaveBeenCalledWith(
@@ -3245,11 +3822,19 @@ command = "vim"
       panel.handleInput('\r');
 
       await vi.waitFor(() => {
-        expect(session.installPlugin).toHaveBeenCalledWith(
-          'https://code.kimi.com/kimi-code/plugins/official/kimi-datasource.zip',
+        expect(driver.state.editorContainer.children[0]).toBeInstanceOf(
+          PluginInstallTrustConfirmComponent,
         );
       });
-      expect(globalThis.fetch).toHaveBeenCalledWith(NORI_CODE_PLUGIN_MARKETPLACE_URL);
+      const confirm = driver.state.editorContainer.children[0] as PluginInstallTrustConfirmComponent;
+      confirm.handleInput('\u001B[B'); // switch from "Exit" to "Trust and install"
+      confirm.handleInput('\r');
+
+      await vi.waitFor(() => {
+        expect(session.installPlugin).toHaveBeenCalledWith(
+          resolve(process.cwd(), '../../plugins/official/kimi-datasource'),
+        );
+      });
     } finally {
       vi.stubGlobal('fetch', originalFetch);
     }
@@ -3756,7 +4341,7 @@ command = "vim"
     driver.handleUserInput('/new');
 
     await vi.waitFor(() => {
-      expect(harness.createSession).toHaveBeenCalledTimes(2);
+      expect(harness.createSession).toHaveBeenCalledTimes(1);
       expect(driver.getCurrentSessionId()).toBe('ses-2');
     });
     expect(write).toHaveBeenCalledWith(deleteAllKittyImages());
@@ -3817,7 +4402,7 @@ command = "vim"
       expect(forked.onEvent).toHaveBeenCalledOnce();
       expect(harness.resumeSession).not.toHaveBeenCalled();
       expect(driver.state.transcriptContainer.render(120).join('\n')).toContain(
-        'Session forked (ses-fork). To return to the original session: kimi -r ses-source',
+        'Session forked (ses-fork). To return to the original session: nori -r ses-source',
       );
     } finally {
       process.title = originalTitle;

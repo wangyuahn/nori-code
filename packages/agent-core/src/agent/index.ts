@@ -5,7 +5,14 @@ import { normalizeAdditionalDirs } from '../config';
 import { ErrorCodes, KimiError, makeErrorPayload } from '#/errors';
 import { log } from '#/logging/logger';
 import type { Logger } from '#/logging/types';
-import type { AgentAPI, AgentEvent, KimiConfig, SDKAgentRPC, UsageStatus } from '#/rpc';
+import type {
+  AgentAPI,
+  AgentEvent,
+  InjectSystemReminderPayload,
+  KimiConfig,
+  SDKAgentRPC,
+  UsageStatus,
+} from '#/rpc';
 import { generate } from '@nori-code/kosong';
 
 import type { EnabledPluginSessionStart, PluginCommandDef } from '#/plugin';
@@ -146,8 +153,9 @@ export class Agent {
   readonly obsidianMemory?: NoriMemoryProvider;
   readonly noriWorkflow?: NoriWorkflowConfig;
 
-  /** When true, bypasses toolsReadonly for Write/Edit on sub-agents
-   *  whose profile is nori-coder/coder.  Toggled via /setting coder write. */
+  /** When true, bypasses toolsReadonly for Write/Edit on non-main agents
+   *  (coding subagents / team members). Toggled via /setting coder write.
+   *  Never unlocks the main Agent — use `/setting readonly off` for that. */
   coderWriteEnabled: boolean;
 
   /** True while a persistent Team member is held in Discuss's read-only state. */
@@ -544,6 +552,12 @@ export class Agent {
       cancelGoal: () => this.goal.cancelGoal(),
       getBackgroundOutput: (payload) => this.background.readOutput(payload.taskId, payload.tail),
       getContext: () => this.context.data(),
+      injectSystemReminder: (payload: InjectSystemReminderPayload) => {
+        this.context.appendSystemReminder(payload.content, {
+          kind: 'injection',
+          variant: payload.variant ?? 'system_reminder',
+        });
+      },
       getConfig: () => this.config.data(),
       getPermission: () => this.permission.data(),
       getUsage: () => this.usage.data(),

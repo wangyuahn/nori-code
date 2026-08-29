@@ -100,7 +100,8 @@ export interface Session {
   workspace_id?: string;
   message_count?: number;
   current_prompt_id?: string;
-  metadata?: { cwd?: string; [key: string]: unknown };
+  last_prompt?: string;
+  metadata?: { cwd?: string; parent_session_id?: string; [key: string]: unknown };
   agent_config?: SessionAgentConfig;
   usage?: {
     input_tokens: number;
@@ -113,6 +114,16 @@ export interface Session {
     turn_count: number;
   };
   archived?: boolean;
+}
+
+export interface SessionGraphEdge {
+  child_session_id: string;
+  parent_session_id: string;
+}
+
+export interface SessionGraph {
+  nodes: Session[];
+  edges: SessionGraphEdge[];
 }
 
 /**
@@ -142,6 +153,8 @@ export interface SessionAgent {
   discussion_turn_agent_id?: string;
   /** Members taking part in this Discuss round; only discussion nodes carry it. */
   discussion_participant_agent_ids?: readonly string[];
+  /** Dual-write child session for TeamCreate / map mount members. */
+  mounted_session_id?: string;
 }
 
 interface SessionAgentTreeWireNode {
@@ -162,6 +175,7 @@ interface SessionAgentTreeWireNode {
   archived: boolean;
   discussion_turn_agent_id?: string;
   discussion_participant_agent_ids?: string[];
+  mounted_session_id?: string;
 }
 
 const SESSION_AGENT_KINDS: readonly SessionAgentKind[] = ['main', 'team', 'discussion', 'independent'];
@@ -197,6 +211,7 @@ function toSessionAgent(node: SessionAgentTreeWireNode): SessionAgent {
     archived: node.archived,
     discussion_turn_agent_id: node.discussion_turn_agent_id,
     discussion_participant_agent_ids: node.discussion_participant_agent_ids,
+    mounted_session_id: node.mounted_session_id,
   };
 }
 
@@ -974,6 +989,65 @@ export function createClient(
         undefined,
         { method: 'POST', body: title?.trim() ? { title: title.trim() } : {} },
       ),
+
+      createChild: (
+        id: string,
+        options?: string | { title?: string; role?: string; mandate?: string },
+      ) => {
+        const body = typeof options === 'string'
+          ? (options.trim() ? { title: options.trim() } : {})
+          : {
+              ...(options?.title?.trim() ? { title: options.title.trim() } : {}),
+              ...(options?.role?.trim() ? { role: options.role.trim() } : {}),
+              ...(options?.mandate?.trim() ? { mandate: options.mandate.trim() } : {}),
+            };
+        return request<Session>(
+          `/sessions/${encodeURIComponent(id)}/children`,
+          undefined,
+          { method: 'POST', body },
+        );
+      },
+
+      mount: (id: string, parentSessionId: string, options?: { role?: string; mandate?: string }) =>
+        request<Session>(
+          `/sessions/${encodeURIComponent(id)}:mount`,
+          undefined,
+          {
+            method: 'POST',
+            body: {
+              parent_session_id: parentSessionId,
+              role: options?.role,
+              mandate: options?.mandate,
+            },
+          },
+        ),
+
+      unmount: (id: string) =>
+        request<Session>(
+          `/sessions/${encodeURIComponent(id)}:unmount`,
+          undefined,
+          { method: 'POST', body: {} },
+        ),
+
+      remount: (id: string, parentSessionId: string, options?: { role?: string; mandate?: string }) =>
+        request<Session>(
+          `/sessions/${encodeURIComponent(id)}:remount`,
+          undefined,
+          {
+            method: 'POST',
+            body: {
+              parent_session_id: parentSessionId,
+              role: options?.role,
+              mandate: options?.mandate,
+            },
+          },
+        ),
+
+      getGraph: (params?: { include_archive?: boolean; exclude_empty?: boolean }) =>
+        request<SessionGraph>(`/sessions/graph`, {
+          include_archive: params?.include_archive,
+          exclude_empty: params?.exclude_empty,
+        }),
 
       abort: (id: string, agentId?: string) =>
         request<void>(

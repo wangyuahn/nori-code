@@ -156,6 +156,27 @@ export interface ListSessionsPayload {
   readonly includeArchive?: boolean;
 }
 
+export interface SessionGraphEdgeSummary {
+  readonly childSessionId: string;
+  readonly parentSessionId: string;
+}
+
+export interface SessionGraphSummary {
+  readonly nodes: readonly SessionSummary[];
+  readonly edges: readonly SessionGraphEdgeSummary[];
+}
+
+export interface MountSessionPayload {
+  readonly sessionId: string;
+  readonly parentSessionId: string;
+  readonly role?: string;
+  readonly mandate?: string;
+}
+
+export interface UnmountSessionPayload {
+  readonly sessionId: string;
+}
+
 export interface CoreInfo {
   readonly version: string;
 }
@@ -456,6 +477,38 @@ export interface AgentAPI {
   listCron: (payload: EmptyPayload) => readonly CronTaskDetails[];
   createCron: (payload: CronCreateRequest) => CronTaskDetails;
   deleteCron: (payload: { readonly id: string }) => { readonly deleted: true };
+  /**
+   * Append a durable system-reminder into the agent context (mount-change
+   * notices, identity updates). Does not start a turn.
+   */
+  injectSystemReminder: (payload: InjectSystemReminderPayload) => void;
+}
+
+export interface InjectSystemReminderPayload {
+  readonly content: string;
+  readonly variant?: string;
+}
+
+export interface DetachMountedTeamMemberPayload {
+  readonly mountedSessionId: string;
+}
+
+export interface DetachMountedTeamMemberResult {
+  readonly detachedAgentIds: readonly string[];
+}
+
+export interface AttachMountedTeamMemberPayload {
+  readonly mountedSessionId: string;
+  readonly identity: {
+    readonly name: string;
+    readonly role: string;
+    readonly mandate: string;
+  };
+  readonly teamLeaderAgentId?: string;
+}
+
+export interface AttachMountedTeamMemberResult {
+  readonly agentId: string;
 }
 
 type AgentAPIWithId = WithAgentId<AgentAPI>;
@@ -472,6 +525,20 @@ export interface SessionAPI extends AgentAPIWithId {
   generateAgentsMd: (payload: EmptyPayload) => void;
   getSessionWarnings: (payload: EmptyPayload) => readonly SessionWarning[];
   addAdditionalDir: (payload: AddAdditionalDirPayload) => AddAdditionalDirResult;
+  /**
+   * Remove dual-write team agents for a mounted child session id.
+   * Used when the map/API changes mount edges (mount authority).
+   */
+  detachMountedTeamMember: (
+    payload: DetachMountedTeamMemberPayload,
+  ) => DetachMountedTeamMemberResult;
+  /**
+   * Ensure a dual-write team agent exists for a mounted child under a leader
+   * (default `main`). Idempotent on `mountedSessionId`.
+   */
+  attachMountedTeamMember: (
+    payload: AttachMountedTeamMemberPayload,
+  ) => AttachMountedTeamMemberResult;
 }
 
 type SessionAPIWithId = WithSessionId<SessionAPI>;
@@ -491,6 +558,14 @@ export interface CoreAPI extends SessionAPIWithId {
   reloadSession: (payload: ReloadSessionPayload) => ResumeSessionResult;
   forkSession: (payload: ForkSessionPayload) => ResumeSessionResult;
   listSessions: (payload: ListSessionsPayload) => readonly SessionSummary[];
+  /** Session mount forest for the conversation map (nodes + parent edges). */
+  getSessionGraph: (payload: ListSessionsPayload) => SessionGraphSummary;
+  /** Mount `sessionId` under `parentSessionId` (single-parent tree). */
+  mountSession: (payload: MountSessionPayload) => SessionSummary;
+  /** Move an already-mounted session to a new parent (or update role/mandate). */
+  remountSession: (payload: MountSessionPayload) => SessionSummary;
+  /** Promote a mounted session to top-level. */
+  unmountSession: (payload: UnmountSessionPayload) => SessionSummary;
   exportSession: (payload: ExportSessionPayload) => ExportSessionResult;
   listPlugins: (payload: EmptyPayload) => readonly PluginSummary[];
   installPlugin: (payload: InstallPluginPayload) => PluginSummary;

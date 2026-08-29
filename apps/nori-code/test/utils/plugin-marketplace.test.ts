@@ -6,7 +6,6 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  NORI_CODE_PLUGIN_MARKETPLACE_URL,
   NORI_CODE_PLUGIN_MARKETPLACE_URL_ENV,
 } from '#/constant/app';
 import { computeUpdateStatus, loadPluginMarketplace } from '#/utils/plugin-marketplace';
@@ -179,18 +178,18 @@ describe('loadPluginMarketplace', () => {
 
     const marketplace = await loadPluginMarketplace({
       workDir: '/tmp/work',
-      source: NORI_CODE_PLUGIN_MARKETPLACE_URL,
+      source: 'https://example.test/marketplace.json',
       fetchImpl,
     });
 
-    expect(fetchImpl).toHaveBeenCalledWith(NORI_CODE_PLUGIN_MARKETPLACE_URL);
+    expect(fetchImpl).toHaveBeenCalledWith('https://example.test/marketplace.json');
     expect(marketplace.plugins[0]).toEqual(
       expect.objectContaining({
         id: 'kimi-datasource',
         displayName: 'Kimi Datasource',
         source: new URL(
           './official/kimi-datasource.zip',
-          NORI_CODE_PLUGIN_MARKETPLACE_URL,
+          'https://example.test/marketplace.json',
         ).toString(),
       }),
     );
@@ -206,7 +205,6 @@ describe('loadPluginMarketplace', () => {
     try {
       const marketplace = await loadPluginMarketplace({ workDir: '/tmp/work', fetchImpl });
 
-      expect(fetchImpl).toHaveBeenCalledWith(NORI_CODE_PLUGIN_MARKETPLACE_URL);
       expect(marketplace.source).toBe(join(REPO_ROOT, 'plugins/marketplace.json'));
       expect(marketplace.plugins).toContainEqual(
         expect.objectContaining({
@@ -230,7 +228,7 @@ describe('loadPluginMarketplace', () => {
 
     await expect(loadPluginMarketplace({
       workDir: '/tmp/work',
-      source: NORI_CODE_PLUGIN_MARKETPLACE_URL,
+      source: 'https://example.test/explicit-marketplace.json',
       fetchImpl,
     })).rejects.toThrow(/fetch failed/);
   });

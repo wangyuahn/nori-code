@@ -78,6 +78,70 @@ export function argsRecord(args: unknown): Record<string, unknown> {
     : {};
 }
 
+/**
+ * Pull a JSON string field out of partially streamed tool arguments, even
+ * when the closing quote has not arrived yet. Handles the common escapes so
+ * a live TeamSpeak `message` can paint before `tool.call.started`.
+ */
+export function extractPartialJsonStringField(text: string, key: string): string | undefined {
+  const opener = new RegExp(`"${key}"\\s*:\\s*"`);
+  const match = opener.exec(text);
+  if (match === null) return undefined;
+  const start = match.index + match[0].length;
+  let out = '';
+  let i = start;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '\\') {
+      const next = text[i + 1];
+      if (next === undefined) return out;
+      switch (next) {
+        case 'n':
+          out += '\n';
+          break;
+        case 't':
+          out += '\t';
+          break;
+        case 'r':
+          out += '\r';
+          break;
+        case 'b':
+          out += '\b';
+          break;
+        case 'f':
+          out += '\f';
+          break;
+        case '"':
+          out += '"';
+          break;
+        case '\\':
+          out += '\\';
+          break;
+        case '/':
+          out += '/';
+          break;
+        case 'u': {
+          if (i + 5 >= text.length) return out;
+          const hex = text.slice(i + 2, i + 6);
+          const code = Number.parseInt(hex, 16);
+          if (Number.isNaN(code)) return out;
+          out += String.fromCodePoint(code);
+          i += 6;
+          continue;
+        }
+        default:
+          out += next;
+      }
+      i += 2;
+      continue;
+    }
+    if (ch === '"') return out;
+    out += ch;
+    i++;
+  }
+  return out;
+}
+
 export function serializeToolResultOutput(output: unknown): string {
   if (typeof output === 'string') return output;
   return JSON.stringify(output, null, 2);
@@ -101,6 +165,18 @@ export function formatErrorMessage(error: unknown): string {
     });
   }
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * A failed turn emits both `turn.ended{reason:'failed', error}` and a trailing
+ * `error` event with the same payload. `summarizeTurnError` stamps
+ * `details.turnId` on turn-scoped failures; those must not paint a second block.
+ * Errors without it (MCP startup, compaction, a rejected launch) still show.
+ */
+export function isTurnScopedError(payload: { details?: unknown } | undefined): boolean {
+  const details = payload?.details;
+  if (typeof details !== 'object' || details === null) return false;
+  return (details as Record<string, unknown>)['turnId'] !== undefined;
 }
 
 export function formatErrorPayload(

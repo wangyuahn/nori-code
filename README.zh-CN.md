@@ -11,7 +11,10 @@ Nori 编排多个 AI Agent 协同完成代码的规划、实现、审查和跨�
 ![Nori Work 浏览器工作区](docs/images/nori-work-browser.png)
 
 > [!NOTE]
-> **v1.0.0 是 Nori Code 和 Nori Work 的首个正式稳定版本。** 升级时会完整覆盖旧版 Nori Work 程序文件，同时保留用户数据。
+> **v2.0** 新增**团队工程**：持久伙伴会话组成的部门树、进入 Code 前的 Discuss/Assign，以及由 `parent_session_id` 连接的**会话地图**（TUI `/map`、Nori Work **Map**）。身份通过 `<session_self>` 与挂载变更通知注入，而非复制 transcript。
+
+> [!NOTE]
+> **v1.0.0** 是 Nori Code 与 Nori Work 的首个正式稳定版本。升级时会完整覆盖旧版 Nori Work 程序文件，同时保留用户数据。
 
 ### v1.0.0 包含的内容
 
@@ -52,6 +55,9 @@ Nori 编排多个 AI Agent 协同完成代码的规划、实现、审查和跨�
 
 ### 🧠 多 Agent DAG 编排
 SubAgent 将任务拆解为带显式依赖链的并行子 Agent。多文件重构自动派发 `{ 规划, 实现-1, 实现-2, 验证, 审查 }` 并行工作，无需手动一问一答。
+
+### 👥 团队工程（2.0）
+`TeamCreate` 将会话地图上的**挂载子会话**雇佣为持久伙伴。Discuss（`TeamDecide` / `TeamSpeak`）在 `TeamAssign` 进入 Code 前收集团队发言；主 Agent 保持只读，成员执行分配任务。`/team` 打开伙伴会话；`/map` 管理挂载。`TeamDismiss` 移除伙伴并删除对应会话。Web **Map** 提供同一挂载森林的平移/缩放与本地标注。
 
 ### 📚 持久项目记忆
 每个决策、审查和模式都写入 Obsidian 兼容的 `[[双向链接]]` 记忆库。规划阶段自动检索历史上下文。Nori 会随着时间推移越来越了解**你的项目**。
@@ -95,6 +101,7 @@ SubAgent 始终可以一次启动多个子会话。主模型可以查询、暂�
 | P0 | **Nori Work — 系统托盘 / 通知** | ✅ 已实现 |
 | P0 | **Nori Work — 安全 Preload 桥接** | ✅ 已实现 |
 | P1 | **Agent 内置浏览器** — 导航、快照、交互、上传、诊断与网页标注 | ✅ 已实现 |
+| P0 | **团队工程** — 部门树、Discuss/Assign、会话地图、`/team` / `/map` | ✅ 已实现 |
 
 ---
 

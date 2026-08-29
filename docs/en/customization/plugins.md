@@ -1,6 +1,6 @@
 # Plugins
 
-Plugins package reusable Kimi Code CLI capabilities into installable units — they can add [Agent Skills](./skills.md), automatically load a specified Skill at session start, and declare MCP servers to provide real tool capabilities. They are ideal for sharing workflows with a team, connecting to external services, or installing extensions from the official marketplace.
+Plugins package reusable Nori Code CLI capabilities into installable units — they can add [Agent Skills](./skills.md), automatically load a specified Skill at session start, and declare MCP servers to provide real tool capabilities. They are ideal for sharing workflows with a team, connecting to external services, or installing extensions from the official marketplace.
 
 ## Installation and Management
 
@@ -33,7 +33,7 @@ You can also use slash commands directly:
 | `/plugins mcp enable <id> <server>` | Enable an MCP server declared by a plugin |
 | `/plugins mcp disable <id> <server>` | Disable an MCP server declared by a plugin |
 
-The **Installed** tab lists your installed plugins and shows an update badge when a newer version is available in the marketplace. The **Official** and **Third-party** tabs list marketplace plugins by tier; the **Custom** tab installs from a URL. Marketplace catalogs load automatically when needed. Each install shows a trust badge: `kimi-official` (from an official address), `curated` (from a curated address), or `third-party` (everything else). Installing a third-party plugin (anything not from the official address, including Custom installs) first shows a confirmation prompt that defaults to cancelling, so it is only installed if you choose to trust the source.
+The **Installed** tab lists your installed plugins and shows an update badge when a newer version is available in the marketplace. The **Official** and **Third-party** tabs list marketplace plugins by tier; the **Custom** tab installs from a URL. Marketplace catalogs load automatically when needed. Each install shows a trust badge: `official` (from an official address), `curated` (from a curated address), or `third-party` (everything else). Installing a third-party plugin (anything not from the official address, including Custom installs) first shows a confirmation prompt that defaults to cancelling, so it is only installed if you choose to trust the source.
 
 ### Installing from GitHub
 
@@ -49,13 +49,13 @@ Network requests only go through `github.com` redirects and `codeload.github.com
 ### Notes
 
 - Plugin changes apply after `/reload` or in new sessions. After installing, enabling/disabling, or removing a plugin, run `/reload` or `/new`; the current session will not update.
-- Local installations are copied to `$KIMI_CODE_HOME/plugins/managed/<id>/`, and the CLI always runs from this managed copy. Editing the original source directory after installation has no effect; you must reinstall.
+- Local installations are copied to `$NORI_CODE_HOME/plugins/managed/<id>/`, and the CLI always runs from this managed copy. Editing the original source directory after installation has no effect; you must reinstall.
 - Removing a plugin only deletes the installation record; the managed copy and original source files remain on disk.
 - Plugins are currently installed per-user and apply to all projects; project-level installation scope is not yet supported.
 
 ### Custom marketplace JSON
 
-Pass a custom marketplace JSON path or URL to `/plugins marketplace <source>`, or set [`KIMI_CODE_PLUGIN_MARKETPLACE_URL`](../configuration/env-vars.md) to override the default catalog. Each entry in the `plugins` array needs an `id` and a `source` (local path, zip URL, or GitHub URL):
+Pass a custom marketplace JSON path or URL to `/plugins marketplace <source>`, or set [`NORI_CODE_PLUGIN_MARKETPLACE_URL`](../configuration/env-vars.md) to override the default catalog. Each entry in the `plugins` array needs an `id` and a `source` (local path, zip URL, or GitHub URL):
 
 ```json
 {
@@ -122,19 +122,19 @@ Once installed, describe your need in natural language and Kimi Code will automa
 A plugin is a directory or zip file containing a manifest. The manifest can be placed at either of the following locations:
 
 ```text
-<plugin_root>/kimi.plugin.json
-<plugin_root>/.kimi-plugin/plugin.json
+<plugin_root>/nori.plugin.json
+<plugin_root>/.nori-plugin/plugin.json
 ```
 
-When both files exist, `kimi.plugin.json` takes precedence.
+When both files exist, `nori.plugin.json` takes precedence.
 
 Example:
 
 ```json
 {
-  "name": "kimi-finance",
+  "name": "nori-finance",
   "version": "1.0.0",
-  "description": "Finance data and analysis workflows for Kimi Code CLI",
+  "description": "Finance data and analysis workflows for Nori Code CLI",
   "skills": "./skills/",
   "sessionStart": {
     "skill": "using-finance"
@@ -169,17 +169,17 @@ Slash commands save a prompt you use often as a `/command`, so you can trigger i
 Here is a minimal end-to-end example. The plugin's directory structure:
 
 ```text
-kimi-finance/
-  kimi.plugin.json
+nori-finance/
+  nori.plugin.json
   commands/
     report.md
 ```
 
-In the manifest (`kimi.plugin.json`), the `commands` field points to where the command files live:
+In the manifest (`nori.plugin.json`), the `commands` field points to where the command files live:
 
 ```json
 {
-  "name": "kimi-finance",
+  "name": "nori-finance",
   "version": "1.0.0",
   "commands": "./commands/"
 }
@@ -198,7 +198,7 @@ Pull the latest financials for $ARGUMENTS and summarize revenue, profit, and key
 After installing and enabling the plugin, type this in the chat:
 
 ```text
-/kimi-finance:report TSLA
+/nori-finance:report TSLA
 ```
 
 Kimi replaces `$ARGUMENTS` in the body with `TSLA`, then runs the prompt. The three details below cover each step.
@@ -220,7 +220,7 @@ A command file has two parts: an optional **frontmatter** (the metadata between 
 
 ### Running Commands and Passing Arguments
 
-Commands are prefixed with the plugin id (their namespace) and registered as `<plugin>:<command>`, so the command above is actually `/kimi-finance:report` — this keeps same-named commands from different plugins from colliding.
+Commands are prefixed with the plugin id (their namespace) and registered as `<plugin>:<command>`, so the command above is actually `/nori-finance:report` — this keeps same-named commands from different plugins from colliding.
 
 Whatever you type after the command replaces `$ARGUMENTS` in the body (above, `TSLA` replaces `$ARGUMENTS`). If the body has no `$ARGUMENTS` but you pass arguments anyway, they are not dropped — they are appended to the end of the body as `ARGUMENTS: <what you typed>`.
 
@@ -230,7 +230,7 @@ Plugin Skills use the same `SKILL.md` format as ordinary [Agent Skills](./skills
 
 ```text
 my-plugin/
-  kimi.plugin.json
+  nori.plugin.json
   skills/
     using-my-plugin/
       SKILL.md
@@ -238,7 +238,7 @@ my-plugin/
       SKILL.md
 ```
 
-`sessionStart.skill` loads a plugin Skill into the main Agent at session start, making it suitable for initialization instructions, workflow rules, or mapping terminology from other tools to Kimi Code CLI. It only injects text; it does not execute code.
+`sessionStart.skill` loads a plugin Skill into the main Agent at session start, making it suitable for initialization instructions, workflow rules, or mapping terminology from other tools to Nori Code CLI. It only injects text; it does not execute code.
 
 Regardless of how a Skill is loaded (`sessionStart.skill`, `/skill:<name>`, or automatic model invocation), `skillInstructions` appears alongside that plugin's Skill.
 
@@ -253,7 +253,7 @@ Stdio server (local command):
   "mcpServers": {
     "finance": {
       "command": "uvx",
-      "args": ["kimi-finance-mcp"]
+      "args": ["nori-finance-mcp"]
     }
   }
 }
@@ -276,10 +276,10 @@ For stdio servers, `command` can be a command on `PATH` or a path starting with 
 Plugin MCP servers start after `/reload` or in new sessions. To enable or disable a server:
 
 ```sh
-/plugins mcp disable kimi-finance finance
+/plugins mcp disable nori-finance finance
 /reload
 
-/plugins mcp enable kimi-finance finance
+/plugins mcp enable nori-finance finance
 /reload
 ```
 
@@ -304,7 +304,7 @@ Plugin hooks reuse the same mechanism as global hooks — see [Hooks](./hooks.md
 
 - A plugin's hooks are active only while the plugin is **enabled**; disabling the plugin stops its hooks.
 - Each hook runs with its working directory set to the plugin root, so `command` can use `./` paths inside the plugin.
-- The hook process receives two extra environment variables: `KIMI_CODE_HOME` and `KIMI_PLUGIN_ROOT` (the plugin root directory).
+- The hook process receives two extra environment variables: `NORI_CODE_HOME` and `NORI_PLUGIN_ROOT` (the plugin root directory).
 
 Installing a plugin never runs its hooks by itself — they only fire when their matching event occurs while the plugin is enabled.
 

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { api, type BackgroundTask, type SessionAgent, type SessionRealtimeStatus } from '../api/client';
 import { useI18n } from '../i18n';
 import { sessionAgentDisplayName } from '../utils/session-agent';
+import { findAgentDiscussion } from '../utils/team-discussion';
 import { Icon } from './Icon';
 
 interface SessionAgentTreeProps {
@@ -316,9 +317,8 @@ export function SessionAgentTree({
     || [...independentChildrenByParent.values()].some(list => list.some(isActiveAgent))
     || backgroundTasks.some(task => task.status === 'running');
   const discussionActive = activeDiscussionForAgent(agents, selectedAgentId, _sessionStatus);
-  const currentDiscussionTurnAgentId = discussionTurnAgentId !== undefined
-    ? discussionTurnAgentId ?? undefined
-    : activeDiscussions.find(agent => agent.discussion_turn_agent_id)?.discussion_turn_agent_id;
+  const currentDiscussionTurnAgentId = findAgentDiscussion(agents, selectedAgentId, discussionTurnAgentId)?.turnAgentId
+    ?? activeDiscussions.find(agent => agent.discussion_turn_agent_id)?.discussion_turn_agent_id;
   const currentDiscussionTurnAgent = currentDiscussionTurnAgentId === undefined
     ? undefined
     : agents.find(agent => agent.agent_id === currentDiscussionTurnAgentId);
@@ -542,7 +542,9 @@ function sameAgentList(previous: readonly SessionAgent[], next: readonly Session
       && agent.last_active === candidate.last_active
       && agent.summary === candidate.summary
       && agent.archived === candidate.archived
-      && agent.discussion_turn_agent_id === candidate.discussion_turn_agent_id;
+      && agent.discussion_turn_agent_id === candidate.discussion_turn_agent_id
+      && (agent.discussion_participant_agent_ids ?? []).join(',')
+        === (candidate.discussion_participant_agent_ids ?? []).join(',');
   });
 }
 

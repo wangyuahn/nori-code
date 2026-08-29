@@ -61,6 +61,8 @@ export interface ProviderManagerOptions {
   /** Provider id of the currently active model. */
   readonly activeProviderId?: string;
   readonly onAdd: () => void;
+  /** Open extra / stealth models for a source (auto-discover stays on). */
+  readonly onOpenExtras: (providerIds: readonly string[]) => void;
   /** Delete all providers under a source (Open Platform / custom-registry
    *  fetch / standalone). Passed the full provider-id list so the host
    *  doesn't have to re-derive the source grouping. */
@@ -91,7 +93,7 @@ type Row = SourceRow | AddRow;
 
 const ADD_ROW_LABEL = '[ Add New Platform ]';
 const PAGE_SIZE = 8;
-const HEADER_HINT = '↑↓ navigate · D delete · Esc cancel';
+const HEADER_HINT = '↑↓ navigate · Enter extras · D delete · Esc cancel';
 
 // Narrows a `ProviderConfig` blob to a `CustomRegistrySource` payload.
 // Mirrors `readCustomRegistrySource` in `kimi-tui.ts`. We can't import
@@ -308,6 +310,8 @@ export class ProviderManagerComponent extends Container implements Focusable {
       const selected = rows[this.selectedIndex];
       if (selected?.kind === 'add') {
         this.opts.onAdd();
+      } else if (selected?.kind === 'source') {
+        this.opts.onOpenExtras(selected.providerIds);
       }
       return;
     }

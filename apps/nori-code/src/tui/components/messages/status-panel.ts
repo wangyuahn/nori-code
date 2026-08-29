@@ -22,6 +22,13 @@ import {
   safeUsageRatio,
 } from '#/utils/usage/usage-format';
 
+import {
+  formatTeamReportsStatus,
+  teamMemberCount,
+  teamSpeakingLabel,
+  type TeamAgentSnapshot,
+} from '#/tui/utils/team-tree';
+
 import { buildManagedUsageReportLines, type ManagedUsageReport } from './usage-panel';
 
 interface FieldRow {
@@ -39,6 +46,9 @@ export interface StatusReportOptions {
   readonly thinkingEffort: ThinkingEffort;
   readonly permissionMode: PermissionMode;
   readonly discussMode: boolean;
+  readonly toolsReadonly?: boolean;
+  readonly teamMemberCount?: number;
+  readonly teamAgents?: readonly TeamAgentSnapshot[];
   readonly contextUsage: number;
   readonly contextTokens: number;
   readonly maxContextTokens: number;
@@ -101,12 +111,21 @@ export function buildStatusReportLines(options: StatusReportOptions): string[] {
 
   const permission = options.status?.permission ?? options.permissionMode;
   const discussMode = options.status?.discussMode ?? options.discussMode;
+  const toolsReadonly = options.status?.toolsReadonly ?? options.toolsReadonly ?? false;
+  const agents = options.teamAgents ?? [];
+  const teamCount = options.teamMemberCount ?? teamMemberCount(agents);
+  const speaking = teamSpeakingLabel(agents) ?? '—';
+  const reports = formatTeamReportsStatus(agents);
   const sessionId = options.sessionId.trim().length > 0 ? options.sessionId : 'none';
   const rows: FieldRow[] = [
     { label: 'Model', value: formatModelStatus(options) },
     { label: 'Directory', value: options.workDir },
     { label: 'Permissions', value: permission },
     { label: 'Discuss', value: discussMode ? 'on' : 'off' },
+    { label: 'Read-only', value: toolsReadonly ? 'on' : 'off' },
+    { label: 'Team', value: teamCount === 1 ? '1 member' : `${String(teamCount)} members` },
+    { label: 'Speaking', value: speaking },
+    { label: 'Reports', value: reports },
     { label: 'Session', value: sessionId },
   ];
   const title = options.sessionTitle?.trim();

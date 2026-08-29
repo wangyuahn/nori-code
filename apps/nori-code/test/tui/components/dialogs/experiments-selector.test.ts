@@ -36,7 +36,7 @@ function text(component: ExperimentsSelectorComponent, width = 120): string {
 }
 
 describe('ExperimentsSelectorComponent', () => {
-  it('renders searchable feature toggles with source details', () => {
+  it('renders feature toggles with source details', () => {
     const selector = new ExperimentsSelectorComponent({
       features: [
         feature({ enabled: true, source: 'config', configValue: true }),
@@ -47,7 +47,8 @@ describe('ExperimentsSelectorComponent', () => {
 
     const out = text(selector);
 
-    expect(out).toContain(' Experimental features  (type to search)');
+    expect(out).toContain(' Experimental features');
+    expect(out).not.toContain('(type to search)');
     expect(out).toContain(' ↑↓ navigate · Space toggle · Enter apply · Esc cancel');
     expect(out).toContain('  ❯ Micro compaction  enabled');
     expect(out).toContain('    id micro_compaction · config · KIMI_CODE_EXPERIMENTAL_MICRO_COMPACTION');
@@ -101,7 +102,7 @@ describe('ExperimentsSelectorComponent', () => {
     expect(onApply).not.toHaveBeenCalled();
   });
 
-  it('filters by typing and clears the query before cancelling', () => {
+  it('does not type-to-search and cancels on Esc', () => {
     const onCancel = vi.fn();
     const selector = new ExperimentsSelectorComponent({
       features: [feature()],
@@ -110,13 +111,9 @@ describe('ExperimentsSelectorComponent', () => {
     });
 
     selector.handleInput('m');
-    selector.handleInput('i');
-    selector.handleInput('c');
-    expect(text(selector)).toContain('Search: mic');
+    expect(text(selector)).not.toContain('Search:');
     expect(text(selector)).toContain('Micro compaction');
 
-    selector.handleInput(ESC);
-    expect(onCancel).not.toHaveBeenCalled();
     selector.handleInput(ESC);
     expect(onCancel).toHaveBeenCalledOnce();
   });

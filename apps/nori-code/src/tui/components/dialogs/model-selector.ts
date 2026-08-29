@@ -43,6 +43,7 @@ export function modelDisplayName(alias: string, model: ModelAlias | undefined): 
 
 export function providerDisplayName(provider: string): string {
   if (provider === DEFAULT_OAUTH_PROVIDER_NAME) return PRODUCT_NAME;
+  if (provider === 'managed:kimi-code' || provider === 'managed:nori-code') return 'Kimi Code';
   if (provider.startsWith('managed:')) return provider.slice('managed:'.length);
   return provider;
 }
@@ -92,7 +93,13 @@ function createModelChoices(models: Record<string, ModelAlias>): readonly ModelC
 export function thinkingAvailability(model: ModelAlias): ThinkingAvailability {
   const caps = model.capabilities ?? [];
   if (caps.includes('always_thinking')) return 'always-on';
-  if (caps.includes('thinking') || model.adaptiveThinking === true) return 'toggle';
+  if (
+    caps.includes('thinking') ||
+    model.adaptiveThinking === true ||
+    model.thinkingSupport === true
+  ) {
+    return 'toggle';
+  }
   return 'unsupported';
 }
 

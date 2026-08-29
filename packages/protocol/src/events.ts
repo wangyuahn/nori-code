@@ -372,6 +372,23 @@ export interface SessionCreatedEvent {
   readonly session: Session;
 }
 
+/**
+ * Structural mount change notification for identity / org updates (P1 injects
+ * change context from this). Not conversation-summary inheritance.
+ */
+export interface SessionMountChangedEvent {
+  readonly type: 'event.session.mount_changed';
+  readonly change: {
+    readonly session_id: string;
+    readonly old_parent_session_id: string | null;
+    readonly new_parent_session_id: string | null;
+    readonly role?: string;
+    readonly mandate?: string;
+    readonly reason: 'mount' | 'unmount' | 'remount' | 'parent_deleted';
+  };
+  readonly recipient_role: 'subject' | 'old_parent' | 'new_parent' | 'direct_child';
+}
+
 export interface WorkspaceCreatedEvent {
   readonly type: 'event.workspace.created';
   readonly workspace: Workspace;
@@ -699,6 +716,7 @@ export type AgentEvent =
   | AgentStatusUpdatedEvent
   | SessionMetaUpdatedEvent
   | SessionCreatedEvent
+  | SessionMountChangedEvent
   | WorkspaceCreatedEvent
   | WorkspaceUpdatedEvent
   | WorkspaceDeletedEvent
@@ -1085,6 +1103,19 @@ export const sessionCreatedEventSchema = z.object({
   session: sessionSchema,
 }) satisfies z.ZodType<SessionCreatedEvent>;
 
+export const sessionMountChangedEventSchema = z.object({
+  type: z.literal('event.session.mount_changed'),
+  change: z.object({
+    session_id: z.string().min(1),
+    old_parent_session_id: z.string().min(1).nullable(),
+    new_parent_session_id: z.string().min(1).nullable(),
+    role: z.string().min(1).optional(),
+    mandate: z.string().min(1).optional(),
+    reason: z.enum(['mount', 'unmount', 'remount', 'parent_deleted']),
+  }),
+  recipient_role: z.enum(['subject', 'old_parent', 'new_parent', 'direct_child']),
+}) satisfies z.ZodType<SessionMountChangedEvent>;
+
 export const workspaceCreatedEventSchema = z.object({
   type: z.literal('event.workspace.created'),
   workspace: workspaceSchema,
@@ -1386,6 +1417,7 @@ export const agentEventSchema = z.discriminatedUnion('type', [
   agentStatusUpdatedEventSchema,
   sessionMetaUpdatedEventSchema,
   sessionCreatedEventSchema,
+  sessionMountChangedEventSchema,
   workspaceCreatedEventSchema,
   workspaceUpdatedEventSchema,
   workspaceDeletedEventSchema,

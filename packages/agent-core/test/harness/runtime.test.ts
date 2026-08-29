@@ -296,6 +296,132 @@ max_context_size = 100000
     expect(mainAgent?.config.modelAlias).toBe('default-mock');
   });
 
+  it('completes direct mount mutations without re-entering the session queue', async () => {
+    tmp = await mkdtemp(join(tmpdir(), 'kimi-core-runtime-'));
+    const homeDir = join(tmp, 'home');
+    const workDir = join(tmp, 'work');
+    await mkdir(homeDir, { recursive: true });
+    await mkdir(workDir, { recursive: true });
+    await writeFile(join(homeDir, 'config.toml'), baseModelConfig());
+
+    const [coreRpc, sdkRpc] = createRPC<CoreAPI, SDKAPI>();
+    const core = new KimiCore(coreRpc, { homeDir });
+    const rpc = await sdkRpc({
+      emitEvent: vi.fn(),
+      requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
+      requestQuestion: vi.fn(async () => null),
+      toolCall: vi.fn(async () => ({ output: '' })),
+    });
+
+    const parent = await rpc.createSession({
+      id: 'ses_runtime_mount_parent',
+      workDir,
+      model: 'default-mock',
+    });
+    const child = await rpc.createSession({
+      id: 'ses_runtime_mount_child',
+      workDir,
+      model: 'default-mock',
+    });
+
+    await expect(rpc.mountSession({
+      sessionId: child.id,
+      parentSessionId: parent.id,
+      role: 'reviewer',
+      mandate: 'Review changes',
+    })).resolves.toMatchObject({
+      id: child.id,
+    });
+
+    expect(core.sessions.get(child.id)?.metadata.custom).toMatchObject({
+      parent_session_id: parent.id,
+      mount_role: 'reviewer',
+      mount_mandate: 'Review changes',
+    });
+    expect(Object.values(core.sessions.get(parent.id)?.metadata.agents ?? {}).some(
+      (agent) => agent.mountedSessionId === child.id,
+    )).toBe(true);
+
+    await expect(rpc.remountSession({
+      sessionId: child.id,
+      parentSessionId: parent.id,
+      role: 'lead reviewer',
+      mandate: 'Review and report',
+    })).resolves.toMatchObject({
+      id: child.id,
+    });
+    expect(core.sessions.get(child.id)?.metadata.custom).toMatchObject({
+      mount_role: 'lead reviewer',
+      mount_mandate: 'Review and report',
+    });
+
+    const parentSession = core.sessions.get(parent.id)!;
+    for (const [agentId, agent] of Object.entries(parentSession.metadata.agents)) {
+      if (agent.mountedSessionId === child.id) delete parentSession.metadata.agents[agentId];
+    }
+    await expect(rpc.remountSession({
+      sessionId: child.id,
+      parentSessionId: parent.id,
+    })).resolves.toMatchObject({
+      id: child.id,
+    });
+    expect(Object.values(parentSession.metadata.agents).some(
+      (agent) => agent.mountedSessionId === child.id,
+    )).toBe(true);
+
+    await expect(rpc.unmountSession({ sessionId: child.id })).resolves.toMatchObject({
+      id: child.id,
+    });
+    expect(core.sessions.get(child.id)?.metadata.custom).not.toHaveProperty('parent_session_id');
+    expect(Object.values(core.sessions.get(parent.id)?.metadata.agents ?? {}).some(
+      (agent) => agent.mountedSessionId === child.id,
+    )).toBe(false);
+  });
+
+  it('deletes the mounted session and Team agent together on dismissal', async () => {
+    tmp = await mkdtemp(join(tmpdir(), 'kimi-core-runtime-'));
+    const homeDir = join(tmp, 'home');
+    const workDir = join(tmp, 'work');
+    await mkdir(homeDir, { recursive: true });
+    await mkdir(workDir, { recursive: true });
+    await writeFile(join(homeDir, 'config.toml'), baseModelConfig());
+
+    const [coreRpc, sdkRpc] = createRPC<CoreAPI, SDKAPI>();
+    const core = new KimiCore(coreRpc, { homeDir });
+    const rpc = await sdkRpc({
+      emitEvent: vi.fn(),
+      requestApproval: vi.fn(async (): Promise<ApprovalResponse> => ({ decision: 'rejected' })),
+      requestQuestion: vi.fn(async () => null),
+      toolCall: vi.fn(async () => ({ output: '' })),
+    });
+
+    const parent = await rpc.createSession({
+      id: 'ses_runtime_team_parent',
+      workDir,
+      model: 'default-mock',
+    });
+    const parentSession = core.sessions.get(parent.id);
+    expect(parentSession).toBeDefined();
+
+    const member = await parentSession!.createTeamMember('main', {
+      name: 'Builder',
+      role: 'builder',
+      mandate: 'Implement the assigned work.',
+    });
+    const mountedSessionId = parentSession!.getAgentMetadata(member.id)?.mountedSessionId;
+    expect(mountedSessionId).toBeDefined();
+    expect((await rpc.listSessions({ includeArchive: true })).some(
+      (session) => session.id === mountedSessionId,
+    )).toBe(true);
+
+    await parentSession!.dismissTeamMembers('main', [member.id], 'Work is complete.', true);
+
+    expect((await rpc.listSessions({ includeArchive: true })).some(
+      (session) => session.id === mountedSessionId,
+    )).toBe(false);
+    expect(parentSession!.getAgentMetadata(member.id)).toBeUndefined();
+  });
+
   it('loads project local additional dirs into the session and main agent', async () => {
     tmp = await mkdtemp(join(tmpdir(), 'kimi-core-runtime-'));
     const homeDir = join(tmp, 'home');

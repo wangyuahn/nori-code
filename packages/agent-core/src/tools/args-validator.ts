@@ -61,16 +61,28 @@ export interface JsonObject extends Record<string, JsonType> {}
 
 export type ToolArgsValidator = ValidateFunction<JsonType>;
 
+/**
+ * Render one Ajv error.
+ *
+ * `instancePath` has to survive on every branch. Ajv runs with `allErrors`, so a
+ * bad array of items yields one error per item, and dropping the path made them
+ * render byte-identical — `AskUserQuestion` with two malformed questions came
+ * back as the same sentence twice, reading like the UI had double-printed the
+ * failure while actually hiding which item was wrong. `/questions/0` in front of
+ * the message is both the deduplication and the only pointer the model gets to
+ * the offending element.
+ */
 function formatValidationError(error: ErrorObject): string {
+  const path = error.instancePath ? `${error.instancePath} ` : '';
+
   if (error.keyword === 'required' && 'missingProperty' in error.params) {
-    return `must have required property '${String(error.params['missingProperty'])}'`;
+    return `${path}must have required property '${String(error.params['missingProperty'])}'`;
   }
 
   if (error.keyword === 'additionalProperties' && 'additionalProperty' in error.params) {
-    return `must NOT have additional property '${String(error.params['additionalProperty'])}'`;
+    return `${path}must NOT have additional property '${String(error.params['additionalProperty'])}'`;
   }
 
-  const path = error.instancePath ? `${error.instancePath} ` : '';
   return `${path}${error.message ?? 'is invalid'}`;
 }
 
@@ -89,5 +101,17 @@ export function validateToolArgs(validator: ToolArgsValidator, args: JsonType): 
     return 'Tool parameter validation failed';
   }
 
-  return errors.map((error) => formatValidationError(error)).join('; ');
+  // Ajv can still report the same complaint twice for one instance path (a
+  // branch reached through both `anyOf` and the top-level schema, for example).
+  // Identical sentences tell the model nothing extra and read as a duplicated
+  // error, so collapse them while keeping the original order.
+  const seen = new Set<string>();
+  const messages: string[] = [];
+  for (const error of errors) {
+    const message = formatValidationError(error);
+    if (seen.has(message)) continue;
+    seen.add(message);
+    messages.push(message);
+  }
+  return messages.join('; ');
 }

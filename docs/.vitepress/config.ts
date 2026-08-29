@@ -53,6 +53,7 @@ const config = withMermaid(defineConfig({
                 { text: '从 kimi-cli 迁移', link: '/zh/guides/migration' },
                 { text: '常见使用案例', link: '/zh/guides/use-cases' },
                 { text: '交互与输入', link: '/zh/guides/interaction' },
+                { text: '团队工程', link: '/zh/guides/team-engineering' },
                 { text: '会话与上下文', link: '/zh/guides/sessions' },
                 { text: '使用目标模式', link: '/zh/guides/goals' },
                 { text: '在 IDE 中使用', link: '/zh/guides/ides' },
@@ -88,8 +89,8 @@ const config = withMermaid(defineConfig({
             {
               text: '参考手册',
               items: [
-                { text: 'kimi 命令', link: '/zh/reference/kimi-command' },
-                { text: 'kimi acp 子命令', link: '/zh/reference/kimi-acp' },
+                { text: 'nori 命令', link: '/zh/reference/kimi-command' },
+                { text: 'nori acp 子命令', link: '/zh/reference/kimi-acp' },
                 { text: '内置工具', link: '/zh/reference/tools' },
                 { text: '斜杠命令', link: '/zh/reference/slash-commands' },
                 { text: '键盘快捷键', link: '/zh/reference/keyboard' },
@@ -130,6 +131,7 @@ const config = withMermaid(defineConfig({
                 { text: 'Migrating from kimi-cli', link: '/en/guides/migration' },
                 { text: 'Common Use Cases', link: '/en/guides/use-cases' },
                 { text: 'Interaction and Input', link: '/en/guides/interaction' },
+                { text: 'Team engineering', link: '/en/guides/team-engineering' },
                 { text: 'Sessions and Context', link: '/en/guides/sessions' },
                 { text: 'Using Goals', link: '/en/guides/goals' },
                 { text: 'Using in IDEs', link: '/en/guides/ides' },
@@ -165,8 +167,8 @@ const config = withMermaid(defineConfig({
             {
               text: 'Reference',
               items: [
-                { text: 'kimi Command', link: '/en/reference/kimi-command' },
-                { text: 'kimi acp Subcommand', link: '/en/reference/kimi-acp' },
+                { text: 'nori Command', link: '/en/reference/kimi-command' },
+                { text: 'nori acp Subcommand', link: '/en/reference/kimi-acp' },
                 { text: 'Built-in Tools', link: '/en/reference/tools' },
                 { text: 'Slash Commands', link: '/en/reference/slash-commands' },
                 { text: 'Keyboard Shortcuts', link: '/en/reference/keyboard' },
@@ -190,7 +192,7 @@ const config = withMermaid(defineConfig({
     outline: [2, 3],
     search: { provider: 'local' },
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/MoonshotAI/kimi-code' },
+      { icon: 'github', link: 'https://github.com/wangyuahn/nori-code' },
     ],
   },
 

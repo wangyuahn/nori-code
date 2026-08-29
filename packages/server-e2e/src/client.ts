@@ -249,6 +249,28 @@ export class DaemonClient {
   createChild(sid: string, body: SessionChildCreate = {}): Promise<Session> {
     return this.http.createChild(sid, body);
   }
+  mountSession(
+    sid: string,
+    body: { parent_session_id: string; role?: string; mandate?: string },
+  ): Promise<Session> {
+    return this.http.mountSession(sid, body);
+  }
+  unmountSession(sid: string): Promise<Session> {
+    return this.http.unmountSession(sid);
+  }
+  remountSession(
+    sid: string,
+    body: { parent_session_id: string; role?: string; mandate?: string },
+  ): Promise<Session> {
+    return this.http.remountSession(sid, body);
+  }
+  getSessionGraph(query?: {
+    include_archive?: boolean;
+    exclude_empty?: boolean;
+    status?: Session['status'];
+  }): Promise<{ nodes: Session[]; edges: Array<{ child_session_id: string; parent_session_id: string }> }> {
+    return this.http.getSessionGraph(query);
+  }
 
   // ── Terminals ──────────────────────────────────────────────────────────
   listTerminals(sid: string): Promise<ListTerminalsResponse> {

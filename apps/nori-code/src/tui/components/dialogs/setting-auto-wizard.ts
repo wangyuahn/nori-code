@@ -178,8 +178,9 @@ export class SettingAutoWizardComponent extends Container implements Focusable {
         title: 'Discuss',
         description:
           'Should new sessions start in Discuss?\n\n' +
-          '• On  — Nori starts in a read-only team meeting (TeamCreate / TeamDecide), then TeamAssign enters Code.\n' +
+          '• On  — After hiring partners, Nori can open a read-only team meeting, then assign work to enter Code.\n' +
           '• Off — Nori starts in Code. Faster for simple tasks.\n\n' +
+          'Discuss needs a department. An empty team cannot enter it.\n\n' +
           'Recommended: On for multi-step work, Off for quick fixes.',
         options: ON_OFF_OPTIONS,
         currentValue: appState.discussMode ? 'on' : 'off',

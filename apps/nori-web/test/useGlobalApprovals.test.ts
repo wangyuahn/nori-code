@@ -156,4 +156,32 @@ describe('useGlobalApprovals', () => {
     });
     expect(latest.requests).toHaveLength(0);
   });
+
+  it('keeps past-expires_at approvals visible and never aborts the session on refresh', async () => {
+    const stale = request('approval-stale', 'session-stale');
+    const list = vi.spyOn(api.approvals, 'list').mockResolvedValue({ items: [stale] });
+    const abortSession = vi.spyOn(api, 'abortSession').mockResolvedValue(undefined as never);
+    vi.spyOn(api, 'getWsUrl').mockResolvedValue('ws://localhost/api/v1/ws');
+    globalThis.WebSocket = TestWebSocket as unknown as typeof WebSocket;
+
+    let latest!: GlobalApprovalsResult;
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => {
+      root.render(createElement(Probe, {
+        currentSessionId: 'session-current',
+        onState: state => { latest = state; },
+      }));
+      await Promise.resolve();
+    });
+    TestWebSocket.latest.emitOpen();
+    await act(async () => { await latest.refresh(); });
+
+    expect(list).toHaveBeenCalled();
+    expect(stale.expires_at < new Date().toISOString()).toBe(true);
+    expect(latest.requests.map(item => item.approval_id)).toEqual(['approval-stale']);
+    expect(abortSession).not.toHaveBeenCalled();
+  });
 });

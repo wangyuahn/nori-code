@@ -22,6 +22,8 @@ import {
   type WizardAnswers,
 } from '../components/dialogs/setting-auto-wizard';
 import { SettingsSelectorComponent, type SettingsSelection } from '../components/dialogs/settings-selector';
+import { ApiKeyInputDialogComponent } from '../components/dialogs/api-key-input-dialog';
+import { TextInputDialogComponent } from '../components/dialogs/text-input-dialog';
 import {
   StartPermissionPromptComponent,
   goalStartOptions,
@@ -74,18 +76,44 @@ export async function handleDiscussCommand(host: SlashCommandHost, args: string)
   await applyDiscussMode(host, session, enabled);
 }
 
+/** `/plan` is the compatibility name for Discuss; `clear` leaves Discuss. */
+export async function handlePlanCommand(host: SlashCommandHost, args: string): Promise<void> {
+  const subcmd = args.trim().toLowerCase();
+  if (subcmd === 'clear') {
+    if (host.state.appState.discussMode) {
+      await handleDiscussCommand(host, 'off');
+      return;
+    }
+    host.showNotice(
+      'Plan mode was replaced by Discuss.',
+      'Hire partners, then Shift-Tab or /discuss to start a read-only meeting.',
+    );
+    return;
+  }
+  await handleDiscussCommand(host, args);
+}
+
 async function applyDiscussMode(host: SlashCommandHost, session: Session, enabled: boolean): Promise<void> {
   try {
     await session.setDiscussMode(enabled);
     host.setAppState({ discussMode: enabled });
     if (enabled) {
-      host.showNotice('Discuss: ON', 'Read-only team meeting is active.');
+      host.showNotice(
+        'Discuss: ON',
+        'Read-only team meeting. Members speak in turn; assigning work enters Code.',
+      );
       return;
     }
     host.showNotice('Discuss: OFF');
   } catch (error) {
     const msg = formatErrorMessage(error);
-    host.showError(`Failed to set Discuss: ${msg}`);
+    host.showError(msg.startsWith('Discuss ') ? msg : `Failed to set Discuss: ${msg}`);
+    try {
+      const status = await session.getStatus();
+      host.setAppState({ discussMode: status.discussMode });
+    } catch {
+      if (enabled) host.setAppState({ discussMode: false });
+    }
   }
 }
 
@@ -790,7 +818,16 @@ function handleSettingsSelection(host: SlashCommandHost, value: SettingsSelectio
       showWorkflowPicker(host);
       return;
     case 'team':
-      void showTeamPicker(host);
+      void showTeamSettingsPicker(host);
+      return;
+    case 'default-discuss':
+      void showDefaultDiscussPicker(host);
+      return;
+    case 'loop':
+      void showLoopLimitsPicker(host);
+      return;
+    case 'memory':
+      void showMemoryPicker(host);
       return;
   }
 }
@@ -849,9 +886,31 @@ export async function handleSettingCommand(host: SlashCommandHost, args: string)
     case 'note':
       showNoteRulesPicker(host);
       return;
+    case 'workflow':
+      showWorkflowPicker(host);
+      return;
     case 'team':
       await handleSettingTeam(host, subcommand, value);
       return;
+    case 'loop':
+      await handleSettingLoop(host, subcommand, value);
+      return;
+    case 'memory':
+      await showMemoryPicker(host);
+      return;
+    case 'default-discuss': {
+      if (subcommand === undefined) {
+        await showDefaultDiscussPicker(host);
+        return;
+      }
+      const next = parseOnOff(subcommand, true);
+      if (next === undefined) {
+        host.showError('Usage: /setting default-discuss on|off');
+        return;
+      }
+      await applyDefaultDiscussChoice(host, next);
+      return;
+    }
     default:
       host.showError(`Unknown setting: ${section}`);
       return;
@@ -892,6 +951,43 @@ async function applyReadOnlyChoice(host: SlashCommandHost, enabled: boolean): Pr
     host.showStatus(`Read-only mode: ${settings.toolsReadonly ? 'ON' : 'OFF'}`);
   } catch (error) {
     host.showError(`Failed to set read-only mode: ${formatErrorMessage(error)}`);
+  }
+}
+
+async function showDefaultDiscussPicker(host: SlashCommandHost): Promise<void> {
+  let current = true;
+  try {
+    current = (await host.harness.getConfig()).defaultDiscussMode ?? true;
+  } catch {
+    current = true;
+  }
+  host.mountEditorReplacement(
+    new ChoicePickerComponent({
+      title: 'Default Discuss',
+      options: [
+        { value: 'on', label: 'On', description: 'New sessions start in Discuss mode.' },
+        { value: 'off', label: 'Off', description: 'New sessions start ready to work.' },
+      ],
+      currentValue: current ? 'on' : 'off',
+      onSelect: (value) => {
+        host.restoreEditor();
+        if (value === 'on' || value === 'off') {
+          void applyDefaultDiscussChoice(host, value === 'on');
+        }
+      },
+      onCancel: () => {
+        host.restoreEditor();
+      },
+    }),
+  );
+}
+
+async function applyDefaultDiscussChoice(host: SlashCommandHost, enabled: boolean): Promise<void> {
+  try {
+    await host.harness.setConfig({ defaultDiscussMode: enabled });
+    host.showStatus(`Default Discuss: ${enabled ? 'ON' : 'OFF'}`);
+  } catch (error) {
+    host.showError(`Failed to set default Discuss: ${formatErrorMessage(error)}`);
   }
 }
 
@@ -936,7 +1032,19 @@ async function applySettingAutoWizardAnswers(
       coderWriteEnabled: answers.coderWrite,
     });
 
-    await session.setDiscussMode(answers.discussMode);
+    let discussMode = host.state.appState.discussMode;
+    try {
+      await session.setDiscussMode(answers.discussMode);
+      discussMode = answers.discussMode;
+    } catch (error) {
+      const msg = formatErrorMessage(error);
+      host.showError(msg.startsWith('Discuss ') ? msg : `Failed to set Discuss: ${msg}`);
+      try {
+        discussMode = (await session.getStatus()).discussMode;
+      } catch {
+        if (answers.discussMode) discussMode = false;
+      }
+    }
 
     const notifications = {
       ...host.state.appState.notifications,
@@ -952,7 +1060,7 @@ async function applySettingAutoWizardAnswers(
     host.setAppState({
       permissionMode: answers.permission,
       model: answers.model === '__none__' ? host.state.appState.model : answers.model,
-      discussMode: answers.discussMode,
+      discussMode,
       notifications,
       coderWriteEnabled: settings.coderWriteEnabled,
       toolsReadonly: settings.toolsReadonly,
@@ -993,7 +1101,7 @@ function showNoteRulesPicker(host: SlashCommandHost): void {
   host.mountEditorReplacement(
     new ChoicePickerComponent({
       title: 'Note Rules',
-      hint: '↑↓ navigate · Enter toggle · Esc back',
+      hint: '↑↓ navigate · Enter toggle · Esc cancel',
       options,
       onSelect: (value) => {
         const flagName = value as keyof NoteRuleFlags;
@@ -1071,7 +1179,7 @@ function showWorkflowPicker(host: SlashCommandHost): void {
   host.mountEditorReplacement(
     new ChoicePickerComponent({
       title: 'Workflow',
-      hint: '↑↓ navigate · Enter select · Esc back',
+      hint: '↑↓ navigate · Enter select · Esc cancel',
       options,
       onSelect: (value) => {
         host.restoreEditor();
@@ -1110,7 +1218,7 @@ function showReviewThresholdPicker(host: SlashCommandHost): void {
   host.mountEditorReplacement(
     new ChoicePickerComponent({
       title: 'Review Thresholds',
-      hint: '↑↓ navigate · Enter select · Esc back',
+      hint: '↑↓ navigate · Enter select · Esc cancel',
       options,
       onSelect: (value) => {
         if (value === 'suggestion') {
@@ -1118,6 +1226,8 @@ function showReviewThresholdPicker(host: SlashCommandHost): void {
           showNumberPicker(host, 'Suggestion Threshold', 0, 10, config.reviewSuggestionThreshold, (v) => {
             setWorkflowConfig(host, { reviewSuggestionThreshold: v });
             host.showStatus(`Suggestion threshold: ${v}`);
+          }, () => {
+            showReviewThresholdPicker(host);
           });
           return;
         }
@@ -1126,6 +1236,8 @@ function showReviewThresholdPicker(host: SlashCommandHost): void {
           showNumberPicker(host, 'Required Threshold', 0, 10, config.reviewRequiredThreshold, (v) => {
             setWorkflowConfig(host, { reviewRequiredThreshold: v });
             host.showStatus(`Required threshold: ${v}`);
+          }, () => {
+            showReviewThresholdPicker(host);
           });
           return;
         }
@@ -1144,13 +1256,12 @@ function showGateContinuationsPicker(host: SlashCommandHost): void {
   const options: ChoiceOption[] = Array.from({ length: 5 }, (_, i) => ({
     value: String(i + 1),
     label: `${i + 1}`,
-    description: i + 1 === config.maxReviewGateContinuations ? '(current)' : undefined,
   }));
 
   host.mountEditorReplacement(
     new ChoicePickerComponent({
       title: 'Max Gate Continuations',
-      hint: '↑↓ navigate · Enter select · Esc back',
+      hint: '↑↓ navigate · Enter select · Esc cancel',
       options,
       currentValue: String(config.maxReviewGateContinuations),
       onSelect: (value) => {
@@ -1174,17 +1285,17 @@ function showNumberPicker(
   max: number,
   current: number,
   onSelect: (value: number) => void,
+  onCancel: () => void,
 ): void {
   const options: ChoiceOption[] = Array.from({ length: max - min + 1 }, (_, i) => ({
     value: String(min + i),
     label: `${min + i}`,
-    description: min + i === current ? '(current)' : undefined,
   }));
 
   host.mountEditorReplacement(
     new ChoicePickerComponent({
       title,
-      hint: '↑↓ navigate · Enter select · Esc back',
+      hint: '↑↓ navigate · Enter select · Esc cancel',
       options,
       currentValue: String(current),
       onSelect: (value) => {
@@ -1193,7 +1304,7 @@ function showNumberPicker(
       },
       onCancel: () => {
         host.restoreEditor();
-        showReviewThresholdPicker(host);
+        onCancel();
       },
     }),
   );
@@ -1209,7 +1320,7 @@ const TEAM_MAX_DEPTH = 5;
 /** Fallback when unset — mirrors DEFAULT_TEAM_MAX_DEPTH in session/team-tree.ts. */
 const TEAM_DEFAULT_DEPTH = 2;
 
-async function showTeamPicker(host: SlashCommandHost): Promise<void> {
+export async function showTeamSettingsPicker(host: SlashCommandHost): Promise<void> {
   let depth = TEAM_DEFAULT_DEPTH;
   try {
     const config = await host.harness.getConfig({ reload: true });
@@ -1230,8 +1341,8 @@ async function showTeamPicker(host: SlashCommandHost): Promise<void> {
 
   host.mountEditorReplacement(
     new ChoicePickerComponent({
-      title: 'Team',
-      hint: '↑↓ navigate · Enter select · Esc back',
+      title: 'Team settings',
+      hint: '↑↓ navigate · Enter select · Esc cancel',
       options,
       onSelect: (value) => {
         host.restoreEditor();
@@ -1245,9 +1356,19 @@ async function showTeamPicker(host: SlashCommandHost): Promise<void> {
 }
 
 function showTeamDepthPicker(host: SlashCommandHost, current: number): void {
-  showNumberPicker(host, 'Max Department Depth', TEAM_MIN_DEPTH, TEAM_MAX_DEPTH, current, (v) => {
-    void applyTeamMaxDepth(host, v);
-  });
+  showNumberPicker(
+    host,
+    'Max Department Depth',
+    TEAM_MIN_DEPTH,
+    TEAM_MAX_DEPTH,
+    current,
+    (v) => {
+      void applyTeamMaxDepth(host, v);
+    },
+    () => {
+      void showTeamSettingsPicker(host);
+    },
+  );
 }
 
 async function applyTeamMaxDepth(host: SlashCommandHost, maxDepth: number): Promise<void> {
@@ -1265,7 +1386,7 @@ async function handleSettingTeam(
   value: string | undefined,
 ): Promise<void> {
   if (subcommand === undefined) {
-    await showTeamPicker(host);
+    await showTeamSettingsPicker(host);
     return;
   }
   if (subcommand !== 'max-depth') {
@@ -1278,4 +1399,564 @@ async function handleSettingTeam(
     return;
   }
   await applyTeamMaxDepth(host, parsed);
+}
+
+// ---------------------------------------------------------------------------
+// Loop limits (config.toml `loop_control`)
+// ---------------------------------------------------------------------------
+
+const LOOP_STEPS_PRESETS = [0, 8, 16, 32, 64, 128] as const;
+const LOOP_GOAL_TURNS_PRESETS = [0, 3, 5, 10, 20, 50] as const;
+const LOOP_IDLE_PRESETS = [0, 5, 10, 15, 30, 60] as const;
+const LOOP_IDLE_DEFAULT = 5;
+
+type LoopField = 'steps' | 'goal-turns' | 'idle';
+
+interface ResolvedLoopLimits {
+  readonly maxStepsPerTurn: number;
+  readonly goalMaxTurns: number;
+  readonly goalBackgroundIdleMinutes: number;
+}
+
+function isLoopField(value: string): value is LoopField {
+  return value === 'steps' || value === 'goal-turns' || value === 'idle';
+}
+
+function parseNonNegativeInt(value: string): number | undefined {
+  if (!/^\d+$/.test(value)) return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) return undefined;
+  return parsed;
+}
+
+function formatUnlimitedOrNumber(value: number): string {
+  return value === 0 ? 'Unlimited' : String(value);
+}
+
+function formatIdleMinutes(value: number): string {
+  return value === 0 ? 'Off' : String(value);
+}
+
+async function readLoopLimits(host: SlashCommandHost): Promise<ResolvedLoopLimits | undefined> {
+  try {
+    const config = await host.harness.getConfig({ reload: true });
+    return {
+      maxStepsPerTurn: config.loopControl?.maxStepsPerTurn ?? 0,
+      goalMaxTurns: config.loopControl?.goalMaxTurns ?? 0,
+      goalBackgroundIdleMinutes: config.loopControl?.goalBackgroundIdleMinutes ?? LOOP_IDLE_DEFAULT,
+    };
+  } catch (error) {
+    host.showError(`Failed to read loop limits: ${formatErrorMessage(error)}`);
+    return undefined;
+  }
+}
+
+export async function showLoopLimitsPicker(host: SlashCommandHost): Promise<void> {
+  const limits = await readLoopLimits(host);
+  if (limits === undefined) return;
+
+  const options: ChoiceOption[] = [
+    {
+      value: 'steps',
+      label: `Steps per turn: ${formatUnlimitedOrNumber(limits.maxStepsPerTurn)}`,
+      description: 'Maximum model/tool steps in one turn. 0 means unlimited.',
+    },
+    {
+      value: 'goal-turns',
+      label: `Goal turns: ${formatUnlimitedOrNumber(limits.goalMaxTurns)}`,
+      description: 'Default continuation-turn budget for new goals. 0 means unlimited.',
+    },
+    {
+      value: 'idle',
+      label: `Background idle: ${formatIdleMinutes(limits.goalBackgroundIdleMinutes)}`,
+      description:
+        'Minutes of no background progress before force-wake. Unset defaults to 5. 0 disables timeout wake only.',
+    },
+  ];
+
+  host.mountEditorReplacement(
+    new ChoicePickerComponent({
+      title: 'Loop limits',
+      options,
+      onSelect: (value) => {
+        host.restoreEditor();
+        if (isLoopField(value)) void showLoopFieldPicker(host, value);
+      },
+      onCancel: () => {
+        host.restoreEditor();
+      },
+    }),
+  );
+}
+
+async function showLoopFieldPicker(host: SlashCommandHost, field: LoopField): Promise<void> {
+  const limits = await readLoopLimits(host);
+  if (limits === undefined) return;
+
+  const spec = loopFieldSpec(field, limits);
+  showPresetNumberPicker(
+    host,
+    spec.title,
+    spec.presets,
+    spec.current,
+    spec.formatLabel,
+    (value) => {
+      void applyLoopField(host, field, value);
+    },
+    () => {
+      void showLoopLimitsPicker(host);
+    },
+  );
+}
+
+function loopFieldSpec(
+  field: LoopField,
+  limits: ResolvedLoopLimits,
+): {
+  readonly title: string;
+  readonly presets: readonly number[];
+  readonly current: number;
+  readonly formatLabel: (value: number) => string;
+} {
+  switch (field) {
+    case 'steps':
+      return {
+        title: 'Steps per turn',
+        presets: LOOP_STEPS_PRESETS,
+        current: limits.maxStepsPerTurn,
+        formatLabel: formatUnlimitedOrNumber,
+      };
+    case 'goal-turns':
+      return {
+        title: 'Goal turns',
+        presets: LOOP_GOAL_TURNS_PRESETS,
+        current: limits.goalMaxTurns,
+        formatLabel: formatUnlimitedOrNumber,
+      };
+    case 'idle':
+      return {
+        title: 'Background idle (minutes)',
+        presets: LOOP_IDLE_PRESETS,
+        current: limits.goalBackgroundIdleMinutes,
+        formatLabel: formatIdleMinutes,
+      };
+  }
+}
+
+function showPresetNumberPicker(
+  host: SlashCommandHost,
+  title: string,
+  presets: readonly number[],
+  current: number,
+  formatLabel: (value: number) => string,
+  onSelect: (value: number) => void,
+  onCancel: () => void,
+): void {
+  const values = presets.includes(current)
+    ? [...presets]
+    : [...presets, current].toSorted((a, b) => a - b);
+  const options: ChoiceOption[] = values.map((n) => ({
+    value: String(n),
+    label: formatLabel(n),
+  }));
+
+  host.mountEditorReplacement(
+    new ChoicePickerComponent({
+      title,
+      options,
+      currentValue: String(current),
+      onSelect: (value) => {
+        host.restoreEditor();
+        onSelect(Number(value));
+      },
+      onCancel: () => {
+        host.restoreEditor();
+        onCancel();
+      },
+    }),
+  );
+}
+
+async function applyLoopField(host: SlashCommandHost, field: LoopField, value: number): Promise<void> {
+  try {
+    if (field === 'steps') {
+      await host.harness.setConfig({ loopControl: { maxStepsPerTurn: value } });
+      host.showStatus(`Steps per turn: ${formatUnlimitedOrNumber(value)}`);
+      return;
+    }
+    if (field === 'goal-turns') {
+      await host.harness.setConfig({ loopControl: { goalMaxTurns: value } });
+      host.showStatus(`Goal turns: ${formatUnlimitedOrNumber(value)}`);
+      return;
+    }
+    await host.harness.setConfig({ loopControl: { goalBackgroundIdleMinutes: value } });
+    host.showStatus(`Background idle: ${formatIdleMinutes(value)}`);
+  } catch (error) {
+    host.showError(`Failed to set loop limits: ${formatErrorMessage(error)}`);
+  }
+}
+
+async function handleSettingLoop(
+  host: SlashCommandHost,
+  subcommand: string | undefined,
+  value: string | undefined,
+): Promise<void> {
+  if (subcommand === undefined) {
+    await showLoopLimitsPicker(host);
+    return;
+  }
+  if (!isLoopField(subcommand)) {
+    host.showError('Usage: /setting loop [steps|goal-turns|idle] [n]');
+    return;
+  }
+  if (value === undefined) {
+    await showLoopFieldPicker(host, subcommand);
+    return;
+  }
+  const parsed = parseNonNegativeInt(value);
+  if (parsed === undefined) {
+    host.showError(`Usage: /setting loop ${subcommand} <n>`);
+    return;
+  }
+  await applyLoopField(host, subcommand, parsed);
+}
+
+// ---------------------------------------------------------------------------
+// Memory vector search (config.toml `memory`)
+// ---------------------------------------------------------------------------
+
+type MemoryProviderType = 'openai' | 'openai_responses';
+type MemoryField = 'vector' | 'format' | 'base-url' | 'api-key' | 'model';
+
+interface ResolvedMemoryConfig {
+  readonly vectorEnabled: boolean;
+  readonly providerType: MemoryProviderType;
+  readonly baseUrl: string;
+  readonly model: string;
+  readonly hasApiKey: boolean;
+}
+
+const MEMORY_FORMAT_OPTIONS: readonly { value: MemoryProviderType; label: string }[] = [
+  { value: 'openai', label: 'OpenAI compatible' },
+  { value: 'openai_responses', label: 'OpenAI Responses compatible' },
+];
+
+function isMemoryField(value: string): value is MemoryField {
+  return (
+    value === 'vector' ||
+    value === 'format' ||
+    value === 'base-url' ||
+    value === 'api-key' ||
+    value === 'model'
+  );
+}
+
+function isMemoryProviderType(value: string): value is MemoryProviderType {
+  return value === 'openai' || value === 'openai_responses';
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function displayOrUnset(value: string): string {
+  return value.length > 0 ? value : '(not set)';
+}
+
+function memoryFormatLabel(type: MemoryProviderType): string {
+  return MEMORY_FORMAT_OPTIONS.find((option) => option.value === type)?.label ?? type;
+}
+
+async function readMemoryConfig(host: SlashCommandHost): Promise<ResolvedMemoryConfig | undefined> {
+  try {
+    const config = await host.harness.getConfig({ reload: true });
+    const memory = config.memory;
+    const apiKey = memory?.apiKey?.trim() ?? '';
+    return {
+      vectorEnabled: memory?.vectorEnabled === true,
+      providerType: memory?.providerType === 'openai_responses' ? 'openai_responses' : 'openai',
+      baseUrl: memory?.baseUrl?.trim() ?? '',
+      model: memory?.model?.trim() ?? '',
+      hasApiKey: apiKey.length > 0,
+    };
+  } catch (error) {
+    host.showError(`Failed to read Memory settings: ${formatErrorMessage(error)}`);
+    return undefined;
+  }
+}
+
+export async function showMemoryPicker(host: SlashCommandHost): Promise<void> {
+  const memory = await readMemoryConfig(host);
+  if (memory === undefined) return;
+
+  const options: ChoiceOption[] = [
+    {
+      value: 'vector',
+      label: `Vector search: ${memory.vectorEnabled ? 'On' : 'Off'}`,
+      description: 'Combine semantic matches with full-text results and links.',
+    },
+    {
+      value: 'format',
+      label: `API format: ${memoryFormatLabel(memory.providerType)}`,
+      description: 'Protocol used only for embedding requests.',
+    },
+    {
+      value: 'base-url',
+      label: `Base URL: ${displayOrUnset(memory.baseUrl)}`,
+      description: 'Independent endpoint for embedding requests.',
+    },
+    {
+      value: 'api-key',
+      label: `API Key: ${memory.hasApiKey ? 'stored' : '(not set)'}`,
+      description: memory.hasApiKey
+        ? 'A key is stored. Enter a new value only to replace it.'
+        : 'Stored separately from chat provider keys.',
+    },
+    {
+      value: 'model',
+      label: `Embedding model: ${displayOrUnset(memory.model)}`,
+      description: 'Model used to create Memory vectors.',
+    },
+  ];
+
+  host.mountEditorReplacement(
+    new ChoicePickerComponent({
+      title: 'Memory',
+      options,
+      onSelect: (value) => {
+        host.restoreEditor();
+        if (isMemoryField(value)) void openMemoryField(host, value);
+      },
+      onCancel: () => {
+        host.restoreEditor();
+      },
+    }),
+  );
+}
+
+async function openMemoryField(host: SlashCommandHost, field: MemoryField): Promise<void> {
+  switch (field) {
+    case 'vector':
+      await showMemoryVectorPicker(host);
+      return;
+    case 'format':
+      await showMemoryFormatPicker(host);
+      return;
+    case 'base-url':
+      await showMemoryBaseUrlInput(host);
+      return;
+    case 'api-key':
+      await showMemoryApiKeyInput(host);
+      return;
+    case 'model':
+      await showMemoryModelInput(host);
+      return;
+  }
+}
+
+function firstMissingMemoryVectorField(
+  memory: ResolvedMemoryConfig,
+): Exclude<MemoryField, 'vector' | 'format'> | undefined {
+  if (!isHttpUrl(memory.baseUrl)) return 'base-url';
+  if (!memory.hasApiKey) return 'api-key';
+  if (memory.model.length === 0) return 'model';
+  return undefined;
+}
+
+function memoryVectorFieldError(field: Exclude<MemoryField, 'vector' | 'format'>): string {
+  if (field === 'base-url') return 'Vector search needs an http(s) Base URL.';
+  if (field === 'api-key') return 'Vector search needs an API key.';
+  return 'Vector search needs an embedding model.';
+}
+
+async function showMemoryVectorPicker(host: SlashCommandHost): Promise<void> {
+  const memory = await readMemoryConfig(host);
+  if (memory === undefined) return;
+
+  host.mountEditorReplacement(
+    new ChoicePickerComponent({
+      title: 'Vector search',
+      options: [
+        {
+          value: 'on',
+          label: 'On',
+          description: 'Vector + full text + links.',
+        },
+        {
+          value: 'off',
+          label: 'Off',
+          description: 'Full text + links only.',
+        },
+      ],
+      currentValue: memory.vectorEnabled ? 'on' : 'off',
+      onSelect: (value) => {
+        host.restoreEditor();
+        if (value === 'on' || value === 'off') {
+          void applyMemoryVectorEnabled(host, value === 'on');
+        }
+      },
+      onCancel: () => {
+        host.restoreEditor();
+        void showMemoryPicker(host);
+      },
+    }),
+  );
+}
+
+async function applyMemoryVectorEnabled(host: SlashCommandHost, enabled: boolean): Promise<void> {
+  if (enabled) {
+    const memory = await readMemoryConfig(host);
+    if (memory === undefined) return;
+    const missing = firstMissingMemoryVectorField(memory);
+    if (missing !== undefined) {
+      host.showError(memoryVectorFieldError(missing));
+      await openMemoryField(host, missing);
+      return;
+    }
+  }
+  try {
+    await host.harness.setConfig({ memory: { vectorEnabled: enabled } });
+    host.showStatus(`Memory vector search: ${enabled ? 'ON' : 'OFF'}`);
+  } catch (error) {
+    host.showError(`Failed to set Memory vector search: ${formatErrorMessage(error)}`);
+    return;
+  }
+  await showMemoryPicker(host);
+}
+
+async function showMemoryFormatPicker(host: SlashCommandHost): Promise<void> {
+  const memory = await readMemoryConfig(host);
+  if (memory === undefined) return;
+
+  host.mountEditorReplacement(
+    new ChoicePickerComponent({
+      title: 'API format',
+      options: MEMORY_FORMAT_OPTIONS.map((option) => ({
+        value: option.value,
+        label: option.label,
+      })),
+      currentValue: memory.providerType,
+      onSelect: (value) => {
+        host.restoreEditor();
+        if (isMemoryProviderType(value)) void applyMemoryFormat(host, value);
+      },
+      onCancel: () => {
+        host.restoreEditor();
+        void showMemoryPicker(host);
+      },
+    }),
+  );
+}
+
+async function applyMemoryFormat(host: SlashCommandHost, providerType: MemoryProviderType): Promise<void> {
+  try {
+    await host.harness.setConfig({ memory: { providerType } });
+    host.showStatus(`Memory API format: ${memoryFormatLabel(providerType)}`);
+  } catch (error) {
+    host.showError(`Failed to set Memory API format: ${formatErrorMessage(error)}`);
+    return;
+  }
+  await showMemoryPicker(host);
+}
+
+async function showMemoryBaseUrlInput(host: SlashCommandHost): Promise<void> {
+  const memory = await readMemoryConfig(host);
+  if (memory === undefined) return;
+
+  host.mountEditorReplacement(
+    new TextInputDialogComponent({
+      title: 'Memory Base URL',
+      subtitle: 'http(s) endpoint for embedding requests.',
+      initialValue: memory.baseUrl,
+      allowEmpty: true,
+      onDone: (result) => {
+        host.restoreEditor();
+        if (result.kind === 'cancel') {
+          void showMemoryPicker(host);
+          return;
+        }
+        void applyMemoryBaseUrl(host, result.value);
+      },
+    }),
+  );
+}
+
+async function applyMemoryBaseUrl(host: SlashCommandHost, baseUrl: string): Promise<void> {
+  try {
+    await host.harness.setConfig({ memory: { baseUrl } });
+    host.showStatus(`Memory Base URL: ${displayOrUnset(baseUrl)}`);
+  } catch (error) {
+    host.showError(`Failed to set Memory Base URL: ${formatErrorMessage(error)}`);
+    return;
+  }
+  await showMemoryPicker(host);
+}
+
+async function showMemoryApiKeyInput(host: SlashCommandHost): Promise<void> {
+  const memory = await readMemoryConfig(host);
+  if (memory === undefined) return;
+
+  const subtitleLines = memory.hasApiKey
+    ? ['A key is stored. Enter a new value only to replace it.', 'Esc keeps the stored key.']
+    : ['Stored separately from chat provider keys.'];
+
+  host.mountEditorReplacement(
+    new ApiKeyInputDialogComponent('Memory', subtitleLines, (result) => {
+      host.restoreEditor();
+      if (result.kind === 'cancel') {
+        void showMemoryPicker(host);
+        return;
+      }
+      void applyMemoryApiKey(host, result.value);
+    }),
+  );
+}
+
+async function applyMemoryApiKey(host: SlashCommandHost, apiKey: string): Promise<void> {
+  try {
+    await host.harness.setConfig({ memory: { apiKey } });
+    host.showStatus('Memory API key saved.');
+  } catch (error) {
+    host.showError(`Failed to set Memory API key: ${formatErrorMessage(error)}`);
+    return;
+  }
+  await showMemoryPicker(host);
+}
+
+async function showMemoryModelInput(host: SlashCommandHost): Promise<void> {
+  const memory = await readMemoryConfig(host);
+  if (memory === undefined) return;
+
+  host.mountEditorReplacement(
+    new TextInputDialogComponent({
+      title: 'Embedding model',
+      subtitle: 'Model used to create Memory vectors.',
+      initialValue: memory.model,
+      allowEmpty: true,
+      onDone: (result) => {
+        host.restoreEditor();
+        if (result.kind === 'cancel') {
+          void showMemoryPicker(host);
+          return;
+        }
+        void applyMemoryModel(host, result.value);
+      },
+    }),
+  );
+}
+
+async function applyMemoryModel(host: SlashCommandHost, model: string): Promise<void> {
+  try {
+    await host.harness.setConfig({ memory: { model } });
+    host.showStatus(`Memory embedding model: ${displayOrUnset(model)}`);
+  } catch (error) {
+    host.showError(`Failed to set Memory embedding model: ${formatErrorMessage(error)}`);
+    return;
+  }
+  await showMemoryPicker(host);
 }

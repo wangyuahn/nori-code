@@ -19,7 +19,7 @@ export type TeamCreateInput = z.infer<typeof TeamCreateInputSchema>;
 
 export class TeamCreateTool implements BuiltinTool<TeamCreateInput> {
   readonly name = 'TeamCreate' as const;
-  readonly description = 'Hire durable members into your own department. Each member requires a unique non-empty name, role, and mandate. Hire only who the work actually needs: every extra member is one more position to reconcile in every discussion. Fails once the configured team depth limit is reached.';
+  readonly description = 'Hire durable members into your own department. Each member becomes a real child session mounted under you (visible on the conversation map) and keeps Team Discuss/Assign. Each member requires a unique non-empty name, role, and mandate. Hire only who the work actually needs: every extra member is one more position to reconcile in every discussion. Fails once the configured team depth limit is reached.';
   readonly parameters = toInputJsonSchema(TeamCreateInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}
@@ -28,7 +28,15 @@ export class TeamCreateTool implements BuiltinTool<TeamCreateInput> {
     return {
       description: `Creating ${String(args.members.length)} team partner(s)`,
       approvalRule: this.name,
-      execute: async () => ({ output: JSON.stringify({ members: await this.host.createTeam(args.members) }) }),
+      execute: async () => ({
+        output: JSON.stringify({
+          members: (await this.host.createTeam(args.members)).map((member) => ({
+            agent_id: member.agentId,
+            session_id: member.sessionId ?? null,
+            identity: member.identity,
+          })),
+        }),
+      }),
     };
   }
 }
@@ -42,7 +50,7 @@ export type TeamDismissInput = z.infer<typeof TeamDismissInputSchema>;
 
 export class TeamDismissTool implements BuiltinTool<TeamDismissInput> {
   readonly name = 'TeamDismiss' as const;
-  readonly description = 'Dismiss members of your own department. When a member is working, first call with confirm_active=false; retry with confirm_active=true only after confirming the interruption.';
+  readonly description = 'Dismiss members of your own department. Also deletes each member\'s mounted child session (the map node TeamCreate created). When a member is working, first call with confirm_active=false; retry with confirm_active=true only after confirming the interruption.';
   readonly parameters = toInputJsonSchema(TeamDismissInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}

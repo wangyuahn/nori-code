@@ -1,4 +1,4 @@
-import { buildSkillSlashCommands, isUserActivatableSkill } from '#/tui/commands/index';
+import { buildSkillSlashCommands, isUserActivatableSkill, skillNeedsArguments } from '#/tui/commands/index';
 import type { SkillSummary } from '@nori-code/sdk';
 import { describe, expect, it } from 'vitest';
 
@@ -101,5 +101,13 @@ describe('skill slash commands', () => {
 
     expect(built.commands.map((command) => command.name)).toEqual(['outer.inner']);
     expect(built.commandMap.get('outer.inner')).toBe('outer.inner');
+  });
+
+  it('treats prompt skills and marked descriptions as needing arguments', () => {
+    expect(skillNeedsArguments(skill('review', 'prompt'))).toBe(true);
+    expect(skillNeedsArguments(skill('theme', 'inline', { description: 'Create a theme [extra]' }))).toBe(
+      true,
+    );
+    expect(skillNeedsArguments(skill('mcp-config', 'inline'))).toBe(false);
   });
 });

@@ -1,10 +1,10 @@
 # @nori-code/sdk
 
-The TypeScript SDK for Kimi Code
+The TypeScript SDK for Nori Code.
 
-Part of the [Kimi Code](https://github.com/MoonshotAI/kimi-code) monorepo.
+For 2.0 department workflows and the conversation map, see [`docs/en/guides/team-engineering.md`](../../docs/en/guides/team-engineering.md).
 
-See the main repository for documentation, issues, and contribution guidelines.
+Part of the [nori-code](https://github.com/wangyuahn/nori-code) monorepo.
 
 ## License
 

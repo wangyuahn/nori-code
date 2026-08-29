@@ -9,6 +9,7 @@ import {
   type UndoChoice,
 } from '../components/dialogs/undo-selector';
 import { AssistantMessageComponent } from '../components/messages/assistant-message';
+import { DiscussUtteranceComponent } from '../components/messages/discuss-utterance';
 import { BackgroundAgentStatusComponent } from '../components/messages/background-agent-status';
 import { CronMessageComponent } from '../components/messages/cron-message';
 import { ReadGroupComponent } from '../components/messages/read-group';
@@ -413,6 +414,7 @@ function isUndoContextEntry(entry: TranscriptEntry): boolean {
   switch (entry.kind) {
     case 'user':
     case 'assistant':
+    case 'discuss_utterance':
     case 'tool_call':
     case 'thinking':
     case 'skill_activation':
@@ -471,6 +473,7 @@ function isUndoContextComponent(child: Component): boolean {
   return (
     child instanceof UserMessageComponent ||
     child instanceof AssistantMessageComponent ||
+    child instanceof DiscussUtteranceComponent ||
     child instanceof ThinkingComponent ||
     child instanceof ToolCallComponent ||
     child instanceof ReadGroupComponent ||

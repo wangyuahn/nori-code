@@ -77,6 +77,75 @@ const globGlance: GlanceFn = (_toolCall, result) => {
   return `${samples.join(', ')}${tail}`;
 };
 
+function recordNames(value: unknown, nameKey: string, extraKey?: string): string[] {
+  if (!Array.isArray(value)) return [];
+  const names: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null) continue;
+    const record = item as Record<string, unknown>;
+    const name = typeof record[nameKey] === 'string' ? record[nameKey] : undefined;
+    if (name === undefined || name.length === 0) continue;
+    const extra = extraKey !== undefined && typeof record[extraKey] === 'string' ? record[extraKey] : undefined;
+    names.push(extra !== undefined && extra.length > 0 ? `${name} (${extra})` : name);
+  }
+  return names;
+}
+
+const teamGlance: GlanceFn = (toolCall, _result) => {
+  const args = toolCall.args;
+  switch (toolCall.name) {
+    case 'TeamCreate': {
+      const names = recordNames(args['members'], 'name', 'role');
+      return names.length === 0 ? 'Hired partners' : `Hired ${names.join(', ')}`;
+    }
+    case 'TeamAssign': {
+      const assignments = Array.isArray(args['assignments']) ? args['assignments'] : [];
+      const parts: string[] = [];
+      for (const item of assignments) {
+        if (typeof item !== 'object' || item === null) continue;
+        const record = item as Record<string, unknown>;
+        const id = typeof record['agent_id'] === 'string' ? record['agent_id'] : undefined;
+        if (id === undefined) continue;
+        const task = typeof record['task'] === 'string' && record['task'].length > 0 ? record['task'] : 'cleared';
+        parts.push(`${id}: ${task}`);
+      }
+      return parts.length === 0 ? 'Updated assignments' : parts.join('; ');
+    }
+    case 'TeamDismiss': {
+      const ids = Array.isArray(args['agent_ids'])
+        ? args['agent_ids'].filter((value): value is string => typeof value === 'string')
+        : [];
+      return ids.length === 0 ? 'Dismissed partners' : `Dismissed ${ids.join(', ')}`;
+    }
+    case 'TeamDM':
+    case 'TeamBroadcast':
+    case 'TeamSpeak': {
+      const message = typeof args['message'] === 'string' ? args['message'] : '';
+      const trimmed = message.trim();
+      if (trimmed.length === 0) return 'Sent a team message';
+      return trimmed.length > 80 ? `${trimmed.slice(0, 77)}...` : trimmed;
+    }
+    case 'TeamDecide': {
+      const action = typeof args['action'] === 'string' ? args['action'] : 'decide';
+      const topic = typeof args['topic'] === 'string' ? args['topic'] : '';
+      return topic.length > 0 ? `${action}: ${topic}` : action;
+    }
+    case 'TeamStatus':
+      return 'Checked team status';
+    case 'TeamChat': {
+      const message = typeof args['message'] === 'string' ? args['message'] : '';
+      const trimmed = message.trim();
+      return trimmed.length === 0 ? 'Department chat' : trimmed.length > 80 ? `${trimmed.slice(0, 77)}...` : trimmed;
+    }
+    case 'TeamDiscussInvite':
+      return 'Invited a partner to Discuss';
+    case 'TeamDiscussKick':
+      return 'Removed a partner from Discuss';
+    default:
+      return '';
+  }
+};
+
 // ── Exports ──────────────────────────────────────────────────────────
 
 // Tools whose chip already conveys everything — the body is empty in
@@ -91,3 +160,4 @@ export const writeSummary: ResultRenderer = withGlance(null);
 // Tools that benefit from inline path samples below the chip.
 export const grepSummary: ResultRenderer = withGlance(grepGlance);
 export const globSummary: ResultRenderer = withGlance(globGlance);
+export const teamSummary: ResultRenderer = withGlance(teamGlance);

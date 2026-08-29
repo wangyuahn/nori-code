@@ -6,6 +6,28 @@ import type { AgentContextData, ContextMessage } from '../../agent/context';
 import type { JsonObject, ListSessionsPayload, SessionSummary } from '../../rpc';
 import type { AgentMeta, SessionMeta } from '../../session';
 import {
+  formatMountChangeNotice,
+  formatSessionSelf,
+  type MountChangeInfo,
+  type MountChangeRecipientRole,
+} from '../../session/session-self';
+import {
+  CHILD_SESSION_KIND,
+  CHILD_SESSION_KIND_KEY,
+  DEFAULT_MOUNT_MEMBER_MANDATE,
+  DEFAULT_MOUNT_MEMBER_ROLE,
+  MOUNT_MANDATE_KEY,
+  MOUNT_NAME_KEY,
+  MOUNT_ROLE_KEY,
+  normalizeOptionalMountString as normalizeOptionalString,
+  PARENT_SESSION_ID_KEY,
+  readMountMandate,
+  readMountName,
+  readMountRole,
+  readParentSessionId,
+} from '../../session/mount-metadata';
+import { withMountTreeMutation } from '../../session/mount-mutation';
+import {
   type CompactSessionRequest,
   type CompactSessionResponse,
   type Event,
@@ -19,6 +41,9 @@ import {
   type SessionChildCreate,
   type SessionCreate,
   type SessionFork,
+  type SessionGraphResponse,
+  type SessionMount,
+  type SessionRemount,
   type SessionStatus,
   type SessionStatusResponse,
   type SessionUpdate,
@@ -38,6 +63,7 @@ import { IPromptService, type AgentStatePatch } from '../prompt/prompt';
 import { IQuestionService } from '../question/question';
 import {
   ISessionService,
+  SessionMountCycleError,
   SessionNotFoundError,
   SessionUndoUnavailableError,
   toProtocolSession,
@@ -49,8 +75,13 @@ const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
 const DEFAULT_UNDO_MESSAGE_PAGE_SIZE = 50;
 const MAX_UNDO_MESSAGE_PAGE_SIZE = 100;
-const CHILD_SESSION_KIND = 'child';
 const MAIN_AGENT_ID = 'main';
+
+interface PromotedMount {
+  readonly sessionId: string;
+  readonly role: string | undefined;
+  readonly mandate: string | undefined;
+}
 
 function sessionAgentKey(sessionId: string, agentId: string): string {
   return `${sessionId}\u0000${agentId}`;
@@ -58,11 +89,6 @@ function sessionAgentKey(sessionId: string, agentId: string): string {
 
 function asJsonObject(value: Record<string, unknown>): JsonObject {
   return value as unknown as JsonObject;
-}
-
-function normalizeOptionalString(value: string | undefined): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed === '' ? undefined : trimmed;
 }
 
 function mapTokenUsage(usage: TokenUsage) {
@@ -166,6 +192,7 @@ export class SessionService extends Disposable implements ISessionService {
   private readonly _abortedTurns = new Set<string>();
   private readonly _lastActivityByAgent = new Map<string, string>();
   private readonly _activeBackgroundTasks = new Map<string, import('./session').SessionAgentActivity>();
+  private _mountMutationTail: Promise<void> = Promise.resolve();
   private _promptService: IPromptService | undefined;
 
   constructor(
@@ -375,6 +402,13 @@ export class SessionService extends Disposable implements ISessionService {
         });
         break;
       }
+      case 'event.session.mount_changed': {
+        const change = (event as { change?: MountChangeInfo }).change;
+        const recipientRole = (event as { recipient_role?: MountChangeRecipientRole }).recipient_role;
+        if (change === undefined || recipientRole === undefined) break;
+        void this.injectMountChangeNotice(sessionId, change, recipientRole);
+        break;
+      }
     }
   }
 
@@ -536,9 +570,7 @@ export class SessionService extends Disposable implements ISessionService {
     const all = await this.core.rpc.listSessions({});
     const sorted = all.toSorted((a, b) => b.updatedAt - a.updatedAt);
     const children = sorted.filter(
-      (summary) =>
-        summary.metadata?.['parent_session_id'] === id &&
-        summary.metadata?.['child_session_kind'] === CHILD_SESSION_KIND,
+      (summary) => readParentSessionId(summary.metadata) === id,
     );
 
     let pivotIndex = -1;
@@ -578,23 +610,579 @@ export class SessionService extends Disposable implements ISessionService {
     };
   }
 
+  /**
+   * Create an empty session under `id` and mount it (not a fork of transcript).
+   * TeamCreate uses the same empty-session + mount primitive.
+   */
   async createChild(id: string, input: SessionChildCreate): Promise<Session> {
     const parent = await this.get(id);
     const title = input.title ?? `Child: ${parent.title || parent.id}`;
-    const metadata = asJsonObject({
-      ...input.metadata,
-      parent_session_id: id,
-      child_session_kind: CHILD_SESSION_KIND,
-    });
-    const summary = await this.core.rpc.forkSession({
-      sessionId: id,
+    const cwd = typeof parent.metadata.cwd === 'string' ? parent.metadata.cwd : undefined;
+    if (cwd === undefined) {
+      throw new Error('SessionService.createChild: parent metadata.cwd is required');
+    }
+    const callerMeta = { ...(input.metadata ?? {}) };
+    delete callerMeta[PARENT_SESSION_ID_KEY];
+    delete callerMeta[CHILD_SESSION_KIND_KEY];
+    delete callerMeta[MOUNT_ROLE_KEY];
+    delete callerMeta[MOUNT_MANDATE_KEY];
+    const child = await this.create({
       title,
-      metadata,
+      metadata: {
+        cwd,
+        ...callerMeta,
+      },
     });
-    const meta = await this.tryGetMeta(summary.id);
-    const session = this._patchSessionStatus(toProtocolSession(summary, meta));
-    this.emitCreated(session);
-    return session;
+    try {
+      return await this.mount(child.id, {
+        parent_session_id: id,
+        role: input.role,
+        mandate: input.mandate,
+      });
+    } catch (error) {
+      try {
+        await this.delete(child.id);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          'Child session creation failed and could not be rolled back.',
+        );
+      }
+      throw error;
+    }
+  }
+
+  async mount(id: string, input: SessionMount): Promise<Session> {
+    return this.withMountMutation(() => this.applyMount(id, input, 'mount'));
+  }
+
+  async remount(id: string, input: SessionRemount): Promise<Session> {
+    return this.withMountMutation(() => this.applyMount(id, input, 'remount'));
+  }
+
+  async unmount(id: string): Promise<Session> {
+    return this.withMountMutation(() => this.unmountUnlocked(id));
+  }
+
+  private async unmountUnlocked(id: string): Promise<Session> {
+    const session = await this.get(id);
+    const oldParentId = readParentSessionId(session.metadata);
+    if (oldParentId === undefined) {
+      return session;
+    }
+    const previousRole = readMountRole(session.metadata);
+    const previousMandate = readMountMandate(session.metadata);
+    await this.writeMountMetadata(id, {
+      parentSessionId: null,
+      role: undefined,
+      mandate: undefined,
+      clearIdentity: true,
+    });
+    await this.syncMountWithRollback({
+      childSessionId: id,
+      oldParentSessionId: oldParentId,
+      newParentSessionId: null,
+      role: undefined,
+      mandate: undefined,
+      previousRole,
+      previousMandate,
+      afterSync: () => this.emitMountChanged({
+        sessionId: id,
+        oldParentSessionId: oldParentId,
+        newParentSessionId: null,
+        reason: 'unmount',
+      }),
+    });
+    return this.get(id);
+  }
+
+  async getGraph(query: SessionListQuery = {}): Promise<SessionGraphResponse> {
+    const all = await this.core.rpc.listSessions({
+      workDir: query.workDir,
+      includeArchive: query.includeArchive,
+    });
+    const sorted = all.toSorted((a, b) => b.updatedAt - a.updatedAt);
+    const visible = query.excludeEmpty ? sorted.filter((s) => s.lastPrompt) : sorted;
+    const nodes = await Promise.all(
+      visible.map(async (s) => {
+        const session = this._patchSessionStatus(toProtocolSession(s, await this.tryGetMeta(s.id)));
+        await this._attachUsage(session);
+        return session;
+      }),
+    );
+    const filtered =
+      query.status !== undefined ? nodes.filter((session) => session.status === query.status) : nodes;
+    const idSet = new Set(filtered.map((n) => n.id));
+    const edges: SessionGraphResponse['edges'] = [];
+    for (const node of filtered) {
+      const parentId = readParentSessionId(node.metadata);
+      if (parentId !== undefined && idSet.has(parentId)) {
+        edges.push({ child_session_id: node.id, parent_session_id: parentId });
+      }
+    }
+    return { nodes: filtered, edges };
+  }
+
+  private async applyMount(
+    id: string,
+    input: SessionMount,
+    reason: 'mount' | 'remount',
+  ): Promise<Session> {
+    if (input.parent_session_id === id) {
+      throw new SessionMountCycleError(id, input.parent_session_id);
+    }
+    const session = await this.get(id);
+    await this.get(input.parent_session_id);
+    const oldParentId = readParentSessionId(session.metadata) ?? null;
+    const oldRole = readMountRole(session.metadata);
+    const oldMandate = readMountMandate(session.metadata);
+    if (oldParentId === input.parent_session_id) {
+      const role = normalizeOptionalString(input.role);
+      const mandate = normalizeOptionalString(input.mandate);
+      if (role === undefined && mandate === undefined) {
+        // A previous mount may have persisted its parent link before the
+        // dual-write attach completed. Re-run the idempotent sync on every
+        // same-parent remount so that retrying the operation repairs that
+        // drift instead of treating it as a no-op.
+        await this.syncMountWithRollback({
+          childSessionId: id,
+          oldParentSessionId: oldParentId,
+          newParentSessionId: input.parent_session_id,
+          role: oldRole,
+          mandate: oldMandate,
+          previousRole: oldRole,
+          previousMandate: oldMandate,
+        });
+        return this.get(id);
+      }
+      await this.writeMountMetadata(id, {
+        parentSessionId: input.parent_session_id,
+        role,
+        mandate,
+        clearIdentity: false,
+      });
+      const updated = await this.get(id);
+      await this.syncMountWithRollback({
+        childSessionId: id,
+        oldParentSessionId: oldParentId,
+        newParentSessionId: input.parent_session_id,
+        role,
+        mandate,
+        previousRole: oldRole,
+        previousMandate: oldMandate,
+        afterSync: () => this.emitMountChanged({
+          sessionId: id,
+          oldParentSessionId: oldParentId,
+          newParentSessionId: input.parent_session_id,
+          role,
+          mandate,
+          reason,
+        }),
+      });
+      return updated;
+    }
+    await this.assertAcyclicMount(id, input.parent_session_id);
+    const role = normalizeOptionalString(input.role);
+    const mandate = normalizeOptionalString(input.mandate);
+    await this.writeMountMetadata(id, {
+      parentSessionId: input.parent_session_id,
+      role,
+      mandate,
+      clearIdentity: false,
+    });
+    const updated = await this.get(id);
+    await this.syncMountWithRollback({
+      childSessionId: id,
+      oldParentSessionId: oldParentId,
+      newParentSessionId: input.parent_session_id,
+      role,
+      mandate,
+      previousRole: oldRole,
+      previousMandate: oldMandate,
+      afterSync: () => this.emitMountChanged({
+        sessionId: id,
+        oldParentSessionId: oldParentId,
+        newParentSessionId: input.parent_session_id,
+        role,
+        mandate,
+        reason: oldParentId === null ? 'mount' : reason,
+      }),
+    });
+    return updated;
+  }
+
+  private withMountMutation<T>(operation: () => Promise<T>): Promise<T> {
+    return withMountTreeMutation(() => {
+      const result = this._mountMutationTail.catch(() => undefined).then(operation);
+      this._mountMutationTail = result.then(() => undefined, () => undefined);
+      return result;
+    });
+  }
+
+  private async assertAcyclicMount(sessionId: string, parentSessionId: string): Promise<void> {
+    const all = await this.core.rpc.listSessions({ includeArchive: true });
+    const parentById = new Map<string, string | undefined>();
+    for (const summary of all) {
+      parentById.set(summary.id, readParentSessionId(summary.metadata));
+    }
+    parentById.set(sessionId, parentSessionId);
+    let cursor: string | undefined = parentSessionId;
+    const seen = new Set<string>([sessionId]);
+    while (cursor !== undefined) {
+      if (seen.has(cursor)) {
+        throw new SessionMountCycleError(sessionId, parentSessionId);
+      }
+      seen.add(cursor);
+      cursor = parentById.get(cursor);
+    }
+  }
+
+  private async syncMountWithRollback(input: {
+    readonly childSessionId: string;
+    readonly oldParentSessionId: string | null;
+    readonly newParentSessionId: string | null;
+    readonly role: string | undefined;
+    readonly mandate: string | undefined;
+    readonly previousRole: string | undefined;
+    readonly previousMandate: string | undefined;
+    readonly afterSync?: () => Promise<void>;
+  }): Promise<void> {
+    try {
+      await this.syncTeamAgentsFromMountChange(input);
+      await input.afterSync?.();
+    } catch (error) {
+      try {
+        await this.writeMountMetadata(input.childSessionId, {
+          parentSessionId: input.oldParentSessionId,
+          role: input.previousRole,
+          mandate: input.previousMandate,
+          clearIdentity: true,
+        });
+        await this.syncTeamAgentsFromMountChange({
+          childSessionId: input.childSessionId,
+          oldParentSessionId: input.newParentSessionId,
+          newParentSessionId: input.oldParentSessionId,
+          role: input.previousRole,
+          mandate: input.previousMandate,
+        });
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          'Session mount synchronization failed and could not be rolled back.',
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async writeMountMetadata(
+    id: string,
+    opts: {
+      parentSessionId: string | null;
+      role: string | undefined;
+      mandate: string | undefined;
+      clearIdentity: boolean;
+    },
+  ): Promise<void> {
+    await this.core.rpc.resumeSession({ sessionId: id });
+    const meta = await this.tryGetMeta(id);
+    const summary = await this.requireSummary(id);
+    const nextCustom: Record<string, unknown> = {
+      ...(summary.metadata ?? {}),
+      ...(meta?.custom ?? {}),
+    };
+    if (opts.parentSessionId === null) {
+      delete nextCustom[PARENT_SESSION_ID_KEY];
+      delete nextCustom[CHILD_SESSION_KIND_KEY];
+    } else {
+      nextCustom[PARENT_SESSION_ID_KEY] = opts.parentSessionId;
+      nextCustom[CHILD_SESSION_KIND_KEY] = CHILD_SESSION_KIND;
+    }
+    if (opts.clearIdentity) {
+      delete nextCustom[MOUNT_ROLE_KEY];
+      delete nextCustom[MOUNT_MANDATE_KEY];
+      delete nextCustom[MOUNT_NAME_KEY];
+    }
+    if (opts.role !== undefined) nextCustom[MOUNT_ROLE_KEY] = opts.role;
+    if (opts.mandate !== undefined) nextCustom[MOUNT_MANDATE_KEY] = opts.mandate;
+    await this.core.rpc.updateSessionMetadata({
+      sessionId: id,
+      metadata: { custom: nextCustom },
+    });
+  }
+
+  private async emitMountChanged(input: {
+    sessionId: string;
+    oldParentSessionId: string | null;
+    newParentSessionId: string | null;
+    role?: string;
+    mandate?: string;
+    reason: 'mount' | 'unmount' | 'remount' | 'parent_deleted';
+  }): Promise<void> {
+    const change: MountChangeInfo = {
+      session_id: input.sessionId,
+      old_parent_session_id: input.oldParentSessionId,
+      new_parent_session_id: input.newParentSessionId,
+      role: input.role,
+      mandate: input.mandate,
+      reason: input.reason,
+    };
+    const recipients: Array<{ sessionId: string; role: MountChangeRecipientRole }> = [
+      { sessionId: input.sessionId, role: 'subject' },
+    ];
+    if (input.oldParentSessionId !== null) {
+      recipients.push({ sessionId: input.oldParentSessionId, role: 'old_parent' });
+    }
+    if (input.newParentSessionId !== null && input.newParentSessionId !== input.oldParentSessionId) {
+      recipients.push({ sessionId: input.newParentSessionId, role: 'new_parent' });
+    }
+    const all = await this.core.rpc.listSessions({});
+    for (const summary of all) {
+      if (readParentSessionId(summary.metadata) === input.sessionId) {
+        recipients.push({ sessionId: summary.id, role: 'direct_child' });
+      }
+    }
+    const seen = new Set<string>();
+    for (const recipient of recipients) {
+      if (seen.has(recipient.sessionId)) continue;
+      seen.add(recipient.sessionId);
+      this.eventService.publish({
+        type: 'event.session.mount_changed',
+        agentId: 'main',
+        sessionId: recipient.sessionId,
+        change,
+        recipient_role: recipient.role,
+      });
+    }
+  }
+
+  private async injectMountChangeNotice(
+    sessionId: string,
+    change: MountChangeInfo,
+    recipientRole: MountChangeRecipientRole,
+  ): Promise<void> {
+    try {
+      await this.core.rpc.resumeSession({ sessionId });
+      await this.core.rpc.injectSystemReminder({
+        sessionId,
+        agentId: MAIN_AGENT_ID,
+        content: formatMountChangeNotice(change, recipientRole),
+        variant: 'mount_changed',
+      });
+      await this.refreshSessionSelfPrompt(sessionId);
+    } catch {
+      // Dormant / missing sessions still receive the WS event; context inject is best-effort.
+    }
+  }
+
+  /** Re-render main system prompt so `<session_self>` matches latest mount metadata. */
+  private async refreshSessionSelfPrompt(sessionId: string): Promise<void> {
+    try {
+      const meta = await this.tryGetMeta(sessionId);
+      const custom = meta?.custom ?? {};
+      const parentId = readParentSessionId(custom) ?? readParentSessionId(
+        (await this.requireSummary(sessionId)).metadata,
+      );
+      const all = await this.core.rpc.listSessions({});
+      const parentById = new Map(
+        all.map((summary) => [summary.id, readParentSessionId(summary.metadata)] as const),
+      );
+      const children = all
+        .filter((summary) => readParentSessionId(summary.metadata) === sessionId)
+        .map((summary) => ({
+          sessionId: summary.id,
+          title: summary.title ?? summary.id,
+          role: readMountRole(summary.metadata),
+          mandate: readMountMandate(summary.metadata),
+        }));
+      let depth = 0;
+      let cursor = parentId;
+      const seen = new Set<string>([sessionId]);
+      while (cursor !== undefined && !seen.has(cursor)) {
+        depth += 1;
+        seen.add(cursor);
+        cursor = parentById.get(cursor);
+      }
+      const selfTitle = meta?.title
+        ?? (await this.requireSummary(sessionId)).title
+        ?? sessionId;
+      let parentTitle: string | undefined;
+      if (parentId !== undefined) {
+        const parentMeta = await this.tryGetMeta(parentId);
+        parentTitle = parentMeta?.title
+          ?? all.find((summary) => summary.id === parentId)?.title;
+      }
+      const block = formatSessionSelf({
+        sessionId,
+        title: selfTitle,
+        parentSessionId: parentId,
+        parentTitle,
+        role: readMountRole(custom) ?? readMountRole(
+          all.find((summary) => summary.id === sessionId)?.metadata,
+        ),
+        mandate: readMountMandate(custom) ?? readMountMandate(
+          all.find((summary) => summary.id === sessionId)?.metadata,
+        ),
+        depth,
+        position: parentId === undefined ? 'top-level' : 'member',
+        directChildren: children,
+      });
+      // Persist the latest identity block in metadata so the next turn / resume
+      // can splice it into the system prompt without another graph walk.
+      await this.core.rpc.updateSessionMetadata({
+        sessionId,
+        metadata: {
+          custom: {
+            ...custom,
+            session_self: block,
+          },
+        },
+      });
+    } catch {
+      // Best-effort identity refresh.
+    }
+  }
+
+  private async promoteChildrenOnDelete(parentId: string): Promise<PromotedMount[]> {
+    const all = await this.core.rpc.listSessions({ includeArchive: true });
+    const children = all.filter((summary) => readParentSessionId(summary.metadata) === parentId);
+    const promoted: PromotedMount[] = [];
+    try {
+      for (const child of children) {
+        const previousRole = readMountRole(child.metadata);
+        const previousMandate = readMountMandate(child.metadata);
+        await this.writeMountMetadata(child.id, {
+          parentSessionId: null,
+          role: undefined,
+          mandate: undefined,
+          clearIdentity: true,
+        });
+        await this.syncMountWithRollback({
+          childSessionId: child.id,
+          oldParentSessionId: parentId,
+          newParentSessionId: null,
+          role: undefined,
+          mandate: undefined,
+          previousRole,
+          previousMandate,
+          afterSync: () => this.emitMountChanged({
+            sessionId: child.id,
+            oldParentSessionId: parentId,
+            newParentSessionId: null,
+            reason: 'parent_deleted',
+          }),
+        });
+        promoted.push({ sessionId: child.id, role: previousRole, mandate: previousMandate });
+      }
+      return promoted;
+    } catch (error) {
+      const rollbackErrors = await this.restorePromotedMounts(parentId, promoted);
+      if (rollbackErrors.length > 0) {
+        throw new AggregateError(
+          [error, ...rollbackErrors],
+          'Child session promotion failed and could not be rolled back.',
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async restorePromotedMounts(parentId: string, promoted: readonly PromotedMount[]): Promise<unknown[]> {
+    const errors: unknown[] = [];
+    for (const child of promoted.toReversed()) {
+      try {
+        await this.applyMount(child.sessionId, {
+          parent_session_id: parentId,
+          role: child.role,
+          mandate: child.mandate,
+        }, 'remount');
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    return errors;
+  }
+
+  /**
+   * Mount tree is authority: rebuild dual-write team agents so Discuss/Assign
+   * match `parent_session_id`. Skipped on TeamCreate's createMountedMember path
+   * (that path dual-writes via createTeamMember instead).
+   */
+  private async syncTeamAgentsFromMountChange(input: {
+    readonly childSessionId: string;
+    readonly oldParentSessionId: string | null;
+    readonly newParentSessionId: string | null;
+    readonly role?: string;
+    readonly mandate?: string;
+  }): Promise<void> {
+    const sameParent =
+      input.oldParentSessionId !== null
+      && input.oldParentSessionId === input.newParentSessionId;
+    if (!sameParent) {
+      await this.detachMountedTeamAgentsEverywhere(input.childSessionId);
+    }
+    if (input.newParentSessionId === null) {
+      return;
+    }
+    const identity = await this.resolveMountMemberIdentity(
+      input.childSessionId,
+      input.role,
+      input.mandate,
+    );
+    await this.core.rpc.resumeSession({ sessionId: input.newParentSessionId });
+    await this.core.rpc.attachMountedTeamMember({
+      sessionId: input.newParentSessionId,
+      mountedSessionId: input.childSessionId,
+      identity,
+      teamLeaderAgentId: MAIN_AGENT_ID,
+    });
+  }
+
+  private async detachMountedTeamAgentsEverywhere(mountedSessionId: string): Promise<void> {
+    const all = await this.core.rpc.listSessions({ includeArchive: true });
+    for (const summary of all) {
+      if (summary.id === mountedSessionId) continue;
+      await this.core.rpc.resumeSession({ sessionId: summary.id });
+      await this.core.rpc.detachMountedTeamMember({
+        sessionId: summary.id,
+        mountedSessionId,
+      });
+    }
+  }
+
+  private async resolveMountMemberIdentity(
+    childSessionId: string,
+    role: string | undefined,
+    mandate: string | undefined,
+  ): Promise<{ name: string; role: string; mandate: string }> {
+    const meta = await this.tryGetMeta(childSessionId);
+    let summaryTitle: string | undefined;
+    let summaryMeta: Record<string, unknown> | undefined;
+    try {
+      const summary = await this.requireSummary(childSessionId);
+      summaryTitle = summary.title;
+      summaryMeta = summary.metadata;
+    } catch {
+      // Title falls back below.
+    }
+    const custom: Record<string, unknown> = {
+      ...(summaryMeta ?? {}),
+      ...(meta?.custom ?? {}),
+    };
+    const name =
+      normalizeOptionalString(typeof meta?.title === 'string' ? meta.title : undefined)
+      ?? normalizeOptionalString(summaryTitle)
+      ?? readMountName(custom)
+      ?? childSessionId;
+    return {
+      name,
+      role: normalizeOptionalString(role)
+        ?? readMountRole(custom)
+        ?? DEFAULT_MOUNT_MEMBER_ROLE,
+      mandate: normalizeOptionalString(mandate)
+        ?? readMountMandate(custom)
+        ?? DEFAULT_MOUNT_MEMBER_MANDATE,
+    };
   }
 
   private emitCreated(session: Session): void {
@@ -660,6 +1248,9 @@ export class SessionService extends Disposable implements ISessionService {
             ...(agent.discussion === undefined
               ? {}
               : { discussion_participant_agent_ids: [...agent.discussion.participantAgentIds] }),
+            ...(typeof agent.mountedSessionId === 'string' && agent.mountedSessionId.length > 0
+              ? { mounted_session_id: agent.mountedSessionId }
+              : {}),
           };
         }),
     );
@@ -858,15 +1449,56 @@ export class SessionService extends Disposable implements ISessionService {
   }
 
   async delete(id: string): Promise<{ deleted: true }> {
-    const all = await this.core.rpc.listSessions({ includeArchive: true });
-    const summary = all.find((session) => session.id === id);
-    if (summary === undefined) {
-      throw new SessionNotFoundError(id);
-    }
-    await this.core.rpc.deleteSession({ sessionId: id });
-    this._onDidClose.fire({ sessionId: id });
-    this._clearAgentRuntimeState(id);
-    return { deleted: true };
+    return this.withMountMutation(async () => {
+      const all = await this.core.rpc.listSessions({ includeArchive: true });
+      const summary = all.find((session) => session.id === id);
+      if (summary === undefined) {
+        throw new SessionNotFoundError(id);
+      }
+      const parentSessionId = readParentSessionId(summary.metadata);
+      const promoted = await this.promoteChildrenOnDelete(id);
+      try {
+        // A session created by TeamCreate has a second representation as a team
+        // agent in its owning session. Deleting it through the generic session API
+        // must remove that representation too; otherwise the parent keeps a
+        // member whose mounted_session_id points at a deleted session.
+        // The summary's parent link can already be stale while a dual-write
+        // agent still points at this session. Scan every host before deletion
+        // so the successful delete cannot leave an agent with a dead mount.
+        await this.detachMountedTeamAgentsEverywhere(id);
+        await this.core.rpc.deleteSession({ sessionId: id });
+      } catch (error) {
+        const rollbackErrors = await this.restorePromotedMounts(id, promoted);
+        if (parentSessionId !== undefined) {
+          try {
+            const identity = await this.resolveMountMemberIdentity(
+              id,
+              readMountRole(summary.metadata),
+              readMountMandate(summary.metadata),
+            );
+            await this.core.rpc.resumeSession({ sessionId: parentSessionId });
+            await this.core.rpc.attachMountedTeamMember({
+              sessionId: parentSessionId,
+              mountedSessionId: id,
+              identity,
+              teamLeaderAgentId: MAIN_AGENT_ID,
+            });
+          } catch (rollbackError) {
+            rollbackErrors.push(rollbackError);
+          }
+        }
+        if (rollbackErrors.length > 0) {
+          throw new AggregateError(
+            [error, ...rollbackErrors],
+            'Session deletion failed and could not be rolled back.',
+          );
+        }
+        throw error;
+      }
+      this._onDidClose.fire({ sessionId: id });
+      this._clearAgentRuntimeState(id);
+      return { deleted: true };
+    });
   }
 
   private async requireSummary(id: string): Promise<SessionSummary> {

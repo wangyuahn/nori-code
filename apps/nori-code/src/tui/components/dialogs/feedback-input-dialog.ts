@@ -29,7 +29,7 @@ export type FeedbackInputDialogResult =
 const TITLE = 'Send feedback to Nori Code';
 const SUBTITLE_DEFAULT = "Tell us what's working or what's not.";
 const SUBTITLE_EMPTY = 'Feedback cannot be empty.';
-const FOOTER = 'Enter to submit  ·  Esc to cancel';
+const FOOTER = 'Enter submit · Esc cancel';
 
 export class FeedbackInputDialogComponent extends Container implements Focusable {
   focused = false;

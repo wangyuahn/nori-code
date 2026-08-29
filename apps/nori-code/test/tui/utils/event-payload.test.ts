@@ -4,8 +4,10 @@ import { describe, expect, it } from 'vitest';
 import { STREAMING_ARGS_PREVIEW_MAX_CHARS } from '#/tui/constant/streaming';
 import {
   appendStreamingArgsPreview,
+  extractPartialJsonStringField,
   formatErrorMessage,
   formatErrorPayload,
+  isTurnScopedError,
   parseStreamingArgs,
 } from '#/tui/utils/event-payload';
 
@@ -15,6 +17,22 @@ describe('streaming tool argument payload helpers', () => {
       command: 'echo hi',
       path: '/tmp/a',
     });
+  });
+
+  it('parses TeamSpeak message and TeamDecide statement fields', () => {
+    expect(parseStreamingArgs('{"message":"Use a canvas.","action":"start"}')).toEqual({
+      message: 'Use a canvas.',
+      action: 'start',
+    });
+  });
+
+  it('extracts a partial JSON string before the closing quote arrives', () => {
+    expect(extractPartialJsonStringField('{"message":"Start with a dark canvas', 'message')).toBe(
+      'Start with a dark canvas',
+    );
+    expect(
+      extractPartialJsonStringField('{"statement":"Please propose an HTML\\nblack hole', 'statement'),
+    ).toBe('Please propose an HTML\nblack hole');
   });
 
   it('caps accumulated streaming preview text', () => {
@@ -67,5 +85,13 @@ describe('error payload formatting', () => {
     });
 
     expect(formatErrorMessage(error)).toBe(conciseFilteredMessage);
+  });
+});
+
+describe('isTurnScopedError', () => {
+  it('detects a trailing error stamped with details.turnId', () => {
+    expect(isTurnScopedError({ details: { turnId: 'turn-1' } })).toBe(true);
+    expect(isTurnScopedError({ details: { finishReason: 'filtered' } })).toBe(false);
+    expect(isTurnScopedError({})).toBe(false);
   });
 });

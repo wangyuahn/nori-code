@@ -12,11 +12,11 @@ import {
   Container,
   matchesKey,
   Key,
-  decodeKittyPrintable,
   type Focusable,
   truncateToWidth,
 } from '@nori-code/pi-tui';
 import { currentTheme } from '#/tui/theme';
+import { printableChar } from '#/tui/utils/printable-key';
 
 export interface KeyboardShortcut {
   readonly keys: string;
@@ -32,11 +32,16 @@ export interface HelpPanelCommand {
 /** Static list — keep in sync with the global editor bindings. */
 export const DEFAULT_KEYBOARD_SHORTCUTS: readonly KeyboardShortcut[] = [
   { keys: 'Shift-Tab', description: 'Toggle Discuss' },
+  { keys: '!', description: 'Run a shell command' },
   { keys: 'Ctrl-G', description: 'Edit in external editor ($VISUAL / $EDITOR)' },
+  { keys: 'Ctrl-V / Alt-V', description: 'Paste image from clipboard' },
   { keys: 'Ctrl-O', description: 'Toggle tool output expansion' },
+  { keys: 'Ctrl-Y', description: 'Toggle Discuss / Chat pane' },
   { keys: 'Ctrl-T', description: 'Expand / collapse the todo list (when truncated)' },
   { keys: 'Ctrl-S', description: 'Steer — inject a follow-up during streaming' },
   { keys: 'Shift-Enter / Ctrl-J', description: 'Insert newline' },
+  { keys: 'Ctrl--', description: 'Undo' },
+  { keys: 'Esc Esc', description: 'Open the undo selector' },
   { keys: 'Ctrl-C', description: 'Interrupt stream / clear input' },
   { keys: 'Ctrl-D', description: 'Exit (on empty input)' },
   { keys: 'Esc', description: 'Close dialogs / interrupt streaming' },
@@ -63,12 +68,12 @@ export class HelpPanelComponent extends Container implements Focusable {
   }
 
   handleInput(data: string): void {
-    const printable = decodeKittyPrintable(data) ?? data;
+    const decoded = printableChar(data);
     if (
       matchesKey(data, Key.escape) ||
       matchesKey(data, Key.enter) ||
-      printable === 'q' ||
-      printable === 'Q'
+      decoded === 'q' ||
+      decoded === 'Q'
     ) {
       this.opts.onClose();
       return;
@@ -107,7 +112,8 @@ export class HelpPanelComponent extends Container implements Focusable {
     const cmdWidth = Math.max(12, ...cmdLabels.map((l) => l.length));
     const lines: string[] = [
       accent('─'.repeat(width)),
-      currentTheme.boldFg('primary', ' help ') + muted('· Esc / Enter / q to cancel · ↑↓ scroll'),
+      currentTheme.boldFg('primary', ' Help'),
+      muted(' ↑↓ scroll · Esc cancel'),
       '',
       // Greeting
       `  ${dim('Nori is ready. Send a message to get started.')}`,
@@ -128,7 +134,7 @@ export class HelpPanelComponent extends Container implements Focusable {
 
     // Apply scroll windowing — keep the borders visible.
     const content = lines.slice(1, lines.length - 1);
-    const maxVisible = Math.max(5, this.opts.maxVisible ?? 24);
+    const maxVisible = Math.max(5, this.opts.maxVisible ?? 28);
     if (content.length > maxVisible) {
       this.scrollTop = Math.max(0, Math.min(this.scrollTop, content.length - maxVisible));
       const slice = content.slice(this.scrollTop, this.scrollTop + maxVisible);

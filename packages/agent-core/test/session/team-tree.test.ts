@@ -3,8 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   activeDiscussionAsParticipant,
   canCreateDepartment,
+  canCreateDepartmentInTree,
   DEFAULT_TEAM_MAX_DEPTH,
+  departmentDepth,
   directMessageRelation,
+  sessionMountDepth,
   teamDepth,
   type TeamDirectMessageRelation,
   type TeamTree,
@@ -75,6 +78,40 @@ describe('canCreateDepartment', () => {
     expect(DEFAULT_TEAM_MAX_DEPTH).toBe(2);
     expect(canCreateDepartment(tree, 'lead-a', DEFAULT_TEAM_MAX_DEPTH)).toBe(true);
     expect(canCreateDepartment(tree, 'a-one', DEFAULT_TEAM_MAX_DEPTH)).toBe(false);
+  });
+});
+
+describe('mounted department depth', () => {
+  it('uses the mount graph when the agent has a mapped session', () => {
+    const parentById = {
+      root: undefined,
+      member: 'root',
+      child: 'member',
+    };
+
+    expect(sessionMountDepth(parentById, 'child')).toBe(2);
+    expect(departmentDepth({
+      agents: tree,
+      agentId: 'lead-a',
+      parentById,
+      sessionIdForAgent: 'child',
+    })).toBe(2);
+    expect(canCreateDepartmentInTree({
+      agents: tree,
+      agentId: 'lead-a',
+      maxDepth: 3,
+      parentById,
+      sessionIdForAgent: 'child',
+    })).toBe(true);
+  });
+
+  it('falls back to the agent graph when the mount mapping is stale', () => {
+    expect(departmentDepth({
+      agents: tree,
+      agentId: 'a-one',
+      parentById: { root: undefined },
+      sessionIdForAgent: 'missing-session',
+    })).toBe(2);
   });
 });
 

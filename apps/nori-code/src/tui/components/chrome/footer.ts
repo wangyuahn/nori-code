@@ -2,8 +2,14 @@
  * Footer/status bar — multi-line status display at the bottom of the TUI.
  *
  * Layout:
- *   Line 1: [yolo] [plan] <model> <cwd>  <git-badge>  <shortcut hints>
+ *   Line 1: permission/discuss/readonly  [report!]  [team N]  speak:  model
+ *           then droppable extras (goal, task/question badges, cwd, git)
+ *           then rotating tips in leftover space.
  *   Line 2: context: XX.X% (tokens/max)
+ *
+ * When the terminal is too narrow, extras drop in this order:
+ *   tips → git → cwd → task/question badges → goal details.
+ * Mode, team, speak, and model stay as long as possible.
  */
 
 import type { Component } from '@nori-code/pi-tui';
@@ -16,6 +22,7 @@ import { isRainbowDancing, renderDanceFooterModel } from '#/tui/easter-eggs/danc
 import { currentTheme } from '#/tui/theme';
 import type { ColorPalette } from '#/tui/theme/colors';
 import type { AppState } from '#/tui/types';
+import { teamHasBlockingReports, teamMemberCount, teamSpeakingLabel } from '#/tui/utils/team-tree';
 import {
   createGitStatusCache,
   formatGitBadgeBase,
@@ -250,16 +257,33 @@ export class FooterComponent implements Component {
     const colors = currentTheme.palette;
     const state = this.state;
 
-    // ── Line 1: mode badges + model + [N task(s) running] + [N question(s) pending] + cwd + git + hints ──
-    const left: string[] = [];
+    // ── Line 1: keep mode / team / speak / model; drop extras by priority ──
+    const core: string[] = [];
     const modes: string[] = [];
     if (state.permissionMode === 'auto') modes.push(chalk.hex(colors.warning).bold('auto'));
     if (state.permissionMode === 'yolo') modes.push(chalk.hex(colors.warning).bold('yolo'));
     if (state.discussMode) modes.push(chalk.hex(colors.primary).bold('discuss'));
-    if (modes.length > 0) left.push(modes.join(' '));
+    else if (state.toolsReadonly) modes.push(chalk.hex(colors.textMuted).bold('readonly'));
+    if (modes.length > 0) core.push(modes.join(' '));
 
-    const goalBadge = formatGoalBadge(state.goal, colors, this.goalWallClockMs(state.goal));
-    if (goalBadge !== null) left.push(goalBadge);
+    if (teamHasBlockingReports(state.teamAgents)) {
+      core.push(chalk.hex(colors.warning)('[report!]'));
+    }
+
+    const hired = teamMemberCount(state.teamAgents);
+    if (hired > 0) {
+      core.push(chalk.hex(colors.textMuted)(`[team ${String(hired)}]`));
+    }
+    const viewingId = state.viewingAgentId;
+    if (viewingId !== undefined && viewingId !== 'main') {
+      const viewingName =
+        state.teamAgents.find((agent) => agent.agentId === viewingId)?.name ?? viewingId;
+      core.push(chalk.hex(colors.primary).bold(viewingName));
+    }
+    const speaking = teamSpeakingLabel(state.teamAgents);
+    if (speaking !== undefined) {
+      core.push(chalk.hex(colors.primary)(`speak:${speaking}`));
+    }
 
     const model = modelDisplayName(state);
     if (model) {
@@ -280,37 +304,55 @@ export class FooterComponent implements Component {
       if (isRainbowDancing()) {
         renderedModelLabel = renderDanceFooterModel(modelLabel);
       }
-      left.push(renderedModelLabel);
+      core.push(renderedModelLabel);
     }
 
-    // Background-task badges sit immediately before cwd. Shell processes and
-    // pending questions get separate badges so the user can distinguish them
-    // at a glance.
+    type ExtraId = 'goal' | 'tasks' | 'cwd' | 'git';
+    const extras: Array<{ id: ExtraId; text: string }> = [];
+
+    const goalBadge = formatGoalBadge(state.goal, colors, this.goalWallClockMs(state.goal));
+    if (goalBadge !== null) extras.push({ id: 'goal', text: goalBadge });
+
+    // Background-task badges. Shell processes and pending questions get
+    // separate badges so the user can distinguish them at a glance.
+    const taskBadges: string[] = [];
     if (this.backgroundProcessTaskCount > 0) {
       const noun = this.backgroundProcessTaskCount === 1 ? 'task' : 'tasks';
-      left.push(
+      taskBadges.push(
         chalk.hex(colors.primary)(`[${String(this.backgroundProcessTaskCount)} ${noun} running]`),
       );
     }
     if (this.backgroundQuestionTaskCount > 0) {
       const noun = this.backgroundQuestionTaskCount === 1 ? 'question' : 'questions';
-      left.push(
+      taskBadges.push(
         chalk.hex(colors.primary)(`[${String(this.backgroundQuestionTaskCount)} ${noun} pending]`),
       );
     }
+    if (taskBadges.length > 0) extras.push({ id: 'tasks', text: taskBadges.join('  ') });
 
     const cwd = shortenCwd(state.workDir);
-    if (cwd) left.push(chalk.hex(colors.textDim)(cwd));
+    if (cwd) extras.push({ id: 'cwd', text: chalk.hex(colors.textDim)(cwd) });
 
     const git = this.gitCache.getStatus();
     if (git !== null) {
-      left.push(formatFooterGitBadge(git, colors));
+      extras.push({ id: 'git', text: formatFooterGitBadge(git, colors) });
     }
 
-    const leftLine = left.join('  ');
+    const dropOrder: readonly ExtraId[] = ['git', 'cwd', 'tasks', 'goal'];
+    let keptExtras = extras;
+    const joinLeft = (extraParts: readonly { text: string }[]): string =>
+      [...core, ...extraParts.map((part) => part.text)].join('  ');
+
+    for (const drop of dropOrder) {
+      if (visibleWidth(joinLeft(keptExtras)) <= width) break;
+      keptExtras = keptExtras.filter((part) => part.id !== drop);
+    }
+
+    const leftLine = joinLeft(keptExtras);
     const leftWidth = visibleWidth(leftLine);
 
-    // Rotating hint tips, fill remaining space on line 1.
+    // Rotating hint tips, fill remaining space on line 1. Dropped first when
+    // the core + extras already fill the row.
     const { primary, pair } = tipsForIndex(currentTipIndex());
     const gap = 2;
     const remaining = Math.max(0, width - leftWidth - gap);

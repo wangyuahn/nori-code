@@ -1,57 +1,38 @@
 # Getting started
 
-## What is Kimi Code CLI
+## What is Nori Code CLI
 
-Kimi Code CLI is an AI agent that runs in the terminal, helping you carry out software development tasks and day-to-day terminal operations — reading and modifying code, running shell commands, searching files, fetching web pages, and autonomously planning and adjusting its next steps based on feedback as it works.
+Nori Code CLI is an AI coding agent that runs in the terminal. It helps you carry out software development tasks and day-to-day terminal operations — reading and modifying code, running shell commands, searching files, fetching web pages — and, in 2.0, coordinating a **department tree** of durable partner sessions on a **conversation map**.
 
 It fits scenarios such as:
 
 - **Writing and modifying code**: implementing new features, fixing bugs, completing refactors
 - **Understanding a project**: exploring an unfamiliar codebase and answering questions about architecture and implementation
+- **Team engineering**: hiring partners with `TeamCreate`, discussing before assigning work, and navigating sessions with `/team` and `/map`
 - **Automating tasks**: batch-processing files, running builds and tests, chaining multiple scripts together
 
-The CLI is written in TypeScript, distributed via npm, and runs on Node.js.
+The CLI is written in TypeScript, distributed via npm as `nori-code`, and runs on Node.js. The executable command is `nori`. Nori Work is the companion Electron desktop workbench.
 
 ## Installation
 
-Two installation options are available: the official install script (recommended, no pre-installed Node.js required) and a global npm install.
-
-::: tip Before you install
-Kimi Code CLI is a fully interactive TUI application. For the best visual experience, run it in a terminal with true-color and ligature support, such as [Kitty](https://sw.kovidgoyal.net/kitty/) or [Ghostty](https://ghostty.org/).
-:::
-
-### Install script (recommended)
-
-- **macOS / Linux**:
-
-```sh
-curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash
-```
-
-- **Windows (PowerShell)**:
-
-```powershell
-irm https://code.kimi.com/kimi-code/install.ps1 | iex
-```
-
-> On Windows, install [Git for Windows](https://gitforwindows.org/) before first launch. Kimi Code CLI uses the bundled Git Bash as its shell environment; if Git Bash is installed in a custom location, set `KIMI_SHELL_PATH` to the absolute path of `bash.exe`.
-
-The script automatically downloads the latest release, verifies the checksum, and places the `kimi` executable on your `PATH`.
-
-### npm installation
-
-Requires Node.js 22.19.0 or later:
+Install the published package globally with npm or pnpm. Requires Node.js 22.19.0 or later (the monorepo development engines may be stricter).
 
 ```sh
 node --version
-npm install -g @moonshot-ai/kimi-code
+npm install -g nori-code
 ```
 
 Or with pnpm:
 
 ```sh
-pnpm add -g @moonshot-ai/kimi-code
+pnpm add -g nori-code
 ```
+
+::: tip Before you install
+Nori Code CLI is a fully interactive TUI application. For the best visual experience, run it in a terminal with true-color and ligature support, such as [Kitty](https://sw.kovidgoyal.net/kitty/) or [Ghostty](https://ghostty.org/).
+:::
+
+> On Windows, install [Git for Windows](https://gitforwindows.org/) before first launch. Nori Code CLI uses the bundled Git Bash as its shell environment; if Git Bash is installed in a custom location, set `NORI_SHELL_PATH` to the absolute path of `bash.exe`.
 
 ## Upgrade and uninstall
 
@@ -61,51 +42,48 @@ After installation, verify that the executable is ready:
 nori --version
 ```
 
-**Upgrade**: run `kimi upgrade` — the CLI checks for the latest version and presents update options. Choose `Install update now` to upgrade based on your current install source. You can also upgrade directly via the package manager:
+**Upgrade**: run `nori upgrade` — the CLI checks for the latest version and presents update options. Choose `Install update now` to upgrade based on your current install source. You can also upgrade directly via the package manager:
 
 ```sh
-npm install -g @moonshot-ai/kimi-code@latest
+npm install -g nori-code@latest
 ```
 
-**Uninstall**: if you installed via the script, delete the `kimi` executable. If you installed via npm:
+**Uninstall**:
 
 ```sh
-npm uninstall -g @moonshot-ai/kimi-code
+npm uninstall -g nori-code
 ```
+
+Nori Work desktop builds are distributed separately on [GitHub Releases](https://github.com/wangyuahn/nori-code/releases).
 
 ## First launch
 
-Move into your project directory and run `kimi` to start the interactive UI:
+Move into your project directory and run `nori` to start the interactive UI:
 
 ```sh
 cd your-project
-kimi
+nori
 ```
 
 To run a single instruction without entering the interactive UI, use `-p`:
 
 ```sh
-kimi -p "Take a look at this project's directory structure"
+nori -p "Take a look at this project's directory structure"
 ```
 
 To resume the previous session, add `-c`:
 
 ```sh
-kimi -c
+nori -c
 ```
 
-On first launch you need to configure an API source. In the interactive UI, enter `/login` to begin the login flow:
+On first launch you need to configure an API source. In the interactive UI, enter `/login` or `/provider` to begin:
 
 ```
 /login
 ```
 
-`/login` opens a platform selector supporting two options:
-
-- **Nori Code (OAuth)** — device-code flow; open the link on any device, sign in, and enter the code to authorize
-- **Nori Platform API key** — enter an API key from the platform console
-
-To sign out, enter `/logout` to clear the current credentials.
+`/login` opens a platform selector. Depending on your build you may see managed OAuth and/or API key options, plus other providers you add in config. To sign out, enter `/logout` to clear the current credentials.
 
 ::: tip Using other AI providers
 If you want to connect Anthropic, OpenAI, Google, or other providers, edit `~/.nori-code/config.toml` directly to configure the API key. See [Providers and models](../configuration/providers.md) for details. For the full reference of all config options, see [Configuration files](../configuration/config-files.md), [Environment variables](../configuration/env-vars.md), and [Configuration overrides](../configuration/overrides.md).
@@ -119,7 +97,7 @@ Once logged in, describe a task in natural language. A good starting point is to
 Take a look at this project's directory structure and briefly describe what each directory is for.
 ```
 
-Kimi Code CLI automatically calls file-reading, search, and other tools to browse the relevant content before responding. Read-only operations are executed automatically by default without requiring confirmation. The main Agent can also run bounded `Bash` checks under the normal permission flow, while direct `Write` and `Edit` calls are blocked when Nori read-only mode is on.
+Nori Code CLI automatically calls file-reading, search, and other tools to browse the relevant content before responding. Read-only operations are executed automatically by default without requiring confirmation. The main Agent can also run bounded `Bash` checks under the normal permission flow, while direct `Write` and `Edit` calls are blocked when Nori read-only mode is on.
 
 You can also describe a more concrete task directly:
 
@@ -127,7 +105,7 @@ You can also describe a more concrete task directly:
 Add a function in src/utils that converts any string to kebab-case, and add a unit test for it.
 ```
 
-Kimi Code CLI plans the steps, delegates implementation through `SubAgent` when the task needs code changes, runs the relevant checks, and tells you what it did at each step. Use `/setting readonly off` if you want the main Agent to edit files directly after approval.
+Nori Code CLI plans the steps, delegates implementation through `SubAgent` or hired team partners when the task needs code changes, runs the relevant checks, and tells you what it did at each step. Use `/setting readonly off` if you want the main Agent to edit files directly after approval.
 
 ::: tip Not sure what to do? Type `/help`
 Type `/help` at any time to open the built-in command and keyboard shortcut panel. Use `↑`/`↓` to browse and `Esc` to close. To exit, type `/exit`, press `Ctrl-C` twice, or press `Ctrl-D` with the input box empty.
@@ -143,6 +121,8 @@ For a first-time user, the following is all you need to know:
 | --- | --- |
 | `/new` | Start a new session, clearing the current context |
 | `/sessions` | Browse session history and choose one to resume |
+| `/team` | Open a hired partner's session or browse department reports |
+| `/map` | Browse the conversation map (session mounts) for this working directory |
 | `/model` | Switch the current model |
 | `/compact` | Manually compress the context to free up tokens |
 | `/fork` | Fork the current session, keeping history but continuing independently |
@@ -154,6 +134,7 @@ For a first-time user, the following is all you need to know:
 | `Esc` | Interrupt streaming output / close a popup |
 | `Ctrl-C` | Interrupt output; press twice while idle to exit |
 | `Shift-Tab` | Toggle Discuss |
+| `Ctrl-Y` | Show or hide the Discuss / Chat pane |
 | `Ctrl-S` | Inject a message mid-stream without waiting for the current response to finish |
 | `Ctrl-O` | Collapse / expand tool output |
 
@@ -161,10 +142,12 @@ For the full list, type `/help` or visit [Slash commands reference](../reference
 
 ## Where data is stored
 
-Kimi Code CLI stores its local data under `~/.kimi-code/` by default — config files, session records, logs, and the update cache. To move it elsewhere, point to a new path via the `KIMI_CODE_HOME` environment variable. For the full directory layout, see [Data locations](../configuration/data-locations.md) and [Environment variables](../configuration/env-vars.md).
+Nori Code CLI stores its local data under `~/.nori-code/` by default — config files, session records, logs, and the update cache. To move it elsewhere, point to a new path via the `NORI_CODE_HOME` environment variable. For the full directory layout, see [Data locations](../configuration/data-locations.md) and [Environment variables](../configuration/env-vars.md).
 
 ## Next steps
 
 - [Interaction and input](./interaction.md) — input box operations, approval flow, Discuss, and YOLO mode explained
+- [Team engineering](./team-engineering.md) — department tree, conversation map, Discuss/Assign, and `/team` / `/map`
+- [Migrating from kimi-cli](./migration.md) — 1.x → 2.0 team engineering notes and legacy kimi-cli data
 - [Sessions and context](./sessions.md) — resuming sessions, compressing context, exporting sessions
 - [Common use cases](./use-cases.md) — prompt examples for typical tasks

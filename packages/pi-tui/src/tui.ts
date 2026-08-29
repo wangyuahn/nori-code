@@ -1401,6 +1401,19 @@ export class TUI extends Container {
 			return;
 		}
 
+		// New content no longer reaches the old viewport. Differential
+		// `\r\n` line-clears would scroll the short remainder into
+		// scrollback — a blank screen whose scrollback still holds the
+		// pre-shrink buffer. Same failure for ctrl+o, /new|/clear,
+		// undoing many turns, and switching to a short session.
+		if (newLines.length <= prevViewportTop) {
+			logRedraw(
+				`shrink left viewport empty (new=${newLines.length} viewportTop=${prevViewportTop})`,
+			);
+			fullRender(true);
+			return;
+		}
+
 		// All changes are in deleted lines (nothing to render, just clear)
 		if (firstChanged >= newLines.length) {
 			if (this.previousLines.length > newLines.length) {
@@ -1468,6 +1481,18 @@ export class TUI extends Container {
 				}
 			}
 			if (visibleFirstChanged === -1) {
+				// Shrink can leave the old viewport past the new content (ctrl+o
+				// collapsing a long tool, /new replacing the transcript with
+				// welcome). Skipping the write would keep previousViewportTop in
+				// empty space — a blank screen whose scrollback still shows the
+				// pre-shrink buffer. Also handled by the early shrink guard above.
+				if (newLines.length <= prevViewportTop) {
+					logRedraw(
+						`shrink left viewport empty (new=${newLines.length} viewportTop=${prevViewportTop})`,
+					);
+					fullRender(true);
+					return;
+				}
 				logRedraw(`all changes above viewport (firstChanged=${firstChanged} < ${prevViewportTop})`);
 				this.positionHardwareCursor(cursorPos, newLines.length);
 				this.previousLines = newLines;
@@ -1479,6 +1504,13 @@ export class TUI extends Container {
 			}
 			logRedraw(`clamped firstChanged ${firstChanged} -> ${visibleFirstChanged} (viewportTop=${prevViewportTop})`);
 			firstChanged = visibleFirstChanged;
+			if (firstChanged >= newLines.length || newLines.length <= prevViewportTop) {
+				logRedraw(
+					`clamped shrink moved content above viewport (new=${newLines.length} viewportTop=${prevViewportTop} firstChanged=${firstChanged})`,
+				);
+				fullRender(true);
+				return;
+			}
 		}
 
 		// Render from first changed line to end
@@ -1576,13 +1608,22 @@ export class TUI extends Container {
 
 		// If we had more lines before, clear them and move cursor back
 		if (this.previousLines.length > newLines.length) {
+			const extraLines = this.previousLines.length - newLines.length;
+			// `\r\n` × extraLines while the cursor is in the visible viewport
+			// scrolls live content into scrollback when extraLines > height
+			// (ctrl+o collapsing a 100+ line tool, /new wiping a long
+			// transcript). Same recovery as the trailing-delete path above.
+			if (extraLines > height) {
+				logRedraw(`extraLines > height after mid-content shrink (${extraLines} > ${height})`);
+				fullRender(true);
+				return;
+			}
 			// Move to end of new content first if we stopped before it
 			if (renderEnd < newLines.length - 1) {
 				const moveDown = newLines.length - 1 - renderEnd;
 				buffer += `\x1b[${moveDown}B`;
 				finalCursorRow = newLines.length - 1;
 			}
-			const extraLines = this.previousLines.length - newLines.length;
 			for (let i = newLines.length; i < this.previousLines.length; i++) {
 				buffer += "\r\n\x1b[2K";
 			}

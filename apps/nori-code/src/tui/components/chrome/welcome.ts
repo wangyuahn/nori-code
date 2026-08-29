@@ -13,6 +13,7 @@ import { NORI_TERMINAL_LOGO, NORI_TERMINAL_LOGO_COLOR, PRODUCT_NAME } from '#/co
 import { isRainbowDancing, renderDanceWelcomeHeader } from '#/tui/easter-eggs/dance';
 import type { AppState } from '#/tui/types';
 import { currentTheme } from '#/tui/theme';
+import { teamMemberCount } from '#/tui/utils/team-tree';
 
 export class WelcomeComponent implements Component {
   private state: AppState;
@@ -39,9 +40,12 @@ export class WelcomeComponent implements Component {
       const model = isLoggedOut
         ? chalk.hex(currentTheme.palette.warning)('not set, run /provider')
         : (effectiveActiveModel?.displayName ?? effectiveActiveModel?.model ?? this.state.model);
-      return ['', title, prompt, `Model: ${model}`].map((line) =>
-        truncateToWidth(line, safeWidth, '…'),
-      );
+      const hired = teamMemberCount(this.state.teamAgents);
+      const lines = ['', title, prompt, `Model: ${model}`];
+      if (hired > 0) {
+        lines.push(formatWelcomeTeamLine(hired, this.state.discussMode));
+      }
+      return lines.map((line) => truncateToWidth(line, safeWidth, '…'));
     }
 
     const innerWidth = Math.max(1, safeWidth - 4);
@@ -89,6 +93,13 @@ export class WelcomeComponent implements Component {
       infoLines.push(labelStyle('MCP:       ') + this.state.mcpServersSummary);
     }
 
+    const hired = teamMemberCount(this.state.teamAgents);
+    if (hired > 0) {
+      infoLines.push(
+        labelStyle('Team: ') + `${String(hired)} · Discuss ${this.state.discussMode ? 'on' : 'off'}`,
+      );
+    }
+
     const contentLines: string[] = [...renderedHeaderLines, '', ...infoLines];
 
     const lines: string[] = [
@@ -110,4 +121,8 @@ export class WelcomeComponent implements Component {
 
     return lines.map((line) => truncateToWidth(line, safeWidth, '…'));
   }
+}
+
+function formatWelcomeTeamLine(count: number, discussMode: boolean): string {
+  return `Team: ${String(count)} · Discuss ${discussMode ? 'on' : 'off'}`;
 }

@@ -1,26 +1,26 @@
 # Environment variables
 
-Kimi Code CLI uses environment variables to control a small number of runtime behaviors — relocating the data directory, turning off telemetry, and temporarily switching models without touching the config file.
+Nori Code CLI uses environment variables to control a small number of runtime behaviors — relocating the data directory, turning off telemetry, and temporarily switching models without touching the config file.
 
 ::: warning Important: API keys are not configured here
 Credential variables such as `KIMI_API_KEY`, `ANTHROPIC_API_KEY`, and `OPENAI_API_KEY` are **not** read automatically from shell environment variables. Running `export KIMI_API_KEY=xxx` in the terminal does not give any provider its key — they must be written in `config.toml` under `[providers.<name>]` or the `[providers.<name>.env]` sub-table.
 
-The only exception is the `KIMI_MODEL_*` family, which is an explicit channel that *does* read credentials from the shell — see [Define a model from environment variables](#define-a-model-from-environment-variables-kimi-model).
+The only exception is the `NORI_MODEL_*` family, which is an explicit channel that *does* read credentials from the shell — see [Define a model from environment variables](#define-a-model-from-environment-variables-nori-model).
 
 For background, see [Config overrides: provider credentials](./overrides.md#provider-credentials).
 :::
 
 ## Core paths
 
-### `KIMI_CODE_HOME`
+### `NORI_CODE_HOME`
 
-Overrides the data root directory; the default is `~/.kimi-code`. Once set, the config file, sessions, logs, OAuth credentials, and all other data land under the new path:
+Overrides the data root directory; the default is `~/.nori-code`. Once set, the config file, sessions, logs, OAuth credentials, and all other data land under the new path:
 
 ```sh
-export KIMI_CODE_HOME="/path/to/custom/kimi-code"
+export NORI_CODE_HOME="/path/to/custom/nori-code"
 ```
 
-> Make sure the directory is writable. Multiple `kimi` instances sharing the same `KIMI_CODE_HOME` will share config and credential files.
+> Make sure the directory is writable. Multiple `nori` instances sharing the same `NORI_CODE_HOME` will share config and credential files.
 
 For the complete data directory structure, see [Data locations](./data-locations.md).
 
@@ -32,9 +32,9 @@ Set to `1` to turn off anonymous telemetry reporting (also accepts `true`, `yes`
 export NORI_DISABLE_TELEMETRY=1
 ```
 
-### `KIMI_MODEL_*` family
+### `NORI_MODEL_*` family
 
-Switch models temporarily without modifying `config.toml` — when `KIMI_MODEL_NAME` is set, the CLI synthesizes a temporary provider in memory; the change does not persist after restart. See [Define a model from environment variables](#define-a-model-from-environment-variables-kimi_model).
+Switch models temporarily without modifying `config.toml` — when `NORI_MODEL_NAME` is set, the CLI synthesizes a temporary provider in memory; the change does not persist after restart. See [Define a model from environment variables](#define-a-model-from-environment-variables-nori_model).
 
 ## Provider credential key names (written in config.toml)
 
@@ -75,44 +75,44 @@ This group of variables redirects OAuth authentication and managed service endpo
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
-| `KIMI_CODE_OAUTH_HOST` | OAuth auth host; highest priority | Falls back to `KIMI_OAUTH_HOST` when unset |
-| `KIMI_OAUTH_HOST` | OAuth auth host; fallback for `KIMI_CODE_OAUTH_HOST` | Falls back to `https://auth.kimi.com` when unset |
-| `KIMI_CODE_BASE_URL` | Managed API base URL used after OAuth login | `https://api.kimi.com/coding/v1` |
+| `NORI_CODE_OAUTH_HOST` | OAuth auth host; highest priority | Falls back to `KIMI_OAUTH_HOST` when unset |
+| `KIMI_OAUTH_HOST` | OAuth auth host; fallback for `NORI_CODE_OAUTH_HOST` | Falls back to `https://auth.kimi.com` when unset |
+| `NORI_CODE_BASE_URL` | Managed API base URL used after OAuth login | `https://api.kimi.com/coding/v1` |
 
 ::: warning
-`KIMI_CODE_BASE_URL` (OAuth-managed service, targeting `kimi.com`) and `KIMI_BASE_URL` (direct API key connection, targeting `moonshot.ai`) are two distinct variables. Use each one in its appropriate context.
+`NORI_CODE_BASE_URL` (OAuth-managed service, targeting `kimi.com`) and `KIMI_BASE_URL` (direct API key connection, targeting `moonshot.ai`) are two distinct variables. Use each one in its appropriate context.
 :::
 
-## Define a model from environment variables (`KIMI_MODEL_*`)
+## Define a model from environment variables (`NORI_MODEL_*`)
 
-Want to switch models for testing without touching `config.toml`? When `KIMI_MODEL_NAME` is set, the CLI synthesizes a temporary provider and model alias from the `KIMI_MODEL_*` variables in memory — nothing is written back to the config file. These variables take priority over `default_model` in `config.toml`, but the `-m <alias>` option at startup still has the highest priority.
+Want to switch models for testing without touching `config.toml`? When `NORI_MODEL_NAME` is set, the CLI synthesizes a temporary provider and model alias from the `NORI_MODEL_*` variables in memory — nothing is written back to the config file. These variables take priority over `default_model` in `config.toml`, but the `-m <alias>` option at startup still has the highest priority.
 
 ```sh
-export KIMI_MODEL_NAME="kimi-for-coding"
-export KIMI_MODEL_API_KEY="YOUR_API_KEY"
-export KIMI_MODEL_BASE_URL="https://api.example.com/v1"
-export KIMI_MODEL_MAX_CONTEXT_SIZE="262144"
-export KIMI_MODEL_CAPABILITIES="image_in,thinking"
-kimi
+export NORI_MODEL_NAME="kimi-for-coding"
+export NORI_MODEL_API_KEY="YOUR_API_KEY"
+export NORI_MODEL_BASE_URL="https://api.example.com/v1"
+export NORI_MODEL_MAX_CONTEXT_SIZE="262144"
+export NORI_MODEL_CAPABILITIES="image_in,thinking"
+nori
 ```
 
 Complete variable list:
 
 | Variable | Required | Purpose | Default |
 | --- | --- | --- | --- |
-| `KIMI_MODEL_NAME` | Yes (also the enable switch) | Model id sent to the API | — |
-| `KIMI_MODEL_API_KEY` | Yes | API key | — |
-| `KIMI_MODEL_PROVIDER_TYPE` | No | Provider type: `kimi`, `anthropic`, `openai` | `kimi` |
-| `KIMI_MODEL_BASE_URL` | No | API base URL | Each type has its own default |
-| `KIMI_MODEL_MAX_CONTEXT_SIZE` | No | Maximum context length (tokens) | `262144` (256 K) |
-| `KIMI_MODEL_CAPABILITIES` | No | Comma-separated capability tags, unioned with auto-detected capabilities | `image_in,thinking` |
-| `KIMI_MODEL_DISPLAY_NAME` | No | Name shown in `/model` | Falls back to `KIMI_MODEL_NAME` |
-| `KIMI_MODEL_MAX_OUTPUT_SIZE` | No | Per-request output cap (`anthropic` only) | Model default |
-| `KIMI_MODEL_REASONING_KEY` | No | Reasoning field name override (`openai` only) | Auto-detected |
-| `KIMI_MODEL_THINKING_EFFORT` | No | Thinking effort level: `low`/`medium`/`high`/`xhigh`/`max` | — |
-| `KIMI_MODEL_ADAPTIVE_THINKING` | No | Force adaptive thinking on or off (`anthropic` only) | Inferred from model name |
+| `NORI_MODEL_NAME` | Yes (also the enable switch) | Model id sent to the API | — |
+| `NORI_MODEL_API_KEY` | Yes | API key | — |
+| `NORI_MODEL_PROVIDER_TYPE` | No | Provider type: `kimi`, `anthropic`, `openai` | `kimi` |
+| `NORI_MODEL_BASE_URL` | No | API base URL | Each type has its own default |
+| `NORI_MODEL_MAX_CONTEXT_SIZE` | No | Maximum context length (tokens) | `262144` (256 K) |
+| `NORI_MODEL_CAPABILITIES` | No | Comma-separated capability tags, unioned with auto-detected capabilities | `image_in,thinking` |
+| `NORI_MODEL_DISPLAY_NAME` | No | Name shown in `/model` | Falls back to `NORI_MODEL_NAME` |
+| `NORI_MODEL_MAX_OUTPUT_SIZE` | No | Per-request output cap (`anthropic` only) | Model default |
+| `NORI_MODEL_REASONING_KEY` | No | Reasoning field name override (`openai` only) | Auto-detected |
+| `NORI_MODEL_THINKING_EFFORT` | No | Thinking effort level: `low`/`medium`/`high`/`xhigh`/`max` | — |
+| `NORI_MODEL_ADAPTIVE_THINKING` | No | Force adaptive thinking on or off (`anthropic` only) | Inferred from model name |
 
-If `KIMI_MODEL_NAME` is set but a required variable is missing, startup fails immediately with a clear error message.
+If `NORI_MODEL_NAME` is set but a required variable is missing, startup fails immediately with a clear error message.
 
 ## Runtime switches
 
@@ -121,19 +121,19 @@ Switches that control the behavior of subsystems such as telemetry, background t
 | Variable | Purpose | Valid values |
 | --- | --- | --- |
 | `NORI_DISABLE_TELEMETRY` | Disable anonymous telemetry reporting | `1`, `true`, `yes`, `y` (case-insensitive) |
-| `KIMI_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT` | Whether to keep background tasks when the session closes; takes higher priority than `config.toml`. The default is to stop them on exit | Truthy: `1`/`true`/`yes`/`on`; falsy: `0`/`false`/`no`/`off` |
-| `KIMI_CODE_PLUGIN_MARKETPLACE_URL` | Override the plugin marketplace JSON loaded by `/plugins`; useful for dev loopback servers, staging CDN files, or alternate marketplace directories | `https://code.kimi.com/kimi-code/plugins/marketplace.json`; also accepts `http://`, `file://` URLs, and local paths |
+| `NORI_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT` | Whether to keep background tasks when the session closes; takes higher priority than `config.toml`. The default is to stop them on exit | Truthy: `1`/`true`/`yes`/`on`; falsy: `0`/`false`/`no`/`off` |
+| `NORI_CODE_PLUGIN_MARKETPLACE_URL` | Override the plugin marketplace JSON loaded by `/plugins`; useful for dev loopback servers, staging CDN files, or alternate marketplace directories | empty by default (packaged marketplace fallback); also accepts `http://`, `file://` URLs, and local paths |
 | `NORI_CODE_SUBAGENT_MAX_CONCURRENCY` | Cap how many SubAgent children run concurrently during the initial ramp; leave unset for no cap | Positive integer; invalid values fail fast |
-| `KIMI_CODE_EXPERIMENTAL_FLAG` | Enable all registered experimental features for this process | `1`, `true`, `yes`, `on` |
-| `KIMI_CODE_EXPERIMENTAL_MICRO_COMPACTION` | Override [`[experimental].micro_compaction`](./config-files.md#experimental) for this process | Truthy or falsy |
-| `KIMI_SHELL_PATH` | Override the Git Bash path on Windows (used when auto-detection fails) | Absolute path |
-| `KIMI_MODEL_MAX_COMPLETION_TOKENS` | Hard cap on `max_completion_tokens` per LLM step; applies to the `kimi` provider only | Positive integer; `0` or negative disables clamping |
-| `KIMI_MODEL_TEMPERATURE` | Sampling temperature for every request; applies to the `kimi` provider only (global — independent of `KIMI_MODEL_NAME`) | Number, e.g. `0.3` |
-| `KIMI_MODEL_TOP_P` | Nucleus-sampling `top_p` for every request; applies to the `kimi` provider only (global) | Number, e.g. `0.95` |
-| `KIMI_MODEL_THINKING_EFFORT` | Force a specific thinking effort on the wire (`thinking.effort`), bypassing the model's declared `support_efforts`; applies to the `kimi` provider only, and only while Thinking is on | An effort value, e.g. `max` |
-| `KIMI_MODEL_THINKING_KEEP` | Moonshot preserved-thinking passthrough (`thinking.keep`); applies to the `kimi` provider only, and only while Thinking is on | A value the API accepts, e.g. `all` |
-| `KIMI_CODE_NO_AUTO_UPDATE` | Fully disable the update preflight — no check, background install, or prompt. Legacy alias `KIMI_CLI_NO_AUTO_UPDATE` is also honored | Truthy: `1`/`true`/`yes`/`on` |
-| `KIMI_DISABLE_CRON` | Disable the scheduled-task tool (`CronCreate` rejects new schedules; existing tasks do not fire) | `1` to disable |
+| `NORI_CODE_EXPERIMENTAL_FLAG` | Enable all registered experimental features for this process | `1`, `true`, `yes`, `on` |
+| `NORI_CODE_EXPERIMENTAL_MICRO_COMPACTION` | Override [`[experimental].micro_compaction`](./config-files.md#experimental) for this process | Truthy or falsy |
+| `NORI_SHELL_PATH` | Override the Git Bash path on Windows (used when auto-detection fails) | Absolute path |
+| `NORI_MODEL_MAX_COMPLETION_TOKENS` | Hard cap on `max_completion_tokens` per LLM step; applies to the `kimi` provider only | Positive integer; `0` or negative disables clamping |
+| `NORI_MODEL_TEMPERATURE` | Sampling temperature for every request; applies to the `kimi` provider only (global — independent of `NORI_MODEL_NAME`) | Number, e.g. `0.3` |
+| `NORI_MODEL_TOP_P` | Nucleus-sampling `top_p` for every request; applies to the `kimi` provider only (global) | Number, e.g. `0.95` |
+| `NORI_MODEL_THINKING_EFFORT` | Force a specific thinking effort on the wire (`thinking.effort`), bypassing the model's declared `support_efforts`; applies to the `kimi` provider only, and only while Thinking is on | An effort value, e.g. `max` |
+| `NORI_MODEL_THINKING_KEEP` | Moonshot preserved-thinking passthrough (`thinking.keep`); applies to the `kimi` provider only, and only while Thinking is on | A value the API accepts, e.g. `all` |
+| `NORI_CODE_NO_AUTO_UPDATE` | Fully disable the update preflight — no check, background install, or prompt. Legacy alias `KIMI_CLI_NO_AUTO_UPDATE` is also honored | Truthy: `1`/`true`/`yes`/`on` |
+| `NORI_DISABLE_CRON` | Disable the scheduled-task tool (`CronCreate` rejects new schedules; existing tasks do not fire) | `1` to disable |
 
 ## Diagnostic logs
 
@@ -141,11 +141,11 @@ These variables control log level and file rotation, read once at process startu
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
-| `KIMI_LOG_LEVEL` | Log level: `off`, `error`, `warn`, `info`, `debug` | `info` |
-| `KIMI_LOG_GLOBAL_MAX_BYTES` | Maximum bytes per global log file | `6291456` (6 MB) |
-| `KIMI_LOG_GLOBAL_FILES` | Number of global log files to retain | `5` |
-| `KIMI_LOG_SESSION_MAX_BYTES` | Maximum bytes per session log file | `5242880` (5 MB) |
-| `KIMI_LOG_SESSION_FILES` | Number of session log files to retain | `3` |
+| `NORI_LOG_LEVEL` | Log level: `off`, `error`, `warn`, `info`, `debug` | `info` |
+| `NORI_LOG_GLOBAL_MAX_BYTES` | Maximum bytes per global log file | `6291456` (6 MB) |
+| `NORI_LOG_GLOBAL_FILES` | Number of global log files to retain | `5` |
+| `NORI_LOG_SESSION_MAX_BYTES` | Maximum bytes per session log file | `5242880` (5 MB) |
+| `NORI_LOG_SESSION_FILES` | Number of session log files to retain | `3` |
 
 ## System environment variables
 
@@ -179,5 +179,5 @@ Stdio MCP servers that run as Node child processes honor `HTTP_PROXY` / `HTTPS_P
 ## Next steps
 
 - [Config overrides](./overrides.md) — how environment variables, CLI options, and the config file interact by priority
-- [Data locations](./data-locations.md) — directory structure affected by `KIMI_CODE_HOME`
+- [Data locations](./data-locations.md) — directory structure affected by `NORI_CODE_HOME`
 - [Providers and models](./providers.md) — full connection examples per provider type

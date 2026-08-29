@@ -19,6 +19,7 @@ import {
   globSummary,
   grepSummary,
   readSummary,
+  teamSummary,
   thinkSummary,
   webSearchSummary,
   writeSummary,
@@ -53,6 +54,18 @@ export function pickResultRenderer(toolName: string): ResultRenderer {
     case 'SetGoalBudget':
     case 'UpdateGoal':
       return goalSummary;
+    case 'TeamCreate':
+    case 'TeamAssign':
+    case 'TeamDismiss':
+    case 'TeamDM':
+    case 'TeamBroadcast':
+    case 'TeamSpeak':
+    case 'TeamDecide':
+    case 'TeamStatus':
+    case 'TeamChat':
+    case 'TeamDiscussInvite':
+    case 'TeamDiscussKick':
+      return teamSummary;
     default:
       return renderTruncated;
   }

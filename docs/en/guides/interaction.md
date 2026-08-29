@@ -1,6 +1,6 @@
 # Interaction and input
 
-Kimi Code CLI runs as an interactive TUI (terminal user interface) built around three components: the input box, the conversation view, and the status bar. This page covers how to enter text, paste media, navigate the approval flow, and switch between modes.
+Nori Code CLI runs as an interactive TUI (terminal user interface) built around three components: the input box, the conversation view, and the status bar. This page covers how to enter text, paste media, navigate the approval flow, and switch between modes.
 
 ## Input box basics
 
@@ -10,7 +10,7 @@ The input box accepts free-form text. Press `Enter` to send, or `Shift-Enter` / 
 
 ## Pasting images and video
 
-Kimi Code CLI supports pasting images and video directly into the input box, so you can discuss screenshots, UI mockups, architecture diagrams, or code demos without uploading or converting files first.
+Nori Code CLI supports pasting images and video directly into the input box, so you can discuss screenshots, UI mockups, architecture diagrams, or code demos without uploading or converting files first.
 
 **Video input is a distinctive Kimi Code capability** — you can paste a video clip and have the model analyze its content, UI flow, or code walkthrough.
 
@@ -81,6 +81,17 @@ The input box remains usable while the agent is thinking or calling tools, and s
 - **`Ctrl-S`**: inject the content in the input box into the running turn immediately, without waiting for it to finish
 - **`Esc` / `Ctrl-C`**: interrupt the current turn
 - **`Ctrl-O`**: globally toggle the collapsed/expanded state of tool output
+- **`Ctrl-Y`**: show or hide the Discuss / Chat pane (`/team` opens a partner session; hiding the pane does not leave that session)
+
+## Team engineering
+
+Nori Code CLI 2.0 adds a **department tree** of durable partner sessions alongside the existing approval and mode controls above. Hire partners with `TeamCreate`, gather statements in Discuss, assign execution with `TeamAssign`, and browse or remount sessions on the **conversation map** with `/map` (terminal) or the Web **Map** view.
+
+- **`/team`** — open a partner's session or browse department reports and Discuss speech
+- **`/map`** — manage session mounts (`parent_session_id`) for the current working directory
+- **Main read-only by default** — the lead coordinates; members execute after Discuss
+
+Full workflow, identity injection (`<session_self>`), and terminal/desktop coexistence notes: [Team engineering](./team-engineering.md).
 
 ## External editor
 

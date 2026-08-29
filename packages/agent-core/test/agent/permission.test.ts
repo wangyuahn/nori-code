@@ -42,28 +42,35 @@ function editArgs(path: string) {
 }
 
 describe('Agent permission', () => {
-  it('keeps readonly manual mode blocking writes but lets Bash and approved modes pass through', () => {
+  it('blocks Write/Edit under readonly in every permission mode; coder write unlocks non-main only', () => {
     const contextFor = (toolName: string) =>
       ({
         toolCall: { name: toolName },
       }) as PermissionPolicyContext;
-    const evaluate = (mode: PermissionMode, coderWriteEnabled: boolean) =>
+    const denyMessage =
+      'Tool "Write" is blocked while readonly is on. Assign the work with TeamAssign, or run `/setting readonly off` if the main Agent should write directly.';
+    const evaluate = (
+      mode: PermissionMode,
+      coderWriteEnabled: boolean,
+      type: Agent['type'] = 'main',
+    ) =>
       new ReadonlyPermissionPolicy({
+        type,
         permission: { toolsReadonly: true, mode },
         coderWriteEnabled,
       } as unknown as Agent).evaluate(contextFor('Write'));
 
-    expect(evaluate('manual', false)).toEqual({
-      kind: 'deny',
-      message: 'Tool "Write" is not available because tools are set to readonly.',
-    });
-    expect(evaluate('manual', true)).toBeUndefined();
-    expect(evaluate('auto', false)).toBeUndefined();
-    expect(evaluate('yolo', false)).toBeUndefined();
+    for (const mode of ['manual', 'auto', 'yolo'] as const) {
+      expect(evaluate(mode, false)).toEqual({ kind: 'deny', message: denyMessage });
+      // Main keeps readonly even when coder write is on — that switch is for members.
+      expect(evaluate(mode, true, 'main')).toEqual({ kind: 'deny', message: denyMessage });
+      expect(evaluate(mode, true, 'sub')).toBeUndefined();
+    }
 
     expect(
       new ReadonlyPermissionPolicy({
-        permission: { toolsReadonly: true, mode: 'manual' },
+        type: 'main',
+        permission: { toolsReadonly: true, mode: 'auto' },
         coderWriteEnabled: false,
       } as unknown as Agent).evaluate(contextFor('Bash')),
     ).toBeUndefined();
@@ -77,7 +84,9 @@ describe('Agent permission', () => {
       teamWriteLocked: true,
     } as unknown as Agent);
 
-    expect(policy.evaluate(contextFor('Write'))?.kind).toBe('deny');
+    const writeResult = policy.evaluate(contextFor('Write'));
+    expect(writeResult?.kind).toBe('deny');
+    expect(writeResult?.kind === 'deny' ? writeResult.message : '').toContain('your lead is in Discuss');
     expect(policy.evaluate(contextFor('Bash'))?.kind).toBe('deny');
     expect(policy.evaluate(contextFor('Edit'))?.kind).toBe('deny');
     expect(policy.evaluate(contextFor('Read'))).toBeUndefined();
@@ -481,6 +490,65 @@ describe('Permission auto mode', () => {
       tool_name: 'Bash',
       permission_mode: 'auto',
       decision: 'deny',
+    });
+  });
+
+  it.each(['auto', 'yolo', 'manual'] as const)(
+    'denies main Write under readonly in %s mode before mode approve',
+    async (mode) => {
+      const { manager, requestApproval, telemetryTrack } = makePermissionManager(async () => ({
+        decision: 'approved',
+      }));
+      manager.setMode(mode);
+      manager.setToolsReadonly(true);
+
+      await expect(
+        manager.beforeToolCall(
+          hookContext({
+            id: 'call_write_readonly',
+            toolName: 'Write',
+            args: { path: '/tmp/notes.md', content: 'x' },
+          }),
+        ),
+      ).resolves.toMatchObject({
+        block: true,
+        reason: expect.stringContaining('readonly is on'),
+      });
+
+      expect(requestApproval).not.toHaveBeenCalled();
+      expect(telemetryTrack).toHaveBeenCalledWith('permission_policy_decision', {
+        policy_name: 'tools-readonly-deny',
+        tool_name: 'Write',
+        permission_mode: mode,
+        decision: 'deny',
+      });
+    },
+  );
+
+  it('lets a coding subagent Write under readonly when coder write is enabled', async () => {
+    const { manager, requestApproval, telemetryTrack } = makePermissionManager(
+      async () => ({ decision: 'approved' }),
+      { agentType: 'sub', coderWriteEnabled: true },
+    );
+    manager.setMode('auto');
+    manager.setToolsReadonly(true);
+
+    await expect(
+      manager.beforeToolCall(
+        hookContext({
+          id: 'call_write_coder',
+          toolName: 'Write',
+          args: { path: '/tmp/notes.md', content: 'x' },
+        }),
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(requestApproval).not.toHaveBeenCalled();
+    expect(telemetryTrack).toHaveBeenCalledWith('permission_policy_decision', {
+      policy_name: 'auto-mode-approve',
+      tool_name: 'Write',
+      permission_mode: 'auto',
+      decision: 'approve',
     });
   });
 
@@ -3187,6 +3255,7 @@ function makePermissionManager(
     readonly cwd?: string;
     readonly additionalDirs?: readonly string[];
     readonly agentType?: Agent['type'];
+    readonly coderWriteEnabled?: boolean;
     readonly hooks?: Agent['hooks'];
     readonly approvalRpc?: boolean;
   } = {},
@@ -3202,6 +3271,7 @@ function makePermissionManager(
   const telemetryTrack = vi.fn();
   const agent = {
     type: options.agentType ?? 'main',
+    coderWriteEnabled: options.coderWriteEnabled ?? false,
     config: { cwd: options.cwd ?? '/workspace' },
     kaos: options.kaos ?? createFakeKaos(),
     getAdditionalDirs: () => options.additionalDirs ?? [],

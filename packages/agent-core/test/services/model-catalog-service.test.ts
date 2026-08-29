@@ -164,6 +164,45 @@ describe('model catalog adapters', () => {
     });
   });
 
+  it('infers multi-level efforts for glm-5.3 when the stored alias only has boolean thinking', () => {
+    expect(toProtocolModel(
+      'zhipu/glm-5.3-flash',
+      {
+        provider: 'zhipu',
+        model: 'glm-5.3-flash',
+        maxContextSize: 1_000_000,
+        thinkingSupport: true,
+        capabilities: ['tool_use'],
+      },
+      {
+        type: 'openai',
+        name: 'Zhipu GLM',
+      },
+    )).toEqual(expect.objectContaining({
+      supports_thinking: true,
+      support_efforts: ['low', 'high', 'max'],
+      default_effort: 'high',
+    }));
+  });
+
+  it('keeps boolean thinking for kimi aliases that omit supportEfforts', () => {
+    expect(toProtocolModel(
+      'openrouter/moonshotai/kimi-k2.5',
+      {
+        provider: 'openrouter',
+        model: 'moonshotai/kimi-k2.5',
+        maxContextSize: 262_144,
+        thinkingSupport: true,
+        capabilities: ['tool_use', 'thinking'],
+      },
+      { type: 'openai', name: 'OpenRouter' },
+    )).toEqual(expect.objectContaining({
+      supports_thinking: true,
+      support_efforts: undefined,
+      default_effort: undefined,
+    }));
+  });
+
   it('uses the provider model name as display fallback', () => {
     const alias = catalogConfig().models!['turbo']!;
     expect(toProtocolModel('turbo', alias).display_name).toBe('kimi-turbo');
@@ -222,6 +261,27 @@ describe('model catalog adapters', () => {
       }).models,
     ).toEqual([]);
   });
+
+  it('keeps discovered aliases when auto discovery also lists extra custom models', () => {
+    const config = catalogConfig();
+    config.providers['kimi'] = {
+      ...config.providers['kimi']!,
+      autoDiscover: true,
+      customModels: ['stealth/ox-alpha'],
+    };
+    config.models!['kimi/stealth/ox-alpha'] = {
+      provider: 'kimi',
+      model: 'stealth/ox-alpha',
+      maxContextSize: 1_000_000,
+    };
+
+    expect(
+      toProtocolProvider('kimi', config.providers['kimi']!, config, {
+        hasApiKey: true,
+        hasOAuthToken: false,
+      }).models,
+    ).toEqual(['k2', 'turbo', 'kimi/stealth/ox-alpha']);
+  });
 });
 
 describe('ModelCatalogService', () => {
@@ -233,6 +293,30 @@ describe('ModelCatalogService', () => {
     expect(await svc.listModels()).toHaveLength(3);
     expect(await svc.listProviders()).toHaveLength(2);
     expect(getCalls).toEqual([{ reload: true }, { reload: true }]);
+  });
+
+  it('lists discovered aliases even when extra custom models are configured', async () => {
+    const config = catalogConfig();
+    config.providers['kimi'] = {
+      ...config.providers['kimi']!,
+      autoDiscover: true,
+      customModels: ['stealth/ox-alpha'],
+    };
+    config.models!['kimi/stealth/ox-alpha'] = {
+      provider: 'kimi',
+      model: 'stealth/ox-alpha',
+      maxContextSize: 1_000_000,
+    };
+    const configRef = { current: config };
+    const { core } = makeCore(configRef);
+    const svc = new ModelCatalogService(makeEnv(), core, makeEventService().svc);
+
+    await expect(svc.listModels()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ model: 'k2' }),
+      expect.objectContaining({ model: 'turbo' }),
+      expect.objectContaining({ model: 'kimi/stealth/ox-alpha' }),
+      expect.objectContaining({ model: 'gpt4o' }),
+    ]));
   });
 
   it('reports the same key length it will reveal, including env-declared keys', async () => {

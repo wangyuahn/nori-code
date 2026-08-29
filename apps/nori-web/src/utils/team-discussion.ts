@@ -36,12 +36,26 @@ export function findAgentDiscussion(
     : discussions.find(candidate => candidate.parent_agent_id === departmentLeaderAgentId);
   const discussion = own ?? joined;
   if (discussion === undefined || discussion.parent_agent_id === undefined) return undefined;
-  const turnAgentId = liveTurnAgentId ?? discussion.discussion_turn_agent_id;
+  const turnAgentId = liveTurnForDiscussion(discussion, liveTurnAgentId)
+    ?? discussion.discussion_turn_agent_id;
   return {
     discussionAgentId: discussion.agent_id,
     leaderAgentId: discussion.parent_agent_id,
-    ...(turnAgentId ? { turnAgentId } : {}),
+    turnAgentId,
   };
+}
+
+function liveTurnForDiscussion(
+  discussion: SessionAgent,
+  liveTurnAgentId?: string | null,
+): string | undefined {
+  if (!liveTurnAgentId) return undefined;
+  if (discussion.discussion_turn_agent_id === liveTurnAgentId) return liveTurnAgentId;
+  if (discussion.parent_agent_id === liveTurnAgentId) return liveTurnAgentId;
+  if (discussion.discussion_participant_agent_ids?.includes(liveTurnAgentId) === true) {
+    return liveTurnAgentId;
+  }
+  return undefined;
 }
 
 /**
@@ -56,8 +70,9 @@ export function discussionSpeakingAgentIds(
   const speaking = new Set<string>();
   for (const agent of agents) {
     if (agent.kind !== 'discussion' || agent.archived === true) continue;
-    if (agent.discussion_turn_agent_id) speaking.add(agent.discussion_turn_agent_id);
+    const turnAgentId = liveTurnForDiscussion(agent, liveTurnAgentId)
+      ?? agent.discussion_turn_agent_id;
+    if (turnAgentId) speaking.add(turnAgentId);
   }
-  if (liveTurnAgentId) speaking.add(liveTurnAgentId);
   return speaking;
 }

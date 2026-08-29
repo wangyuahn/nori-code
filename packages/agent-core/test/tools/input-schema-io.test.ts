@@ -95,4 +95,33 @@ describe('builtin tool input JSON Schema', () => {
     // The closed-object guard must hold at every nesting level.
     expect(validateToolArgs(validator, { questions: [question] })).not.toBeNull();
   });
+
+  it('points at the offending item instead of repeating one sentence', () => {
+    const tool = askUserQuestionTool();
+    const validator = compileToolArgsValidator(tool.parameters);
+    // Two questions, each missing `options`. Without `instancePath` the two Ajv
+    // errors rendered byte-identical, so the tool result read as the same
+    // complaint printed twice and never said which question was wrong.
+    const message = validateToolArgs(validator, {
+      questions: [{ question: 'First?' }, { question: 'Second?' }],
+    });
+    expect(message).not.toBeNull();
+    expect(message).toContain('/questions/0');
+    expect(message).toContain('/questions/1');
+    const sentences = (message ?? '').split('; ');
+    expect(new Set(sentences).size).toBe(sentences.length);
+  });
+
+  it('collapses an Ajv complaint repeated for the same path', () => {
+    // `anyOf` re-reports the branch failure alongside the top-level one, so the
+    // identical sentence can arrive more than once for a single instance path.
+    const validator = compileToolArgsValidator({
+      type: 'object',
+      properties: { mode: { anyOf: [{ type: 'string' }, { type: 'string' }] } },
+    });
+    const message = validateToolArgs(validator, { mode: 7 });
+    expect(message).not.toBeNull();
+    const sentences = (message ?? '').split('; ');
+    expect(new Set(sentences).size).toBe(sentences.length);
+  });
 });

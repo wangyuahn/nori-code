@@ -6,6 +6,8 @@ import type {
   AddAdditionalDirPayload,
   AddAdditionalDirResult,
   AgentAPI,
+  AttachMountedTeamMemberPayload,
+  AttachMountedTeamMemberResult,
   BeginCompactionPayload,
   CancelPayload,
   CancelDiscussPayload,
@@ -13,9 +15,12 @@ import type {
   CreateGoalPayload,
   CronCreateRequest,
   DetachBackgroundPayload,
+  DetachMountedTeamMemberPayload,
+  DetachMountedTeamMemberResult,
   EmptyPayload,
   GetBackgroundOutputPayload,
   GetBackgroundPayload,
+  InjectSystemReminderPayload,
   McpServerInfo,
   McpStartupMetrics,
   ManageBackgroundPayload,
@@ -80,6 +85,22 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
     return this.session.metadata;
   }
 
+  detachMountedTeamMember(
+    payload: DetachMountedTeamMemberPayload,
+  ): Promise<DetachMountedTeamMemberResult> {
+    return this.session.detachMountedTeamMember(payload.mountedSessionId);
+  }
+
+  attachMountedTeamMember(
+    payload: AttachMountedTeamMemberPayload,
+  ): Promise<AttachMountedTeamMemberResult> {
+    return this.session.attachMountedTeamMember({
+      mountedSessionId: payload.mountedSessionId,
+      identity: payload.identity,
+      teamLeaderAgentId: payload.teamLeaderAgentId,
+    });
+  }
+
   listSkills(_payload: EmptyPayload): Promise<readonly SkillSummary[]> {
     return this.session.listSkills();
   }
@@ -122,6 +143,13 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
 
   async steer({ agentId, ...payload }: AgentScopedPayload<SteerPayload>) {
     return (await this.getAgent(agentId)).steer(payload);
+  }
+
+  async injectSystemReminder({
+    agentId,
+    ...payload
+  }: AgentScopedPayload<InjectSystemReminderPayload>): Promise<void> {
+    return (await this.getAgent(agentId)).injectSystemReminder(payload);
   }
 
   /**

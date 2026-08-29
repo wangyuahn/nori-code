@@ -37,6 +37,7 @@ const appState: AppState = {
   availableModels: {},
   availableProviders: {},
   mcpServersSummary: null,
+  teamAgents: [],
 };
 
 function truecolorCodes(text: string): Set<string> {
@@ -97,6 +98,9 @@ describe('WelcomeComponent', () => {
 
     expect(output).toContain(NORI_TERMINAL_LOGO[0]);
     expect(output).toContain(NORI_TERMINAL_LOGO[1]);
+    expect(output).toContain(NORI_TERMINAL_LOGO[2]);
+    // Reject the old letter-N block logo and the prior Kimi banner glyph.
+    expect(output).not.toContain('█   █');
     expect(output).not.toContain('▐█▛█▛█▌');
   });
 
@@ -118,6 +122,47 @@ describe('WelcomeComponent', () => {
   it('keeps every line within the requested width on narrow terminals', () => {
     for (const width of [0, 1, 2, 4, 10, 39, 80]) {
       for (const line of new WelcomeComponent(appState).render(width)) {
+        expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+      }
+    }
+  });
+
+  it('omits the team line when nobody is hired', () => {
+    const output = new WelcomeComponent(appState).render(80).join('\n');
+    expect(output).not.toContain('Team:');
+    expect(output).not.toContain('Discuss on');
+    expect(output).not.toContain('Discuss off');
+  });
+
+  it('shows hired team count and discuss state', () => {
+    const hired: AppState = {
+      ...appState,
+      discussMode: true,
+      teamAgents: [
+        { agentId: 'main', kind: 'main', name: 'Main', parentAgentId: null },
+        { agentId: 'reviewer', kind: 'team', name: 'Reviewer', parentAgentId: 'main' },
+        { agentId: 'archived', kind: 'team', name: 'Old', parentAgentId: 'main', archived: true },
+      ],
+    };
+    const output = new WelcomeComponent(hired).render(80).join('\n').replaceAll(/\u001B\[[0-9;]*m/g, '');
+    expect(output).toContain('Team: 1 · Discuss on');
+
+    const off = new WelcomeComponent({ ...hired, discussMode: false }).render(80).join('\n').replaceAll(/\u001B\[[0-9;]*m/g, '');
+    expect(off).toContain('Team: 1 · Discuss off');
+  });
+
+  it('truncates the team line on a narrow terminal', () => {
+    const hired: AppState = {
+      ...appState,
+      discussMode: true,
+      teamAgents: [
+        { agentId: 'reviewer', kind: 'team', name: 'Reviewer', parentAgentId: 'main' },
+      ],
+    };
+    const narrow = new WelcomeComponent(hired).render(20).join('\n');
+    expect(narrow).toMatch(/Team:/);
+    for (const width of [0, 1, 2, 4, 10, 20]) {
+      for (const line of new WelcomeComponent(hired).render(width)) {
         expect(visibleWidth(line)).toBeLessThanOrEqual(width);
       }
     }

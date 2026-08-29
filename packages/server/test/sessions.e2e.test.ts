@@ -661,6 +661,7 @@ describe('POST and GET /api/v1/sessions/{session_id}/children', () => {
   it('creates a child session and lists it under the parent', async () => {
     const r = await bootDaemon();
     const cwd = join(tmpDir, 'workspace-children');
+    mkdirSync(cwd, { recursive: true });
     const parent = envelopeOf<{ id: string }>(
       (await appOf(r).inject({
         method: 'POST',
@@ -692,11 +693,11 @@ describe('POST and GET /api/v1/sessions/{session_id}/children', () => {
     expect(child.title).toBe('Child: Parent session');
     expect(child.metadata).toMatchObject({
       cwd,
-      source: true,
       parent_session_id: parent.id,
       child_session_kind: 'child',
       topic: 'btw',
     });
+    expect(child.metadata).not.toHaveProperty('source');
 
     await appOf(r).inject({
       method: 'POST',
@@ -725,6 +726,101 @@ describe('POST and GET /api/v1/sessions/{session_id}/children', () => {
     const env = envelopeOf(res.json());
     expect(env.code).toBe(40401);
     expect(env.data).toBeNull();
+  });
+});
+
+describe('session mount / unmount / remount / graph', () => {
+  it('mounts with cycle rejection, remounts, promotes children on delete, and exposes graph edges', async () => {
+    const r = await bootDaemon();
+    const cwd = join(tmpDir, 'workspace-mount');
+    mkdirSync(cwd, { recursive: true });
+    const create = async (title: string) =>
+      sessionSchema.parse(
+        envelopeOf(
+          (await appOf(r).inject({
+            method: 'POST',
+            url: '/api/v1/sessions',
+            payload: { title, metadata: { cwd } },
+          })).json(),
+        ).data,
+      );
+
+    const a = await create('A');
+    const b = await create('B');
+    const c = await create('C');
+
+    const mounted = sessionSchema.parse(
+      envelopeOf(
+        (await appOf(r).inject({
+          method: 'POST',
+          url: `/api/v1/sessions/${b.id}:mount`,
+          payload: { parent_session_id: a.id, role: 'member' },
+        })).json(),
+      ).data,
+    );
+    expect(mounted.metadata).toMatchObject({
+      parent_session_id: a.id,
+      child_session_kind: 'child',
+      mount_role: 'member',
+    });
+
+    await appOf(r).inject({
+      method: 'POST',
+      url: `/api/v1/sessions/${c.id}:mount`,
+      payload: { parent_session_id: b.id },
+    });
+
+    const cycle = envelopeOf(
+      (await appOf(r).inject({
+        method: 'POST',
+        url: `/api/v1/sessions/${a.id}:mount`,
+        payload: { parent_session_id: c.id },
+      })).json(),
+    );
+    expect(cycle.code).toBe(ErrorCode.SESSION_MOUNT_CYCLE);
+
+    const remounted = sessionSchema.parse(
+      envelopeOf(
+        (await appOf(r).inject({
+          method: 'POST',
+          url: `/api/v1/sessions/${c.id}:remount`,
+          payload: { parent_session_id: a.id },
+        })).json(),
+      ).data,
+    );
+    expect(remounted.metadata['parent_session_id']).toBe(a.id);
+
+    const graphEnv = envelopeOf<{
+      nodes: unknown[];
+      edges: Array<{ child_session_id: string; parent_session_id: string }>;
+    }>(
+      (await appOf(r).inject({
+        method: 'GET',
+        url: '/api/v1/sessions/graph',
+      })).json(),
+    );
+    expect(graphEnv.code).toBe(0);
+    expect(graphEnv.data!.edges).toEqual(
+      expect.arrayContaining([
+        { child_session_id: b.id, parent_session_id: a.id },
+        { child_session_id: c.id, parent_session_id: a.id },
+      ]),
+    );
+
+    await appOf(r).inject({
+      method: 'POST',
+      url: `/api/v1/sessions/${a.id}:delete`,
+      payload: {},
+    });
+
+    const bAfter = sessionSchema.parse(
+      envelopeOf((await appOf(r).inject({ method: 'GET', url: `/api/v1/sessions/${b.id}` })).json()).data,
+    );
+    const cAfter = sessionSchema.parse(
+      envelopeOf((await appOf(r).inject({ method: 'GET', url: `/api/v1/sessions/${c.id}` })).json()).data,
+    );
+    expect(bAfter.metadata['parent_session_id']).toBeUndefined();
+    expect(cAfter.metadata['parent_session_id']).toBeUndefined();
   });
 });
 

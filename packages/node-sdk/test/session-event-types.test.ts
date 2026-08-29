@@ -102,6 +102,8 @@ describe('Event public types', () => {
         case 'background.task.terminated':
         case 'cron.fired':
         case 'prompt.submitted':
+        case 'event.session.mount_changed':
+        case 'team.chat.updated':
           return;
         default:
           assertNever(event);

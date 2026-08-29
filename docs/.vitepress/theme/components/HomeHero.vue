@@ -9,24 +9,28 @@ const isZh = computed(() => lang.value.startsWith('zh'))
 
 const copy = computed(() => isZh.value
   ? {
-      titleLead: 'Kimi',
+      titleLead: 'Nori',
       titleAccent: 'Code',
-      titleTail: ' CLI',
-      tagline: 'The Starting Point for Next-Gen Agents',
+      titleTail: '',
+      tagline: '多智能体工程工作区 —— 部门树、Discuss/Assign、会话地图',
       primaryText: '开始使用',
       primaryHref: '/zh/guides/getting-started',
-      secondaryText: '在 GitHub 查看',
-      secondaryHref: 'https://github.com/MoonshotAI/kimi-code',
+      secondaryText: '团队工程',
+      secondaryHref: '/zh/guides/team-engineering',
+      githubText: '在 GitHub 查看',
+      githubHref: 'https://github.com/wangyuahn/nori-code',
     }
   : {
-      titleLead: 'Kimi',
+      titleLead: 'Nori',
       titleAccent: 'Code',
-      titleTail: ' CLI',
-      tagline: 'The Starting Point for Next-Gen Agents',
+      titleTail: '',
+      tagline: 'Multi-agent engineering workspace — department tree, Discuss/Assign, conversation map',
       primaryText: 'Get started',
       primaryHref: '/en/guides/getting-started',
-      secondaryText: 'View on GitHub',
-      secondaryHref: 'https://github.com/MoonshotAI/kimi-code',
+      secondaryText: 'Team engineering',
+      secondaryHref: '/en/guides/team-engineering',
+      githubText: 'View on GitHub',
+      githubHref: 'https://github.com/wangyuahn/nori-code',
     })
 </script>
 
@@ -48,11 +52,14 @@ const copy = computed(() => isZh.value
             <path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
           </svg>
         </a>
-        <a class="KimiBtn KimiBtn--ghost" :href="copy.secondaryHref" target="_blank" rel="noopener">
+        <a class="KimiBtn KimiBtn--ghost" :href="withBase(copy.secondaryHref)">
+          {{ copy.secondaryText }}
+        </a>
+        <a class="KimiBtn KimiBtn--ghost" :href="copy.githubHref" target="_blank" rel="noopener">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
             <path d="M8 .2C3.58.2 0 3.78 0 8.2c0 3.54 2.3 6.54 5.48 7.6.4.07.55-.17.55-.38l-.01-1.5c-2.23.49-2.7-.95-2.7-.95-.37-.93-.9-1.18-.9-1.18-.73-.5.06-.49.06-.49.81.06 1.24.83 1.24.83.72 1.23 1.88.88 2.34.67.07-.52.28-.88.51-1.08-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.13 0 0 .67-.21 2.2.82a7.65 7.65 0 014 0c1.53-1.03 2.2-.82 2.2-.82.44 1.11.16 1.93.08 2.13.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.55.74.55 1.49l-.01 2.21c0 .21.15.46.55.38C13.7 14.74 16 11.74 16 8.2 16 3.78 12.42.2 8 .2z" />
           </svg>
-          {{ copy.secondaryText }}
+          {{ copy.githubText }}
         </a>
       </div>
     </div>

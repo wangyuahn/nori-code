@@ -207,6 +207,11 @@ interface WsPayload {
   promptId?: string;
   reason?: string;
   error?: { message?: string; code?: string; [key: string]: unknown };
+  /**
+   * Structured cause of an `error` event, spread from the core's
+   * `summarizeTurnError`. Carries `turnId` when the failure belongs to a turn.
+   */
+  details?: Record<string, unknown>;
   agentId?: string;
   discussMode?: boolean;
   coderWriteEnabled?: boolean;
@@ -238,6 +243,8 @@ interface WsPayload {
     kind?: string;
     agentId?: string;
   };
+  /** `session.meta.updated`: durable metadata patch (e.g. agents tree). */
+  patch?: Record<string, unknown>;
 }
 
 function addTokenUsage(left: TokenUsage | undefined, right: TokenUsage | undefined): TokenUsage | undefined {
@@ -1113,6 +1120,24 @@ export function turnFailureText(error: { message?: string; code?: string; detail
   return 'Turn failed without a reported cause.';
 }
 
+/**
+ * Whether a stream `error` event was already rendered by the `turn.ended` branch.
+ *
+ * A failed turn emits BOTH `turn.ended{reason:'failed', error}` and a trailing
+ * `error` event carrying the same `summarizeTurnError` payload — the core emits
+ * the second one deliberately just past the turn boundary. Rendering both printed
+ * every provider failure as two near-identical red blocks, one with the error code
+ * and one without. `summarizeTurnError` stamps `details.turnId` on anything
+ * turn-scoped, so that field is the reliable way to tell the two apart. Errors
+ * without it — MCP startup, compaction, a rejected launch — have no `turn.ended`
+ * to ride on and must still be shown.
+ */
+export function isTurnScopedError(payload: { details?: unknown } | undefined): boolean {
+  const details = payload?.details;
+  if (typeof details !== 'object' || details === null) return false;
+  return (details as Record<string, unknown>)['turnId'] !== undefined;
+}
+
 export function reconcileHistory(previous: ChatMessage[], remote: ChatMessage[]): ChatMessage[] {
   // A replace is an authoritative REST snapshot. Never rename its stable
   // message ids to temporary UI ids by matching message text.
@@ -1547,23 +1572,11 @@ export function useChatMessages(
     }
     const result = await api.sessions.approvals.list(sessionId, agentId);
     if (!hasCurrentScope(scopeRef, sessionId, agentId)) return;
-    const now = Date.now();
-    const expired = result.items.filter(request => Date.parse(request.expires_at) <= now);
-    if (expired.length > 0) {
-      await api.abortSession(sessionId, agentId).catch(() => undefined);
-      setPendingApprovals([]);
-      setIsStreaming(false);
-      clearDraft();
-      setMessages(previous => mergeHistory(previous, [{
-        id: `approval-expired-${sessionId}-${agentId}-${now}`,
-        role: 'system',
-        text: '工具授权已过期，本轮已自动取消。可以继续发送消息并重试。',
-        createdAt: new Date().toISOString(),
-      }]));
-      return;
-    }
+    // Do not treat wire `expires_at` as a client-side kill switch. The broker
+    // waits for an explicit resolve; aborting here labeled tool failures as a
+    // deliberate user interrupt while the permission dock never got answered.
     setPendingApprovals(previous => preserveEqual(previous, result.items));
-  }, [agentId, clearDraft, sessionId]);
+  }, [agentId, sessionId]);
 
   const refreshQuestions = useCallback(async () => {
     if (!sessionId) {
@@ -1789,6 +1802,32 @@ export function useChatMessages(
                 finishTurn(activeTurnIdRef.current ?? undefined, true);
               }
               break;
+            case 'approval.requested': {
+              const request = approvalRequestFromEvent(payload, data.session_id ?? sessionId);
+              if (request === null) break;
+              if ((request.agent_id ?? 'main') !== agentId) break;
+              setPendingApprovals(previous => {
+                if (previous.some(item => item.approval_id === request.approval_id)) {
+                  return previous.map(item => item.approval_id === request.approval_id ? request : item);
+                }
+                return [...previous, request];
+              });
+              setIsStreaming(true);
+              break;
+            }
+            case 'approval.resolved': {
+              const raw = payload as WsPayload & { approval_id?: string; approvalId?: string; agent_id?: string };
+              const approvalId = typeof raw.approval_id === 'string'
+                ? raw.approval_id
+                : typeof raw.approvalId === 'string' ? raw.approvalId : undefined;
+              if (!approvalId) break;
+              const eventAgentId = typeof raw.agent_id === 'string'
+                ? raw.agent_id
+                : typeof raw.agentId === 'string' ? raw.agentId : 'main';
+              if (eventAgentId !== agentId) break;
+              setPendingApprovals(previous => previous.filter(item => item.approval_id !== approvalId));
+              break;
+            }
             case 'tool.call.started':
               lastStreamActivityAtRef.current = Date.now();
               if (payload.toolCallId && payload.name) {
@@ -1886,7 +1925,25 @@ export function useChatMessages(
             case 'team.chat.updated':
               void refreshDepartmentChat(sessionId, agentId);
               break;
-            case 'error':
+            case 'session.meta.updated':
+              // TeamCreate/TeamDismiss update the durable agent tree without
+              // changing the selected transcript. Refresh the tree immediately
+              // instead of waiting for the four-second poll.
+              if (payload.patch?.['agents'] !== undefined) {
+                setAgentTreeRevision(previous => previous + 1);
+              }
+              break;
+            case 'session.mount_changed':
+              setAgentTreeRevision(previous => previous + 1);
+              window.dispatchEvent(new CustomEvent('nori:session-mount-changed', {
+                detail: payload,
+              }));
+              break;
+            case 'error': {
+              if (isTurnScopedError(payload)) {
+                finishTurn(activeTurnIdRef.current ?? undefined, true);
+                break;
+              }
               playNotificationSound('error');
               console.error('Stream error:', payload);
               if (payload.message) {
@@ -1899,6 +1956,7 @@ export function useChatMessages(
               }
               finishTurn(activeTurnIdRef.current ?? undefined, true);
               break;
+            }
             default:
               break;
           }
@@ -2239,6 +2297,56 @@ export function statusForSession(
 
 function preserveEqual<T>(previous: T, next: T): T {
   return JSON.stringify(previous) === JSON.stringify(next) ? previous : next;
+}
+
+function approvalRequestFromEvent(
+  payload: unknown,
+  fallbackSessionId: string,
+): ApprovalRequest | null {
+  if (payload === null || typeof payload !== 'object') return null;
+  const record = payload as Record<string, unknown>;
+  const approvalId = typeof record.approval_id === 'string'
+    ? record.approval_id
+    : typeof record.approvalId === 'string' ? record.approvalId : undefined;
+  const toolCallId = typeof record.tool_call_id === 'string'
+    ? record.tool_call_id
+    : typeof record.toolCallId === 'string' ? record.toolCallId : undefined;
+  const toolName = typeof record.tool_name === 'string'
+    ? record.tool_name
+    : typeof record.toolName === 'string' ? record.toolName : undefined;
+  if (!approvalId || !toolCallId || !toolName) return null;
+
+  const sessionId = typeof record.session_id === 'string'
+    ? record.session_id
+    : typeof record.sessionId === 'string' ? record.sessionId : fallbackSessionId;
+  const agentId = typeof record.agent_id === 'string'
+    ? record.agent_id
+    : typeof record.agentId === 'string' ? record.agentId : undefined;
+  const turnId = typeof record.turn_id === 'number'
+    ? record.turn_id
+    : typeof record.turnId === 'number' ? record.turnId : undefined;
+  const action = typeof record.action === 'string' ? record.action : '';
+  const createdAt = typeof record.created_at === 'string'
+    ? record.created_at
+    : typeof record.createdAt === 'string' ? record.createdAt : new Date().toISOString();
+  const expiresAt = typeof record.expires_at === 'string'
+    ? record.expires_at
+    : typeof record.expiresAt === 'string'
+      ? record.expiresAt
+      : new Date(Date.now() + 60_000).toISOString();
+
+  return {
+    approval_id: approvalId,
+    session_id: sessionId,
+    agent_id: agentId,
+    turn_id: turnId,
+    tool_call_id: toolCallId,
+    tool_name: toolName,
+    action,
+    tool_input_display: record.tool_input_display ?? record.toolInputDisplay ?? record.display,
+    created_at: createdAt,
+    expires_at: expiresAt,
+  };
 }
 
 function serializeToolOutput(output: unknown): string | undefined {

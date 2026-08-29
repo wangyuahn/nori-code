@@ -25,6 +25,7 @@ describe('findAgentDiscussion', () => {
     expect(findAgentDiscussion([MAIN, LEAD, MEMBER, round], 'member')).toEqual({
       discussionAgentId: 'round-2',
       leaderAgentId: 'lead',
+      turnAgentId: undefined,
     });
   });
 
@@ -41,18 +42,40 @@ describe('findAgentDiscussion', () => {
   });
 
   it('lets the live turn hint win over the polled tree', () => {
-    const round = agent({ agent_id: 'round-4', kind: 'discussion', parent_agent_id: 'main', discussion_turn_agent_id: 'lead' });
+    const round = agent({
+      agent_id: 'round-4',
+      kind: 'discussion',
+      parent_agent_id: 'main',
+      discussion_turn_agent_id: 'lead',
+      discussion_participant_agent_ids: ['lead', 'member'],
+    });
     expect(findAgentDiscussion([MAIN, LEAD, round], 'main', 'member')?.turnAgentId).toBe('member');
+  });
+
+  it('ignores a live turn hint from another department', () => {
+    const round = agent({ agent_id: 'round-5', kind: 'discussion', parent_agent_id: 'main', discussion_turn_agent_id: 'lead' });
+    expect(findAgentDiscussion([MAIN, LEAD, round], 'main', 'outsider')?.turnAgentId).toBe('lead');
   });
 });
 
 describe('discussionSpeakingAgentIds', () => {
-  it('collects the speaker of every live round plus the live hint', () => {
+  it('collects the speaker of every live round', () => {
     const first = agent({ agent_id: 'round-a', kind: 'discussion', parent_agent_id: 'main', discussion_turn_agent_id: 'lead' });
     const second = agent({ agent_id: 'round-b', kind: 'discussion', parent_agent_id: 'lead', discussion_turn_agent_id: 'member' });
     const stale = agent({ agent_id: 'round-c', kind: 'discussion', parent_agent_id: 'main', archived: true, discussion_turn_agent_id: 'ghost' });
-    const speaking = discussionSpeakingAgentIds([MAIN, LEAD, MEMBER, first, second, stale], 'fresh');
-    expect([...speaking].sort()).toEqual(['fresh', 'lead', 'member']);
+    const speaking = discussionSpeakingAgentIds([MAIN, LEAD, MEMBER, first, second, stale], 'outsider');
+    expect([...speaking].sort()).toEqual(['lead', 'member']);
+  });
+
+  it('applies a live hint only to the department that owns that speaker', () => {
+    const round = agent({
+      agent_id: 'round-a',
+      kind: 'discussion',
+      parent_agent_id: 'main',
+      discussion_turn_agent_id: 'lead',
+      discussion_participant_agent_ids: ['lead', 'member'],
+    });
+    expect([...discussionSpeakingAgentIds([MAIN, LEAD, MEMBER, round], 'member')]).toEqual(['member']);
   });
 
   it('is empty without any live round', () => {

@@ -33,7 +33,6 @@ export function useGlobalApprovals(): GlobalApprovalsResult {
   const liveVersionRef = useRef(0);
   const liveEventsRef = useRef(new Map<string, GlobalApprovalEvent>());
   const resolvingRef = useRef(new Set<string>());
-  const expiredIdsRef = useRef(new Set<string>());
   const mountedRef = useRef(true);
   const refreshRef = useRef<(() => Promise<void>) | null>(null);
 
@@ -48,20 +47,12 @@ export function useGlobalApprovals(): GlobalApprovalsResult {
     const result = await api.approvals.list();
     if (!mountedRef.current) return;
 
-    const expired = result.items.filter(request => {
-      const expiresAt = Date.parse(request.expires_at);
-      return Number.isFinite(expiresAt) && expiresAt <= Date.now();
-    });
-    for (const request of expired) {
-      if (expiredIdsRef.current.has(request.approval_id)) continue;
-      expiredIdsRef.current.add(request.approval_id);
-      void api.abortSession(request.session_id, request.agent_id).catch(() => undefined);
-    }
-
-    const snapshot = result.items.filter(request => !expired.some(item => item.approval_id === request.approval_id));
+    // Server keeps approvals open until the user resolves them (or the turn
+    // ends). `expires_at` is advisory wire metadata only — never abort a live
+    // turn from the client clock, or tools settle as a false "user interrupted".
     const liveChanges = [...liveEventsRef.current.entries()]
       .filter(([, event]) => event.version > versionAtStart);
-    const next = [...snapshot];
+    const next = [...result.items];
     for (const [approvalId, event] of liveChanges) {
       if (event.removed) {
         const index = next.findIndex(request => request.approval_id === approvalId);

@@ -39,13 +39,12 @@ export class ExperimentsSelectorComponent extends Container implements Focusable
     this.list = new SearchableList({
       items: opts.features,
       toSearchText: (feature) => `${feature.title} ${feature.id} ${feature.description}`,
-      searchable: true,
+      searchable: false,
     });
   }
 
   handleInput(data: string): void {
     if (matchesKey(data, Key.escape)) {
-      if (this.list.clearQuery()) return;
       this.opts.onCancel();
       return;
     }
@@ -65,23 +64,16 @@ export class ExperimentsSelectorComponent extends Container implements Focusable
 
   override render(width: number): string[] {
     const view = this.list.view();
-    const titleSuffix =
-      view.query.length === 0 ? currentTheme.fg('textMuted', '  (type to search)') : '';
     const hintParts = ['↑↓ navigate'];
     if (view.page.pageCount > 1) hintParts.push('PgUp/PgDn page');
     hintParts.push('Space toggle', 'Enter apply', 'Esc cancel');
-    if (view.query.length > 0) hintParts.push('Backspace clear');
 
     const lines: string[] = [
       currentTheme.fg('primary', '─'.repeat(width)),
-      currentTheme.boldFg('primary', ' Experimental features') + titleSuffix,
+      currentTheme.boldFg('primary', ' Experimental features'),
       currentTheme.fg('textMuted', ` ${hintParts.join(' · ')}`),
       '',
     ];
-
-    if (view.query.length > 0) {
-      lines.push(currentTheme.fg('primary', ` Search: `) + currentTheme.fg('text', view.query));
-    }
 
     if (view.items.length === 0) {
       lines.push(currentTheme.fg('textMuted', '   No matches'));
@@ -94,14 +86,7 @@ export class ExperimentsSelectorComponent extends Container implements Focusable
     }
 
     lines.push('');
-    if (view.query.length > 0) {
-      lines.push(
-        currentTheme.fg(
-          'textMuted',
-          ` ${String(view.items.length)} / ${String(this.opts.features.length)}`,
-        ),
-      );
-    } else if (view.page.end < view.items.length) {
+    if (view.page.end < view.items.length) {
       lines.push(
         currentTheme.fg(
           'textMuted',

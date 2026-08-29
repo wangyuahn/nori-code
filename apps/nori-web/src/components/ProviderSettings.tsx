@@ -114,7 +114,9 @@ export function ProviderSettings() {
       apiKey: '',
       apiKeyLength: provider.api_key_length ?? 0,
       autoDiscover: provider.auto_discover !== false,
-      customModels: parseCustomModelDrafts(provider.custom_models ?? [], aliases, provider.id),
+      customModels: parseCustomModelDrafts(provider.custom_models ?? [], aliases, provider.id, {
+        includeUnlistedAliases: provider.auto_discover === false,
+      }),
       disabled: provider.disabled === true,
       requiresApiKey: false,
       fromPreset: false,
@@ -204,12 +206,10 @@ export function ProviderSettings() {
       setNotice({ text: tr('This template needs an API key before it can fetch models.', '该模板需要先填写 API Key 才能获取模型。'), error: true });
       return;
     }
-    if (!draft.autoDiscover) {
-      const invalid = validateCustomModelDrafts(draft.customModels);
-      if (invalid !== undefined) {
-        setNotice({ text: tr(invalid, invalid === 'Add at least one custom model when automatic discovery is disabled.' ? '关闭自动获取模型后至少填写一个自定义模型。' : invalid), error: true });
-        return;
-      }
+    const invalid = validateCustomModelDrafts(draft.customModels, { requireAtLeastOne: !draft.autoDiscover });
+    if (invalid !== undefined) {
+      setNotice({ text: tr(invalid, invalid === 'Add at least one custom model when automatic discovery is disabled.' ? '关闭自动获取模型后至少填写一个自定义模型。' : invalid), error: true });
+      return;
     }
     setSaving(true);
     setNotice(null);
@@ -230,19 +230,25 @@ export function ProviderSettings() {
       const models: Record<string, unknown> = {};
       const currentConfig = await api.getConfig();
       const previousProviderId = draft.originalId ?? id;
+      const previousCustom = customModelIdsFromConfig(currentConfig.providers?.[previousProviderId]);
       if (!draft.autoDiscover) {
         for (const [modelId, alias] of Object.entries(currentConfig.models ?? {})) {
           if (isModelAliasRecord(alias) && alias.provider === previousProviderId) {
             models[modelId] = null;
           }
         }
-        for (const customModel of draft.customModels) {
-          const aliasId = customModel.id.trim();
-          if (!aliasId) continue;
-          const existing = asRecord(currentConfig.models?.[`${previousProviderId}/${aliasId}`] ?? currentConfig.models?.[`${id}/${aliasId}`]);
-          const patch = customModelAliasPatch(id, customModel, existing);
-          if (patch !== undefined) models[`${id}/${aliasId}`] = patch;
+      } else {
+        for (const removed of previousCustom.filter(modelId => !customModels.includes(modelId))) {
+          models[`${previousProviderId}/${removed}`] = null;
+          if (id !== previousProviderId) models[`${id}/${removed}`] = null;
         }
+      }
+      for (const customModel of draft.customModels) {
+        const aliasId = customModel.id.trim();
+        if (!aliasId) continue;
+        const existing = asRecord(currentConfig.models?.[`${previousProviderId}/${aliasId}`] ?? currentConfig.models?.[`${id}/${aliasId}`]);
+        const patch = customModelAliasPatch(id, customModel, existing);
+        if (patch !== undefined) models[`${id}/${aliasId}`] = patch;
       }
       const updatedConfig = await api.updateConfig({ providers: { [id]: providerPatch }, ...(Object.keys(models).length > 0 ? { models } : {}) });
       if (draft.originalId !== null && draft.originalId !== id) await api.providers.remove(draft.originalId);
@@ -396,10 +402,10 @@ function ProviderEditor({ draft, saving, isNew = false, onChange, onSave, onCanc
       <label><span>{tr('API format', 'API 格式')}</span><select value={draft.type} onChange={event => onChange('type', event.target.value as ProviderType)}>{API_FORMATS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
       <label className="provider-form-wide"><span>Base URL</span><input value={draft.baseUrl} onChange={event => onChange('baseUrl', event.target.value)} placeholder="https://api.example.com/v1" /></label>
       <label className="provider-form-wide"><span>API Key{draft.requiresApiKey ? ` (${tr('required', '必填')})` : ''}</span><div className="provider-secret-input"><input type={showApiKey ? 'text' : 'password'} value={storedKeyMasked ? '•'.repeat(maskLength) : draft.apiKey} readOnly={storedKeyMasked} onChange={event => onChange('apiKey', event.target.value)} placeholder="sk-..." aria-required={draft.requiresApiKey}/><button type="button" onClick={onRevealApiKey} title={showApiKey ? tr('Hide API key', '隐藏 API Key') : tr('Show API key', '显示 API Key')} aria-label={showApiKey ? tr('Hide API key', '隐藏 API Key') : tr('Show API key', '显示 API Key')}><Icon name="eye" size={14}/></button><button type="button" onClick={onCopyApiKey} title={tr('Copy API key', '复制 API Key')} aria-label={tr('Copy API key', '复制 API Key')}><Icon name="copy" size={14}/></button></div></label>
-      <label className="provider-switch"><input type="checkbox" checked={draft.autoDiscover} onChange={event => onChange('autoDiscover', event.target.checked)}/><span><strong>{tr('Automatically fetch models', '自动获取模型')}</strong><small>{tr('When off, only custom models are shown. Configure thinking effort for each custom model.', '关闭后只显示自定义模型，并为每个模型设置推理强度。')}</small></span></label>
+      <label className="provider-switch"><input type="checkbox" checked={draft.autoDiscover} onChange={event => onChange('autoDiscover', event.target.checked)}/><span><strong>{tr('Automatically fetch models', '自动获取模型')}</strong><small>{tr('When off, only custom models are shown. Extra models below stay available even when discovery is on.', '关闭后只显示自定义模型。开启时仍可在下方补充目录里没有的模型，并设置推理强度。')}</small></span></label>
       <label className="provider-switch"><input type="checkbox" checked={draft.disabled} onChange={event => onChange('disabled', event.target.checked)}/><span><strong>{tr('Disabled', '禁用')}</strong><small>{tr('Disabled providers disappear from model selection.', '禁用后不会出现在模型选择器中。')}</small></span></label>
-      {!draft.autoDiscover && <div className="provider-form-wide custom-model-editor">
-        <div className="custom-model-editor-heading"><span>{tr('Custom models', '自定义模型')}</span><small>{tr('Set supported thinking efforts and a default. Unsupported models hide the chat effort picker.', '设置支持的推理档位和默认档位。不支持思考的模型不会显示聊天页强度选择器。')}</small></div>
+      <div className="provider-form-wide custom-model-editor">
+        <div className="custom-model-editor-heading"><span>{draft.autoDiscover ? tr('Extra models', '补充模型') : tr('Custom models', '自定义模型')}</span><small>{draft.autoDiscover ? tr('Add models the catalog omits, such as stealth routes, and set thinking effort. Discovery will not delete these.', '添加目录里没有的模型（例如 stealth 路由）并设置推理强度。自动获取不会删掉这些条目。') : tr('Set supported thinking efforts and a default. Unsupported models hide the chat effort picker.', '设置支持的推理档位和默认档位。不支持思考的模型不会显示聊天页强度选择器。')}</small></div>
         {draft.customModels.map((model, index) => <CustomModelRow
           key={`custom-model-${String(index)}`}
           model={model}
@@ -411,8 +417,8 @@ function ProviderEditor({ draft, saving, isNew = false, onChange, onSave, onCanc
             onChange('customModels', draft.customModels.length === 1 ? [emptyCustomModelDraft()] : draft.customModels.filter((_, itemIndex) => itemIndex !== index));
           }}
         />)}
-        <button type="button" className="btn btn-secondary btn-compact" onClick={() => onChange('customModels', [...draft.customModels, emptyCustomModelDraft()])}><Icon name="plus" size={13}/>{tr('Add custom model', '添加自定义模型')}</button>
-      </div>}
+        <button type="button" className="btn btn-secondary btn-compact" onClick={() => onChange('customModels', [...draft.customModels, emptyCustomModelDraft()])}><Icon name="plus" size={13}/>{draft.autoDiscover ? tr('Add extra model', '添加补充模型') : tr('Add custom model', '添加自定义模型')}</button>
+      </div>
     </div>
     <footer><button type="button" className="btn btn-secondary btn-compact" onClick={onCancel}>{tr('Cancel', '取消')}</button><button type="button" className="btn btn-primary btn-compact" onClick={onSave} disabled={saving}>{saving ? tr('Saving…', '保存中…') : tr('Save provider', '保存供应商')}</button></footer>
   </section>;
@@ -454,8 +460,16 @@ function CustomModelRow({ model, tr, onChange, onSave, onRemove }: { model: Cust
   </article>;
 }
 
-export function providerCustomModelsForPatch(autoDiscover: boolean, customModels: string[]): string[] {
-  return autoDiscover ? [] : customModels;
+export function providerCustomModelsForPatch(_autoDiscover: boolean, customModels: string[]): string[] {
+  return customModels;
+}
+
+function customModelIdsFromConfig(provider: unknown): string[] {
+  if (typeof provider !== 'object' || provider === null) return [];
+  const record = provider as Record<string, unknown>;
+  const raw = record['custom_models'] ?? record['customModels'];
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.flatMap(id => typeof id === 'string' && id.trim() ? [id.trim()] : []))];
 }
 
 export function defaultModelAfterProviderSave(

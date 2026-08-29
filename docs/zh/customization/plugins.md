@@ -1,6 +1,6 @@
 # Plugins
 
-Plugins 把可复用的 Kimi Code CLI 能力打包成可安装单元——可以添加 [Agent Skills](./skills.md)、在会话启动时自动加载指定 Skill，也可以声明 MCP servers 来提供真实工具能力。适合把工作流共享给团队、连接外部服务，或从官方 marketplace 安装扩展。
+Plugins 把可复用的 Nori Code CLI 能力打包成可安装单元——可以添加 [Agent Skills](./skills.md)、在会话启动时自动加载指定 Skill，也可以声明 MCP servers 来提供真实工具能力。适合把工作流共享给团队、连接外部服务，或从官方 marketplace 安装扩展。
 
 ## 安装与管理
 
@@ -33,7 +33,7 @@ Plugins 把可复用的 Kimi Code CLI 能力打包成可安装单元——可以
 | `/plugins mcp enable <id> <server>` | 启用 plugin 声明的 MCP server |
 | `/plugins mcp disable <id> <server>` | 禁用 plugin 声明的 MCP server |
 
-**Installed** tab 列出已安装的 plugin，并在 marketplace 有更新版本时显示更新徽章。**Official** 和 **Third-party** tab 按 tier 列出 marketplace plugin；**Custom** tab 从 URL 安装。marketplace 目录会在需要时自动加载。每个安装会显示信任徽章：`kimi-official`（来自官方地址）、`curated`（来自精选地址）、`third-party`（其他所有情况）。安装第三方 plugin（任何非官方地址的 plugin，包括 Custom 安装）会先显示一个默认「取消」的确认提示，只有在你选择信任该来源后才会继续安装。
+**Installed** tab 列出已安装的 plugin，并在 marketplace 有更新版本时显示更新徽章。**Official** 和 **Third-party** tab 按 tier 列出 marketplace plugin；**Custom** tab 从 URL 安装。marketplace 目录会在需要时自动加载。每个安装会显示信任徽章：`official`（来自官方地址）、`curated`（来自精选地址）、`third-party`（其他所有情况）。安装第三方 plugin（任何非官方地址的 plugin，包括 Custom 安装）会先显示一个默认「取消」的确认提示，只有在你选择信任该来源后才会继续安装。
 
 ### 从 GitHub 安装
 
@@ -49,13 +49,13 @@ Plugins 把可复用的 Kimi Code CLI 能力打包成可安装单元——可以
 ### 注意事项
 
 - Plugin 变更需要通过 `/reload` 或新会话生效。安装、启用/禁用、移除后，运行 `/reload` 或 `/new`；当前会话不会更新。
-- 本地安装会被拷贝到 `$KIMI_CODE_HOME/plugins/managed/<id>/`，CLI 始终从这份托管副本运行。安装后编辑原始源目录不会生效，需重新安装。
+- 本地安装会被拷贝到 `$NORI_CODE_HOME/plugins/managed/<id>/`，CLI 始终从这份托管副本运行。安装后编辑原始源目录不会生效，需重新安装。
 - 移除 plugin 只会删除安装记录，托管副本和原始源文件仍保留在磁盘上。
 - Plugin 目前按用户安装，对所有项目生效，暂不支持项目级安装范围。
 
 ### 自定义 marketplace JSON
 
-浏览自定义目录时，把 JSON 路径或 URL 传给 `/plugins marketplace <source>`；或通过 [`KIMI_CODE_PLUGIN_MARKETPLACE_URL`](../configuration/env-vars.md) 覆盖默认 marketplace。`plugins` 数组中每个条目需要 `id` 和 `source`（本地路径、zip URL 或 GitHub URL）：
+浏览自定义目录时，把 JSON 路径或 URL 传给 `/plugins marketplace <source>`；或通过 [`NORI_CODE_PLUGIN_MARKETPLACE_URL`](../configuration/env-vars.md) 覆盖默认 marketplace。`plugins` 数组中每个条目需要 `id` 和 `source`（本地路径、zip URL 或 GitHub URL）：
 
 ```json
 {
@@ -122,19 +122,19 @@ Kimi Datasource 是 Kimi Code 官方数据插件，让你通过自然语言直�
 Plugin 是一个带 manifest 的目录或 zip 文件。Manifest 可以放在以下任一位置：
 
 ```text
-<plugin_root>/kimi.plugin.json
-<plugin_root>/.kimi-plugin/plugin.json
+<plugin_root>/nori.plugin.json
+<plugin_root>/.nori-plugin/plugin.json
 ```
 
-两个文件同时存在时，以 `kimi.plugin.json` 为准。
+两个文件同时存在时，以 `nori.plugin.json` 为准。
 
 示例：
 
 ```json
 {
-  "name": "kimi-finance",
+  "name": "nori-finance",
   "version": "1.0.0",
-  "description": "Finance data and analysis workflows for Kimi Code CLI",
+  "description": "Finance data and analysis workflows for Nori Code CLI",
   "skills": "./skills/",
   "sessionStart": {
     "skill": "using-finance"
@@ -169,17 +169,17 @@ Plugin 是一个带 manifest 的目录或 zip 文件。Manifest 可以放在以�
 下面是一个最小完整例子，插件目录结构：
 
 ```text
-kimi-finance/
-  kimi.plugin.json
+nori-finance/
+  nori.plugin.json
   commands/
     report.md
 ```
 
-manifest（`kimi.plugin.json`）用 `commands` 字段指出命令文件的位置：
+manifest（`nori.plugin.json`）用 `commands` 字段指出命令文件的位置：
 
 ```json
 {
-  "name": "kimi-finance",
+  "name": "nori-finance",
   "version": "1.0.0",
   "commands": "./commands/"
 }
@@ -198,7 +198,7 @@ description: 拉取指定股票的财报并总结
 装好并启用后，在对话里输入：
 
 ```text
-/kimi-finance:report TSLA
+/nori-finance:report TSLA
 ```
 
 Kimi 会把正文里的 `$ARGUMENTS` 替换成 `TSLA`，再执行这段提示词。三处细节分述如下。
@@ -220,7 +220,7 @@ Kimi 会把正文里的 `$ARGUMENTS` 替换成 `TSLA`，再执行这段提示词
 
 ### 调用命令与传参
 
-命令自动以插件 id 作前缀（即命名空间），注册成 `<插件名>:<命令名>`，所以上面的命令实际叫 `/kimi-finance:report`，不同插件的同名命令因此不会冲突。
+命令自动以插件 id 作前缀（即命名空间），注册成 `<插件名>:<命令名>`，所以上面的命令实际叫 `/nori-finance:report`，不同插件的同名命令因此不会冲突。
 
 命令后输入的文字会替换正文里的 `$ARGUMENTS`（上例中 `TSLA` 替换掉 `$ARGUMENTS`）。若正文没写 `$ARGUMENTS` 却传了参数，参数不会丢弃，而是以 `ARGUMENTS: <你输入的内容>` 追加到正文末尾。
 
@@ -230,7 +230,7 @@ Plugin Skills 使用与普通 [Agent Skills](./skills.md) 相同的 `SKILL.md` �
 
 ```text
 my-plugin/
-  kimi.plugin.json
+  nori.plugin.json
   skills/
     using-my-plugin/
       SKILL.md
@@ -238,7 +238,7 @@ my-plugin/
       SKILL.md
 ```
 
-`sessionStart.skill` 在会话启动时把一个 plugin Skill 加载到主 Agent，适合放置初始化说明、工作流规则，或把其他工具中的术语映射到 Kimi Code CLI。它只注入文本，不执行代码。
+`sessionStart.skill` 在会话启动时把一个 plugin Skill 加载到主 Agent，适合放置初始化说明、工作流规则，或把其他工具中的术语映射到 Nori Code CLI。它只注入文本，不执行代码。
 
 无论 Skill 通过哪种方式加载（`sessionStart.skill`、`/skill:<name>` 或模型自动调用），`skillInstructions` 都会随该 plugin 的 Skill 一起出现。
 
@@ -253,7 +253,7 @@ Stdio server（本地命令）：
   "mcpServers": {
     "finance": {
       "command": "uvx",
-      "args": ["kimi-finance-mcp"]
+      "args": ["nori-finance-mcp"]
     }
   }
 }
@@ -276,10 +276,10 @@ HTTP server（远程服务）：
 Plugin MCP servers 会在 `/reload` 后或新会话中启动。启用或禁用某个 server：
 
 ```sh
-/plugins mcp disable kimi-finance finance
+/plugins mcp disable nori-finance finance
 /reload
 
-/plugins mcp enable kimi-finance finance
+/plugins mcp enable nori-finance finance
 /reload
 ```
 
@@ -304,7 +304,7 @@ plugin hooks 复用与全局 hooks 相同的机制——事件列表、stdin JSO
 
 - plugin 的 hooks 仅在 plugin **启用**期间生效；禁用 plugin 后其 hooks 停止运行。
 - 每条 hook 的工作目录为 plugin 根目录，因此 `command` 可以使用 plugin 内的 `./` 路径。
-- hook 进程会额外收到两个环境变量：`KIMI_CODE_HOME` 和 `KIMI_PLUGIN_ROOT`（plugin 根目录）。
+- hook 进程会额外收到两个环境变量：`NORI_CODE_HOME` 和 `NORI_PLUGIN_ROOT`（plugin 根目录）。
 
 仅安装 plugin 本身不会运行其 hooks——它们只在 plugin 启用期间、匹配的事件触发时运行。
 

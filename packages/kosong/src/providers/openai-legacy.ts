@@ -77,6 +77,11 @@ export interface OpenAILegacyOptions {
   apiKey?: string | undefined;
   baseUrl?: string | undefined;
   model: string;
+  /**
+   * Name to report as {@link ChatProvider.name}, e.g. the `[providers.x]` key
+   * from the host's config. Defaults to the wire name (`openai`).
+   */
+  providerName?: string | undefined;
   stream?: boolean | undefined;
   maxTokens?: number | undefined;
   reasoningKey?: string | undefined;
@@ -459,6 +464,10 @@ export class OpenAILegacyStreamedMessage implements StreamedMessage {
   }
 }
 export class OpenAILegacyChatProvider implements ChatProvider {
+  // The OpenAI Chat Completions wire is what most third-party vendors speak, so
+  // a hardcoded 'openai' here mislabels every one of them — an OpenRouter 403
+  // reported itself as "Provider: openai", pointing the user at the wrong
+  // dashboard. Fall back to the wire name only when the host names nothing.
   readonly name: string = 'openai';
 
   private _model: string;
@@ -476,6 +485,8 @@ export class OpenAILegacyChatProvider implements ChatProvider {
   private _clientFactory: ((auth: ProviderRequestAuth) => OpenAI) | undefined;
 
   constructor(options: OpenAILegacyOptions) {
+    const providerName = options.providerName?.trim();
+    if (providerName !== undefined && providerName.length > 0) this.name = providerName;
     const apiKey = options.apiKey ?? process.env['OPENAI_API_KEY'];
     this._apiKey = apiKey === undefined || apiKey.length === 0 ? undefined : apiKey;
     this._baseUrl = options.baseUrl ?? 'https://api.openai.com/v1';

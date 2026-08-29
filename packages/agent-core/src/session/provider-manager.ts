@@ -138,18 +138,24 @@ export class ProviderManager implements ModelProvider {
     // remove before commit
     const adaptiveThinkingOverride = this.options.adaptiveThinkingOverride?.();
     const effectiveAdaptiveThinking = adaptiveThinkingOverride ?? effectiveAlias.adaptiveThinking;
-    const provider = toKosongProviderConfig(
-      providerConfig,
-      alias.model,
-      alias.protocol,
-      this.options.kimiRequestHeaders,
-      effectiveAlias.maxOutputSize,
-      effectiveAlias.reasoningKey,
-      this.options.promptCacheKey,
-      effectiveAdaptiveThinking,
-      alias.betaApi,
-      effectiveAlias.supportEfforts,
-    );
+    // `providerName` is the config key the user actually chose (`openrouter`,
+    // `groq`, …). Carry it into the kosong config so provider-facing error text
+    // names that provider instead of the wire protocol it happens to speak.
+    const provider: KosongProviderConfig = {
+      ...toKosongProviderConfig(
+        providerConfig,
+        alias.model,
+        alias.protocol,
+        this.options.kimiRequestHeaders,
+        effectiveAlias.maxOutputSize,
+        effectiveAlias.reasoningKey,
+        this.options.promptCacheKey,
+        effectiveAdaptiveThinking,
+        alias.betaApi,
+        effectiveAlias.supportEfforts,
+      ),
+      providerName,
+    };
 
     return {
       providerName,

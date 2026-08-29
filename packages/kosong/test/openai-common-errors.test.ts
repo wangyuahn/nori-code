@@ -119,6 +119,60 @@ describe('convertOpenAIError: provider rate limit', () => {
     expect((result as APIProviderRateLimitError).statusCode).toBe(429);
   });
 });
+describe('convertOpenAIError: gateway detail', () => {
+  // `APIError.generate` unwraps `body.error` onto `.error`, so this is the shape
+  // a real OpenRouter failure arrives in — not the whole body.
+  const openRouter403 = (metadata: unknown) =>
+    OpenAIAPIError.generate(
+      403,
+      { error: { message: 'Provider returned error', code: 403, metadata } },
+      undefined,
+      new Headers(),
+    );
+
+  it('appends the upstream provider and its raw body to the status message', () => {
+    const result = convertOpenAIError(
+      openRouter403({
+        provider_name: 'DeepInfra',
+        raw: 'model not available for this key',
+      }),
+    );
+    expect(result).toBeInstanceOf(APIStatusError);
+    expect(result.message).toBe(
+      '403 Provider returned error (upstream: DeepInfra — model not available for this key)',
+    );
+  });
+
+  it('serializes a non-string raw payload and survives a partial metadata', () => {
+    expect(convertOpenAIError(openRouter403({ raw: { code: 'no_credits' } })).message).toBe(
+      '403 Provider returned error ({"code":"no_credits"})',
+    );
+    expect(convertOpenAIError(openRouter403({ provider_name: 'Groq' })).message).toBe(
+      '403 Provider returned error (upstream: Groq)',
+    );
+  });
+
+  it('truncates a raw body that would otherwise flood the transcript', () => {
+    const result = convertOpenAIError(openRouter403({ raw: 'x'.repeat(5000) }));
+    // 600-char cap plus the ellipsis, wrapped in the parenthetical.
+    expect(result.message).toBe(`403 Provider returned error (${'x'.repeat(600)}…)`);
+  });
+
+  it('leaves the message alone when there is no gateway metadata', () => {
+    expect(convertOpenAIError(openRouter403(undefined)).message).toBe(
+      '403 Provider returned error',
+    );
+    expect(convertOpenAIError(openRouter403('not an object')).message).toBe(
+      '403 Provider returned error',
+    );
+    expect(convertOpenAIError(openRouter403({})).message).toBe('403 Provider returned error');
+    expect(
+      convertOpenAIError(
+        OpenAIAPIError.generate(401, { error: { message: 'Invalid key' } }, undefined, new Headers()),
+      ).message,
+    ).toBe('401 Invalid key');
+  });
+});
 describe('convertOpenAIError: subclass errors still match first', () => {
   it('APIConnectionError matches its own case', () => {
     const connErr = new OpenAIConnectionError({ message: 'Connection error.' });

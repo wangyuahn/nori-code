@@ -58,6 +58,10 @@ describe('status panel report lines', () => {
     expect(output).toContain('Directory    /tmp/project');
     expect(output).toContain('Permissions  auto');
     expect(output).toContain('Discuss      on');
+    expect(output).toContain('Read-only    off');
+    expect(output).toContain('Team         0 members');
+    expect(output).toContain('Speaking     —');
+    expect(output).toContain('Reports      all clear');
     expect(output).toContain('Session      ses-1');
     expect(output).toContain('Title        Implement status');
     expect(output).toContain('Context window');
@@ -68,6 +72,45 @@ describe('status panel report lines', () => {
     expect(output).not.toContain('Account');
     expect(output).not.toContain('AGENTS.md');
     expect(output).not.toContain('Runtime');
+  });
+
+  it('shows the current speaker and blocking reports', () => {
+    const lines = buildStatusReportLines({
+      version: '1.2.3',
+      model: 'k2',
+      workDir: '/tmp/project',
+      sessionId: 'ses-1',
+      sessionTitle: null,
+      thinkingEffort: 'on',
+      permissionMode: 'manual',
+      discussMode: true,
+      contextUsage: 0,
+      contextTokens: 0,
+      maxContextTokens: 0,
+      availableModels: {},
+      teamAgents: [
+        { agentId: 'main', kind: 'main', name: 'Main', parentAgentId: null },
+        {
+          agentId: 'reviewer',
+          kind: 'team',
+          name: 'Reviewer',
+          parentAgentId: 'main',
+          reportStatus: 'blocked',
+        },
+        {
+          agentId: 'discuss-1',
+          kind: 'discussion',
+          name: 'Discussion',
+          parentAgentId: 'main',
+          discussionTurnAgentId: 'reviewer',
+        },
+      ],
+    }).map(strip);
+
+    const output = lines.join('\n');
+    expect(output).toContain('Speaking     Reviewer');
+    expect(output).toContain('Reports      1 blocked');
+    expect(output).toContain('Team         1 member');
   });
 
   it('falls back to app state and shows status load errors as warnings', () => {

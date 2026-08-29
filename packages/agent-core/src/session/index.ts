@@ -62,10 +62,13 @@ import { noopTelemetryClient, type TelemetryClient } from '../telemetry';
 import { SessionSubagentHost } from './subagent-host';
 import {
   activeDiscussionAsParticipant,
-  canCreateDepartment,
+  canCreateDepartmentInTree,
   DEFAULT_TEAM_MAX_DEPTH,
+  departmentDepth,
   teamDepth,
 } from './team-tree';
+import { withMountTreeMutation } from './mount-mutation';
+import { formatSessionSelf, type SessionSelfInfo } from './session-self';
 import type { BrowserProvider, ToolServices } from '../tools/support/services';
 import TEAM_AGENT_PROMPT from './team-agent.md?raw';
 import TEAM_MEMBER_ROLE_PROMPT from './team-member-role.md?raw';
@@ -109,6 +112,16 @@ export interface SessionOptions {
     readonly memory: NoriMemoryProvider;
     readonly coderWriteEnabled?: boolean;
   };
+  /** Parent map for mount-depth checks (sessionId → parentSessionId). */
+  readonly listMountParentById?: () => Promise<Readonly<Record<string, string | undefined>>>;
+  /** Creates the standalone session shown for a TeamCreate member. */
+  readonly createMountedMember?: (
+    input: { readonly identity: TeamIdentity; readonly parentSessionId?: string },
+  ) => Promise<{ readonly sessionId: string }>;
+  /** Deletes the standalone session owned by a dismissed TeamCreate member. */
+  readonly deleteMountedMember?: (sessionId: string) => Promise<void>;
+  /** Rebuilds the cached session identity block after team membership changes. */
+  readonly refreshSessionSelf?: () => Promise<void>;
 }
 
 export interface SessionSkillConfig {
@@ -142,6 +155,8 @@ export interface AgentMeta {
   readonly assignedAt?: string;
   /** Latest report for the current or most recent TeamAssign lease. */
   readonly teamReport?: TeamReportRecord;
+  /** Standalone session shown for this member on the conversation map. */
+  readonly mountedSessionId?: string;
   /** Present only on an agent-scoped, archived-or-active team discussion transcript. */
   readonly discussion?: TeamDiscussionMeta;
   /**
@@ -235,6 +250,7 @@ export interface CreateAgentOptions {
   readonly assignedTask?: string;
   readonly discussion?: TeamDiscussionMeta;
   readonly name?: string;
+  readonly mountedSessionId?: string;
 }
 
 export interface SessionMeta {
@@ -671,23 +687,48 @@ export class Session {
         assignedTask: options.assignedTask,
         assignedAt: options.assignedTask === undefined ? undefined : new Date().toISOString(),
         discussion: options.discussion,
+        mountedSessionId: options.mountedSessionId,
       };
       this.metadata.agents[id] = metadata;
-      if (kind === 'team') this.configureTeamAgentRuntime(agent, metadata);
-      void this.writeMetadata();
+      try {
+        if (kind === 'team') this.invalidateSessionSelfBlock();
+        if (kind === 'team') this.configureTeamAgentRuntime(agent, metadata);
+        await this.writeMetadata();
+        if (kind === 'team') this.emitTeamAgentsUpdated();
+      } catch (error) {
+        delete this.metadata.agents[id];
+        this.agents.delete(id);
+        if (kind === 'team') this.invalidateSessionSelfBlock();
+        throw error;
+      }
     }
     if (type === 'main') this.enableTeamLeadTools(agent);
 
     return { id, agent };
   }
 
-  /** Creates a durable member of `leaderAgentId`'s department, never a child Session. */
+  /**
+   * Creates a durable member of `leaderAgentId`'s department.
+   *
+   * A hire is exactly one entity: an agent in this session. It is *not* also
+   * mirrored into a freshly created standalone session — that dual-write is why
+   * the conversation map used to show every member twice and open an empty copy
+   * instead of the member's real transcript. The map reads members straight off
+   * the agent tree and talks to them through `(sessionId, agentId)`.
+   */
   async createTeamMember(
     leaderAgentId: string,
     identity: TeamIdentity,
   ): Promise<{ readonly id: string; readonly agent: Agent }> {
+    return withMountTreeMutation(() => this.createTeamMemberUnlocked(leaderAgentId, identity));
+  }
+
+  private async createTeamMemberUnlocked(
+    leaderAgentId: string,
+    identity: TeamIdentity,
+  ): Promise<{ readonly id: string; readonly agent: Agent }> {
     this.assertTeamManager(leaderAgentId);
-    this.assertCanCreateDepartment(leaderAgentId);
+    await this.assertCanCreateDepartment(leaderAgentId);
     validateTeamIdentity(identity);
     const duplicates = this.teamMemberMetadata(leaderAgentId).some(
       ([, meta]) => meta.name?.localeCompare(identity.name, undefined, { sensitivity: 'accent' }) === 0,
@@ -700,23 +741,54 @@ export class Session {
     }
 
     const leader = await this.ensureAgentResumed(leaderAgentId);
-    const result = await this.createAgent(
-      { type: 'sub', generate: leader.rawGenerate },
-      {
-        kind: 'team',
-        teamIdentity: identity,
-        teamLeaderAgentId: leaderAgentId,
-        parentAgentId: leaderAgentId,
-        profile: defaultTeamProfile(),
-      },
-    );
-    result.agent.config.update({
-      cwd: leader.config.cwd,
-      modelAlias: leader.config.modelAlias,
-      thinkingEffort: leader.config.thinkingEffort,
+    const leaderMeta = this.metadata.agents[leaderAgentId];
+    const mounted = await this.options.createMountedMember?.({
+      identity,
+      parentSessionId: leaderMeta?.mountedSessionId ?? this.options.id,
     });
-    result.agent.tools.inheritUserTools(leader.tools);
-    return result;
+    let createdAgentId: string | undefined;
+    try {
+      const result = await this.createAgent(
+        { type: 'sub', generate: leader.rawGenerate },
+        {
+          kind: 'team',
+          teamIdentity: identity,
+          teamLeaderAgentId: leaderAgentId,
+          parentAgentId: leaderAgentId,
+          profile: defaultTeamProfile(),
+          mountedSessionId: mounted?.sessionId,
+        },
+      );
+      createdAgentId = result.id;
+      result.agent.config.update({
+        cwd: leader.config.cwd,
+        modelAlias: leader.config.modelAlias,
+        thinkingEffort: leader.config.thinkingEffort,
+      });
+      result.agent.tools.inheritUserTools(leader.tools);
+      await leader.refreshSystemPrompt();
+      await this.options.refreshSessionSelf?.();
+      return result;
+    } catch (error) {
+      try {
+        if (createdAgentId !== undefined) {
+          await this.dismissTeamMembers(
+            leaderAgentId,
+            [createdAgentId],
+            'Rolling back a failed team member creation.',
+            true,
+          );
+        } else if (mounted !== undefined) {
+          await this.options.deleteMountedMember?.(mounted.sessionId);
+        }
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          'Team member creation failed and could not be rolled back.',
+        );
+      }
+      throw error;
+    }
   }
 
   getAgentMetadata(id: string): AgentMeta | undefined {
@@ -729,7 +801,139 @@ export class Session {
     );
   }
 
+  async attachMountedTeamMember(input: {
+    readonly mountedSessionId: string;
+    readonly identity: TeamIdentity;
+    readonly teamLeaderAgentId?: string;
+  }): Promise<{ readonly agentId: string }> {
+    return withMountTreeMutation(() => this.attachMountedTeamMemberUnlocked(input));
+  }
+
+  private async attachMountedTeamMemberUnlocked(input: {
+    readonly mountedSessionId: string;
+    readonly identity: TeamIdentity;
+    readonly teamLeaderAgentId?: string;
+  }): Promise<{ readonly agentId: string }> {
+    const leaderAgentId = input.teamLeaderAgentId ?? 'main';
+    this.assertTeamManager(leaderAgentId);
+    validateTeamIdentity(input.identity);
+
+    const existing = this.teamMemberMetadata(leaderAgentId).find(
+      ([, meta]) => meta.mountedSessionId === input.mountedSessionId,
+    );
+    if (existing !== undefined) {
+      const [agentId, current] = existing;
+      const next: AgentMeta = {
+        ...current,
+        name: input.identity.name,
+        role: input.identity.role,
+        mandate: input.identity.mandate,
+      };
+      this.metadata.agents[agentId] = next;
+      this.invalidateSessionSelfBlock();
+      const agent = await this.ensureAgentResumed(agentId);
+      this.configureTeamAgentRuntime(agent, next);
+      await this.writeMetadata();
+      this.emitTeamAgentsUpdated();
+      await this.ensureAgentResumed(leaderAgentId).then((leader) => leader.refreshSystemPrompt());
+      await this.options.refreshSessionSelf?.();
+      return { agentId };
+    }
+
+    await this.assertCanCreateDepartment(leaderAgentId);
+    const leader = await this.ensureAgentResumed(leaderAgentId);
+    let createdAgentId: string | undefined;
+    try {
+      const result = await this.createAgent(
+        { type: 'sub', generate: leader.rawGenerate },
+        {
+          kind: 'team',
+          teamIdentity: input.identity,
+          teamLeaderAgentId: leaderAgentId,
+          parentAgentId: leaderAgentId,
+          profile: defaultTeamProfile(),
+          mountedSessionId: input.mountedSessionId,
+        },
+      );
+      createdAgentId = result.id;
+      result.agent.config.update({
+        cwd: leader.config.cwd,
+        modelAlias: leader.config.modelAlias,
+        thinkingEffort: leader.config.thinkingEffort,
+      });
+      result.agent.tools.inheritUserTools(leader.tools);
+      await leader.refreshSystemPrompt();
+      await this.options.refreshSessionSelf?.();
+      return { agentId: result.id };
+    } catch (error) {
+      try {
+        if (createdAgentId !== undefined) {
+          await this.detachMountedTeamMember(input.mountedSessionId);
+        }
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          'Mounted team member attach failed and could not be rolled back.',
+        );
+      }
+      throw error;
+    }
+  }
+
+  async detachMountedTeamMember(
+    mountedSessionId: string,
+  ): Promise<{ readonly detachedAgentIds: readonly string[] }> {
+    return withMountTreeMutation(() => this.detachMountedTeamMemberUnlocked(mountedSessionId));
+  }
+
+  private async detachMountedTeamMemberUnlocked(
+    mountedSessionId: string,
+  ): Promise<{ readonly detachedAgentIds: readonly string[] }> {
+    const roots = Object.entries(this.metadata.agents)
+      .filter(([, meta]) => meta.kind === 'team' && meta.mountedSessionId === mountedSessionId)
+      .map(([agentId]) => agentId);
+    if (roots.length === 0) return { detachedAgentIds: [] };
+
+    const branchIds = [...roots, ...this.descendantAgentIds(roots)];
+    const leaders = new Set(
+      roots
+        .map((agentId) => this.metadata.agents[agentId]?.teamLeaderAgentId)
+        .filter((agentId): agentId is string => agentId !== undefined),
+    );
+    for (const agentId of branchIds) {
+      const agent = this.getReadyAgent(agentId);
+      agent?.turn.cancel(undefined, abortError('Mounted member detached'));
+      await agent?.background.stopAll('Mounted member detached');
+      this.agents.delete(agentId);
+      delete this.metadata.agents[agentId];
+    }
+    const archivedDiscussionLeaders = this.removeDismissedAgentsFromDiscussions(new Set(branchIds));
+    this.invalidateSessionSelfBlock();
+    await this.writeMetadata();
+    this.emitTeamAgentsUpdated();
+    await this.options.refreshSessionSelf?.();
+    for (const leaderAgentId of leaders) {
+      this.configureTeamMembers(leaderAgentId);
+      const leader = await this.ensureAgentResumed(leaderAgentId);
+      if (archivedDiscussionLeaders.has(leaderAgentId)) leader.discussMode.exit();
+      else leader.discussMode.deactivateIfOrphaned();
+      await leader.refreshSystemPrompt();
+    }
+    return { detachedAgentIds: roots };
+  }
+
   async dismissTeamMembers(
+    leaderAgentId: string,
+    agentIds: readonly string[],
+    reason: string,
+    confirmActive: boolean,
+  ): Promise<void> {
+    return withMountTreeMutation(() =>
+      this.dismissTeamMembersUnlocked(leaderAgentId, agentIds, reason, confirmActive),
+    );
+  }
+
+  private async dismissTeamMembersUnlocked(
     leaderAgentId: string,
     agentIds: readonly string[],
     reason: string,
@@ -767,30 +971,85 @@ export class Session {
     }
 
     const cancellation = abortError(`Dismissed: ${reason.trim()}`);
+    // Capture mount targets before mutating agent metadata so a later
+    // persistence failure can abort without deleting map sessions first.
+    const mountedSessionIds = [
+      ...new Set(
+        branchIds
+          .map((id) => this.metadata.agents[id]?.mountedSessionId)
+          .filter((id): id is string => id !== undefined),
+      ),
+    ];
+    const removedMetas = new Map<string, AgentMeta>();
+    for (const id of branchIds) {
+      const meta = this.metadata.agents[id];
+      if (meta !== undefined) removedMetas.set(id, meta);
+    }
+    const cleanupErrors: unknown[] = [];
     for (const id of branchIds) {
       const agent = this.getReadyAgent(id);
       agent?.turn.cancel(undefined, cancellation);
-      await agent?.background.stopAll(`Dismissed: ${reason.trim()}`);
+      try {
+        await agent?.background.stopAll(`Dismissed: ${reason.trim()}`);
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
       this.agents.delete(id);
       delete this.metadata.agents[id];
     }
-    const dismissed = new Set(uniqueIds);
-    for (const [discussionAgentId, meta] of Object.entries(this.metadata.agents)) {
-      const discussion = meta.discussion;
-      if (discussion === undefined) continue;
-      const participantAgentIds = discussion.participantAgentIds.filter((id) => !dismissed.has(id));
-      if (participantAgentIds.length === discussion.participantAgentIds.length) continue;
-      this.metadata.agents[discussionAgentId] = {
-        ...meta,
-        discussion: {
-          ...discussion,
-          participantAgentIds,
-          status: participantAgentIds.length === 0 ? 'archived' : discussion.status,
-          updatedAt: new Date().toISOString(),
-        },
-      };
+    const archivedDiscussionLeaders = this.removeDismissedAgentsFromDiscussions(new Set(branchIds));
+    this.invalidateSessionSelfBlock();
+    try {
+      await this.writeMetadata();
+    } catch (error) {
+      try {
+        await this.writeMetadata();
+      } catch (retryError) {
+        for (const [id, meta] of removedMetas) {
+          this.metadata.agents[id] = meta;
+        }
+        this.invalidateSessionSelfBlock();
+        throw new AggregateError(
+          [error, retryError],
+          'Team member dismissal aborted: agent removal could not be persisted.',
+        );
+      }
     }
-    await this.writeMetadata();
+    this.emitTeamAgentsUpdated();
+
+    // Mounted sessions are deleted only after agent metadata is durable.
+    // A failed delete leaves an orphan map node, which is safer than an agent
+    // whose mounted_session_id points at a session that no longer exists.
+    for (const mountedSessionId of mountedSessionIds) {
+      try {
+        await this.options.deleteMountedMember?.(mountedSessionId);
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    }
+    try {
+      await this.options.refreshSessionSelf?.();
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    const leadersToRefresh = new Set([leaderAgentId, ...archivedDiscussionLeaders]);
+    for (const departmentLeaderId of leadersToRefresh) {
+      try {
+        const leader = await this.ensureAgentResumed(departmentLeaderId);
+        this.configureTeamMembers(departmentLeaderId);
+        if (archivedDiscussionLeaders.has(departmentLeaderId)) leader.discussMode.exit();
+        else leader.discussMode.deactivateIfOrphaned();
+        await leader.refreshSystemPrompt();
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    }
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(
+        cleanupErrors,
+        'Team member dismissal completed with cleanup errors.',
+      );
+    }
   }
 
   /** Returns all live/persisted descendants below the supplied agent roots. */
@@ -808,6 +1067,72 @@ export class Session {
       }
     }
     return descendants;
+  }
+
+  /**
+   * Remove dismissed members from every surviving discussion and its runtime
+   * turn state. A dismissed member can be below the direct target, and a
+   * discussion transcript can itself be in that deleted branch, so clean both
+   * persisted metadata and in-memory scheduling maps.
+   */
+  private removeDismissedAgentsFromDiscussions(dismissed: ReadonlySet<string>): ReadonlySet<string> {
+    const archivedDiscussionLeaders = new Set<string>();
+    for (const discussionAgentId of dismissed) {
+      this.activeTeamDiscussionTurns.delete(discussionAgentId);
+      this.teamDiscussionSpeaks.delete(discussionAgentId);
+    }
+    const clearedDiscussionTurns = new Set<string>();
+    for (const [discussionAgentId, turnAgentId] of this.activeTeamDiscussionTurns) {
+      if (dismissed.has(turnAgentId)) {
+        this.activeTeamDiscussionTurns.delete(discussionAgentId);
+        clearedDiscussionTurns.add(discussionAgentId);
+      }
+    }
+    for (const [discussionAgentId, speaks] of this.teamDiscussionSpeaks) {
+      for (const agentId of dismissed) speaks.delete(agentId);
+      if (speaks.size === 0) this.teamDiscussionSpeaks.delete(discussionAgentId);
+    }
+
+    for (const [discussionAgentId, meta] of Object.entries(this.metadata.agents)) {
+      const discussion = meta.discussion;
+      if (discussion === undefined) continue;
+      const participantAgentIds = discussion.participantAgentIds.filter((id) => !dismissed.has(id));
+      const currentTurnCleared =
+        (discussion.currentTurnAgentId !== undefined && dismissed.has(discussion.currentTurnAgentId))
+        || clearedDiscussionTurns.has(discussionAgentId);
+      const nextReadCursors = discussion.readCursors === undefined
+        ? undefined
+        : Object.fromEntries(
+            Object.entries(discussion.readCursors).filter(([agentId]) => !dismissed.has(agentId)),
+          );
+      const cursorsChanged =
+        discussion.readCursors !== undefined
+        && Object.keys(nextReadCursors ?? {}).length !== Object.keys(discussion.readCursors).length;
+      const participantsChanged = participantAgentIds.length !== discussion.participantAgentIds.length;
+      const statusChanged = participantAgentIds.length === 0 && discussion.status === 'active';
+      if (participantAgentIds.length === 0 && meta.teamLeaderAgentId !== undefined) {
+        archivedDiscussionLeaders.add(meta.teamLeaderAgentId);
+      }
+      if (!participantsChanged && !statusChanged && !cursorsChanged && !currentTurnCleared) continue;
+      this.metadata.agents[discussionAgentId] = {
+        ...meta,
+        discussion: {
+          ...discussion,
+          participantAgentIds,
+          status: participantAgentIds.length === 0 ? 'archived' : discussion.status,
+          currentTurnAgentId: currentTurnCleared ? undefined : discussion.currentTurnAgentId,
+          readCursors: nextReadCursors,
+          updatedAt: new Date().toISOString(),
+        },
+      };
+      this.getReadyAgent(discussionAgentId)?.emitEvent({
+        type: 'discussion.updated',
+        discussionAgentId,
+        kind: 'lifecycle',
+        currentTurnAgentId: currentTurnCleared ? null : undefined,
+      });
+    }
+    return archivedDiscussionLeaders;
   }
 
   async assignTeamTasks(
@@ -1103,6 +1428,15 @@ export class Session {
     });
   }
 
+  /** Notify clients that the durable Team-agent tree changed. */
+  private emitTeamAgentsUpdated(): void {
+    void this.rpc.emitEvent({
+      type: 'session.meta.updated',
+      agentId: 'main',
+      patch: { agents: { ...this.metadata.agents } },
+    });
+  }
+
   /** Revoke every TeamAssign write lease. Used when re-entering Discuss or archiving. */
   async lockTeamAssignments(leaderAgentId: string): Promise<void> {
     this.assertTeamManager(leaderAgentId);
@@ -1233,14 +1567,26 @@ export class Session {
     if (meta?.discussion === undefined) {
       throw new KimiError(ErrorCodes.AGENT_NOT_FOUND, `Discussion "${discussionAgentId}" was not found.`);
     }
+    const participantAgentIds = [...update.participantAgentIds];
+    const activeTurnAgentId = this.activeTeamDiscussionTurns.get(discussionAgentId);
+    const currentTurnAgentId = meta.discussion.currentTurnAgentId;
+    const turnStillValid =
+      update.status === 'active'
+      && (activeTurnAgentId === undefined || participantAgentIds.includes(activeTurnAgentId))
+      && (currentTurnAgentId === undefined || participantAgentIds.includes(currentTurnAgentId));
+    if (!turnStillValid) {
+      this.activeTeamDiscussionTurns.delete(discussionAgentId);
+      this.teamDiscussionSpeaks.delete(discussionAgentId);
+    }
     const discussion: TeamDiscussionMeta = {
       ...meta.discussion,
       ...update,
-      participantAgentIds: [...update.participantAgentIds],
+      participantAgentIds,
+      currentTurnAgentId: turnStillValid ? currentTurnAgentId : undefined,
       readCursors: {
         ...meta.discussion.readCursors,
         ...Object.fromEntries(
-          update.participantAgentIds
+          participantAgentIds
             .filter((agentId) => meta.discussion!.readCursors?.[agentId] === undefined)
             .map((agentId) => [agentId, 0]),
         ),
@@ -1379,13 +1725,19 @@ export class Session {
   }
 
   beginTeamDiscussionTurn(discussionAgentId: string, agentId: string): void {
+    const meta = this.metadata.agents[discussionAgentId];
+    if (meta?.discussion === undefined || !meta.discussion.participantAgentIds.includes(agentId)) {
+      throw new KimiError(
+        ErrorCodes.SESSION_STATE_INVALID,
+        'Only active discussion participants can take a discussion turn.',
+      );
+    }
     const active = this.activeTeamDiscussionTurns.get(discussionAgentId);
     if (active !== undefined) {
       throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'A discussion participant is already speaking.');
     }
     this.teamDiscussionSpeaks.get(discussionAgentId)?.delete(agentId);
     this.activeTeamDiscussionTurns.set(discussionAgentId, agentId);
-    const meta = this.metadata.agents[discussionAgentId];
     if (meta?.discussion !== undefined) {
       this.metadata.agents[discussionAgentId] = {
         ...meta,
@@ -1543,7 +1895,7 @@ export class Session {
       this.options.kimiHomeDir,
       { additionalDirs: this.additionalDirs, customAgents: this.runtimeConfig?.customAgents },
     );
-    agent.useProfile(profile, context, this.options.kimiHomeDir);
+    agent.useProfile(this.withSessionSelf(profile), context, this.options.kimiHomeDir);
     const { agentsMdWarning } = context;
     if (agentsMdWarning !== undefined) {
       this.agentsMdWarning = agentsMdWarning;
@@ -1554,6 +1906,67 @@ export class Session {
         code: 'agents-md-oversized',
       });
     }
+  }
+
+  /** Append latest `<session_self>` from mount metadata on every prompt render. */
+  private withSessionSelf(profile: ResolvedAgentProfile): ResolvedAgentProfile {
+    return {
+      ...profile,
+      systemPrompt: (context) => {
+        const base = profile.systemPrompt(context);
+        const block = this.readSessionSelfBlock();
+        return block === undefined ? base : `${base}\n\n${block}`;
+      },
+    };
+  }
+
+  private invalidateSessionSelfBlock(): void {
+    delete this.metadata.custom['session_self'];
+  }
+
+  private readSessionSelfBlock(): string | undefined {
+    const cached = this.metadata.custom['session_self'];
+    if (typeof cached === 'string' && cached.includes('<session_self>')) return cached;
+    const sessionId = this.options.id;
+    if (sessionId === undefined) return undefined;
+    const parentSessionId = typeof this.metadata.custom['parent_session_id'] === 'string'
+      ? this.metadata.custom['parent_session_id'] as string
+      : undefined;
+    const role = typeof this.metadata.custom['mount_role'] === 'string'
+      ? this.metadata.custom['mount_role'] as string
+      : undefined;
+    const mandate = typeof this.metadata.custom['mount_mandate'] === 'string'
+      ? this.metadata.custom['mount_mandate'] as string
+      : undefined;
+    const directChildren = Object.entries(this.metadata.agents)
+      .filter(([, meta]) => meta.kind === 'team' && meta.teamLeaderAgentId === 'main')
+      .map(([agentId, meta]) => ({
+        sessionId: meta.mountedSessionId ?? agentId,
+        title: meta.name ?? agentId,
+        role: meta.role,
+        mandate: meta.mandate,
+      }));
+    // Keep ordinary top-level / BTW prompts clean. Identity belongs on mounted
+    // members and on hosts that already hired a department.
+    if (
+      parentSessionId === undefined
+      && role === undefined
+      && mandate === undefined
+      && directChildren.length === 0
+    ) {
+      return undefined;
+    }
+    const info: SessionSelfInfo = {
+      sessionId,
+      title: this.metadata.title || sessionId,
+      parentSessionId,
+      role,
+      mandate,
+      depth: parentSessionId === undefined ? 0 : 1,
+      position: parentSessionId === undefined ? 'top-level' : 'member',
+      directChildren,
+    };
+    return formatSessionSelf(info);
   }
 
   async getSessionWarnings(): Promise<readonly SessionWarning[]> {
@@ -1828,13 +2241,23 @@ export class Session {
    * created rather than by withholding `TeamCreate`, because the limit is a
    * setting the user can change while agents are already running — a tool set
    * frozen at creation time would go stale, while this message is always true.
+   *
+   * When a leader has a mounted session, that session's mount depth is the
+   * authoritative department depth; otherwise use the in-session agent tree.
    */
-  private assertCanCreateDepartment(leaderAgentId: string): void {
+  private async assertCanCreateDepartment(leaderAgentId: string): Promise<void> {
     const maxDepth = this.teamMaxDepth();
-    if (canCreateDepartment(this.metadata.agents, leaderAgentId, maxDepth)) return;
+    const parentById = await this.options.listMountParentById?.();
+    const scope = {
+      agents: this.metadata.agents,
+      agentId: leaderAgentId,
+      parentById,
+      sessionIdForAgent: this.metadata.agents[leaderAgentId]?.mountedSessionId ?? this.options.id,
+    };
+    if (canCreateDepartmentInTree({ ...scope, maxDepth })) return;
     throw new KimiError(
       ErrorCodes.SESSION_STATE_INVALID,
-      `Team depth limit reached: this agent is at depth ${String(teamDepth(this.metadata.agents, leaderAgentId))} of ${String(maxDepth)} and cannot hire its own members. Do the work in this department, or ask your parent to raise team.maxDepth.`,
+      `Team depth limit reached: this agent is at depth ${String(departmentDepth(scope))} of ${String(maxDepth)} and cannot hire its own members. Do the work in this department, or ask your parent to raise team.maxDepth.`,
     );
   }
 
@@ -1849,11 +2272,13 @@ export class Session {
       ...TEAM_MEMBER_TOOLS,
     ];
     agent.tools.setActiveTools(inheritedTools);
+    // Discuss is the only team-wide write lock. `/setting readonly` is main-only
+    // (see applyNoriRuntimeSettingsToAgent) and must not cascade onto members —
+    // otherwise Code-phase TeamAssign work stays blocked while the footer still
+    // shows readonly for the lead.
     const discussReadonly = leader?.discussMode.isActive ?? false;
     agent.teamWriteLocked = discussReadonly;
-    agent.permission.setToolsReadonly(
-      discussReadonly || (leader?.permission.toolsReadonly ?? false),
-    );
+    agent.permission.setToolsReadonly(discussReadonly);
     agent.permission.setMode(
       discussReadonly ? 'manual' : (this.sessionPermissionMode ?? leader?.permission.mode ?? 'manual'),
     );
@@ -2147,7 +2572,7 @@ export class Session {
     if (agent.config.systemPrompt === '') return;
     const profile = this.resolvePersistedProfile(agent, meta, parentAgent);
     if (profile === undefined) return;
-    agent.setActiveProfile(profile, this.options.kimiHomeDir);
+    agent.setActiveProfile(this.withSessionSelf(profile), this.options.kimiHomeDir);
   }
 
   private async refreshMainAgentProfileCapabilities(

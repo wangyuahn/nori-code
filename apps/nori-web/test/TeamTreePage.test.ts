@@ -68,6 +68,36 @@ describe('team tree view', () => {
     expect(height).toBeGreaterThan(0);
   });
 
+  it('opens members through onSelectAgent with the host session id', async () => {
+    vi.spyOn(api.sessions, 'getAgents').mockResolvedValue({ items: agents } as unknown as Awaited<ReturnType<typeof api.sessions.getAgents>>);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 1000, bottom: 600, width: 1000, height: 600, toJSON: () => ({}),
+    });
+
+    const onSelectAgent = vi.fn();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(TeamTreePage, {
+          session,
+          onSelectAgent,
+        })));
+        await Promise.resolve();
+      });
+
+      const member = [...container.querySelectorAll<HTMLElement>('.team-node')]
+        .find((el) => el.textContent?.includes('L1'));
+      expect(member).toBeTruthy();
+      await act(async () => { member!.click(); });
+      expect(onSelectAgent).toHaveBeenCalledWith('session-team', expect.objectContaining({ agent_id: 'l1' }));
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
   it('pans on drag, zooms on wheel and recenters on double-click', async () => {
     vi.spyOn(api.sessions, 'getAgents').mockResolvedValue({ items: agents } as unknown as Awaited<ReturnType<typeof api.sessions.getAgents>>);
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({

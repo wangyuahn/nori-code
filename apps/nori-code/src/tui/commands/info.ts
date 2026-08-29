@@ -2,8 +2,9 @@ import { release as osRelease, type as osType } from 'node:os';
 
 import type { McpServerInfo, SessionStatus, SessionUsage } from '@nori-code/sdk';
 
-import { buildMcpStatusReportLines } from '../components/messages/mcp-status-panel';
+import { McpStatusListComponent } from '../components/dialogs/mcp-status-list';
 import { buildStatusReportLines } from '../components/messages/status-panel';
+import { teamMemberCount } from '../utils/team-tree';
 import { buildUsageReportLines, UsagePanelComponent, type ManagedUsageReport } from '../components/messages/usage-panel';
 import {
   FEEDBACK_ISSUE_URL,
@@ -142,6 +143,9 @@ export async function showStatusReport(host: SlashCommandHost): Promise<void> {
     thinkingEffort: appState.thinkingEffort,
     permissionMode: appState.permissionMode,
     discussMode: appState.discussMode,
+    toolsReadonly: appState.toolsReadonly,
+    teamMemberCount: teamMemberCount(appState.teamAgents),
+    teamAgents: appState.teamAgents,
     contextUsage: appState.contextUsage,
     contextTokens: appState.contextTokens,
     maxContextTokens: appState.maxContextTokens,
@@ -165,14 +169,14 @@ export async function showMcpServers(host: SlashCommandHost): Promise<void> {
     return;
   }
 
-  const title = servers.length > 0 ? ` MCP (${servers.length}) ` : ' MCP ';
-  const panel = new UsagePanelComponent(
-    () => buildMcpStatusReportLines({ servers }),
-    'primary',
-    title,
+  host.mountEditorReplacement(
+    new McpStatusListComponent({
+      servers,
+      onCancel: () => {
+        host.restoreEditor();
+      },
+    }),
   );
-  host.state.transcriptContainer.addChild(panel);
-  host.state.ui.requestRender();
 }
 
 async function loadSessionUsageReport(host: SlashCommandHost): Promise<SessionUsageResult> {

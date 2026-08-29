@@ -134,6 +134,16 @@ function makeSessionService(sessions: Map<string, Session>): ISessionService {
     createChild: async () => {
       throw new Error('not implemented');
     },
+    mount: async () => {
+      throw new Error('not implemented');
+    },
+    unmount: async () => {
+      throw new Error('not implemented');
+    },
+    remount: async () => {
+      throw new Error('not implemented');
+    },
+    getGraph: async () => ({ nodes: [], edges: [] }),
     getStatus: async () => {
       throw new Error('not implemented');
     },

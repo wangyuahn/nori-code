@@ -1,10 +1,14 @@
 /**
  *   POST    /v1/sessions                  body: SessionCreate   data: Session
  *   GET     /v1/sessions                  query: ListSessions   data: Page<Session>
+ *   GET     /v1/sessions/graph            query: ListSessions   data: SessionGraph
  *   GET     /v1/sessions/{id}             -                     data: Session
  *   GET     /v1/sessions/{id}/profile     -                     data: Session
  *   POST    /v1/sessions/{id}/profile     body: SessionUpdate   data: Session
  *   POST    /v1/sessions/{id}:fork        body: SessionFork     data: Session
+ *   POST    /v1/sessions/{id}:mount       body: SessionMount    data: Session
+ *   POST    /v1/sessions/{id}:unmount     body: SessionUnmount  data: Session
+ *   POST    /v1/sessions/{id}:remount     body: SessionRemount  data: Session
  *   POST    /v1/sessions/{id}:btw         -                     data: StartBtwSession
  *   GET     /v1/sessions/{id}/children    query: ListSessions   data: Page<Session>
  *   POST    /v1/sessions/{id}/children    body: SessionChild    data: Session
@@ -24,8 +28,11 @@ import {
   sessionChildCreateSchema,
   sessionCreateSchema,
   sessionForkSchema,
+  sessionMountSchema,
+  sessionRemountSchema,
   sessionSchema,
   sessionStatusSchema,
+  sessionUnmountSchema,
   sessionUpdateSchema,
 } from '../session';
 
@@ -115,6 +122,36 @@ export type CreateSessionChildRequest = z.infer<typeof createSessionChildRequest
 export const createSessionChildResponseSchema = sessionSchema;
 export type CreateSessionChildResponse = z.infer<typeof createSessionChildResponseSchema>;
 
+export const mountSessionRequestSchema = sessionMountSchema;
+export type MountSessionRequest = z.infer<typeof mountSessionRequestSchema>;
+
+export const mountSessionResponseSchema = sessionSchema;
+export type MountSessionResponse = z.infer<typeof mountSessionResponseSchema>;
+
+export const remountSessionRequestSchema = sessionRemountSchema;
+export type RemountSessionRequest = z.infer<typeof remountSessionRequestSchema>;
+
+export const remountSessionResponseSchema = sessionSchema;
+export type RemountSessionResponse = z.infer<typeof remountSessionResponseSchema>;
+
+export const unmountSessionRequestSchema = sessionUnmountSchema;
+export type UnmountSessionRequest = z.infer<typeof unmountSessionRequestSchema>;
+
+export const unmountSessionResponseSchema = sessionSchema;
+export type UnmountSessionResponse = z.infer<typeof unmountSessionResponseSchema>;
+
+export const sessionGraphEdgeSchema = z.object({
+  child_session_id: z.string().min(1),
+  parent_session_id: z.string().min(1),
+});
+export type SessionGraphEdge = z.infer<typeof sessionGraphEdgeSchema>;
+
+export const sessionGraphResponseSchema = z.object({
+  nodes: z.array(sessionSchema),
+  edges: z.array(sessionGraphEdgeSchema),
+});
+export type SessionGraphResponse = z.infer<typeof sessionGraphResponseSchema>;
+
 export const sessionAgentQuerySchema = z.object({
   agent_id: sessionAgentIdSchema.optional(),
 });
@@ -147,6 +184,12 @@ export const sessionAgentTreeNodeSchema = z.object({
   discussion_turn_agent_id: sessionAgentIdSchema.optional(),
   /** Members taking part in this Discuss round; only discussion nodes carry it. */
   discussion_participant_agent_ids: z.array(sessionAgentIdSchema).optional(),
+  /**
+   * Dual-write child session created by TeamCreate / map mount. Opening this
+   * node lets the conversation map resolve the member's owning host agent
+   * instead of opening the empty child-session shell.
+   */
+  mounted_session_id: z.string().min(1).optional(),
 });
 export type SessionAgentTreeNode = z.infer<typeof sessionAgentTreeNodeSchema>;
 

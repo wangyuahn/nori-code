@@ -4,7 +4,7 @@ import { mergeWorkBlocks, type ChatMessage, type QueuedPrompt, type TodoItem, ty
 import { useBrowserPermissions, type BrowserPermissionRequest, type BrowserPermissionDecision } from '../hooks/useBrowser';
 import { useI18n } from '../i18n';
 import { chatSlashCommandSuggestions, resolveChatSlashCommand, type ChatSlashCommand, type ChatSlashCommandName } from '../utils/chat-slash-commands';
-import { modelThinkingOptions } from '../utils/model-thinking';
+import { resolveComposerThinking } from '../utils/model-thinking';
 import { PROJECT_FILE_REFERENCE_EVENT, projectFileMention } from '../projectFileReference';
 import { BROWSER_REFERENCE_EVENT } from '../browserReference';
 import { Icon, type IconName } from './Icon';
@@ -267,18 +267,19 @@ export function ChatView(props: ChatViewProps) {
   const runtimeModelId = runtimeModelValue === '' ? undefined : runtimeModelValue;
   const selectedModelId = activeModelOverride ?? runtimeModelId ?? session?.agent_config?.model ?? draftAgentConfig?.model ?? '';
   const selectedModel = models.find(model => model.model === selectedModelId);
-  const thinkingOptions = modelThinkingOptions(selectedModel);
-  const requestedThinking = session?.agent_config?.thinking ?? draftAgentConfig?.thinking ?? thinkingOptions.defaultValue;
+  const composerThinking = resolveComposerThinking({
+    model: selectedModel,
+    runtimeThinking: sessionStatus?.thinking_level,
+    sessionThinking: session?.agent_config?.thinking,
+    draftThinking: draftAgentConfig?.thinking,
+  });
   const selectedPermission = session?.agent_config?.permission_mode ?? draftAgentConfig?.permission_mode ?? 'manual';
   const selectedPermissionLabel = selectedPermission === 'auto' ? 'AUTO' : selectedPermission === 'yolo' ? 'YOLO' : tr('Manual', '手动');
   const selectedModelLabel = selectedModel
     ? `${selectedModel.display_name || selectedModel.model} · ${selectedModel.provider_name || selectedModel.provider}`
     : selectedModelId || tr('Select model', '选择模型');
-  const selectedThinkingChoice = thinkingOptions.choices.find(choice => choice.value === requestedThinking)
-    ?? thinkingOptions.choices.find(choice => choice.value === thinkingOptions.defaultValue)
-    ?? thinkingOptions.choices[0];
-  const selectedThinking = selectedThinkingChoice?.value ?? requestedThinking;
-  const selectedThinkingLabel = selectedThinkingChoice?.value ?? '';
+  const selectedThinking = composerThinking.selectedValue;
+  const selectedThinkingLabel = composerThinking.choices.length > 0 ? selectedThinking : '';
   const modelChoices: ComposerSettingChoice[] = [
     { value: '', label: modelsLoading ? tr('Loading models…', '正在加载模型…') : tr('Select model', '选择模型'), disabled: true },
     ...(selectedModelId !== '' && !selectedModel ? [{ value: selectedModelId, label: selectedModelId }] : []),
@@ -287,7 +288,7 @@ export function ChatView(props: ChatViewProps) {
       label: `${model.display_name || model.model} · ${model.provider_name || model.provider}`,
     })),
   ];
-  const thinkingChoices: ComposerSettingChoice[] = thinkingOptions.choices.map(choice => ({ value: choice.value, label: choice.value }));
+  const thinkingChoices: ComposerSettingChoice[] = composerThinking.choices.map(choice => ({ value: choice.value, label: choice.value }));
   const commandSuggestions = chatSlashCommandSuggestions(input);
   const commandMenuOpen = !commandMenuDismissed && commandSuggestions.length > 0;
   const imageCapable = modelSupportsImageInput(selectedModel);
@@ -858,6 +859,7 @@ export function ChatView(props: ChatViewProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const waitingForPermission = approvalRequests.length > 0 || browserPermissions.pending.length > 0;
   const [agentSystemPrompt, setAgentSystemPrompt] = useState<string | null>(null);
   useEffect(() => {
     if (currentSessionId === null) {
@@ -875,9 +877,9 @@ export function ChatView(props: ChatViewProps) {
     <div className="chat-messages-shell">
     <div className="chat-messages" ref={messagesScrollRef} onScroll={handleMessagesScroll}>
       {messages.length > 0 && agentSystemPrompt !== null && <ContextInjectionRow block={{ id: 'agent-system-prompt', type: 'context', source: 'system-prompt', content: agentSystemPrompt }} label={tr('System prompt', '系统提示词')}/>}
-      {messagesLoading ? <div className="chat-history-loading" role="status"><span className="spinner"/><strong>{tr('Loading conversation…', '正在加载会话…')}</strong></div> : messages.length === 0 ? <div className="chat-welcome"><div className="welcome-mark"><Icon name="sparkles" size={27}/></div><span className="eyebrow">{tr('Your thoughtful coding partner', '你的智能编程伙伴')}</span><h2>{session ? tr('What should we make better?', '我们要改进什么？') : tr('What would you like to work on?', '你想从哪里开始？')}</h2><p>{session ? tr('Ask Nori to inspect code, plan a feature, fix a bug, or validate an API integration.', '让 Nori 检查代码、规划功能、修复缺陷或验证 API 集成。') : tr('Choose a project folder to start a new task, or open an existing conversation from the sidebar. You can also type below now.', '选择一个项目文件夹开始新任务，或打开已有对话。你也可以直接在下方输入。')}</p><UsageOverview sessions={allSessions} models={models}/><div className="starter-grid">{STARTERS.map(item => <button key={item.title} className="starter-card" onClick={() => void handleSend(tr(item.prompt, item.promptZh))}><Icon name="sparkles" size={16}/><span><strong>{tr(item.title, item.titleZh)}</strong><small>{tr(item.prompt, item.promptZh)}</small></span></button>)}</div></div> : presentedMessages.map(({ message, workStartedAt }) => <MessageBubble key={message.id} message={message} sessionAgents={sessionAgents} workStartedAt={workStartedAt} rewindCount={rewindCounts.get(message.id)} rewindDisabled={isStreaming || rewinding} onRewind={requestRewind} live={message.id === continuationMessageId ? { streaming, thinking, workBlocks, stopping, onAbort: handleAbort } : undefined}/>) }
+      {messagesLoading ? <div className="chat-history-loading" role="status"><span className="spinner"/><strong>{tr('Loading conversation…', '正在加载会话…')}</strong></div> : messages.length === 0 ? <div className="chat-welcome"><div className="welcome-mark"><Icon name="sparkles" size={27}/></div><span className="eyebrow">{tr('Your thoughtful coding partner', '你的智能编程伙伴')}</span><h2>{session ? tr('What should we make better?', '我们要改进什么？') : tr('What would you like to work on?', '你想从哪里开始？')}</h2><p>{session ? tr('Ask Nori to inspect code, plan a feature, fix a bug, or validate an API integration.', '让 Nori 检查代码、规划功能、修复缺陷或验证 API 集成。') : tr('Choose a project folder to start a new task, or open an existing conversation from the sidebar. You can also type below now.', '选择一个项目文件夹开始新任务，或打开已有对话。你也可以直接在下方输入。')}</p><UsageOverview sessions={allSessions} models={models}/><div className="starter-grid">{STARTERS.map(item => <button key={item.title} className="starter-card" onClick={() => void handleSend(tr(item.prompt, item.promptZh))}><Icon name="sparkles" size={16}/><span><strong>{tr(item.title, item.titleZh)}</strong><small>{tr(item.prompt, item.promptZh)}</small></span></button>)}</div></div> : presentedMessages.map(({ message, workStartedAt }) => <MessageBubble key={message.id} message={message} sessionAgents={sessionAgents} workStartedAt={workStartedAt} rewindCount={rewindCounts.get(message.id)} rewindDisabled={isStreaming || rewinding} onRewind={requestRewind} live={message.id === continuationMessageId ? { streaming, thinking, workBlocks, stopping, waitingForPermission, onAbort: handleAbort } : undefined}/>) }
 
-      {isStreaming && !streamingContinuesAssistant && <div className="chat-message chat-message-assistant chat-message-streaming"><div className="message-body"><div className="chat-message-role">Nori <span>{pendingApprovals.length > 0 || browserPermissions.pending.length > 0 ? tr('waiting for permission', '等待授权') : tr('working', '工作中')}</span></div>{standaloneLiveBlocks.length > 0 ? <WorkStream blocks={standaloneLiveBlocks} live activeProgressId={standaloneLiveProgressId} startedAt={latestUserStartedAt}/> : <div className="chat-message-content"><span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span><span className="streaming-cursor"/></div>}{streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(streaming))} tokens</div>}<button className="chat-abort-btn" onClick={() => void handleAbort()} disabled={stopping}><Icon name="stop" size={13}/> {stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button></div></div>}
+      {isStreaming && !streamingContinuesAssistant && <div className="chat-message chat-message-assistant chat-message-streaming"><div className="message-body"><div className="chat-message-role">Nori <span>{waitingForPermission ? tr('waiting for permission', '等待授权') : tr('working', '工作中')}</span></div>{standaloneLiveBlocks.length > 0 ? <WorkStream blocks={standaloneLiveBlocks} live activeProgressId={standaloneLiveProgressId} startedAt={latestUserStartedAt}/> : <div className="chat-message-content"><span className="thinking-label">{tr('Waiting for model output…', '等待模型输出…')}</span><span className="streaming-cursor"/></div>}{streaming && <div className="message-token-usage">{tr('Live output', '实时输出')} ~{formatTokens(estimateStreamingTokens(streaming))} tokens</div>}<button className="chat-abort-btn" onClick={() => void handleAbort()} disabled={stopping}><Icon name="stop" size={13}/> {stopping ? tr('Stopping…', '正在停止…') : tr('Stop response', '停止回复')}</button></div></div>}
       <div ref={messagesEndRef}/>
     </div>
     {turnPreviews.length > 0 && <nav className="chat-turn-rail" style={{ height: `${Math.min(360, Math.max(54, turnPreviews.length * 14))}px` }} aria-label={tr('Conversation turns', '对话轮次')} onPointerMove={event => {
@@ -987,6 +989,7 @@ interface LiveAssistantContinuation {
   thinking: string;
   workBlocks: WorkBlock[];
   stopping: boolean;
+  waitingForPermission?: boolean;
   onAbort: () => void | Promise<void>;
 }
 
@@ -1063,8 +1066,8 @@ function MessageBubble({ message, sessionAgents, workStartedAt, rewindCount, rew
     ? Math.max(0, completedAt - workStartedAt)
     : undefined;
   const discussionName = discussionSpeakerDisplayName(message.speaker, sessionAgents, tr);
-  return <article data-chat-turn-id={isUser ? message.id : undefined} className={'chat-message ' + (isUser ? 'chat-message-user' : isDiscussion ? 'chat-message-discussion' : isSystem ? 'chat-message-system' : 'chat-message-assistant')}>
-    {isSystem && <div className="message-avatar"><span>{isDiscussion ? '·' : '!'}</span></div>}<div className="message-body">{(!isUser || (rewindCount !== undefined && onRewind !== undefined)) && <div className="chat-message-role">{!isUser && (isDiscussion ? `${discussionName} · ${discussionSpeakerRoleLabel(message.speaker?.from, tr)}` : isSystem ? tr('System', '系统') : 'Nori')}{isUser && rewindCount && onRewind && <button className="message-rewind-btn" disabled={rewindDisabled} onClick={() => { void onRewind(rewindCount); }} title={tr('Rewind to before this prompt', '回溯到此提问之前')}><Icon name="refresh" size={12}/>{tr('Rewind', '回溯')}</button>}</div>}
+  return <article data-chat-turn-id={isUser ? message.id : undefined} className={'chat-message ' + (isUser ? 'chat-message-user' : isDiscussion ? 'chat-message-discussion' : isSystem ? 'chat-message-system' : 'chat-message-assistant') + (live ? ' chat-message-streaming' : '')}>
+    {isSystem && <div className="message-avatar"><span>{isDiscussion ? '·' : '!'}</span></div>}<div className="message-body">{(!isUser || (rewindCount !== undefined && onRewind !== undefined)) && <div className="chat-message-role">{!isUser && (isDiscussion ? `${discussionName} · ${discussionSpeakerRoleLabel(message.speaker?.from, tr)}` : isSystem ? tr('System', '系统') : <>Nori{live ? <span>{live.waitingForPermission ? tr('waiting for permission', '等待授权') : tr('working', '工作中')}</span> : null}</>)}{isUser && rewindCount && onRewind && <button className="message-rewind-btn" disabled={rewindDisabled} onClick={() => { void onRewind(rewindCount); }} title={tr('Rewind to before this prompt', '回溯到此提问之前')}><Icon name="refresh" size={12}/>{tr('Rewind', '回溯')}</button>}</div>}
       {onlyContext
         ? displayedBlocks.map(block => block.type === 'context' ? <ContextInjectionRow key={block.id} block={block}/> : null)
         : hasWork ? <WorkStream blocks={displayedBlocks} live={live !== undefined} activeProgressId={liveProgressId} startedAt={workStartedAt} durationMs={live === undefined ? workDurationMs : undefined}/> : null}

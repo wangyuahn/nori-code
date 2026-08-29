@@ -1,13 +1,13 @@
 # 会话与上下文
 
-Kimi Code CLI 把每次对话持久化为一个「会话」，保留消息历史和元数据，可以随时关闭终端后再回来继续。本页介绍如何恢复会话、管理上下文，以及导出和派生会话。
+Nori Code CLI 把每次对话持久化为一个「会话」，保留消息历史和元数据，可以随时关闭终端后再回来继续。本页介绍如何恢复会话、管理上下文，以及导出和派生会话。
 
 ## 会话存储
 
-所有会话保存在 `$KIMI_CODE_HOME/sessions/` 下（默认 `~/.kimi-code/sessions/`），按工作目录分组存放：
+所有会话保存在 `$NORI_CODE_HOME/sessions/` 下（默认 `~/.nori-code/sessions/`），按工作目录分组存放：
 
 ```text
-~/.kimi-code/
+~/.nori-code/
 ├── config.toml
 ├── session_index.jsonl
 └── sessions/
@@ -30,24 +30,24 @@ Kimi Code CLI 把每次对话持久化为一个「会话」，保留消息历史
 
 ## 启动与恢复会话
 
-每次直接运行 `kimi` 都会创建新会话。以下方式可以恢复历史会话：
+每次直接运行 `nori` 都会创建新会话。以下方式可以恢复历史会话：
 
 **继续当前目录最近的会话：**
 
 ```sh
-kimi --continue
+nori --continue
 ```
 
 **恢复指定会话（通过 ID）：**
 
 ```sh
-kimi --session abc123
+nori --session abc123
 ```
 
 **交互式浏览历史会话并选择：**
 
 ```sh
-kimi --session
+nori --session
 ```
 
 ::: warning 注意
@@ -65,7 +65,7 @@ kimi --session
 
 ## 上下文压缩
 
-对话变长时，Kimi Code CLI 会在上下文接近窗口上限时自动压缩历史消息，释放 token 空间。也可以随时手动触发：
+对话变长时，Nori Code CLI 会在上下文接近窗口上限时自动压缩历史消息，释放 token 空间。也可以随时手动触发：
 
 ```
 /compact
@@ -87,26 +87,32 @@ kimi --session
 
 派生后的两个会话彼此独立，互不影响，可以随时通过 `/sessions` 切回原来的会话。已保存的 `/goal` 不会复制到派生会话。如果你想在派生会话中进行自主 goal 工作，需要在那里开始一个新 goal。
 
+## 会话挂载树
+
+除 fork/continue 外，会话还可通过元数据中的 `parent_session_id`（以及可选的 `mount_role` / `mount_mandate`）组成**会话地图**。`TeamCreate` 雇佣的伙伴是挂载子会话；TUI 的 `/map` 与 Web **Map** 视图可在当前工作目录下浏览、打开、挂载、卸载或 remount 节点。
+
+挂载操作会更新各会话中的 **`<session_self>`**，并可能在下一回合注入 **`<session_mount_changed>`** —— 仅为身份与拓扑，不共享 transcript 历史。详见[团队工程](./team-engineering.md)。
+
 ## 导出会话
 
-用 `kimi export` 把会话打包为 ZIP，适合分享、归档或提交问题反馈：
+用 `nori export` 把会话打包为 ZIP，适合分享、归档或提交问题反馈：
 
 ```sh
-kimi export <sessionId>
+nori export <sessionId>
 ```
 
 不传 `sessionId` 时导出当前目录最近的会话（有交互式确认，加 `-y` 跳过）。用 `-o` 指定输出路径：
 
 ```sh
-kimi export <sessionId> -o ~/Desktop/my-session.zip
+nori export <sessionId> -o ~/Desktop/my-session.zip
 ```
 
-导出包含会话目录下的所有文件，包括诊断日志。全局诊断日志（`~/.kimi-code/logs/kimi-code.log`）默认也会打包；如不需要，加 `--no-include-global-log` 排除。
+导出包含会话目录下的所有文件，包括诊断日志。全局诊断日志（`~/.nori-code/logs/nori-code.log`）默认也会打包；如不需要，加 `--no-include-global-log` 排除。
 
 也可以在 TUI 内导出，无需离开交互界面：
 
-- **`/export-debug-zip`**：产生与 `kimi export` 相同的调试 ZIP。
-- **`/export-md`**（别名 `/export`）：导出为人类可读的 Markdown 对话记录，适合分享或存档。可选接收路径参数；不带参数时写入工作目录下的 `kimi-export-<short-id>-<timestamp>.md`。
+- **`/export-debug-zip`**：产生与 `nori export` 相同的调试 ZIP。
+- **`/export-md`**（别名 `/export`）：导出为人类可读的 Markdown 对话记录，适合分享或存档。可选接收路径参数；不带参数时写入工作目录下的 `nori-export-<short-id>-<timestamp>.md`。
 
 ::: tip 提示
 导出文件可能包含代码、命令输出和路径等敏感信息，分享前请先确认内容。
@@ -115,4 +121,4 @@ kimi export <sessionId> -o ~/Desktop/my-session.zip
 ## 下一步
 
 - [数据路径](../configuration/data-locations.md) — 会话文件的完整目录结构说明
-- [kimi 命令](../reference/kimi-command.md) — `--continue`、`--session`、`export` 等命令的完整参数参考
+- [nori 命令](../reference/kimi-command.md) — `--continue`、`--session`、`export` 等命令的完整参数参考

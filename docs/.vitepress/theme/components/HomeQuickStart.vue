@@ -5,16 +5,16 @@ import { computed, ref } from 'vue'
 const { lang } = useData()
 const isZh = computed(() => lang.value.startsWith('zh'))
 
-const installMacCommand = 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash'
-const installWinCommand = 'irm https://code.kimi.com/kimi-code/install.ps1 | iex'
-const runCommand = 'kimi'
+const installNpmCommand = 'npm install -g nori-code'
+const installPnpmCommand = 'pnpm add -g nori-code'
+const runCommand = 'nori'
 
 const copy = computed(() => isZh.value
   ? {
       title: '一行命令开始',
-      lede: '装好之后跑 kimi，立刻在你当前的项目里开聊。',
-      macLabel: 'macOS / Linux',
-      winLabel: 'Windows (PowerShell)',
+      lede: '装好之后跑 nori，立刻在当前项目里开聊；再用 /team 与 /map 进入团队工程。',
+      npmLabel: 'npm',
+      pnpmLabel: 'pnpm',
       runLabel: '在任意目录运行',
       copyHint: '复制',
       copiedHint: '已复制',
@@ -23,9 +23,9 @@ const copy = computed(() => isZh.value
     }
   : {
       title: 'Get started in one line',
-      lede: 'Once installed, run kimi inside any project to start a conversation.',
-      macLabel: 'macOS / Linux',
-      winLabel: 'Windows (PowerShell)',
+      lede: 'Once installed, run nori inside any project. Use /team and /map for team engineering.',
+      npmLabel: 'npm',
+      pnpmLabel: 'pnpm',
       runLabel: 'Run anywhere',
       copyHint: 'Copy',
       copiedHint: 'Copied',
@@ -53,32 +53,32 @@ function copyText(value: string, key: string) {
 
     <div class="KimiQuick__installs">
       <div class="KimiQuick__block">
-        <div class="KimiQuick__label">{{ copy.macLabel }}</div>
+        <div class="KimiQuick__label">{{ copy.npmLabel }}</div>
         <div class="KimiQuick__cmd">
-          <code><span class="KimiQuick__prompt">$</span> {{ installMacCommand }}</code>
+          <code><span class="KimiQuick__prompt">$</span> {{ installNpmCommand }}</code>
           <button
             type="button"
             class="KimiQuick__copy"
-            @click="copyText(installMacCommand, 'mac')"
+            @click="copyText(installNpmCommand, 'npm')"
             :aria-label="copy.copyHint"
           >
-            <template v-if="copiedKey === 'mac'">{{ copy.copiedHint }}</template>
+            <template v-if="copiedKey === 'npm'">{{ copy.copiedHint }}</template>
             <template v-else>{{ copy.copyHint }}</template>
           </button>
         </div>
       </div>
 
       <div class="KimiQuick__block">
-        <div class="KimiQuick__label">{{ copy.winLabel }}</div>
+        <div class="KimiQuick__label">{{ copy.pnpmLabel }}</div>
         <div class="KimiQuick__cmd">
-          <code><span class="KimiQuick__prompt">PS&gt;</span> {{ installWinCommand }}</code>
+          <code><span class="KimiQuick__prompt">$</span> {{ installPnpmCommand }}</code>
           <button
             type="button"
             class="KimiQuick__copy"
-            @click="copyText(installWinCommand, 'win')"
+            @click="copyText(installPnpmCommand, 'pnpm')"
             :aria-label="copy.copyHint"
           >
-            <template v-if="copiedKey === 'win'">{{ copy.copiedHint }}</template>
+            <template v-if="copiedKey === 'pnpm'">{{ copy.copiedHint }}</template>
             <template v-else>{{ copy.copyHint }}</template>
           </button>
         </div>

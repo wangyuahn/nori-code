@@ -21,6 +21,7 @@ import { CHROME_GUTTER } from '#/tui/constant/rendering';
 import { KimiTUI } from '#/tui/index';
 import { currentTheme, getColorPalette } from '#/tui/theme';
 import { combineStartupNotice } from '#/tui/utils/startup';
+import { runningServerCoexistenceNotice } from '#/tui/utils/server-coexistence';
 import { toTerminalHyperlink } from '#/utils/terminal-hyperlink';
 import { restoreTerminalModes } from '#/utils/terminal-restore';
 
@@ -84,6 +85,7 @@ export async function runShell(
   for (const warning of (await harness.getConfigDiagnostics()).warnings) {
     configWarning = combineStartupNotice(configWarning, warning);
   }
+  configWarning = combineStartupNotice(configWarning, await runningServerCoexistenceNotice());
   const configMs = Date.now() - configStartedAt;
   const tui = new KimiTUI(harness, {
     cliOptions: opts,

@@ -1,6 +1,6 @@
 # Built-in Tools
 
-Built-in tools are the tool set provided by Kimi Code CLI alongside its core engine — no MCP server installation required. The Agent automatically selects and calls these tools based on the task at hand during each conversation; users can inspect the details of each tool call through the approval interface.
+Built-in tools are the tool set provided by Nori Code CLI alongside its core engine — no MCP server installation required. The Agent automatically selects and calls these tools based on the task at hand during each conversation; users can inspect the details of each tool call through the approval interface.
 
 Compared to MCP tools, built-in tools are managed directly by the runtime, their lifecycle is bound to the session, and no external process is required. Both follow the same unified approval mechanism: **read-only tools** (such as `Read`, `Grep`, `Glob`) are automatically allowed by default, while **write and execution tools** (such as `Write`, `Edit`, `Bash`) require user approval by default. Nori's session-level read-only setting blocks direct `Write` and `Edit` calls, but it does not remove file-reading tools or block `Bash`; `Bash` still follows the current permission mode and rules. In YOLO mode, approval for regular tool calls is skipped; Discuss exit approval is not affected.
 
@@ -88,12 +88,15 @@ Collaboration tools handle inter-Agent coordination, user interaction, and Skill
 | `TeamDecide` | Auto-allow | Start/continue discussion, or vote after execution |
 | `TeamSpeak` | Auto-allow | Publish a discussion statement; not calling it records the turn as skipped (abstention) |
 | `TeamAssign` | Auto-allow | Assign work; success leaves Discuss and enters Code |
+| `TeamDismiss` | Auto-allow | Dismiss department members and delete their mounted child sessions |
 | `AskUserQuestion` | Auto-allow | Ask the user a question to gather structured input |
 | `Skill` | Auto-allow | Invoke a registered inline Skill |
 
 **`SubAgent`** is the unified temporary-delegation tool. Launch one or many full child transcripts with `prompt_template` + `items`, `tasks` (including `depends_on` DAGs), or `resume_agent_ids`. Completed SubAgents are archived in the parent session. If a model response calls `SubAgent`, that call must be the only tool call in the response. Do not use SubAgent during Discuss; call TeamAssign first.
 
-**`TeamCreate`** requires a unique `name`, `role`, and `mandate` for every member. **`TeamDecide`** `action=start` requires `topic` and the lead `statement`. Members publish only with `TeamSpeak`. After execution, `action=vote` does not require Discuss; every team member votes (`discuss_again` / `proceed` / `abstain`), including members left idle with `task=null`.
+**`TeamCreate`** requires a unique `name`, `role`, and `mandate` for every member. Each hire creates a real child session mounted under the caller (visible on the conversation map). **`TeamDismiss`** removes members from the department and deletes those child sessions; provide `reason`, and use `confirm_active=true` only after accepting interruption of active work. **`TeamDecide`** `action=start` requires `topic` and the lead `statement`. Members publish only with `TeamSpeak`. After execution, `action=vote` does not require Discuss; every team member votes (`discuss_again` / `proceed` / `abstain`), including members left idle with `task=null`.
+
+Session mount changes refresh **`<session_self>`** in each affected session's system prompt and may inject **`<session_mount_changed>`** on the next turn. This is identity and topology only — not transcript sharing. See [Team engineering](../guides/team-engineering.md#identity-session_self-and-mount-changes).
 
 **`AskUserQuestion`** asks the user a structured multiple-choice question — useful for disambiguation or option selection. The `questions` parameter accepts 1–4 questions; each question requires `question` (ending with `?`), `options` (2–4 choices, each with a `label` and `description`), and optional `header` (max 12 characters) and `multi_select` (defaults to false). An "Other" option is appended automatically. Setting `background` to true starts a background question task and returns a task ID immediately. When the host does not support interactive questioning, a failure message is returned and the Agent should ask the user directly in a text reply instead.
 
@@ -132,7 +135,7 @@ Background task tools manage tasks started via `Bash`, `SubAgent`, or `AskUserQu
 
 ## Scheduled Tasks
 
-Scheduled task tools allow the Agent to re-inject a prompt into the current session at a future time — either as a one-time reminder or as a recurring cron-triggered task (periodic checks, daily reports, deployment monitoring, etc.). Schedules are bound to the session and remain active after `kimi resume`, but are not carried into a brand-new session. A single session can hold at most 50 active scheduled tasks. Set `KIMI_DISABLE_CRON=1` to disable them entirely; see [Environment Variables](../configuration/env-vars.md#运行时开关).
+Scheduled task tools allow the Agent to re-inject a prompt into the current session at a future time — either as a one-time reminder or as a recurring cron-triggered task (periodic checks, daily reports, deployment monitoring, etc.). Schedules are bound to the session and remain active after `nori --continue`, but are not carried into a brand-new session. A single session can hold at most 50 active scheduled tasks. Set `NORI_DISABLE_CRON=1` to disable them entirely; see [Environment Variables](../configuration/env-vars.md#runtime-switches).
 
 | Tool | Default Approval | Description |
 | --- | --- | --- |

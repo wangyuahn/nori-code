@@ -1,6 +1,8 @@
 # Agent 与子 Agent
 
-Kimi Code CLI 中的每次会话都由一个**主 Agent** 驱动。主 Agent 理解用户意图、规划步骤、调用工具，并在需要时向外派发**子 Agent** 处理更聚焦的子任务——例如探索一个陌生代码库、并行审阅多处实现、或在不触碰主上下文的情况下规划一次大型重构。
+Nori Code CLI 中的每次会话都由一个**主 Agent** 驱动。主 Agent 理解用户意图、规划步骤、调用工具，并在需要时向外派发**子 Agent** 处理更聚焦的子任务——例如探索一个陌生代码库、并行审阅多处实现、或在不触碰主上下文的情况下规划一次大型重构。
+
+Nori Code CLI 2.0 中，主 Agent 还领导一棵由 **`TeamCreate`** 雇佣的持久**团队伙伴**组成的**部门树**。伙伴是会话地图上的真实子会话；它们参与 Discuss、接收任务并执行，而负责人默认保持只读。有界委派仍使用临时 **SubAgent**，归档在父会话目录内。完整流程见[团队工程](../guides/team-engineering.md)。
 
 子 Agent 接受主 Agent 给出的任务描述，在自己的独立上下文里工作，最后把结论返回。它不会与用户直接对话，中间的思考和工具调用记录也不会混入主 Agent 的历史。
 
@@ -12,7 +14,7 @@ Kimi Code CLI 中的每次会话都由一个**主 Agent** 驱动。主 Agent 理
 
 ## 内置子 Agent
 
-Kimi Code CLI 内置四种子 Agent，开箱即用，分别面向不同任务形态：
+Nori Code CLI 内置四种子 Agent，开箱即用，分别面向不同任务形态：
 
 - **`nori-coder`**：默认子 Agent，只读编程协调者，负责规划、拆解并通过 SubAgent 将实现委派给子 Agent。它分析代码库并协调工作，但自己不直接写代码。
 - **`coder`**：通用软件工程助手，可以读写文件、执行命令、搜索代码并落地具体改动。新工作推荐优先使用 `nori-coder`。
@@ -48,7 +50,7 @@ Kimi Code CLI 内置四种子 Agent，开箱即用，分别面向不同任务形
 
 ## 指令文件
 
-全局 Kimi 专属指令可放在 `$KIMI_CODE_HOME/AGENTS.md`（默认：`~/.kimi-code/AGENTS.md`）。当你用 `KIMI_CODE_HOME` 移动数据根时，这份全局指令文件也会一起移动。跨工具通用指令仍可放在真实 OS home 下的 `~/.agents/AGENTS.md`，项目级指令仍放在项目目录中，例如 `.kimi-code/AGENTS.md` 或 `AGENTS.md`。
+全局 Nori 专属指令可放在 `$NORI_CODE_HOME/AGENTS.md`（默认：`~/.nori-code/AGENTS.md`）。当你用 `NORI_CODE_HOME` 移动数据根时，这份全局指令文件也会一起移动。跨工具通用指令仍可放在真实 OS home 下的 `~/.agents/AGENTS.md`，项目级指令仍放在项目目录中，例如 `.nori-code/AGENTS.md` 或 `AGENTS.md`。
 
 ## 会话目录中的存储位置
 
@@ -60,5 +62,6 @@ Kimi Code CLI 内置四种子 Agent，开箱即用，分别面向不同任务形
 
 ## 下一步
 
+- [团队工程](../guides/team-engineering.md) — 部门树、会话地图与 Discuss/Assign 流程
 - [Hooks](./hooks.md) — 在子 Agent 完成等关键节点触发本地脚本通知或拦截
 - [Agent Skills](./skills.md) — 给子 Agent 注入专业知识和工作流程

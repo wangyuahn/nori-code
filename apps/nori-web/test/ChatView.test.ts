@@ -5,7 +5,7 @@ import type { ApprovalRequest, ModelCatalogItem, QuestionRequest, Session } from
 import { api } from '../src/api/client';
 import { ChatView, modelSupportsImageInput, type ChatViewProps } from '../src/components/ChatView';
 import { I18nProvider } from '../src/i18n';
-import { modelThinkingOptions } from '../src/utils/model-thinking';
+import { modelThinkingOptions, resolveComposerThinking } from '../src/utils/model-thinking';
 import { projectFileMention, referenceProjectFile } from '../src/projectFileReference';
 import type { NoriBrowserState, NoriDesktopAPI } from '../src/types/nori-desktop';
 
@@ -514,17 +514,40 @@ describe('model thinking options', () => {
     });
   });
 
-  it('uses provider-declared effort levels without inventing more levels', () => {
+  it('uses provider-declared effort levels and prepends off like the TUI', () => {
     expect(modelThinkingOptions({
       ...model('reasoning-model', ['tool_use', 'thinking']),
       support_efforts: ['minimal', 'high'],
       default_effort: 'high',
     })).toEqual({
       choices: [
+        { value: 'off', kind: 'fast' },
         { value: 'minimal', kind: 'effort' },
         { value: 'high', kind: 'effort' },
       ],
       defaultValue: 'high',
+    });
+  });
+
+  it('reads camelCase catalog fields when snake_case is absent', () => {
+    expect(modelThinkingOptions({
+      ...model('camel-model', ['tool_use']),
+      supports_thinking: undefined,
+      supportEfforts: ['low', 'medium', 'high'],
+      defaultEffort: 'medium',
+      thinkingSupport: true,
+    } as ModelCatalogItem & {
+      supportEfforts: string[];
+      defaultEffort: string;
+      thinkingSupport: boolean;
+    })).toEqual({
+      choices: [
+        { value: 'off', kind: 'fast' },
+        { value: 'low', kind: 'effort' },
+        { value: 'medium', kind: 'effort' },
+        { value: 'high', kind: 'effort' },
+      ],
+      defaultValue: 'medium',
     });
   });
 
@@ -542,6 +565,20 @@ describe('model thinking options', () => {
         { value: 'xhigh', kind: 'effort' },
       ],
       defaultValue: 'medium',
+    });
+  });
+
+  it('keeps toggle-only effort lists as on/off without inventing more levels', () => {
+    expect(modelThinkingOptions({
+      ...model('toggle-catalog-model', ['tool_use', 'thinking']),
+      support_efforts: ['off', 'on'],
+      default_effort: 'on',
+    })).toEqual({
+      choices: [
+        { value: 'off', kind: 'fast' },
+        { value: 'on', kind: 'think' },
+      ],
+      defaultValue: 'on',
     });
   });
 
@@ -587,7 +624,72 @@ describe('model thinking options', () => {
       .toBe('medium');
   });
 
-  it('falls back to the model default when the persisted effort is no longer supported', async () => {
+  it('shows off plus declared efforts when the catalog omits an off/none entry', async () => {
+    const reasoningModel = {
+      ...model('reasoning-model', ['tool_use', 'thinking']),
+      support_efforts: ['low', 'medium', 'high'],
+      default_effort: 'medium',
+    };
+    const { container } = await renderChat({
+      session: session(reasoningModel.model),
+      models: [reasoningModel],
+    });
+
+    expect(
+      [...container.querySelectorAll<HTMLOptionElement>('.thinking-select option')]
+        .map(option => option.textContent),
+    ).toEqual(['off', 'low', 'medium', 'high']);
+  });
+
+  it('shows runtime thinking effort from session status instead of the catalog default', async () => {
+    const reasoningModel = {
+      ...model('reasoning-model', ['tool_use', 'thinking']),
+      support_efforts: ['none', 'low', 'medium', 'high', 'xhigh'],
+    };
+    const { container } = await renderChat({
+      session: session(reasoningModel.model),
+      models: [reasoningModel],
+      sessionStatus: {
+        status: 'idle',
+        model: reasoningModel.model,
+        thinking_level: 'xhigh',
+        permission: 'manual',
+        discuss_mode: false,
+        main_write_enabled: true,
+        goal: null,
+        context_tokens: 46_000,
+        max_context_tokens: 128_000,
+        context_usage: 0.02,
+      },
+    });
+
+    expect(container.querySelector<HTMLSelectElement>('.thinking-select')?.value).toBe('xhigh');
+    expect(container.querySelector('.composer-model-trigger em')?.textContent).toBe('xhigh');
+    expect(container.querySelector('[data-composer-setting="thinking"] .composer-setting-trigger strong')?.textContent)
+      .toBe('xhigh');
+  });
+
+  it('keeps a runtime effort visible when the catalog list omits it', () => {
+    expect(resolveComposerThinking({
+      model: {
+        ...model('reasoning-model', ['tool_use', 'thinking']),
+        support_efforts: ['low', 'medium', 'high'],
+        default_effort: 'medium',
+      },
+      runtimeThinking: 'xhigh',
+    })).toEqual({
+      choices: [
+        { value: 'off', kind: 'fast' },
+        { value: 'low', kind: 'effort' },
+        { value: 'medium', kind: 'effort' },
+        { value: 'high', kind: 'effort' },
+        { value: 'xhigh', kind: 'effort' },
+      ],
+      selectedValue: 'xhigh',
+    });
+  });
+
+  it('falls back to the runtime effort when the persisted effort is no longer supported', async () => {
     const reasoningModel = {
       ...model('reasoning-model', ['tool_use', 'thinking']),
       support_efforts: ['low', 'medium', 'high'],
@@ -595,12 +697,48 @@ describe('model thinking options', () => {
     };
     const staleSession = session(reasoningModel.model);
     staleSession.agent_config.thinking = 'xhigh';
-    const { container } = await renderChat({ session: staleSession, models: [reasoningModel] });
+    const { container } = await renderChat({
+      session: staleSession,
+      models: [reasoningModel],
+      sessionStatus: {
+        status: 'idle',
+        model: reasoningModel.model,
+        thinking_level: 'medium',
+        permission: 'manual',
+        discuss_mode: false,
+        main_write_enabled: true,
+        goal: null,
+        context_tokens: 0,
+        max_context_tokens: 128_000,
+        context_usage: 0,
+      },
+    });
 
     expect(container.querySelector<HTMLSelectElement>('.thinking-select')?.value).toBe('medium');
     expect(container.querySelector('.composer-model-trigger em')?.textContent).toBe('medium');
     expect(container.querySelector('[data-composer-setting="thinking"] .composer-setting-trigger strong')?.textContent)
       .toBe('medium');
+  });
+
+  it('falls back to the model default when no runtime or persisted effort is set', async () => {
+    const reasoningModel = {
+      ...model('reasoning-model', ['tool_use', 'thinking']),
+      support_efforts: ['low', 'medium', 'high'],
+      default_effort: 'medium',
+    };
+    const { container } = await renderChat({ session: session(reasoningModel.model), models: [reasoningModel] });
+
+    expect(container.querySelector<HTMLSelectElement>('.thinking-select')?.value).toBe('medium');
+    expect(container.querySelector('.composer-model-trigger em')?.textContent).toBe('medium');
+    expect(container.querySelector('[data-composer-setting="thinking"] .composer-setting-trigger strong')?.textContent)
+      .toBe('medium');
+  });
+
+  it('does not invent effort choices when the model omits thinking metadata', () => {
+    expect(resolveComposerThinking({
+      model: model('gateway-model', ['tool_use']),
+      runtimeThinking: 'medium',
+    })).toEqual({ choices: [], selectedValue: 'off' });
   });
 
   it('hides the control when catalog metadata explicitly marks thinking unsupported', () => {
@@ -654,6 +792,18 @@ describe('interactive user questions', () => {
 });
 
 describe('tool permission controls', () => {
+  it('labels the live turn as waiting for permission when only global approvals are pending', async () => {
+    const { container } = await renderChat({
+      isStreaming: true,
+      streaming: '',
+      globalApprovals: [approvalRequest()],
+      onResolveGlobalApproval: vi.fn(async () => undefined),
+    });
+
+    expect(container.querySelector('.chat-message-streaming')?.textContent).toContain('waiting for permission');
+    expect(container.querySelector('.approval-dock')).not.toBeNull();
+  });
+
   it('renders global approvals above the composer and resolves them through the source-aware handler', async () => {
     const onResolveApproval = vi.fn(async () => undefined);
     const onResolveGlobalApproval = vi.fn(async () => undefined);

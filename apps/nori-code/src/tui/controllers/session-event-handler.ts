@@ -1,6 +1,5 @@
 import type { Component, Focusable } from '@nori-code/pi-tui';
 import type {
-  AgentStatusUpdatedEvent,
   AssistantDeltaEvent,
   BackgroundTaskInfo,
   BackgroundTaskStartedEvent,
@@ -19,10 +18,7 @@ import type {
   SkillActivatedEvent,
   PluginCommandActivatedEvent,
   ThinkingDeltaEvent,
-  ToolCallDeltaEvent,
-  ToolCallStartedEvent,
   ToolProgressEvent,
-  ToolResultEvent,
   TurnEndedEvent,
   TurnStartedEvent,
   TurnStepCompletedEvent,
@@ -42,8 +38,10 @@ import {
 import { buildGoalCompletionMessage } from '../utils/goal-completion';
 import {
   argsRecord,
+  extractPartialJsonStringField,
   formatErrorPayload,
   formatErrorMessage,
+  isTurnScopedError,
   isTodoItemShape,
   serializeToolResultOutput,
   stringValue,
@@ -72,6 +70,7 @@ import { nextTranscriptId } from '../utils/transcript-id';
 import type { BtwPanelController } from './btw-panel';
 import type { StreamingUIController } from './streaming-ui';
 import type { TasksBrowserController } from './tasks-browser';
+import type { TeamViewController } from './team-view';
 import type {
   AppState,
   LivePaneState,
@@ -82,6 +81,18 @@ import type {
 } from '../types';
 import type { TUIState } from '../tui-state';
 import { createGoal as startGoalCommand } from '../commands/goal';
+import {
+  applyAgentStatusToTeam,
+  applyDiscussionUpdateToTeam,
+  applyTeamToolResultToTeam,
+  currentViewingAgentId,
+  extractTeamSpeechText,
+  isTeamSpeechTool,
+  shouldPaintDiscussUtterance,
+  teamAgentsFromSessionMetadata,
+  type TeamAgentSnapshot,
+  type TeamReportStatus,
+} from '../utils/team-tree';
 
 export interface SessionEventHost {
   state: TUIState;
@@ -111,6 +122,7 @@ export interface SessionEventHost {
   shiftQueuedMessage(): QueuedMessage | undefined;
   readonly btwPanelController: BtwPanelController;
   readonly tasksBrowserController: TasksBrowserController;
+  readonly teamViewController: TeamViewController;
 }
 
 export class SessionEventHandler {
@@ -133,6 +145,9 @@ export class SessionEventHandler {
   private queuedGoalPromotionInFlight = false;
   private queuedGoalPromotionTimer: ReturnType<typeof setTimeout> | undefined;
 
+  private lastSessionErrorKey: string | undefined;
+  private shownTurnErrorIds = new Set<string>();
+
   resetRuntimeState(): void {
     this.backgroundTasks.clear();
     this.backgroundTaskTranscriptedTerminal.clear();
@@ -148,6 +163,8 @@ export class SessionEventHandler {
     this.queuedGoalPromotionInFlight = false;
     this.clearQueuedGoalPromotionTimer();
     this.stopAllMcpServerStatusSpinners();
+    this.lastSessionErrorKey = undefined;
+    this.shownTurnErrorIds.clear();
   }
 
   startSubscription(): void {
@@ -206,6 +223,11 @@ export class SessionEventHandler {
   }
 
   handleEvent(event: Event, sendQueued: (item: QueuedMessage) => void): void {
+    if (event.type === 'team.chat.updated') {
+      this.host.teamViewController.routeEvent(event);
+      this.handleTeamChatUpdated(event);
+      return;
+    }
     if (this.routeChildAgentEvent(event)) return;
 
     if ('turnId' in event && event.turnId !== undefined) {
@@ -230,6 +252,7 @@ export class SessionEventHandler {
       case 'tool.result': this.handleToolResult(event); break;
       case 'agent.status.updated': this.handleStatusUpdate(event); break;
       case 'session.meta.updated': this.handleSessionMetaChanged(event); break;
+      case 'discussion.updated': this.applyTeamLiveEvent(event); break;
       case 'goal.updated': this.handleGoalUpdated(event); break;
       case 'skill.activated': this.handleSkillActivated(event); break;
       case 'plugin_command.activated': this.handlePluginCommandActivated(event); break;
@@ -250,15 +273,135 @@ export class SessionEventHandler {
   }
 
   /**
-   * Events produced by an agent other than the lead never belong in the main
-   * transcript. A BTW side question has its own panel; a team member's or a
-   * discussion's turn is read in that agent's own view. Swallow the rest here
-   * so the lead's output is never interleaved with theirs.
+   * Events from an agent other than the one on screen stay off that
+   * transcript, except Discuss meeting speech (lead view) and the BTW panel.
+   * Opening a member paints that member's own events into the main view.
    */
   private routeChildAgentEvent(event: Event): boolean {
-    if (event.agentId === MAIN_AGENT_ID) return false;
-    this.host.btwPanelController.routeEvent(event);
+    const viewing = currentViewingAgentId(this.host.state.appState.viewingAgentId);
+    this.applyTeamLiveEvent(event);
+    this.host.teamViewController.routeEvent(event);
+
+    if (event.agentId === viewing) {
+      if (event.agentId !== MAIN_AGENT_ID && this.host.btwPanelController.routeEvent(event)) {
+        return true;
+      }
+      return false;
+    }
+
+    if (event.agentId === MAIN_AGENT_ID) {
+      if (event.type === 'agent.status.updated') this.applyLeadSessionFlags(event);
+      return true;
+    }
+
+    if (this.host.btwPanelController.routeEvent(event)) return true;
+    this.handleDiscussChildEvent(event);
     return true;
+  }
+
+  private shouldShowDiscussUtterance(agentId: string, toolName?: string): boolean {
+    const { appState } = this.host.state;
+    return shouldPaintDiscussUtterance(appState.teamAgents, agentId, {
+      discussMode: appState.discussMode,
+      toolName,
+    });
+  }
+
+  private speakerNameFor(agentId: string): string {
+    const named = this.host.state.appState.teamAgents.find((agent) => agent.agentId === agentId)
+      ?.name;
+    if (named !== undefined && named.length > 0) return named;
+    return agentId === MAIN_AGENT_ID ? 'Main' : agentId;
+  }
+
+  private paintTeamSpeech(
+    agentId: string,
+    toolName: string | undefined,
+    args: Record<string, unknown>,
+    argumentsText: string | undefined,
+    turnId: string | undefined,
+    streaming: boolean,
+  ): boolean {
+    if (!isTeamSpeechTool(toolName)) return false;
+    if (!this.shouldShowDiscussUtterance(agentId, toolName)) return false;
+    const fromArgs = extractTeamSpeechText(toolName, args);
+    const field = toolName === 'TeamSpeak' ? 'message' : 'statement';
+    const fromStream =
+      argumentsText === undefined ? undefined : extractPartialJsonStringField(argumentsText, field);
+    const speech = fromArgs ?? fromStream;
+    if (speech !== undefined && speech.length > 0) {
+      this.host.streamingUI.setDiscussUtterance(agentId, this.speakerNameFor(agentId), speech, {
+        turnId,
+        speaking: streaming,
+        replace: true,
+      });
+      if (streaming) {
+        this.host.streamingUI.scheduleFlush();
+      } else {
+        this.host.streamingUI.flushNow();
+        this.host.streamingUI.finalizeDiscussUtterance(agentId);
+      }
+    }
+    return true;
+  }
+
+  private handleDiscussChildEvent(event: Event): void {
+    if (currentViewingAgentId(this.host.state.appState.viewingAgentId) !== MAIN_AGENT_ID) return;
+    if (event.type === 'assistant.delta') {
+      if (!this.shouldShowDiscussUtterance(event.agentId)) return;
+      this.host.streamingUI.appendDiscussDelta(
+        event.agentId,
+        this.speakerNameFor(event.agentId),
+        event.delta,
+        String(event.turnId),
+      );
+      this.host.streamingUI.scheduleFlush();
+      return;
+    }
+    if (event.type === 'tool.call.delta') {
+      const { streamingUI } = this.host;
+      const preview = streamingUI.getStreamingToolCallPreview(event.toolCallId);
+      const toolName = event.name ?? preview?.name;
+      if (toolName !== undefined && !isTeamSpeechTool(toolName)) return;
+      streamingUI.accumulateToolCallDelta(event.toolCallId, event.name, event.argumentsPart);
+      streamingUI.suppressToolCallPreview(event.toolCallId);
+      const next = streamingUI.getStreamingToolCallPreview(event.toolCallId);
+      this.paintTeamSpeech(
+        event.agentId,
+        event.name ?? next?.name,
+        next?.args ?? {},
+        next?.argumentsText,
+        String(event.turnId),
+        true,
+      );
+      return;
+    }
+    if (event.type === 'tool.call.started') {
+      if (
+        this.paintTeamSpeech(
+          event.agentId,
+          event.name,
+          argsRecord(event.args),
+          undefined,
+          String(event.turnId),
+          false,
+        )
+      ) {
+        this.host.streamingUI.discardToolCallStream(event.toolCallId);
+      }
+      return;
+    }
+    if (event.type === 'turn.ended') {
+      this.host.streamingUI.finalizeDiscussUtterance(event.agentId);
+    }
+  }
+
+  private handleTeamChatUpdated(event: Event): void {
+    if (event.type !== 'team.chat.updated') return;
+    const sender =
+      this.host.state.appState.teamAgents.find((agent) => agent.agentId === event.senderAgentId)
+        ?.name ?? event.senderAgentId;
+    this.host.showStatus(`${sender} posted in department chat`);
   }
 
   stopAllMcpServerStatusSpinners(): void {
@@ -274,6 +417,7 @@ export class SessionEventHandler {
 
   private handleTurnBegin(_event: TurnStartedEvent): void {
     void _event;
+    this.lastSessionErrorKey = undefined;
     this.currentTurnHasAssistantText = false;
     this.host.streamingUI.resetToolUi();
     this.host.streamingUI.setStep(0);
@@ -310,6 +454,9 @@ export class SessionEventHandler {
     this.host.streamingUI.flushNow();
     if (event.reason === 'filtered') {
       this.host.showStatus('Turn stopped: provider safety policy blocked the response.', 'error');
+    }
+    if (event.reason === 'failed' && event.error !== undefined) {
+      this.showTurnErrorOnce(String(event.turnId), event.error);
     }
     const todos = this.host.state.todoPanel.getTodos();
     if (todos.length > 0 && todos.every((t) => t.status === 'done')) {
@@ -471,14 +618,18 @@ export class SessionEventHandler {
     });
   }
 
-  private handleToolCall(event: ToolCallStartedEvent): void {
+  private handleToolCall(event: Extract<Event, { type: 'tool.call.started' }>): void {
     const { streamingUI } = this.host;
+    const args = argsRecord(event.args);
+    if (this.paintTeamSpeech(event.agentId, event.name, args, undefined, String(event.turnId), false)) {
+      streamingUI.discardToolCallStream(event.toolCallId);
+    }
     streamingUI.flushNow();
     const { turnId, step } = streamingUI.getTurnContext();
     const toolCall: ToolCallBlockData = {
       id: event.toolCallId,
       name: event.name,
-      args: argsRecord(event.args),
+      args,
       description: event.description,
       display: event.display,
       step,
@@ -492,10 +643,24 @@ export class SessionEventHandler {
     });
   }
 
-  private handleToolCallDelta(event: ToolCallDeltaEvent): void {
+  private handleToolCallDelta(event: Extract<Event, { type: 'tool.call.delta' }>): void {
     if (event.toolCallId.length === 0) return;
     const { state, streamingUI } = this.host;
     streamingUI.accumulateToolCallDelta(event.toolCallId, event.name, event.argumentsPart);
+    const preview = streamingUI.getStreamingToolCallPreview(event.toolCallId);
+    const toolName = event.name ?? preview?.name;
+    if (
+      this.paintTeamSpeech(
+        event.agentId,
+        toolName,
+        preview?.args ?? {},
+        preview?.argumentsText,
+        String(event.turnId),
+        true,
+      )
+    ) {
+      streamingUI.suppressToolCallPreview(event.toolCallId);
+    }
     this.host.patchLivePane({
       mode: 'tool',
       pendingApproval: null,
@@ -521,7 +686,7 @@ export class SessionEventHandler {
     }
   }
 
-  private handleToolResult(event: ToolResultEvent): void {
+  private handleToolResult(event: Extract<Event, { type: 'tool.result' }>): void {
     const { streamingUI } = this.host;
     streamingUI.flushNow();
     const resultData: ToolResultBlockData = {
@@ -542,11 +707,14 @@ export class SessionEventHandler {
         streamingUI.setTodoList(sanitized);
       }
     }
+    if (matchedCall !== undefined && !event.isError) {
+      this.applyTeamToolResult(matchedCall.name, matchedCall.args, resultData.output, event.agentId);
+    }
     this.host.patchLivePane({ mode: 'waiting' });
   }
 
-  private handleStatusUpdate(event: AgentStatusUpdatedEvent): void {
-    const runtimeEvent = event as AgentStatusUpdatedEvent & {
+  private handleStatusUpdate(event: Extract<Event, { type: 'agent.status.updated' }>): void {
+    const runtimeEvent = event as Extract<Event, { type: 'agent.status.updated' }> & {
       readonly coderWriteEnabled?: boolean;
       readonly toolsReadonly?: boolean;
     };
@@ -554,13 +722,31 @@ export class SessionEventHandler {
     if (event.contextUsage !== undefined) patch.contextUsage = event.contextUsage;
     if (event.contextTokens !== undefined) patch.contextTokens = event.contextTokens;
     if (event.maxContextTokens !== undefined) patch.maxContextTokens = event.maxContextTokens;
-    if (event.discussMode !== undefined) patch.discussMode = event.discussMode;
+    if (event.discussMode !== undefined && event.agentId === MAIN_AGENT_ID) {
+      patch.discussMode = event.discussMode;
+    }
     if (event.permission !== undefined) {
       patch.permissionMode = event.permission;
     }
     if (runtimeEvent.coderWriteEnabled !== undefined) patch.coderWriteEnabled = runtimeEvent.coderWriteEnabled;
     if (runtimeEvent.toolsReadonly !== undefined) patch.toolsReadonly = runtimeEvent.toolsReadonly;
     if (event.model !== undefined) patch.model = event.model;
+    this.applyTeamLiveEvent(event);
+    if (Object.keys(patch).length > 0) this.host.setAppState(patch);
+  }
+
+  private applyLeadSessionFlags(event: Extract<Event, { type: 'agent.status.updated' }>): void {
+    const runtimeEvent = event as Extract<Event, { type: 'agent.status.updated' }> & {
+      readonly coderWriteEnabled?: boolean;
+      readonly toolsReadonly?: boolean;
+    };
+    const patch: Partial<AppState> = {};
+    if (event.discussMode !== undefined) patch.discussMode = event.discussMode;
+    if (event.permission !== undefined) patch.permissionMode = event.permission;
+    if (runtimeEvent.coderWriteEnabled !== undefined) {
+      patch.coderWriteEnabled = runtimeEvent.coderWriteEnabled;
+    }
+    if (runtimeEvent.toolsReadonly !== undefined) patch.toolsReadonly = runtimeEvent.toolsReadonly;
     if (Object.keys(patch).length > 0) this.host.setAppState(patch);
   }
 
@@ -781,9 +967,16 @@ export class SessionEventHandler {
       this.host.setAppState({ sessionTitle: title });
       this.host.updateTerminalTitle();
     }
+    if (event.patch?.['agents'] !== undefined) {
+      this.setTeamAgents(teamAgentsFromSessionMetadata(event.patch));
+    }
   }
 
   private handleSessionError(event: ErrorEvent): void {
+    // Core emits turn.ended{failed, error} and a trailing error{details.turnId}.
+    // The failed turn already painted the block; skip this event entirely
+    // (no second Error line, no flush/render, no bell / OSC 9).
+    if (isTurnScopedError(event)) return;
     this.host.streamingUI.flushNow();
     this.host.streamingUI.resetToolUi();
     this.host.streamingUI.finalizeLiveTextBuffers('idle');
@@ -791,10 +984,94 @@ export class SessionEventHandler {
       this.host.showError(OAUTH_LOGIN_REQUIRED_STARTUP_NOTICE);
       return;
     }
+    const key = `${event.code}:${event.message}`;
+    if (this.lastSessionErrorKey === key) return;
+    this.lastSessionErrorKey = key;
     this.host.showError(formatErrorPayload(event));
     const sessionId = this.host.state.appState.sessionId;
     if (sessionId.length > 0) {
       this.host.showStatus(errorReportHintLine());
+    }
+  }
+
+  private showTurnErrorOnce(turnId: string, error: Parameters<typeof formatErrorPayload>[0]): void {
+    if (this.shownTurnErrorIds.has(turnId)) return;
+    this.shownTurnErrorIds.add(turnId);
+    this.host.showError(formatErrorPayload(error));
+    if (this.host.state.appState.sessionId.length > 0) {
+      this.host.showStatus(errorReportHintLine());
+    }
+  }
+
+  seedTeamAgentsFromSession(session: Session): void {
+    const agents = teamAgentsFromSessionMetadata(session.getResumeState()?.sessionMetadata);
+    this.host.setAppState({ teamAgents: agents });
+    this.host.teamViewController.seedFromSession(session);
+  }
+
+  private applyTeamLiveEvent(event: Event): void {
+    if (event.type === 'agent.status.updated') {
+      const team = event.team;
+      if (team === undefined && event.agentId === MAIN_AGENT_ID) return;
+      this.setTeamAgents(
+        applyAgentStatusToTeam(this.host.state.appState.teamAgents, {
+          agentId: event.agentId,
+          team:
+            team === undefined
+              ? undefined
+              : {
+                  assignedTask: team.assignedTask,
+                  status: team.status,
+                  reportStatus: team.reportStatus as TeamReportStatus,
+                  reportSummary: team.reportSummary,
+                },
+        }),
+      );
+      return;
+    }
+    if (event.type === 'discussion.updated') {
+      this.setTeamAgents(
+        applyDiscussionUpdateToTeam(this.host.state.appState.teamAgents, {
+          discussionAgentId: event.discussionAgentId,
+          currentTurnAgentId: event.currentTurnAgentId,
+          kind: event.kind,
+        }),
+      );
+    }
+  }
+
+  private applyTeamToolResult(
+    toolName: string,
+    args: Record<string, unknown>,
+    output: string,
+    parentAgentId: string,
+  ): void {
+    if (toolName !== 'TeamCreate' && toolName !== 'TeamAssign' && toolName !== 'TeamDismiss') {
+      return;
+    }
+    this.setTeamAgents(
+      applyTeamToolResultToTeam(
+        this.host.state.appState.teamAgents,
+        toolName,
+        args,
+        output,
+        parentAgentId,
+      ),
+    );
+  }
+
+  private setTeamAgents(agents: readonly TeamAgentSnapshot[]): void {
+    this.host.setAppState({ teamAgents: agents });
+    const viewingAgentId = currentViewingAgentId(this.host.state.appState.viewingAgentId);
+    if (
+      viewingAgentId !== MAIN_AGENT_ID
+      && !agents.some((agent) =>
+        agent.agentId === viewingAgentId
+        && agent.kind === 'team'
+        && agent.archived !== true,
+      )
+    ) {
+      this.host.teamViewController.reset();
     }
   }
 

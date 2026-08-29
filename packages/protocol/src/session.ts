@@ -134,6 +134,24 @@ export type SessionFork = z.infer<typeof sessionForkSchema>;
 export const sessionChildCreateSchema = z.object({
   title: z.string().min(1).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
+  role: z.string().min(1).optional(),
+  mandate: z.string().min(1).optional(),
 });
 
 export type SessionChildCreate = z.infer<typeof sessionChildCreateSchema>;
+
+/** Mount session A under parent B (A becomes B's member). Single-parent tree. */
+export const sessionMountSchema = z.object({
+  parent_session_id: z.string().min(1),
+  /** P1 identity fields — stored on the mounted session when provided. */
+  role: z.string().min(1).optional(),
+  mandate: z.string().min(1).optional(),
+});
+
+export type SessionMount = z.infer<typeof sessionMountSchema>;
+
+export const sessionRemountSchema = sessionMountSchema;
+export type SessionRemount = z.infer<typeof sessionRemountSchema>;
+
+export const sessionUnmountSchema = z.object({});
+export type SessionUnmount = z.infer<typeof sessionUnmountSchema>;

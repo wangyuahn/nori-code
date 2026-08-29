@@ -36,7 +36,9 @@ interface ReplayDriver {
   switchToSession(session: Session, statusMessage: string): Promise<void>;
 }
 
-function makeStartupInput(): KimiTUIStartupInput {
+function makeStartupInput(
+  cliOptions: Partial<KimiTUIStartupInput['cliOptions']> = {},
+): KimiTUIStartupInput {
   return {
     cliOptions: {
       session: undefined,
@@ -47,6 +49,7 @@ function makeStartupInput(): KimiTUIStartupInput {
       outputFormat: undefined,
       prompt: undefined,
       skillsDirs: [],
+      ...cliOptions,
     },
     tuiConfig: {
       theme: 'dark',
@@ -203,6 +206,7 @@ function makeHarness(initialSession: Session) {
   const interactiveAgentScope = new AsyncLocalStorage<string>();
   return {
     getConfig: vi.fn(async () => ({
+      defaultModel: 'k2',
       models: {
         k2: { model: 'moonshot-v1', maxContextSize: 100 },
       },
@@ -211,7 +215,7 @@ function makeHarness(initialSession: Session) {
     createSession: vi.fn(async () => initialSession),
     resumeSession: vi.fn(async () => initialSession),
     forkSession: vi.fn(async () => initialSession),
-    listSessions: vi.fn(async () => []),
+    listSessions: vi.fn(async () => [{ id: initialSession.id, workDir: '/tmp/proj-a' }]),
     close: vi.fn(async () => {}),
     track: vi.fn(),
     setTelemetryContext: vi.fn(),
@@ -235,7 +239,7 @@ function makeHarness(initialSession: Session) {
 async function makeDriver(initialSession: Session): Promise<ReplayDriver> {
   const driver = new KimiTUI(
     makeHarness(initialSession) as never,
-    makeStartupInput(),
+    makeStartupInput({ continue: true }),
   ) as unknown as ReplayDriver;
   vi.spyOn(driver.state.ui, 'requestRender').mockImplementation(() => {});
   vi.spyOn(driver.state.terminal, 'setProgress').mockImplementation(() => {});

@@ -18,4 +18,16 @@ describe('ApiKeyInputDialogComponent', () => {
       }
     }
   });
+
+  it('masks the typed key with one bullet per character and does not clear on re-render', () => {
+    const dialog = new ApiKeyInputDialogComponent('OpenRouter', ['Paste your API key below.'], () => {});
+    dialog.focused = true;
+    const key = 'sk-test-123';
+    for (const ch of key) dialog.handleInput(ch);
+    const first = dialog.render(60).join('\n');
+    expect(first.replaceAll(/\u001B\[[0-9;]*m/g, '')).toContain('•'.repeat(key.length));
+    expect(first).not.toContain(key);
+    const second = dialog.render(60).join('\n');
+    expect(second.replaceAll(/\u001B\[[0-9;]*m/g, '')).toContain('•'.repeat(key.length));
+  });
 });

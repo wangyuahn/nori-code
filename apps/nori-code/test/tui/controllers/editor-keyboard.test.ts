@@ -33,6 +33,8 @@ function createHarness(options: { streamingPhase?: string; isCompacting?: boolea
     },
     session,
     btwPanelController: { closeOrCancel: vi.fn(() => false) },
+    teamViewController: { hide: vi.fn(() => false), scrollPane: vi.fn(() => false), toggle: vi.fn() },
+    cancelViewingAgent: vi.fn(),
     openUndoSelector,
     cancelRunningShellCommand,
   } as unknown as EditorKeyboardHost;
@@ -77,11 +79,13 @@ describe('EditorKeyboardController double-Esc undo', () => {
     expect(openUndoSelector).toHaveBeenCalledOnce();
   });
 
-  it('does nothing for a single Esc while idle', () => {
-    const { editor, openUndoSelector } = createHarness();
+  it('hides the department pane on the first idle Esc before arming undo', () => {
+    const { editor, host, openUndoSelector } = createHarness();
+    const hide = vi.fn(() => true);
+    (host.teamViewController as unknown as { hide: ReturnType<typeof vi.fn> }).hide = hide;
 
     pressEscape(editor);
-
+    expect(hide).toHaveBeenCalledOnce();
     expect(openUndoSelector).not.toHaveBeenCalled();
   });
 
@@ -115,7 +119,6 @@ describe('EditorKeyboardController double-Esc undo', () => {
 
     expect(openUndoSelector).not.toHaveBeenCalled();
     expect(cancelRunningShellCommand).toHaveBeenCalled();
-    const session = host.session as unknown as { cancel: ReturnType<typeof vi.fn> };
-    expect(session.cancel).toHaveBeenCalled();
+    expect(host.cancelViewingAgent).toHaveBeenCalled();
   });
 });

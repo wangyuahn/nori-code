@@ -1,18 +1,18 @@
 # 配置文件
 
-Kimi Code CLI 把所有长期偏好写进 `~/.kimi-code/` 下的 TOML（一种结构清晰的纯文本配置格式）文件——比如使用哪个模型、填哪个 API 密钥、Agent 每轮最多跑几步。改一次，每次启动都生效。Agent 与运行时设置放在 `config.toml`，终端界面与客户端偏好（主题、编辑器、通知、自动更新）放在配套的 `tui.toml`。
+Nori Code CLI 把所有长期偏好写进 `~/.nori-code/` 下的 TOML（一种结构清晰的纯文本配置格式）文件——比如使用哪个模型、填哪个 API 密钥、Agent 每轮最多跑几步。改一次，每次启动都生效。Agent 与运行时设置放在 `config.toml`，终端界面与客户端偏好（主题、编辑器、通知、自动更新）放在配套的 `tui.toml`。
 
-默认位置：`~/.kimi-code/config.toml`，首次运行时自动创建。
+默认位置：`~/.nori-code/config.toml`，首次运行时自动创建。
 
 ## 配置文件位置
 
-CLI 从 `~/.kimi-code/config.toml` 读取配置。如需把数据目录迁移到别处，可用 `KIMI_CODE_HOME` 环境变量覆盖：
+CLI 从 `~/.nori-code/config.toml` 读取配置。如需把数据目录迁移到别处，可用 `NORI_CODE_HOME` 环境变量覆盖：
 
 ```sh
-export KIMI_CODE_HOME=/path/to/kimi-home
+export NORI_CODE_HOME=/path/to/nori-home
 ```
 
-此时配置文件路径变为 `$KIMI_CODE_HOME/config.toml`。无论目录在哪里，文件名固定是 `config.toml`。
+此时配置文件路径变为 `$NORI_CODE_HOME/config.toml`。无论目录在哪里，文件名固定是 `config.toml`。
 
 ::: tip
 TOML 字段名一律用下划线（snake_case），如 `default_model`、`max_context_size`。字段名里若含 `.`，需用引号包住，例如 `[models."gpt-4.1"]`——否则 TOML 会把 `.` 解释为嵌套表分隔符。
@@ -23,7 +23,7 @@ TOML 字段名一律用下划线（snake_case），如 `default_model`、`max_co
 以下示例覆盖最常用的配置项，可直接复制后按需修改：
 
 ```toml
-default_model = "kimi-code/kimi-for-coding"
+default_model = "nori-code/kimi-for-coding"
 default_permission_mode = "manual"
 default_discuss_mode = false
 merge_all_available_skills = true
@@ -65,7 +65,7 @@ pattern = "Bash(rm -rf*)"
 [[hooks]]
 event = "PreToolUse"
 matcher = "Bash"
-command = "node ~/.kimi-code/hooks/check-bash.mjs"
+command = "node ~/.nori-code/hooks/check-bash.mjs"
 timeout = 5
 ```
 
@@ -147,21 +147,21 @@ max_context_size = 1047576
 如果某些用户覆盖需要在 provider-model 刷新后保留，请写到 `[models."<alias>".overrides]`。运行时读取的是 effective 值：有 override 时用 override，否则用顶层字段。
 
 ```toml
-[models."kimi-code/kimi-k2"]
+[models."nori-code/kimi-k2"]
 provider = "managed:nori-code"
 model = "kimi-k2"
 max_context_size = 262144
 support_efforts = ["low", "high", "max"]
 default_effort = "max"
 
-[models."kimi-code/kimi-k2".overrides]
+[models."nori-code/kimi-k2".overrides]
 support_efforts = ["low", "high"]
 default_effort = "high"
 ```
 
 `[models."<alias>".overrides]` 接受普通模型字段，例如 `max_context_size`、`max_output_size`、`capabilities`、`display_name`、`reasoning_key`、`adaptive_thinking`、`support_efforts` 和 `default_effort`。不接受身份 / 路由字段：`provider`、`model`、`protocol` 和 `beta_api`。
 
-无需修改配置文件也可以临时切换模型——通过 `KIMI_MODEL_*` 环境变量在内存里合成一个临时供应商，详见[用环境变量定义模型](./env-vars.md#用环境变量定义模型-kimi-model)。
+无需修改配置文件也可以临时切换模型——通过 `NORI_MODEL_*` 环境变量在内存里合成一个临时供应商，详见[用环境变量定义模型](./env-vars.md#用环境变量定义模型-nori-model)。
 
 ## `thinking`
 
@@ -198,7 +198,7 @@ default_effort = "high"
 | `max_running_tasks` | `integer` | — | 同时运行的最大后台任务数 |
 | `keep_alive_on_exit` | `boolean` | `false` | 会话关闭时是否保留仍在运行的后台任务。默认情况下，Kimi Code 会在进程退出前请求停止所有后台任务；只有希望任务在会话结束后继续运行时才设为 `true` |
 
-`keep_alive_on_exit` 可被环境变量 `KIMI_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT` 覆盖，优先级高于配置文件。
+`keep_alive_on_exit` 可被环境变量 `NORI_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT` 覆盖，优先级高于配置文件。
 
 ## `experimental`
 
@@ -263,12 +263,12 @@ pattern = "Bash"
 ```
 
 ::: tip
-MCP server 的声明配置写在 `~/.kimi-code/mcp.json` 或项目内 `.kimi-code/mcp.json` 中，不在 `config.toml` 里。交互式配置入口是 `/mcp-config`，详见 [Model Context Protocol](../customization/mcp.md)。
+MCP server 的声明配置写在 `~/.nori-code/mcp.json` 或项目内 `.nori-code/mcp.json` 中，不在 `config.toml` 里。交互式配置入口是 `/mcp-config`，详见 [Model Context Protocol](../customization/mcp.md)。
 :::
 
 ## `tui.toml`
 
-除了 `config.toml`，CLI 还在同一目录下用一份配套的 `tui.toml` 保存终端界面与客户端偏好（`~/.kimi-code/tui.toml`，或覆盖后的 `$KIMI_CODE_HOME/tui.toml`）。它在首次运行时以默认值创建，交互式命令 `/config`、`/theme`、`/editor` 会自动写入，通常无需手动编辑。文件格式有误时，CLI 会回退到默认值并给出提示，而不是启动失败。
+除了 `config.toml`，CLI 还在同一目录下用一份配套的 `tui.toml` 保存终端界面与客户端偏好（`~/.nori-code/tui.toml`，或覆盖后的 `$NORI_CODE_HOME/tui.toml`）。它在首次运行时以默认值创建，交互式命令 `/config`、`/theme`、`/editor` 会自动写入，通常无需手动编辑。文件格式有误时，CLI 会回退到默认值并给出提示，而不是启动失败。
 
 | 字段 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
@@ -279,7 +279,7 @@ MCP server 的声明配置写在 `~/.kimi-code/mcp.json` 或项目内 `.kimi-cod
 | `[upgrade].auto_install` | `boolean` | `true` | 是否自动安装新版本 |
 
 ```toml
-# ~/.kimi-code/tui.toml
+# ~/.nori-code/tui.toml
 theme = "auto" # "auto" | "dark" | "light" | 自定义主题名
 
 [editor]
@@ -297,7 +297,7 @@ auto_install = true
 
 ## 项目级本地配置
 
-除了 `~/.kimi-code` 下的用户级文件，Kimi Code 还会读取位于 `<项目根目录>/.kimi-code/local.toml` 的项目级本地配置文件。它保存的是与某一个项目检出相关、通常不应与队友共享的设置。
+除了 `~/.nori-code` 下的用户级文件，Kimi Code 还会读取位于 `<项目根目录>/.nori-code/local.toml` 的项目级本地配置文件。它保存的是与某一个项目检出相关、通常不应与队友共享的设置。
 
 该文件会在你通过 [`/add-dir`](../reference/slash-commands.md) 添加额外工作目录并选择记入项目时自动创建，通常无需手动编辑。
 
@@ -314,10 +314,10 @@ auto_install = true
 additional_dir = ["/absolute/path/to/shared"]
 ```
 
-目录以绝对路径存储，与具体机器相关。因此建议把 `.kimi-code/local.toml` 加入项目的 `.gitignore`，避免被提交。
+目录以绝对路径存储，与具体机器相关。因此建议把 `.nori-code/local.toml` 加入项目的 `.gitignore`，避免被提交。
 
 ## 下一步
 
 - [平台与模型](./providers.md) — 各供应商类型（Kimi、Claude、OpenAI、Gemini）的接入示例
 - [配置覆盖](./overrides.md) — CLI 选项、配置文件、环境变量的优先级规则
-- [环境变量](./env-vars.md) — `KIMI_CODE_HOME` 等运行时变量的完整列表
+- [环境变量](./env-vars.md) — `NORI_CODE_HOME` 等运行时变量的完整列表

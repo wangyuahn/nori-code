@@ -33,20 +33,20 @@ function makeDialog(defaultUrl = 'https://example.com/api.json'): {
 describe('CustomRegistryImportDialogComponent', () => {
   it('advances from the URL field to the token field on Enter instead of submitting', () => {
     const { dialog, onDone } = makeDialog();
-    expect(plain(dialog)).toContain('next field');
+    expect(plain(dialog)).toContain('Enter next');
 
     dialog.handleInput('\r');
 
     expect(onDone).not.toHaveBeenCalled();
-    expect(plain(dialog)).toContain('Enter to submit');
+    expect(plain(dialog)).toContain('Enter submit');
   });
 
   it('switches fields with Up / Down arrows', () => {
     const { dialog } = makeDialog();
     dialog.handleInput(DOWN);
-    expect(plain(dialog)).toContain('Enter to submit');
+    expect(plain(dialog)).toContain('Enter submit');
     dialog.handleInput(UP);
-    expect(plain(dialog)).toContain('next field');
+    expect(plain(dialog)).toContain('Enter next');
   });
 
   it('requires a non-empty Bearer token before submitting', () => {

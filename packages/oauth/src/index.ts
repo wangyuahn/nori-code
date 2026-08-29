@@ -99,7 +99,11 @@ export type {
 } from './stubs';
 
 export { refreshProviderModels } from './refresh-provider-models';
-export { defaultEffortFromList, reasoningEffortsFromRecord } from './reasoning-options';
+export {
+  defaultEffortFromList,
+  fallbackReasoningMetadata,
+  reasoningEffortsFromRecord,
+} from './reasoning-options';
 export {
   BUILTIN_PROVIDER_PRESETS,
   MODELS_DEV_CATALOG_URL,

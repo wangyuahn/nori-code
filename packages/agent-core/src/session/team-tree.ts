@@ -113,3 +113,76 @@ export function activeDiscussionAsParticipant(agents: TeamTree, agentId: string)
   );
   return entry?.[0];
 }
+
+/**
+ * Session-mount department tree (P1): parent is `parent_session_id` on session
+ * metadata. Discuss/Assign still address agents, but hiring depth and identity
+ * resolve from this mount graph when available.
+ */
+export type SessionMountTree = Readonly<Record<string, string | undefined>>;
+
+/** Depth of `sessionId` below a top-level root (no parent → 0). */
+export function sessionMountDepth(parentById: SessionMountTree, sessionId: string): number {
+  let depth = 0;
+  const visited = new Set<string>([sessionId]);
+  let current = parentById[sessionId];
+  while (current !== undefined && !visited.has(current)) {
+    depth += 1;
+    visited.add(current);
+    current = parentById[current];
+  }
+  return depth;
+}
+
+export function canCreateMountedDepartment(
+  parentById: SessionMountTree,
+  sessionId: string,
+  maxDepth: number,
+): boolean {
+  return sessionMountDepth(parentById, sessionId) < maxDepth;
+}
+
+/** Direct mounted children of `parentSessionId`. */
+export function mountedChildrenOf(
+  parentById: SessionMountTree,
+  parentSessionId: string,
+): string[] {
+  return Object.entries(parentById)
+    .filter(([, parent]) => parent === parentSessionId)
+    .map(([id]) => id)
+    .toSorted();
+}
+
+/**
+ * Resolve an agent's department depth. Mounted sessions are the authoritative
+ * representation when the caller can map the agent to one; otherwise fall back
+ * to the in-session agent tree. A TeamCreate member may be represented in both
+ * trees, so adding the two depths would count the same department twice.
+ */
+export function departmentDepth(input: {
+  readonly agents: TeamTree;
+  readonly agentId: string;
+  readonly parentById?: SessionMountTree;
+  readonly sessionIdForAgent?: string;
+}): number {
+  const sessionId = input.sessionIdForAgent;
+  if (
+    sessionId !== undefined
+    && input.parentById !== undefined
+    && Object.hasOwn(input.parentById, sessionId)
+  ) {
+    return sessionMountDepth(input.parentById, sessionId);
+  }
+  return teamDepth(input.agents, input.agentId);
+}
+
+/** Whether `agentId` may hire, counting both the mount tree and the agent tree. */
+export function canCreateDepartmentInTree(input: {
+  readonly agents: TeamTree;
+  readonly agentId: string;
+  readonly maxDepth: number;
+  readonly parentById?: SessionMountTree;
+  readonly sessionIdForAgent?: string;
+}): boolean {
+  return departmentDepth(input) < input.maxDepth;
+}

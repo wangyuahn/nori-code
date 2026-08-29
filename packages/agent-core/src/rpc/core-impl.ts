@@ -76,9 +76,18 @@ import type {
   GetBackgroundPayload,
   GetKimiConfigPayload,
   GetPluginInfoPayload,
+  InjectSystemReminderPayload,
+  AttachMountedTeamMemberPayload,
+  AttachMountedTeamMemberResult,
+  DetachMountedTeamMemberPayload,
+  DetachMountedTeamMemberResult,
   InstallPluginPayload,
   ListSessionsPayload,
+  MountSessionPayload,
   McpServerInfo,
+  SessionGraphEdgeSummary,
+  SessionGraphSummary,
+  UnmountSessionPayload,
   McpStartupMetrics,
   ManageBackgroundPayload,
   PluginInfo,
@@ -117,6 +126,30 @@ import type { SessionWarning } from '@nori-code/protocol';
 import { proxyWithExtraPayload } from './types';
 import { KaosShellNotFoundError, LocalKaos, type Kaos } from '@nori-code/kaos';
 import type { BrowserProvider, ToolServices } from '../tools/support/services';
+import { SessionMountCycleError } from '../services/session/session';
+import {
+  formatMountChangeNotice,
+  formatSessionSelf,
+  type MountChangeInfo,
+  type MountChangeRecipientRole,
+} from '../session/session-self';
+import {
+  CHILD_SESSION_KIND,
+  CHILD_SESSION_KIND_KEY,
+  DEFAULT_MOUNT_MEMBER_MANDATE,
+  DEFAULT_MOUNT_MEMBER_ROLE,
+  MOUNT_MANDATE_KEY,
+  MOUNT_NAME_KEY,
+  MOUNT_ROLE_KEY,
+  normalizeOptionalMountString,
+  PARENT_SESSION_ID_KEY,
+  readMountMandate,
+  readMountName,
+  readMountRole,
+  readParentSessionId,
+  wouldCreateMountCycle,
+} from '../session/mount-metadata';
+import { withMountTreeMutation } from '../session/mount-mutation';
 
 const KIMI_CODE_PROVIDER_NAME = 'managed:nori-code';
 const NORI_CODE_BASE_URL_ENV = 'NORI_CODE_BASE_URL';
@@ -304,6 +337,14 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       pluginCommands,
       appVersion: this.appVersion,
       additionalDirs,
+      listMountParentById: () => this.listMountParentById(),
+      createMountedMember: ({ identity, parentSessionId }) =>
+        this.createMountedMemberSession({
+          parentSessionId: parentSessionId ?? id,
+          identity,
+        }),
+      deleteMountedMember: (mountedSessionId) => this.deleteMountedMemberSession(mountedSessionId),
+      refreshSessionSelf: () => this.refreshCoreSessionSelf(id),
     });
     try {
       session.metadata = {
@@ -327,9 +368,13 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
         // 记成会话级模式，这样之后招进来的成员默认也是这个模式。
         session.applySessionPermissionMode(permissionMode);
       }
-      // New sessions start in Discuss unless the user explicitly disabled it.
-      // Resumed sessions restore their own state and never re-apply this.
-      if (options.discussMode ?? config.defaultDiscussMode ?? true) {
+      // A new session has no department yet, so Discuss cannot start here: it
+      // would deny Write/Edit/Bash while TeamAssign — the only exit — has nobody
+      // to assign to. The preference still matters; the lead enters Discuss
+      // through TeamDecide once TeamCreate has hired someone. `canEnter()` is
+      // false for every fresh main agent, so this is a no-op in practice and a
+      // guard if session creation ever restores a team.
+      if ((options.discussMode ?? config.defaultDiscussMode ?? true) && mainAgent.discussMode.canEnter()) {
         await mainAgent.discussMode.enter();
       }
       await session.writeMetadata();
@@ -373,9 +418,27 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
   }
 
   async deleteSession({ sessionId }: DeleteSessionPayload): Promise<void> {
-    await this.withSessionLifecycle(sessionId, async () => {
-      await this.closeSessionUnlocked(sessionId);
-      await this.sessionStore.delete(sessionId);
+    return withMountTreeMutation(async () => {
+      await this.withSessionLifecycle(sessionId, async () => {
+        const summary = await this.sessionStore.get(sessionId);
+        const oldParentSessionId =
+          readParentSessionId(summary.metadata as Record<string, unknown> | undefined) ?? null;
+        await this.detachMountedTeamAgentsEverywhere(sessionId);
+        await this.closeSessionUnlocked(sessionId);
+        await this.sessionStore.delete(sessionId);
+        if (oldParentSessionId !== null) {
+          try {
+            await this.emitCoreMountChanged({
+              sessionId,
+              oldParentSessionId,
+              newParentSessionId: null,
+              reason: 'unmount',
+            });
+          } catch {
+            // Deletion is already durable; the structural notification is best effort.
+          }
+        }
+      });
     });
   }
 
@@ -467,6 +530,14 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       pluginCommands,
       appVersion: this.appVersion,
       additionalDirs,
+      listMountParentById: () => this.listMountParentById(),
+      createMountedMember: ({ identity, parentSessionId }) =>
+        this.createMountedMemberSession({
+          parentSessionId: parentSessionId ?? summary.id,
+          identity,
+        }),
+      deleteMountedMember: (mountedSessionId) => this.deleteMountedMemberSession(mountedSessionId),
+      refreshSessionSelf: () => this.refreshCoreSessionSelf(summary.id),
     });
     let warning: string | undefined;
     try {
@@ -543,6 +614,66 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
 
   async listSessions(input: ListSessionsPayload = {}): Promise<readonly SessionSummary[]> {
     return this.sessionStore.list(input);
+  }
+
+  async getSessionGraph(input: ListSessionsPayload = {}): Promise<SessionGraphSummary> {
+    const nodes = await this.sessionStore.list(input);
+    const idSet = new Set(nodes.map((node) => node.id));
+    const edges: SessionGraphEdgeSummary[] = [];
+    for (const node of nodes) {
+      const parentId = readParentSessionId(node.metadata as Record<string, unknown> | undefined);
+      if (parentId !== undefined && idSet.has(parentId)) {
+        edges.push({ childSessionId: node.id, parentSessionId: parentId });
+      }
+    }
+    return { nodes, edges };
+  }
+
+  async mountSession(input: MountSessionPayload): Promise<SessionSummary> {
+    return withMountTreeMutation(() =>
+      this.withSessionLifecycle(input.sessionId, () => this.applySessionMount(input, 'mount')),
+    );
+  }
+
+  async remountSession(input: MountSessionPayload): Promise<SessionSummary> {
+    return withMountTreeMutation(() =>
+      this.withSessionLifecycle(input.sessionId, () => this.applySessionMount(input, 'remount')),
+    );
+  }
+
+  async unmountSession(input: UnmountSessionPayload): Promise<SessionSummary> {
+    return withMountTreeMutation(() => this.withSessionLifecycle(input.sessionId, async () => {
+      const summary = await this.sessionStore.get(input.sessionId);
+      const oldParentId =
+        readParentSessionId(summary.metadata as Record<string, unknown> | undefined) ?? null;
+      if (oldParentId === null) {
+        return summary;
+      }
+      const previousRole = readMountRole(summary.metadata as Record<string, unknown> | undefined);
+      const previousMandate = readMountMandate(summary.metadata as Record<string, unknown> | undefined);
+      await this.writeSessionMountMetadata(input.sessionId, {
+        parentSessionId: null,
+        role: undefined,
+        mandate: undefined,
+        clearIdentity: true,
+      });
+      await this.syncCoreMountWithRollback({
+        childSessionId: input.sessionId,
+        oldParentSessionId: oldParentId,
+        newParentSessionId: null,
+        role: undefined,
+        mandate: undefined,
+        previousRole,
+        previousMandate,
+        afterSync: () => this.emitCoreMountChanged({
+          sessionId: input.sessionId,
+          oldParentSessionId: oldParentId,
+          newParentSessionId: null,
+          reason: 'unmount',
+        }),
+      });
+      return this.sessionStore.get(input.sessionId);
+    }));
   }
 
   async renameSession({ sessionId, ...payload }: RenameSessionRequest): Promise<void> {
@@ -659,6 +790,13 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
 
   steer({ sessionId, ...payload }: SessionAgentPayload<SteerPayload>) {
     return this.sessionApi(sessionId).steer(payload);
+  }
+
+  injectSystemReminder({
+    sessionId,
+    ...payload
+  }: SessionAgentPayload<InjectSystemReminderPayload>) {
+    return this.sessionApi(sessionId).injectSystemReminder(payload);
   }
 
   cancel({ sessionId, ...payload }: SessionAgentPayload<CancelPayload>) {
@@ -824,6 +962,20 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
 
   getSessionMetadata({ sessionId, ...payload }: SessionScopedPayload<EmptyPayload>): SessionMeta {
     return this.sessionApi(sessionId).getSessionMetadata(payload);
+  }
+
+  detachMountedTeamMember({
+    sessionId,
+    ...payload
+  }: SessionScopedPayload<DetachMountedTeamMemberPayload>): Promise<DetachMountedTeamMemberResult> {
+    return this.sessionApi(sessionId).detachMountedTeamMember(payload);
+  }
+
+  attachMountedTeamMember({
+    sessionId,
+    ...payload
+  }: SessionScopedPayload<AttachMountedTeamMemberPayload>): Promise<AttachMountedTeamMemberResult> {
+    return this.sessionApi(sessionId).attachMountedTeamMember(payload);
   }
 
   listSkills({
@@ -1166,6 +1318,575 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
           continue;
         }
         throw error;
+      }
+    }
+  }
+
+  private async listMountParentById(): Promise<Readonly<Record<string, string | undefined>>> {
+    const all = await this.sessionStore.list({});
+    const out: Record<string, string | undefined> = {};
+    for (const summary of all) {
+      const parent = summary.metadata?.['parent_session_id'];
+      out[summary.id] = typeof parent === 'string' && parent.length > 0 ? parent : undefined;
+    }
+    return out;
+  }
+
+  private async applySessionMount(
+    input: MountSessionPayload,
+    reason: 'mount' | 'remount',
+  ): Promise<SessionSummary> {
+    if (input.sessionId === input.parentSessionId) {
+      throw new SessionMountCycleError(input.sessionId, input.parentSessionId);
+    }
+    const summary = await this.sessionStore.get(input.sessionId);
+    await this.sessionStore.get(input.parentSessionId);
+    const oldParentId =
+      readParentSessionId(summary.metadata as Record<string, unknown> | undefined) ?? null;
+    const oldRole = readMountRole(summary.metadata as Record<string, unknown> | undefined);
+    const oldMandate = readMountMandate(summary.metadata as Record<string, unknown> | undefined);
+    const role = normalizeOptionalMountString(input.role);
+    const mandate = normalizeOptionalMountString(input.mandate);
+    if (oldParentId === input.parentSessionId) {
+      if (role === undefined && mandate === undefined) {
+        // The parent link may have survived a crash after the dual-write
+        // attach failed. Treat an identical remount as a repair request.
+        await this.syncCoreMountWithRollback({
+          childSessionId: input.sessionId,
+          oldParentSessionId: oldParentId,
+          newParentSessionId: input.parentSessionId,
+          role: oldRole,
+          mandate: oldMandate,
+          previousRole: oldRole,
+          previousMandate: oldMandate,
+        });
+        return this.sessionStore.get(input.sessionId);
+      }
+      await this.writeSessionMountMetadata(input.sessionId, {
+        parentSessionId: input.parentSessionId,
+        role,
+        mandate,
+        clearIdentity: false,
+      });
+      await this.syncCoreMountWithRollback({
+        childSessionId: input.sessionId,
+        oldParentSessionId: oldParentId,
+        newParentSessionId: input.parentSessionId,
+        role,
+        mandate,
+        previousRole: oldRole,
+        previousMandate: oldMandate,
+        afterSync: () => this.emitCoreMountChanged({
+          sessionId: input.sessionId,
+          oldParentSessionId: oldParentId,
+          newParentSessionId: input.parentSessionId,
+          role,
+          mandate,
+          reason,
+        }),
+      });
+      return this.sessionStore.get(input.sessionId);
+    }
+
+    const parentById = new Map<string, string | undefined>();
+    for (const entry of await this.sessionStore.list({ includeArchive: true })) {
+      parentById.set(
+        entry.id,
+        readParentSessionId(entry.metadata as Record<string, unknown> | undefined),
+      );
+    }
+    parentById.set(input.sessionId, input.parentSessionId);
+    if (wouldCreateMountCycle(input.sessionId, input.parentSessionId, parentById)) {
+      throw new SessionMountCycleError(input.sessionId, input.parentSessionId);
+    }
+
+    await this.writeSessionMountMetadata(input.sessionId, {
+      parentSessionId: input.parentSessionId,
+      role,
+      mandate,
+      clearIdentity: false,
+    });
+    await this.syncCoreMountWithRollback({
+      childSessionId: input.sessionId,
+      oldParentSessionId: oldParentId,
+      newParentSessionId: input.parentSessionId,
+      role,
+      mandate,
+      previousRole: oldRole,
+      previousMandate: oldMandate,
+      afterSync: () => this.emitCoreMountChanged({
+        sessionId: input.sessionId,
+        oldParentSessionId: oldParentId,
+        newParentSessionId: input.parentSessionId,
+        role,
+        mandate,
+        reason: oldParentId === null ? 'mount' : reason,
+      }),
+    });
+    return this.sessionStore.get(input.sessionId);
+  }
+
+  private async syncCoreMountWithRollback(input: {
+    readonly childSessionId: string;
+    readonly oldParentSessionId: string | null;
+    readonly newParentSessionId: string | null;
+    readonly role: string | undefined;
+    readonly mandate: string | undefined;
+    readonly previousRole: string | undefined;
+    readonly previousMandate: string | undefined;
+    readonly afterSync?: () => Promise<void>;
+  }): Promise<void> {
+    try {
+      await this.syncTeamAgentsFromCoreMount(input);
+      await input.afterSync?.();
+    } catch (error) {
+      try {
+        await this.writeSessionMountMetadata(input.childSessionId, {
+          parentSessionId: input.oldParentSessionId,
+          role: input.previousRole,
+          mandate: input.previousMandate,
+          clearIdentity: true,
+        });
+        await this.syncTeamAgentsFromCoreMount({
+          childSessionId: input.childSessionId,
+          oldParentSessionId: input.newParentSessionId,
+          newParentSessionId: input.oldParentSessionId,
+          role: input.previousRole,
+          mandate: input.previousMandate,
+        });
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          'Session mount synchronization failed and could not be rolled back.',
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async writeSessionMountMetadata(
+    sessionId: string,
+    opts: {
+      parentSessionId: string | null;
+      role: string | undefined;
+      mandate: string | undefined;
+      clearIdentity: boolean;
+    },
+  ): Promise<void> {
+    // Mount mutations already run inside this session's lifecycle queue.
+    // Calling the public resumeSession wrapper here would enqueue behind the
+    // mutation that is currently awaiting this method and deadlock forever.
+    await this.resumeSessionWithOverridesUnlocked({ sessionId }, {});
+    const active = this.sessions.get(sessionId);
+    const summary = await this.sessionStore.get(sessionId);
+    const nextCustom: Record<string, unknown> = {
+      ...(summary.metadata ?? {}),
+      ...(active?.metadata.custom ?? {}),
+    };
+    if (opts.parentSessionId === null) {
+      delete nextCustom[PARENT_SESSION_ID_KEY];
+      delete nextCustom[CHILD_SESSION_KIND_KEY];
+    } else {
+      nextCustom[PARENT_SESSION_ID_KEY] = opts.parentSessionId;
+      nextCustom[CHILD_SESSION_KIND_KEY] = CHILD_SESSION_KIND;
+    }
+    if (opts.clearIdentity) {
+      delete nextCustom[MOUNT_ROLE_KEY];
+      delete nextCustom[MOUNT_MANDATE_KEY];
+      delete nextCustom[MOUNT_NAME_KEY];
+    }
+    if (opts.role !== undefined) nextCustom[MOUNT_ROLE_KEY] = opts.role;
+    if (opts.mandate !== undefined) nextCustom[MOUNT_MANDATE_KEY] = opts.mandate;
+    await this.updateSessionMetadata({
+      sessionId,
+      metadata: { custom: nextCustom },
+    });
+  }
+
+  private async syncTeamAgentsFromCoreMount(input: {
+    readonly childSessionId: string;
+    readonly oldParentSessionId: string | null;
+    readonly newParentSessionId: string | null;
+    readonly role?: string;
+    readonly mandate?: string;
+  }): Promise<void> {
+    const sameParent =
+      input.oldParentSessionId !== null
+      && input.oldParentSessionId === input.newParentSessionId;
+    if (!sameParent) {
+      const all = await this.sessionStore.list({ includeArchive: true });
+      for (const entry of all) {
+        if (entry.id === input.childSessionId) continue;
+        await this.resumeSession({ sessionId: entry.id });
+        await this.detachMountedTeamMember({
+          sessionId: entry.id,
+          mountedSessionId: input.childSessionId,
+        });
+      }
+    }
+    if (input.newParentSessionId === null) {
+      return;
+    }
+    const identity = await this.resolveCoreMountIdentity(
+      input.childSessionId,
+      input.role,
+      input.mandate,
+    );
+    await this.resumeSession({ sessionId: input.newParentSessionId });
+    await this.attachMountedTeamMember({
+      sessionId: input.newParentSessionId,
+      mountedSessionId: input.childSessionId,
+      identity,
+      teamLeaderAgentId: 'main',
+    });
+  }
+
+  private async detachMountedTeamAgentsEverywhere(mountedSessionId: string): Promise<void> {
+    const all = await this.sessionStore.list({ includeArchive: true });
+    for (const entry of all) {
+      if (entry.id === mountedSessionId) continue;
+      await this.resumeSession({ sessionId: entry.id });
+      await this.detachMountedTeamMember({
+        sessionId: entry.id,
+        mountedSessionId,
+      });
+    }
+  }
+
+  private async resolveCoreMountIdentity(
+    childSessionId: string,
+    role: string | undefined,
+    mandate: string | undefined,
+  ): Promise<{ name: string; role: string; mandate: string }> {
+    // The caller is synchronizing a mount mutation for this exact child.
+    // Resume without re-entering the per-session lifecycle queue.
+    await this.resumeSessionWithOverridesUnlocked({ sessionId: childSessionId }, {});
+    const active = this.sessions.get(childSessionId);
+    const summary = await this.sessionStore.get(childSessionId);
+    const custom = {
+      ...(summary.metadata ?? {}),
+      ...(active?.metadata.custom ?? {}),
+    } as Record<string, unknown>;
+    const name =
+      normalizeOptionalMountString(active?.metadata.title)
+      ?? normalizeOptionalMountString(summary.title)
+      ?? readMountName(custom)
+      ?? childSessionId;
+    return {
+      name,
+      role: normalizeOptionalMountString(role)
+        ?? readMountRole(custom)
+        ?? DEFAULT_MOUNT_MEMBER_ROLE,
+      mandate: normalizeOptionalMountString(mandate)
+        ?? readMountMandate(custom)
+        ?? DEFAULT_MOUNT_MEMBER_MANDATE,
+    };
+  }
+
+  private async emitCoreMountChanged(input: {
+    sessionId: string;
+    oldParentSessionId: string | null;
+    newParentSessionId: string | null;
+    role?: string;
+    mandate?: string;
+    reason: 'mount' | 'unmount' | 'remount' | 'parent_deleted';
+  }): Promise<void> {
+    const change: MountChangeInfo = {
+      session_id: input.sessionId,
+      old_parent_session_id: input.oldParentSessionId,
+      new_parent_session_id: input.newParentSessionId,
+      role: input.role,
+      mandate: input.mandate,
+      reason: input.reason,
+    };
+    const recipients: Array<{ sessionId: string; role: MountChangeRecipientRole }> = [
+      { sessionId: input.sessionId, role: 'subject' },
+    ];
+    if (input.oldParentSessionId !== null) {
+      recipients.push({ sessionId: input.oldParentSessionId, role: 'old_parent' });
+    }
+    if (input.newParentSessionId !== null && input.newParentSessionId !== input.oldParentSessionId) {
+      recipients.push({ sessionId: input.newParentSessionId, role: 'new_parent' });
+    }
+    const all = await this.sessionStore.list({});
+    for (const summary of all) {
+      if (readParentSessionId(summary.metadata as Record<string, unknown> | undefined) === input.sessionId) {
+        recipients.push({ sessionId: summary.id, role: 'direct_child' });
+      }
+    }
+    const seen = new Set<string>();
+    const sdk = await this.sdk;
+    for (const recipient of recipients) {
+      if (seen.has(recipient.sessionId)) continue;
+      seen.add(recipient.sessionId);
+      void sdk.emitEvent({
+        type: 'event.session.mount_changed',
+        agentId: 'main',
+        sessionId: recipient.sessionId,
+        change,
+        recipient_role: recipient.role,
+      } as never);
+      try {
+        // This helper is called from a mount mutation. The subject recipient
+        // is the mutation's session, so using the public wrapper here would
+        // enqueue behind the current operation and deadlock it.
+        await this.resumeSessionWithOverridesUnlocked({ sessionId: recipient.sessionId }, {});
+        await this.injectSystemReminder({
+          sessionId: recipient.sessionId,
+          agentId: 'main',
+          content: formatMountChangeNotice(change, recipient.role),
+          variant: 'mount_changed',
+        });
+        await this.refreshCoreSessionSelf(recipient.sessionId);
+      } catch {
+        // Best-effort inject for dormant sessions.
+      }
+    }
+  }
+
+  private async refreshCoreSessionSelf(sessionId: string): Promise<void> {
+    // Refreshes are triggered from mount lifecycle callbacks, including for
+    // the subject session. Avoid queueing behind the lifecycle operation that
+    // is waiting for this refresh to finish.
+    await this.resumeSessionWithOverridesUnlocked({ sessionId }, {});
+    const active = this.sessions.get(sessionId);
+    if (active === undefined) return;
+    const summary = await this.sessionStore.get(sessionId);
+    const custom = {
+      ...(summary.metadata ?? {}),
+      ...(active.metadata.custom ?? {}),
+    } as Record<string, unknown>;
+    const parentId = readParentSessionId(custom);
+    const all = await this.sessionStore.list({});
+    const parentById = new Map(
+      all.map((entry) => [
+        entry.id,
+        readParentSessionId(entry.metadata as Record<string, unknown> | undefined),
+      ] as const),
+    );
+    const children = all
+      .filter(
+        (entry) =>
+          readParentSessionId(entry.metadata as Record<string, unknown> | undefined) === sessionId,
+      )
+      .map((entry) => ({
+        sessionId: entry.id,
+        title: entry.title ?? entry.id,
+        role: readMountRole(entry.metadata as Record<string, unknown> | undefined),
+        mandate: readMountMandate(entry.metadata as Record<string, unknown> | undefined),
+      }));
+    let depth = 0;
+    let cursor = parentId;
+    const seen = new Set<string>([sessionId]);
+    while (cursor !== undefined && !seen.has(cursor)) {
+      depth += 1;
+      seen.add(cursor);
+      cursor = parentById.get(cursor);
+    }
+    let parentTitle: string | undefined;
+    if (parentId !== undefined) {
+      const parent = all.find((entry) => entry.id === parentId);
+      parentTitle = parent?.title ?? parentId;
+    }
+    const block = formatSessionSelf({
+      sessionId,
+      title: active.metadata.title ?? summary.title ?? sessionId,
+      parentSessionId: parentId,
+      parentTitle,
+      role: readMountRole(custom),
+      mandate: readMountMandate(custom),
+      depth,
+      position: parentId === undefined ? 'top-level' : 'member',
+      directChildren: children.map((child) => ({
+        sessionId: child.sessionId,
+        title: child.title,
+        role: child.role,
+        mandate: child.mandate,
+      })),
+    });
+    await this.updateSessionMetadata({
+      sessionId,
+      metadata: {
+        custom: {
+          ...custom,
+          session_self: block,
+        },
+      },
+    });
+  }
+
+  /**
+   * TeamCreate hire path: empty child session + mount metadata + mount_changed
+   * events (consumed by SessionService for identity notices).
+   */
+  private async createMountedMemberSession(input: {
+    readonly parentSessionId: string;
+    readonly identity: { readonly name: string; readonly role: string; readonly mandate: string };
+  }): Promise<{ readonly sessionId: string }> {
+    const parent = await this.sessionStore.get(input.parentSessionId);
+    const child = await this.createSession({
+      workDir: parent.workDir,
+      metadata: {
+        cwd: parent.workDir,
+        parent_session_id: input.parentSessionId,
+        child_session_kind: 'child',
+        mount_role: input.identity.role,
+        mount_mandate: input.identity.mandate,
+        mount_name: input.identity.name,
+      },
+    });
+    try {
+      const active = this.sessions.get(child.id);
+      if (active !== undefined) {
+        active.metadata = {
+          ...active.metadata,
+          title: input.identity.name,
+          isCustomTitle: true,
+          custom: {
+            ...active.metadata.custom,
+            parent_session_id: input.parentSessionId,
+            child_session_kind: 'child',
+            mount_role: input.identity.role,
+            mount_mandate: input.identity.mandate,
+            mount_name: input.identity.name,
+          },
+        };
+        await active.writeMetadata();
+        await active.flushMetadata();
+        await (await active.ensureAgentResumed('main')).refreshSystemPrompt();
+      }
+    } catch (error) {
+      try {
+        await this.deleteSession({ sessionId: child.id });
+        await this.refreshCoreSessionSelf(input.parentSessionId).catch(() => undefined);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          'Mounted member session creation failed and could not be rolled back.',
+        );
+      }
+      throw error;
+    }
+    try {
+      await this.sessionStore.rename(child.id, input.identity.name);
+    } catch {
+      // Title is best-effort; mount metadata is the authority.
+    }
+
+    // TeamCreate creates the map node before it creates the dual-written team
+    // agent. Refresh the owning session now so a cached <session_self> block
+    // cannot keep advertising the pre-hire child list.
+    try {
+      await this.refreshCoreSessionSelf(input.parentSessionId);
+
+      const change = {
+        session_id: child.id,
+        old_parent_session_id: null as string | null,
+        new_parent_session_id: input.parentSessionId,
+        role: input.identity.role,
+        mandate: input.identity.mandate,
+        reason: 'mount' as const,
+      };
+      const sdk = await this.sdk;
+      for (const recipient of [
+        { sessionId: child.id, role: 'subject' as const },
+        { sessionId: input.parentSessionId, role: 'new_parent' as const },
+      ]) {
+        void sdk.emitEvent({
+          type: 'event.session.mount_changed',
+          agentId: 'main',
+          sessionId: recipient.sessionId,
+          change,
+          recipient_role: recipient.role,
+        } as never);
+      }
+      return { sessionId: child.id };
+    } catch (error) {
+      try {
+        await this.deleteSession({ sessionId: child.id });
+        await this.refreshCoreSessionSelf(input.parentSessionId).catch(() => undefined);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          'Mounted member session creation failed and could not be rolled back.',
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * TeamDismiss removes the member's map session, but its own mounted children
+   * are still independent sessions. Promote those children before deleting the
+   * parent so dismissing one member never destroys a deeper branch.
+   */
+  private async deleteMountedMemberSession(sessionId: string): Promise<void> {
+    let summary: SessionSummary;
+    try {
+      summary = await this.sessionStore.get(sessionId);
+    } catch (error) {
+      // Generic session deletion may already have removed the map node and
+      // detached its agent. TeamDismiss is intentionally idempotent at this
+      // boundary so a stale in-memory member cannot make cleanup fail again.
+      if (error instanceof KimiError && error.code === ErrorCodes.SESSION_NOT_FOUND) return;
+      throw error;
+    }
+    const parentSessionId = readParentSessionId(
+      summary.metadata as Record<string, unknown> | undefined,
+    );
+    const children = (await this.sessionStore.list({ includeArchive: true }))
+      .filter((summary) => readParentSessionId(summary.metadata as Record<string, unknown> | undefined) === sessionId);
+    const promoted: Array<{
+      readonly sessionId: string;
+      readonly role: string | undefined;
+      readonly mandate: string | undefined;
+    }> = [];
+    try {
+      for (const child of children) {
+        try {
+          await this.unmountSession({ sessionId: child.id });
+        } catch (error) {
+          if (!(error instanceof KimiError) || error.code !== ErrorCodes.SESSION_NOT_FOUND) {
+            throw error;
+          }
+          continue;
+        }
+        promoted.push({
+          sessionId: child.id,
+          role: readMountRole(child.metadata as Record<string, unknown> | undefined),
+          mandate: readMountMandate(child.metadata as Record<string, unknown> | undefined),
+        });
+      }
+      await this.deleteSession({ sessionId });
+    } catch (error) {
+      const rollbackErrors: unknown[] = [];
+      for (const child of promoted.toReversed()) {
+        try {
+          await this.mountSession({
+            sessionId: child.sessionId,
+            parentSessionId: sessionId,
+            role: child.role,
+            mandate: child.mandate,
+          });
+        } catch (rollbackError) {
+          rollbackErrors.push(rollbackError);
+        }
+      }
+      if (rollbackErrors.length > 0) {
+        throw new AggregateError(
+          [error, ...rollbackErrors],
+          'Mounted member session deletion failed and could not be rolled back.',
+        );
+      }
+      throw error;
+    }
+    if (parentSessionId !== undefined) {
+      try {
+        await this.refreshCoreSessionSelf(parentSessionId);
+      } catch {
+        // Deletion is authoritative; a prompt cache refresh can be retried on
+        // the next parent operation and must not leave a stale team agent
+        // pointing at a session that was already removed.
       }
     }
   }

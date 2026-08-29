@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../src/api/client';
-import { apiMessageToChat, applyRealtimeStatusEvent, isClientNoticeId, reconcileHistory, turnFailureText, canApplyGeneratedSessionTitle, chatFilesFromPromptAttachments, chatScopeKey, confirmOptimisticUserMessage, fallbackSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, isTransientChatMessageId, latestTodos, liveAssistantMessage, mergeHistory, mergeInFlightWorkBlocks, promptForRewind, RealtimeEventDeduper, RealtimeSubscriptionGate, shouldFinishAbortedPrompt, shouldIgnoreTranscriptEvent, splitUploadedFileMarkup, statusForSession, stripGeneratedSessionTitle, unwrapWholeAnswerCodeFence } from '../src/hooks/useChatMessages';
+import { apiMessageToChat, applyRealtimeStatusEvent, isClientNoticeId, isTurnScopedError, reconcileHistory, turnFailureText, canApplyGeneratedSessionTitle, chatFilesFromPromptAttachments, chatScopeKey, confirmOptimisticUserMessage, fallbackSessionTitle, firstPromptWithTitleInstruction, foldConversationTurns, generatedSessionTitle, insertSteerBoundary, isTransientChatMessageId, latestTodos, liveAssistantMessage, mergeHistory, mergeInFlightWorkBlocks, promptForRewind, RealtimeEventDeduper, RealtimeSubscriptionGate, shouldFinishAbortedPrompt, shouldIgnoreTranscriptEvent, splitUploadedFileMarkup, statusForSession, stripGeneratedSessionTitle, unwrapWholeAnswerCodeFence } from '../src/hooks/useChatMessages';
 
 describe('session-bound realtime status', () => {
   const status = {
@@ -1023,5 +1023,18 @@ describe('failed turns keep their output and their cause', () => {
     expect(turnFailureText({ message: 'rate limited' })).toBe('rate limited');
     expect(turnFailureText({ code: 'provider_rate_limit' })).toBe('Turn failed: `provider_rate_limit`');
     expect(turnFailureText(undefined)).toBe('Turn failed without a reported cause.');
+  });
+
+  it('renders a turn failure once, and still shows errors with no turn to ride on', () => {
+    // A failed turn emits turn.ended{failed} AND a trailing error event with the
+    // same payload; both used to render, so every provider failure printed twice.
+    expect(isTurnScopedError({ details: { turnId: 'turn-1', statusCode: 403 } })).toBe(true);
+    expect(isTurnScopedError({ details: { serverName: 'ctx7' } })).toBe(false);
+    expect(isTurnScopedError({ details: undefined })).toBe(false);
+    expect(isTurnScopedError({})).toBe(false);
+    expect(isTurnScopedError(undefined)).toBe(false);
+    expect(isTurnScopedError({ details: 'not an object' })).toBe(false);
+    expect(isTurnScopedError({ details: null })).toBe(false);
+    expect(isTurnScopedError({ details: { turnId: 0 } })).toBe(true);
   });
 });

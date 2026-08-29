@@ -34,8 +34,8 @@ const TITLE = 'Import custom provider registry';
 const SUBTITLE_DEFAULT = 'Paste an api.json URL and its Bearer token.';
 const SUBTITLE_URL_EMPTY = 'Registry URL cannot be empty.';
 const SUBTITLE_TOKEN_EMPTY = 'Bearer token cannot be empty.';
-const FOOTER_NOT_LAST = 'Tab / ↑↓ to switch  ·  Enter for next field  ·  Esc to cancel';
-const FOOTER_LAST = 'Tab / ↑↓ to switch  ·  Enter to submit  ·  Esc to cancel';
+const FOOTER_NOT_LAST = 'Enter next · Esc cancel';
+const FOOTER_LAST = 'Enter submit · Esc cancel';
 
 type FieldId = 'url' | 'token';
 

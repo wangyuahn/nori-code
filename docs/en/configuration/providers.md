@@ -1,6 +1,6 @@
 # Providers and models
 
-Kimi Code CLI supports connecting to multiple LLM platforms simultaneously — one-click login via the Kimi Code managed service, connecting Claude with an Anthropic API key, or connecting third-party inference services via the OpenAI-compatible protocol. Each provider corresponds to a specific API protocol; models are declared on top of providers with their own name, context length, and capabilities. This page explains how to configure each type of provider in `config.toml`.
+Nori Code CLI supports connecting to multiple LLM platforms simultaneously — one-click login via the Kimi Code managed service, connecting Claude with an Anthropic API key, or connecting third-party inference services via the OpenAI-compatible protocol. Each provider corresponds to a specific API protocol; models are declared on top of providers with their own name, context length, and capabilities. This page explains how to configure each type of provider in `config.toml`.
 
 ## Supported provider types
 
@@ -26,6 +26,7 @@ Prefer not to edit TOML by hand? Type `/provider` in the TUI to open the **provi
 The manager displays providers as a list of entries grouped by source. Navigation:
 
 - ↑/↓ to move the cursor, ←/→ to page
+- Enter on a provider row to add extra models (stealth routes, thinking efforts) without turning auto-discover off
 - `d` to delete the current provider (with `[y/N]` confirmation)
 - Press Enter on the `[ Add New Platform ]` row to add a new provider
 
@@ -38,7 +39,9 @@ Two paths when adding:
 Kimi Code OAuth managed accounts logged in via `/login` do not appear in `/provider`. Use `/login` and `/logout` to manage them.
 :::
 
-The same operations are also available in non-interactive environments via the shell command: [`kimi provider`](../reference/kimi-command.md#kimi-provider).
+The same operations are also available in non-interactive environments via the shell command: [`nori provider`](../reference/kimi-command.md#nori-provider).
+
+Auto-discover and extra models can coexist. Keep discovery on, then add catalog omissions such as `stealth/ox-alpha` and set thinking efforts. Refresh does not delete those extras.
 
 ## `kimi`
 
@@ -147,7 +150,7 @@ GOOGLE_CLOUD_LOCATION = "us-central1"
 
 ```sh
 gcloud auth application-default login   # one-time authentication
-kimi
+nori
 ```
 
 To route Vertex requests through a custom (e.g. proxied) endpoint, set `base_url` (or the `GOOGLE_VERTEX_BASE_URL` env var); when omitted, the SDK default regional `*-aiplatform.googleapis.com` host is used. As with `google-genai`, give the host root only — the SDK appends `/v1beta1/publishers/google/models/…` itself.

@@ -25,6 +25,7 @@ function makeComponent(overrides: Partial<ProviderManagerOptions> = {}): Provide
   return new ProviderManagerComponent({
     providers: {} as Record<string, ProviderConfig>,
     onAdd: vi.fn(),
+    onOpenExtras: vi.fn(),
     onDeleteSource: vi.fn(),
     onClose: vi.fn(),
     ...overrides,
@@ -101,6 +102,7 @@ describe('ProviderManagerComponent', () => {
     // old `border · title · border` sandwich is gone).
     expect(isBorder(lines[titleIdx + 1])).toBe(false);
     expect(lines[titleIdx + 1]).toContain('navigate');
+    expect(lines[titleIdx + 1]).toContain('Enter extras');
     expect(lines[titleIdx + 1]).toContain('Esc cancel');
     // Blank line separates the hint from the body, exactly like the model dialog.
     expect(lines[titleIdx + 2]).toBe('');
@@ -133,5 +135,18 @@ describe('ProviderManagerComponent', () => {
     });
     component.handleInput(ESC);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens extras on Enter for a source row', () => {
+    const onOpenExtras = vi.fn();
+    const component = makeComponent({
+      providers: {
+        acme: { baseUrl: 'https://acme.test' },
+      } as unknown as Record<string, ProviderConfig>,
+      activeProviderId: 'acme',
+      onOpenExtras,
+    });
+    component.handleInput('\r');
+    expect(onOpenExtras).toHaveBeenCalledWith(['acme']);
   });
 });

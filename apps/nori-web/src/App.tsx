@@ -3,7 +3,7 @@ import { useBackgroundTasks } from './hooks/useBackgroundTasks';
 import { CronJobPanel } from './components/CronJobPanel';
 import { AccountCenter } from './components/AccountCenter';
 import { CodeView } from './components/CodeView';
-import { TeamTreePage } from './components/TeamTreePage';
+import { SessionMapPage } from './components/SessionMapPage';
 import { Icon, type IconName } from './components/Icon';
 import { useSessions, usePhaseStatus, useServerStatus } from './hooks/useApi';
 import { useChatMessages } from './hooks/useChatMessages';
@@ -13,6 +13,7 @@ import { ProjectFolderPicker } from './components/ProjectFolderPicker';
 import { useI18n } from './i18n';
 import { modelThinkingOptions } from './utils/model-thinking';
 import { sessionAgentDisplayName } from './utils/session-agent';
+import { sessionsForSidebar } from './utils/session-mount';
 import { findAgentDiscussion } from './utils/team-discussion';
 import { loadRewindLimit } from './rewindPreferences';
 import type { ChatSlashCommandName } from './utils/chat-slash-commands';
@@ -26,7 +27,7 @@ type InitialMessage = { text: string; attachments: PromptAttachment[]; options?:
 
 const NAV_ITEMS: { key: View; icon: IconName; label: string }[] = [
   { key: 'chat', icon: 'chat', label: 'Chat' },
-  { key: 'team', icon: 'graph', label: 'Team' },
+  { key: 'team', icon: 'graph', label: 'Map' },
   { key: 'cron', icon: 'clock', label: 'Cron Job' },
 ];
 
@@ -60,7 +61,9 @@ export function App() {
   const { tr } = useI18n();
   const [activeView, setActiveView] = useState<View>('chat');
   const [activeAgentSelection, setActiveAgentSelection] = useState<{ sessionId: string; agent: SessionAgent } | null>(null);
-  const [pendingAgentOpen, setPendingAgentOpen] = useState<{ sessionId: string; agentId: string } | null>(null);
+  // Keep the known agent object while the host session's agent list is still
+  // loading so map/team opens do not briefly bind chat to main.
+  const [pendingAgentOpen, setPendingAgentOpen] = useState<{ sessionId: string; agent: SessionAgent } | null>(null);
   const [sessionAgents, setSessionAgents] = useState<SessionAgent[]>([]);
   const [sidebarExpanded, setSidebarExpanded] = useState(loadSidebarExpanded);
   const [sidebarWidth, setSidebarWidth] = useState(() => Math.max(220, Math.min(480, Number(localStorage.getItem('nori-sidebar-width')) || 256)));
@@ -129,7 +132,10 @@ export function App() {
     refresh: refreshSessions,
   } = useSessions();
   const activeSession: Session | null = sessions.find(session => session.id === sessionId) ?? null;
-  const activeAgent = activeAgentSelection?.sessionId === sessionId ? activeAgentSelection.agent : null;
+  const pendingAgent = pendingAgentOpen?.sessionId === sessionId ? pendingAgentOpen.agent : null;
+  const activeAgent = (
+    activeAgentSelection?.sessionId === sessionId ? activeAgentSelection.agent : null
+  ) ?? pendingAgent;
   const activeAgentId = activeAgent?.agent_id ?? 'main';
   const selectSessionAgent = useCallback((agent: SessionAgent | null) => {
     setActiveAgentSelection(agent && agent.agent_id !== 'main' && agent.kind !== 'main' && sessionId ? { sessionId, agent } : null);
@@ -139,16 +145,39 @@ export function App() {
     setSessionAgents([...agents]);
   }, []);
   useEffect(() => {
+    setPendingAgentOpen(current => (
+      current !== null && current.sessionId !== sessionId ? null : current
+    ));
     setActiveAgentSelection(null);
     setSessionAgents([]);
   }, [sessionId]);
   useEffect(() => {
     if (pendingAgentOpen === null || pendingAgentOpen.sessionId !== sessionId) return;
-    const agent = sessionAgents.find(candidate => candidate.agent_id === pendingAgentOpen.agentId);
-    if (agent === undefined) return;
+    const agent = sessionAgents.find(candidate => candidate.agent_id === pendingAgentOpen.agent.agent_id);
+    if (agent === undefined) {
+      if (sessionAgents.length === 0) return;
+      // Host agents loaded, but the requested member is gone (dismissed /
+      // detached). Drop the pending open instead of leaving chat on a dead id.
+      setPendingAgentOpen(null);
+      return;
+    }
     setActiveAgentSelection({ sessionId: pendingAgentOpen.sessionId, agent });
     setPendingAgentOpen(null);
   }, [pendingAgentOpen, sessionAgents, sessionId]);
+  useEffect(() => {
+    if (activeAgentSelection === null || activeAgentSelection.sessionId !== sessionId) return;
+    const current = sessionAgents.find(agent => agent.agent_id === activeAgentSelection.agent.agent_id);
+    if (current === undefined) {
+      // A TeamDismiss (or a concurrent session reload) can remove the agent
+      // while its host session stays open. Fall back to the host's main agent
+      // instead of continuing to request a deleted agent id.
+      setActiveAgentSelection(null);
+      return;
+    }
+    if (current !== activeAgentSelection.agent) {
+      setActiveAgentSelection({ sessionId, agent: current });
+    }
+  }, [activeAgentSelection, sessionAgents, sessionId]);
   const backgroundTasks = useBackgroundTasks(sessionId);
   const [activity, setActivity] = useState<readonly SessionActivity[]>([]);
   useEffect(() => {
@@ -191,13 +220,20 @@ export function App() {
     const interval = window.setInterval(() => { void refresh(); }, 30_000);
     return () => { window.clearInterval(interval); };
   }, [sessionId]);
+  useEffect(() => {
+    const onSessionMountChanged = () => {
+      void refreshSessions();
+    };
+    window.addEventListener('nori:session-mount-changed', onSessionMountChanged);
+    return () => window.removeEventListener('nori:session-mount-changed', onSessionMountChanged);
+  }, [refreshSessions]);
   useEffect(() => { setSelectedProjectFile(null); }, [sessionId]);
   useEffect(() => {
     if (activeSession?.metadata?.cwd) setSelectedProjectRoot(activeSession.metadata.cwd);
   }, [activeSession?.metadata?.cwd]);
   const viewLabels: Record<View, string> = {
     chat: tr('Chat', '对话'),
-    team: tr('Team', '团队'),
+    team: tr('Map', '对话地图'),
     cron: tr('Cron Job', '定时任务'),
     account: tr('My profile', '我的'),
   };
@@ -216,9 +252,19 @@ export function App() {
     const load = async () => {
       try {
         const result = await api.sessions.getAgents(sessionId);
+        const nextAgents = result.items ?? [];
         // 每 4 秒一轮，返回内容通常与上一轮完全相同。复用上一次的数组身份，
         // 让依赖 sessionAgents 的下游 effect（部门轨的讨论拉取）不会被轮询本身唤醒。
-        if (!disposed) setSessionAgents(previous => sameAgentList(previous, result.items ?? []) ? previous : (result.items ?? []));
+        if (!disposed) {
+          setSessionAgents(previous => sameAgentList(previous, nextAgents) ? previous : nextAgents);
+          setPendingAgentOpen(current => (
+            current !== null
+            && current.sessionId === sessionId
+            && !nextAgents.some(agent => agent.agent_id === current.agent.agent_id)
+              ? null
+              : current
+          ));
+        }
       } catch {
         // 轮询失败保持上一次列表，下一轮重试。
       }
@@ -417,9 +463,27 @@ export function App() {
     switch (activeView) {
       case 'team':
         return (
-          <TeamTreePage
-            session={activeSession}
-            onSelectAgent={(_, agent) => { selectSessionAgent(agent.kind === 'main' ? null : agent); }}
+          <SessionMapPage
+            sessions={sessions}
+            activeSessionId={sessionId ?? undefined}
+            onOpenSession={(id) => {
+              switchSession(id);
+              selectSessionAgent(null);
+              setActiveView('chat');
+              closeSidebarOnNarrowViewport();
+            }}
+            onOpenAgent={(hostSessionId, agent) => {
+              setPendingAgentOpen({ sessionId: hostSessionId, agent });
+              if (hostSessionId === sessionId) {
+                setActiveAgentSelection({ sessionId: hostSessionId, agent });
+              } else {
+                setActiveAgentSelection(null);
+              }
+              switchSession(hostSessionId);
+              setActiveView('chat');
+              closeSidebarOnNarrowViewport();
+            }}
+            onGraphChanged={() => { void refreshSessions(); }}
           />
         );
       case 'cron':
@@ -486,7 +550,14 @@ export function App() {
             onResolveBrowserPermissionOverride={browserPermissions.resolvePermission}
             onOpenApprovalSession={(sourceSessionId, sourceAgentId) => {
               if (sourceAgentId && sourceAgentId !== 'main') {
-                setPendingAgentOpen({ sessionId: sourceSessionId, agentId: sourceAgentId });
+                setPendingAgentOpen({
+                  sessionId: sourceSessionId,
+                  agent: {
+                    agent_id: sourceAgentId,
+                    kind: 'team',
+                    status: 'unknown',
+                  },
+                });
               } else {
                 setPendingAgentOpen(null);
               }
@@ -541,7 +612,7 @@ export function App() {
 
         <div className="sidebar-content">
           {sidebarTab === 'sessions' && (
-            <SessionsList sessions={sessions} sessionId={sessionId} sessionsLoading={sessionsLoading} sessionsError={sessionsError} sessionsCreating={sessionsCreating} onRefresh={refreshSessions} onCreateSession={() => { startNewConversation(); }} onSwitchSession={id => { switchSession(id); setActiveView('chat'); closeSidebarOnNarrowViewport(); }} onArchiveSession={archiveSession} onDeleteSession={deleteSession} onRenameSession={renameSession} onForkSession={async (id, title) => { await forkSession(id, title); setActiveView('chat'); closeSidebarOnNarrowViewport(); }} />
+            <SessionsList sessions={sessionsForSidebar(sessions, sessionId)} sessionId={sessionId} sessionsLoading={sessionsLoading} sessionsError={sessionsError} sessionsCreating={sessionsCreating} onRefresh={refreshSessions} onCreateSession={() => { startNewConversation(); }} onSwitchSession={id => { switchSession(id); setActiveView('chat'); closeSidebarOnNarrowViewport(); }} onArchiveSession={archiveSession} onDeleteSession={deleteSession} onRenameSession={renameSession} onForkSession={async (id, title) => { await forkSession(id, title); setActiveView('chat'); closeSidebarOnNarrowViewport(); }} />
           )}
           {sidebarTab === 'files' && <FilesSidebar session={activeSession} selectedFile={selectedProjectFile} onSelectFile={setSelectedProjectFile} />}
         </div>
@@ -711,6 +782,7 @@ function sameAgentList(a: readonly SessionAgent[], b: readonly SessionAgent[]): 
       && agent.team_report_summary === other.team_report_summary
       && agent.team_report_received === other.team_report_received
       && agent.discussion_turn_agent_id === other.discussion_turn_agent_id
+      && agent.mounted_session_id === other.mounted_session_id
       // 参会名单会随邀请/移出变化，开会面板的头部要跟着刷新。
       && (agent.discussion_participant_agent_ids ?? []).join(',')
         === (other.discussion_participant_agent_ids ?? []).join(',');

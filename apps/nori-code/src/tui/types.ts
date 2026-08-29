@@ -12,6 +12,7 @@ import type {
 import type { NotificationsConfig, UpgradePreferences } from './config';
 import type { PendingApproval, PendingQuestion } from './reverse-rpc/types';
 import type { ColorToken, ThemeName } from './theme';
+import type { TeamAgentSnapshot } from './utils/team-tree';
 
 export type BannerDisplay = 'always' | 'once' | 'cooldown';
 
@@ -59,6 +60,10 @@ export interface AppState {
   /** Current goal snapshot for the footer badge; null/undefined when no active goal. */
   goal?: GoalSnapshot | null;
   mcpServersSummary: string | null;
+  /** Live department tree reconstructed from resume metadata and team events. */
+  teamAgents: readonly TeamAgentSnapshot[];
+  /** Agent whose session the main transcript is showing. Defaults to main. */
+  viewingAgentId?: string;
   /** Optional banner shown below the welcome panel; null means no banner to render. */
   banner?: BannerState | null;
 }
@@ -119,6 +124,7 @@ export type TranscriptEntryKind =
   | 'welcome'
   | 'user'
   | 'assistant'
+  | 'discuss_utterance'
   | 'tool_call'
   | 'thinking'
   | 'status'
@@ -158,6 +164,10 @@ export interface TranscriptEntry {
   skillArgs?: string;
   skillTrigger?: SkillActivationTrigger;
   pluginCommandData?: PluginCommandTranscriptData;
+  /** Discuss meeting speaker label (partner / chair, not the lead assistant). */
+  speakerName?: string;
+  speakerAgentId?: string;
+  speaking?: boolean;
 }
 
 export type LivePaneMode =

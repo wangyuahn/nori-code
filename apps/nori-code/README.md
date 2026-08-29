@@ -30,15 +30,16 @@ Take a look at this project and explain the main directories.
 
 ## Key Features
 
-- **Tree-structured Team.** `TeamCreate` builds durable members under any node, forming departments. `TeamAssign` hands out concrete tracks, and `TeamDecide` / `TeamSpeak` keep same-department members discussing while they work.
-- **Persistent memory.** Architecture decisions, code reviews, and patterns persist in a bidirectional-link vault via `nori_memory_search` / `nori_memory_write`. Cross-session knowledge means Nori learns your project over time.
+- **Tree-structured team.** `TeamCreate` hires durable partners as mounted child sessions. `TeamDecide` / `TeamSpeak` run Discuss; `TeamAssign` enters Code; `TeamDismiss` removes partners and deletes their sessions.
+- **Conversation map.** Sessions link via `parent_session_id`. `/map` in the TUI and the Web **Map** view browse, open, mount, unmount, and remount nodes.
+- **Main read-only by default.** The lead coordinates; members execute assigned tracks. Toggle with `/setting readonly off` when needed.
+- **Persistent memory.** Architecture decisions and patterns persist in a bidirectional-link vault via `nori_memory_search` / `nori_memory_write`.
 - **Policy-as-Code.** `nori.yaml` enforces deterministic rules: search vault before coding, run tests before exit, require review before merge.
-- **Lifecycle hooks.** Run arbitrary commands at key workflow gates — audit tool calls, fire notifications, trigger CI.
-- **Desktop workbench.** Nori Work pairs with the CLI for a full IDE-like experience.
+- **Desktop workbench.** Nori Work pairs with the CLI for browser, terminal, Git, and the session map on a large screen.
 
 ## Documentation
 
-TBD — see the project root [README](../README.md) for architecture and feature docs.
+User docs live under [`docs/`](../docs/) (VitePress, English and Chinese). Start with [Team engineering](../docs/en/guides/team-engineering.md) for 2.0 department workflows, or the project root [README](../README.md) for product overview.
 
 ## Repository
 
