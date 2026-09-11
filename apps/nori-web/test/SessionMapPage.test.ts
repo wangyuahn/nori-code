@@ -34,7 +34,9 @@ import {
   mapNodeCapabilities,
   mapStatusDotClass,
   pendingTopologyOpsReady,
+  reconcileParentEdgesWithServer,
   upsertParentMapEdge,
+  upsertTypedMapEdge,
 } from '../src/utils/session-graph';
 import { I18nProvider } from '../src/i18n';
 import {
@@ -393,6 +395,8 @@ describe('SessionMapPage smoke', () => {
       const project = memberNode!.querySelector('.team-node-project');
       expect(project?.textContent).toMatch(/demo-app/);
       expect(project?.getAttribute('title')).toBe('/work/demo-app');
+      expect(memberNode!.querySelector('.session-map-port-in')).toBeNull();
+      expect(memberNode!.querySelector('.session-map-port-out')).toBeNull();
     } finally {
       await act(async () => { root.unmount(); });
       container.remove();
@@ -820,6 +824,7 @@ describe('SessionMapPage smoke', () => {
       title: 'Child',
       metadata: { parent_session_id: 'other' },
     }));
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     mockViewport();
     if (typeof globalThis.PointerEvent === 'undefined') {
       class TestPointerEvent extends MouseEvent {
@@ -1489,6 +1494,7 @@ describe('wire gesture click suppression (live regressions)', () => {
       metadata: { parent_session_id: 'other' },
     }));
     const onOpenSession = vi.fn();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     const map = await renderMap(nodes, [{ child_session_id: 'child', parent_session_id: 'parent' }], { onOpenSession });
     try {
       const inPort = map.card('child').querySelector<HTMLElement>('.session-map-port-in');
@@ -2308,6 +2314,167 @@ describe('wire gesture click suppression (live regressions)', () => {
     expect(isComponentRootPin('session:root', index)).toBe(true);
     expect(isComponentRootPin('session:child', index)).toBe(false);
   });
+
+  it('right-click empty canvas creates a top-level session', async () => {
+    const nodes = [session({ id: 'a', title: 'Alpha', metadata: { cwd: '/tmp/proj' } })];
+    const create = vi.spyOn(api.sessions, 'create').mockResolvedValue(
+      session({ id: 'created', title: 'Created', metadata: { cwd: '/tmp/proj' } }),
+    );
+    const map = await renderMap(nodes, [], { onOpenSession: vi.fn() });
+    try {
+      const empty = map.emptyClientPoint();
+      const stage = map.container.querySelector<HTMLElement>('.session-map-stage');
+      expect(stage).toBeTruthy();
+      await act(async () => {
+        stage!.dispatchEvent(new MouseEvent('contextmenu', {
+          bubbles: true, cancelable: true, clientX: empty.x, clientY: empty.y,
+        }));
+      });
+      const menu = map.container.querySelector('.session-map-context-menu');
+      expect(menu?.textContent).toMatch(/New session|新建会话/);
+      const createBtn = [...menu!.querySelectorAll('button')].find((el) => /New session|新建会话/.test(el.textContent ?? ''));
+      expect(createBtn).toBeTruthy();
+      await act(async () => {
+        createBtn!.click();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(create).toHaveBeenCalled();
+    } finally {
+      await act(async () => { map.root.unmount(); });
+      map.container.remove();
+      localStorage.removeItem('nori-session-map-doc');
+    }
+  });
+
+  it('label chips filter canvas nodes as well as the list', async () => {
+    localStorage.setItem('nori-session-map-doc', JSON.stringify({
+      version: 2,
+      annotations: [],
+      labels: [{ id: 'lbl-hot', name: 'Hot', color: '#ef4444' }],
+      sessionLabels: { a: ['lbl-hot'] },
+      edges: [],
+    }));
+    const nodes = [
+      session({ id: 'a', title: 'Alpha' }),
+      session({ id: 'b', title: 'Beta' }),
+    ];
+    const map = await renderMap(nodes, [], { onOpenSession: vi.fn() }, { keepMapDoc: true });
+    try {
+      expect(map.container.querySelector('[data-session-id="a"]')).toBeTruthy();
+      expect(map.container.querySelector('[data-session-id="b"]')).toBeTruthy();
+      const chip = [...map.container.querySelectorAll<HTMLButtonElement>('.session-map-label-chip')]
+        .find((el) => el.textContent === 'Hot');
+      expect(chip).toBeTruthy();
+      await act(async () => { chip!.click(); });
+      expect(map.container.querySelector('[data-session-id="a"]')).toBeTruthy();
+      expect(map.container.querySelector('[data-session-id="b"]')).toBeNull();
+    } finally {
+      await act(async () => { map.root.unmount(); });
+      map.container.remove();
+      localStorage.removeItem('nori-session-map-doc');
+    }
+  });
+
+  it('label chips keep unlabeled ancestors of matching mounted children', async () => {
+    localStorage.setItem('nori-session-map-doc', JSON.stringify({
+      version: 2,
+      annotations: [],
+      labels: [{ id: 'lbl-hot', name: 'Hot', color: '#ef4444' }],
+      sessionLabels: { child: ['lbl-hot'] },
+      edges: [{ id: 'e1', type: 'parent', source: 'parent', target: 'child' }],
+    }));
+    const nodes = [
+      session({ id: 'parent', title: 'Parent' }),
+      session({ id: 'child', title: 'Child', metadata: { parent_session_id: 'parent' } }),
+      session({ id: 'other', title: 'Other' }),
+    ];
+    const map = await renderMap(
+      nodes,
+      [{ child_session_id: 'child', parent_session_id: 'parent' }],
+      { onOpenSession: vi.fn() },
+      { keepMapDoc: true },
+    );
+    try {
+      const chip = [...map.container.querySelectorAll<HTMLButtonElement>('.session-map-label-chip')]
+        .find((el) => el.textContent === 'Hot');
+      expect(chip).toBeTruthy();
+      await act(async () => { chip!.click(); });
+      expect(map.container.querySelector('[data-session-id="child"]')).toBeTruthy();
+      expect(map.container.querySelector('[data-session-id="parent"]')).toBeTruthy();
+      expect(map.container.querySelector('[data-session-id="other"]')).toBeNull();
+    } finally {
+      await act(async () => { map.root.unmount(); });
+      map.container.remove();
+      localStorage.removeItem('nori-session-map-doc');
+    }
+  });
+
+  it('Shift+drag between session cards draws a local peer edge', async () => {
+    const nodes = [
+      session({ id: 'a', title: 'Alpha' }),
+      session({ id: 'b', title: 'Beta' }),
+    ];
+    const mount = vi.spyOn(api.sessions, 'mount');
+    const map = await renderMap(nodes, [], { onOpenSession: vi.fn() });
+    try {
+      const outPort = map.card('a').querySelector<HTMLElement>('.session-map-port-out');
+      const drop = map.clientPointOf('b', 8);
+      await act(async () => {
+        outPort!.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true, cancelable: true, button: 0, shiftKey: true,
+          clientX: 64, clientY: 64, pointerId: 77, pointerType: 'mouse',
+        }));
+      });
+      await act(async () => {
+        window.dispatchEvent(new PointerEvent('pointermove', {
+          bubbles: true, cancelable: true, shiftKey: true,
+          clientX: drop.x, clientY: drop.y, pointerId: 77, pointerType: 'mouse',
+        }));
+      });
+      await act(async () => {
+        window.dispatchEvent(new PointerEvent('pointerup', {
+          bubbles: true, cancelable: true, button: 0, shiftKey: true,
+          clientX: drop.x, clientY: drop.y, pointerId: 77, pointerType: 'mouse',
+        }));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(map.container.querySelector('path.session-map-edge-peer')).not.toBeNull();
+      expect(mount).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => { map.root.unmount(); });
+      map.container.remove();
+      localStorage.removeItem('nori-session-map-doc');
+    }
+  });
+
+  it('queues unmount while the child session is running', async () => {
+    const nodes = [
+      session({ id: 'parent', title: 'Parent' }),
+      session({ id: 'child', title: 'Child', status: 'running', metadata: { parent_session_id: 'parent' } }),
+    ];
+    const unmount = vi.spyOn(api.sessions, 'unmount');
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const map = await renderMap(nodes, [{ child_session_id: 'child', parent_session_id: 'parent' }], { onOpenSession: vi.fn() });
+    try {
+      const childIn = map.card('child').querySelector<HTMLElement>('.session-map-port-in');
+      await act(async () => {
+        childIn!.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true, cancelable: true, button: 0, altKey: true,
+          clientX: 10, clientY: 10, pointerId: 88, pointerType: 'mouse',
+        }));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(unmount).not.toHaveBeenCalled();
+      expect(map.container.textContent).toMatch(/queued|排队/);
+    } finally {
+      await act(async () => { map.root.unmount(); });
+      map.container.remove();
+      localStorage.removeItem('nori-session-map-doc');
+    }
+  });
 });
 
 describe('wire parent helpers', () => {
@@ -2670,6 +2837,30 @@ describe('wire parent helpers', () => {
     expect(snap?.node.id).toBe('session:b');
     expect(nearestSessionMapNodeDistance(forceNodes, 500, 500)).toBeGreaterThan(0);
   });
+
+  it('peer wires ignore mount cycles so a child can link back to its parent', () => {
+    const parent = {
+      id: 'session:p',
+      x: 0,
+      y: 0,
+      member: { kind: 'session' as const, session: session({ id: 'p', title: 'P' }) },
+    };
+    const child = {
+      id: 'session:c',
+      x: 0,
+      y: 200,
+      member: {
+        kind: 'session' as const,
+        session: session({ id: 'c', title: 'C', metadata: { parent_session_id: 'p' } }),
+      },
+    };
+    const nodes = [parent.member.session, child.member.session];
+    const mountWire = { side: 'out' as const, parentSessionId: 'c', childSessionId: '', fromId: 'session:c' };
+    expect(isValidWireTarget(mountWire, parent, nodes)).toBe(false);
+    const peerWire = { ...mountWire, edgeType: 'peer' as const };
+    expect(isValidWireTarget(peerWire, parent, nodes)).toBe(true);
+    expect(isValidWireTarget(peerWire, child, nodes)).toBe(false);
+  });
 });
 
 describe('map node capabilities', () => {
@@ -2758,5 +2949,72 @@ describe('map node capabilities', () => {
     expect(next.edges).toHaveLength(1);
     expect(next.edges![0]!.source).toBe('new-parent');
     expect(next.edges![0]!.target).toBe('child');
+  });
+
+  it('peer upsert treats A→B and B→A as the same undirected edge', () => {
+    const empty = { version: 2 as const, annotations: [], labels: [], sessionLabels: {} };
+    const ab = upsertTypedMapEdge(empty, { type: 'peer', source: 'a', target: 'b' });
+    const ba = upsertTypedMapEdge(ab, { type: 'peer', source: 'b', target: 'a' });
+    const peers = (ba.edges ?? []).filter((edge) => edge.type === 'peer');
+    expect(peers).toHaveLength(1);
+    expect(peers[0]).toMatchObject({ source: 'b', target: 'a' });
+  });
+
+  it('disconnects from mapDoc parent edges even when metadata is missing', () => {
+    const child = session({ id: 'child', title: 'Child' });
+    const parent = session({ id: 'root', title: 'Root' });
+    const caps = mapNodeCapabilities({ kind: 'session', session: child }, {
+      sessions: [parent, child],
+      mapEdges: [{ id: 'e1', type: 'parent', source: 'root', target: 'child' }],
+    });
+    expect(caps.canDisconnect).toBe(true);
+    expect(caps.isTopLevel).toBe(false);
+  });
+
+  it('reconciles local parent edges to the server forest and keeps peer links', () => {
+    const doc = {
+      version: 2 as const,
+      annotations: [],
+      labels: [],
+      sessionLabels: {},
+      edges: [
+        { id: 'stale', type: 'parent' as const, source: 'old', target: 'child' },
+        { id: 'peer1', type: 'peer' as const, source: 'a', target: 'b' },
+      ],
+    };
+    const next = reconcileParentEdgesWithServer(doc, [
+      { parent_session_id: 'root', child_session_id: 'child' },
+      { parent_session_id: 'root', child_session_id: 'other' },
+    ]);
+    const parents = (next.edges ?? []).filter((edge) => edge.type === 'parent');
+    expect(parents).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'root', target: 'child' }),
+      expect.objectContaining({ source: 'root', target: 'other' }),
+    ]));
+    expect(parents).toHaveLength(2);
+    expect(next.edges?.some((edge) => edge.id === 'peer1' && edge.type === 'peer')).toBe(true);
+  });
+
+  it('keeps a pending remount parent while the server still shows the old parent', () => {
+    const doc = {
+      version: 2 as const,
+      annotations: [],
+      labels: [],
+      sessionLabels: {},
+      edges: [{ id: 'e1', type: 'parent' as const, source: 'new', target: 'child' }],
+      pendingTopology: [{
+        id: 'pt1',
+        kind: 'remount' as const,
+        childSessionId: 'child',
+        parentSessionId: 'new',
+        queuedAt: new Date().toISOString(),
+      }],
+    };
+    const next = reconcileParentEdgesWithServer(doc, [
+      { parent_session_id: 'old', child_session_id: 'child' },
+    ]);
+    expect(next.edges).toEqual([
+      expect.objectContaining({ source: 'new', target: 'child' }),
+    ]);
   });
 });

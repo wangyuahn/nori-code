@@ -185,9 +185,9 @@ export const sessionAgentTreeNodeSchema = z.object({
   /** Members taking part in this Discuss round; only discussion nodes carry it. */
   discussion_participant_agent_ids: z.array(sessionAgentIdSchema).optional(),
   /**
-   * Dual-write child session created by TeamCreate / map mount. Opening this
-   * node lets the conversation map resolve the member's owning host agent
-   * instead of opening the empty child-session shell.
+   * Dual-write child session created by map mount. Opening this node lets the
+   * conversation map resolve the member's owning host agent instead of opening
+   * an empty child-session shell. TeamCreate members do not set this field.
    */
   mounted_session_id: z.string().min(1).optional(),
 });

@@ -2,7 +2,7 @@
 
 ## What is Nori Code CLI
 
-Nori Code CLI is an AI coding agent that runs in the terminal. It helps you carry out software development tasks and day-to-day terminal operations — reading and modifying code, running shell commands, searching files, fetching web pages — and, in 2.0, coordinating a **department tree** of durable partner sessions on a **conversation map**.
+Nori Code CLI is an AI coding agent that runs in the terminal. It helps you carry out software development tasks and day-to-day terminal operations — reading and modifying code, running shell commands, searching files, fetching web pages — and, in 2.0, coordinating a **department tree** of durable partners on a **conversation map**.
 
 It fits scenarios such as:
 

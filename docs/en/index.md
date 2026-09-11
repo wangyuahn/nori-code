@@ -16,7 +16,7 @@ hero:
       link: https://github.com/wangyuahn/nori-code
 features:
   - title: Team engineering
-    details: Hire durable partners with TeamCreate. Discuss before Code, then TeamAssign — each partner is a real mounted child session.
+    details: Hire durable partners with TeamCreate. Discuss before Code, then TeamAssign — each partner is an in-session department agent on the conversation map.
   - title: Conversation map
     details: Sessions link via parent_session_id. Browse and remount with /map in the TUI or the Map view in Nori Work.
   - title: SubAgent DAG

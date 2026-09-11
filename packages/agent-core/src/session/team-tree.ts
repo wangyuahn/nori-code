@@ -156,8 +156,8 @@ export function mountedChildrenOf(
 /**
  * Resolve an agent's department depth. Mounted sessions are the authoritative
  * representation when the caller can map the agent to one; otherwise fall back
- * to the in-session agent tree. A TeamCreate member may be represented in both
- * trees, so adding the two depths would count the same department twice.
+ * to the in-session agent tree. A map-mounted member may appear in both trees,
+ * so adding the two depths would count the same department twice.
  */
 export function departmentDepth(input: {
   readonly agents: TeamTree;

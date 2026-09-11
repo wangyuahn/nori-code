@@ -88,13 +88,13 @@ Discuss 是只读团队开会。新会话默认进入该状态（用户可关闭
 | `TeamDecide` | 自动放行 | 开会或在执行后投票 |
 | `TeamSpeak` | 自动放行 | 发布讨论发言；不调用会将本轮记录为 skipped（弃权） |
 | `TeamAssign` | 自动放行 | 分配任务；成功后离开 Discuss 进入 Code |
-| `TeamDismiss` | 自动放行 | 解除部门成员并删除其挂载子会话 |
+| `TeamDismiss` | 自动放行 | 解除部门成员（仅在存在挂载子会话时删除该会话） |
 | `AskUserQuestion` | 自动放行 | 向用户提问以获取结构化输入 |
 | `Skill` | 自动放行 | 调用已注册的 inline Skill |
 
 **`SubAgent`** 是统一的临时代理入口。可用 `prompt_template` + `items`、`tasks`（含 `depends_on` DAG）或 `resume_agent_ids` 一次启动一个或多个完整子会话。完成后归档到父会话，可再打开。一次模型响应若调用 `SubAgent`，该调用必须是该响应中的唯一工具调用。Discuss 期间不要用 SubAgent，先 TeamAssign。
 
-**`TeamCreate`** 每个成员必须有唯一的 `name`、`role`、`mandate`；每次雇佣会创建挂载在调用者下的真实子会话（在会话地图上可见）。**`TeamDismiss`** 从部门移除成员并删除对应子会话；需提供 `reason`，仅在确认中断进行中的任务后用 `confirm_active=true` 重试。**`TeamDecide`** `action=start` 必须有 `topic` 和主持 `statement`。成员只用 `TeamSpeak` 发言。执行后 `action=vote` 不要求 Discuss；全队投票（`discuss_again` / `proceed` / `abstain`），含 `task=null` 的成员。
+**`TeamCreate`** 每个成员必须有唯一的 `name`、`role`、`mandate`；每次雇佣是当前会话里的部门 Agent（地图上显示为成员卡片），**不会**创建挂载子会话。真实子会话请用 Map 画布创建或挂载。**`TeamDismiss`** 从部门移除成员；需提供 `reason`，仅在确认中断进行中的任务后用 `confirm_active=true` 重试。若该成员是通过地图挂载雇来的（带有 `session_id` / `mounted_session_id`），会同时删除该子会话。**`TeamDecide`** `action=start` 必须有 `topic` 和主持 `statement`。成员只用 `TeamSpeak` 发言。执行后 `action=vote` 不要求 Discuss；全队投票（`discuss_again` / `proceed` / `abstain`），含 `task=null` 的成员。
 
 挂载变更会刷新各会话 system prompt 中的 **`<session_self>`**，并可能在下一回合注入 **`<session_mount_changed>`**。这只是身份与拓扑，**不是** transcript 共享。详见[团队工程](../guides/team-engineering.md#身份模型session_self-与挂载变更)。
 

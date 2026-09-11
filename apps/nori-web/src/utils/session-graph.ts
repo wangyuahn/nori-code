@@ -4,6 +4,8 @@ import {
   addSessionMapEdge,
   edgesForLayout,
   incomingParentEdgeCount,
+  newEdgeId,
+  removeSessionMapEdgeByEndpoints,
   seedEdgesFromServerGraph,
 } from '../components/sessionMapDoc';
 import { parentSessionIdOf, wouldCreateMountCycle } from './session-mount';
@@ -81,7 +83,7 @@ export function mapStatusDotClass(status: string): string {
 
 /**
  * Real session id that owns an OUT/IN wire.
- * Priority: real session card id → dual-write mounted_session_id.
+ * Agent ghosts are not wireable; dual-write members appear as real session cards.
  */
 export function wireSourceParentSessionId(member: MapNodeMember): string | null {
   if (member.kind === 'agent') return null;
@@ -160,7 +162,10 @@ export function mapNodeCapabilities(
   const canWireOut = wireSessionId !== null;
   const canWireIn = isRealSession;
   const canDelete = isRealSession;
-  const canDisconnect = isRealSession && parentSessionIdOf(member.session) !== undefined;
+  const canDisconnect = isRealSession && (
+    parentSessionIdOf(member.session) !== undefined
+    || incomingParentEdgeCount(member.session.id, mapEdges) > 0
+  );
   const canOpenAsSession = isRealSession;
   const canOpenAsAgent = parentId !== undefined
     && member.agent !== undefined
@@ -269,7 +274,10 @@ export function clearPendingTopology(doc: SessionMapDoc, childSessionId: string)
   };
 }
 
-/** Persist a parent edge locally (source = parent, target = child). */
+/**
+ * Persist a parent edge locally (source = parent, target = child).
+ * Server mount is single-parent: a second parent replaces the first (not 兼职).
+ */
 export function upsertParentMapEdge(
   doc: SessionMapDoc,
   parentSessionId: string,
@@ -282,6 +290,104 @@ export function upsertParentMapEdge(
     target: childSessionId,
     ...fields,
   });
+}
+
+/** Persist a peer/service edge once per endpoint pair (local visual links). */
+export function upsertTypedMapEdge(
+  doc: SessionMapDoc,
+  edge: Omit<SessionMapEdge, 'id'> & { id?: string },
+): SessionMapDoc {
+  if (edge.type === 'parent') {
+    return upsertParentMapEdge(doc, edge.source, edge.target, {
+      mandate: edge.mandate,
+      task: edge.task,
+      returnTo: edge.returnTo,
+      status: edge.status,
+    });
+  }
+  let next = removeSessionMapEdgeByEndpoints(doc, edge.type, edge.source, edge.target);
+  if (edge.type === 'peer') {
+    // Peer links are undirected: A→B and B→A are the same collaboration edge.
+    next = removeSessionMapEdgeByEndpoints(next, 'peer', edge.target, edge.source);
+  }
+  return addSessionMapEdge(next, edge);
+}
+
+function parentEdgeSignature(edges: readonly SessionMapEdge[]): string {
+  return edges
+    .filter((edge) => edge.type === 'parent')
+    .map((edge) => `${edge.source}->${edge.target}`)
+    .sort()
+    .join('|');
+}
+
+function nonParentEdgeSignature(edges: readonly SessionMapEdge[]): string {
+  return edges
+    .filter((edge) => edge.type !== 'parent')
+    .map((edge) => `${edge.type}:${edge.source}->${edge.target}:${edge.id}`)
+    .sort()
+    .join('|');
+}
+
+/**
+ * Align local parent edges with the server mount forest.
+ * Peer/service edges stay local. Pending topology children are left alone until flush.
+ */
+export function reconcileParentEdgesWithServer(
+  doc: SessionMapDoc,
+  serverEdges: readonly SessionGraphEdge[],
+): SessionMapDoc {
+  const pendingChildren = new Set(
+    (doc.pendingTopology ?? []).map((op) => op.childSessionId),
+  );
+  const local = doc.edges ?? [];
+  const nonParent = local.filter((edge) => edge.type !== 'parent');
+  const localByChild = new Map<string, SessionMapEdge>();
+  for (const edge of local) {
+    if (edge.type !== 'parent') continue;
+    localByChild.set(edge.target, edge);
+  }
+
+  const nextParent: SessionMapEdge[] = [];
+  const seenChildren = new Set<string>();
+  for (const server of serverEdges) {
+    const child = server.child_session_id;
+    const parent = server.parent_session_id;
+    seenChildren.add(child);
+    const existing = localByChild.get(child);
+    if (pendingChildren.has(child) && existing !== undefined) {
+      nextParent.push(existing);
+      continue;
+    }
+    if (existing !== undefined && existing.source === parent) {
+      nextParent.push(existing);
+      continue;
+    }
+    nextParent.push({
+      id: existing?.id ?? newEdgeId(),
+      type: 'parent',
+      source: parent,
+      target: child,
+      mandate: existing?.mandate,
+      task: existing?.task,
+      returnTo: existing?.returnTo,
+      status: existing?.status,
+    });
+  }
+  for (const child of pendingChildren) {
+    if (seenChildren.has(child)) continue;
+    const existing = localByChild.get(child);
+    if (existing !== undefined) nextParent.push(existing);
+  }
+
+  const nextEdges = [...nextParent, ...nonParent];
+  if (
+    parentEdgeSignature(local) === parentEdgeSignature(nextEdges)
+    && nonParentEdgeSignature(local) === nonParentEdgeSignature(nextEdges)
+  ) {
+    return doc;
+  }
+  return { ...doc, version: 2, edges: nextEdges.length > 0 ? nextEdges : [] };
 }
 
 /** Disconnect: remove parent edges pointing at child; keep the session node. */

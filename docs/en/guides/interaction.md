@@ -85,7 +85,7 @@ The input box remains usable while the agent is thinking or calling tools, and s
 
 ## Team engineering
 
-Nori Code CLI 2.0 adds a **department tree** of durable partner sessions alongside the existing approval and mode controls above. Hire partners with `TeamCreate`, gather statements in Discuss, assign execution with `TeamAssign`, and browse or remount sessions on the **conversation map** with `/map` (terminal) or the Web **Map** view.
+Nori Code CLI 2.0 adds a **department tree** of durable team partners alongside the existing approval and mode controls above. Hire partners with `TeamCreate`, gather statements in Discuss, assign execution with `TeamAssign`, and browse or remount sessions on the **conversation map** with `/map` (terminal) or the Web **Map** view.
 
 - **`/team`** — open a partner's session or browse department reports and Discuss speech
 - **`/map`** — manage session mounts (`parent_session_id`) for the current working directory

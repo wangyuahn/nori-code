@@ -2,7 +2,7 @@
 
 Every session in Nori Code CLI is driven by a **main Agent**. The main Agent understands the user's intent, plans steps, calls tools, and when needed dispatches **sub-agents** to handle more focused sub-tasks — for example, exploring an unfamiliar codebase, reviewing multiple implementations in parallel, or planning a large refactor without touching the main context.
 
-In Nori Code CLI 2.0, the main Agent also leads a **department tree** of durable **team partners** (`TeamCreate`). Partners are real child sessions on the conversation map; they Discuss, receive assignments, and execute work while the lead stays read-only by default. Temporary **SubAgents** remain the tool for bounded delegation inside a single session archive. See [Team engineering](../guides/team-engineering.md) for the full workflow.
+In Nori Code CLI 2.0, the main Agent also leads a **department tree** of durable **team partners** (`TeamCreate`). Partners are in-session agents shown as member cards on the conversation map; they Discuss, receive assignments, and execute work while the lead stays read-only by default. Temporary **SubAgents** remain the tool for bounded delegation inside a single session archive. See [Team engineering](../guides/team-engineering.md) for the full workflow.
 
 A sub-agent receives a task description from the main Agent, works in its own isolated context, and then returns its conclusions. It does not communicate with the user directly, and its intermediate reasoning and tool call records do not mix into the main Agent's history.
 
