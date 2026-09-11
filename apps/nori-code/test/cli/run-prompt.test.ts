@@ -1,5 +1,5 @@
 import type { createKimiDeviceId as createKimiDeviceIdFn } from '@nori-code/oauth';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runPrompt } from '#/cli/run-prompt';
 import { PROMPT_CLEANUP_TIMEOUT_MS } from '#/constant/app';

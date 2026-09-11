@@ -209,7 +209,7 @@ describe('runShell', () => {
     expect(mocks.initializeTelemetry).toHaveBeenCalledWith({
       homeDir: '/tmp/nori-code-test-home',
       deviceId: 'device-1',
-      enabled: true,
+      enabled: false,
       appName: 'nori-code-cli',
       version: '1.2.3-test',
       uiMode: 'shell',

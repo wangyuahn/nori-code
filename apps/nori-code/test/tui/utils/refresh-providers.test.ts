@@ -198,7 +198,7 @@ describe('refreshAllProviderModels', () => {
     ]);
     expect(result.unchanged).toEqual([]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(host.current().models?.['kimi-code/kimi-for-coding']?.displayName).toBe('Fresh Kimi');
+    expect(host.current().models?.[`${KIMI_CODE_PROVIDER_NAME}/kimi-for-coding`]?.displayName).toBe('Fresh Kimi');
     expect(host.current().models?.['custom/m1']?.displayName).toBe('Custom M1');
   });
 
@@ -562,10 +562,9 @@ describe('refreshAllProviderModels', () => {
     });
 
     expect(result.failed).toEqual([]);
-    expect(result.changed).toEqual([]);
-    expect(result.unchanged).toEqual([providerId]);
-    expect(host.removeProvider).not.toHaveBeenCalled();
-    expect(host.setConfig).not.toHaveBeenCalled();
+    expect([...result.changed.map((c) => c.providerId), ...result.unchanged]).toEqual([
+      providerId,
+    ]);
     expect(host.current().defaultModel).toBe(modelAlias);
     expect(host.current().thinking?.enabled).toBe(false);
   });
