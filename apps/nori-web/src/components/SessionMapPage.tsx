@@ -1199,12 +1199,9 @@ export function SessionMapPage({
     for (const { from, to } of base.edges) {
       parentOf.set(nodeKey(to.member), nodeKey(from.member));
     }
-    for (const id of [...wanted]) {
-      let cur = parentOf.get(id);
-      while (cur !== undefined && !wanted.has(cur)) {
-        wanted.add(cur);
-        cur = parentOf.get(cur);
-      }
+    for (const id of wanted) {
+      const parent = parentOf.get(id);
+      if (parent !== undefined) wanted.add(parent);
     }
     const placed = base.placed.filter((node) => wanted.has(nodeKey(node.member)));
     const edges = base.edges.filter(({ from, to }) => (
