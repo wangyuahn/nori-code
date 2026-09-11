@@ -70,6 +70,8 @@ describe('native node-pty assets', () => {
       expect(relativeFiles.has(`prebuilds/${target}/conpty_console_list.node`)).toBe(true);
       expect(relativeFiles.has(`prebuilds/${target}/winpty-agent.exe`)).toBe(true);
       expect(relativeFiles.has(`prebuilds/${target}/winpty.dll`)).toBe(true);
+    } else if (process.platform === 'linux') {
+      expect(relativeFiles.has('build/Release/pty.node')).toBe(true);
     } else {
       expect(relativeFiles.get(`prebuilds/${target}/spawn-helper`)?.mode).toBe(0o755);
     }

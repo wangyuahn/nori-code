@@ -1,11 +1,11 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 
-import { resolveKimiCodeOAuthKey } from '@nori-code/oauth';
 import { describe, expect, it } from 'vitest';
 
 const REPO_ROOT = join(import.meta.dirname, '../../../..');
@@ -311,15 +311,16 @@ describe('kimi-datasource MCP server', () => {
   });
 });
 
-// Pin the expected credential file name to the canonical OAuth-key resolver so
-// this test fails if the plugin's standalone digest drifts from the source of
-// truth in @nori-code/oauth. The credential file name is the OAuth
-// key with its `oauth/` prefix stripped.
+// Keep this digest in sync with plugins/official/kimi-datasource/bin/kimi-datasource.mjs.
 function kimiCodeEnvCredentialName(options: {
   readonly oauthHost: string;
   readonly baseUrl: string;
 }): string {
-  return resolveKimiCodeOAuthKey(options).replace(/^oauth\//, '');
+  const digest = createHash('sha256')
+    .update(JSON.stringify({ oauthHost: options.oauthHost, baseUrl: options.baseUrl }))
+    .digest('hex')
+    .slice(0, 16);
+  return `kimi-code-env-${digest}`;
 }
 
 async function readJson(request: IncomingMessage): Promise<unknown> {

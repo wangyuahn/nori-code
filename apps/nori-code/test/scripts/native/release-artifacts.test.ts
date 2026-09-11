@@ -16,7 +16,7 @@ const packageScript = resolve(appRoot, 'scripts/native/package.mjs');
 const manifestScript = resolve(appRoot, 'scripts/native/produce-manifest.mjs');
 const artifactsDir = resolve(appRoot, 'dist-native/artifacts');
 const target = 'test-zip-artifact';
-const executableName = process.platform === 'win32' ? 'kimi.exe' : 'kimi';
+const executableName = process.platform === 'win32' ? 'nori.exe' : 'nori';
 const fakeBinary = resolve(appRoot, 'dist-native/bin', target, executableName);
 
 function sha256(bytes: Buffer | string): string {
@@ -103,7 +103,7 @@ describe('native release artifacts', () => {
 
     await execFileAsync(process.execPath, [packageScript], {
       cwd: appRoot,
-      env: { ...process.env, KIMI_CODE_BUILD_TARGET: target },
+      env: { ...process.env, NORI_CODE_BUILD_TARGET: target },
     });
 
     const archivePath = resolve(artifactsDir, `kimi-code-${target}.zip`);

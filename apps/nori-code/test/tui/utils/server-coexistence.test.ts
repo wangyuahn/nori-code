@@ -35,7 +35,7 @@ describe('runningServerCoexistenceNotice', () => {
 
   it('warns about foreign listeners without claiming Nori ownership', async () => {
     mocks.getLiveLock.mockReturnValue({ host: '127.0.0.1', port: 58771, pid: 1 });
-    mocks.classifyServerIdentity.mockResolvedValue({ kind: 'foreign' });
+    mocks.classifyServerIdentity.mockResolvedValue('foreign');
 
     const notice = await runningServerCoexistenceNotice();
     expect(notice).toContain('Another service is bound');
