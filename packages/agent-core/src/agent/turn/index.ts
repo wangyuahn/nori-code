@@ -1665,21 +1665,6 @@ function isVerificationCommand(args: unknown): boolean {
     .test(command);
 }
 
-function isReviewLikeArgs(toolName: string, args: unknown): boolean {
-  const text = `${toolName} ${stringifyForGate(args)}`;
-  return /\b(?:review|verify|verification|test|tests|lint|type[-_\s]?check|regression|security|audit|check)\b/i
-    .test(text);
-}
-
-function stringifyForGate(value: unknown): string {
-  if (typeof value === 'string') return value;
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return '';
-  }
-}
-
 function contentPartsText(input: readonly ContentPart[]): string {
   return input
     .flatMap((part) => part.type === 'text' ? [part.text] : [])

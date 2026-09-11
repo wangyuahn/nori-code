@@ -437,7 +437,7 @@ describe('MessageService', () => {
 
   it('reads a child transcript from its own agent scope', async () => {
     const getContextMock = bridge.rpc.getContext as ReturnType<typeof vi.fn>;
-    getContextMock.mockImplementation(async ({ agentId }: { agentId: string }): Promise<AgentContextData> => ({
+    getContextMock.mockImplementation(({ agentId }: { agentId: string }): Promise<AgentContextData> => Promise.resolve({
       history: agentId === 'agent-1'
         ? [mkUserMessage('child-only')]
         : [mkUserMessage('main-only')],

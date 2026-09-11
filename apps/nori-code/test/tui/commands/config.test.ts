@@ -40,11 +40,11 @@ function makeHost(initial: ConfigShape = { providers: {} }) {
           ...patch,
           loopControl: {
             ...config.loopControl,
-            ...((patch['loopControl'] as ConfigShape['loopControl']) ?? {}),
+            ...(patch['loopControl'] as ConfigShape['loopControl']),
           },
           memory: {
             ...config.memory,
-            ...((patch['memory'] as ConfigShape['memory']) ?? {}),
+            ...(patch['memory'] as ConfigShape['memory']),
           },
         };
         return config;

@@ -85,13 +85,13 @@ export async function loadPluginMarketplace(
       options.workDir,
     );
     raw = await readMarketplaceText(location, fetchImpl);
-    return withLatestVersions(parsePluginMarketplace(raw, location), fetchImpl);
+    return await withLatestVersions(parsePluginMarketplace(raw, location), fetchImpl);
   } catch (error) {
     const fallback =
       configuredSource === undefined ? await getSourceCheckoutMarketplaceLocation() : undefined;
     if (fallback === undefined) throw error;
     raw = await readMarketplaceText(fallback, fetchImpl);
-    return withLatestVersions(parsePluginMarketplace(raw, fallback), fetchImpl);
+    return await withLatestVersions(parsePluginMarketplace(raw, fallback), fetchImpl);
   }
 }
 

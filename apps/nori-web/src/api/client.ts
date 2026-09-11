@@ -827,7 +827,7 @@ export function createClient(
       let decoded: unknown;
       try {
         decoded = text ? JSON.parse(text) : undefined;
-      } catch (error) {
+      } catch {
         throw new ApiError(
           `API ${method} ${path} returned invalid JSON (${res.status})`,
           method,

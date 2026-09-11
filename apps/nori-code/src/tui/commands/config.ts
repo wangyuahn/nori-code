@@ -180,22 +180,24 @@ export async function ensureAutoPermission(
       title,
       noticeLines,
       options,
-      onSelect: async (choice) => {
-        host.restoreEditor();
-        if (choice === 'cancel') {
-          cancelStart();
-          return;
-        }
-        if (choice !== currentMode) {
-          try {
-            await host.requireSession().setPermission(choice as PermissionMode);
-          } catch (error) {
-            host.showError(`Failed to set permission mode: ${formatErrorMessage(error)}`);
+      onSelect: (choice) => {
+        void (async () => {
+          host.restoreEditor();
+          if (choice === 'cancel') {
+            cancelStart();
             return;
           }
-          host.setAppState({ permissionMode: choice as PermissionMode });
-        }
-        await onStart();
+          if (choice !== currentMode) {
+            try {
+              await host.requireSession().setPermission(choice as PermissionMode);
+            } catch (error) {
+              host.showError(`Failed to set permission mode: ${formatErrorMessage(error)}`);
+              return;
+            }
+            host.setAppState({ permissionMode: choice as PermissionMode });
+          }
+          await onStart();
+        })();
       },
       onCancel: cancelStart,
     }),
@@ -1136,7 +1138,7 @@ function getWorkflowConfig(host: SlashCommandHost): WorkflowConfig {
   const mainAgent = sessionAny?.getReadyAgent?.('main');
   const fromAgent = mainAgent?.noriWorkflow as WorkflowConfig | undefined;
   // Merge: agent runtime overrides file defaults
-  return { ...fromFile, ...(fromAgent ?? {}) };
+  return { ...fromFile, ...fromAgent };
 }
 
 function setWorkflowConfig(host: SlashCommandHost, patch: Partial<WorkflowConfig>): void {

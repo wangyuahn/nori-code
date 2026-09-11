@@ -89,7 +89,7 @@ async function handleOpenPlatformLogin(
   }
 
   const config = await host.harness.getConfig();
-  applyOpenPlatformConfig(config as ManagedKimiConfigShape, {
+  await applyOpenPlatformConfig(config as ManagedKimiConfigShape, {
     platform,
     models,
     selectedModel: selection.model,

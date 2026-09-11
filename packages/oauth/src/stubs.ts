@@ -36,8 +36,8 @@ export function createKimiDefaultHeaders(_options: {
 }
 
 export function assertKimiHostIdentity(
-  identity: unknown,
-): asserts identity is KimiHostIdentity {
+  _identity: unknown,
+): asserts _identity is KimiHostIdentity {
   // no-op stub — trust the caller
 }
 

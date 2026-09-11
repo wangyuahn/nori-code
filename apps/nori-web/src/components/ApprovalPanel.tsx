@@ -112,11 +112,11 @@ export function ApprovalPanel({ requests, onResolve, onPermissionChange, browser
       <pre className="approval-args">{request.origin}</pre>
       {modeErrors[request.id] && <div className="approval-mode-error" role="alert">{modeErrors[request.id]}</div>}
       <div className="approval-actions">
-        <button className="approval-btn approval-btn--approve" disabled={Boolean(activeModeSwitch)} onClick={() => onResolveBrowserPermission?.(request.id, 'allow_once')}>{tr('Allow once', '允许一次')}</button>
+        <button className="approval-btn approval-btn--approve" disabled={Boolean(activeModeSwitch)} onClick={() => { void onResolveBrowserPermission?.(request.id, 'allow_once'); }}>{tr('Allow once', '允许一次')}</button>
         {onPermissionChange && <><button className="approval-btn approval-btn--auto" disabled={Boolean(activeModeSwitch)} onClick={() => void switchModeAndResolve(request.id, 'auto', () => onResolveBrowserPermission?.(request.id, 'allow_once'))}>{activeModeSwitch === 'auto' ? tr('Switching…', '切换中…') : tr('Switch to AUTO and approve', '切换为 AUTO 并允许')}</button><button className="approval-btn approval-btn--yolo" disabled={Boolean(activeModeSwitch)} onClick={() => void switchModeAndResolve(request.id, 'yolo', () => onResolveBrowserPermission?.(request.id, 'allow_once'))}>{activeModeSwitch === 'yolo' ? tr('Switching…', '切换中…') : tr('Switch to YOLO and approve', '切换为 YOLO 并允许')}</button></>}
-        <button className="approval-btn approval-btn--approve" disabled={Boolean(activeModeSwitch)} onClick={() => onResolveBrowserPermission?.(request.id, 'allow_always')}>{tr('Always allow', '始终允许')}</button>
-        <button className="approval-btn approval-btn--decline" disabled={Boolean(activeModeSwitch)} onClick={() => onResolveBrowserPermission?.(request.id, 'deny')}>{tr('Deny', '拒绝')}</button>
-        <button className="approval-btn approval-btn--decline" disabled={Boolean(activeModeSwitch)} onClick={() => onResolveBrowserPermission?.(request.id, 'deny_always')}>{tr('Always deny', '始终拒绝')}</button>
+        <button className="approval-btn approval-btn--approve" disabled={Boolean(activeModeSwitch)} onClick={() => { void onResolveBrowserPermission?.(request.id, 'allow_always'); }}>{tr('Always allow', '始终允许')}</button>
+        <button className="approval-btn approval-btn--decline" disabled={Boolean(activeModeSwitch)} onClick={() => { void onResolveBrowserPermission?.(request.id, 'deny'); }}>{tr('Deny', '拒绝')}</button>
+        <button className="approval-btn approval-btn--decline" disabled={Boolean(activeModeSwitch)} onClick={() => { void onResolveBrowserPermission?.(request.id, 'deny_always'); }}>{tr('Always deny', '始终拒绝')}</button>
       </div>
     </div>;
   };
@@ -132,10 +132,14 @@ export function ApprovalPanel({ requests, onResolve, onPermissionChange, browser
   </aside>;
 }
 
+function displayText(value: unknown): string {
+  return typeof value === 'string' ? value : value == null ? '' : JSON.stringify(value);
+}
+
 function ApprovalDisplay({ display, fallback }: { display: DisplayData | null; fallback: unknown }) {
-  if (display?.kind === 'goal_start') return <div className="approval-goal"><strong>{String(display.objective ?? '')}</strong>{typeof display.completionCriterion === 'string' && <span>{display.completionCriterion}</span>}</div>;
-  if (display?.kind === 'command') return <pre className="approval-args">{String(display.command ?? '')}</pre>;
-  if (display?.kind === 'file_io' || display?.kind === 'diff') return <pre className="approval-args">{String(display.path ?? '')}{typeof display.detail === 'string' ? `\n${display.detail}` : ''}</pre>;
+  if (display?.kind === 'goal_start') return <div className="approval-goal"><strong>{displayText(display.objective ?? '')}</strong>{typeof display.completionCriterion === 'string' && <span>{display.completionCriterion}</span>}</div>;
+  if (display?.kind === 'command') return <pre className="approval-args">{displayText(display.command ?? '')}</pre>;
+  if (display?.kind === 'file_io' || display?.kind === 'diff') return <pre className="approval-args">{displayText(display.path ?? '')}{typeof display.detail === 'string' ? `\n${display.detail}` : ''}</pre>;
   return <pre className="approval-args">{JSON.stringify(fallback, null, 2)}</pre>;
 }
 

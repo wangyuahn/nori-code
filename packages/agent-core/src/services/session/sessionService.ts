@@ -621,7 +621,7 @@ export class SessionService extends Disposable implements ISessionService {
     if (cwd === undefined) {
       throw new Error('SessionService.createChild: parent metadata.cwd is required');
     }
-    const callerMeta = { ...(input.metadata ?? {}) };
+    const callerMeta = { ...input.metadata };
     delete callerMeta[PARENT_SESSION_ID_KEY];
     delete callerMeta[CHILD_SESSION_KIND_KEY];
     delete callerMeta[MOUNT_ROLE_KEY];
@@ -888,8 +888,8 @@ export class SessionService extends Disposable implements ISessionService {
     const meta = await this.tryGetMeta(id);
     const summary = await this.requireSummary(id);
     const nextCustom: Record<string, unknown> = {
-      ...(summary.metadata ?? {}),
-      ...(meta?.custom ?? {}),
+      ...summary.metadata,
+      ...meta?.custom,
     };
     if (opts.parentSessionId === null) {
       delete nextCustom[PARENT_SESSION_ID_KEY];
@@ -1166,8 +1166,8 @@ export class SessionService extends Disposable implements ISessionService {
       // Title falls back below.
     }
     const custom: Record<string, unknown> = {
-      ...(summaryMeta ?? {}),
-      ...(meta?.custom ?? {}),
+      ...summaryMeta,
+      ...meta?.custom,
     };
     const name =
       normalizeOptionalString(typeof meta?.title === 'string' ? meta.title : undefined)

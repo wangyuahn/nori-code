@@ -322,13 +322,12 @@ describe('UpdateGoalTool', () => {
     const store = makeStore();
     const reminders: Array<{ readonly content: string; readonly origin: unknown }> = [];
     await store.createGoal({ objective: 'work' });
-    const agent = {
-      ...agentWithContext(store, reminders),
+    const agent = Object.assign({}, agentWithContext(store, reminders), {
       obsidianMemory: { removeNote: async () => false },
       tools: {
         data: () => [{ name: 'nori_memory_remove', active: true }],
       },
-    } as unknown as Agent;
+    }) as unknown as Agent;
     const result = await executeTool(new UpdateGoalTool(agent), ctx({ status: 'complete' }));
     expect(result.stopTurn).toBe(true);
     expect(reminders).toHaveLength(1);
@@ -341,13 +340,12 @@ describe('UpdateGoalTool', () => {
     const store = makeStore();
     const reminders: Array<{ readonly content: string; readonly origin: unknown }> = [];
     await store.createGoal({ objective: 'work' });
-    const agent = {
-      ...agentWithContext(store, reminders),
+    const agent = Object.assign({}, agentWithContext(store, reminders), {
       obsidianMemory: { removeNote: async () => false },
       tools: {
         data: () => [{ name: 'nori_memory_remove', active: false }],
       },
-    } as unknown as Agent;
+    }) as unknown as Agent;
     await executeTool(new UpdateGoalTool(agent), ctx({ status: 'complete' }));
     expect(reminders[0]?.content).not.toContain('nori_memory_remove');
   });
@@ -421,14 +419,13 @@ describe('UpdateGoalTool', () => {
     const store = makeStore();
     await store.createGoal({ objective: 'work' });
     let noted = false;
-    const agent = {
-      ...agentWithContext(store),
+    const agent = Object.assign({}, agentWithContext(store), {
       turn: {
         notePendingGoalOutcomeContinuation: () => {
           noted = true;
         },
       },
-    } as unknown as Agent;
+    }) as unknown as Agent;
     await executeTool(new UpdateGoalTool(agent), ctx({ status: 'complete' }));
     expect(noted).toBe(true);
   });

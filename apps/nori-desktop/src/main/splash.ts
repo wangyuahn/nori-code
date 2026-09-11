@@ -1,4 +1,4 @@
-﻿import { BrowserWindow } from 'electron';
+import { BrowserWindow } from 'electron';
 
 import { NORI_PRODUCT_NAME, noriRuntimeIconPath } from './brand';
 

@@ -1,5 +1,5 @@
-import { readFileSync, readdirSync, lstatSync, writeFileSync, watch, realpathSync } from 'node:fs';
-import { resolve, relative, normalize, join, isAbsolute } from 'node:path';
+import { readFileSync, readdirSync, lstatSync, realpathSync } from 'node:fs';
+import { resolve, relative, join, isAbsolute } from 'node:path';
 import { app } from 'electron';
 
 const ALLOWED_BASE_DIR = resolve(app.isPackaged ? process.resourcesPath : join(app.getAppPath(), '..', '..'));

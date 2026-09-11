@@ -25,7 +25,7 @@ export function isUserActivatableSkill(skill: SkillSummary): boolean {
 /** Heuristic: SkillSummary has no arguments field. */
 export function skillNeedsArguments(skill: SkillSummary): boolean {
   if (skill.type === 'prompt') return true;
-  return /[\[$<]/.test(skill.description);
+  return /[[$<]/.test(skill.description);
 }
 
 export async function showSkillsSelector(host: SlashCommandHost): Promise<void> {

@@ -1470,8 +1470,8 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     const active = this.sessions.get(sessionId);
     const summary = await this.sessionStore.get(sessionId);
     const nextCustom: Record<string, unknown> = {
-      ...(summary.metadata ?? {}),
-      ...(active?.metadata.custom ?? {}),
+      ...summary.metadata,
+      ...active?.metadata.custom,
     };
     if (opts.parentSessionId === null) {
       delete nextCustom[PARENT_SESSION_ID_KEY];
@@ -1554,8 +1554,8 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     const active = this.sessions.get(childSessionId);
     const summary = await this.sessionStore.get(childSessionId);
     const custom = {
-      ...(summary.metadata ?? {}),
-      ...(active?.metadata.custom ?? {}),
+      ...summary.metadata,
+      ...active?.metadata.custom,
     } as Record<string, unknown>;
     const name =
       normalizeOptionalMountString(active?.metadata.title)
@@ -1643,8 +1643,8 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     if (active === undefined) return;
     const summary = await this.sessionStore.get(sessionId);
     const custom = {
-      ...(summary.metadata ?? {}),
-      ...(active.metadata.custom ?? {}),
+      ...summary.metadata,
+      ...active.metadata.custom,
     } as Record<string, unknown>;
     const parentId = readParentSessionId(custom);
     const all = await this.sessionStore.list({});

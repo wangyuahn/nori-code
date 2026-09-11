@@ -100,8 +100,8 @@ export class KimiAuthFacade {
   }
 
   async login(
-    providerName: string | undefined,
-    options: KimiAuthLoginOptions = {},
+    _providerName: string | undefined,
+    _options: KimiAuthLoginOptions = {},
   ): Promise<KimiAuthLoginResult> {
     throw new Error('OAuth login is not supported. Use setApiKey() to configure an API key.');
   }
@@ -115,40 +115,40 @@ export class KimiAuthFacade {
   }
 
   async submitFeedback(
-    input: KimiAuthSubmitFeedbackInput,
-    providerName?: string | undefined,
+    _input: KimiAuthSubmitFeedbackInput,
+    _providerName?: string | undefined,
   ): Promise<any> {
     throw new Error('Feedback submission is not available with API key auth.');
   }
 
   async createFeedbackUploadUrl(
-    input: KimiAuthCreateFeedbackUploadUrlInput,
-    providerName?: string | undefined,
+    _input: KimiAuthCreateFeedbackUploadUrlInput,
+    _providerName?: string | undefined,
   ): Promise<KimiAuthCreateFeedbackUploadUrlResult> {
     return { kind: 'error', message: 'Feedback upload is not available with API key auth.' };
   }
 
   async completeFeedbackUpload(
-    input: KimiAuthCompleteFeedbackUploadInput,
-    providerName?: string | undefined,
+    _input: KimiAuthCompleteFeedbackUploadInput,
+    _providerName?: string | undefined,
   ): Promise<any> {
     throw new Error('Feedback upload completion is not available with API key auth.');
   }
 
   async getCachedAccessToken(
-    providerName?: string,
-    oauthRef?: OAuthRef | undefined,
+    _providerName?: string,
+    _oauthRef?: OAuthRef | undefined,
   ): Promise<string | undefined> {
     return this.apiKey;
   }
 
   readonly resolveOAuthTokenProvider = (
     providerName: string,
-    oauthRef?: OAuthRef | undefined,
+    _oauthRef?: OAuthRef | undefined,
   ): BearerTokenProvider => {
     const apiKey = this.apiKey;
     return {
-      getAccessToken: async (options?: { readonly force?: boolean }): Promise<string> => {
+      getAccessToken: async (_options?: { readonly force?: boolean }): Promise<string> => {
         if (apiKey === undefined || apiKey.length === 0) {
           throw new Error(
             `No API key configured for provider "${providerName}". Call setApiKey() to configure one.`,

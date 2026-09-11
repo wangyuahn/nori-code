@@ -84,7 +84,7 @@ function makeFakeBridge(state: FakeBridgeState): ICoreProcessService {
           updatedAt: new Date(0).toISOString(),
           isCustomTitle: false,
           agents: {},
-          custom: { ...(payload.metadata ?? {}) },
+          custom: { ...payload.metadata },
         });
         return created;
       }),

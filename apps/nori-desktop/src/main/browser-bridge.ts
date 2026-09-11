@@ -31,13 +31,18 @@ export function startBrowserBridge(input: {
   const ready = new Promise<void>(resolve => { markReady = resolve; });
 
   const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
+    const headers = new Headers({
+      authorization: `Bearer ${input.token}`,
+      'content-type': 'application/json',
+    });
+    if (init?.headers !== undefined) {
+      new Headers(init.headers).forEach((value, key) => {
+        headers.set(key, value);
+      });
+    }
     const response = await fetch(`${input.origin}/api/v1${path}`, {
       ...init,
-      headers: {
-        authorization: `Bearer ${input.token}`,
-        'content-type': 'application/json',
-        ...init?.headers,
-      },
+      headers,
       signal: controller.signal,
     });
     const envelope = await response.json() as Envelope<T>;

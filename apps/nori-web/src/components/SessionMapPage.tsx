@@ -901,11 +901,13 @@ export function SessionMapPage({
 
   const pruneStalePositions = useCallback((aliveKeys: ReadonlySet<string>) => {
     let changed = false;
-    for (const key of [...positionsRef.current.keys()]) {
-      if (!aliveKeys.has(key)) {
-        positionsRef.current.delete(key);
-        changed = true;
-      }
+    const stale: string[] = [];
+    for (const key of positionsRef.current.keys()) {
+      if (!aliveKeys.has(key)) stale.push(key);
+    }
+    for (const key of stale) {
+      positionsRef.current.delete(key);
+      changed = true;
     }
     const persisted = mapDocRef.current.positions;
     if (persisted === undefined && !changed) return;
