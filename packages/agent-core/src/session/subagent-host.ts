@@ -1,6 +1,5 @@
 import {
   APIProviderRateLimitError,
-  isProviderRateLimitError,
 } from '@nori-code/kosong';
 
 import type { Agent } from '../agent';
@@ -30,6 +29,7 @@ import type {
 } from './index';
 import TEAM_AGENT_EXECUTION_PROMPT from './team-agent-execution.md?raw';
 import { directMessageRelation } from './team-tree';
+import { validateTeamChatMentions } from './team-chat';
 
 export const DEFAULT_TEAM_DISCUSSION_MEMBER_TIMEOUT_MS = 2 * 60 * 1000;
 export const DEFAULT_TEAM_DISCUSSION_FIRST_RESPONSE_TIMEOUT_MS = 10 * 1000;
@@ -100,30 +100,27 @@ export class SessionSubagentHost {
     members: readonly TeamIdentity[],
   ): Promise<Array<{
     readonly agentId: string;
-    readonly sessionId?: string;
     readonly identity: TeamIdentity;
   }>> {
     this.assertDepartmentManager();
     this.preflightTeamCreation(members);
     const created: Array<{
       readonly agentId: string;
-      readonly sessionId?: string;
       readonly identity: TeamIdentity;
     }> = [];
     try {
       for (const identity of members) {
         const { id } = await this.session.createTeamMember(this.ownerAgentId, identity);
-        const mountedSessionId = this.session.getAgentMetadata(id)?.mountedSessionId;
         created.push({
           agentId: id,
           identity,
-          ...(mountedSessionId === undefined ? {} : { sessionId: mountedSessionId }),
         });
       }
     } catch (error) {
       // Profile bootstrapping can still fail after a successful preflight. Do
       // not leave the durable first members behind when a later one fails.
-      // dismissTeamMembers already deletes each hire's mounted child session.
+      // TeamCreate owns only the durable in-session agent. Explicit map mounts
+      // remain independent and are handled by the mount API.
       if (created.length > 0) {
         try {
           await this.session.dismissTeamMembers(
@@ -136,6 +133,7 @@ export class SessionSubagentHost {
           throw new AggregateError(
             [error, cleanupError],
             'TeamCreate failed and could not be rolled back.',
+            { cause: error },
           );
         }
       }
@@ -422,6 +420,7 @@ export class SessionSubagentHost {
     signal: AbortSignal,
   ): Promise<TeamChatMessageRecord> {
     signal.throwIfAborted();
+    validateTeamChatMentions(message, mentions);
     const sender = this.session.getAgentMetadata(this.ownerAgentId);
     if (sender?.kind !== 'team' || sender.teamLeaderAgentId === undefined) {
       throw new Error('Chat is only available to a member of a department.');

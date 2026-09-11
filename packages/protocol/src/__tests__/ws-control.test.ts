@@ -239,6 +239,19 @@ describe('ws-control — §3.2 client_hello', () => {
     expect(result.success).toBe(true);
   });
 
+  it('client_hello accepts the failure-only diagnostics stream', () => {
+    const result = clientHelloMessageSchema.safeParse({
+      type: 'client_hello',
+      id: 'c1',
+      payload: {
+        client_id: 'error-center',
+        subscriptions: ['sess_1'],
+        failure_only: true,
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
   it('client_hello rejects an empty agent filter', () => {
     const result = clientHelloMessageSchema.safeParse({
       type: 'client_hello',

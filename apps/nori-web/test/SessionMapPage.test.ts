@@ -1,24 +1,49 @@
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { forceSimulation, forceX, forceY } from 'd3-force';
 import { api, type Session } from '../src/api/client';
 import {
+  buildMapComponents,
+  cachedAgentsFromMapMembers,
   centerViewOnNode,
   findNearestValidWireTarget,
   fitTreeView,
   hitSessionMapNode,
   HOME_PULL_STRENGTH,
+  isComponentRootPin,
   isValidWireTarget,
+  mapMembersFromAgentCache,
+  REARRANGE_SETTLE_MS,
+  resolveMapNodeSpawnPosition,
+  resolveNodeDragGroupIds,
   SESSION_MAP_AMBIENT_HOME_GRAVITY,
   layoutSessionMountForest,
+  memberProjectCwd,
   nearestSessionMapNodeDistance,
   parentSessionIdOf,
+  projectFolderName,
   SessionMapPage,
   snapMapView,
+  snapComponentChildrenToLiveRoot,
+  tidyComponentAroundRoot,
   wireSourceParentSessionId,
   zoomTreeView,
 } from '../src/components/SessionMapPage';
+import {
+  mapNodeCapabilities,
+  mapStatusDotClass,
+  pendingTopologyOpsReady,
+  upsertParentMapEdge,
+} from '../src/utils/session-graph';
 import { I18nProvider } from '../src/i18n';
+import {
+  loadCachedMapAgents,
+  loadSessionMapDoc,
+  parseCachedMapAgents,
+  saveCachedMapAgents,
+  SESSION_MAP_AGENTS_CACHE_KEY,
+} from '../src/components/sessionMapDoc';
 import { sessionsForSidebar, wouldCreateMountCycle } from '../src/utils/session-mount';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -26,6 +51,9 @@ import { sessionsForSidebar, wouldCreateMountCycle } from '../src/utils/session-
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.useRealTimers();
+  localStorage.removeItem('nori-session-map-doc');
+  localStorage.removeItem(SESSION_MAP_AGENTS_CACHE_KEY);
 });
 
 function mockViewport(width = 1000, height = 600) {
@@ -61,6 +89,34 @@ function session(partial: Partial<Session> & Pick<Session, 'id'>): Session {
 }
 
 describe('session map layout', () => {
+  it('extracts the last path segment as the project folder name', () => {
+    expect(projectFolderName('/home/user/nori-code')).toBe('nori-code');
+    expect(projectFolderName('C:\\Users\\me\\proj\\')).toBe('proj');
+  });
+
+  it('resolves project cwd from session metadata, falling back to host for agent ghosts', () => {
+    const root = session({ id: 'root', title: 'Root', metadata: { cwd: '/home/user/nori-code' } });
+    const child = session({
+      id: 'child',
+      title: 'Child',
+      metadata: { parent_session_id: 'root', cwd: '/home/user/other-app' },
+    });
+    const ghost = session({
+      id: 'agent:root:a1',
+      title: 'Reviewer',
+      metadata: { parent_session_id: 'root', mount_role: 'reviewer' },
+    });
+    const byId = new Map([['root', root], ['child', child]]);
+    expect(memberProjectCwd({ kind: 'session', session: root }, byId)).toBe('/home/user/nori-code');
+    expect(memberProjectCwd({ kind: 'session', session: child }, byId)).toBe('/home/user/other-app');
+    expect(memberProjectCwd({
+      kind: 'agent',
+      session: ghost,
+      hostSessionId: 'root',
+      agent: { agent_id: 'a1', kind: 'team', name: 'Reviewer', role: 'reviewer', status: 'idle' },
+    }, byId)).toBe('/home/user/nori-code');
+  });
+
   it('places mount children under parents and keeps top-level roots', () => {
     const nodes = [
       session({ id: 'root', title: 'Root', updated_at: '2026-01-03T00:00:00.000Z' }),
@@ -118,7 +174,7 @@ describe('session map layout', () => {
     expect(edges).toHaveLength(1);
   });
 
-  it('does not link a stale agent from another host to a mounted session', () => {
+  it('does not place a stale agent ghost when another host claims a mounted session', () => {
     const nodes = [
       session({ id: 'root', title: 'Root' }),
       session({ id: 'other', title: 'Other' }),
@@ -142,7 +198,9 @@ describe('session map layout', () => {
     );
 
     expect(placed.find((node) => node.member.session.id === 'child')?.member.agent).toBeUndefined();
-    expect(placed.some((node) => node.member.agent?.agent_id === 'stale_member')).toBe(true);
+    // Mounted session is already a node — never spawn an agent: duplicate for any host.
+    expect(placed.some((node) => node.member.session.id.startsWith('agent:'))).toBe(false);
+    expect(placed.some((node) => node.member.agent?.agent_id === 'stale_member')).toBe(false);
   });
 
   it('keeps fit/zoom helpers stable', () => {
@@ -189,6 +247,36 @@ describe('sidebar mount filter', () => {
 });
 
 describe('SessionMapPage smoke', () => {
+  it('renders float chrome + empty stage with zero sessions (no throw)', async () => {
+    vi.spyOn(api.sessions, 'getGraph').mockResolvedValue({ nodes: [], edges: [] });
+    vi.spyOn(api.sessions, 'getAgents').mockResolvedValue({ items: [] });
+    mockViewport();
+
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(SessionMapPage, {
+          sessions: [],
+          onOpenSession: vi.fn(),
+        })));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(container.querySelector('.session-map-page')).not.toBeNull();
+      expect(container.querySelector('.session-map-float-top')).not.toBeNull();
+      expect(container.querySelector('.session-map-stage')).not.toBeNull();
+      expect(container.querySelector('.session-map-search')).not.toBeNull();
+      expect(container.textContent).toMatch(/Conversation Map|对话地图/);
+      expect(container.textContent).toMatch(/No sessions yet|还没有会话/);
+    } finally {
+      await act(async () => { root.unmount(); });
+      container.remove();
+    }
+  });
+
   it('renders list + canvas and opens a session on click', async () => {
     const nodes = [
       session({ id: 'a', title: 'Alpha' }),
@@ -226,6 +314,85 @@ describe('SessionMapPage smoke', () => {
       expect(node).not.toBeNull();
       await act(async () => { node!.click(); });
       expect(onOpen).toHaveBeenCalled();
+    } finally {
+      await act(async () => { root.unmount(); });
+      container.remove();
+    }
+  });
+
+  it('shows project folder from metadata.cwd on map nodes', async () => {
+    const nodes = [
+      session({ id: 'a', title: 'Alpha', metadata: { cwd: '/home/user/nori-code' } }),
+      session({
+        id: 'b',
+        title: 'Beta',
+        metadata: { parent_session_id: 'a', mount_role: 'member', cwd: '/home/user/nori-code' },
+      }),
+    ];
+    vi.spyOn(api.sessions, 'getGraph').mockResolvedValue({
+      nodes,
+      edges: [{ child_session_id: 'b', parent_session_id: 'a' }],
+    });
+    vi.spyOn(api.sessions, 'getAgents').mockResolvedValue({ items: [] });
+    mockViewport();
+
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(SessionMapPage, {
+          sessions: nodes,
+          onOpenSession: vi.fn(),
+        })));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      const projectLines = [...container.querySelectorAll('.team-node-project')];
+      expect(projectLines.length).toBeGreaterThanOrEqual(2);
+      expect(projectLines[0]?.textContent).toMatch(/nori-code/);
+      expect(projectLines[0]?.getAttribute('title')).toBe('/home/user/nori-code');
+    } finally {
+      await act(async () => { root.unmount(); });
+      container.remove();
+    }
+  });
+
+  it('shows host project on agent ghosts when the ghost has no cwd', async () => {
+    const nodes = [session({ id: 'a', title: 'Alpha', metadata: { cwd: '/work/demo-app' } })];
+    vi.spyOn(api.sessions, 'getGraph').mockResolvedValue({ nodes, edges: [] });
+    vi.spyOn(api.sessions, 'getAgents').mockResolvedValue({
+      items: [{
+        agent_id: 'member_1',
+        kind: 'team',
+        name: 'Reviewer',
+        role: 'reviewer',
+        status: 'idle',
+      }],
+    });
+    mockViewport();
+
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(SessionMapPage, {
+          sessions: nodes,
+          onOpenSession: vi.fn(),
+          onOpenAgent: vi.fn(),
+        })));
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      const memberNode = [...container.querySelectorAll<HTMLElement>('.session-map-node')]
+        .find((candidate) => candidate.textContent?.includes('Reviewer'));
+      expect(memberNode).not.toBeNull();
+      const project = memberNode!.querySelector('.team-node-project');
+      expect(project?.textContent).toMatch(/demo-app/);
+      expect(project?.getAttribute('title')).toBe('/work/demo-app');
     } finally {
       await act(async () => { root.unmount(); });
       container.remove();
@@ -367,6 +534,55 @@ describe('SessionMapPage smoke', () => {
     }
   });
 
+  it('opens mounted child via onOpenSession when getAgents returns no agent', async () => {
+    const nodes = [
+      session({ id: 'root', title: 'Root' }),
+      session({
+        id: 'child',
+        title: 'Orphan Mount',
+        metadata: { parent_session_id: 'root', mount_role: 'worker' },
+      }),
+    ];
+    vi.spyOn(api.sessions, 'getGraph').mockResolvedValue({
+      nodes,
+      edges: [{ child_session_id: 'child', parent_session_id: 'root' }],
+    });
+    vi.spyOn(api.sessions, 'getAgents').mockResolvedValue({ items: [] });
+    mockViewport();
+
+    const onOpenAgent = vi.fn();
+    const onOpenSession = vi.fn();
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(SessionMapPage, {
+          sessions: nodes,
+          onOpenSession,
+          onOpenAgent,
+        })));
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      const childNode = [...container.querySelectorAll<HTMLElement>('.session-map-node')]
+        .find((el) => el.textContent?.includes('Orphan Mount'));
+      expect(childNode).toBeTruthy();
+      await act(async () => { childNode!.click(); });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(onOpenSession).toHaveBeenCalledWith('child');
+      expect(onOpenAgent).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => { root.unmount(); });
+      container.remove();
+    }
+  });
+
   it('shows blueprint ports and parent name on mounted children', async () => {
     const nodes = [
       session({ id: 'a', title: 'Alpha Host' }),
@@ -405,7 +621,7 @@ describe('SessionMapPage smoke', () => {
     }
   });
 
-  it('adds an empty UE note box behind the canvas', async () => {
+  it('does not expose a standalone Notes toolbar button', async () => {
     const nodes = [session({ id: 'a', title: 'Alpha' })];
     vi.spyOn(api.sessions, 'getGraph').mockResolvedValue({ nodes, edges: [] });
     vi.spyOn(api.sessions, 'getAgents').mockResolvedValue({ items: [] });
@@ -425,15 +641,10 @@ describe('SessionMapPage smoke', () => {
         await Promise.resolve();
       });
 
-      const notesBtn = [...container.querySelectorAll('button')].find((el) => el.textContent?.includes('Notes'));
-      expect(notesBtn).toBeTruthy();
-      await act(async () => { notesBtn!.click(); });
-      const addBtn = [...container.querySelectorAll('button')].find((el) => el.textContent?.includes('Add note'));
-      expect(addBtn).toBeTruthy();
-      await act(async () => { addBtn!.click(); });
-
-      expect(container.querySelector('.session-map-annotation')).not.toBeNull();
-      expect(container.textContent).toContain('Empty box');
+      const notesBtn = [...container.querySelectorAll('button')].find((el) => (
+        /Notes|注释框/.test(el.textContent ?? '')
+      ));
+      expect(notesBtn).toBeUndefined();
     } finally {
       await act(async () => { root.unmount(); });
       container.remove();
@@ -442,7 +653,8 @@ describe('SessionMapPage smoke', () => {
   });
 
   it('polls the session graph periodically while mounted', async () => {
-    vi.useFakeTimers();
+    // Only fake timeout APIs — faking performance/RAF poisons d3-timer for later tests.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
     const nodes = [session({ id: 'a', title: 'Alpha' })];
     const getGraph = vi.spyOn(api.sessions, 'getGraph').mockResolvedValue({ nodes, edges: [] });
     vi.spyOn(api.sessions, 'getAgents').mockResolvedValue({ items: [] });
@@ -869,12 +1081,94 @@ describe('SessionMapPage smoke', () => {
     }
   });
 
-  it('keeps ambient home-slot gravity disabled', () => {
-    expect(HOME_PULL_STRENGTH).toBe(0);
-    expect(SESSION_MAP_AMBIENT_HOME_GRAVITY).toBe(false);
+  it('enables ambient child tidy home-pull (not link clustering)', () => {
+    expect(SESSION_MAP_AMBIENT_HOME_GRAVITY).toBe(true);
+    expect(HOME_PULL_STRENGTH).toBeGreaterThan(0);
+    expect(HOME_PULL_STRENGTH).toBeLessThan(0.5);
   });
 
-  it('Notes-mode drag creates an annotation; Shift+drag only selects', async () => {
+  it('tidyComponentAroundRoot anchors children to root without moving the root', () => {
+    const seeds = new Map([
+      ['session:root', { x: 100, y: 100 }],
+      ['session:child', { x: 100, y: 260 }],
+      ['session:sib', { x: 356, y: 260 }],
+    ]);
+    const targets = tidyComponentAroundRoot({
+      rootNodeId: 'session:root',
+      nodeIds: ['session:root', 'session:child', 'session:sib'],
+      rootPosition: { x: 500, y: 400 },
+      seeds,
+    });
+    expect(targets.get('session:root')).toEqual({ x: 500, y: 400 });
+    expect(targets.get('session:child')).toEqual({ x: 500, y: 560 });
+    expect(targets.get('session:sib')).toEqual({ x: 756, y: 560 });
+  });
+
+  it('resolveNodeDragGroupIds: selection wins over component-root tree drag', () => {
+    const root = session({ id: 'root', title: 'Root' });
+    const child = session({ id: 'child', title: 'Child', metadata: { parent_session_id: 'root' } });
+    const other = session({ id: 'other', title: 'Other' });
+    const forceNodes = [
+      { id: 'session:root', member: { kind: 'session' as const, session: root } },
+      { id: 'session:child', member: { kind: 'session' as const, session: child } },
+      { id: 'session:other', member: { kind: 'session' as const, session: other } },
+    ];
+    const index = buildMapComponents(forceNodes, [
+      { source: 'session:root', target: 'session:child' },
+    ]);
+    // Dragging the root while multi-selected with an unrelated node moves ONLY selection —
+    // not the whole mount tree (child must not be dragged unless selected).
+    expect(resolveNodeDragGroupIds({
+      nodeId: 'session:root',
+      sessionId: 'root',
+      selectedIds: ['root', 'other'],
+      component: index.get('session:root'),
+      forceNodes,
+    })).toEqual(['session:root', 'session:other']);
+    // No selection: root drag still moves the whole component.
+    expect(resolveNodeDragGroupIds({
+      nodeId: 'session:root',
+      sessionId: 'root',
+      selectedIds: [],
+      component: index.get('session:root'),
+      forceNodes,
+    })).toEqual(expect.arrayContaining(['session:root', 'session:child']));
+  });
+
+  it('resolveMapNodeSpawnPosition prefers cache over forest seed and never (0,0) when host exists', () => {
+    expect(resolveMapNodeSpawnPosition({
+      id: 'agent:host:a1',
+      cached: { x: 321, y: 654 },
+      seed: { x: 10, y: 10 },
+      hostPosition: { x: 100, y: 100 },
+    })).toEqual({ x: 321, y: 654 });
+    expect(resolveMapNodeSpawnPosition({
+      id: 'agent:host:a1',
+      hostPosition: { x: 100, y: 200 },
+      seed: { x: 999, y: 999 },
+    })).toEqual({ x: 100, y: 200 + 96 + 64 });
+  });
+
+  it('agents cache round-trips for stale-while-revalidate first paint', () => {
+    localStorage.removeItem(SESSION_MAP_AGENTS_CACHE_KEY);
+    const members = mapMembersFromAgentCache([{
+      hostId: 'host',
+      agentId: 'a1',
+      title: 'Reviewer',
+      role: 'reviewer',
+      mounted_session_id: 'child',
+    }]);
+    expect(members).toHaveLength(1);
+    expect(members[0]!.session.id).toBe('agent:host:a1');
+    saveCachedMapAgents(cachedAgentsFromMapMembers(members));
+    expect(loadCachedMapAgents()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ hostId: 'host', agentId: 'a1', title: 'Reviewer' }),
+    ]));
+    expect(parseCachedMapAgents('{')).toEqual([]);
+    localStorage.removeItem(SESSION_MAP_AGENTS_CACHE_KEY);
+  });
+
+  it('LMB marquee selects; right-click selection Annotate persists a note', async () => {
     const nodes = [
       session({ id: 'a', title: 'Alpha' }),
       session({ id: 'b', title: 'Beta' }),
@@ -917,55 +1211,80 @@ describe('SessionMapPage smoke', () => {
 
       const stage = container.querySelector('.session-map-stage');
       expect(stage).toBeTruthy();
+      const aCard = [...container.querySelectorAll<HTMLElement>('.session-map-node')]
+        .find((el) => el.dataset.sessionId === 'a');
+      expect(aCard).toBeTruthy();
+      const canvas = container.querySelector<HTMLElement>('.session-map-canvas');
+      const transform = /translate3d\(([-\d.]+)px,\s*([-\d.]+)px,\s*0\)\s*scale\(([-\d.]+)\)/.exec(canvas!.style.transform)!;
+      const viewX = Number(transform[1]);
+      const viewY = Number(transform[2]);
+      const scale = Number(transform[3]);
+      const nodeLeft = Number.parseFloat(aCard!.style.left);
+      const nodeTop = Number.parseFloat(aCard!.style.top);
+      const nodeCx = (nodeLeft + 110) * scale + viewX;
+      const nodeCy = (nodeTop + 48) * scale + viewY;
 
-      // Shift-only: select, no annotation.
-      await act(async () => {
-        stage!.dispatchEvent(new PointerEvent('pointerdown', {
-          bubbles: true, cancelable: true, button: 0, shiftKey: true,
-          clientX: 40, clientY: 40, pointerId: 3, pointerType: 'mouse',
-        }));
-      });
-      await act(async () => {
-        stage!.dispatchEvent(new PointerEvent('pointermove', {
-          bubbles: true, cancelable: true, shiftKey: true,
-          clientX: 320, clientY: 220, pointerId: 3, pointerType: 'mouse',
-        }));
-      });
-      expect(container.querySelector('.session-map-marquee')).not.toBeNull();
-      await act(async () => {
-        stage!.dispatchEvent(new PointerEvent('pointerup', {
-          bubbles: true, cancelable: true, button: 0, shiftKey: true,
-          clientX: 320, clientY: 220, pointerId: 3, pointerType: 'mouse',
-        }));
-      });
-      expect(container.querySelector('.session-map-annotation')).toBeNull();
-
-      const notesBtn = [...container.querySelectorAll('button')].find((el) => (
-        /Notes|注释框/.test(el.textContent ?? '')
-      ));
-      expect(notesBtn).toBeTruthy();
-      await act(async () => { notesBtn!.click(); });
-
+      // Default LMB marquee: select, no annotation.
       await act(async () => {
         stage!.dispatchEvent(new PointerEvent('pointerdown', {
           bubbles: true, cancelable: true, button: 0,
-          clientX: 40, clientY: 40, pointerId: 4, pointerType: 'mouse',
+          clientX: nodeCx - 160, clientY: nodeCy - 90, pointerId: 3, pointerType: 'mouse',
         }));
       });
       await act(async () => {
         stage!.dispatchEvent(new PointerEvent('pointermove', {
           bubbles: true, cancelable: true,
-          clientX: 320, clientY: 220, pointerId: 4, pointerType: 'mouse',
+          clientX: nodeCx + 160, clientY: nodeCy + 90, pointerId: 3, pointerType: 'mouse',
         }));
       });
+      expect(container.querySelector('.session-map-marquee')).not.toBeNull();
       await act(async () => {
         stage!.dispatchEvent(new PointerEvent('pointerup', {
           bubbles: true, cancelable: true, button: 0,
-          clientX: 320, clientY: 220, pointerId: 4, pointerType: 'mouse',
+          clientX: nodeCx + 160, clientY: nodeCy + 90, pointerId: 3, pointerType: 'mouse',
         }));
       });
+      expect(container.querySelector('.session-map-annotation')).toBeNull();
+      expect(container.querySelector('.session-map-selection-box')).not.toBeNull();
+      expect([...container.querySelectorAll('.session-map-node.selected')].length).toBeGreaterThan(0);
+
+      const selectionBox = container.querySelector<HTMLElement>('.session-map-selection-box');
+      expect(selectionBox).toBeTruthy();
+      const selectionLeft = Number.parseFloat(selectionBox!.style.left);
+      const selectionTop = Number.parseFloat(selectionBox!.style.top);
+      const selectionWidth = Number.parseFloat(selectionBox!.style.width);
+      const selectionHeight = Number.parseFloat(selectionBox!.style.height);
+      await act(async () => {
+        selectionBox!.dispatchEvent(new MouseEvent('contextmenu', {
+          bubbles: true, cancelable: true, clientX: 200, clientY: 200,
+        }));
+      });
+      const menu = container.querySelector('.session-map-context-menu');
+      expect(menu).not.toBeNull();
+      const annotateBtn = [...menu!.querySelectorAll('button')].find((el) => (
+        /Annotate|注释/.test(el.textContent ?? '')
+      ));
+      expect(annotateBtn).toBeTruthy();
+      await act(async () => { annotateBtn!.click(); });
+
       expect(container.querySelector('.session-map-annotation')).not.toBeNull();
       expect(container.querySelector('.session-map-note-editor')).not.toBeNull();
+      expect(container.querySelector('.session-map-selection-box')).toBeNull();
+
+      const ann = container.querySelector<HTMLElement>('.session-map-annotation')!;
+      const doc = loadSessionMapDoc();
+      expect(doc.annotations).toHaveLength(1);
+      expect(doc.annotations[0]!.rect).toEqual({
+        x: selectionLeft,
+        y: selectionTop,
+        width: selectionWidth,
+        height: selectionHeight,
+      });
+      expect(Number.parseFloat(ann.style.left)).toBeCloseTo(selectionLeft, 0);
+      expect(Number.parseFloat(ann.style.top)).toBeCloseTo(selectionTop, 0);
+      expect(Number.parseFloat(ann.style.width)).toBeCloseTo(selectionWidth, 0);
+      expect(Number.parseFloat(ann.style.height)).toBeCloseTo(selectionHeight, 0);
+      expect(container.querySelector('.session-map-note-editor input')).toBeTruthy();
     } finally {
       await act(async () => { root.unmount(); });
       container.remove();
@@ -1009,12 +1328,15 @@ describe('wire gesture click suppression (live regressions)', () => {
     nodes: Session[],
     edges: Array<{ child_session_id: string; parent_session_id: string }>,
     props: { onOpenSession?: (id: string) => void; onOpenAgent?: never; activeSessionId?: string } = {},
+    options: { keepMapDoc?: boolean } = {},
   ): Promise<RenderedMap> {
     vi.spyOn(api.sessions, 'getGraph').mockResolvedValue({ nodes, edges });
     vi.spyOn(api.sessions, 'getAgents').mockResolvedValue({ items: [] });
     mockViewport();
     stubPointerEvents();
-    localStorage.removeItem('nori-session-map-doc');
+    if (!options.keepMapDoc) {
+      localStorage.removeItem('nori-session-map-doc');
+    }
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -1230,7 +1552,7 @@ describe('wire gesture click suppression (live regressions)', () => {
   });
 
   it('(e) background graph polling never fires while an identity draft is open', async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
     const nodes = [session({ id: 'a', title: 'Alpha' })];
     const map = await renderMap(nodes, [], { onOpenSession: vi.fn() });
     try {
@@ -1255,7 +1577,7 @@ describe('wire gesture click suppression (live regressions)', () => {
     }
   });
 
-  it('(f) wheel pans without Ctrl and zooms with Ctrl (trackpad vs pinch)', async () => {
+  it('(f) wheel zooms (never pans); Ctrl+wheel also zooms', async () => {
     const nodes = [session({ id: 'a', title: 'Alpha' })];
     const map = await renderMap(nodes, [], { onOpenSession: vi.fn() });
     try {
@@ -1264,13 +1586,23 @@ describe('wire gesture click suppression (live regressions)', () => {
       const before = map.canvasTransform();
       await act(async () => {
         stage!.dispatchEvent(new WheelEvent('wheel', {
-          bubbles: true, cancelable: true, deltaX: 30, deltaY: 40,
+          bubbles: true, cancelable: true, deltaY: 40,
+          clientX: 500, clientY: 300,
         }));
       });
-      const panned = map.canvasTransform();
-      expect(panned.scale).toBe(before.scale);
-      expect(Math.abs(panned.x - (before.x - 30))).toBeLessThanOrEqual(1.5);
-      expect(Math.abs(panned.y - (before.y - 40))).toBeLessThanOrEqual(1.5);
+      const afterWheel = map.canvasTransform();
+      expect(afterWheel.scale).not.toBe(before.scale);
+
+      await act(async () => {
+        stage!.dispatchEvent(new WheelEvent('wheel', {
+          bubbles: true, cancelable: true, deltaX: 30, deltaY: 0,
+          clientX: 500, clientY: 300,
+        }));
+      });
+      const afterDeltaX = map.canvasTransform();
+      expect(afterDeltaX.scale).toBe(afterWheel.scale);
+      expect(afterDeltaX.x).toBe(afterWheel.x);
+      expect(afterDeltaX.y).toBe(afterWheel.y);
 
       await act(async () => {
         stage!.dispatchEvent(new WheelEvent('wheel', {
@@ -1279,7 +1611,43 @@ describe('wire gesture click suppression (live regressions)', () => {
         }));
       });
       const zoomed = map.canvasTransform();
-      expect(zoomed.scale).toBeGreaterThan(panned.scale);
+      expect(zoomed.scale).toBeGreaterThan(afterWheel.scale);
+    } finally {
+      await act(async () => { map.root.unmount(); });
+      map.container.remove();
+      localStorage.removeItem('nori-session-map-doc');
+    }
+  });
+
+  it('(f2) right mouse button drag pans the canvas', async () => {
+    const nodes = [session({ id: 'a', title: 'Alpha' })];
+    const map = await renderMap(nodes, [], { onOpenSession: vi.fn() });
+    try {
+      const stage = map.container.querySelector<HTMLElement>('.session-map-stage');
+      expect(stage).toBeTruthy();
+      const before = map.canvasTransform();
+      await act(async () => {
+        stage!.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true, cancelable: true, button: 2,
+          clientX: 200, clientY: 200, pointerId: 5, pointerType: 'mouse',
+        }));
+      });
+      await act(async () => {
+        stage!.dispatchEvent(new PointerEvent('pointermove', {
+          bubbles: true, cancelable: true, button: 2,
+          clientX: 260, clientY: 240, pointerId: 5, pointerType: 'mouse',
+        }));
+      });
+      await act(async () => {
+        stage!.dispatchEvent(new PointerEvent('pointerup', {
+          bubbles: true, cancelable: true, button: 2,
+          clientX: 260, clientY: 240, pointerId: 5, pointerType: 'mouse',
+        }));
+      });
+      const after = map.canvasTransform();
+      expect(after.scale).toBe(before.scale);
+      expect(Math.abs(after.x - (before.x + 60))).toBeLessThanOrEqual(2);
+      expect(Math.abs(after.y - (before.y + 40))).toBeLessThanOrEqual(2);
     } finally {
       await act(async () => { map.root.unmount(); });
       map.container.remove();
@@ -1483,7 +1851,7 @@ describe('wire gesture click suppression (live regressions)', () => {
   });
 
   it('(o) sticky mount errors survive a successful graph poll until dismissed', async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'] });
     const nodes = [
       session({ id: 'a', title: 'Alpha' }),
       session({ id: 'b', title: 'Beta' }),
@@ -1568,7 +1936,7 @@ describe('wire gesture click suppression (live regressions)', () => {
     }
   });
 
-  it('(j) Escape clears the marquee selection', async () => {
+  it('(j) Escape clears the marquee selection; LMB marquee selects', async () => {
     const nodes = [session({ id: 'a', title: 'Alpha' }), session({ id: 'b', title: 'Beta' })];
     const map = await renderMap(nodes, [], { onOpenSession: vi.fn() });
     try {
@@ -1576,19 +1944,19 @@ describe('wire gesture click suppression (live regressions)', () => {
       const target = map.clientPointOf('a');
       await act(async () => {
         stage!.dispatchEvent(new PointerEvent('pointerdown', {
-          bubbles: true, cancelable: true, button: 0, shiftKey: true,
+          bubbles: true, cancelable: true, button: 0,
           clientX: target.x - 160, clientY: target.y - 90, pointerId: 3, pointerType: 'mouse',
         }));
       });
       await act(async () => {
         stage!.dispatchEvent(new PointerEvent('pointermove', {
-          bubbles: true, cancelable: true, shiftKey: true,
+          bubbles: true, cancelable: true,
           clientX: target.x + 160, clientY: target.y + 90, pointerId: 3, pointerType: 'mouse',
         }));
       });
       await act(async () => {
         stage!.dispatchEvent(new PointerEvent('pointerup', {
-          bubbles: true, cancelable: true, button: 0, shiftKey: true,
+          bubbles: true, cancelable: true, button: 0,
           clientX: target.x + 160, clientY: target.y + 90, pointerId: 3, pointerType: 'mouse',
         }));
       });
@@ -1604,36 +1972,639 @@ describe('wire gesture click suppression (live regressions)', () => {
       localStorage.removeItem('nori-session-map-doc');
     }
   });
+
+  it('(j2) batch delete confirms count and calls API for each selected session', async () => {
+    const nodes = [
+      session({ id: 'a', title: 'Alpha' }),
+      session({ id: 'b', title: 'Beta' }),
+    ];
+    const del = vi.spyOn(api.sessions, 'delete').mockResolvedValue({ deleted: true });
+    const unmount = vi.spyOn(api.sessions, 'unmount').mockResolvedValue(session({ id: 'b', title: 'Beta' }));
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const map = await renderMap(nodes, [], { onOpenSession: vi.fn() });
+    try {
+      const stage = map.container.querySelector<HTMLElement>('.session-map-stage');
+      const aPoint = map.clientPointOf('a');
+      const bPoint = map.clientPointOf('b');
+      const left = Math.min(aPoint.x, bPoint.x) - 180;
+      const top = Math.min(aPoint.y, bPoint.y) - 120;
+      const right = Math.max(aPoint.x, bPoint.x) + 180;
+      const bottom = Math.max(aPoint.y, bPoint.y) + 120;
+      await act(async () => {
+        stage!.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true, cancelable: true, button: 0,
+          clientX: left, clientY: top, pointerId: 11, pointerType: 'mouse',
+        }));
+      });
+      await act(async () => {
+        stage!.dispatchEvent(new PointerEvent('pointermove', {
+          bubbles: true, cancelable: true,
+          clientX: right, clientY: bottom, pointerId: 11, pointerType: 'mouse',
+        }));
+      });
+      await act(async () => {
+        stage!.dispatchEvent(new PointerEvent('pointerup', {
+          bubbles: true, cancelable: true, button: 0,
+          clientX: right, clientY: bottom, pointerId: 11, pointerType: 'mouse',
+        }));
+      });
+      expect(map.card('a').className).toContain('selected');
+      expect(map.card('b').className).toContain('selected');
+
+      const selectionBox = map.container.querySelector<HTMLElement>('.session-map-selection-box');
+      expect(selectionBox).toBeTruthy();
+      await act(async () => {
+        selectionBox!.dispatchEvent(new MouseEvent('contextmenu', {
+          bubbles: true, cancelable: true, clientX: 200, clientY: 200,
+        }));
+      });
+      const menu = map.container.querySelector('.session-map-context-menu');
+      expect(menu).not.toBeNull();
+      const deleteBtn = [...menu!.querySelectorAll('button')].find((el) => /Delete|删除/.test(el.textContent ?? ''));
+      expect(deleteBtn).toBeTruthy();
+      await act(async () => {
+        deleteBtn!.click();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(confirmSpy).toHaveBeenCalled();
+      expect(String(confirmSpy.mock.calls[0]?.[0] ?? '')).toMatch(/2 selected|已选 2|2 个/);
+      expect(del).toHaveBeenCalledTimes(2);
+      expect(del).toHaveBeenCalledWith('a');
+      expect(del).toHaveBeenCalledWith('b');
+      expect(unmount).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => { map.root.unmount(); });
+      map.container.remove();
+      localStorage.removeItem('nori-session-map-doc');
+    }
+  });
+
+  it('(j3) rearrange tidies intra-component layout without moving the group anchor', async () => {
+    const nodes = [
+      session({ id: 'root', title: 'Root' }),
+      session({ id: 'child', title: 'Child', metadata: { parent_session_id: 'root' } }),
+    ];
+    const layout = layoutSessionMountForest({
+      nodes,
+      edges: [{ child_session_id: 'child', parent_session_id: 'root' }],
+    });
+    const rootPlaced = layout.placed.find((node) => node.member.session.id === 'root')!;
+    const childPlaced = layout.placed.find((node) => node.member.session.id === 'child')!;
+    const groupDx = 400;
+    const groupDy = 300;
+    const messyChildCenterX = childPlaced.cx + groupDx + 220;
+    const offsetPositions: Record<string, { x: number; y: number }> = {
+      'session:root': { x: rootPlaced.cx + groupDx, y: rootPlaced.y + 48 + groupDy },
+      // Child kept at group translation but pulled sideways — internal layout is messy.
+      'session:child': { x: messyChildCenterX, y: childPlaced.y + 48 + groupDy + 80 },
+    };
+    localStorage.setItem('nori-session-map-doc', JSON.stringify({
+      version: 1,
+      annotations: [],
+      labels: [],
+      sessionLabels: {},
+      positions: offsetPositions,
+    }));
+
+    const map = await renderMap(nodes, [{
+      child_session_id: 'child',
+      parent_session_id: 'root',
+    }], { onOpenSession: vi.fn() }, { keepMapDoc: true });
+    try {
+      const beforeRoot = Number.parseFloat(map.card('root').style.left);
+      const messyChildLeft = Math.round(messyChildCenterX - 110);
+      const rearrangeBtn = [...map.container.querySelectorAll('button')].find((el) => (
+        /Rearrange|规整/.test(el.textContent ?? '')
+      ));
+      expect(rearrangeBtn).toBeTruthy();
+      await act(async () => { rearrangeBtn!.click(); });
+      // finishRearrange hard-snaps on the settle timer — no RAF dependency.
+      await act(async () => {
+        await new Promise((resolve) => { window.setTimeout(resolve, REARRANGE_SETTLE_MS + 50); });
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      const afterRoot = Number.parseFloat(map.card('root').style.left);
+      const afterChild = Number.parseFloat(map.card('child').style.left);
+      expect(Math.abs(afterRoot - beforeRoot)).toBeLessThanOrEqual(8);
+      // Child leaves the intentional messy offset toward tidy under the live root.
+      expect(Math.abs(afterChild - messyChildLeft)).toBeGreaterThan(40);
+    } finally {
+      await act(async () => { map.root.unmount(); });
+      map.container.remove();
+      localStorage.removeItem('nori-session-map-doc');
+    }
+  });
+
+  it('(j4) batch drag moves all selected nodes together', async () => {
+    const nodes = [
+      session({ id: 'a', title: 'Alpha' }),
+      session({ id: 'b', title: 'Beta' }),
+    ];
+    const map = await renderMap(nodes, [], { onOpenSession: vi.fn() });
+    try {
+      const stage = map.container.querySelector<HTMLElement>('.session-map-stage');
+      const aPoint = map.clientPointOf('a');
+      const bPoint = map.clientPointOf('b');
+      const left = Math.min(aPoint.x, bPoint.x) - 180;
+      const top = Math.min(aPoint.y, bPoint.y) - 120;
+      const right = Math.max(aPoint.x, bPoint.x) + 180;
+      const bottom = Math.max(aPoint.y, bPoint.y) + 120;
+      await act(async () => {
+        stage!.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true, cancelable: true, button: 0,
+          clientX: left, clientY: top, pointerId: 21, pointerType: 'mouse',
+        }));
+      });
+      await act(async () => {
+        stage!.dispatchEvent(new PointerEvent('pointermove', {
+          bubbles: true, cancelable: true,
+          clientX: right, clientY: bottom, pointerId: 21, pointerType: 'mouse',
+        }));
+      });
+      await act(async () => {
+        stage!.dispatchEvent(new PointerEvent('pointerup', {
+          bubbles: true, cancelable: true, button: 0,
+          clientX: right, clientY: bottom, pointerId: 21, pointerType: 'mouse',
+        }));
+      });
+      expect(map.card('a').className).toContain('selected');
+      expect(map.card('b').className).toContain('selected');
+
+      const beforeA = Number.parseFloat(map.card('a').style.left);
+      const beforeB = Number.parseFloat(map.card('b').style.left);
+      const start = map.clientPointOf('a');
+      await act(async () => {
+        map.card('a').dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true, cancelable: true, button: 0,
+          clientX: start.x, clientY: start.y, pointerId: 22, pointerType: 'mouse',
+        }));
+      });
+      await act(async () => {
+        window.dispatchEvent(new PointerEvent('pointermove', {
+          bubbles: true, cancelable: true,
+          clientX: start.x + 120, clientY: start.y + 40, pointerId: 22, pointerType: 'mouse',
+        }));
+      });
+      await act(async () => {
+        window.dispatchEvent(new PointerEvent('pointerup', {
+          bubbles: true, cancelable: true, button: 0,
+          clientX: start.x + 120, clientY: start.y + 40, pointerId: 22, pointerType: 'mouse',
+        }));
+      });
+      const afterA = Number.parseFloat(map.card('a').style.left);
+      const afterB = Number.parseFloat(map.card('b').style.left);
+      expect(afterA - beforeA).toBeGreaterThan(40);
+      expect(afterB - beforeB).toBeGreaterThan(40);
+      expect(Math.abs((afterA - beforeA) - (afterB - beforeB))).toBeLessThan(8);
+      expect(map.container.querySelector('.session-map-selection-box')).toBeNull();
+    } finally {
+      await act(async () => { map.root.unmount(); });
+      map.container.remove();
+      localStorage.removeItem('nori-session-map-doc');
+    }
+  });
+
+  it('(j4b) box-select parent+child then drag ROOT moves ALL selected by same delta', async () => {
+    // Regression: multi-select must beat "drag root → whole tree / only root" branches.
+    const nodes = [
+      session({ id: 'root', title: 'Root' }),
+      session({ id: 'child', title: 'Child', metadata: { parent_session_id: 'root' } }),
+      session({ id: 'solo', title: 'Solo' }),
+    ];
+    const map = await renderMap(nodes, [
+      { child_session_id: 'child', parent_session_id: 'root' },
+    ], { onOpenSession: vi.fn() });
+    try {
+      const stage = map.container.querySelector<HTMLElement>('.session-map-stage');
+      const rootPoint = map.clientPointOf('root');
+      const childPoint = map.clientPointOf('child');
+      const left = Math.min(rootPoint.x, childPoint.x) - 180;
+      const top = Math.min(rootPoint.y, childPoint.y) - 120;
+      const right = Math.max(rootPoint.x, childPoint.x) + 180;
+      const bottom = Math.max(rootPoint.y, childPoint.y) + 120;
+      await act(async () => {
+        stage!.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true, cancelable: true, button: 0,
+          clientX: left, clientY: top, pointerId: 31, pointerType: 'mouse',
+        }));
+      });
+      await act(async () => {
+        stage!.dispatchEvent(new PointerEvent('pointermove', {
+          bubbles: true, cancelable: true,
+          clientX: right, clientY: bottom, pointerId: 31, pointerType: 'mouse',
+        }));
+      });
+      await act(async () => {
+        stage!.dispatchEvent(new PointerEvent('pointerup', {
+          bubbles: true, cancelable: true, button: 0,
+          clientX: right, clientY: bottom, pointerId: 31, pointerType: 'mouse',
+        }));
+      });
+      expect(map.card('root').className).toContain('selected');
+      expect(map.card('child').className).toContain('selected');
+
+      const beforeRoot = Number.parseFloat(map.card('root').style.left);
+      const beforeChild = Number.parseFloat(map.card('child').style.left);
+      const beforeSolo = Number.parseFloat(map.card('solo').style.left);
+      const start = map.clientPointOf('root');
+      await act(async () => {
+        map.card('root').dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true, cancelable: true, button: 0,
+          clientX: start.x, clientY: start.y, pointerId: 32, pointerType: 'mouse',
+        }));
+      });
+      await act(async () => {
+        window.dispatchEvent(new PointerEvent('pointermove', {
+          bubbles: true, cancelable: true,
+          clientX: start.x + 140, clientY: start.y + 50, pointerId: 32, pointerType: 'mouse',
+        }));
+      });
+      const midRoot = Number.parseFloat(map.card('root').style.left);
+      const midChild = Number.parseFloat(map.card('child').style.left);
+      const midSolo = Number.parseFloat(map.card('solo').style.left);
+      // BOTH selected cards must move by the same delta during the drag — not only root.
+      expect(midRoot - beforeRoot).toBeGreaterThan(40);
+      expect(midChild - beforeChild).toBeGreaterThan(40);
+      expect(Math.abs((midRoot - beforeRoot) - (midChild - beforeChild))).toBeLessThan(8);
+      expect(Math.abs(midSolo - beforeSolo)).toBeLessThan(8);
+      await act(async () => {
+        window.dispatchEvent(new PointerEvent('pointerup', {
+          bubbles: true, cancelable: true, button: 0,
+          clientX: start.x + 140, clientY: start.y + 50, pointerId: 32, pointerType: 'mouse',
+        }));
+      });
+    } finally {
+      await act(async () => { map.root.unmount(); });
+      map.container.remove();
+      localStorage.removeItem('nori-session-map-doc');
+    }
+  });
+
+  it('(j5) unpinned children soft-settle under a pinned root (intra gravity)', () => {
+    // Deterministic: drive the same home forces the map uses, via sync ticks
+    // (live RAF settle is poisoned by prior fake-timer tests / jsdom scheduling).
+    expect(SESSION_MAP_AMBIENT_HOME_GRAVITY).toBe(true);
+    expect(HOME_PULL_STRENGTH).toBeGreaterThan(0.1);
+
+    const seeds = new Map([
+      ['session:root', { x: 100, y: 100 }],
+      ['session:child', { x: 100, y: 260 }],
+    ]);
+    const index = buildMapComponents(
+      [
+        { id: 'session:root', member: { kind: 'session', session: session({ id: 'root' }) } },
+        { id: 'session:child', member: { kind: 'session', session: session({ id: 'child', metadata: { parent_session_id: 'root' } }) } },
+      ],
+      [{ source: 'session:root', target: 'session:child' }],
+    );
+    expect(isComponentRootPin('session:root', index)).toBe(true);
+    expect(isComponentRootPin('session:child', index)).toBe(false);
+
+    const rootPos = { x: 100, y: 100 };
+    const childStartX = 100 + 280;
+    const homeOf = (id: string) => tidyComponentAroundRoot({
+      rootNodeId: 'session:root',
+      nodeIds: ['session:root', 'session:child'],
+      rootPosition: rootPos,
+      seeds,
+    }).get(id)!;
+
+    const nodes = [
+      { id: 'session:root', x: rootPos.x, y: rootPos.y, fx: rootPos.x, fy: rootPos.y },
+      { id: 'session:child', x: childStartX, y: 260, fx: null as number | null, fy: null as number | null },
+    ];
+    const sim = forceSimulation(nodes)
+      .force('homeX', forceX<typeof nodes[number]>((node) => homeOf(node.id).x).strength((node) => (
+        isComponentRootPin(node.id, index) ? 0 : HOME_PULL_STRENGTH
+      )))
+      .force('homeY', forceY<typeof nodes[number]>((node) => homeOf(node.id).y).strength((node) => (
+        isComponentRootPin(node.id, index) ? 0 : HOME_PULL_STRENGTH
+      )))
+      .stop();
+    sim.tick(80);
+
+    expect(Math.abs((nodes[0]!.x ?? 0) - rootPos.x)).toBeLessThanOrEqual(4);
+    expect(nodes[1]!.x ?? 0).toBeLessThan(childStartX - 30);
+  });
+
+  it('pins only component roots for ambient settle', () => {
+    const root = session({ id: 'root', title: 'Root' });
+    const child = session({ id: 'child', title: 'Child', metadata: { parent_session_id: 'root' } });
+    const { placed, edges } = layoutSessionMountForest({
+      nodes: [root, child],
+      edges: [{ child_session_id: 'child', parent_session_id: 'root' }],
+    });
+    const nodes = placed.map((node) => ({
+      id: `session:${node.member.session.id}`,
+      member: node.member,
+    }));
+    const links = edges.map(({ from, to }) => ({
+      source: `session:${from.member.session.id}`,
+      target: `session:${to.member.session.id}`,
+    }));
+    const index = buildMapComponents(nodes, links);
+    expect(isComponentRootPin('session:root', index)).toBe(true);
+    expect(isComponentRootPin('session:child', index)).toBe(false);
+  });
 });
 
 describe('wire parent helpers', () => {
-  it('captures real session id from the wire source member, never agent ghosts', () => {
+  it('buildMapComponents groups mount subtrees and picks a root per component', () => {
+    const root = session({ id: 'root', title: 'Root' });
+    const child = session({ id: 'child', title: 'Child', metadata: { parent_session_id: 'root' } });
+    const solo = session({ id: 'solo', title: 'Solo' });
+    const { placed, edges } = layoutSessionMountForest({
+      nodes: [root, child, solo],
+      edges: [{ child_session_id: 'child', parent_session_id: 'root' }],
+    });
+    const nodes = placed.map((node) => ({
+      id: `session:${node.member.session.id}`,
+      member: node.member,
+    }));
+    const links = edges.map(({ from, to }) => ({
+      source: `session:${from.member.session.id}`,
+      target: `session:${to.member.session.id}`,
+    }));
+    const index = buildMapComponents(nodes, links);
+    expect(index.get('session:root')?.rootNodeId).toBe('session:root');
+    expect(index.get('session:child')?.rootNodeId).toBe('session:root');
+    expect(index.get('session:solo')?.rootNodeId).toBe('session:solo');
+    expect(index.get('session:root')?.nodeIds).toEqual(expect.arrayContaining(['session:root', 'session:child']));
+  });
+
+  it('captures wire parent only from real session nodes', () => {
     expect(wireSourceParentSessionId({
       kind: 'session',
       session: session({ id: 'b', title: 'Beta' }),
     })).toBe('b');
+    // Pure agent ghost with no dual-write session — still non-wireable.
     expect(wireSourceParentSessionId({
       kind: 'agent',
       hostSessionId: 'host',
       session: session({ id: 'agent:host:m1', title: 'Ghost' }),
       agent: { agent_id: 'm1', kind: 'team', name: 'Ghost', status: 'idle' },
     })).toBeNull();
-    // Stale mounted_session_id UUID on an agent ghost must still be non-wireable.
+    // A mounted agent ghost still is not a real session node and cannot wire.
     expect(wireSourceParentSessionId({
       kind: 'agent',
       hostSessionId: 'host',
-      session: session({
-        id: '11111111-1111-4111-8111-111111111111',
-        title: 'Stale UUID ghost',
-      }),
+      session: session({ id: 'agent:host:ghost', title: 'L2 ghost' }),
       agent: {
         agent_id: 'ghost',
         kind: 'team',
-        name: 'Ghost',
+        name: 'L2',
         status: 'idle',
         mounted_session_id: '11111111-1111-4111-8111-111111111111',
       },
     })).toBeNull();
+    // Dual-write session card with agent attached.
+    expect(wireSourceParentSessionId({
+      kind: 'session',
+      hostSessionId: 'host',
+      session: session({
+        id: 'child-sess',
+        title: 'L1-B',
+        metadata: { parent_session_id: 'host', mount_role: 'member' },
+      }),
+      agent: {
+        agent_id: 'm2',
+        kind: 'team',
+        name: 'L1-B',
+        status: 'idle',
+        mounted_session_id: 'child-sess',
+      },
+    })).toBe('child-sess');
+  });
+
+  it('tidy slots track the root after the root moves', () => {
+    const seeds = new Map([
+      ['session:root', { x: 100, y: 100 }],
+      ['session:child', { x: 100, y: 260 }],
+    ]);
+    const before = tidyComponentAroundRoot({
+      rootNodeId: 'session:root',
+      nodeIds: ['session:root', 'session:child'],
+      rootPosition: { x: 100, y: 100 },
+      seeds,
+    });
+    const after = tidyComponentAroundRoot({
+      rootNodeId: 'session:root',
+      nodeIds: ['session:root', 'session:child'],
+      rootPosition: { x: 400, y: 300 },
+      seeds,
+    });
+    expect(before.get('session:child')).toEqual({ x: 100, y: 260 });
+    expect(after.get('session:root')).toEqual({ x: 400, y: 300 });
+    expect(after.get('session:child')).toEqual({ x: 400, y: 460 });
+  });
+
+  it('nested dual-write member keeps agent on the session card (no host ghost)', () => {
+    const nodes = [
+      session({ id: 'root', title: '打招呼' }),
+      session({ id: 'l1', title: 'L1', metadata: { parent_session_id: 'root', mount_role: 'member' } }),
+      session({ id: 'l2', title: 'L2', metadata: { parent_session_id: 'l1', mount_role: 'member' } }),
+    ];
+    const { placed } = layoutSessionMountForest(
+      {
+        nodes,
+        edges: [
+          { child_session_id: 'l1', parent_session_id: 'root' },
+          { child_session_id: 'l2', parent_session_id: 'l1' },
+        ],
+      },
+      [{
+        kind: 'agent',
+        hostSessionId: 'root',
+        session: session({ id: 'agent:root:l2', title: 'L2 ghost' }),
+        agent: {
+          agent_id: 'l2',
+          kind: 'team',
+          name: 'L2',
+          role: 'member',
+          status: 'idle',
+          mounted_session_id: 'l2',
+        },
+      }],
+    );
+    expect(placed.find((node) => node.member.session.id.startsWith('agent:'))).toBeUndefined();
+    const l2 = placed.find((node) => node.member.session.id === 'l2');
+    expect(l2?.member.agent?.agent_id).toBe('l2');
+    expect(wireSourceParentSessionId(l2!.member)).toBe('l2');
+  });
+
+  it('createChild+mount: no agent ghost when mounted_session_id is already in the graph', () => {
+    const nodes = [
+      session({ id: 'root', title: '你好问候' }),
+      session({
+        id: 'child',
+        title: 'New member',
+        metadata: { parent_session_id: 'root', mount_role: 'member' },
+      }),
+    ];
+    const extras = [
+      {
+        kind: 'session' as const,
+        hostSessionId: 'root',
+        session: nodes[1]!,
+        agent: {
+          agent_id: 'member_1',
+          kind: 'team' as const,
+          name: 'New member',
+          role: 'member',
+          status: 'idle',
+          mounted_session_id: 'child',
+        },
+      },
+      {
+        kind: 'agent' as const,
+        hostSessionId: 'root',
+        session: session({ id: 'agent:root:member_1', title: 'New member' }),
+        agent: {
+          agent_id: 'member_1',
+          kind: 'team' as const,
+          name: 'New member',
+          role: 'member',
+          status: 'idle',
+          mounted_session_id: 'child',
+        },
+      },
+    ];
+    const { placed } = layoutSessionMountForest(
+      { nodes, edges: [{ child_session_id: 'child', parent_session_id: 'root' }] },
+      extras,
+    );
+    const keys = placed.map((node) => (
+      node.member.kind === 'agent'
+        ? `agent:${node.member.hostSessionId}:${node.member.agent?.agent_id}`
+        : `session:${node.member.session.id}`
+    ));
+    expect(keys.filter((key) => key === 'session:child')).toHaveLength(1);
+    expect(keys.filter((key) => key === 'session:root')).toHaveLength(1);
+    expect(placed.some((node) => node.member.session.id.startsWith('agent:'))).toBe(false);
+    expect(placed).toHaveLength(2);
+    expect(placed.find((node) => node.member.session.id === 'child')?.member.agent?.agent_id)
+      .toBe('member_1');
+  });
+
+  it('mapDoc layout edge alone does not double-place child as a second root', () => {
+    // Wire lands a parent edge before server parent_session_id is written.
+    const nodes = [
+      session({ id: 'root', title: '你好问候' }),
+      session({ id: 'child', title: 'New member' }), // no metadata parent yet
+    ];
+    const { placed } = layoutSessionMountForest(
+      { nodes, edges: [{ child_session_id: 'child', parent_session_id: 'root' }] },
+      [{
+        kind: 'agent',
+        hostSessionId: 'root',
+        session: session({ id: 'agent:root:m1', title: 'New member' }),
+        agent: {
+          agent_id: 'm1',
+          kind: 'team',
+          name: 'New member',
+          role: 'member',
+          status: 'idle',
+          mounted_session_id: 'child',
+        },
+      }],
+    );
+    expect(placed.filter((node) => node.member.session.id === 'child')).toHaveLength(1);
+    expect(placed.filter((node) => node.member.session.id === 'root')).toHaveLength(1);
+    expect(placed.some((node) => node.member.session.id.startsWith('agent:'))).toBe(false);
+    expect(placed).toHaveLength(2);
+  });
+
+  it('mounted session in nodes without parent edge still skips agent ghost', () => {
+    // Dual-write race: session exists in the graph but parent edge/metadata has
+    // not landed yet — must still not place agent: ghost beside the real card.
+    const nodes = [
+      session({ id: 'root', title: 'Root' }),
+      session({ id: 'child', title: 'New member' }), // no parent_session_id, no edge
+    ];
+    const { placed } = layoutSessionMountForest(
+      { nodes, edges: [] },
+      [{
+        kind: 'agent',
+        hostSessionId: 'root',
+        session: session({ id: 'agent:root:m1', title: 'New member' }),
+        agent: {
+          agent_id: 'm1',
+          kind: 'team',
+          name: 'New member',
+          role: 'member',
+          status: 'idle',
+          mounted_session_id: 'child',
+        },
+      }, {
+        kind: 'session',
+        hostSessionId: 'root',
+        session: nodes[1]!,
+        agent: {
+          agent_id: 'm1',
+          kind: 'team',
+          name: 'New member',
+          role: 'member',
+          status: 'idle',
+          mounted_session_id: 'child',
+        },
+      }],
+    );
+    expect(placed.filter((node) => node.member.session.id === 'child')).toHaveLength(1);
+    expect(placed.filter((node) => node.member.session.id === 'root')).toHaveLength(1);
+    expect(placed.some((node) => node.member.session.id.startsWith('agent:'))).toBe(false);
+    expect(placed).toHaveLength(2);
+  });
+
+  it('snapComponentChildrenToLiveRoot hard-sets children under the moved root', () => {
+    const seeds = new Map([
+      ['session:root', { x: 100, y: 100 }],
+      ['session:child', { x: 100, y: 260 }],
+      ['session:sib', { x: 356, y: 260 }],
+    ]);
+    const nodes = [
+      { id: 'session:root', x: 500, y: 400, vx: 1, vy: 1 },
+      { id: 'session:child', x: 100, y: 260, vx: 9, vy: 9 },
+      { id: 'session:sib', x: 356, y: 260, vx: 9, vy: 9 },
+    ];
+    const snapped = snapComponentChildrenToLiveRoot({
+      rootNodeId: 'session:root',
+      nodeIds: ['session:root', 'session:child', 'session:sib'],
+      rootPosition: { x: 500, y: 400 },
+      seeds,
+      nodes,
+    });
+    expect(snapped.get('session:child')).toEqual({ x: 500, y: 560 });
+    expect(snapped.get('session:sib')).toEqual({ x: 756, y: 560 });
+    expect(nodes[0]).toMatchObject({ x: 500, y: 400 }); // root untouched
+    expect(nodes[1]).toMatchObject({ x: 500, y: 560, vx: 0, vy: 0 });
+    expect(nodes[2]).toMatchObject({ x: 756, y: 560, vx: 0, vy: 0 });
+  });
+
+  it('cyclic mapDoc parent edges still place every session (no vanish)', () => {
+    const nodes = [
+      session({ id: 'a', title: 'A' }),
+      session({ id: 'b', title: 'B' }),
+    ];
+    const { placed } = layoutSessionMountForest({
+      nodes,
+      edges: [
+        { child_session_id: 'b', parent_session_id: 'a' },
+        { child_session_id: 'a', parent_session_id: 'b' },
+      ],
+    });
+    expect(placed.map((node) => node.member.session.id).sort()).toEqual(['a', 'b']);
+  });
+
+  it('wouldCreateMountCycle respects mapDoc parents when metadata lags', () => {
+    const nodes = [
+      session({ id: 'root', title: 'Root' }),
+      session({ id: 'child', title: 'Child' }), // no metadata parent yet
+    ];
+    const mapParents = new Map([['child', 'root']]);
+    expect(wouldCreateMountCycle('root', 'child', nodes, mapParents)).toBe(true);
+    expect(wouldCreateMountCycle('root', 'child', nodes)).toBe(false);
   });
 
   it('hit-tests prefer the nearest overlapping node', () => {
@@ -1698,5 +2669,94 @@ describe('wire parent helpers', () => {
     ]);
     expect(snap?.node.id).toBe('session:b');
     expect(nearestSessionMapNodeDistance(forceNodes, 500, 500)).toBeGreaterThan(0);
+  });
+});
+
+describe('map node capabilities', () => {
+  it('grants self-bootstrap and wire-out only to top-level real sessions', () => {
+    const top = session({ id: 'root', title: 'Root', status: 'idle' });
+    const child = session({
+      id: 'child',
+      title: 'Child',
+      status: 'running',
+      metadata: { parent_session_id: 'root', mount_role: 'worker' },
+    });
+    const sessions = [top, child];
+    const topCaps = mapNodeCapabilities({ kind: 'session', session: top }, { sessions });
+    const childCaps = mapNodeCapabilities({ kind: 'session', session: child }, { sessions });
+    expect(topCaps.canSelfBootstrapRole).toBe(true);
+    expect(topCaps.canWireOut).toBe(true);
+    expect(topCaps.canMountOthers).toBe(true);
+    expect(topCaps.displayTier).toBe('top');
+    expect(childCaps.canSelfBootstrapRole).toBe(false);
+    expect(childCaps.canDisconnect).toBe(true);
+    expect(childCaps.canWireIn).toBe(true);
+    expect(childCaps.displayTier).toBe('mounted');
+    expect(mapStatusDotClass(childCaps.status)).toBe('running');
+  });
+
+  it('allows dual-write members to wire out via mounted_session_id', () => {
+    const host = session({ id: 'host', title: 'Host' });
+    const child = session({
+      id: 'child',
+      title: 'Child',
+      metadata: { parent_session_id: 'host' },
+    });
+    const member = mapNodeCapabilities({
+      kind: 'session',
+      session: child,
+      hostSessionId: 'host',
+      agent: {
+        agent_id: 'a1',
+        kind: 'team',
+        status: 'working',
+        mounted_session_id: 'child',
+      },
+    }, { sessions: [host, child] });
+    expect(member.canWireOut).toBe(true);
+    expect(member.wireSessionId).toBe('child');
+    expect(mapStatusDotClass(member.status)).toBe('active');
+  });
+
+  it('queues pending topology until sessions are idle', () => {
+    const busy = session({ id: 'child', title: 'Child', status: 'running' });
+    const idle = session({ id: 'parent', title: 'Parent', status: 'idle' });
+    const doc = {
+      version: 2 as const,
+      annotations: [],
+      labels: [],
+      sessionLabels: {},
+      pendingTopology: [{
+        id: 'pt1',
+        kind: 'mount' as const,
+        childSessionId: 'child',
+        parentSessionId: 'parent',
+        queuedAt: new Date().toISOString(),
+      }],
+    };
+    expect(pendingTopologyOpsReady(doc, [busy, idle])).toHaveLength(0);
+    expect(pendingTopologyOpsReady(doc, [
+      { ...busy, status: 'idle' },
+      idle,
+    ])).toHaveLength(1);
+  });
+
+  it('replaces stale parent edges on remount upsert', () => {
+    const doc = {
+      version: 2 as const,
+      annotations: [],
+      labels: [],
+      sessionLabels: {},
+      edges: [{
+        id: 'e1',
+        type: 'parent' as const,
+        source: 'old-parent',
+        target: 'child',
+      }],
+    };
+    const next = upsertParentMapEdge(doc, 'new-parent', 'child');
+    expect(next.edges).toHaveLength(1);
+    expect(next.edges![0]!.source).toBe('new-parent');
+    expect(next.edges![0]!.target).toBe('child');
   });
 });

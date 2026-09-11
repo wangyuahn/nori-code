@@ -4,6 +4,8 @@
  * In dev mode, Vite proxies /api to the local server.
  */
 
+import { reportAppError } from '../utils/error-center';
+
 // === TypeScript Interfaces ===
 
 export interface MessageContent {
@@ -661,6 +663,7 @@ interface Envelope<T> {
   msg: string;
   data: T;
   request_id: string;
+  details?: unknown;
 }
 
 interface RequestOptions {
@@ -669,6 +672,56 @@ interface RequestOptions {
   method?: 'GET' | 'POST' | 'DELETE' | 'PATCH' | 'PUT';
   body?: unknown;
   acceptedCodes?: number[];
+}
+
+export class ApiError extends Error {
+  readonly name = 'ApiError';
+
+  constructor(
+    message: string,
+    readonly method: string,
+    readonly path: string,
+    readonly httpStatus?: number,
+    readonly businessCode?: number,
+    readonly requestId?: string,
+    readonly details?: unknown,
+  ) {
+    super(message);
+  }
+}
+
+function parsedEnvelope(value: unknown): Partial<Envelope<unknown>> {
+  if (value === null || typeof value !== 'object') return {};
+  return value as Partial<Envelope<unknown>>;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError'
+    || error instanceof Error && error.name === 'AbortError';
+}
+
+function reportRequestError(error: unknown, method: string, path: string): void {
+  if (isAbortError(error)) return;
+  if (error instanceof ApiError) {
+    reportAppError({
+      source: 'api',
+      message: error,
+      code: error.businessCode,
+      httpStatus: error.httpStatus,
+      requestId: error.requestId,
+      operation: `${method} ${path}`,
+      details: error.details,
+      retryable: error.httpStatus === undefined || error.httpStatus >= 500 || error.httpStatus === 429,
+    });
+    return;
+  }
+  reportAppError({
+    source: 'api',
+    message: error,
+    operation: `${method} ${path}`,
+    retryable: true,
+    details: error instanceof Error ? { name: error.name, stack: error.stack } : error,
+  });
 }
 
 // === Client Factory ===
@@ -726,6 +779,7 @@ export function createClient(
       });
     }
 
+    const method = options?.method ?? 'GET';
     const controller = new AbortController();
 
     // Wire external signal to abort the internal controller
@@ -746,7 +800,6 @@ export function createClient(
     const timeoutId = setTimeout(() => { controller.abort(); }, timeout);
 
     try {
-      const method = options?.method ?? 'GET';
       const headers: Record<string, string> = {};
       let currentToken: string | undefined;
       try {
@@ -770,38 +823,107 @@ export function createClient(
 
       const res = await fetch(url.toString(), init);
       clearTimeout(timeoutId);
-
-      if (!res.ok) {
-        throw new Error(`API ${method} ${path} failed: ${res.status}`);
-      }
-
-      // Handle empty responses (204, or empty body)
       const text = await res.text();
-      if (!text) return undefined as unknown as T;
-
-      const envelope: Envelope<T> = JSON.parse(text);
-      if (envelope.code !== 0 && !options?.acceptedCodes?.includes(envelope.code)) {
-        throw new Error(`API error: ${envelope.msg}`);
+      let decoded: unknown;
+      try {
+        decoded = text ? JSON.parse(text) : undefined;
+      } catch (error) {
+        throw new ApiError(
+          `API ${method} ${path} returned invalid JSON (${res.status})`,
+          method,
+          path,
+          res.status,
+          undefined,
+          res.headers.get('x-request-id') ?? undefined,
+          text.slice(0, 4_000),
+        );
       }
-      return envelope.data;
+      const envelope = parsedEnvelope(decoded);
+      if (!res.ok) {
+        throw new ApiError(
+          typeof envelope.msg === 'string' && envelope.msg.length > 0
+            ? envelope.msg
+            : `API ${method} ${path} failed: ${res.status}`,
+          method,
+          path,
+          res.status,
+          typeof envelope.code === 'number' ? envelope.code : undefined,
+          typeof envelope.request_id === 'string' ? envelope.request_id : res.headers.get('x-request-id') ?? undefined,
+          envelope.details ?? envelope.data,
+        );
+      }
+      // Handle empty responses (204, or empty body)
+      if (!text) return undefined as unknown as T;
+      if (
+        typeof envelope.code === 'number'
+        && envelope.code !== 0
+        && !options?.acceptedCodes?.includes(envelope.code)
+      ) {
+        throw new ApiError(
+          typeof envelope.msg === 'string' ? envelope.msg : `API ${method} ${path} failed`,
+          method,
+          path,
+          res.status,
+          typeof envelope.code === 'number' ? envelope.code : undefined,
+          typeof envelope.request_id === 'string' ? envelope.request_id : undefined,
+          envelope.details ?? envelope.data,
+        );
+      }
+      return envelope.data as T;
     } catch (error) {
       clearTimeout(timeoutId);
+      reportRequestError(error, method, path);
       throw error;
     }
   }
 
   async function uploadFile(file: File): Promise<FileMeta> {
+    const method = 'POST';
+    const path = '/files';
     const form = new FormData();
     form.append('file', file, file.name);
     form.append('name', file.name);
     const headers: Record<string, string> = {};
     const currentToken = await getToken().catch(() => undefined);
     if (currentToken) headers['Authorization'] = `Bearer ${currentToken}`;
-    const response = await fetch(`${API_BASE}/files`, { method: 'POST', headers, body: form });
-    if (!response.ok) throw new Error(`File upload failed: ${response.status}`);
-    const envelope = await response.json() as Envelope<FileMeta>;
-    if (envelope.code !== 0) throw new Error(`File upload failed: ${envelope.msg}`);
-    return envelope.data;
+    try {
+      const response = await fetch(`${API_BASE}${path}`, { method, headers, body: form });
+      const text = await response.text();
+      let decoded: unknown;
+      try {
+        decoded = text ? JSON.parse(text) : undefined;
+      } catch {
+        throw new ApiError(
+          `API ${method} ${path} returned invalid JSON (${response.status})`,
+          method,
+          path,
+          response.status,
+          undefined,
+          response.headers.get('x-request-id') ?? undefined,
+          text.slice(0, 4_000),
+        );
+      }
+      const envelope = parsedEnvelope(decoded);
+      if (!response.ok || envelope.code !== 0) {
+        throw new ApiError(
+          typeof envelope.msg === 'string' && envelope.msg.length > 0
+            ? envelope.msg
+            : `API ${method} ${path} failed: ${response.status}`,
+          method,
+          path,
+          response.status,
+          typeof envelope.code === 'number' ? envelope.code : undefined,
+          typeof envelope.request_id === 'string'
+            ? envelope.request_id
+            : response.headers.get('x-request-id') ?? undefined,
+          envelope.details ?? envelope.data,
+        );
+      }
+      return envelope.data as FileMeta;
+    } catch (error) {
+      reportRequestError(error, method, path);
+      throw error;
+    }
   }
 
   // === Public API ===

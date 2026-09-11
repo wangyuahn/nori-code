@@ -107,6 +107,7 @@ export const clientHelloPayloadSchema = z.object({
   subscriptions: z.array(z.string()),
   cursors: cursorsBySessionSchema.optional(),
   agent_ids: agentIdsBySessionSchema.optional(),
+  failure_only: z.boolean().optional(),
 });
 
 export const clientHelloMessageSchema = z.object({
@@ -137,6 +138,7 @@ export const subscribePayloadSchema = z.object({
   session_ids: z.array(z.string()),
   cursors: cursorsBySessionSchema.optional(),
   agent_ids: agentIdsBySessionSchema.optional(),
+  failure_only: z.boolean().optional(),
   watch_fs: z.record(z.string(), watchFsConfigSchema).optional(),
 });
 

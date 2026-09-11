@@ -921,7 +921,6 @@ export function ChatView(props: ChatViewProps) {
         {commandSuggestions.map((command, index) => <button key={command.name} type="button" id={`composer-command-${command.name}`} role="option" aria-selected={index === commandSelection} className={index === commandSelection ? 'active' : ''} onMouseDown={event => event.preventDefault()} onClick={() => selectSlashCommand(command)}><code>/{command.name}{command.argumentHint ? ` ${command.argumentHint}` : ''}</code><span>{tr(command.description, command.descriptionZh)}</span></button>)}
       </div>}
       <textarea ref={inputRef} className="chat-input" placeholder={session ? tr('Ask Nori about this project…', '向 Nori 询问此项目…') : tr('Describe what you want to work on…', '告诉 Nori 你想做什么…')} value={input} onFocus={() => { void restoreRewindFocus(); }} onChange={event => { rewindCaretRef.current = null; setInput(event.target.value); setCommandMenuDismissed(false); setCommandSelection(0); setCommandNotice(null); }} onKeyDown={handleKeyDown} onPaste={handlePaste} rows={1} aria-label={tr('Message Nori', '向 Nori 发送消息')} aria-autocomplete="list" aria-expanded={commandMenuOpen} aria-controls={commandMenuOpen ? 'composer-command-menu' : undefined} aria-activedescendant={commandMenuOpen ? `composer-command-${commandSuggestions[commandSelection]?.name ?? commandSuggestions[0]?.name}` : undefined}/>
-      <SessionUsageBar status={sessionStatus} compacting={compacting} treeTokens={activeAgentTokens} />
       <div className="composer-toolbar">
         <div className="composer-toolbar-left">
           <input ref={imageInputRef} className="composer-image-input" type="file" multiple onChange={event => { if (event.target.files) void addFiles(event.target.files); event.target.value = ''; }}/>
@@ -940,6 +939,9 @@ export function ChatView(props: ChatViewProps) {
             <label className="loop-mode-toggle" title={tr('Create a goal before this request so Nori continues through the Loop state machine.', '发送后先创建 Goal，并由 Loop 状态机持续执行。')}><input type="checkbox" checked={loopEnabled} onChange={event => handleLoopToggle(event.target.checked)}/><span>Loop</span></label>
           </div>
           <SkillPicker sessionId={session?.id ?? null} disabled={isStreaming}/>
+        </div>
+        <div className="composer-toolbar-center">
+          <SessionUsageBar status={sessionStatus} compacting={compacting} treeTokens={activeAgentTokens} />
         </div>
         <div className="composer-toolbar-right">
           <div className="composer-model-controls">
@@ -1154,13 +1156,10 @@ function WorkGroup({ blocks, live = false }: { blocks: WorkBlock[]; live?: boole
   const { tr } = useI18n();
   const [open, setOpen] = useState(live);
   useEffect(() => { if (!live) setOpen(false); }, [live]);
-  const running = blocks.some(block => block.type === 'tool'
-    && block.tool.result === undefined && block.tool.endedAt === undefined && block.tool.isError !== true);
   return <details className={`chat-work-group${live ? ' live' : ''}`} open={open} onToggle={event => { setOpen(event.currentTarget.open); }}>
     <summary>
-      <span className="work-group-icon"><Icon name={running ? 'sparkles' : 'check'} size={12}/></span>
       <span className="work-group-headline">{summarizeWorkGroup(blocks, tr)}</span>
-      <Icon className="work-group-chevron" name="chevron-right" size={11}/>
+      <Icon className="work-group-chevron" name="chevron-down" size={11}/>
     </summary>
     <div className="work-group-body">
       {blocks.map((block, index) => {
@@ -1182,7 +1181,17 @@ function isCommandToolName(name: string): boolean {
 }
 
 /** 折叠时那一行汇总：跑了几条命令、动了几个文件、一共几次工具调用。 */
-function summarizeWorkGroup(blocks: WorkBlock[], tr: (en: string, zh: string) => string): string {
+export function summarizeWorkGroup(blocks: WorkBlock[], tr: (en: string, zh: string) => string): string {
+  if (blocks.length === 1) {
+    const only = blocks[0]!;
+    if (only.type === 'tool') return compactToolCallHeadline(only.tool, tr);
+    if (only.type === 'thinking') {
+      const preview = only.text.trim().split('\n').find(line => line.trim().length > 0) ?? '';
+      return preview || tr('Thinking', '思考');
+    }
+    if (only.type === 'context') return tr('Context injection', '上下文注入');
+  }
+
   const tools = blocks.flatMap(block => block.type === 'tool' ? [block.tool] : []);
   const commands = tools.filter(tool => isCommandToolName(tool.name)).length;
   const created = tools.filter(tool => /^(write|createfile)$/i.test(tool.name)).length;
@@ -1193,7 +1202,8 @@ function summarizeWorkGroup(blocks: WorkBlock[], tr: (en: string, zh: string) =>
   if (commands > 0) parts.push(tr(`Ran ${String(commands)} command${commands === 1 ? '' : 's'}`, `运行 ${String(commands)} 条命令`));
   if (created > 0) parts.push(tr(`created ${String(created)} file${created === 1 ? '' : 's'}`, `新建 ${String(created)} 个文件`));
   if (edited > 0) parts.push(tr(`edited ${String(edited)} file${edited === 1 ? '' : 's'}`, `编辑 ${String(edited)} 处`));
-  if (tools.length > 0) parts.push(tr(`used ${String(tools.length)} tool${tools.length === 1 ? '' : 's'}`, `共 ${String(tools.length)} 次工具调用`));
+  const nonCommandTools = tools.length - commands;
+  if (nonCommandTools > 0) parts.push(tr(`used ${String(nonCommandTools)} tool${nonCommandTools === 1 ? '' : 's'}`, `共 ${String(nonCommandTools)} 次工具调用`));
   if (thoughts > 0) parts.push(tr(`${String(thoughts)} thought${thoughts === 1 ? '' : 's'}`, `${String(thoughts)} 段思考`));
   if (contexts > 0) parts.push(tr(`${String(contexts)} context injection${contexts === 1 ? '' : 's'}`, `${String(contexts)} 次上下文注入`));
   if (parts.length === 0) return tr('Worked quietly', '静默处理');
@@ -1211,8 +1221,7 @@ function ThinkingLine({ text, live = false }: { text: string; live?: boolean }) 
   const preview = text.trim().split('\n').find(line => line.trim().length > 0) ?? '';
   return <details className={`work-thinking-line${live ? ' live' : ''}`} open={open} onToggle={event => { setOpen(event.currentTarget.open); }}>
     <summary>
-      <span className="work-thinking-label"><Icon name="sparkles" size={11}/>{tr('Thinking', '思考')}</span>
-      <span className="work-thinking-preview">{preview}</span>
+      <span className="work-thinking-preview">{live && !preview ? tr('Thinking…', '思考中…') : preview || tr('Thinking', '思考')}</span>
       <Icon className="work-thinking-chevron" name="chevron-right" size={11}/>
     </summary>
     <p>{text}</p>
@@ -1236,20 +1245,12 @@ function ContextInjectionRow({ block, label }: { block: Extract<WorkBlock, { typ
 
 function CompactToolCall({ tool }: { tool: ToolCall }) {
   const { tr } = useI18n();
-  const summary = summarizeToolCall(tool, tr);
-  const running = tool.result === undefined && tool.endedAt === undefined && tool.isError !== true;
-  const statusLabel = tool.isError === true
-    ? tr('Failed', '失败')
-    : running
-      ? tr('Running', '运行中')
-      : tr('Done', '完成');
+  const headline = compactToolCallHeadline(tool, tr);
   const fields = toolCallDetailFields(tool, tr);
   const isEdit = tool.name.toLowerCase() === 'edit';
   return <details className={`compact-tool-call tool-${tool.name.toLowerCase()}${tool.isError ? ' error' : ''}`}>
     <summary title={tool.result?.slice(0, 600)}>
-      <span className="compact-tool-icon"><Icon name={toolCallIcon(tool.name)} size={12}/></span>
-      <span className="compact-tool-copy"><strong>{tool.name}</strong>{summary && <span>{summary}</span>}</span>
-      <small className={running ? 'running' : tool.isError ? 'error' : 'done'}>{statusLabel}</small>
+      <span className="compact-tool-headline">{headline}</span>
       <Icon className="compact-tool-chevron" name="chevron-right" size={11}/>
     </summary>
     <dl className="compact-tool-detail">
@@ -1263,15 +1264,41 @@ function CompactToolCall({ tool }: { tool: ToolCall }) {
   </details>;
 }
 
-function toolCallIcon(name: string): IconName {
-  const normalized = name.toLowerCase();
-  if (normalized === 'contextinjection') return 'document';
-  if (normalized.includes('bash') || normalized.includes('terminal') || normalized.includes('command')) return 'terminal';
-  if (normalized.startsWith('team')) return 'git-branch';
-  if (normalized.includes('browser') || normalized.includes('web')) return 'globe';
-  if (normalized.includes('read') || normalized.includes('write') || normalized.includes('edit') || normalized.includes('file')) return 'files';
-  return 'settings';
+/** 折叠时工具行的一行摘要，例如 “Read src/app.ts” 或 “Ran ls -la”。 */
+export function compactToolCallHeadline(tool: ToolCall, tr: (english: string, chinese: string) => string): string {
+  const args = typeof tool.args === 'object' && tool.args !== null ? tool.args as Record<string, unknown> : {};
+  const normalized = tool.name.toLowerCase();
+  const path = firstString(args.path, args.file_path, args.filename, args.file);
+  const command = firstString(args.command);
+  const query = firstString(args.query, args.pattern, args.description);
+  if (normalized === 'contextinjection') {
+    return firstString(args.source) ?? tr('Context injection', '上下文注入');
+  }
+  if (/^(read|readfile)$/.test(normalized) || normalized.includes('read')) {
+    return path ? tr(`Read ${path}`, `读取 ${path}`) : tr('Read file', '读取文件');
+  }
+  if (isCommandToolName(tool.name)) {
+    const short = command?.split('\n')[0]?.trim().slice(0, 96) ?? '';
+    return short ? tr(`Ran ${short}`, `运行 ${short}`) : tr('Ran command', '运行命令');
+  }
+  if (/^(write|createfile)$/.test(normalized)) {
+    return path ? tr(`Wrote ${path}`, `写入 ${path}`) : tr('Wrote file', '写入文件');
+  }
+  if (/^(edit|multiedit|notebookedit|apply_?patch)$/.test(normalized)) {
+    return path ? tr(`Edited ${path}`, `编辑 ${path}`) : tr('Edited file', '编辑文件');
+  }
+  if (/^(grep|glob|search|find|list|ls)$/.test(normalized) || normalized.includes('search') || normalized.includes('grep')) {
+    const target = query ?? path;
+    return target ? tr(`Searched ${target}`, `搜索 ${target}`) : tr('Searched', '搜索');
+  }
+  if (normalized.includes('browser') || normalized.includes('web')) {
+    const url = firstString(args.url);
+    return url ? tr(`Opened ${url}`, `打开 ${url}`) : tr('Browser action', '浏览器操作');
+  }
+  const summary = summarizeToolCall(tool, tr);
+  return summary ? `${tool.name} · ${summary}` : tool.name;
 }
+
 
 function summarizeToolCall(tool: ToolCall, tr: (english: string, chinese: string) => string): string {
   const args = typeof tool.args === 'object' && tool.args !== null ? tool.args as Record<string, unknown> : {};
@@ -1406,11 +1433,14 @@ function SessionUsageBar({ status, compacting, treeTokens }: { status?: SessionR
   const statusTokens = total ? total.input_other + total.input_cache_read + total.input_cache_creation + total.output : undefined;
   const totalTokens = treeTokens !== undefined && treeTokens > 0 ? treeTokens : statusTokens;
   const percentage = Math.min(100, Math.max(0, Math.round(status.context_usage * 100)));
+  const contextWarning = percentage >= 80;
   return <div className="composer-usage" title={`${formatTokens(status.context_tokens)} / ${formatTokens(status.max_context_tokens)} tokens`}>
-    <span>{tr('Session usage', '会话用量')} {totalTokens === undefined ? '--' : `${formatTokens(totalTokens)} tokens`}</span>
-    <span className={percentage >= 80 ? 'warning' : ''}>{tr('Context', '上下文')} {percentage}%</span>
-    <i aria-hidden="true"><b style={{ width: `${percentage}%` }} /></i>
-    {compacting && <span>{tr('Compacting context…', '正在压缩上下文…')}</span>}
+    <span className="composer-usage-tokens">{tr('Conversation usage', '对话用量')} {totalTokens === undefined ? '--' : `${formatTokens(totalTokens)} tokens`}</span>
+    <span className={`composer-usage-context${contextWarning ? ' warning' : ''}`}>
+      <span>{tr('Context', '上下文')} {percentage}%</span>
+      <i aria-hidden="true"><b style={{ width: `${percentage}%` }} /></i>
+    </span>
+    {compacting && <span className="composer-usage-status">{tr('Compacting context…', '正在压缩上下文…')}</span>}
   </div>;
 }
 

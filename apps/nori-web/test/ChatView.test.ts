@@ -3,7 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ApprovalRequest, ModelCatalogItem, QuestionRequest, Session } from '../src/api/client';
 import { api } from '../src/api/client';
-import { ChatView, modelSupportsImageInput, type ChatViewProps } from '../src/components/ChatView';
+import { ChatView, compactToolCallHeadline, modelSupportsImageInput, summarizeWorkGroup, type ChatViewProps } from '../src/components/ChatView';
 import { I18nProvider } from '../src/i18n';
 import { modelThinkingOptions, resolveComposerThinking } from '../src/utils/model-thinking';
 import { projectFileMention, referenceProjectFile } from '../src/projectFileReference';
@@ -1466,8 +1466,8 @@ describe('conversation presentation', () => {
     const groups = [...stream.querySelectorAll<HTMLDetailsElement>('.chat-work-group')];
     expect(groups).toHaveLength(2);
     expect(groups.every(group => !group.open)).toBe(true);
-    expect(groups[0]?.querySelector('.work-group-headline')?.textContent ?? '').toMatch(/tool|工具/);
-    expect(groups[1]?.querySelector('.work-group-headline')?.textContent ?? '').toMatch(/command|命令/);
+    expect(groups[0]?.querySelector('.work-group-headline')?.textContent ?? '').toMatch(/tool|thought|工具|思考/);
+    expect(groups[1]?.querySelector('.work-group-headline')?.textContent ?? '').toMatch(/Ran ls|运行 ls/);
     expect(container.querySelector('.chat-message-content:not(.transcript-assistant-output)')?.textContent).toContain('Finished.');
     expect(container.querySelector('.transcript-assistant-output')?.textContent).toContain('The target file is loaded.');
 
@@ -1489,6 +1489,7 @@ describe('conversation presentation', () => {
     // 工具行仍是就地展开的一行。
     const toolRow = groups[0]!.querySelector<HTMLDetailsElement>('.compact-tool-call')!;
     expect(toolRow.open).toBe(false);
+    expect(toolRow.querySelector('.compact-tool-headline')?.textContent).toMatch(/Read|读取/);
     expect(toolRow.querySelector('.compact-tool-chevron')).not.toBeNull();
     await act(async () => {
       toolRow.querySelector('summary')?.click();
@@ -1496,6 +1497,44 @@ describe('conversation presentation', () => {
     });
     expect(toolRow.open).toBe(true);
     expect(toolRow.querySelector('.compact-tool-detail')?.textContent).toContain('src/app.ts');
+  });
+
+  it('renders collapsed work groups as text-only rows without a box', async () => {
+    const blocks = [
+      { id: 'tool-1', type: 'tool' as const, tool: { id: 'tool-1', name: 'Bash', args: { command: 'pnpm test' }, result: 'ok' } },
+      { id: 'tool-2', type: 'tool' as const, tool: { id: 'tool-2', name: 'Bash', args: { command: 'pnpm typecheck' }, result: 'ok' } },
+    ];
+    const { container } = await renderChat({
+      messages: [{ id: 'assistant-1', role: 'assistant', text: 'Done.', workBlocks: blocks }],
+    });
+
+    const group = container.querySelector<HTMLDetailsElement>('.chat-work-group')!;
+    expect(group.open).toBe(false);
+    expect(group.querySelector('.work-group-headline')?.textContent).toMatch(/Ran 2 commands|运行 2 条命令/);
+    expect(group.querySelector('.work-group-chevron')).not.toBeNull();
+    expect(group.querySelector('.work-group-body')).not.toBeNull();
+
+    await act(async () => {
+      group.querySelector('summary')?.click();
+      await Promise.resolve();
+    });
+    expect(group.open).toBe(true);
+    const headlines = [...group.querySelectorAll('.compact-tool-headline')].map(node => node.textContent);
+    expect(headlines).toEqual([
+      expect.stringMatching(/pnpm test/),
+      expect.stringMatching(/pnpm typecheck/),
+    ]);
+  });
+
+  it('builds compact tool headlines for common tool names', () => {
+    const tr = (en: string) => en;
+    expect(compactToolCallHeadline({ name: 'Read', args: { path: 'src/a.ts' } }, tr)).toBe('Read src/a.ts');
+    expect(compactToolCallHeadline({ name: 'Bash', args: { command: 'ls -la' } }, tr)).toBe('Ran ls -la');
+    expect(compactToolCallHeadline({ name: 'Glob', args: { pattern: '**/*.ts' } }, tr)).toBe('Searched **/*.ts');
+    expect(summarizeWorkGroup([
+      { id: 't1', type: 'tool', tool: { name: 'Read', args: { path: 'x.ts' } } },
+      { id: 't2', type: 'tool', tool: { name: 'Bash', args: { command: 'echo hi' } } },
+    ], tr)).toBe('Ran 1 command, used 1 tool');
   });
 
   it('renders ordinary live text as normal assistant output while work is active', async () => {
@@ -1688,8 +1727,65 @@ describe('live work group boundaries', () => {
   });
 });
 
+describe('composer usage bar', () => {
+  it('lives in the toolbar center instead of a separate row above controls', async () => {
+    const { container } = await renderChat({
+      sessionStatus: {
+        status: 'idle',
+        model: 'multimodal-model',
+        thinking_level: 'medium',
+        permission: 'auto',
+        discuss_mode: false,
+        main_write_enabled: true,
+        goal: null,
+        context_tokens: 46_000,
+        max_context_tokens: 128_000,
+        context_usage: 0.35,
+        usage: {
+          total: {
+            input_other: 8_000,
+            input_cache_read: 0,
+            input_cache_creation: 0,
+            output: 2_330,
+          },
+        },
+      },
+    });
+
+    const usage = container.querySelector('.composer-usage');
+    expect(usage).not.toBeNull();
+    expect(usage!.closest('.composer-toolbar-center')).not.toBeNull();
+    expect(usage!.closest('.composer-toolbar')).not.toBeNull();
+    expect(container.querySelector('.chat-input + .composer-usage')).toBeNull();
+    expect(usage!.querySelector('.composer-usage-tokens')?.textContent).toContain('Conversation usage');
+    expect(usage!.querySelector('.composer-usage-context')?.textContent).toContain('Context 35%');
+    expect(usage!.querySelector<HTMLElement>('.composer-usage-context i b')?.style.width).toBe('35%');
+  });
+
+  it('shows compacting status without leaving the toolbar', async () => {
+    const { container } = await renderChat({
+      compacting: true,
+      sessionStatus: {
+        status: 'idle',
+        model: 'multimodal-model',
+        thinking_level: 'medium',
+        permission: 'auto',
+        discuss_mode: false,
+        main_write_enabled: true,
+        goal: null,
+        context_tokens: 102_000,
+        max_context_tokens: 128_000,
+        context_usage: 0.82,
+      },
+    });
+
+    const usage = container.querySelector('.composer-usage');
+    expect(usage?.querySelector('.composer-usage-status')?.textContent).toBe('Compacting context…');
+    expect(usage?.querySelector('.composer-usage-context')?.classList.contains('warning')).toBe(true);
+  });
+});
+
 /**
- * The goal/todo strip lives inside the composer, so it is exactly as wide as the
  * input box, and it collapses to one line — a nine-item todo list used to push the
  * conversation off the screen and could not be folded away.
  */

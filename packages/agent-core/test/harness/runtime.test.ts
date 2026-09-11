@@ -378,7 +378,7 @@ max_context_size = 100000
     )).toBe(false);
   });
 
-  it('deletes the mounted session and Team agent together on dismissal', async () => {
+  it('deletes the durable Team agent without creating a second session on dismissal', async () => {
     tmp = await mkdtemp(join(tmpdir(), 'kimi-core-runtime-'));
     const homeDir = join(tmp, 'home');
     const workDir = join(tmp, 'work');
@@ -408,17 +408,13 @@ max_context_size = 100000
       role: 'builder',
       mandate: 'Implement the assigned work.',
     });
-    const mountedSessionId = parentSession!.getAgentMetadata(member.id)?.mountedSessionId;
-    expect(mountedSessionId).toBeDefined();
-    expect((await rpc.listSessions({ includeArchive: true })).some(
-      (session) => session.id === mountedSessionId,
-    )).toBe(true);
+    expect(parentSession!.getAgentMetadata(member.id)?.mountedSessionId).toBeUndefined();
+    const sessionsBeforeDismiss = await rpc.listSessions({ includeArchive: true });
 
     await parentSession!.dismissTeamMembers('main', [member.id], 'Work is complete.', true);
 
-    expect((await rpc.listSessions({ includeArchive: true })).some(
-      (session) => session.id === mountedSessionId,
-    )).toBe(false);
+    expect((await rpc.listSessions({ includeArchive: true })).map(session => session.id))
+      .toEqual(sessionsBeforeDismiss.map(session => session.id));
     expect(parentSession!.getAgentMetadata(member.id)).toBeUndefined();
   });
 

@@ -338,11 +338,6 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       appVersion: this.appVersion,
       additionalDirs,
       listMountParentById: () => this.listMountParentById(),
-      createMountedMember: ({ identity, parentSessionId }) =>
-        this.createMountedMemberSession({
-          parentSessionId: parentSessionId ?? id,
-          identity,
-        }),
       deleteMountedMember: (mountedSessionId) => this.deleteMountedMemberSession(mountedSessionId),
       refreshSessionSelf: () => this.refreshCoreSessionSelf(id),
     });
@@ -531,11 +526,6 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       appVersion: this.appVersion,
       additionalDirs,
       listMountParentById: () => this.listMountParentById(),
-      createMountedMember: ({ identity, parentSessionId }) =>
-        this.createMountedMemberSession({
-          parentSessionId: parentSessionId ?? summary.id,
-          identity,
-        }),
       deleteMountedMember: (mountedSessionId) => this.deleteMountedMemberSession(mountedSessionId),
       refreshSessionSelf: () => this.refreshCoreSessionSelf(summary.id),
     });

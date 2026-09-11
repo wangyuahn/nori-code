@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, getWebSocketProtocols, type ApprovalRequest } from '../api/client';
+import { reportAppError } from '../utils/error-center';
 
 interface GlobalApprovalEvent {
   version: number;
@@ -113,6 +114,14 @@ export function useGlobalApprovals(): GlobalApprovalsResult {
         removeApproval(approvalId);
       } else {
         setErrors(previous => ({ ...previous, [approvalId]: message }));
+        reportAppError({
+          source: 'api',
+          message: error,
+          sessionId: request.session_id,
+          agentId: request.agent_id,
+          operation: 'resolve approval',
+          retryable: true,
+        });
       }
     } finally {
       resolvingRef.current.delete(approvalId);
@@ -205,8 +214,9 @@ export function useGlobalApprovals(): GlobalApprovalsResult {
           reconnectAttempt += 1;
           reconnectTimer = setTimeout(() => void connect(), delay);
         };
-      } catch {
+      } catch (error) {
         if (!disposed) {
+          reportAppError({ source: 'websocket', message: error, operation: 'global approvals connect', retryable: true });
           const delay = Math.min(1_000 * 2 ** reconnectAttempt, 8_000);
           reconnectAttempt += 1;
           reconnectTimer = setTimeout(() => void connect(), delay);

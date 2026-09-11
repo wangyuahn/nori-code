@@ -157,7 +157,7 @@ describe('ChatView tool details and context injection', () => {
       workBlocks: [{ id: 'edit-1', type: 'tool', tool: { id: 'edit-1', name: 'Edit', args: {} } }],
     });
 
-    expect(container.querySelectorAll('.chat-message-streaming').length).toBe(0);
+    expect(container.querySelectorAll('.chat-message-streaming').length).toBe(1);
     expect(container.querySelectorAll('.chat-work-stream').length).toBe(1);
     const tools = [...container.querySelectorAll('.compact-tool-call')];
     expect(tools.length).toBe(2);

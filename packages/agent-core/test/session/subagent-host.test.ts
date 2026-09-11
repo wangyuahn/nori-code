@@ -1564,18 +1564,18 @@ describe('SessionSubagentHost', () => {
     });
     const host = new SessionSubagentHost(session, 'agent-sender');
 
-    const record = await host.sendChatMessage('Cache key changed.', ['agent-mentioned'], signal);
+    const record = await host.sendChatMessage('@agent-mentioned Cache key changed.', ['agent-mentioned'], signal);
 
     expect(record).toMatchObject({ messageId: 7, agentId: 'agent-sender', name: 'Sender' });
     expect(postTeamChatMessage).toHaveBeenCalledWith(
       'main',
       'agent-sender',
       'Sender',
-      'Cache key changed.',
+      '@agent-mentioned Cache key changed.',
       ['agent-mentioned'],
     );
     expect(mentionedSteer).toHaveBeenCalledWith(
-      [{ type: 'text', text: '<system-reminder>\n[Chat] Sender: Cache key changed.\n</system-reminder>' }],
+      [{ type: 'text', text: '<system-reminder>\n[Chat] Sender: @agent-mentioned Cache key changed.\n</system-reminder>' }],
       expect.objectContaining({
         kind: 'system_trigger',
         name: 'team_chat',
@@ -1611,7 +1611,7 @@ describe('SessionSubagentHost', () => {
     });
     const host = new SessionSubagentHost(session, 'agent-sender');
 
-    await host.sendChatMessage('Sync point.', ['all'], signal);
+    await host.sendChatMessage('@all Sync point.', ['all'], signal);
 
     expect(firstSteer).toHaveBeenCalledTimes(1);
     expect(secondSteer).toHaveBeenCalledTimes(1);
@@ -1638,12 +1638,37 @@ describe('SessionSubagentHost', () => {
     });
 
     const mainHost = new SessionSubagentHost(session, 'main');
-    await expect(mainHost.sendChatMessage('Hello.', ['all'], signal))
+    await expect(mainHost.sendChatMessage('@all Hello.', ['all'], signal))
       .rejects.toThrow('Chat is only available to a member of a department.');
 
     const memberHost = new SessionSubagentHost(session, 'agent-member');
-    await expect(memberHost.sendChatMessage('Hello.', ['agent-ghost'], signal))
+    await expect(memberHost.sendChatMessage('@agent-ghost Hello.', ['agent-ghost'], signal))
       .rejects.toThrow('Chat mention target(s) not in this department: agent-ghost');
+  });
+
+  it('requires literal leading mentions that match the mentions array', async () => {
+    const memberMeta = {
+      homedir: '/member',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'team' as const,
+      teamLeaderAgentId: 'main',
+      name: 'Member',
+    };
+    const session = teamSessionDouble({
+      getAgentMetadata: vi.fn(() => memberMeta),
+      teamMemberMetadata: vi.fn(() => [['agent-member', memberMeta]]),
+    });
+    const host = new SessionSubagentHost(session, 'agent-member');
+
+    await expect(host.sendChatMessage('Hello.', ['agent-member'], signal))
+      .rejects.toThrow('must begin with one or more literal @agent-id mentions');
+    await expect(host.sendChatMessage('@agent-member Hello.', ['agent-other'], signal))
+      .rejects.toThrow('must exactly match');
+    await expect(host.sendChatMessage('@agent-member @agent-member Hello.', ['agent-member', 'agent-member'], signal))
+      .rejects.toThrow('must not contain duplicates');
+    await expect(host.sendChatMessage('@all Hello.', ['agent-member'], signal))
+      .rejects.toThrow('@all must be the only leading mention');
   });
 
   it('does not claim delivery when an idle TeamDM cannot start or is cancelled', async () => {

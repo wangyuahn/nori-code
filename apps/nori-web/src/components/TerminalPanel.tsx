@@ -6,6 +6,7 @@ import '@xterm/xterm/css/xterm.css';
 import { api, getWebSocketProtocols, type TerminalSession } from '../api/client';
 import { useI18n } from '../i18n';
 import { Icon } from './Icon';
+import { reportAppError } from '../utils/error-center';
 
 interface TerminalPanelProps {
   sessionId: string | null;
@@ -31,6 +32,7 @@ export function TerminalPanel({ sessionId, reuseExisting = true }: TerminalPanel
       setActiveId(terminal.id);
     } catch (cause) {
       setError(errorMessage(cause));
+      reportAppError({ source: 'runtime', message: cause, sessionId, operation: 'terminal create', retryable: true });
     } finally {
       creatingRef.current = false;
       setLoading(false);
@@ -56,7 +58,10 @@ export function TerminalPanel({ sessionId, reuseExisting = true }: TerminalPanel
           void createTerminal();
         }
       })
-      .catch(cause => { if (!cancelled) setError(errorMessage(cause)); })
+      .catch(cause => {
+        if (!cancelled) setError(errorMessage(cause));
+        reportAppError({ source: 'runtime', message: cause, sessionId, operation: 'terminal list', retryable: true });
+      })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [createTerminal, reuseExisting, sessionId]);
@@ -170,8 +175,16 @@ function TerminalSurface({ sessionId, terminal, onExit }: { sessionId: string; t
           if (disposed || exited) return;
           reconnectTimer = setTimeout(() => void connect(), Math.min(500 * 2 ** reconnectAttempt++, 5000));
         };
-      } catch {
-        if (!disposed) reconnectTimer = setTimeout(() => void connect(), Math.min(500 * 2 ** reconnectAttempt++, 5000));
+        ws.onerror = () => {
+          if (!disposed && !exited) {
+            reportAppError({ source: 'websocket', message: '终端实时连接失败', sessionId, operation: 'terminal stream', retryable: true });
+          }
+        };
+      } catch (error) {
+        if (!disposed) {
+          reportAppError({ source: 'websocket', message: error, sessionId, operation: 'terminal connect', retryable: true });
+          reconnectTimer = setTimeout(() => void connect(), Math.min(500 * 2 ** reconnectAttempt++, 5000));
+        }
       }
     };
 

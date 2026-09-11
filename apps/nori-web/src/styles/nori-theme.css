@@ -1681,7 +1681,20 @@ kbd {
 
 .content-area { padding: 0; background: transparent; }
 .content-area-chat { overflow: hidden; }
-.content-area-team { overflow: hidden; padding: 0; }
+/* Map fills the main pane; any intermediate wrapper must stretch or height:100% collapses. */
+.content-area-team {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  min-height: 0;
+}
+.content-area-team > * {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+}
 .view-page { min-height: 100%; padding: 30px clamp(20px, 4vw, 56px); }
 .view-page > * { width: min(920px, 100%); margin-inline: auto; }
 .view-page-wide > * { width: min(1180px, 100%); }
@@ -1761,11 +1774,14 @@ kbd {
 .chat-input-area:focus-within { border-color: rgba(109,214,199,.58); box-shadow: 0 14px 40px rgba(0,0,0,.2), 0 0 0 3px rgba(109,214,199,.07); }
 .chat-input { width: 100%; min-height: 28px; max-height: 180px; padding: 3px 2px; resize: none; border: 0; outline: 0; color: var(--nori-text); background: transparent; font-size: calc(13px * var(--nori-ui-font-scale)); line-height: 1.55; }
 .chat-input::placeholder { color: var(--nori-text-muted); }
-.composer-usage { display: flex; min-height: 15px; align-items: center; gap: 7px; color: var(--nori-text-muted); font-size: calc(9px * var(--nori-ui-font-scale)); }
-.composer-usage .warning { color: var(--nori-warning); }
-.composer-usage i { position: relative; width: 56px; height: 3px; overflow: hidden; border-radius: 2px; background: var(--nori-border); }
+.composer-usage { display: flex; min-width: 0; min-height: 15px; align-items: center; gap: 10px; color: var(--nori-text-muted); font-size: calc(9px * var(--nori-ui-font-scale)); }
+.composer-usage-tokens { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-usage-context { display: flex; flex: none; align-items: center; gap: 5px; white-space: nowrap; }
+.composer-usage-context.warning { color: var(--nori-warning); }
+.composer-usage-status { flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--nori-text-subtle); }
+.composer-usage i { position: relative; width: 56px; height: 3px; flex: none; overflow: hidden; border-radius: 2px; background: var(--nori-border); }
 .composer-usage i b { position: absolute; inset: 0 auto 0 0; max-width: 100%; border-radius: inherit; background: var(--nori-cyan); }
-.composer-usage .warning + i b { background: var(--nori-warning); }
+.composer-usage-context.warning i b { background: var(--nori-warning); }
 .goal-island { width: min(100%, 780px); margin: 0 auto 7px; overflow: hidden; border: 1px solid var(--nori-border-strong); border-radius: 8px; background: color-mix(in srgb, var(--nori-surface-raised) 94%, var(--nori-cyan) 6%); box-shadow: 0 8px 24px rgba(0,0,0,.14); }
 .goal-island > summary { display: grid; min-height: 44px; grid-template-columns: 28px minmax(0, 1fr) auto 16px; align-items: center; gap: 8px; padding: 7px 10px; cursor: pointer; list-style: none; }
 .goal-island > summary::-webkit-details-marker { display: none; }
@@ -3962,11 +3978,13 @@ kbd {
   font-size: calc(14px * var(--nori-ui-font-scale));
   line-height: 1.58;
 }
-.codex-layout .composer-usage { margin: -3px 1px 7px; }
+.codex-layout .composer-usage { margin: 0; }
 .composer-toolbar { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 12px; padding-top: 5px; }
-.composer-toolbar-left, .composer-toolbar-right { display: flex; min-width: 0; align-items: center; gap: 7px; }
-.composer-toolbar-left { flex: 1 1 auto; flex-wrap: nowrap; }
-.composer-toolbar-right { flex: 0 1 auto; justify-content: flex-end; }
+.composer-toolbar-left, .composer-toolbar-center, .composer-toolbar-right { display: flex; min-width: 0; align-items: center; gap: 7px; }
+.composer-toolbar-left { flex: 0 1 auto; flex-wrap: nowrap; }
+.composer-toolbar-center { flex: 1 1 0; justify-content: center; overflow: hidden; padding-inline: 4px; }
+.composer-toolbar-center .composer-usage { max-width: 100%; justify-content: center; }
+.composer-toolbar-right { flex: 0 0 auto; justify-content: flex-end; }
 .composer-toolbar .composer-image-button {
   width: 32px;
   height: 32px;
@@ -4081,18 +4099,31 @@ kbd {
 .work-thinking-line > p { max-height: 260px; margin: 0; overflow: auto; color: var(--nori-text-muted); font: italic calc(11px * var(--nori-ui-font-scale))/1.6 var(--nori-font); white-space: pre-wrap; overflow-wrap: anywhere; }
 .work-thinking-line.live > p { max-height: none; }
 /* 工具调用：一行一条（`Read foo.tsx ›`），点一下就地展开细节。 */
-.compact-tool-call { min-height: 24px; padding: 0; border: 0; border-radius: 0; background: transparent; }
-.compact-tool-call > summary { grid-template-columns: 18px minmax(0, 1fr) auto 12px; align-items: center; gap: 6px; min-height: 24px; }
-.compact-tool-call .compact-tool-icon { width: 17px; height: 17px; border-radius: 4px; color: var(--nori-text-muted); background: transparent; }
-.compact-tool-call > summary:hover .compact-tool-icon { color: var(--nori-accent); }
-.compact-tool-copy { display: flex; min-width: 0; align-items: baseline; gap: 6px; }
-.chat-work-stream .compact-tool-copy strong { flex: none; margin: 0; color: var(--nori-text-secondary); font-size: calc(10px * var(--nori-ui-font-scale)); font-weight: 650; text-transform: none; }
-.compact-tool-copy > span { min-width: 0; overflow: hidden; color: var(--nori-text-muted); font: calc(9px * var(--nori-ui-font-scale))/1.35 var(--nori-font-mono); text-overflow: ellipsis; white-space: nowrap; }
-.compact-tool-call > small, .compact-tool-call > summary > small { padding-right: 0; }
+.compact-tool-call { min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
+.compact-tool-call > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  padding: 2px 0;
+  cursor: pointer;
+  list-style: none;
+}
+.compact-tool-call > summary::-webkit-details-marker { display: none; }
+.compact-tool-headline {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--nori-text-muted);
+  font-size: calc(10px * var(--nori-ui-font-scale));
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.compact-tool-call > summary:hover .compact-tool-headline { color: var(--nori-text-secondary); }
+.compact-tool-call.error > summary .compact-tool-headline { color: color-mix(in srgb, var(--nori-danger) 82%, var(--nori-text-muted)); }
 .compact-tool-chevron { flex: none; color: var(--nori-text-muted); transition: transform .16s ease; }
 .compact-tool-call[open] .compact-tool-chevron { transform: rotate(90deg); }
-.compact-tool-call[open] > summary .compact-tool-icon { color: var(--nori-accent); }
-.chat-work-stream .compact-tool-detail { padding: 5px 0 6px 24px; }
+.chat-work-stream .compact-tool-detail { padding: 6px 0 8px; border-top: 1px solid color-mix(in srgb, var(--nori-border) 70%, transparent); margin-top: 4px; }
 
 /* Ordinary model text stays a transcript line, never a grey process card. */
 .context-injection-row { margin: 0; border: 0; background: transparent; min-width: 0; }
@@ -4135,7 +4166,8 @@ kbd {
   .codex-layout .chat-input-area { padding: 14px 14px 11px; border-radius: 12px; }
   .codex-layout .chat-input { min-height: 42px; font-size: calc(13px * var(--nori-ui-font-scale)); }
   .composer-toolbar { align-items: stretch; flex-direction: column; gap: 7px; }
-  .composer-toolbar-left, .composer-toolbar-right { width: 100%; }
+  .composer-toolbar-left, .composer-toolbar-center, .composer-toolbar-right { width: 100%; }
+  .composer-toolbar-center { justify-content: center; padding-inline: 0; }
   .composer-toolbar-left { gap: 4px; flex-wrap: wrap; }
   .composer-toolbar-right { justify-content: space-between; }
   .composer-toolbar .composer-model-controls { min-width: 0; flex: 1; justify-content: flex-start; }
@@ -4480,6 +4512,7 @@ kbd {
 .team-tree-legend i.tone-discuss { background: transparent; box-shadow: inset 0 0 0 2px var(--nori-accent, currentColor); }
 .team-tree-legend i.tone-idle { background: var(--nori-border); }
 .team-tree-legend i.tone-attention { background: #d9a13c; }
+.team-tree-legend i.tone-error { background: var(--nori-danger, #e5534b); }
 /* 团队树是张画布：空白处拖动平移、滚轮缩放，所以自己不滚动。 */
 .team-tree-viewport {
   position: relative;
@@ -4565,6 +4598,12 @@ kbd {
   flex-direction: column;
   min-height: 0;
   position: relative;
+  flex: 1 1 auto;
+  width: 100%;
+}
+.session-map-error-page.view-page {
+  justify-content: flex-start;
+  overflow: auto;
 }
 .session-map-page.view-page-wide > * {
   width: 100%;
@@ -4587,9 +4626,12 @@ kbd {
   background-position: 0 0;
 }
 .session-map-stage.panning { cursor: grabbing; }
+.session-map-stage:not(.panning):not(.wiring):not(.marqueeing) {
+  cursor: default;
+}
 .session-map-stage.binding-note { cursor: cell; }
-.session-map-stage.note-mode { cursor: crosshair; }
 .session-map-stage.marqueeing { cursor: crosshair; }
+.session-map-stage.selecting { cursor: default; }
 .session-map-stage-empty {
   position: absolute;
   inset: 0;
@@ -4776,16 +4818,35 @@ kbd {
   position: absolute;
   z-index: 1;
   box-sizing: border-box;
-  border: 1.5px dashed color-mix(in srgb, var(--map-ann-color, #3b82f6) 75%, transparent);
-  background: color-mix(in srgb, var(--map-ann-color, #3b82f6) 12%, transparent);
+  border: 2px dashed color-mix(in srgb, var(--map-ann-color, #3b82f6) 85%, #fff);
+  background: color-mix(in srgb, var(--map-ann-color, #3b82f6) 18%, transparent);
   border-radius: 8px;
-  pointer-events: auto;
-  cursor: pointer;
+  /* Body lets marquee/pan through; chrome (title / resize) re-enables hits. */
+  pointer-events: none;
+  cursor: default;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--map-ann-color, #3b82f6) 25%, transparent);
 }
 .session-map-annotation.editing,
 .session-map-annotation.binding {
   border-style: solid;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--map-ann-color) 40%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--map-ann-color) 45%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--map-ann-color, #3b82f6) 20%, transparent);
+}
+.session-map-annotation-chrome {
+  pointer-events: auto;
+}
+.session-map-annotation-titlebar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 22px;
+  cursor: grab;
+  touch-action: none;
+}
+.session-map-annotation-titlebar:active {
+  cursor: grabbing;
 }
 .session-map-annotation-title {
   position: absolute;
@@ -4793,11 +4854,13 @@ kbd {
   top: 4px;
   font-size: 11px;
   font-weight: 600;
-  color: color-mix(in srgb, var(--map-ann-color, #3b82f6) 85%, var(--nori-text));
+  color: color-mix(in srgb, var(--map-ann-color, #3b82f6) 90%, var(--nori-text));
   max-width: calc(100% - 16px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-shadow: 0 1px 2px color-mix(in srgb, var(--nori-bg, #0c0f14) 70%, transparent);
+  pointer-events: none;
 }
 .session-map-annotation-empty {
   position: absolute;
@@ -4806,6 +4869,22 @@ kbd {
   font-size: 10px;
   color: var(--nori-text-secondary);
   opacity: 0.8;
+  pointer-events: none;
+}
+.session-map-annotation-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  touch-action: none;
+  background: linear-gradient(
+    135deg,
+    transparent 50%,
+    color-mix(in srgb, var(--map-ann-color, #3b82f6) 70%, #fff) 50%
+  );
+  border-radius: 0 0 6px 0;
 }
 .session-map-node {
   z-index: 3;
@@ -4836,13 +4915,11 @@ kbd {
   overflow: hidden;
 }
 .session-map-node .team-node-name {
-  display: -webkit-box !important;
+  display: block !important;
+  flex: 0 0 auto;
   font-size: calc(13px * var(--nori-ui-font-scale));
   line-height: 1.25;
-  max-height: 2.5em;
-  white-space: normal;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  white-space: nowrap !important;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -4850,6 +4927,17 @@ kbd {
   display: block !important;
   flex: 0 0 auto;
   line-height: 1.25;
+  white-space: nowrap !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-map-node .team-node-project {
+  display: block !important;
+  flex: 0 0 auto;
+  font-size: calc(11px * var(--nori-ui-font-scale));
+  line-height: 1.25;
+  color: var(--nori-text-secondary);
+  opacity: 0.9;
   white-space: nowrap !important;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4885,10 +4973,8 @@ kbd {
 .session-map-port::before {
   content: '';
   position: absolute;
-  /* Fat invisible hit pad — UE pins are easy to grab. Matches the
-     PORT_HIT_RADIUS (36 world units = 9px port + 27px pad at scale 1) so the
-     DOM grab area and the drop hit-test agree. */
-  inset: -27px;
+  /* Hit pad aligned with PORT_HIT_RADIUS (28 world ≈ 9px port + 19px pad). */
+  inset: -19px;
   border-radius: 50%;
 }
 .session-map-stage.wiring .session-map-port {
@@ -4951,6 +5037,21 @@ kbd {
   background: color-mix(in srgb, #6ea8ff 18%, transparent);
   pointer-events: none;
   box-sizing: border-box;
+}
+.session-map-selection-box {
+  position: absolute;
+  z-index: 2;
+  border: 1px dashed #6ea8ff;
+  background: color-mix(in srgb, #6ea8ff 12%, transparent);
+  box-sizing: border-box;
+  cursor: grab;
+  touch-action: none;
+}
+.session-map-selection-box:active {
+  cursor: grabbing;
+}
+.session-map-stage.selecting .session-map-selection-box {
+  pointer-events: auto;
 }
 .session-map-node.selected {
   box-shadow: inset 0 0 0 2px #6ea8ff;
@@ -5031,6 +5132,70 @@ kbd {
   padding: 6px 8px;
   min-width: 140px;
 }
+.session-map-note-colors {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.session-map-note-color {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  padding: 0;
+  cursor: pointer;
+}
+.session-map-note-color.active {
+  border-color: #fff;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--nori-text) 40%, transparent);
+}
+.session-map-label-bar {
+  top: 58px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+  z-index: 20;
+}
+.session-map-label-bar > * {
+  pointer-events: auto;
+}
+.session-map-label-chip {
+  border: 1px solid color-mix(in srgb, var(--map-label-color, #6ea8ff) 55%, var(--nori-border));
+  background: color-mix(in srgb, var(--map-label-color, #6ea8ff) 18%, transparent);
+  color: var(--nori-text);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.session-map-label-chip.active {
+  background: color-mix(in srgb, var(--map-label-color, #6ea8ff) 42%, transparent);
+  border-color: var(--map-label-color, #6ea8ff);
+}
+.session-map-list-panel {
+  top: 92px;
+  left: 12px;
+  bottom: 48px;
+  width: min(188px, 34vw);
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--nori-border) 70%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--nori-bg, #0c0f14) 82%, transparent);
+  backdrop-filter: blur(10px);
+  pointer-events: auto;
+  z-index: 18;
+}
+.session-map-list-empty {
+  padding: 10px;
+  font-size: 12px;
+  color: var(--nori-text-secondary);
+}
 .session-map-list-scroll {
   overflow: auto;
   min-height: 0;
@@ -5045,27 +5210,85 @@ kbd {
   background: transparent;
   color: var(--nori-text);
   border-radius: 6px;
-  padding: 8px 10px;
-  cursor: pointer;
+  padding: 6px 8px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
 }
 .session-map-list-item:hover,
 .session-map-list-item.active {
   border-color: var(--nori-border);
   background: var(--nori-hover, color-mix(in srgb, var(--nori-text) 6%, transparent));
 }
+.session-map-list-main {
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+}
+.session-map-list-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.session-map-list-action {
+  border: 1px solid var(--nori-border);
+  background: transparent;
+  color: var(--nori-text-secondary);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 10px;
+  cursor: pointer;
+}
+.session-map-list-action.primary {
+  color: var(--nori-text);
+  border-color: var(--nori-accent, currentColor);
+}
+.session-map-list-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.session-map-mount-hint {
+  font-size: 11px;
+  color: var(--nori-text-secondary);
+  padding: 4px 0 0;
+  max-width: 280px;
+  line-height: 1.35;
+}
 .session-map-list-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: calc(13px * var(--nori-ui-font-scale));
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .session-map-list-meta {
   color: var(--nori-text-secondary);
   font-size: calc(11px * var(--nori-ui-font-scale));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .session-map-node.top-level {
   box-shadow: inset 0 0 0 1px var(--nori-border);
+}
+.session-map-node.status-running:not(.active) {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--nori-cyan) 55%, transparent);
+}
+.session-map-node.status-working:not(.active) {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #d9a13c 55%, transparent);
+}
+.session-map-node.status-error:not(.active) {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--nori-danger, #e5534b) 55%, transparent);
 }
 .session-map-node.active {
   box-shadow: inset 0 0 0 2px var(--nori-accent, currentColor);
@@ -5400,6 +5623,12 @@ kbd {
 
 /* ===== 工作分组：连续的思考 + 工具调用收在一个框里，输出文本自己成段 ===== */
 .chat-work-group {
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.chat-work-group[open] {
   overflow: hidden;
   border: 1px solid var(--nori-border);
   border-radius: 10px;
@@ -5407,17 +5636,20 @@ kbd {
 }
 .chat-work-group > summary {
   display: flex;
-  min-height: 28px;
+  min-height: 22px;
   align-items: center;
-  gap: 7px;
-  padding: 4px 10px;
+  gap: 6px;
+  padding: 2px 0;
   cursor: pointer;
   list-style: none;
 }
+.chat-work-group[open] > summary {
+  min-height: 28px;
+  padding: 6px 10px;
+}
 .chat-work-group > summary::-webkit-details-marker { display: none; }
-.chat-work-group > summary:hover { background: var(--nori-surface-hover); }
-.chat-work-group .work-group-icon { display: flex; flex: none; color: var(--nori-text-muted); }
-.chat-work-group.live .work-group-icon { color: var(--nori-accent); }
+.chat-work-group:not([open]) > summary:hover .work-group-headline { color: var(--nori-text-secondary); }
+.chat-work-group[open] > summary:hover { background: var(--nori-surface-hover); }
 .work-group-headline {
   min-width: 0;
   overflow: hidden;
@@ -5426,35 +5658,50 @@ kbd {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.chat-work-group.live .work-group-headline { color: var(--nori-text-secondary); }
 .work-group-chevron { flex: none; margin-left: auto; color: var(--nori-text-muted); transition: transform .16s ease; }
-.chat-work-group[open] > summary .work-group-chevron { transform: rotate(90deg); }
+.chat-work-group[open] > summary .work-group-chevron { transform: rotate(180deg); }
 .work-group-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 3px;
-  padding: 4px 10px 7px;
+  gap: 0;
+  padding: 0 10px 8px;
   border-top: 1px solid var(--nori-border);
+}
+.work-group-body > * + * {
+  border-top: 1px solid color-mix(in srgb, var(--nori-border) 70%, transparent);
+  padding-top: 4px;
+  margin-top: 4px;
 }
 /* 思考行也能折叠：合起来只留首行预览，展开后是完整的暗淡斜体正文。 */
 .work-thinking-line > summary {
   display: flex;
   min-height: 22px;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  padding: 2px 0;
   cursor: pointer;
   list-style: none;
 }
 .work-thinking-line > summary::-webkit-details-marker { display: none; }
+.work-thinking-line > summary:hover .work-thinking-preview { color: var(--nori-text-secondary); }
 .work-thinking-preview {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   color: var(--nori-text-muted);
-  font: italic calc(9px * var(--nori-ui-font-scale))/1.35 var(--nori-font);
+  font: italic calc(10px * var(--nori-ui-font-scale))/1.35 var(--nori-font);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.work-thinking-chevron { flex: none; margin-left: auto; color: var(--nori-text-muted); transition: transform .16s ease; }
+.work-thinking-line.live > summary .work-thinking-preview { color: var(--nori-text-secondary); }
+.work-thinking-chevron { flex: none; color: var(--nori-text-muted); transition: transform .16s ease; }
 .work-thinking-line[open] > summary .work-thinking-chevron { transform: rotate(90deg); }
+.work-thinking-line[open] > p {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--nori-border) 70%, transparent);
+}
 
 /* ===== 开会头部：议题 + 主持人 + 参会名单（会是父级开的，人类只看） ===== */
 .meeting-header {
@@ -5493,3 +5740,28 @@ kbd {
 .meeting-header-chip.lead { border-color: var(--nori-accent); color: var(--nori-text); }
 :root { --nori-css-stamp: 4; }
 
+.app-error-center {
+  position: fixed;
+  z-index: 80;
+  right: 16px;
+  bottom: 44px;
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(52vh, 420px);
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--nori-danger, #d96b6b) 55%, var(--nori-border));
+  border-radius: 8px;
+  background: var(--nori-surface);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 24%);
+}
+.app-error-center-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--nori-border);
+  color: var(--nori-text);
+}
+.app-error-center-head button { border: 0; background: transparent; color: var(--nori-text-muted); font-size: 18px; cursor: pointer; }
+.app-error-center-item { padding: 9px 12px; border-bottom: 1px solid var(--nori-border); color: var(--nori-text-secondary); font-size: 12px; line-height: 1.45; }
+.app-error-center-item:last-child { border-bottom: 0; }
+.app-error-center-meta, .app-error-center-item small { color: var(--nori-text-muted); font-size: 10px; }

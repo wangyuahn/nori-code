@@ -45,6 +45,7 @@ export interface BufferReplaySource {
     sessionId: string,
     cursor: SessionCursor,
     agentIds?: readonly string[],
+    failureOnly?: boolean,
   ): Promise<{
     events: Array<{ seq: number; envelope: EventEnvelope }>;
     resyncRequired: 'buffer_overflow' | 'session_recreated' | 'epoch_changed' | false;
@@ -144,6 +145,8 @@ export class WsConnection {
    * compatible.
    */
   public readonly agentIdsBySession = new Map<string, ReadonlySet<string>>();
+
+  public failureOnly = false;
 
   /** ISO 8601 UTC timestamp the socket was accepted at. */
   public readonly connectedAt: string;
@@ -279,9 +282,9 @@ export class WsConnection {
 
   private async onClientHello(msg: ClientHelloMessage): Promise<void> {
     this.gotClientHello = true;
-    const { subscriptions, cursors, agent_ids } = msg.payload;
+    const { subscriptions, cursors, agent_ids, failure_only } = msg.payload;
 
-    const sync = await this.syncSessions(subscriptions, cursors, agent_ids);
+    const sync = await this.syncSessions(subscriptions, cursors, agent_ids, failure_only === true);
 
     this.logger.info(
       {
@@ -312,11 +315,13 @@ export class WsConnection {
     sessionIds: readonly string[],
     cursors: CursorsBySession | undefined,
     agentIds: AgentIdsBySession | undefined,
+    failureOnly = false,
   ): Promise<{
     accepted: string[];
     resyncRequired: string[];
     serverCursors: CursorsBySession;
   }> {
+    this.failureOnly = failureOnly;
     const accepted: string[] = [];
     const resyncRequired: string[] = [];
     const serverCursors: CursorsBySession = {};
@@ -340,7 +345,12 @@ export class WsConnection {
     if (cursors) {
       for (const [sid, cursor] of Object.entries(cursors)) {
         this.cursorsBySession.set(sid, cursor);
-        const result = await this.wsBroadcast.getBufferedSince(sid, cursor, agentIds?.[sid]);
+        const result = await this.wsBroadcast.getBufferedSince(
+          sid,
+          cursor,
+          agentIds?.[sid],
+          this.failureOnly,
+        );
         if (result.resyncRequired !== false) {
           this.send(
             buildResyncRequired(sid, result.resyncRequired, result.currentSeq, result.epoch),
@@ -366,13 +376,13 @@ export class WsConnection {
   }
 
   private async onSubscribe(msg: SubscribeMessage): Promise<void> {
-    const { session_ids, cursors, agent_ids, watch_fs } = msg.payload;
+    const { session_ids, cursors, agent_ids, failure_only, watch_fs } = msg.payload;
     this.logger.info(
-      { sessionIds: session_ids, cursors, agentIds: agent_ids, hasWatchFs: !!watch_fs },
+      { sessionIds: session_ids, cursors, agentIds: agent_ids, failureOnly: failure_only === true, hasWatchFs: !!watch_fs },
       'ws subscribe',
     );
 
-    const sync = await this.syncSessions(session_ids, cursors, agent_ids);
+    const sync = await this.syncSessions(session_ids, cursors, agent_ids, failure_only === true);
 
     if (watch_fs && this.fsWatchHandler !== undefined) {
       for (const [sid, cfg] of Object.entries(watch_fs)) {
@@ -712,6 +722,7 @@ export class WsConnection {
     this.sessionClients.forgetConnection(this);
     this.subscriptions.clear();
     this.agentIdsBySession.clear();
+    this.failureOnly = false;
 
     if (this.fsWatchHandler !== undefined) {
       try {

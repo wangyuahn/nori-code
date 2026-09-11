@@ -84,7 +84,9 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
       while (state.tail.length > this._maxBufferSize) state.tail.shift();
     }
     if (this._store.isDisposed) return;
-    const globalEvent = isGlobalSessionEvent(event.type);
+    const globalEvent = isGlobalSessionEvent(event.type)
+      || isFailedTurnEvent(event)
+      || isToolFailureEvent(event);
     const targets = globalEvent
       ? new Set([
         ...this.connectionRegistry.values(),
@@ -93,6 +95,7 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
       : this.sessionClients.getConnections(sid);
     const ignoreAgentFilter = globalEvent || isSessionWideEvent(event.type);
     for (const connection of targets) {
+      if (connection.failureOnly && !isFailureEvent(event)) continue;
       if (!ignoreAgentFilter && !connection.acceptsAgentEvent(sid, event.agentId)) continue;
       connection.send(envelope);
     }
@@ -102,6 +105,7 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
     sid: string,
     cursor: SessionCursor,
     agentIds?: readonly string[],
+    failureOnly = false,
   ): Promise<BufferedSinceResult> {
     const state = this._getOrCreateSession(sid);
     const journal = await state.ready;
@@ -124,7 +128,7 @@ export class WSBroadcastService extends Disposable implements IWSBroadcastServic
       ? state.tail
       : await journal.readSince(cursor.seq, this._maxBufferSize);
     return {
-      events: filterReplayEvents(events, cursor.seq, agentIds),
+      events: filterReplayEvents(events, cursor.seq, agentIds, failureOnly),
       resyncRequired: false,
       currentSeq,
       epoch,
@@ -207,13 +211,40 @@ function filterReplayEvents(
   entries: readonly BufferEntry[],
   cursorSeq: number,
   agentIds: readonly string[] | undefined,
+  failureOnly = false,
 ): BufferEntry[] {
-  const afterCursor = entries.filter((entry) => entry.seq > cursorSeq);
+  const afterCursor = entries.filter(
+    (entry) => entry.seq > cursorSeq
+      && (!failureOnly || isGlobalFailureEnvelope(entry.envelope)),
+  );
   if (agentIds === undefined) return [...afterCursor];
   const selected = new Set(agentIds);
   return afterCursor.filter(
-    (entry) => selected.has(entry.envelope.payload.agentId) || isSessionWideEvent(entry.envelope.type),
+    (entry) => selected.has(entry.envelope.payload.agentId)
+      || isSessionWideEvent(entry.envelope.type)
+      // Failure events are intentionally fanned out to every live connection.
+      // Replay must preserve that guarantee; otherwise a background member that
+      // failed while this client was offline disappears forever on reconnect.
+      || isGlobalFailureEnvelope(entry.envelope),
   );
+}
+
+function isGlobalFailureEnvelope(envelope: EventEnvelope): boolean {
+  const payload = envelope.payload as {
+    reason?: unknown;
+    isError?: unknown;
+  } | undefined;
+  if (envelope.type === 'error') return true;
+  if (envelope.type === 'turn.ended') return payload?.reason === 'failed';
+  if (envelope.type === 'tool.result') return payload?.isError === true;
+  return false;
+}
+
+function isFailureEvent(event: Event): boolean {
+  if (event.type === 'error') return true;
+  if (event.type === 'turn.ended') return isFailedTurnEvent(event);
+  if (event.type === 'tool.result') return (event as { isError?: unknown }).isError === true;
+  return false;
 }
 
 /**
@@ -230,6 +261,7 @@ function isSessionWideEvent(type: string): boolean {
 
 function isGlobalSessionEvent(type: string): boolean {
   return (
+    type === 'error' ||
     type === 'event.session.created' ||
     type === 'event.session.status_changed' ||
     type === 'session.meta.updated' ||
@@ -243,6 +275,16 @@ function isGlobalSessionEvent(type: string): boolean {
   );
 }
 
+function isFailedTurnEvent(event: Event): boolean {
+  if (event.type !== 'turn.ended') return false;
+  return (event as { reason?: unknown }).reason === 'failed';
+}
+
+function isToolFailureEvent(event: Event): boolean {
+  if (event.type !== 'tool.result') return false;
+  return (event as { isError?: unknown }).isError === true;
+}
+
 function sanitizeFileName(sid: string): string {
-  return sid.replace(/[^A-Za-z0-9._-]/g, '_');
+  return sid.replaceAll(/[^A-Za-z0-9._-]/g, '_');
 }

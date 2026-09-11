@@ -19,7 +19,7 @@ export type TeamCreateInput = z.infer<typeof TeamCreateInputSchema>;
 
 export class TeamCreateTool implements BuiltinTool<TeamCreateInput> {
   readonly name = 'TeamCreate' as const;
-  readonly description = 'Hire durable members into your own department. Each member becomes a real child session mounted under you (visible on the conversation map) and keeps Team Discuss/Assign. Each member requires a unique non-empty name, role, and mandate. Hire only who the work actually needs: every extra member is one more position to reconcile in every discussion. Fails once the configured team depth limit is reached.';
+  readonly description = 'Hire durable members into your own department. Each member is one real agent node in the session map and keeps Team Discuss/Assign; do not create a second session to represent the same member. Each member requires a unique non-empty name, role, and mandate. Hire only who the work actually needs: every extra member is one more position to reconcile in every discussion. Fails once the configured team depth limit is reached.';
   readonly parameters = toInputJsonSchema(TeamCreateInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}
@@ -32,7 +32,6 @@ export class TeamCreateTool implements BuiltinTool<TeamCreateInput> {
         output: JSON.stringify({
           members: (await this.host.createTeam(args.members)).map((member) => ({
             agent_id: member.agentId,
-            session_id: member.sessionId ?? null,
             identity: member.identity,
           })),
         }),
@@ -174,7 +173,7 @@ export type TeamChatInput = z.infer<typeof TeamChatInputSchema>;
 
 export class TeamChatTool implements BuiltinTool<TeamChatInput> {
   readonly name = 'TeamChat' as const;
-  readonly description = 'Post to your department\'s persistent group chat — the peers your parent hired alongside you, who all read it; your parent does not. This is the working channel during Code: current progress, a decision you just made that changes someone else\'s assumption, a file you are about to touch, and handoff — when your part is done, name here the peer who continues it, the files, their state, and what is left, so the work moves peer to peer. Every message MUST start with @: begin the message text with @all or @agent-id1 @agent-id2 (also pass them in mentions); only mentioned members are interrupted. Keep it short — one point per message, sent when it matters. Finish your current step before replying if that is more useful than dropping it. Reviews and status reports go to your parent with TeamDM.';
+  readonly description = 'Post to your department\'s persistent group chat — the peers your parent hired alongside you, who all read it; your parent does not. This is the working channel during Code: current progress, a decision that changes another member\'s assumption, a file boundary, a handoff, or a request for another member to check or continue work. Use a concrete message such as "@agent-id I changed src/api.ts and src/client.ts; check timeout errors, type compatibility, and the tests I ran: pnpm test --filter web." Every message MUST start with @: begin the message text with @all or @agent-id1 @agent-id2 (also pass them in mentions); only mentioned members are interrupted. Keep it short and actionable. Working coordination goes here; send the parent the final status with TeamDM.';
   readonly parameters = toInputJsonSchema(TeamChatInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}

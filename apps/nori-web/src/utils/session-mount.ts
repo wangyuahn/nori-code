@@ -14,16 +14,25 @@ export function isMountedChildSession(session: Session | undefined | null): bool
 /**
  * Client-side mirror of server `assertAcyclicMount` — blocks wire drops that
  * would eventually return SESSION_MOUNT_CYCLE.
+ * Optional `mapParentByChild` merges layout/mapDoc parents when metadata lags.
  */
 export function wouldCreateMountCycle(
   childId: string,
   parentId: string,
   nodes: readonly Session[],
+  mapParentByChild?: ReadonlyMap<string, string>,
 ): boolean {
   if (childId === parentId) return true;
   const parentById = new Map<string, string | undefined>();
   for (const node of nodes) {
-    parentById.set(node.id, parentSessionIdOf(node));
+    parentById.set(node.id, parentSessionIdOf(node) ?? mapParentByChild?.get(node.id));
+  }
+  if (mapParentByChild !== undefined) {
+    for (const [child, parent] of mapParentByChild) {
+      if (!parentById.has(child) || parentById.get(child) === undefined) {
+        parentById.set(child, parent);
+      }
+    }
   }
   parentById.set(childId, parentId);
   let cursor: string | undefined = parentId;

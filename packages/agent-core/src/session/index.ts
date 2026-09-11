@@ -114,10 +114,6 @@ export interface SessionOptions {
   };
   /** Parent map for mount-depth checks (sessionId → parentSessionId). */
   readonly listMountParentById?: () => Promise<Readonly<Record<string, string | undefined>>>;
-  /** Creates the standalone session shown for a TeamCreate member. */
-  readonly createMountedMember?: (
-    input: { readonly identity: TeamIdentity; readonly parentSessionId?: string },
-  ) => Promise<{ readonly sessionId: string }>;
   /** Deletes the standalone session owned by a dismissed TeamCreate member. */
   readonly deleteMountedMember?: (sessionId: string) => Promise<void>;
   /** Rebuilds the cached session identity block after team membership changes. */
@@ -741,11 +737,6 @@ export class Session {
     }
 
     const leader = await this.ensureAgentResumed(leaderAgentId);
-    const leaderMeta = this.metadata.agents[leaderAgentId];
-    const mounted = await this.options.createMountedMember?.({
-      identity,
-      parentSessionId: leaderMeta?.mountedSessionId ?? this.options.id,
-    });
     let createdAgentId: string | undefined;
     try {
       const result = await this.createAgent(
@@ -756,7 +747,6 @@ export class Session {
           teamLeaderAgentId: leaderAgentId,
           parentAgentId: leaderAgentId,
           profile: defaultTeamProfile(),
-          mountedSessionId: mounted?.sessionId,
         },
       );
       createdAgentId = result.id;
@@ -778,8 +768,6 @@ export class Session {
             'Rolling back a failed team member creation.',
             true,
           );
-        } else if (mounted !== undefined) {
-          await this.options.deleteMountedMember?.(mounted.sessionId);
         }
       } catch (cleanupError) {
         throw new AggregateError(

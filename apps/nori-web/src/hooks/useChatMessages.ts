@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, getWebSocketProtocols, type ApprovalRequest, type GoalSnapshot, type Message, type MessageContent, type PromptAttachment, type PromptExecutionOptions, type QuestionAnswer, type QuestionRequest, type SessionAgentChatResponse, type SessionRealtimeStatus, type TokenUsage } from '../api/client';
 import { playNotificationSound } from '../notificationSounds';
+import { reportAppError, reportWebSocketError, websocketEventId } from '../utils/error-center';
 
 export interface ToolCall {
   id?: string;
@@ -207,6 +208,8 @@ interface WsPayload {
   promptId?: string;
   reason?: string;
   error?: { message?: string; code?: string; [key: string]: unknown };
+  code?: string | number;
+  retryable?: boolean;
   /**
    * Structured cause of an `error` event, spread from the core's
    * `summarizeTurnError`. Carries `turnId` when the failure belongs to a turn.
@@ -1302,7 +1305,7 @@ export function useChatMessages(
       window.dispatchEvent(new CustomEvent('nori:session-title-changed', { detail: { sessionId, title } }));
     }).catch(error => {
       titleAppliedRef.current = false;
-      console.error('Failed to apply generated session title:', error);
+      reportAppError({ source: 'api', message: error, sessionId, agentId, operation: 'session title' });
     });
   }, [agentId, sessionId]);
 
@@ -1438,7 +1441,7 @@ export function useChatMessages(
         setDepartmentChat(previous => preserveEqual(previous, chat));
       }
     } catch (error) {
-      console.error('Failed to load department chat:', error);
+      reportAppError({ source: 'api', message: error, sessionId: sessionId ?? undefined, agentId, operation: 'department chat', retryable: true });
     }
   }, [agentId, sessionId]);
 
@@ -1477,7 +1480,7 @@ export function useChatMessages(
     if (!sessionId) return;
     void refreshHistory(sessionId, agentId)
       .catch(error => {
-        if (hasCurrentScope(scopeRef, sessionId, agentId)) console.error('Failed to load messages:', error);
+        if (hasCurrentScope(scopeRef, sessionId, agentId)) reportAppError({ source: 'api', message: error, sessionId, agentId, operation: 'message history', retryable: true });
       })
       .finally(() => {
         if (hasCurrentScope(scopeRef, sessionId, agentId)) setMessagesLoading(false);
@@ -1487,7 +1490,7 @@ export function useChatMessages(
     // in-flight 快照，否则切到正在工作的成员就是一片空白——团队里的成员几乎总是
     // 在页面打开之前就已经开始跑了。
     void hydrateInFlight(sessionId, agentId).catch(error => {
-      if (hasCurrentScope(scopeRef, sessionId, agentId)) console.error('Failed to sync in-flight turn:', error);
+      if (hasCurrentScope(scopeRef, sessionId, agentId)) reportAppError({ source: 'api', message: error, sessionId, agentId, operation: 'turn sync', retryable: true });
     });
     void refreshDepartmentChat(sessionId, agentId);
   }, [agentId, clearDraft, hydrateInFlight, refreshDepartmentChat, refreshHistory, sessionId]);
@@ -1776,6 +1779,20 @@ export function useChatMessages(
             }
             case 'turn.ended':
               if (payload.reason === 'failed') {
+                if (payload.error !== undefined) {
+                  reportAppError({
+                    source: 'agent',
+                    eventId: websocketEventId({ sessionId, seq: data.seq, epoch: data.epoch }),
+                    message: payload.error.message ?? 'Turn failed',
+                    code: payload.error.code,
+                    sessionId,
+                    agentId,
+                    turnId: payload.turnId,
+                    operation: 'turn',
+                    details: payload.error.details,
+                    retryable: typeof payload.error.retryable === 'boolean' ? payload.error.retryable : undefined,
+                  });
+                }
                 setMessages(previous => mergeHistory(previous, [{
                   id: `turn-error-${sessionId}-${agentId}-${String(payload.turnId ?? Date.now())}`,
                   role: 'system',
@@ -1864,6 +1881,20 @@ export function useChatMessages(
               lastStreamActivityAtRef.current = Date.now();
               if (payload.toolCallId) {
                 const result = serializeToolOutput(payload.output ?? payload.result);
+                if (payload.isError === true) {
+                  reportAppError({
+                    source: 'tool',
+                    eventId: websocketEventId({ sessionId, seq: data.seq, epoch: data.epoch }),
+                    message: result ?? `Tool ${payload.name ?? 'call'} failed`,
+                    sessionId,
+                    agentId,
+                    turnId: payload.turnId,
+                    toolCallId: payload.toolCallId,
+                    operation: payload.name ?? 'tool',
+                    details: payload.output ?? payload.result,
+                    retryable: false,
+                  });
+                }
                 liveWorkBlocksRef.current = liveWorkBlocksRef.current.map(block => block.type === 'tool' && block.tool.id === payload.toolCallId
                   ? { ...block, tool: { ...block.tool, result, isError: payload.isError === true, endedAt: Date.now() } }
                   : block);
@@ -1940,12 +1971,25 @@ export function useChatMessages(
               }));
               break;
             case 'error': {
+              reportWebSocketError({
+                payload: {
+                  code: payload.code,
+                  message: payload.message ?? payload.error?.message,
+                  name: payload.name,
+                  details: payload.details,
+                  retryable: payload.retryable,
+                  agentId: payload.agentId ?? agentId,
+                },
+                sessionId,
+                eventId: websocketEventId({ sessionId, seq: data.seq, epoch: data.epoch }),
+                operation: 'stream',
+              });
               if (isTurnScopedError(payload)) {
                 finishTurn(activeTurnIdRef.current ?? undefined, true);
                 break;
               }
               playNotificationSound('error');
-              console.error('Stream error:', payload);
+              // Non-turn errors need one readable row in the current chat.
               if (payload.message) {
                 setMessages(previous => [...previous, {
                   id: `stream-error-${Date.now()}`,
@@ -1963,7 +2007,14 @@ export function useChatMessages(
         };
 
         socket.onerror = () => {
-          if (!disposed) console.error('WebSocket connection error');
+          if (!disposed) reportAppError({
+            source: 'websocket',
+            message: 'WebSocket connection error',
+            sessionId,
+            agentId,
+            operation: 'connect',
+            retryable: true,
+          });
         };
 
         socket.onclose = () => {
@@ -1977,7 +2028,14 @@ export function useChatMessages(
         };
       } catch (error) {
         if (!disposed) {
-          console.error('Failed to connect WebSocket:', error);
+          reportAppError({
+            source: 'websocket',
+            message: error,
+            sessionId,
+            agentId,
+            operation: 'connect',
+            retryable: true,
+          });
           const delay = Math.min(1000 * 2 ** reconnectAttempt, 8000);
           reconnectAttempt += 1;
           reconnectTimerRef.current = setTimeout(() => void connect(), delay);

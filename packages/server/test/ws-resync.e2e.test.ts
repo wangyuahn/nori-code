@@ -287,6 +287,121 @@ describe('WS durable journal + resync_required (v2)', () => {
     conn.ws.close();
   });
 
+  it('replays failed turns to an agent-filtered connection', async () => {
+    const r = await spawn();
+    const bus = r.services.invokeFunction((acc) => acc.get(IEventService));
+    const broadcast = r.services.invokeFunction(
+      (acc) => acc.get(IWSBroadcastService),
+    ) as WSBroadcastService;
+
+    bus.publish({ type: 'evt.before', sessionId: 'sid_failures', agentId: 'main' } as unknown as Event);
+    bus.publish({
+      type: 'turn.ended',
+      sessionId: 'sid_failures',
+      agentId: 'agent_sub',
+      turnId: 4,
+      reason: 'failed',
+      error: { message: 'provider failed' },
+    } as unknown as Event);
+    bus.publish({
+      type: 'tool.result',
+      sessionId: 'sid_failures',
+      agentId: 'agent_sub',
+      turnId: 4,
+      toolCallId: 'call-1',
+      output: 'tool failed',
+      isError: true,
+    } as unknown as Event);
+    await broadcast._drainForTest('sid_failures');
+
+    const replay = await broadcast.getBufferedSince(
+      'sid_failures',
+      { seq: 1 },
+      ['agent_sub'],
+    );
+
+    expect(replay.resyncRequired).toBe(false);
+    expect(replay.events.map((entry) => entry.seq)).toEqual([2, 3]);
+    expect(replay.events.map((entry) => entry.envelope.type)).toEqual(['turn.ended', 'tool.result']);
+  });
+
+  it('broadcasts a failed tool result to a connection that did not subscribe to the session', async () => {
+    const r = await spawn();
+    const bus = r.services.invokeFunction((acc) => acc.get(IEventService));
+    const conn = await openConn(wsUrl(r.address));
+    await receiveType(conn, 'server_hello', 1000);
+    conn.ws.send(JSON.stringify({
+      type: 'client_hello',
+      id: 'cli_global_tool_failure',
+      payload: { client_id: 'global-tool-failure', subscriptions: [] },
+    }));
+    await receiveType(conn, 'ack', 1000);
+
+    bus.publish({
+      type: 'tool.result',
+      sessionId: 'sid_unsubscribed_failure',
+      agentId: 'agent_sub',
+      turnId: 5,
+      toolCallId: 'call-failed',
+      output: 'tool failed',
+      isError: true,
+    } as unknown as Event);
+
+    const event = await receiveType(conn, 'tool.result', 1000);
+    expect(event.session_id).toBe('sid_unsubscribed_failure');
+    expect(event.payload).toMatchObject({ isError: true, toolCallId: 'call-failed' });
+    conn.ws.close();
+  });
+
+  it('failure-only connections replay and receive only failure events', async () => {
+    const r = await spawn();
+    const bus = r.services.invokeFunction((acc) => acc.get(IEventService));
+    const broadcast = r.services.invokeFunction(
+      (acc) => acc.get(IWSBroadcastService),
+    ) as WSBroadcastService;
+    bus.publish({ type: 'evt.normal', sessionId: 'sid_failure_only', agentId: 'agent_sub' } as unknown as Event);
+    bus.publish({
+      type: 'tool.result',
+      sessionId: 'sid_failure_only',
+      agentId: 'agent_sub',
+      turnId: 6,
+      toolCallId: 'call-replay-failure',
+      output: 'replayed failure',
+      isError: true,
+    } as unknown as Event);
+    await broadcast._drainForTest('sid_failure_only');
+
+    const conn = await openConn(wsUrl(r.address));
+    await receiveType(conn, 'server_hello', 1000);
+    conn.ws.send(JSON.stringify({
+      type: 'client_hello',
+      id: 'cli_failure_only',
+      payload: {
+        client_id: 'failure-only',
+        subscriptions: ['sid_failure_only'],
+        cursors: { sid_failure_only: { seq: 0 } },
+        failure_only: true,
+      },
+    }));
+    const replayed = await receiveType(conn, 'tool.result', 1000);
+    expect(replayed.payload).toMatchObject({ isError: true, toolCallId: 'call-replay-failure' });
+    await receiveType(conn, 'ack', 1000);
+
+    bus.publish({ type: 'evt.normal.after', sessionId: 'sid_failure_only', agentId: 'agent_sub' } as unknown as Event);
+    bus.publish({
+      type: 'turn.ended',
+      sessionId: 'sid_failure_only',
+      agentId: 'agent_sub',
+      turnId: 7,
+      reason: 'failed',
+      error: { message: 'live failure' },
+    } as unknown as Event);
+    const liveFailure = await receiveType(conn, 'turn.ended', 1000);
+    expect(liveFailure.payload).toMatchObject({ reason: 'failed' });
+    await expect(receiveType(conn, 'evt.normal.after', 300)).rejects.toBeInstanceOf(Error);
+    conn.ws.close();
+  });
+
   it('client connects with a gap beyond the replay cap → resync_required(buffer_overflow)', async () => {
     const r = await spawn();
 

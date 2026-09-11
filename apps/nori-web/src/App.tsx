@@ -1,4 +1,4 @@
-import { Component, lazy, Suspense, useCallback, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from 'react';
+import { Component, Fragment, lazy, Suspense, useCallback, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from 'react';
 import { useBackgroundTasks } from './hooks/useBackgroundTasks';
 import { CronJobPanel } from './components/CronJobPanel';
 import { AccountCenter } from './components/AccountCenter';
@@ -19,6 +19,9 @@ import type { ChatSlashCommandName } from './utils/chat-slash-commands';
 import { installSoundUnlock } from './notificationSounds';
 import { useGlobalApprovals } from './hooks/useGlobalApprovals';
 import { useBrowserPermissions } from './hooks/useBrowser';
+import { ErrorCenter } from './components/ErrorCenter';
+import { reportAppError } from './utils/error-center';
+import { useGlobalErrors } from './hooks/useGlobalErrors';
 
 /** Lazy: Map must never block Chat boot if SessionMapPage/d3-force fails to evaluate. */
 const SessionMapPage = lazy(() =>
@@ -44,10 +47,16 @@ const SIDEBAR_EXPANDED_STORAGE_KEY = 'nori-sidebar-expanded';
 
 /** Keeps Chat usable when Conversation Map throws during render or lazy import. */
 class MapViewBoundary extends Component<
-  { children: ReactNode; onBackToChat: () => void; fallbackLabel: string; backLabel: string },
-  { error: Error | null }
+  {
+    children: ReactNode;
+    onBackToChat: () => void;
+    fallbackLabel: string;
+    backLabel: string;
+    retryLabel: string;
+  },
+  { error: Error | null; retryKey: number }
 > {
-  state: { error: Error | null } = { error: null };
+  state: { error: Error | null; retryKey: number } = { error: null, retryKey: 0 };
 
   static getDerivedStateFromError(error: Error): { error: Error } {
     return { error };
@@ -55,25 +64,39 @@ class MapViewBoundary extends Component<
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error('[nori-web] Conversation Map crashed', error, info.componentStack);
+    reportAppError({ source: 'runtime', message: error, operation: 'react render', details: { componentStack: info.componentStack } });
   }
 
   render() {
     if (this.state.error) {
+      // Fill content-area height — absolute/zero-height shells hide errors behind overflow:hidden.
       return (
-        <div className="view-page view-page-wide">
+        <div className="view-page view-page-wide session-map-page session-map-error-page">
           <div className="view-stack" style={{ padding: 24, gap: 12 }}>
             <p>{this.props.fallbackLabel}</p>
             <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, opacity: 0.75 }}>
               {this.state.error.message}
             </pre>
-            <button type="button" className="btn" onClick={this.props.onBackToChat}>
-              {this.props.backLabel}
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => this.setState((prev) => ({ error: null, retryKey: prev.retryKey + 1 }))}
+              >
+                {this.props.retryLabel}
+              </button>
+              <button type="button" className="btn" onClick={this.props.onBackToChat}>
+                {this.props.backLabel}
+              </button>
+            </div>
           </div>
         </div>
       );
     }
-    return this.props.children;
+    // Fragment+key remounts on retry WITHOUT a layout wrapper. A plain <div> breaks
+    // .session-map-page { height:100% } → stage/floats collapse to 0 under
+    // .content-area-team { overflow:hidden } (blank Map page).
+    return <Fragment key={this.state.retryKey}>{this.props.children}</Fragment>;
   }
 }
 
@@ -98,6 +121,7 @@ function persistSidebarExpanded(expanded: boolean): void {
 
 export function App() {
   const { tr } = useI18n();
+  useGlobalErrors();
   const [activeView, setActiveView] = useState<View>('chat');
   const [activeAgentSelection, setActiveAgentSelection] = useState<{ sessionId: string; agent: SessionAgent } | null>(null);
   // Keep the known agent object while the host session's agent list is still
@@ -344,8 +368,9 @@ export function App() {
     try {
       const result = await api.models.list();
       setModels(result.items);
-    } catch (error) {
-      setModelError(error instanceof Error ? error.message : tr('Failed to load models', '加载模型失败'));
+      } catch (error) {
+        reportAppError({ source: 'api', message: error, operation: 'load models', retryable: true });
+        setModelError(error instanceof Error ? error.message : tr('Failed to load models', '加载模型失败'));
     } finally {
       setModelsLoading(false);
     }
@@ -506,6 +531,7 @@ export function App() {
             onBackToChat={() => setActiveView('chat')}
             fallbackLabel={tr('Conversation Map failed to load.', '对话地图加载失败。')}
             backLabel={tr('Back to Chat', '返回对话')}
+            retryLabel={tr('Retry', '重试')}
           >
             <Suspense
               fallback={(
@@ -519,6 +545,7 @@ export function App() {
               <SessionMapPage
                 sessions={sessions}
                 activeSessionId={sessionId ?? undefined}
+                activeAgentId={activeAgentId}
                 onOpenSession={(id) => {
                   switchSession(id);
                   selectSessionAgent(null);
@@ -722,6 +749,7 @@ export function App() {
         <main className={`content-area content-area-${activeView}`}>{renderContent()}</main>
         <StatusBar sending={isStreaming} activeAgentCount={effectiveGlobalActiveAgentCount} />
       </div>
+      <ErrorCenter />
       <ProjectFolderPicker
         open={folderPickerOpen}
         onClose={() => { setFolderPickerOpen(false); setPendingInitialMessage(null); }}
@@ -1067,6 +1095,7 @@ function SessionsList({
         await onDeleteSession(session.id);
       }
     } catch (error) {
+      reportAppError({ source: 'api', message: error, operation: 'session action', retryable: true });
       setActionError(error instanceof Error ? error.message : tr('Session action failed.', '会话操作失败。'));
     } finally {
       setActionSessionId(null);
@@ -1093,6 +1122,7 @@ function SessionsList({
       }
       setActionDialog(null);
     } catch (error) {
+      reportAppError({ source: 'api', message: error, operation: 'session action', retryable: true });
       setActionError(error instanceof Error ? error.message : tr('Session action failed.', '会话操作失败。'));
     } finally {
       setActionSessionId(null);

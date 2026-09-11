@@ -1,5 +1,8 @@
 /**
  * Fill mount role / mandate / title from a short user prompt (local heuristic only).
+ *
+ * Used by Map mount drafts (child under a parent). Top-level sessions use
+ * `SessionSelfBootstrap` / map `topLevelRoles` instead — see session-graph.ts.
  */
 
 export interface MountIdentityDraft {

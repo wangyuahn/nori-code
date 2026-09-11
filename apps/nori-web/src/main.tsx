@@ -6,6 +6,7 @@ import { initializeTheme } from './theme';
 import { InspectorPopout } from './components/InspectorPopout';
 import type { InspectorTab } from './components/WorkspaceInspector';
 import './styles/nori-theme.css';
+import { reportAppError } from './utils/error-center';
 
 initializeTheme();
 
@@ -19,6 +20,7 @@ class BootErrorBoundary extends Component<{ children: ReactNode }, { error: Erro
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error('[nori-web] boot render failed', error, info.componentStack);
+    reportAppError({ source: 'runtime', message: error, operation: 'boot render', details: { componentStack: info.componentStack } });
   }
 
   render() {
@@ -56,11 +58,15 @@ const content = inspector && ['preview', 'changes', 'browser', 'git', 'lsp', 'te
 
 // Surface module evaluation failures that never reach React (blank #08080a body).
 window.addEventListener('error', (event) => {
+  reportAppError({ source: 'runtime', message: event.error ?? event.message, operation: 'window' });
   if (document.querySelector('.codex-layout, .app-container')) return;
   const root = document.getElementById('root');
-  if (!root || root.childElementCount > 0) return;
+  if (!root) return;
   const message = event.error instanceof Error ? event.error.message : event.message;
   root.innerHTML = `<div style="padding:24px;font-family:system-ui,sans-serif;color:#f2f2f2;background:#111;min-height:100%"><h1 style="font-size:18px">Nori Work failed to load</h1><pre style="white-space:pre-wrap;font-size:12px;opacity:.75">${String(message).replace(/</g, '&lt;')}</pre></div>`;
+});
+window.addEventListener('unhandledrejection', (event) => {
+  reportAppError({ source: 'runtime', message: event.reason, operation: 'promise' });
 });
 
 // The app does not block rendering for the desktop auth token; the API client
