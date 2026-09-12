@@ -6,6 +6,10 @@ outline: 2
 
 This page documents the changes in each Kimi Code CLI release.
 
+::: warning Note
+This VitePress changelog is still the **upstream Kimi Code CLI** history. Nori's own releases live in the repository [CHANGELOG.md](https://github.com/wangyuahn/nori-code/blob/master/CHANGELOG.md). Current product is Team Engineering; SubAgent DAG orchestration was removed. See the GitHub [README](https://github.com/wangyuahn/nori-code/blob/master/README.md).
+:::
+
 ## 0.22.0 (2026-07-02)
 
 ### Features

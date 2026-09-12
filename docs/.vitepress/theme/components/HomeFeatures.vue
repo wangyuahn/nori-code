@@ -33,7 +33,7 @@ const highlights = computed<Highlight[]>(() => isZh.value
       {
         icon: '🧭',
         title: '只读协调者',
-        desc: '主 Agent 默认只读协调；用 /team 打开伙伴会话，SubAgent 仍负责有界临时委派。',
+        desc: '主 Agent 默认只读协调；用 /team 打开伙伴会话。临时 SubAgent 已删除，委派只走团队工程。',
       },
     ]
   : [
@@ -50,7 +50,7 @@ const highlights = computed<Highlight[]>(() => isZh.value
       {
         icon: '🧭',
         title: 'Read-only lead',
-        desc: 'The main Agent coordinates by default. Open partners with /team; SubAgent still handles bounded temporary work.',
+        desc: 'The main Agent coordinates by default. Open partners with /team. Temporary SubAgent is gone — Team Engineering is the only delegation path.',
       },
     ])
 
@@ -70,9 +70,9 @@ const features = computed<Feature[]>(() => isZh.value
       },
       {
         icon: '🤖',
-        title: 'Agent 与 SubAgent',
-        desc: '持久团队伙伴与有界临时 SubAgent 并存；主对话保持清爽。',
-        href: '/zh/customization/agents',
+        title: '团队伙伴',
+        desc: '持久部门树是委派的唯一路径；对照 Codex / Claude Code 的说明见 GitHub README。',
+        href: '/zh/guides/team-engineering',
       },
       {
         icon: '🔌',
@@ -96,9 +96,9 @@ const features = computed<Feature[]>(() => isZh.value
       },
       {
         icon: '🤖',
-        title: 'Agents and SubAgents',
-        desc: 'Durable team partners plus bounded temporary SubAgents — main thread stays clean.',
-        href: '/en/customization/agents',
+        title: 'Team partners',
+        desc: 'The department tree is the only delegation path. Comparison with Codex / Claude Code lives in the GitHub README.',
+        href: '/en/guides/team-engineering',
       },
       {
         icon: '🔌',
@@ -108,10 +108,10 @@ const features = computed<Feature[]>(() => isZh.value
       }
     ])
 
-const highlightsTitle = computed(() => isZh.value ? '2.0 开箱即得' : 'Ready in 2.0')
+const highlightsTitle = computed(() => isZh.value ? '2.0 的主线' : 'The 2.0 path')
 const highlightsLede = computed(() => isZh.value
-  ? '团队工程与会话地图默认就绪。'
-  : 'Team engineering and the conversation map ship ready to use.')
+  ? '团队工程与会话地图是当前产品；LSP、Git 等仍是毛坯，见 GitHub README。'
+  : 'Team engineering and the conversation map are the product. LSP, Git, and other gaps are listed in the GitHub README.')
 
 const featuresTitle = computed(() => isZh.value ? '按需深入' : 'Go deeper')
 const featuresLede = computed(() => isZh.value

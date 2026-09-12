@@ -4,6 +4,10 @@
 
 与 MCP 工具相比，内置工具由运行时直接管理，生命周期与会话绑定，无需外部进程。两者都遵循统一的审批机制：**只读类工具**（如 `Read`、`Grep`、`Glob`）默认自动放行，**写入与执行类工具**（如 `Write`、`Edit`、`Bash`）默认需要用户审批。Nori 的会话级只读设置会拦截直接 `Write` 和 `Edit`，但不会移除文件读取工具，也不会拦截 `Bash`；`Bash` 仍按当前权限模式和规则处理。YOLO 模式下普通工具调用的审批会被跳过。Discuss 通过 TeamAssign 或 UI 切换进入 Code，不再走计划文件审批。
 
+::: warning 注意
+`SubAgent`（含 `depends_on` DAG 任务）已在 v2.0 **删除**。委派只走团队工程。当前产品相对 Codex / Claude Code 见 GitHub [README](https://github.com/wangyuahn/nori-code/blob/master/README.zh-CN.md)。
+:::
+
 ## 文件类
 
 文件类工具负责读取、写入、搜索本地文件系统，是代码分析和修改任务的基础工具。
@@ -65,7 +69,7 @@
 | --- | --- | --- |
 | `TeamDecide` | 主代理 | 使用 `action=start` 进入 Discuss，使用 `action=continue` 继续讨论 |
 
-Discuss 是只读团队开会。新会话默认进入该状态（用户可关闭）。期间 `Write`、`Edit`、`Bash`、`SubAgent`、`TaskStop`、`CronCreate`、`CronDelete` 被拦截。没有 session 文件工作流，也没有 `ExitDiscussMode` 模型出口。
+Discuss 是只读团队开会。新会话默认进入该状态（用户可关闭）。期间 `Write`、`Edit`、`Bash`、`TaskStop`、`CronCreate`、`CronDelete` 被拦截。没有 session 文件工作流，也没有 `ExitDiscussMode` 模型出口。
 
 **`TeamDecide`** 使用 `action=start` 加主题和开场陈述进入 Discuss；后续使用 `action=continue` 加新陈述继续讨论。每条 `TeamSpeak` 只是多轮讨论里的一个短观点，不是完整方案，再用 `TeamAssign` 进入 Code。UI 的 Discuss/Code 切换也可离开或再进入。
 
@@ -83,7 +87,6 @@ Discuss 是只读团队开会。新会话默认进入该状态（用户可关闭
 
 | 工具 | 默认审批 | 说明 |
 | --- | --- | --- |
-| `SubAgent` | SubAgent 模式中自动放行，否则需审批 | 启动一个或多个临时 SubAgent |
 | `TeamCreate` | 自动放行 | 雇佣持久团队伙伴为子会话 |
 | `TeamDecide` | 自动放行 | 开会或在执行后投票 |
 | `TeamSpeak` | 自动放行 | 发布一条短讨论发言；不调用会将本轮记录为 skipped（弃权） |
@@ -92,8 +95,6 @@ Discuss 是只读团队开会。新会话默认进入该状态（用户可关闭
 | `TeamDismiss` | 自动放行 | 解除部门成员并删除其子会话 |
 | `AskUserQuestion` | 自动放行 | 向用户提问以获取结构化输入 |
 | `Skill` | 自动放行 | 调用已注册的 inline Skill |
-
-**`SubAgent`** 是统一的临时代理入口。可用 `prompt_template` + `items`、`tasks`（含 `depends_on` DAG）或 `resume_agent_ids` 一次启动一个或多个完整子会话。完成后归档到父会话，可再打开。一次模型响应若调用 `SubAgent`，该调用必须是该响应中的唯一工具调用。Discuss 期间不要用 SubAgent，先 TeamAssign。
 
 **`TeamCreate`** 每个成员必须有唯一的 `name`、`role`、`mandate`；每次雇佣会创建真实挂载子会话（地图上的会话卡片），并双写一个团队 Agent，以便 Discuss/Assign 仍按本部门寻址。**`TeamDismiss`** 从部门移除成员并删除该子会话；需提供 `reason`，仅在确认中断进行中的任务后用 `confirm_active=true` 重试。地图上的拆挂是用户操作，只断开挂载、不删除会话。**`TeamUpdate`** 可改名称、角色、职责或标签；相关会话会收到提醒，但不会被唤醒。**`TeamDecide`** `action=start` 必须有 `topic` 和主持 `statement`。成员只用 `TeamSpeak` 发言。执行后 `action=vote` 不要求 Discuss；全队投票（`discuss_again` / `proceed` / `abstain`），含 `task=null` 的成员。
 
@@ -105,7 +106,7 @@ Discuss 是只读团队开会。新会话默认进入该状态（用户可关闭
 
 ## Nori 工具
 
-Nori 专用工具在内置工具集上增加共享记忆、文档写入和已配置的 graph/DAG 检查模板能力。只有对应供应商或运行时能力可用时，这些工具才会出现在工具列表中。
+Nori 专用工具在内置工具集上增加共享记忆和文档写入。只有对应供应商或运行时能力可用时，这些工具才会出现在工具列表中。
 
 | 工具 | 默认审批 | 说明 |
 | --- | --- | --- |
@@ -114,12 +115,12 @@ Nori 专用工具在内置工具集上增加共享记忆、文档写入和已配
 
 **`nori_memory_search`** 接受具体的 `keywords`，以及可选的 `note_types`、`top_k`、`include_linked`、`link_depth`、`chain_depth` 和 `follow_up_keywords`。当第一轮结果暴露出更好的关键词或链接笔记时，使用链式检索（`chain_depth: 1` 或 `2`）。
 
-**`nori_memory_write`** 把结构化笔记写入共享记忆库。适合记录任务进度、架构分析、审阅发现，以及未来轮次或子 Agent 需要检索的决策。
+**`nori_memory_write`** 把结构化笔记写入共享记忆库。适合记录任务进度、架构分析、审阅发现，以及未来轮次或团队成员需要检索的决策。
 
 
 ## 后台任务
 
-后台任务工具用于管理通过 `Bash`、`SubAgent` 或 `AskUserQuestion` 启动的后台任务。任务进入终止状态时会自动把状态和已保存的输出路径送回 Agent；如需提前检查进度，使用 `TaskOutput`。
+后台任务工具用于管理通过 `Bash` 或 `AskUserQuestion` 启动的后台任务。任务进入终止状态时会自动把状态和已保存的输出路径送回 Agent；如需提前检查进度，使用 `TaskOutput`。
 
 | 工具 | 默认审批 | 说明 |
 | --- | --- | --- |
@@ -153,6 +154,6 @@ Nori 专用工具在内置工具集上增加共享记忆、文档写入和已配
 
 ## 下一步
 
-- [Agent 与子 Agent](../customization/agents.md) — `Agent` 工具的调度机制与上下文隔离
+- [团队工程](../guides/team-engineering.md) — 部门树、Discuss/Assign、会话地图
 - [Hooks](../customization/hooks.md) — 在工具调用前后触发本地脚本
 - [斜杠命令](./slash-commands.md) — TUI 内置控制命令速查

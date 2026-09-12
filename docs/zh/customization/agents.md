@@ -1,10 +1,12 @@
 # Agent 与子 Agent
 
-Nori Code CLI 中的每次会话都由一个**主 Agent** 驱动。主 Agent 理解用户意图、规划步骤、调用工具，并在需要时向外派发**子 Agent** 处理更聚焦的子任务——例如探索一个陌生代码库、并行审阅多处实现、或在不触碰主上下文的情况下规划一次大型重构。
+Nori Code CLI 中的每次会话都由一个**主 Agent** 驱动。2.0 里，主 Agent 领导一棵由 **`TeamCreate`** 雇佣的持久**团队伙伴**组成的**部门树**。伙伴是会话地图上的真实子会话；它们参与 Discuss、接收任务并执行，负责人默认只读。完整流程见[团队工程](../guides/team-engineering.md)。
 
-Nori Code CLI 2.0 中，主 Agent 还领导一棵由 **`TeamCreate`** 雇佣的持久**团队伙伴**组成的**部门树**。伙伴是会话地图上的真实子会话，并双写团队 Agent 以便 Discuss 仍按本部门寻址；它们参与 Discuss、接收任务并执行，而负责人默认保持只读。有界委派仍使用临时 **SubAgent**，归档在父会话目录内。完整流程见[团队工程](../guides/team-engineering.md)。
+::: warning 注意
+临时 `SubAgent` 工具及其 DAG fan-out 已在 v2.0 **删除**。委派只走团队工程。本页仍残留 Kimi Code fork 的 SubAgent 说明，**不能**当作当前产品。现在的 Nori 相对 Codex / Claude Code 见 GitHub [README](https://github.com/wangyuahn/nori-code/blob/master/README.zh-CN.md)。
+:::
 
-子 Agent 接受主 Agent 给出的任务描述，在自己的独立上下文里工作，最后把结论返回。它不会与用户直接对话，中间的思考和工具调用记录也不会混入主 Agent 的历史。
+以下各节（内置子 Agent 类型、`SubAgent.tasks`、嵌套深度）均为**过时内容**。在本页重写之前，请使用团队工具（`TeamCreate`、`TeamDecide`、`TeamSpeak`、`TeamAssign`），不要调用任何名为 SubAgent 的入口。
 
 ## 主 Agent 与只读模式
 

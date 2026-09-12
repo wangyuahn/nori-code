@@ -4,6 +4,10 @@
 
 输入完整命令名后按 `Enter` 执行。如果输入的 `/` 开头内容不匹配任何内置或 Skill 命令，则按普通消息发送给 Agent。
 
+::: warning 注意
+`/subagent` 是残留文案。临时 SubAgent 模式已在 v2.0 删除；请用 `/team` 和团队工具。见 GitHub [README](https://github.com/wangyuahn/nori-code/blob/master/README.zh-CN.md)。
+:::
+
 ::: tip 提示
 部分命令仅在空闲（idle）状态下可用。会话正在流式输出或压缩上下文时执行这些命令会被拦截，需先按 `Esc` 或 `Ctrl-C` 中断。下表「随时可用」列标注了流式输出期间也可用的命令。
 :::
@@ -52,8 +56,8 @@
 | `/team [settings]` | `/agents` | 打开已雇佣成员的会话，或浏览汇报与本回合 Discuss 发言。Enter 打开选中成员（Main 回到主会话）。Tab 查看详情。讨论节点打开 Discuss 栏。`/team settings` 设置最大部门深度 | 是 |
 | `/map` | — | 浏览当前工作目录的会话地图（挂载森林）。Enter 打开会话；M 挂载（先子后父）；U 卸载。详见[团队工程](../guides/team-engineering.md) | 是 |
 | `/plan clear` | — | 清除旧计划状态 | 否 |
-| `/subagent on\|off` | — | 开启或关闭 SubAgent 模式，但不发送提示词。 | 否 |
-| `/subagent <task>` | — | 先开启 SubAgent 模式，再把 `<task>` 作为普通提示词发送。如果该轮次正常完成，SubAgent 模式会自动关闭。若当前是 `manual` 权限模式，启动前会提示是否切换到 `auto` 或 `yolo`。 | 否 |
+| `/subagent on\|off` | — | **v2.0 已删除。** 临时 SubAgent 模式已去掉；请用 `/team`。 | 否 |
+| `/subagent <task>` | — | **v2.0 已删除。** 请用团队工程雇佣伙伴。 | 否 |
 | `/goal [...]` | — | 开始或管理目标模式 | 见下文 |
 
 ::: warning 注意

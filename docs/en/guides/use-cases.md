@@ -24,7 +24,7 @@ How does the event loop in src/runtime work? Where do events originate, and what
 How is "permission approval" implemented in this project? Which files are involved, and what are the key types?
 ```
 
-For large-scale investigations, you can have the main agent dispatch **sub-agents** to handle sub-tasks in parallel. See [Agents and sub-agents](../customization/agents.md).
+For large-scale investigations, hire team partners with `TeamCreate` and use Discuss before assigning tracks. See [Team engineering](./team-engineering.md). The GitHub [README](https://github.com/wangyuahn/nori-code/blob/master/README.md) compares this model with Codex / Claude Code subagents.
 
 ## Implementing a new feature
 

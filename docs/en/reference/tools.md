@@ -4,6 +4,10 @@ Built-in tools are the tool set provided by Nori Code CLI alongside its core eng
 
 Compared to MCP tools, built-in tools are managed directly by the runtime, their lifecycle is bound to the session, and no external process is required. Both follow the same unified approval mechanism: **read-only tools** (such as `Read`, `Grep`, `Glob`) are automatically allowed by default, while **write and execution tools** (such as `Write`, `Edit`, `Bash`) require user approval by default. Nori's session-level read-only setting blocks direct `Write` and `Edit` calls, but it does not remove file-reading tools or block `Bash`; `Bash` still follows the current permission mode and rules. In YOLO mode, approval for regular tool calls is skipped; Discuss exit approval is not affected.
 
+::: warning Note
+`SubAgent` (including `depends_on` DAG tasks) was **removed** in v2.0. Delegation is Team Engineering only. Current product vs Codex / Claude Code: GitHub [README](https://github.com/wangyuahn/nori-code/blob/master/README.md).
+:::
+
 ## File Tools
 
 File tools handle reading, writing, and searching the local filesystem — the foundation for code analysis and modification tasks.
@@ -65,7 +69,7 @@ In the default Nori read-only posture, the main Agent can still use `Bash` for b
 | --- | --- | --- |
 | `TeamDecide` | Main agent | Enter Discuss with `action=start`; continue with `action=continue` |
 
-Discuss is a read-only team meeting. New sessions start here unless the user turned that default off. While Discuss is active, `Write`, `Edit`, `Bash`, `SubAgent`, `TaskStop`, `CronCreate`, and `CronDelete` are blocked. There is no session-file workflow and no `ExitDiscussMode` model exit.
+Discuss is a read-only team meeting. New sessions start here unless the user turned that default off. While Discuss is active, `Write`, `Edit`, `Bash`, `TaskStop`, `CronCreate`, and `CronDelete` are blocked. There is no session-file workflow and no `ExitDiscussMode` model exit.
 
 **`TeamDecide`** uses `action=start` with a topic and opening statement to enter Discuss, then `action=continue` with a new statement for later rounds. Each `TeamSpeak` is one short point in a multi-round Discuss, not a complete plan. Use `TeamAssign` to enter Code. The UI Discuss/Code toggle can also leave or re-enter this stage.
 
@@ -83,7 +87,6 @@ Collaboration tools handle inter-Agent coordination, user interaction, and Skill
 
 | Tool | Default Approval | Description |
 | --- | --- | --- |
-| `SubAgent` | Auto-allow in SubAgent mode; otherwise requires approval | Launch one or many temporary SubAgents |
 | `TeamCreate` | Auto-allow | Hire durable team partners as child sessions |
 | `TeamDecide` | Auto-allow | Start/continue discussion, or vote after execution |
 | `TeamSpeak` | Auto-allow | Publish one short discussion point; not calling it records the turn as skipped (abstention) |
@@ -92,8 +95,6 @@ Collaboration tools handle inter-Agent coordination, user interaction, and Skill
 | `TeamDismiss` | Auto-allow | Dismiss department members and delete their child sessions |
 | `AskUserQuestion` | Auto-allow | Ask the user a question to gather structured input |
 | `Skill` | Auto-allow | Invoke a registered inline Skill |
-
-**`SubAgent`** is the unified temporary-delegation tool. Launch one or many full child transcripts with `prompt_template` + `items`, `tasks` (including `depends_on` DAGs), or `resume_agent_ids`. Completed SubAgents are archived in the parent session. If a model response calls `SubAgent`, that call must be the only tool call in the response. Do not use SubAgent during Discuss; call TeamAssign first.
 
 **`TeamCreate`** requires a unique `name`, `role`, and `mandate` for every member. Each hire creates a real mounted child session (a session card on the conversation map) and a dual-write team agent so Discuss/Assign still address this department. **`TeamDismiss`** removes members from the department and deletes that child session; provide `reason`, and use `confirm_active=true` only after accepting interruption of active work. Unmount on the map is a separate user action that detaches without deleting. **`TeamUpdate`** changes name, role, mandate, or tags; related sessions receive a reminder and do not start a turn. **`TeamDecide`** `action=start` requires `topic` and the lead `statement`. Members publish only with `TeamSpeak`. After execution, `action=vote` does not require Discuss; every team member votes (`discuss_again` / `proceed` / `abstain`), including members left idle with `task=null`.
 
@@ -105,7 +106,7 @@ Session mount changes refresh **`<session_self>`** in each affected session's sy
 
 ## Nori Tools
 
-Nori-specific tools extend the built-in tool set with shared memory, documentation writes, and configured DAG templates. They appear only when the matching provider or runtime feature is available.
+Nori-specific tools extend the built-in tool set with shared memory and documentation writes. They appear only when the matching provider or runtime feature is available.
 
 | Tool | Default Approval | Description |
 | --- | --- | --- |
@@ -114,12 +115,12 @@ Nori-specific tools extend the built-in tool set with shared memory, documentati
 
 **`nori_memory_search`** accepts concrete `keywords`, optional `note_types`, `top_k`, `include_linked`, `link_depth`, `chain_depth`, and `follow_up_keywords`. Use chained retrieval (`chain_depth: 1` or `2`) when the first results reveal better terms or linked notes.
 
-**`nori_memory_write`** records structured notes in the shared vault. Use it for durable task progress, architecture analysis, review findings, and decisions that future turns or subagents should retrieve.
+**`nori_memory_write`** records structured notes in the shared vault. Use it for durable task progress, architecture analysis, review findings, and decisions that future turns or team members should retrieve.
 
 
 ## Background Tasks
 
-Background task tools manage tasks started via `Bash`, `SubAgent`, or `AskUserQuestion`. When a task reaches a terminal state, its status and saved output path are automatically delivered back to the Agent; use `TaskOutput` to check progress early.
+Background task tools manage tasks started via `Bash` or `AskUserQuestion`. When a task reaches a terminal state, its status and saved output path are automatically delivered back to the Agent; use `TaskOutput` to check progress early.
 
 | Tool | Default Approval | Description |
 | --- | --- | --- |
@@ -153,6 +154,6 @@ To prevent all users from firing at the same time on the hour, the scheduler app
 
 ## Next steps
 
-- [Agent & Sub-Agents](../customization/agents.md) — Scheduling mechanics and context isolation for the `Agent` tool
-- [Hooks](../customization/hooks.md) — Trigger local scripts before and after tool calls
+- [Team engineering](../guides/team-engineering.md) — Department tree, Discuss/Assign, conversation map
+- [Hooks](../customization/hooks.md) — Trigger local script notifications or interceptions at key points such as tool completion
 - [Slash Commands](./slash-commands.md) — Quick reference for TUI built-in control commands

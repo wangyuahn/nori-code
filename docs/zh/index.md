@@ -19,8 +19,8 @@ features:
     details: 用 TeamCreate 雇佣持久伙伴。先 Discuss 再 Code，随后 TeamAssign —— 每位伙伴都是会话地图上的真实子会话。
   - title: 会话地图
     details: 会话通过 parent_session_id 连接。在 TUI 用 /map，或在 Nori Work 打开 Map 视图浏览与调整挂载。
-  - title: SubAgent DAG
-    details: 有界临时委派仍可在会话归档内并行跑规划 → 实现 → 验证 → 审查。
+  - title: 缺口说清楚
+    details: LSP 和 Git 仍是毛坯。已删除的 SubAgent DAG 不是产品路径；委派只走团队工程。详见 GitHub README。
   - title: Nori Work
-    details: Electron 工作台，集成对话、浏览器、终端、Git，以及同一张会话地图。
+    details: Electron 工作台，集成对话、浏览器、终端和同一张会话地图。早期项目，部分检查器仍未打磨。
 ---

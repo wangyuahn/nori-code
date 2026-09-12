@@ -1,5 +1,7 @@
 # Changelog
 
+> **Current product:** Team Engineering (department tree, Discuss/Assign, conversation map) is the only delegation path. Older entries below that describe SubAgent DAG orchestration, `nori_swarm_launch`, or SubAgent+Team coexistence are historical. See the root [README](README.md) for an honest comparison and gap list.
+
 ## v2.0.0-pre.0 (2026-08-24)
 
 The major bump is one change: delegation. The temporary SubAgent is gone, and Team Engineering — a durable department tree whose members talk to each other — is now the only way Nori hands work to another agent.

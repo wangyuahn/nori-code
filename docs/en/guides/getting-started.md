@@ -15,7 +15,7 @@ The CLI is written in TypeScript, distributed via npm as `nori-code`, and runs o
 
 ## Installation
 
-Install the published package globally with npm or pnpm. Requires Node.js 22.19.0 or later (the monorepo development engines may be stricter).
+Install the published package globally with npm or pnpm. Requires Node.js 24.15.0 or later (see the repository `engines` field).
 
 ```sh
 node --version
@@ -105,7 +105,7 @@ You can also describe a more concrete task directly:
 Add a function in src/utils that converts any string to kebab-case, and add a unit test for it.
 ```
 
-Nori Code CLI plans the steps, delegates implementation through `SubAgent` or hired team partners when the task needs code changes, runs the relevant checks, and tells you what it did at each step. Use `/setting readonly off` if you want the main Agent to edit files directly after approval.
+Nori Code CLI plans the steps, hires team partners with `TeamCreate` when the task needs parallel work, runs Discuss before `TeamAssign`, and tells you what it did at each step. Temporary `SubAgent` orchestration was removed in v2.0. Use `/setting readonly off` if you want the main Agent to edit files directly after approval.
 
 ::: tip Not sure what to do? Type `/help`
 Type `/help` at any time to open the built-in command and keyboard shortcut panel. Use `↑`/`↓` to browse and `Esc` to close. To exit, type `/exit`, press `Ctrl-C` twice, or press `Ctrl-D` with the input box empty.

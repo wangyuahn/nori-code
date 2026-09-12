@@ -2,19 +2,24 @@
 
 Nori Code CLI 2.0 treats a project as a **department tree**, not a single chat transcript with side notes. `TeamCreate` hires by creating a **mounted child session** (the same class of node the conversation map already shows) plus a dual-write team agent so Discuss still addresses this department. Discuss rounds gather statements before execution. This page explains how those pieces fit together in the terminal and in Nori Work.
 
-## Department tree vs SubAgent
+::: warning Note
+Temporary `SubAgent` DAG orchestration was **removed** in v2.0. Team Engineering is the only way Nori hands work to another agent. Comparison with Codex / Claude Code, and an honest gap list (LSP and Git are still a rough shell), live in the GitHub [README](https://github.com/wangyuahn/nori-code/blob/master/README.md).
+:::
 
-Two collaboration models coexist:
+## Department tree and the conversation map
+
+There is one collaboration model, shown in two places:
 
 - **Team partners** (`TeamCreate`) are **real child sessions** mounted under you. They appear as session cards on the conversation map, keep Discuss/Assign until `TeamDismiss` removes them, and dual-write a team agent so Discuss still addresses this department by agent id.
 - **Map nodes** are the same class: **real child sessions** linked by `parent_session_id`. Creating or wiring a child on the Web Map canvas uses the same create-child + mount path as `TeamCreate`. A session can have only one parent (part-time / second-parent hire is not supported).
-- **SubAgents** (`SubAgent`) are **temporary delegates** archived inside the parent's session directory. They finish a bounded task and return a result; they are not map nodes and are not meant as long-lived departments.
+
+The dual-write (child session + in-parent team agent) is how Discuss still speaks agent ids while the map speaks session ids. It is a seam, not a finished unified identity.
 
 The main Agent stays a **read-only coordinator** by default: direct `Write` / `Edit` are blocked (`/setting readonly on`), while hired members execute assigned tracks after `TeamAssign` leaves Discuss. Use `/setting readonly off` only when you want the lead to edit files directly.
 
 ## Discuss and Code
 
-**Discuss** is a read-only team meeting. While it is active, `Write`, `Edit`, `Bash`, `SubAgent`, and several scheduling tools stay blocked until the team enters **Code**.
+**Discuss** is a read-only team meeting. While it is active, `Write`, `Edit`, `Bash`, `TaskStop`, `CronCreate`, and `CronDelete` stay blocked until the team enters **Code**.
 
 Typical flow:
 
@@ -100,5 +105,5 @@ When Nori server or Nori Work already holds the home-directory lock, the TUI may
 
 - [Slash commands](../reference/slash-commands.md) — `/team`, `/map`, `/discuss`, `/web`
 - [Built-in tools](../reference/tools.md#collaboration-tools) — `TeamCreate`, `TeamAssign`, `TeamDismiss`, and related tools
-- [Agents and sub-agents](../customization/agents.md) — read-only main Agent and SubAgent delegation
 - [Sessions and context](./sessions.md) — storage layout and session metadata
+- GitHub [README](https://github.com/wangyuahn/nori-code/blob/master/README.md) — what Nori is now vs Codex / Claude Code, including gaps
