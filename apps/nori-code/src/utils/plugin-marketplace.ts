@@ -91,7 +91,7 @@ export async function loadPluginMarketplace(
       configuredSource === undefined ? await getSourceCheckoutMarketplaceLocation() : undefined;
     if (fallback === undefined) throw error;
     raw = await readMarketplaceText(fallback, fetchImpl);
-    return await withLatestVersions(parsePluginMarketplace(raw, fallback), fetchImpl);
+    return withLatestVersions(parsePluginMarketplace(raw, fallback), fetchImpl);
   }
 }
 

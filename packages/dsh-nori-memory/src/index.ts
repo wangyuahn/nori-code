@@ -28,6 +28,17 @@ import type {
 } from './types.dsh.js';
 import { NoriVault, renderChainResult } from './vault.js';
 
+function asText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value === undefined || value === null) return '';
+  try {
+    const json = JSON.stringify(value);
+    return typeof json === 'string' ? json : '';
+  } catch {
+    return '';
+  }
+}
+
 export const name = 'nori-memory';
 
 export const inject: string[] = ['tools'];
@@ -151,7 +162,7 @@ export function apply(ctx: DshCordisContext): void {
     ...tool,
     output: {
       schema: { type: 'string' },
-      render: (_args: unknown, value: unknown) => [{ type: 'text', text: String(value) }],
+      render: (_args: unknown, value: unknown) => [{ type: 'text', text: asText(value) }],
     },
     async execute(args: DshToolParameters, exec?: DshToolExec): Promise<DshToolResult> {
       try {
@@ -162,11 +173,11 @@ export function apply(ctx: DshCordisContext): void {
         const r = await tool.execute(args, exec);
         if (r !== null && typeof r === 'object' && (r as { output?: unknown }).output !== undefined) {
           const record = r as { output?: unknown; isError?: boolean };
-          return record.isError === true ? `Error: ${String(record.output)}` : String(record.output);
+          return record.isError === true ? `Error: ${asText(record.output)}` : asText(record.output);
         }
         return typeof r === 'string' ? r : JSON.stringify(r);
       } catch (e) {
-        return `Error: ${e instanceof Error ? e.message : String(e)}`;
+        return `Error: ${e instanceof Error ? e.message : asText(e)}`;
       }
     },
   });
@@ -229,7 +240,8 @@ export function apply(ctx: DshCordisContext): void {
     async execute(args, exec) {
       const root = workspaceFor(exec, lastKnownRoot);
       lastKnownRoot = root;
-      const r = await (await vaultFor(root)).removeNote(String(args['title'] ?? ''));
+      const title = args['title'];
+      const r = await (await vaultFor(root)).removeNote(typeof title === 'string' ? title : '');
       return r.ok ? textOutput(`Note removed: ${r.path} (moved to .trash)`) : textOutput(`Error: ${r.error}`);
     },
   });

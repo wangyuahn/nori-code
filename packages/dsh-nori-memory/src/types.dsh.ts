@@ -60,14 +60,14 @@ export interface DshToolExec {
 
 /** Lossless-JSON tool parameter/result shapes. */
 export type DshToolParameters = Record<string, unknown>;
-export type DshToolResult = string | { output?: string; isError?: boolean } | unknown;
+export type DshToolResult = unknown;
 
 export interface DshToolDefinition {
   name: string;
   description: string;
   parameters: DshToolParameters;
   output?: unknown;
-  execute(args: DshToolParameters, exec?: DshToolExec): Promise<DshToolResult> | DshToolResult;
+  execute(args: DshToolParameters, exec?: DshToolExec): Promise<DshToolResult>;
 }
 
 /** Structural subset of the DSH `tools` registry. */

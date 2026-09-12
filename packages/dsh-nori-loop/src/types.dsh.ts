@@ -39,7 +39,7 @@ export interface DshToolDefinition {
   description: string;
   parameters: DshToolParameters;
   output?: unknown;
-  execute(args: DshToolParameters, exec?: DshToolExec): Promise<unknown> | unknown;
+  execute(args: DshToolParameters, exec?: DshToolExec): Promise<unknown>;
 }
 
 export interface DshToolsRegistry {
