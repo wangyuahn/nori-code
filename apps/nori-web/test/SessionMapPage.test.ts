@@ -1226,7 +1226,7 @@ describe('SessionMapPage smoke', () => {
       id: 'agent:host:a1',
       hostPosition: { x: 100, y: 200 },
       seed: { x: 999, y: 999 },
-    })).toEqual({ x: 100, y: 200 + 96 + 64 });
+    })).toEqual({ x: 100, y: 200 + NODE_H + 64 });
   });
 
   it('agents cache round-trips for stale-while-revalidate first paint', () => {
@@ -1413,6 +1413,9 @@ describe('wire gesture click suppression (live regressions)', () => {
   ): Promise<RenderedMap> {
     vi.spyOn(api.sessions, 'getGraph').mockResolvedValue({ nodes, edges });
     vi.spyOn(api.sessions, 'getAgents').mockResolvedValue({ items: [] });
+    vi.spyOn(api.sessions, 'getActivity').mockResolvedValue({ items: [] });
+    vi.spyOn(api.sessions, 'getSnapshot').mockRejectedValue(new Error('no snapshot'));
+    vi.spyOn(api.approvals, 'list').mockResolvedValue({ items: [] });
     mockViewport();
     stubPointerEvents();
     if (!options.keepMapDoc) {
@@ -2247,12 +2250,18 @@ describe('wire gesture click suppression (live regressions)', () => {
       expect(prompt).toHaveBeenCalled();
       expect(updateIdentity).toHaveBeenCalled();
       prompt.mockRestore();
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
 
       await act(async () => { map.card('run').click(); });
       await act(async () => {
         map.card('idle').dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
       });
       const laterToolbar = map.container.querySelector('.session-map-selection-toolbar');
+      expect(laterToolbar?.textContent).toMatch(/2 selected|已选 2/);
       await act(async () => {
         laterToolbar!.querySelector<HTMLButtonElement>('[data-map-action="open"]')!.click();
       });

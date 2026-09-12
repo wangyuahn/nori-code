@@ -2286,11 +2286,9 @@ export function SessionMapPage({
     // A port gesture ALWAYS ends in a click near a card — arm suppression up
     // front so even a bare port click can never open the node.
     armClickSuppression();
-    if (busy || busyRef.current || draft !== null || wireDragRef.current !== null) return;
-    // Binding notes and wiring are mutually exclusive — leave bind mode.
-    if (bindAnnotationId !== null) setBindAnnotationId(null);
 
     // Alt+click input port of a mounted child → disconnect (unmount).
+    // Do this before the busy gate so refresh/in-flight mutations cannot swallow the feedback.
     if (side === 'in' && event.altKey) {
       const caps = memberCaps(node.member);
       if (!caps.canDisconnect) {
@@ -2309,6 +2307,10 @@ export function SessionMapPage({
       void unmountSession(node.member.session.id);
       return;
     }
+
+    if (busy || busyRef.current || draft !== null || wireDragRef.current !== null) return;
+    // Binding notes and wiring are mutually exclusive — leave bind mode.
+    if (bindAnnotationId !== null) setBindAnnotationId(null);
 
     stopFollowFocus();
     dragRef.current = null;
