@@ -341,7 +341,7 @@ describe('current builtin collaboration tools', () => {
     expect(assign.description).toContain('TeamDM');
     expect(decide.description).toContain('multi-round');
     expect(speak.description).toContain('Only TeamSpeak is a formal statement');
-    expect(speak.description).toContain('Do not finish the whole problem');
+    expect(speak.description).toContain('do not finish the whole problem');
     expect(status.description).toContain('latest explicit TeamDM report status');
     expect(status.description).toContain('Ordinary TeamDM messages are not classified as reports');
     expect(TeamDMInputSchema.safeParse({
