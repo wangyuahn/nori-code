@@ -1061,6 +1061,7 @@ describe('SessionMapPage smoke', () => {
       expect(menu).not.toBeNull();
       expect(menu!.textContent).toMatch(/Unmount|拆挂/);
       expect(menu!.textContent).toMatch(/Delete|删除/);
+      expect(menu!.textContent).toMatch(/New child session|新建子会话/);
       const unmountBtn = [...menu!.querySelectorAll('button')].find((el) => (
         /Unmount|拆挂/.test(el.textContent ?? '')
       ));
@@ -1079,6 +1080,7 @@ describe('SessionMapPage smoke', () => {
       expect(topMenu).not.toBeNull();
       expect(topMenu!.textContent).not.toMatch(/Unmount|拆挂/);
       expect(topMenu!.textContent).toMatch(/Delete|删除/);
+      expect(topMenu!.textContent).toMatch(/New child session|新建子会话/);
     } finally {
       confirm.mockRestore();
       await act(async () => { root.unmount(); });
@@ -2340,6 +2342,79 @@ describe('wire gesture click suppression (live regressions)', () => {
         await Promise.resolve();
       });
       expect(create).toHaveBeenCalled();
+    } finally {
+      await act(async () => { map.root.unmount(); });
+      map.container.remove();
+      localStorage.removeItem('nori-session-map-doc');
+    }
+  });
+
+  it('right-button click (pointerdown/up, no contextmenu) still creates a top-level session', async () => {
+    const nodes = [session({ id: 'a', title: 'Alpha', metadata: { cwd: '/tmp/proj' } })];
+    const create = vi.spyOn(api.sessions, 'create').mockResolvedValue(
+      session({ id: 'created', title: 'Created', metadata: { cwd: '/tmp/proj' } }),
+    );
+    const map = await renderMap(nodes, [], { onOpenSession: vi.fn() });
+    try {
+      const empty = map.emptyClientPoint();
+      const stage = map.container.querySelector<HTMLElement>('.session-map-stage');
+      expect(stage).toBeTruthy();
+      await act(async () => {
+        stage!.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true, cancelable: true, button: 2,
+          clientX: empty.x, clientY: empty.y, pointerId: 31, pointerType: 'mouse',
+        }));
+      });
+      await act(async () => {
+        stage!.dispatchEvent(new PointerEvent('pointerup', {
+          bubbles: true, cancelable: true, button: 2,
+          clientX: empty.x, clientY: empty.y, pointerId: 31, pointerType: 'mouse',
+        }));
+      });
+      const menu = map.container.querySelector('.session-map-context-menu');
+      expect(menu?.textContent).toMatch(/New session|新建会话/);
+      const createBtn = [...menu!.querySelectorAll('button')].find((el) => /New session|新建会话/.test(el.textContent ?? ''));
+      expect(createBtn).toBeTruthy();
+      await act(async () => {
+        createBtn!.click();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(create).toHaveBeenCalledWith({ cwd: '/tmp/proj', smart_title: true });
+    } finally {
+      await act(async () => { map.root.unmount(); });
+      map.container.remove();
+      localStorage.removeItem('nori-session-map-doc');
+    }
+  });
+
+  it('node context menu creates a child session through the identity draft', async () => {
+    const nodes = [session({ id: 'src', title: 'Source', metadata: { cwd: '/tmp/proj' } })];
+    const createChild = vi.spyOn(api.sessions, 'createChild').mockResolvedValue(
+      session({ id: 'child', title: 'Child', metadata: { cwd: '/tmp/proj', parent_session_id: 'src' } }),
+    );
+    const map = await renderMap(nodes, [], { onOpenSession: vi.fn() });
+    try {
+      await act(async () => {
+        map.card('src').dispatchEvent(new MouseEvent('contextmenu', {
+          bubbles: true, cancelable: true, clientX: 80, clientY: 80,
+        }));
+      });
+      const menu = map.container.querySelector('.session-map-context-menu');
+      const createBtn = [...menu!.querySelectorAll('button')].find((el) => (
+        /New child session|新建子会话/.test(el.textContent ?? '')
+      ));
+      expect(createBtn).toBeTruthy();
+      await act(async () => { createBtn!.click(); });
+      const draft = map.container.querySelector('.session-map-draft-node');
+      expect(draft).not.toBeNull();
+      expect(createChild).not.toHaveBeenCalled();
+      const confirm = [...draft!.querySelectorAll('button')].find((el) => (
+        el.textContent === 'Confirm' || el.textContent === '确认'
+      ));
+      expect(confirm).toBeTruthy();
+      await act(async () => { confirm!.click(); await Promise.resolve(); await Promise.resolve(); });
+      expect(createChild).toHaveBeenCalledWith('src', expect.anything());
     } finally {
       await act(async () => { map.root.unmount(); });
       map.container.remove();

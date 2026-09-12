@@ -1819,9 +1819,10 @@ export function SessionMapPage({
       return;
     }
 
-    // Right mouse button → pan canvas (UE-style). Click without drag opens create menu.
+    // Right mouse button → pan canvas (UE-style). Click without drag opens
+    // the create menu on pointerup. Do not preventDefault here: that cancels
+    // `contextmenu` in Chromium, so the menu never appears for a real click.
     if (event.button === 2) {
-      event.preventDefault();
       rightPanMovedRef.current = false;
       stopFollowFocus();
       (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
@@ -2603,16 +2604,16 @@ export function SessionMapPage({
   };
 
   const createSessionNodeAt = async (worldX: number, worldY: number, parentId?: string) => {
-    const cwd = resolveCreateSessionCwd();
-    if (cwd === undefined) {
-      showError(tr(
-        'No project folder — open a session with a cwd first.',
-        '没有项目目录 — 请先打开带有 cwd 的会话。',
-      ), true);
-      return;
-    }
     setCanvasMenu(null);
+    setNodeMenu(null);
     if (parentId !== undefined) {
+      if (parentId.startsWith('agent:') || !byId.has(parentId)) {
+        showError(tr(
+          'Create under a real session card, not an agent ghost.',
+          '请在真实会话卡片下创建，而不是代理幽灵节点。',
+        ), true);
+        return;
+      }
       setDraft({
         parentId,
         title: tr('New member', '新成员'),
@@ -2622,6 +2623,14 @@ export function SessionMapPage({
         worldX,
         worldY,
       });
+      return;
+    }
+    const cwd = resolveCreateSessionCwd();
+    if (cwd === undefined) {
+      showError(tr(
+        'No project folder — open a session with a cwd first.',
+        '没有项目目录 — 请先打开带有 cwd 的会话。',
+      ), true);
       return;
     }
     setBusyLocked(true);
@@ -2668,6 +2677,8 @@ export function SessionMapPage({
   };
 
   const onPointerUp = (event: ReactPointerEvent) => {
+    const rightPan = panOrigin.current !== null && event.button === 2;
+    const rightClickCreate = rightPan && event.type !== 'pointercancel' && !rightPanMovedRef.current;
     // Unified cleanup: no matter which gesture path ran (wire early-returns
     // included), pan state must always be released.
     try {
@@ -2703,6 +2714,26 @@ export function SessionMapPage({
     } finally {
       panOrigin.current = null;
       setPanning(false);
+      if (rightClickCreate) {
+        const target = event.target as HTMLElement;
+        if (
+          target.closest('.session-map-node') === null
+          && target.closest('.session-map-context-menu') === null
+          && target.closest('.session-map-draft-node') === null
+          && target.closest('.session-map-list-panel') === null
+          && target.closest('.session-map-selection-box') === null
+        ) {
+          setNodeMenu(null);
+          setSelectionMenu(null);
+          const world = clientToWorld(event.clientX, event.clientY);
+          setCanvasMenu({
+            x: event.clientX,
+            y: event.clientY,
+            worldX: world?.x ?? CANVAS_PAD,
+            worldY: world?.y ?? CANVAS_PAD,
+          });
+        }
+      }
     }
   };
 
@@ -2850,7 +2881,7 @@ export function SessionMapPage({
 
   const submitMount = async () => {
     if (draft === null) return;
-    if (!byId.has(draft.parentId)) {
+    if (draft.parentId.startsWith('agent:') || !byId.has(draft.parentId)) {
       showError(tr(
         'The parent session no longer exists. Close this draft and retry.',
         '父会话已不存在。请关闭此草稿后重试。',
@@ -3977,6 +4008,23 @@ export function SessionMapPage({
             role="menu"
             onPointerDown={(event) => event.stopPropagation()}
           >
+            <button
+              type="button"
+              role="menuitem"
+              disabled={busy}
+              onClick={() => {
+                const node = forceNodesRef.current.find((candidate) => (
+                  candidate.member.session.id === nodeMenu.sessionId
+                ));
+                void createSessionNodeAt(
+                  node?.x ?? 0,
+                  (node?.y ?? 0) + NODE_H / 2 + 28,
+                  nodeMenu.sessionId,
+                );
+              }}
+            >
+              {tr('New child session', '新建子会话')}
+            </button>
             {nodeMenu.canSelfBootstrapRole && (
               <button
                 type="button"
