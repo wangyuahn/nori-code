@@ -15,14 +15,14 @@ describe('cli version helpers', () => {
     const pkgPath = getHostPackageJsonPath();
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { version: string };
 
-    expect(pkgPath.endsWith(join('apps', 'kimi-code', 'package.json'))).toBe(true);
+    expect(pkgPath.endsWith(join('apps', 'nori-code', 'package.json'))).toBe(true);
     expect(getHostPackageRoot()).toBe(dirname(pkgPath));
     expect(getVersion()).toBe(pkg.version);
   });
 
-  it('builds default headers with the kimi-code-cli user-agent', () => {
+  it('builds default headers with the nori-code-cli user-agent', () => {
     const headers = buildKimiDefaultHeaders('1.2.3');
 
-    expect(headers['User-Agent']).toBe('kimi-code-cli/1.2.3');
+    expect(headers['User-Agent']).toBe('nori-code-cli/1.2.3');
   });
 });

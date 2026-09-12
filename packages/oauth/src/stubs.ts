@@ -6,6 +6,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 // ── Identity (was ./identity) ──
 
@@ -23,16 +25,26 @@ export function createKimiDeviceId(
   return randomUUID();
 }
 
-export function readKimiDeviceId(_homeDir?: string): string | undefined {
-  return undefined;
+export function readKimiDeviceId(homeDir?: string): string | undefined {
+  if (homeDir === undefined) return undefined;
+  try {
+    const value = readFileSync(join(homeDir, 'device_id'), 'utf-8').trim();
+    return value.length > 0 ? value : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
-export function createKimiDefaultHeaders(_options: {
+export function createKimiDefaultHeaders(options: {
   homeDir: string;
   userAgentProduct?: string;
   version?: string;
 }): Record<string, string> {
-  return {};
+  const headers: Record<string, string> = {};
+  if (options.userAgentProduct !== undefined && options.version !== undefined) {
+    headers['User-Agent'] = `${options.userAgentProduct}/${options.version}`;
+  }
+  return headers;
 }
 
 export function assertKimiHostIdentity(

@@ -356,11 +356,11 @@ describe('kimi provider add', () => {
     expect(final.models?.['kohub-responses/legacy-model']).toBeUndefined();
   });
 
-  it('reads the api key from KIMI_REGISTRY_API_KEY when --api-key is omitted', async () => {
+  it('reads the api key from NORI_REGISTRY_API_KEY when --api-key is omitted', async () => {
     const fetchMock = mockRegistryFetch();
     const { harness } = makeHarness({ providers: {} } as KimiConfig);
     const { deps, exitCodes } = makeDeps(harness, {
-      env: { KIMI_REGISTRY_API_KEY: 'sk-env-token' },
+      env: { NORI_REGISTRY_API_KEY: 'sk-env-token' },
     });
 
     await tryRun(() => handleProviderAdd(deps, REGISTRY_URL, {}));
@@ -733,7 +733,7 @@ describe('kimi provider catalog add', () => {
     expect(exitCodes).toEqual([1]);
     const err = stderr.join('');
     expect(err).toContain('"does-not-exist" is not in provider "anthropic"');
-    expect(err).toContain('kimi provider catalog list anthropic');
+    expect(err).toContain('nori provider catalog list anthropic');
   });
 
   it('preserves an existing default_model when re-importing the same provider without --default-model', async () => {
@@ -875,11 +875,11 @@ describe('kimi provider catalog add', () => {
     expect(current().defaultModel).toBeUndefined();
   });
 
-  it('falls back to KIMI_REGISTRY_API_KEY when --api-key is omitted', async () => {
+  it('falls back to NORI_REGISTRY_API_KEY when --api-key is omitted', async () => {
     mockRegistryFetch(CATALOG_BODY);
     const { harness, current } = makeHarness({ providers: {} } as KimiConfig);
     const { deps, exitCodes } = makeDeps(harness, {
-      env: { KIMI_REGISTRY_API_KEY: 'sk-env' },
+      env: { NORI_REGISTRY_API_KEY: 'sk-env' },
     });
 
     await tryRun(() => handleCatalogAdd(deps, 'openai', {}));

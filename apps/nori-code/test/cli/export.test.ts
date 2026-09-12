@@ -43,7 +43,7 @@ const mocks = vi.hoisted(() => ({
   telemetryTrack: vi.fn(),
   setTelemetryContext: vi.fn(),
   withTelemetryContext: vi.fn(),
-  resolveKimiHome: vi.fn((homeDir?: string) => homeDir ?? '/tmp/kimi-export-home'),
+  resolveKimiHome: vi.fn((homeDir?: string) => homeDir ?? '/tmp/nori-export-home'),
   harnessCreatesDeviceIdOnConstruction: false,
 }));
 
@@ -54,7 +54,7 @@ vi.mock('@nori-code/sdk', async (importOriginal) => {
     resolveKimiHome: mocks.resolveKimiHome,
     createKimiHarness: (...args: unknown[]) => {
       const options = args[0] as { readonly homeDir?: string } | undefined;
-      const homeDir = options?.homeDir ?? '/tmp/kimi-export-home';
+      const homeDir = options?.homeDir ?? '/tmp/nori-export-home';
       if (mocks.harnessCreatesDeviceIdOnConstruction) {
         mocks.createKimiDeviceId(homeDir);
       }
@@ -94,9 +94,11 @@ vi.mock('@nori-code/telemetry', () => ({
 
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), 'kimi-export-'));
+  process.env['NORI_CODE_HOME'] = '/tmp/nori-export-home';
 });
 
 afterEach(() => {
+  delete process.env['NORI_CODE_HOME'];
   rmSync(tmp, { recursive: true, force: true });
   vi.clearAllMocks();
   mocks.harnessGetConfig.mockResolvedValue({
@@ -106,7 +108,7 @@ afterEach(() => {
   });
   mocks.createKimiDeviceId.mockImplementation(() => 'device-1');
   mocks.resolveKimiHome.mockImplementation(
-    (homeDir?: string) => homeDir ?? '/tmp/kimi-export-home',
+    (homeDir?: string) => homeDir ?? '/tmp/nori-export-home',
   );
   mocks.harnessCreatesDeviceIdOnConstruction = false;
 });
@@ -401,13 +403,13 @@ describe('kimi export', () => {
     expect(mocks.harnessEnsureConfigFile).toHaveBeenCalledOnce();
     expect(mocks.harnessGetConfig).toHaveBeenCalledOnce();
     expect(mocks.createKimiDeviceId).toHaveBeenCalledWith(
-      '/tmp/kimi-export-home',
+      '/tmp/nori-export-home',
       expect.objectContaining({ onFirstLaunch: expect.any(Function) }),
     );
     expect(mocks.initializeTelemetry).toHaveBeenCalledWith({
-      homeDir: '/tmp/kimi-export-home',
+      homeDir: '/tmp/nori-export-home',
       deviceId: 'device-1',
-      enabled: true,
+      enabled: false,
       appName: 'nori-code-cli',
       version: expect.any(String),
       uiMode: 'shell',
@@ -500,14 +502,14 @@ describe('kimi export', () => {
 
     expect(mocks.createKimiDeviceId).toHaveBeenNthCalledWith(
       1,
-      '/tmp/kimi-export-home',
+      '/tmp/nori-export-home',
       expect.objectContaining({ onFirstLaunch: expect.any(Function) }),
     );
     expect(mocks.createKimiDeviceId.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.kimiHarnessConstructor.mock.invocationCallOrder[0]!,
     );
     expect(mocks.kimiHarnessConstructor).toHaveBeenCalledWith(
-      expect.objectContaining({ homeDir: '/tmp/kimi-export-home' }),
+      expect.objectContaining({ homeDir: '/tmp/nori-export-home' }),
     );
     expect(mocks.harnessTrack).toHaveBeenCalledWith('first_launch');
     expect(mocks.initializeTelemetry.mock.invocationCallOrder[0]).toBeLessThan(

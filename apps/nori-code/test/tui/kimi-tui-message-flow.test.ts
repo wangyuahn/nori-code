@@ -3832,7 +3832,7 @@ command = "vim"
 
       await vi.waitFor(() => {
         expect(session.installPlugin).toHaveBeenCalledWith(
-          resolve(process.cwd(), '../../plugins/official/kimi-datasource'),
+          resolve(process.cwd(), 'plugins/official/kimi-datasource'),
         );
       });
     } finally {
