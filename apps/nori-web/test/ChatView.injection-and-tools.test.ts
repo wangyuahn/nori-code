@@ -51,6 +51,7 @@ describe('ChatView tool details and context injection', () => {
     const details = container.querySelector<HTMLDetailsElement>('.compact-tool-call')!;
     expect(details).not.toBeNull();
     expect(details.open).toBe(false);
+    expect(details.querySelector('.compact-tool-icon')).not.toBeNull();
     await act(async () => {
       details.open = true;
       details.dispatchEvent(new Event('toggle'));

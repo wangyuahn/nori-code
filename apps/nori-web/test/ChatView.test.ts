@@ -1444,7 +1444,11 @@ describe('conversation presentation', () => {
     // 正在跑的那一段自动展开，之前已经结束的段落保持收起。
     expect(liveGroups[1]?.classList.contains('live')).toBe(true);
     expect(liveGroups[1]?.open).toBe(true);
+    expect(liveGroups[1]?.classList.contains('is-open')).toBe(true);
     expect(liveGroups[0]?.open).toBe(false);
+    expect(liveGroups[0]?.classList.contains('is-open')).toBe(false);
+    expect(liveGroups[0]?.querySelector(':scope > summary')).not.toBeNull();
+    expect(liveGroups[0]?.querySelector(':scope > .work-group-clip > .work-group-body')).not.toBeNull();
     const groupRows = [...liveGroups[0]!.querySelectorAll('.work-group-body > *')].map(node => node.className);
     expect(groupRows[0]).toContain('work-thinking-line');
     expect(groupRows[1]).toContain('compact-tool-call');
@@ -1477,8 +1481,13 @@ describe('conversation presentation', () => {
       await Promise.resolve();
     });
     expect(groups[0]?.open).toBe(true);
+    expect(groups[0]?.classList.contains('is-open')).toBe(true);
+    expect(groups[0]?.querySelector(':scope > summary')).not.toBeNull();
+    expect(groups[0]?.querySelector(':scope > .work-group-clip > .work-group-body')).not.toBeNull();
     const thought = groups[0]!.querySelector<HTMLDetailsElement>('.work-thinking-line')!;
     expect(thought.open).toBe(false);
+    expect(thought.querySelector('.work-thinking-label')).not.toBeNull();
+    expect(thought.querySelector('.work-thinking-label svg')).not.toBeNull();
     await act(async () => {
       thought.querySelector('summary')?.click();
       await Promise.resolve();
@@ -1490,6 +1499,7 @@ describe('conversation presentation', () => {
     const toolRow = groups[0]!.querySelector<HTMLDetailsElement>('.compact-tool-call')!;
     expect(toolRow.open).toBe(false);
     expect(toolRow.querySelector('.compact-tool-headline')?.textContent).toMatch(/Read|读取/);
+    expect(toolRow.querySelector('.compact-tool-icon')).not.toBeNull();
     expect(toolRow.querySelector('.compact-tool-chevron')).not.toBeNull();
     await act(async () => {
       toolRow.querySelector('summary')?.click();
@@ -1519,11 +1529,15 @@ describe('conversation presentation', () => {
       await Promise.resolve();
     });
     expect(group.open).toBe(true);
+    expect(group.classList.contains('is-open')).toBe(true);
+    expect(group.querySelector(':scope > summary')).not.toBeNull();
+    expect(group.querySelector(':scope > .work-group-clip > .work-group-body')).not.toBeNull();
     const headlines = [...group.querySelectorAll('.compact-tool-headline')].map(node => node.textContent);
     expect(headlines).toEqual([
       expect.stringMatching(/pnpm test/),
       expect.stringMatching(/pnpm typecheck/),
     ]);
+    expect(group.querySelectorAll('.compact-tool-icon')).toHaveLength(2);
   });
 
   it('builds compact tool headlines for common tool names', () => {

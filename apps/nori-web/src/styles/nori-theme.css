@@ -2519,7 +2519,7 @@ kbd {
   list-style: none;
 }
 .compact-tool-call > summary::-webkit-details-marker { display: none; }
-.compact-tool-icon { display: grid; width: 19px; height: 19px; place-items: center; border-radius: 4px; color: var(--nori-cyan); background: color-mix(in srgb, var(--nori-cyan) 9%, transparent); }
+.compact-tool-icon { display: grid; flex: none; width: 19px; height: 19px; place-items: center; border-radius: 4px; color: var(--nori-cyan); background: color-mix(in srgb, var(--nori-cyan) 9%, transparent); }
 .compact-tool-call > strong { margin: 0; color: var(--nori-text-secondary); font-size: calc(9px * var(--nori-ui-font-scale)); text-transform: none; }
 .compact-tool-call > span:nth-child(3) { min-width: 0; overflow: hidden; color: var(--nori-text-muted); font-family: var(--nori-font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .compact-tool-call > small, .compact-tool-call > summary > small { color: var(--nori-success); font-size: calc(8px * var(--nori-ui-font-scale)); }
@@ -4094,8 +4094,8 @@ kbd {
    外面去——所以工作流里每一层 grid 的轨道都必须写成 minmax(0, 1fr)。 */
 .work-thinking-line { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 1px 0 2px; min-width: 0; }
 .work-thinking-line > p, .context-injection-row > pre { min-width: 0; }
-.work-thinking-label { display: flex; align-items: center; gap: 5px; color: var(--nori-text-muted); font-size: calc(9px * var(--nori-ui-font-scale)); }
-.work-thinking-label > svg { color: var(--nori-thinking); }
+.work-thinking-label { display: flex; min-width: 0; flex: 1; align-items: center; gap: 5px; color: var(--nori-thinking); font-size: calc(9px * var(--nori-ui-font-scale)); }
+.work-thinking-label > svg { flex: none; color: var(--nori-thinking); }
 .work-thinking-line > p { max-height: 260px; margin: 0; overflow: auto; color: var(--nori-text-muted); font: italic calc(11px * var(--nori-ui-font-scale))/1.6 var(--nori-font); white-space: pre-wrap; overflow-wrap: anywhere; }
 .work-thinking-line.live > p { max-height: none; }
 /* 工具调用：一行一条（`Read foo.tsx ›`），点一下就地展开细节。 */
@@ -5664,12 +5664,6 @@ kbd {
   border-radius: 0;
   background: transparent;
 }
-.chat-work-group[open] {
-  overflow: hidden;
-  border: 1px solid var(--nori-border);
-  border-radius: 10px;
-  background: var(--nori-surface);
-}
 .chat-work-group > summary {
   display: flex;
   min-height: 22px;
@@ -5679,13 +5673,8 @@ kbd {
   cursor: pointer;
   list-style: none;
 }
-.chat-work-group[open] > summary {
-  min-height: 28px;
-  padding: 6px 10px;
-}
 .chat-work-group > summary::-webkit-details-marker { display: none; }
-.chat-work-group:not([open]) > summary:hover .work-group-headline { color: var(--nori-text-secondary); }
-.chat-work-group[open] > summary:hover { background: var(--nori-surface-hover); }
+.chat-work-group > summary:hover .work-group-headline { color: var(--nori-text-secondary); }
 .work-group-headline {
   min-width: 0;
   overflow: hidden;
@@ -5695,19 +5684,41 @@ kbd {
   white-space: nowrap;
 }
 .chat-work-group.live .work-group-headline { color: var(--nori-text-secondary); }
-.work-group-chevron { flex: none; margin-left: auto; color: var(--nori-text-muted); transition: transform .16s ease; }
-.chat-work-group[open] > summary .work-group-chevron { transform: rotate(180deg); }
+.work-group-chevron { flex: none; margin-left: auto; color: var(--nori-text-muted); transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1); }
+.chat-work-group.is-open > summary .work-group-chevron { transform: rotate(180deg); }
+/* Closed <details> uses display:none on non-summary children, which skips height
+   transitions. Keep the clip in the tree and drive 0fr/1fr from `.is-open`. */
+details.chat-work-group > .work-group-clip {
+  display: grid !important;
+  grid-template-rows: 0fr;
+  overflow: hidden;
+  transition: grid-template-rows 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+details.chat-work-group.is-open > .work-group-clip {
+  grid-template-rows: 1fr;
+}
+.work-group-clip > .work-group-body {
+  min-height: 0;
+  overflow: hidden;
+}
 .work-group-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
-  padding: 0 10px 8px;
-  border-top: 1px solid var(--nori-border);
+  margin-top: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--nori-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--nori-surface-raised) 70%, transparent);
 }
 .work-group-body > * + * {
   border-top: 1px solid color-mix(in srgb, var(--nori-border) 70%, transparent);
   padding-top: 4px;
   margin-top: 4px;
+}
+@media (prefers-reduced-motion: reduce) {
+  details.chat-work-group > .work-group-clip,
+  .work-group-chevron { transition: none; }
 }
 /* 思考行也能折叠：合起来只留首行预览，展开后是完整的暗淡斜体正文。 */
 .work-thinking-line > summary {
@@ -5731,7 +5742,7 @@ kbd {
   white-space: nowrap;
 }
 .work-thinking-line.live > summary .work-thinking-preview { color: var(--nori-text-secondary); }
-.work-thinking-chevron { flex: none; color: var(--nori-text-muted); transition: transform .16s ease; }
+.work-thinking-chevron { flex: none; color: var(--nori-text-muted); transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1); }
 .work-thinking-line[open] > summary .work-thinking-chevron { transform: rotate(90deg); }
 .work-thinking-line[open] > p {
   margin-top: 4px;
