@@ -256,7 +256,7 @@ export function describeMapErrorSummary(
     return clipMapText(report);
   }
   const skip = member.agent?.summary?.trim();
-  if (isMapTimeoutFailure(skip)) return clipMapText(skip);
+  if (skip !== undefined && isMapTimeoutFailure(skip)) return clipMapText(skip);
   const runtime = mapRuntimeStatus(mapMemberStatus(member));
   if (runtime !== 'error' && runtime !== 'stopped') return undefined;
   if (skip !== undefined && skip.length > 0) return clipMapText(skip);
