@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,7 +10,8 @@ import { I18nProvider } from '../src/i18n';
 import { modelThinkingOptions, resolveComposerThinking } from '../src/utils/model-thinking';
 import { projectFileMention, referenceProjectFile } from '../src/projectFileReference';
 import type { NoriBrowserState, NoriDesktopAPI } from '../src/types/nori-desktop';
-import themeCss from '../src/styles/nori-theme.css?raw';
+
+const themeCss = readFileSync(path.resolve('src/styles/nori-theme.css'), 'utf8');
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -1751,8 +1754,9 @@ describe('live work group boundaries', () => {
     expect(themeCss).toMatch(/\.work-thinking-line\s*>\s*p\s*\{[^}]*max-height:\s*260px/);
     expect(themeCss).not.toMatch(/\.work-thinking-line\.live\s*>\s*p\s*\{[^}]*max-height:\s*none/);
 
+    const thinkingCss = [...themeCss.matchAll(/\.work-thinking-line[^{]*\{[^}]*\}/g)].map(match => match[0]).join('\n');
     const style = document.createElement('style');
-    style.textContent = themeCss;
+    style.textContent = thinkingCss;
     document.head.append(style);
 
     const lines = Array.from({ length: 40 }, (_, index) => `Reasoning line ${String(index + 1)}.`).join('\n');
