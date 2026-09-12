@@ -33,6 +33,7 @@ import {
 import {
   mapNodeCapabilities,
   mapStatusDotClass,
+  formatMapStatusLabel,
   pendingTopologyOpsReady,
   reconcileParentEdgesWithServer,
   upsertParentMapEdge,
@@ -96,24 +97,24 @@ describe('session map layout', () => {
     expect(projectFolderName('C:\\Users\\me\\proj\\')).toBe('proj');
   });
 
-  it('resolves project cwd from session metadata, falling back to host for agent ghosts', () => {
+  it('resolves project cwd from session metadata, falling back to the parent host', () => {
     const root = session({ id: 'root', title: 'Root', metadata: { cwd: '/home/user/nori-code' } });
     const child = session({
       id: 'child',
       title: 'Child',
       metadata: { parent_session_id: 'root', cwd: '/home/user/other-app' },
     });
-    const ghost = session({
-      id: 'agent:root:a1',
+    const hosted = session({
+      id: 'hosted',
       title: 'Reviewer',
       metadata: { parent_session_id: 'root', mount_role: 'reviewer' },
     });
-    const byId = new Map([['root', root], ['child', child]]);
+    const byId = new Map([['root', root], ['child', child], ['hosted', hosted]]);
     expect(memberProjectCwd({ kind: 'session', session: root }, byId)).toBe('/home/user/nori-code');
     expect(memberProjectCwd({ kind: 'session', session: child }, byId)).toBe('/home/user/other-app');
     expect(memberProjectCwd({
-      kind: 'agent',
-      session: ghost,
+      kind: 'session',
+      session: hosted,
       hostSessionId: 'root',
       agent: { agent_id: 'a1', kind: 'team', name: 'Reviewer', role: 'reviewer', status: 'idle' },
     }, byId)).toBe('/home/user/nori-code');
@@ -151,10 +152,17 @@ describe('session map layout', () => {
     expect(child!.y).toBeGreaterThan(root!.y);
   });
 
-  it('hangs agent-only members under their host session', () => {
-    const nodes = [session({ id: 'root', title: 'Root' })];
+  it('does not place synthetic agent cards; mounted members overlay the session', () => {
+    const nodes = [
+      session({ id: 'root', title: 'Root' }),
+      session({
+        id: 'child',
+        title: 'Reviewer',
+        metadata: { parent_session_id: 'root', mount_role: 'reviewer' },
+      }),
+    ];
     const { placed, edges } = layoutSessionMountForest(
-      { nodes, edges: [] },
+      { nodes, edges: [{ child_session_id: 'child', parent_session_id: 'root' }] },
       [{
         kind: 'agent',
         hostSessionId: 'root',
@@ -169,11 +177,14 @@ describe('session map layout', () => {
           name: 'Reviewer',
           role: 'reviewer',
           status: 'idle',
+          mounted_session_id: 'child',
         },
       }],
     );
     expect(placed).toHaveLength(2);
     expect(edges).toHaveLength(1);
+    expect(placed.some((node) => node.member.session.id.startsWith('agent:'))).toBe(false);
+    expect(placed.find((node) => node.member.session.id === 'child')?.member.agent?.agent_id).toBe('a1');
   });
 
   it('does not place a stale agent ghost when another host claims a mounted session', () => {
@@ -234,6 +245,17 @@ describe('session map layout', () => {
     );
     expect(centered.x).toBe(16 + (1000 - 16) / 2 - (100 + 220 / 2));
     expect(centered.y).toBe(72 + (600 - 72 - 36) / 2 - (50 + 88 / 2));
+  });
+
+  it('formats a readable map status with running duration', () => {
+    expect(formatMapStatusLabel('idle')).toBe('idle');
+    expect(formatMapStatusLabel('awaiting_approval')).toBe('waiting');
+    expect(formatMapStatusLabel('aborted')).toBe('stopped');
+    expect(formatMapStatusLabel(
+      'running',
+      '2026-01-01T00:00:00.000Z',
+      Date.parse('2026-01-01T00:02:00.000Z'),
+    )).toBe('running · 2m');
   });
 });
 
@@ -361,9 +383,19 @@ describe('SessionMapPage smoke', () => {
     }
   });
 
-  it('shows host project on agent ghosts when the ghost has no cwd', async () => {
-    const nodes = [session({ id: 'a', title: 'Alpha', metadata: { cwd: '/work/demo-app' } })];
-    vi.spyOn(api.sessions, 'getGraph').mockResolvedValue({ nodes, edges: [] });
+  it('shows host project on mounted children when the child has no cwd', async () => {
+    const nodes = [
+      session({ id: 'a', title: 'Alpha', metadata: { cwd: '/work/demo-app' } }),
+      session({
+        id: 'child',
+        title: 'Reviewer',
+        metadata: { parent_session_id: 'a', mount_role: 'reviewer' },
+      }),
+    ];
+    vi.spyOn(api.sessions, 'getGraph').mockResolvedValue({
+      nodes,
+      edges: [{ child_session_id: 'child', parent_session_id: 'a' }],
+    });
     vi.spyOn(api.sessions, 'getAgents').mockResolvedValue({
       items: [{
         agent_id: 'member_1',
@@ -371,6 +403,7 @@ describe('SessionMapPage smoke', () => {
         name: 'Reviewer',
         role: 'reviewer',
         status: 'idle',
+        mounted_session_id: 'child',
       }],
     });
     mockViewport();
@@ -395,8 +428,8 @@ describe('SessionMapPage smoke', () => {
       const project = memberNode!.querySelector('.team-node-project');
       expect(project?.textContent).toMatch(/demo-app/);
       expect(project?.getAttribute('title')).toBe('/work/demo-app');
-      expect(memberNode!.querySelector('.session-map-port-in')).toBeNull();
-      expect(memberNode!.querySelector('.session-map-port-out')).toBeNull();
+      expect(memberNode!.querySelector('.session-map-port-in')).not.toBeNull();
+      expect(memberNode!.querySelector('.session-map-port-out')).not.toBeNull();
     } finally {
       await act(async () => { root.unmount(); });
       container.remove();
@@ -433,7 +466,7 @@ describe('SessionMapPage smoke', () => {
     }
   });
 
-  it('opens agent-only members through onOpenAgent without creating sessions', async () => {
+  it('does not render agent ghost cards when a team member has no mounted session', async () => {
     const nodes = [session({ id: 'a', title: 'Alpha' })];
     vi.spyOn(api.sessions, 'getGraph').mockResolvedValue({ nodes, edges: [] });
     vi.spyOn(api.sessions, 'getAgents').mockResolvedValue({
@@ -465,14 +498,12 @@ describe('SessionMapPage smoke', () => {
         await Promise.resolve();
       });
 
-      expect(container.textContent).toContain('Reviewer');
-      const memberNode = [...container.querySelectorAll<HTMLElement>('.session-map-node')]
-        .find((el) => el.textContent?.includes('Reviewer'));
-      expect(memberNode).toBeTruthy();
-      await act(async () => { memberNode!.click(); });
-      expect(onOpenAgent).toHaveBeenCalledWith('a', expect.objectContaining({ agent_id: 'member_1' }));
+      expect(container.querySelectorAll('.session-map-node')).toHaveLength(1);
+      expect(container.textContent).not.toContain('Reviewer');
+      expect([...container.querySelectorAll<HTMLElement>('.session-map-node')]
+        .some((el) => el.dataset.sessionId?.startsWith('agent:'))).toBe(false);
       expect(api.sessions.createChild).not.toHaveBeenCalled();
-      expect(onOpenSession).not.toHaveBeenCalled();
+      expect(onOpenAgent).not.toHaveBeenCalled();
     } finally {
       await act(async () => { root.unmount(); });
       container.remove();
@@ -1166,7 +1197,8 @@ describe('SessionMapPage smoke', () => {
       mounted_session_id: 'child',
     }]);
     expect(members).toHaveLength(1);
-    expect(members[0]!.session.id).toBe('agent:host:a1');
+    expect(members[0]!.session.id).toBe('child');
+    expect(members[0]!.kind).toBe('session');
     saveCachedMapAgents(cachedAgentsFromMapMembers(members));
     expect(loadCachedMapAgents()).toEqual(expect.arrayContaining([
       expect.objectContaining({ hostId: 'host', agentId: 'a1', title: 'Reviewer' }),
@@ -1887,59 +1919,31 @@ describe('wire gesture click suppression (live regressions)', () => {
   });
 
   it('(p) near-miss drop shows error instead of create-new draft', async () => {
-    const nodes = [session({ id: 'a', title: 'Alpha' })];
-    vi.spyOn(api.sessions, 'getGraph').mockResolvedValue({ nodes, edges: [] });
-    vi.spyOn(api.sessions, 'getAgents').mockResolvedValue({
-      items: [{
-        agent_id: 'ghost',
-        kind: 'team',
-        name: 'Ghost member',
-        status: 'idle',
-      }],
-    });
+    const nodes = [
+      session({ id: 'a', title: 'Alpha' }),
+      session({ id: 'b', title: 'Beta' }),
+    ];
     const createChild = vi.spyOn(api.sessions, 'createChild');
     const mount = vi.spyOn(api.sessions, 'mount');
-    mockViewport();
-    stubPointerEvents();
-    localStorage.removeItem('nori-session-map-doc');
-    const container = document.createElement('div');
-    document.body.append(container);
-    const root = createRoot(container);
-    await act(async () => {
-      root.render(createElement(I18nProvider, null, createElement(SessionMapPage, {
-        sessions: nodes,
-        onOpenSession: vi.fn(),
-      })));
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    const map = await renderMap(nodes, [], { onOpenSession: vi.fn() });
     try {
-      const cards = [...container.querySelectorAll<HTMLElement>('.session-map-node')];
-      expect(cards.length).toBeGreaterThanOrEqual(2);
-      const aCard = cards.find((el) => el.dataset.sessionId === 'a')!;
-      const ghostCard = cards.find((el) => el.textContent?.includes('Ghost'))!;
-      const canvas = container.querySelector<HTMLElement>('.session-map-canvas')!;
-      const match = /translate3d\(([-\d.]+)px,\s*([-\d.]+)px,\s*0\)\s*scale\(([-\d.]+)\)/.exec(canvas.style.transform)!;
-      const viewX = Number(match[1]);
-      const viewY = Number(match[2]);
-      const scale = Number(match[3]);
-      const ghostCx = Number.parseFloat(ghostCard.style.left) + 110;
-      const ghostCy = Number.parseFloat(ghostCard.style.top) + 48;
+      const aCard = map.card('a');
+      const bCard = map.card('b');
+      const view = map.canvasTransform();
       const nearMiss = {
-        x: (ghostCx + 44) * scale + viewX,
-        y: ghostCy * scale + viewY,
+        x: (Number.parseFloat(bCard.style.left) + 110 + 44) * view.scale + view.x,
+        y: (Number.parseFloat(bCard.style.top) + 48) * view.scale + view.y,
       };
       const outPort = aCard.querySelector<HTMLElement>('.session-map-port-out')!;
       await dragWire(outPort, nearMiss, 35);
       expect(createChild).not.toHaveBeenCalled();
       expect(mount).not.toHaveBeenCalled();
-      expect(container.querySelector('.session-map-draft-node')).toBeNull();
-      expect(container.querySelector('.session-map-error')).not.toBeNull();
-      expect(container.textContent).toMatch(/missed the node|未命中|real session|真实会话/);
+      expect(map.container.querySelector('.session-map-draft-node')).toBeNull();
+      expect(map.container.querySelector('.session-map-error')).not.toBeNull();
+      expect(map.container.textContent).toMatch(/missed the node|未命中|real session|真实会话/);
     } finally {
-      await act(async () => { root.unmount(); });
-      container.remove();
+      await act(async () => { map.root.unmount(); });
+      map.container.remove();
       localStorage.removeItem('nori-session-map-doc');
     }
   });
@@ -2041,6 +2045,67 @@ describe('wire gesture click suppression (live regressions)', () => {
       expect(del).toHaveBeenCalledWith('a');
       expect(del).toHaveBeenCalledWith('b');
       expect(unmount).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => { map.root.unmount(); });
+      map.container.remove();
+      localStorage.removeItem('nori-session-map-doc');
+    }
+  });
+
+  it('shows a selection toolbar with stop and a readable running badge', async () => {
+    const nodes = [
+      session({
+        id: 'a',
+        title: 'Alpha',
+        status: 'running',
+        updated_at: '2026-01-01T00:00:00.000Z',
+      }),
+      session({ id: 'b', title: 'Beta' }),
+    ];
+    const abort = vi.spyOn(api.sessions, 'abort').mockResolvedValue(undefined as never);
+    const map = await renderMap(nodes, [], { onOpenSession: vi.fn() });
+    try {
+      const badge = map.card('a').querySelector('.session-map-status-badge');
+      expect(badge?.textContent).toMatch(/running/);
+      const stage = map.container.querySelector<HTMLElement>('.session-map-stage');
+      const aPoint = map.clientPointOf('a');
+      const bPoint = map.clientPointOf('b');
+      const left = Math.min(aPoint.x, bPoint.x) - 180;
+      const top = Math.min(aPoint.y, bPoint.y) - 120;
+      const right = Math.max(aPoint.x, bPoint.x) + 180;
+      const bottom = Math.max(aPoint.y, bPoint.y) + 120;
+      await act(async () => {
+        stage!.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true, cancelable: true, button: 0,
+          clientX: left, clientY: top, pointerId: 21, pointerType: 'mouse',
+        }));
+      });
+      await act(async () => {
+        stage!.dispatchEvent(new PointerEvent('pointermove', {
+          bubbles: true, cancelable: true,
+          clientX: right, clientY: bottom, pointerId: 21, pointerType: 'mouse',
+        }));
+      });
+      await act(async () => {
+        stage!.dispatchEvent(new PointerEvent('pointerup', {
+          bubbles: true, cancelable: true, button: 0,
+          clientX: right, clientY: bottom, pointerId: 21, pointerType: 'mouse',
+        }));
+      });
+      expect(map.card('a').className).toContain('selected');
+      expect(map.card('b').className).toContain('selected');
+      const toolbar = map.container.querySelector('.session-map-selection-toolbar');
+      expect(toolbar).not.toBeNull();
+      expect(toolbar?.textContent).toMatch(/2 selected|已选 2/);
+      const stop = [...toolbar!.querySelectorAll('button')].find((el) => /Stop|停止/.test(el.textContent ?? ''));
+      expect(stop).toBeTruthy();
+      await act(async () => {
+        stop!.click();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(abort).toHaveBeenCalledWith('a');
+      expect(abort).toHaveBeenCalledWith('b');
     } finally {
       await act(async () => { map.root.unmount(); });
       map.container.remove();

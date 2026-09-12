@@ -89,7 +89,7 @@ nori --session
 
 ## 会话挂载树
 
-除 fork/continue 外，会话还可通过元数据中的 `parent_session_id`（以及可选的 `mount_role` / `mount_mandate`）组成**会话地图**。`TeamCreate` 雇佣的是会话内部门 Agent（地图上的成员卡片）；真实挂载子会话来自 Map 画布或 `/map` 挂载。TUI 的 `/map` 与 Web **Map** 视图可在当前工作目录下浏览、打开、挂载、卸载或 remount 节点。
+除 fork/continue 外，会话还可通过元数据中的 `parent_session_id`（以及可选的 `mount_role` / `mount_mandate`）组成**会话地图**。`TeamCreate` 通过创建挂载子会话雇佣——与 Map 画布上的节点是同一类。TUI 的 `/map` 与 Web **Map** 视图可在当前工作目录下浏览、打开、停止、挂载、卸载、remount 或编辑身份。
 
 挂载操作会更新各会话中的 **`<session_self>`**，并可能在下一回合注入 **`<session_mount_changed>`** —— 仅为身份与拓扑，不共享 transcript 历史。详见[团队工程](./team-engineering.md)。
 

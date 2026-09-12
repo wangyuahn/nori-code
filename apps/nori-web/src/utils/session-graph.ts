@@ -21,7 +21,7 @@ export interface MapNodeMember {
   kind: 'session' | 'agent';
 }
 
-export type MapNodeStatusTone = 'running' | 'working' | 'idle' | 'error' | 'other';
+export type MapNodeStatusTone = 'running' | 'working' | 'idle' | 'error' | 'waiting' | 'stopped' | 'other';
 
 export interface MapNodeGraphContext {
   sessions: readonly Session[];
@@ -64,11 +64,56 @@ export function mapStatusTone(status: string): MapNodeStatusTone {
   const normalized = status.trim().toLowerCase();
   if (normalized === 'running') return 'running';
   if (normalized === 'working') return 'working';
-  if (normalized === 'idle' || normalized === 'pending' || normalized === 'stopped' || normalized === 'paused') {
-    return 'idle';
+  if (normalized === 'awaiting_approval' || normalized === 'awaiting_question' || normalized === 'waiting') {
+    return 'waiting';
   }
+  if (normalized === 'aborted' || normalized === 'stopped' || normalized === 'paused') return 'stopped';
+  if (normalized === 'idle' || normalized === 'pending') return 'idle';
   if (normalized === 'error' || normalized === 'failed') return 'error';
   return 'other';
+}
+
+export type MapRuntimeStatus = 'idle' | 'running' | 'working' | 'error' | 'waiting' | 'stopped';
+
+export function mapRuntimeStatus(status: string): MapRuntimeStatus {
+  const tone = mapStatusTone(status);
+  if (tone === 'other') return 'idle';
+  return tone;
+}
+
+export function formatElapsed(ms: number): string | undefined {
+  if (!Number.isFinite(ms) || ms < 0) return undefined;
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${String(Math.max(1, seconds))}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${String(minutes)}m`;
+  const hours = Math.floor(minutes / 60);
+  return `${String(hours)}h ${String(minutes % 60)}m`;
+}
+
+export function formatMapStatusLabel(
+  status: string,
+  lastActive?: string,
+  now = Date.now(),
+): string {
+  const runtime = mapRuntimeStatus(status);
+  const labels: Record<MapRuntimeStatus, string> = {
+    idle: 'idle',
+    running: 'running',
+    working: 'working',
+    error: 'error',
+    waiting: 'waiting',
+    stopped: 'stopped',
+  };
+  const label = labels[runtime];
+  if (
+    (runtime === 'running' || runtime === 'working' || runtime === 'waiting')
+    && lastActive !== undefined
+  ) {
+    const elapsed = formatElapsed(now - Date.parse(lastActive));
+    if (elapsed !== undefined) return `${label} · ${elapsed}`;
+  }
+  return label;
 }
 
 /** CSS class for sidebar-style status dots on map cards and list rows. */
@@ -77,6 +122,8 @@ export function mapStatusDotClass(status: string): string {
   if (tone === 'running') return 'running';
   if (tone === 'working') return 'active';
   if (tone === 'error') return 'error';
+  if (tone === 'waiting') return 'paused';
+  if (tone === 'stopped') return 'stopped';
   if (tone === 'idle') return 'idle';
   return 'stopped';
 }
@@ -87,11 +134,8 @@ export function mapStatusDotClass(status: string): string {
  */
 export function wireSourceParentSessionId(member: MapNodeMember): string | null {
   if (member.kind === 'agent') return null;
-  if (member.kind === 'session') {
-    const id = member.session.id.trim();
-    if (id.length > 0 && !id.startsWith('agent:')) return id;
-  }
-  return null;
+  const id = member.session.id.trim();
+  return id.length > 0 ? id : null;
 }
 
 /** True when the session has no incoming parent edge and no server parent metadata. */
@@ -147,8 +191,8 @@ export function mapNodeCapabilities(
 ): MapNodeCapabilities {
   const { sessions, mapEdges = [], hasOpenAgentHandler = false } = context;
   const wireSessionId = wireSourceParentSessionId(member);
-  const isAgentGhost = member.kind === 'agent' || member.session.id.startsWith('agent:');
-  const isRealSession = member.kind === 'session' && !member.session.id.startsWith('agent:');
+  const isAgentGhost = false;
+  const isRealSession = member.kind === 'session';
   const parentId = parentSessionIdOf(member.session) ?? member.hostSessionId;
   const sessionIdForTop = wireSessionId ?? (isRealSession ? member.session.id : undefined);
   const isTopLevel = parentId === undefined
@@ -171,7 +215,7 @@ export function mapNodeCapabilities(
     && member.agent !== undefined
     && hasOpenAgentHandler;
   const canMountOthers = canWireOut;
-  const displayTier: MapNodeCapabilities['displayTier'] = isAgentGhost || member.agent
+  const displayTier: MapNodeCapabilities['displayTier'] = member.agent
     ? 'member'
     : parentId !== undefined
       ? 'mounted'

@@ -117,6 +117,25 @@ export interface SessionOptions {
   readonly deleteMountedMember?: (sessionId: string) => Promise<void>;
   /** Rebuilds the cached session identity block after team membership changes. */
   readonly refreshSessionSelf?: () => Promise<void>;
+  /**
+   * Hire path: empty child session + mount + dual-write team agent.
+   * Same backend as map canvas createChild.
+   */
+  readonly createMountedChild?: (input: {
+    readonly parentSessionId: string;
+    readonly title: string;
+    readonly role: string;
+    readonly mandate: string;
+    readonly teamLeaderAgentId?: string;
+  }) => Promise<{ readonly sessionId: string; readonly agentId: string }>;
+  /** PATCH name / role / mandate / tags; injects a reminder and does not prompt. */
+  readonly updateSessionIdentity?: (input: {
+    readonly sessionId: string;
+    readonly name?: string;
+    readonly role?: string;
+    readonly mandate?: string;
+    readonly tags?: readonly string[];
+  }) => Promise<void>;
 }
 
 export interface SessionSkillConfig {
@@ -703,13 +722,69 @@ export class Session {
   }
 
   /**
+   * Creates a durable member of `leaderAgentId`'s department as a mounted child
+   * session (same backend as map canvas createChild). Dual-write team agents
+   * remain the Discuss/Assign address in this session.
+   */
+  async createMountedChild(input: {
+    readonly parentSessionId: string;
+    readonly identity: TeamIdentity;
+    readonly teamLeaderAgentId?: string;
+  }): Promise<{ readonly sessionId: string; readonly agentId: string }> {
+    const create = this.options.createMountedChild;
+    if (create === undefined) {
+      throw new KimiError(
+        ErrorCodes.SESSION_STATE_INVALID,
+        'Hiring a team member requires creating a mounted child session.',
+      );
+    }
+    validateTeamIdentity(input.identity);
+    return create({
+      parentSessionId: input.parentSessionId,
+      title: input.identity.name,
+      role: input.identity.role,
+      mandate: input.identity.mandate,
+      teamLeaderAgentId: input.teamLeaderAgentId,
+    });
+  }
+
+  async updateSessionIdentity(input: {
+    readonly sessionId: string;
+    readonly name?: string;
+    readonly role?: string;
+    readonly mandate?: string;
+    readonly tags?: readonly string[];
+  }): Promise<void> {
+    const update = this.options.updateSessionIdentity;
+    if (update === undefined) {
+      throw new KimiError(
+        ErrorCodes.SESSION_STATE_INVALID,
+        'Session identity updates are not available in this runtime.',
+      );
+    }
+    await update(input);
+  }
+
+  async bindMountedSessionId(agentId: string, mountedSessionId: string): Promise<void> {
+    const current = this.metadata.agents[agentId];
+    if (current === undefined || current.kind !== 'team') {
+      throw new KimiError(
+        ErrorCodes.AGENT_NOT_FOUND,
+        `Team member "${agentId}" was not found.`,
+      );
+    }
+    this.metadata.agents[agentId] = { ...current, mountedSessionId };
+    this.invalidateSessionSelfBlock();
+    await this.writeMetadata();
+    this.emitTeamAgentsUpdated();
+    await this.options.refreshSessionSelf?.();
+  }
+
+  /**
    * Creates a durable member of `leaderAgentId`'s department.
    *
-   * A hire is exactly one entity: an agent in this session. It is *not* also
-   * mirrored into a freshly created standalone session — that dual-write is why
-   * the conversation map used to show every member twice and open an empty copy
-   * instead of the member's real transcript. The map reads members straight off
-   * the agent tree and talks to them through `(sessionId, agentId)`.
+   * Product hiring uses {@link createMountedChild}. This method remains for
+   * dual-write attach and tests that seed an in-session agent directly.
    */
   async createTeamMember(
     leaderAgentId: string,
@@ -805,8 +880,8 @@ export class Session {
     this.assertTeamManager(leaderAgentId);
     validateTeamIdentity(input.identity);
 
-    const existing = this.teamMemberMetadata(leaderAgentId).find(
-      ([, meta]) => meta.mountedSessionId === input.mountedSessionId,
+    const existing = Object.entries(this.metadata.agents).find(
+      ([, meta]) => meta.kind === 'team' && meta.mountedSessionId === input.mountedSessionId,
     );
     if (existing !== undefined) {
       const [agentId, current] = existing;
@@ -815,6 +890,8 @@ export class Session {
         name: input.identity.name,
         role: input.identity.role,
         mandate: input.identity.mandate,
+        teamLeaderAgentId: leaderAgentId,
+        parentAgentId: leaderAgentId,
       };
       this.metadata.agents[agentId] = next;
       this.invalidateSessionSelfBlock();
@@ -1925,6 +2002,12 @@ export class Session {
     const mandate = typeof this.metadata.custom['mount_mandate'] === 'string'
       ? this.metadata.custom['mount_mandate'] as string
       : undefined;
+    const tags = Array.isArray(this.metadata.custom['session_tags'])
+      ? (this.metadata.custom['session_tags'] as unknown[])
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0)
+      : undefined;
     const directChildren = Object.entries(this.metadata.agents)
       .filter(([, meta]) => meta.kind === 'team' && meta.teamLeaderAgentId === 'main')
       .map(([agentId, meta]) => ({
@@ -1933,22 +2016,13 @@ export class Session {
         role: meta.role,
         mandate: meta.mandate,
       }));
-    // Keep ordinary top-level / BTW prompts clean. Identity belongs on mounted
-    // members and on hosts that already hired a department.
-    if (
-      parentSessionId === undefined
-      && role === undefined
-      && mandate === undefined
-      && directChildren.length === 0
-    ) {
-      return undefined;
-    }
     const info: SessionSelfInfo = {
       sessionId,
       title: this.metadata.title || sessionId,
       parentSessionId,
       role,
       mandate,
+      tags: tags !== undefined && tags.length > 0 ? tags : undefined,
       depth: parentSessionId === undefined ? 0 : 1,
       position: parentSessionId === undefined ? 'top-level' : 'member',
       directChildren,
@@ -2635,6 +2709,7 @@ export * from './subagent-host';
 const TEAM_MANAGEMENT_TOOLS = [
   'TeamCreate',
   'TeamDismiss',
+  'TeamUpdate',
   'TeamAssign',
   'TeamBroadcast',
   'TeamDM',

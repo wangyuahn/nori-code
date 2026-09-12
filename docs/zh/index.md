@@ -16,7 +16,7 @@ hero:
       link: https://github.com/wangyuahn/nori-code
 features:
   - title: 团队工程
-    details: 用 TeamCreate 雇佣持久伙伴。先 Discuss 再 Code，随后 TeamAssign —— 每位伙伴都是会话地图上的部门 Agent。
+    details: 用 TeamCreate 雇佣持久伙伴。先 Discuss 再 Code，随后 TeamAssign —— 每位伙伴都是会话地图上的真实子会话。
   - title: 会话地图
     details: 会话通过 parent_session_id 连接。在 TUI 用 /map，或在 Nori Work 打开 Map 视图浏览与调整挂载。
   - title: SubAgent DAG

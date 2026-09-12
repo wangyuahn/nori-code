@@ -106,6 +106,7 @@ import {
   mapNodeCapabilities,
   mapParentByChildFromEdges,
   mapStatusDotClass,
+  formatMapStatusLabel,
   mergeGraphWithMapEdges,
   pendingTopologyOpsReady,
   queuePendingTopology,
@@ -116,6 +117,7 @@ import {
   wireSourceParentSessionId,
 } from '../utils/session-graph';
 import { completeMountIdentityFromPrompt } from './mountIdentityComplete';
+import { SessionIdentityDrawer } from './SessionIdentityDrawer';
 import {
   annotationBounds,
   DEFAULT_ANNOTATION_COLORS,
@@ -517,6 +519,7 @@ export function SessionMapPage({
   const [selectionMenu, setSelectionMenu] = useState<SelectionContextMenu | null>(null);
   const [canvasMenu, setCanvasMenu] = useState<CanvasContextMenu | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [identitySession, setIdentitySession] = useState<Session | null>(null);
   const selectedIdsRef = useRef(selectedIds);
   selectedIdsRef.current = selectedIds;
   const [activeLabelIds, setActiveLabelIds] = useState<string[]>([]);
@@ -858,17 +861,12 @@ export function SessionMapPage({
         for (const agent of result.items ?? []) {
           if (agent.kind !== 'team' || agent.archived) continue;
           const mountedId = agent.mounted_session_id;
-          // Nested team: agent lives on forest host, mounted session may hang
-          // under an intermediate parent — still a real dual-write session.
-          const mountedSession = mountedId
-            ? nodes.find((node) => node.id === mountedId)
-            : undefined;
-          // Ghosts keep synthetic agent: ids; dual-write uses the real session.
-          const ghostId = `agent:${hostId}:${agent.agent_id}`;
+          if (mountedId === undefined || mountedId.length === 0) continue;
+          const mountedSession = nodes.find((node) => node.id === mountedId);
           extras.push({
-            kind: mountedSession !== undefined ? 'session' : 'agent',
+            kind: 'session',
             session: mountedSession ?? {
-              id: ghostId,
+              id: mountedId,
               title: sessionAgentDisplayName(agent),
               status: agent.status,
               created_at: agent.last_active ?? new Date().toISOString(),
@@ -1105,10 +1103,8 @@ export function SessionMapPage({
 
   const agentOnlyExtras = useMemo(() => (
     dedupeMapMembers(agentExtras.filter((extra) => {
-      // Dual-write session cards are already in allNodes — never list them twice.
-      if (extra.kind === 'session' && !extra.session.id.startsWith('agent:')) return false;
+      if (extra.kind === 'session') return false;
       const mounted = extra.agent?.mounted_session_id;
-      // Mounted session already on the map — never list an agent: ghost duplicate.
       if (mounted !== undefined && byId.has(mounted)) return false;
       return true;
     }), allNodes)
@@ -1175,7 +1171,7 @@ export function SessionMapPage({
   useEffect(() => {
     const visibleSessionIds = new Set(
       filteredList
-        .filter((member) => member.kind !== 'agent' && !member.session.id.startsWith('agent:'))
+        .filter((member) => member.kind === 'session')
         .map((member) => member.session.id),
     );
     setSelectedIds((ids) => {
@@ -2516,7 +2512,6 @@ export function SessionMapPage({
     const selection = { left, top, right, bottom };
     for (const node of forceNodesRef.current) {
       const sessionId = node.member.session.id;
-      if (sessionId.startsWith('agent:') || node.member.kind === 'agent') continue;
       const nodeLeft = (node.x ?? 0) - NODE_W / 2;
       const nodeTop = (node.y ?? 0) - NODE_H / 2;
       if (rectsIntersect(selection, {
@@ -2821,8 +2816,6 @@ export function SessionMapPage({
     event.preventDefault();
     const selectedNodes = forceNodesRef.current.filter((candidate) => (
       selectedIds.includes(candidate.member.session.id)
-      && !candidate.member.session.id.startsWith('agent:')
-      && candidate.member.kind !== 'agent'
     ));
     if (selectedNodes.length === 0) return;
     const primary = selectedNodes[0]!;
@@ -2999,13 +2992,6 @@ export function SessionMapPage({
       if (disposedRef.current) return;
       positionsRef.current.delete(`session:${sessionId}`);
       persistDoc(removeEdgesForSession(mapDocRef.current, sessionId));
-      // Prune pinned positions of agent ghosts hosted by the deleted session.
-      // Map iterators stay valid while deleting the current key.
-      for (const key of positionsRef.current.keys()) {
-        if (key.startsWith(`agent:${sessionId}:`)) {
-          positionsRef.current.delete(key);
-        }
-      }
       persistPositions(positionsRef.current);
       await refresh();
       if (disposedRef.current) return;
@@ -3020,7 +3006,7 @@ export function SessionMapPage({
   };
 
   const deleteSelectedSessions = async () => {
-    const ids = selectedIds.filter((id) => !id.startsWith('agent:'));
+    const ids = [...selectedIds];
     if (ids.length === 0) return;
 
     const warnings: string[] = [];
@@ -3061,11 +3047,6 @@ export function SessionMapPage({
           if (disposedRef.current) return;
           doc = removeEdgesForSession(doc, sessionId);
           positionsRef.current.delete(`session:${sessionId}`);
-          for (const key of positionsRef.current.keys()) {
-            if (key.startsWith(`agent:${sessionId}:`)) {
-              positionsRef.current.delete(key);
-            }
-          }
         } catch (err) {
           failures.push(tr(
             `Delete ${sessionId.slice(0, 8)}…: ${err instanceof Error ? err.message : String(err)}`,
@@ -3094,6 +3075,119 @@ export function SessionMapPage({
       if (!disposedRef.current) setBusyLocked(false);
       else busyRef.current = false;
     }
+  };
+
+  const selectedMembers = (): MapMemberRef[] => {
+    const wanted = new Set(selectedIds);
+    return forceNodesRef.current
+      .filter((node) => wanted.has(node.member.session.id))
+      .map((node) => node.member);
+  };
+
+  const abortSessionMember = async (member: MapMemberRef): Promise<void> => {
+    const tasks = [api.sessions.abort(member.session.id)];
+    if (member.agent !== undefined && member.hostSessionId !== undefined) {
+      tasks.push(api.sessions.abort(member.hostSessionId, member.agent.agent_id));
+    }
+    const results = await Promise.allSettled(tasks);
+    const failed = results.find((result) => result.status === 'rejected');
+    if (failed !== undefined && failed.status === 'rejected') {
+      throw failed.reason;
+    }
+  };
+
+  const abortSelectedSessions = async () => {
+    const members = selectedMembers();
+    if (members.length === 0) return;
+    setBusyLocked(true);
+    clearError();
+    setSelectionMenu(null);
+    const failures: string[] = [];
+    try {
+      for (const member of members) {
+        try {
+          await abortSessionMember(member);
+        } catch (err) {
+          failures.push(memberLabel(member) + ': ' + (err instanceof Error ? err.message : String(err)));
+        }
+      }
+      await refresh();
+      if (failures.length > 0) {
+        showError(tr(
+          `Stop finished with ${String(failures.length)} failure(s): ${failures.slice(0, 3).join(' · ')}`,
+          `停止完成，${String(failures.length)} 项失败：${failures.slice(0, 3).join(' · ')}`,
+        ));
+      } else {
+        showHint(tr(
+          `Stopped ${String(members.length)} session(s).`,
+          `已停止 ${String(members.length)} 个会话。`,
+        ));
+      }
+    } finally {
+      if (!disposedRef.current) setBusyLocked(false);
+      else busyRef.current = false;
+    }
+  };
+
+  const unmountSelectedSessions = async () => {
+    const ids = selectedIds.filter((id) => parentSessionIdOf(byId.get(id)) !== undefined);
+    if (ids.length === 0) {
+      showHint(tr('No mounted sessions in the selection.', '选中项里没有已挂载会话。'));
+      return;
+    }
+    const confirmed = window.confirm(tr(
+      `Unmount ${String(ids.length)} selected session(s) to top-level?`,
+      `将已选中的 ${String(ids.length)} 个会话拆挂为顶层？`,
+    ));
+    if (!confirmed) return;
+    setBusyLocked(true);
+    clearError();
+    setSelectionMenu(null);
+    const failures: string[] = [];
+    try {
+      for (const sessionId of ids) {
+        try {
+          const child = byId.get(sessionId);
+          if (sessionIsBusy(child)) {
+            persistDoc(queuePendingTopology(mapDocRef.current, {
+              kind: 'unmount',
+              childSessionId: sessionId,
+            }));
+            continue;
+          }
+          await api.sessions.unmount(sessionId);
+          persistDoc(disconnectParentEdges(mapDocRef.current, sessionId));
+        } catch (err) {
+          failures.push(sessionId.slice(0, 8) + ': ' + (err instanceof Error ? err.message : String(err)));
+        }
+      }
+      await refresh();
+      onGraphChanged?.();
+      if (failures.length > 0) {
+        showError(tr(
+          `Unmount finished with ${String(failures.length)} failure(s).`,
+          `拆挂完成，${String(failures.length)} 项失败。`,
+        ));
+      }
+    } finally {
+      if (!disposedRef.current) setBusyLocked(false);
+      else busyRef.current = false;
+    }
+  };
+
+  const openSelectedSession = () => {
+    const members = selectedMembers();
+    const member = members[0];
+    if (member === undefined) return;
+    openMember(member);
+  };
+
+  const openIdentityForSession = (sessionId: string) => {
+    const session = byId.get(sessionId);
+    if (session === undefined) return;
+    setNodeMenu(null);
+    setSelectionMenu(null);
+    setIdentitySession(session);
   };
 
   const openNodeContextMenu = (
@@ -3509,6 +3603,18 @@ export function SessionMapPage({
                         <span className="team-node-name" title={memberLabel(member)}>
                           <i className={`status-dot ${statusClass}`} aria-hidden />
                           {memberLabel(member)}
+                          <em
+                            className={`session-map-status-badge tone-${caps.statusTone}`}
+                            title={formatMapStatusLabel(
+                              caps.status,
+                              member.agent?.last_active ?? member.session.updated_at,
+                            )}
+                          >
+                            {formatMapStatusLabel(
+                              caps.status,
+                              member.agent?.last_active ?? member.session.updated_at,
+                            )}
+                          </em>
                         </span>
                         <span className="team-node-sub" title={tierLabel}>
                           {tierLabel}
@@ -3554,11 +3660,22 @@ export function SessionMapPage({
                         <span
                           className="session-map-pending"
                           title={tr(
-                            `Queued ${pendingOp.kind} until idle`,
-                            `已排队 ${pendingOp.kind === 'unmount' ? '拆挂' : pendingOp.kind === 'remount' ? '改挂' : '挂载'}，等待空闲`,
+                            `Queued ${pendingOp.kind} until idle (${pendingOp.queuedAt})`,
+                            `已排队 ${pendingOp.kind === 'unmount' ? '拆挂' : pendingOp.kind === 'remount' ? '改挂' : '挂载'}，等待空闲（${pendingOp.queuedAt}）`,
                           )}
                         >
-                          {tr('queued', '排队中')}
+                          {tr(
+                            pendingOp.kind === 'unmount'
+                              ? 'queued unmount'
+                              : pendingOp.kind === 'remount'
+                                ? 'queued remount'
+                                : 'queued mount',
+                            pendingOp.kind === 'unmount'
+                              ? '排队拆挂'
+                              : pendingOp.kind === 'remount'
+                                ? '排队改挂'
+                                : '排队挂载',
+                          )}
                         </span>
                       )}
                       {caps.canDisconnect && bindAnnotationId === null && (
@@ -3706,8 +3823,8 @@ export function SessionMapPage({
             <h2>{tr('Conversation Map', '对话地图')}</h2>
             <div className="session-map-count">
               {tr(
-                `${String(allNodes.length)} sessions · ${String(agentOnlyExtras.length)} agents · ${String(filteredList.length)} shown`,
-                `${String(allNodes.length)} 个会话 · ${String(agentOnlyExtras.length)} 个代理 · 显示 ${String(filteredList.length)}`,
+                `${String(allNodes.length)} sessions · ${String(filteredList.length)} shown`,
+                `${String(allNodes.length)} 个会话 · 显示 ${String(filteredList.length)}`,
               )}
               {(mapDoc.pendingTopology ?? []).length > 0
                 ? tr(
@@ -3756,6 +3873,8 @@ export function SessionMapPage({
               <span><i className="tone-running" />{tr('Running', '运行中')}</span>
               <span><i className="tone-attention" />{tr('Working', '工作中')}</span>
               <span><i className="tone-idle" />{tr('Idle', '空闲')}</span>
+              <span><i className="tone-waiting" />{tr('Waiting', '等待中')}</span>
+              <span><i className="tone-muted" />{tr('Stopped', '已停止')}</span>
               <span><i className="tone-error" />{tr('Error', '错误')}</span>
             </div>
           </div>
@@ -3973,6 +4092,60 @@ export function SessionMapPage({
                 : tr('Right-click new session · right-drag pan · Shift+drag peer · Alt+drag service · Alt+click IN to disconnect', '右键新建会话 · 右键拖动画布 · Shift 对等连线 · Alt 服务连线 · Alt+点击输入口断连')}
         </span>
 
+        {(mapDoc.pendingTopology ?? []).length > 0 && (
+          <div className="session-map-float session-map-queued-banner" role="status">
+            {tr(
+              `${String((mapDoc.pendingTopology ?? []).length)} topology change(s) waiting for idle sessions.`,
+              `${String((mapDoc.pendingTopology ?? []).length)} 项拓扑变更正在等待会话空闲。`,
+            )}
+          </div>
+        )}
+
+        {selectedIds.length > 0 && (
+          <div className="session-map-float session-map-selection-toolbar" role="toolbar">
+            <span className="session-map-selection-count">
+              {tr(
+                `${String(selectedIds.length)} selected`,
+                `已选 ${String(selectedIds.length)}`,
+              )}
+            </span>
+            <button type="button" className="session-map-tool" disabled={busy} onClick={() => openSelectedSession()}>
+              {tr('Open', '打开')}
+            </button>
+            <button type="button" className="session-map-tool" disabled={busy} onClick={() => void abortSelectedSessions()}>
+              {tr('Stop', '停止')}
+            </button>
+            <button
+              type="button"
+              className="session-map-tool"
+              disabled={busy || selectedIds.length !== 1}
+              onClick={() => {
+                const id = selectedIds[0];
+                if (id !== undefined) openIdentityForSession(id);
+              }}
+            >
+              {tr('Settings', '设置')}
+            </button>
+            <button type="button" className="session-map-tool" disabled={busy} onClick={() => void unmountSelectedSessions()}>
+              {tr('Unmount', '拆挂')}
+            </button>
+            <button type="button" className="session-map-tool danger" disabled={busy} onClick={() => void deleteSelectedSessions()}>
+              {tr('Delete', '删除')}
+            </button>
+          </div>
+        )}
+
+        {identitySession !== null && (
+          <SessionIdentityDrawer
+            session={identitySession}
+            onClose={() => setIdentitySession(null)}
+            onSaved={() => {
+              void refresh();
+              onGraphChanged?.();
+            }}
+          />
+        )}
+
         {selectionMenu !== null && (
           <div
             className="session-map-context-menu session-map-float"
@@ -3988,15 +4161,26 @@ export function SessionMapPage({
               {tr('Annotate', '注释')}
             </button>
             {selectedIds.length > 0 && (
-              <button
-                type="button"
-                role="menuitem"
-                className="danger"
-                disabled={busy}
-                onClick={() => void deleteSelectedSessions()}
-              >
-                {tr(`Delete (${String(selectedIds.length)})`, `删除 (${String(selectedIds.length)})`)}
-              </button>
+              <>
+                <button type="button" role="menuitem" disabled={busy} onClick={() => openSelectedSession()}>
+                  {tr('Open', '打开')}
+                </button>
+                <button type="button" role="menuitem" disabled={busy} onClick={() => void abortSelectedSessions()}>
+                  {tr('Stop', '停止')}
+                </button>
+                <button type="button" role="menuitem" disabled={busy} onClick={() => void unmountSelectedSessions()}>
+                  {tr('Unmount', '拆挂')}
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="danger"
+                  disabled={busy}
+                  onClick={() => void deleteSelectedSessions()}
+                >
+                  {tr(`Delete (${String(selectedIds.length)})`, `删除 (${String(selectedIds.length)})`)}
+                </button>
+              </>
             )}
           </div>
         )}
@@ -4024,6 +4208,41 @@ export function SessionMapPage({
               }}
             >
               {tr('New child session', '新建子会话')}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={busy}
+              onClick={() => {
+                const node = forceNodesRef.current.find((candidate) => (
+                  candidate.member.session.id === nodeMenu.sessionId
+                ));
+                if (node !== undefined) openMember(node.member);
+                setNodeMenu(null);
+              }}
+            >
+              {tr('Open chat', '打开对话')}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={busy}
+              onClick={() => {
+                const node = forceNodesRef.current.find((candidate) => (
+                  candidate.member.session.id === nodeMenu.sessionId
+                ));
+                if (node !== undefined) void abortSessionMember(node.member).then(() => refresh());
+                setNodeMenu(null);
+              }}
+            >
+              {tr('Stop', '停止')}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => openIdentityForSession(nodeMenu.sessionId)}
+            >
+              {tr('Session settings…', '会话设置…')}
             </button>
             {nodeMenu.canSelfBootstrapRole && (
               <button

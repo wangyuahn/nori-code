@@ -17,6 +17,7 @@ import {
   type SessionCreate,
   type SessionFork,
   type SessionGraphResponse,
+  type SessionIdentityUpdate,
   type SessionMount,
   type SessionRemount,
   type SessionStatusResponse,
@@ -61,6 +62,9 @@ export interface ISessionService {
   listChildren(id: string, query: SessionListQuery): Promise<PageResponse<Session>>;
 
   createChild(id: string, input: SessionChildCreate): Promise<Session>;
+
+  /** Update name / role / mandate / tags; injects a reminder and does not prompt. */
+  updateIdentity(id: string, input: SessionIdentityUpdate): Promise<Session>;
 
   /** Mount `id` under `parent_session_id` (single parent; rejects cycles). */
   mount(id: string, input: SessionMount): Promise<Session>;

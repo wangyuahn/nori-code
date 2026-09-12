@@ -305,6 +305,7 @@ function makeSessionService(): {
     fork: vi.fn() as unknown as ISessionService['fork'],
     listChildren: vi.fn() as unknown as ISessionService['listChildren'],
     createChild: vi.fn() as unknown as ISessionService['createChild'],
+    updateIdentity: vi.fn() as unknown as ISessionService['updateIdentity'],
     mount: vi.fn() as unknown as ISessionService['mount'],
     unmount: vi.fn() as unknown as ISessionService['unmount'],
     remount: vi.fn() as unknown as ISessionService['remount'],

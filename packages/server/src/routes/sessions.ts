@@ -25,6 +25,7 @@ import {
   sessionStatusSchema,
   startBtwSessionResponseSchema,
   unmountSessionRequestSchema,
+  updateSessionIdentityRequestSchema,
   updateSessionProfileRequestSchema,
   undoSessionRequestSchema,
   undoSessionResponseSchema,
@@ -445,6 +446,38 @@ export function registerSessionsRoutes(
     getProfileRoute.path,
     getProfileRoute.options,
     getProfileRoute.handler as Parameters<SessionRouteHost['get']>[2],
+  );
+
+  const updateIdentityRoute = defineRoute(
+    {
+      method: 'PATCH',
+      path: '/sessions/{session_id}/identity',
+      params: sessionIdParamSchema,
+      body: updateSessionIdentityRequestSchema,
+      success: { data: sessionSchema },
+      errors: {
+        [ErrorCode.VALIDATION_FAILED]: { detailsSchema },
+        [ErrorCode.SESSION_NOT_FOUND]: {},
+      },
+      description: 'Update session identity (name, role, mandate, tags) without starting a turn',
+      tags: ['sessions'],
+    },
+    async (req, reply) => {
+      try {
+        const { session_id } = req.params;
+        const session = await ix.invokeFunction((a) =>
+          a.get(ISessionService).updateIdentity(session_id, req.body),
+        );
+        reply.send(okEnvelope(session, req.id));
+      } catch (err) {
+        sendMappedError(reply, req.id, err);
+      }
+    },
+  );
+  app.patch(
+    updateIdentityRoute.path,
+    updateIdentityRoute.options,
+    updateIdentityRoute.handler as Parameters<SessionRouteHost['patch']>[2],
   );
 
   const updateProfileRoute = defineRoute(

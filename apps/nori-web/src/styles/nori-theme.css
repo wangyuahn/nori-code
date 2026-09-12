@@ -1707,7 +1707,7 @@ kbd {
 .spinner-small { width: 13px; height: 13px; border-width: 1.5px; }
 
 /* Conversation */
-.chat-view { --chat-content-max-width: 920px; --chat-content-gutter: clamp(18px, 5%, 52px); height: 100%; min-height: 0; display: flex; flex-direction: column; container-type: inline-size; background: transparent; }
+.chat-view { --chat-content-max-width: 920px; --chat-content-gutter: clamp(18px, 5%, 52px); height: 100%; min-height: 0; display: flex; flex-direction: column; container-type: inline-size; background: transparent; position: relative; }
 .eyebrow { color: var(--nori-text-muted); font-size: calc(9px * var(--nori-ui-font-scale)); font-weight: 700; letter-spacing: 0; text-transform: uppercase; }
 .chat-messages-shell { position: relative; min-height: 0; flex: 1; }
 .chat-messages { flex: 1; overflow-y: auto; padding: 28px max(var(--chat-content-gutter), calc((100% - var(--chat-content-max-width)) / 2)); }
@@ -4511,6 +4511,7 @@ kbd {
 .team-tree-legend i.tone-discuss { background: transparent; box-shadow: inset 0 0 0 2px var(--nori-accent, currentColor); }
 .team-tree-legend i.tone-idle { background: var(--nori-border); }
 .team-tree-legend i.tone-attention { background: #d9a13c; }
+.team-tree-legend i.tone-waiting { background: #d9a13c; opacity: .7; }
 .team-tree-legend i.tone-error { background: var(--nori-danger, #e5534b); }
 /* 团队树是张画布：空白处拖动平移、滚轮缩放，所以自己不滚动。 */
 .team-tree-viewport {
@@ -4928,13 +4929,122 @@ kbd {
   overflow: hidden;
 }
 .session-map-node .team-node-name {
-  display: block !important;
+  display: flex !important;
+  align-items: center;
+  gap: 6px;
   flex: 0 0 auto;
   font-size: calc(13px * var(--nori-ui-font-scale));
   line-height: 1.25;
   white-space: nowrap !important;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.session-map-status-badge {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-style: normal;
+  font-weight: 600;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 999px;
+  color: var(--nori-text-secondary);
+  background: color-mix(in srgb, var(--nori-border) 55%, transparent);
+}
+.session-map-status-badge.tone-running,
+.session-map-status-badge.tone-working {
+  color: var(--nori-ok, #3fb27f);
+  background: color-mix(in srgb, var(--nori-ok, #3fb27f) 18%, transparent);
+}
+.session-map-status-badge.tone-waiting {
+  color: var(--nori-warning, #d9a13c);
+  background: color-mix(in srgb, var(--nori-warning, #d9a13c) 18%, transparent);
+}
+.session-map-status-badge.tone-error {
+  color: var(--nori-danger, #e5534b);
+  background: color-mix(in srgb, var(--nori-danger, #e5534b) 18%, transparent);
+}
+.session-map-selection-toolbar {
+  left: 50%;
+  bottom: 52px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--nori-surface, #111) 88%, transparent);
+  border: 1px solid var(--nori-border);
+  z-index: 8;
+}
+.session-map-selection-count {
+  font-size: 12px;
+  color: var(--nori-text-secondary);
+  padding: 0 4px;
+}
+.session-map-queued-banner {
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--nori-warning, #d9a13c) 16%, var(--nori-surface, #111));
+  border: 1px solid color-mix(in srgb, var(--nori-warning, #d9a13c) 45%, transparent);
+  z-index: 7;
+}
+.session-identity-drawer {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  background: color-mix(in srgb, #000 28%, transparent);
+}
+.session-identity-drawer-panel {
+  width: min(360px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  padding: 16px;
+  background: var(--nori-surface, #151515);
+  border-left: 1px solid var(--nori-border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.session-identity-drawer-panel header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.session-identity-drawer-panel header p,
+.session-identity-drawer-error {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--nori-text-secondary);
+}
+.session-identity-drawer-error { color: var(--nori-danger, #e5534b); }
+.session-identity-drawer-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--nori-text-secondary);
+}
+.session-identity-drawer-panel input,
+.session-identity-drawer-panel textarea {
+  border: 1px solid var(--nori-border);
+  background: transparent;
+  color: var(--nori-text);
+  border-radius: 6px;
+  padding: 8px;
+  font: inherit;
+}
+.session-identity-drawer-panel footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
 }
 .session-map-node .team-node-sub {
   display: block !important;

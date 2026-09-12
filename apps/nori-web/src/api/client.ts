@@ -1106,6 +1106,16 @@ export function createClient(
           { method: 'POST', body: { title } },
         ),
 
+      updateIdentity: (
+        id: string,
+        patch: { name?: string; role?: string; mandate?: string; tags?: string[] },
+      ) =>
+        request<Session>(
+          `/sessions/${encodeURIComponent(id)}/identity`,
+          undefined,
+          { method: 'PATCH', body: patch },
+        ),
+
       fork: (id: string, title?: string) => request<Session>(
         `/sessions/${encodeURIComponent(id)}:fork`,
         undefined,

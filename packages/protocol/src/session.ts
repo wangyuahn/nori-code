@@ -136,6 +136,7 @@ export const sessionChildCreateSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).optional(),
   role: z.string().min(1).optional(),
   mandate: z.string().min(1).optional(),
+  name: z.string().min(1).optional(),
 });
 
 export type SessionChildCreate = z.infer<typeof sessionChildCreateSchema>;
@@ -146,6 +147,7 @@ export const sessionMountSchema = z.object({
   /** P1 identity fields — stored on the mounted session when provided. */
   role: z.string().min(1).optional(),
   mandate: z.string().min(1).optional(),
+  name: z.string().min(1).optional(),
 });
 
 export type SessionMount = z.infer<typeof sessionMountSchema>;
@@ -155,3 +157,20 @@ export type SessionRemount = z.infer<typeof sessionRemountSchema>;
 
 export const sessionUnmountSchema = z.object({});
 export type SessionUnmount = z.infer<typeof sessionUnmountSchema>;
+
+export const sessionIdentityUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  role: z.string().trim().min(1).max(4_000).optional(),
+  mandate: z.string().trim().min(1).max(4_000).optional(),
+  tags: z.array(z.string().trim().min(1).max(40)).max(16).optional(),
+}).strict().refine(
+  (value) => (
+    value.name !== undefined
+    || value.role !== undefined
+    || value.mandate !== undefined
+    || value.tags !== undefined
+  ),
+  { message: 'At least one of name, role, mandate, or tags is required' },
+);
+
+export type SessionIdentityUpdate = z.infer<typeof sessionIdentityUpdateSchema>;

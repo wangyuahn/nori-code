@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  formatIdentityChangeNotice,
   formatMountChangeNotice,
   formatSessionSelf,
 } from '../../src/session/session-self';
@@ -20,6 +21,7 @@ describe('session-self', () => {
       parentTitle: 'Root',
       role: 'reviewer',
       mandate: 'Review diffs',
+      tags: ['review', 'maps'],
       depth: 1,
       position: 'member',
       directChildren: [
@@ -29,6 +31,7 @@ describe('session-self', () => {
     expect(block).toContain('<session_self>');
     expect(block).toContain('Parent: sess_root (Root)');
     expect(block).toContain('Role: reviewer');
+    expect(block).toContain('Tags: review, maps');
     expect(block).toContain('sess_b');
     expect(block).not.toContain('summary');
   });
@@ -47,6 +50,22 @@ describe('session-self', () => {
     expect(notice).toContain('<session_mount_changed>');
     expect(notice).toContain('previous parent');
     expect(notice).toContain('not a transcript summary');
+  });
+
+  it('describes identity changes without starting a turn', () => {
+    const notice = formatIdentityChangeNotice(
+      {
+        session_id: 'sess_a',
+        name: 'Reviewer',
+        role: 'reviewer',
+        tags: ['review'],
+      },
+      'parent',
+    );
+    expect(notice).toContain('<session_identity_changed>');
+    expect(notice).toContain('you are the parent');
+    expect(notice).toContain('Tags: review');
+    expect(notice).toContain('does not start a turn');
   });
 });
 

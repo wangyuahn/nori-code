@@ -6,6 +6,7 @@ export const CHILD_SESSION_KIND = 'child';
 export const MOUNT_ROLE_KEY = 'mount_role';
 export const MOUNT_MANDATE_KEY = 'mount_mandate';
 export const MOUNT_NAME_KEY = 'mount_name';
+export const SESSION_TAGS_KEY = 'session_tags';
 
 export const DEFAULT_MOUNT_MEMBER_ROLE = 'member';
 export const DEFAULT_MOUNT_MEMBER_MANDATE = 'Member mounted on the conversation map.';
@@ -32,6 +33,18 @@ export function readMountMandate(
 export function readMountName(metadata: Record<string, unknown> | undefined): string | undefined {
   const value = metadata?.[MOUNT_NAME_KEY];
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+export function readSessionTags(
+  metadata: Record<string, unknown> | undefined,
+): readonly string[] | undefined {
+  const value = metadata?.[SESSION_TAGS_KEY];
+  if (!Array.isArray(value)) return undefined;
+  const tags = value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+  return tags.length > 0 ? tags : undefined;
 }
 
 export function normalizeOptionalMountString(value: string | undefined): string | undefined {

@@ -15,6 +15,7 @@ const DEFAULT_APPROVE_TOOLS = new Set([
   'AskUserQuestion',
   'TeamCreate',
   'TeamDismiss',
+  'TeamUpdate',
   'TeamAssign',
   'TeamBroadcast',
   'TeamDM',

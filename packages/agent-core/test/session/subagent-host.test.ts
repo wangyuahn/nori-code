@@ -2133,6 +2133,7 @@ describe('Session.createAgent', () => {
       'UpdateGoal',
       'mcp__*',
       'TeamCreate',
+      'TeamUpdate',
       'TeamDecide',
       'TeamStatus',
     ]));
@@ -2251,6 +2252,7 @@ describe('Session.createAgent', () => {
     expect(member.agent.tools.activeToolNames()).toEqual(expect.arrayContaining([
       'TeamCreate',
       'TeamDismiss',
+      'TeamUpdate',
       'TeamAssign',
       'TeamBroadcast',
       'TeamDiscussInvite',
@@ -2366,15 +2368,8 @@ describe('Session.createAgent', () => {
   });
 
   it('lets a Team Agent hire its own members up to the configured depth', async () => {
-    const session = new Session({
+    const session = hireableSession({
       id: 'test-department-depth',
-      kaos: createFakeKaos({
-        mkdir: vi.fn().mockResolvedValue(undefined),
-        writeText: vi.fn().mockResolvedValue(0),
-      }),
-      homedir: '/tmp/kimi-session',
-      rpc: createSessionRpc(),
-      initializeMainAgent: false,
       config: { providers: {}, team: { maxDepth: 2 } },
     });
     const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
@@ -2878,6 +2873,52 @@ describe('Session.createAgent', () => {
     expect(session.getAgentMetadata(member.id)).toBeUndefined();
     expect(deleteMountedMember).toHaveBeenCalledWith('sess-mounted-reviewer');
     expect(refreshSystemPrompt).toHaveBeenCalled();
+  });
+
+  it('TeamCreate hires a mounted child session and returns its session id', async () => {
+    const session = hireableSession({ id: 'test-team-create-mounted' });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const host = new SessionSubagentHost(session, main.id);
+    const [member] = await host.createTeam([{
+      name: 'Reviewer',
+      mandate: 'Review behavior before changes.',
+      role: 'reviewer',
+    }]);
+    expect(member?.sessionId).toMatch(/^sess_Reviewer/);
+    expect(session.getAgentMetadata(member!.agentId)?.mountedSessionId).toBe(member!.sessionId);
+  });
+
+  it('TeamUpdate patches identity without prompting a turn', async () => {
+    const prompt = vi.fn();
+    const identityUpdates: Array<{
+      sessionId: string;
+      name?: string;
+      tags?: readonly string[];
+    }> = [];
+    const session = hireableSession({
+      id: 'test-team-update-identity',
+      updateSessionIdentity: async (input) => {
+        identityUpdates.push(input);
+      },
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const host = new SessionSubagentHost(session, main.id);
+    const [member] = await host.createTeam([{
+      name: 'Reviewer',
+      mandate: 'Review PRs.',
+      role: 'reviewer',
+    }]);
+    await host.updateTeamIdentity({
+      agentId: member!.agentId,
+      name: 'Lead reviewer',
+      tags: ['review'],
+    });
+    expect(identityUpdates).toEqual([expect.objectContaining({
+      sessionId: member!.sessionId,
+      name: 'Lead reviewer',
+      tags: ['review'],
+    })]);
+    expect(prompt).not.toHaveBeenCalled();
   });
 
   it('TeamDismiss persists agent removal before deleting mounted sessions', async () => {
@@ -3525,6 +3566,36 @@ function fakeSession(
       },
     ),
   } as unknown as Session;
+}
+
+function hireableSession(
+  options: ConstructorParameters<typeof Session>[0] & { id: string },
+): Session {
+  let session!: Session;
+  session = new Session({
+    kaos: createFakeKaos({
+      mkdir: vi.fn().mockResolvedValue(undefined),
+      writeText: vi.fn().mockResolvedValue(0),
+    }),
+    homedir: '/tmp/kimi-session',
+    rpc: createSessionRpc(),
+    initializeMainAgent: false,
+    ...options,
+    createMountedChild: options.createMountedChild ?? (async (input) => {
+      const sessionId = `sess_${input.title.replace(/\s+/g, '_')}`;
+      const { agentId } = await session.attachMountedTeamMember({
+        mountedSessionId: sessionId,
+        identity: {
+          name: input.title,
+          role: input.role,
+          mandate: input.mandate,
+        },
+        teamLeaderAgentId: input.teamLeaderAgentId ?? 'main',
+      });
+      return { sessionId, agentId };
+    }),
+  });
+  return session;
 }
 
 function contextProfile(): ResolvedAgentProfile {

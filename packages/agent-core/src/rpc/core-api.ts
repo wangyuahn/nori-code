@@ -171,6 +171,7 @@ export interface MountSessionPayload {
   readonly parentSessionId: string;
   readonly role?: string;
   readonly mandate?: string;
+  readonly name?: string;
 }
 
 export interface UnmountSessionPayload {
@@ -511,6 +512,18 @@ export interface AttachMountedTeamMemberResult {
   readonly agentId: string;
 }
 
+export interface BindMountedTeamMemberPayload {
+  readonly agentId: string;
+  readonly mountedSessionId: string;
+}
+
+export interface UpdateSessionIdentityPayload {
+  readonly name?: string;
+  readonly role?: string;
+  readonly mandate?: string;
+  readonly tags?: readonly string[];
+}
+
 type AgentAPIWithId = WithAgentId<AgentAPI>;
 
 export interface SessionAPI extends AgentAPIWithId {
@@ -539,6 +552,10 @@ export interface SessionAPI extends AgentAPIWithId {
   attachMountedTeamMember: (
     payload: AttachMountedTeamMemberPayload,
   ) => AttachMountedTeamMemberResult;
+  /** Point an existing team agent at a child session (ghost → real session). */
+  bindMountedTeamMember: (
+    payload: BindMountedTeamMemberPayload,
+  ) => void;
 }
 
 type SessionAPIWithId = WithSessionId<SessionAPI>;
@@ -566,6 +583,10 @@ export interface CoreAPI extends SessionAPIWithId {
   remountSession: (payload: MountSessionPayload) => SessionSummary;
   /** Promote a mounted session to top-level. */
   unmountSession: (payload: UnmountSessionPayload) => SessionSummary;
+  /** Update name / role / mandate / tags; injects a reminder and does not prompt. */
+  updateSessionIdentity: (
+    payload: WithSessionId<UpdateSessionIdentityPayload>,
+  ) => SessionSummary;
   exportSession: (payload: ExportSessionPayload) => ExportSessionResult;
   listPlugins: (payload: EmptyPayload) => readonly PluginSummary[];
   installPlugin: (payload: InstallPluginPayload) => PluginSummary;

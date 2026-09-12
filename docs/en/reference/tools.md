@@ -84,17 +84,18 @@ Collaboration tools handle inter-Agent coordination, user interaction, and Skill
 | Tool | Default Approval | Description |
 | --- | --- | --- |
 | `SubAgent` | Auto-allow in SubAgent mode; otherwise requires approval | Launch one or many temporary SubAgents |
-| `TeamCreate` | Auto-allow | Create durable team partners |
+| `TeamCreate` | Auto-allow | Hire durable team partners as child sessions |
 | `TeamDecide` | Auto-allow | Start/continue discussion, or vote after execution |
 | `TeamSpeak` | Auto-allow | Publish a discussion statement; not calling it records the turn as skipped (abstention) |
 | `TeamAssign` | Auto-allow | Assign work; success leaves Discuss and enters Code |
-| `TeamDismiss` | Auto-allow | Dismiss department members (and delete a mounted session only if one exists) |
+| `TeamUpdate` | Auto-allow | Update name, role, mandate, or tags without starting a turn |
+| `TeamDismiss` | Auto-allow | Dismiss department members and delete their child sessions |
 | `AskUserQuestion` | Auto-allow | Ask the user a question to gather structured input |
 | `Skill` | Auto-allow | Invoke a registered inline Skill |
 
 **`SubAgent`** is the unified temporary-delegation tool. Launch one or many full child transcripts with `prompt_template` + `items`, `tasks` (including `depends_on` DAGs), or `resume_agent_ids`. Completed SubAgents are archived in the parent session. If a model response calls `SubAgent`, that call must be the only tool call in the response. Do not use SubAgent during Discuss; call TeamAssign first.
 
-**`TeamCreate`** requires a unique `name`, `role`, and `mandate` for every member. Each hire is an in-session department agent shown as a member card on the conversation map — it does not create a mounted child session. Use the Map canvas to create or mount real sessions. **`TeamDismiss`** removes members from the department; provide `reason`, and use `confirm_active=true` only after accepting interruption of active work. If the member was hired by a map mount (`session_id` / `mounted_session_id` set), that child session is also deleted. **`TeamDecide`** `action=start` requires `topic` and the lead `statement`. Members publish only with `TeamSpeak`. After execution, `action=vote` does not require Discuss; every team member votes (`discuss_again` / `proceed` / `abstain`), including members left idle with `task=null`.
+**`TeamCreate`** requires a unique `name`, `role`, and `mandate` for every member. Each hire creates a real mounted child session (a session card on the conversation map) and a dual-write team agent so Discuss/Assign still address this department. **`TeamDismiss`** removes members from the department and deletes that child session; provide `reason`, and use `confirm_active=true` only after accepting interruption of active work. Unmount on the map is a separate user action that detaches without deleting. **`TeamUpdate`** changes name, role, mandate, or tags; related sessions receive a reminder and do not start a turn. **`TeamDecide`** `action=start` requires `topic` and the lead `statement`. Members publish only with `TeamSpeak`. After execution, `action=vote` does not require Discuss; every team member votes (`discuss_again` / `proceed` / `abstain`), including members left idle with `task=null`.
 
 Session mount changes refresh **`<session_self>`** in each affected session's system prompt and may inject **`<session_mount_changed>`** on the next turn. This is identity and topology only — not transcript sharing. See [Team engineering](../guides/team-engineering.md#identity-session_self-and-mount-changes).
 

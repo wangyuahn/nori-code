@@ -100,27 +100,50 @@ export class SessionSubagentHost {
     members: readonly TeamIdentity[],
   ): Promise<Array<{
     readonly agentId: string;
+    readonly sessionId: string;
     readonly identity: TeamIdentity;
   }>> {
     this.assertDepartmentManager();
     this.preflightTeamCreation(members);
+    const currentSessionId = this.session.options.id;
+    if (currentSessionId === undefined) {
+      throw new Error('TeamCreate requires a session id.');
+    }
+    const ownerMeta = this.session.getAgentMetadata(this.ownerAgentId);
+    const mountParentId = ownerMeta?.mountedSessionId ?? currentSessionId;
     const created: Array<{
       readonly agentId: string;
+      readonly sessionId: string;
       readonly identity: TeamIdentity;
     }> = [];
     try {
       for (const identity of members) {
-        const { id } = await this.session.createTeamMember(this.ownerAgentId, identity);
+        const child = await this.session.createMountedChild({
+          parentSessionId: mountParentId,
+          identity,
+          teamLeaderAgentId: mountParentId === currentSessionId ? this.ownerAgentId : 'main',
+        });
+        let agentId = child.agentId;
         created.push({
-          agentId: id,
+          agentId,
+          sessionId: child.sessionId,
           identity,
         });
+        if (mountParentId !== currentSessionId) {
+          const attached = await this.session.attachMountedTeamMember({
+            mountedSessionId: child.sessionId,
+            identity,
+            teamLeaderAgentId: this.ownerAgentId,
+          });
+          agentId = attached.agentId;
+          created[created.length - 1] = {
+            agentId,
+            sessionId: child.sessionId,
+            identity,
+          };
+        }
       }
     } catch (error) {
-      // Profile bootstrapping can still fail after a successful preflight. Do
-      // not leave the durable first members behind when a later one fails.
-      // TeamCreate owns only the durable in-session agent. Explicit map mounts
-      // remain independent and are handled by the mount API.
       if (created.length > 0) {
         try {
           await this.session.dismissTeamMembers(
@@ -172,6 +195,46 @@ export class SessionSubagentHost {
     confirmActive: boolean,
   ): Promise<void> {
     await this.session.dismissTeamMembers(this.ownerAgentId, agentIds, reason, confirmActive);
+  }
+
+  async updateTeamIdentity(input: {
+    readonly agentId?: string;
+    readonly name?: string;
+    readonly role?: string;
+    readonly mandate?: string;
+    readonly tags?: readonly string[];
+  }): Promise<void> {
+    this.assertDepartmentManager();
+    const targetAgentId = input.agentId ?? this.ownerAgentId;
+    const sessionId = this.resolveIdentitySessionId(targetAgentId);
+    await this.session.updateSessionIdentity({
+      sessionId,
+      name: input.name,
+      role: input.role,
+      mandate: input.mandate,
+      tags: input.tags,
+    });
+  }
+
+  private resolveIdentitySessionId(agentId: string): string {
+    const currentSessionId = this.session.options.id;
+    if (currentSessionId === undefined) {
+      throw new Error('Session identity updates require a session id.');
+    }
+    if (agentId === this.ownerAgentId) {
+      const self = this.session.getAgentMetadata(agentId);
+      return self?.mountedSessionId ?? currentSessionId;
+    }
+    const member = this.session.teamMemberMetadata(this.ownerAgentId)
+      .find(([id]) => id === agentId);
+    if (member === undefined) {
+      throw new Error(`Team member "${agentId}" is not in your department.`);
+    }
+    const mounted = member[1].mountedSessionId;
+    if (mounted === undefined) {
+      throw new Error(`Team member "${agentId}" has no mounted session to update.`);
+    }
+    return mounted;
   }
 
   async assignTeam(
@@ -487,7 +550,7 @@ export class SessionSubagentHost {
         report_status: meta.teamReport?.status ?? null,
         report_summary: meta.teamReport?.summary ?? null,
         report_received: meta.teamReport?.receivedAt !== undefined,
-        ...(meta.mountedSessionId === undefined ? {} : { session_id: meta.mountedSessionId }),
+        session_id: meta.mountedSessionId ?? null,
       });
       if (agent.turn.hasActiveTurn && meta.assignedAt !== undefined) {
         this.session.notifyRunningTeamMember(agentId, meta.assignedAt);

@@ -350,6 +350,81 @@ function makeFakeBridge(state: FakeBridgeState): ICoreProcessService {
         return { agentId };
       },
     ),
+    bindMountedTeamMember: vi.fn().mockImplementation(
+      async (payload: { sessionId: string; agentId: string; mountedSessionId: string }) => {
+        const meta = state.metas.get(payload.sessionId);
+        if (meta === undefined) throw new Error(`no metadata for ${payload.sessionId}`);
+        const current = meta.agents[payload.agentId];
+        if (current === undefined) throw new Error(`no agent ${payload.agentId}`);
+        state.metas.set(payload.sessionId, {
+          ...meta,
+          agents: {
+            ...meta.agents,
+            [payload.agentId]: { ...current, mountedSessionId: payload.mountedSessionId },
+          },
+        });
+      },
+    ),
+    prompt: vi.fn(),
+    updateSessionIdentity: vi.fn().mockImplementation(
+      async (payload: {
+        sessionId: string;
+        name?: string;
+        role?: string;
+        mandate?: string;
+        tags?: readonly string[];
+      }) => {
+        const summary = state.sessions.find((session) => session.id === payload.sessionId);
+        if (summary === undefined) throw new Error(`missing session ${payload.sessionId}`);
+        if (payload.name !== undefined) {
+          state.renamedTitles.set(payload.sessionId, payload.name);
+        }
+        const existing = state.metas.get(payload.sessionId) ?? {
+          title: payload.name ?? '',
+          createdAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString(),
+          isCustomTitle: payload.name !== undefined,
+          agents: {},
+          custom: {},
+        };
+        const custom: Record<string, unknown> = { ...existing.custom };
+        if (payload.name !== undefined) custom.mount_name = payload.name;
+        if (payload.role !== undefined) custom.mount_role = payload.role;
+        if (payload.mandate !== undefined) custom.mount_mandate = payload.mandate;
+        if (payload.tags !== undefined) custom.session_tags = [...payload.tags];
+        state.metas.set(payload.sessionId, {
+          ...existing,
+          title: payload.name ?? existing.title,
+          custom,
+        });
+        const index = state.sessions.findIndex((session) => session.id === payload.sessionId);
+        if (index >= 0) {
+          state.sessions[index] = {
+            ...state.sessions[index]!,
+            title: payload.name ?? state.sessions[index]!.title,
+            metadata: { ...state.sessions[index]!.metadata, ...custom },
+          };
+        }
+        const parentId = typeof custom.parent_session_id === 'string' ? custom.parent_session_id : undefined;
+        const recipients = [payload.sessionId];
+        if (parentId !== undefined) {
+          recipients.push(parentId);
+          for (const entry of state.sessions) {
+            if (entry.id === payload.sessionId) continue;
+            if (entry.metadata?.['parent_session_id'] === parentId) recipients.push(entry.id);
+          }
+        }
+        for (const sessionId of new Set(recipients)) {
+          state.injectedReminders.push({
+            sessionId,
+            agentId: 'main',
+            content: `<session_identity_changed>\nChanged session: ${payload.sessionId}\nReason: identity\n</session_identity_changed>`,
+            variant: 'identity_changed',
+          });
+        }
+        return state.sessions.find((session) => session.id === payload.sessionId)!;
+      },
+    ),
   };
   return {
     rpc: rpc as CoreRPC,
@@ -357,6 +432,19 @@ function makeFakeBridge(state: FakeBridgeState): ICoreProcessService {
     dispose: () => undefined,
     _serviceBrand: undefined,
   };
+}
+
+function seedLiveSession(state: FakeBridgeState, id: string, workDir: string): void {
+  if (state.sessions.some((session) => session.id === id)) return;
+  state.sessions.push({
+    id,
+    workDir,
+    sessionDir: `/tmp/sessions/${id}`,
+    createdAt: 1,
+    updatedAt: 1,
+    metadata: { cwd: workDir },
+    title: id,
+  });
 }
 
 function freshState(): FakeBridgeState {
@@ -1142,6 +1230,24 @@ describe('SessionService children', () => {
     expect(child.metadata).not.toHaveProperty('source');
   });
 
+  it('writes the child name onto mount metadata', async () => {
+    const source = await svc.create({
+      metadata: { cwd: '/tmp/child-name' },
+      title: 'Parent',
+    });
+    const child = await svc.createChild(source.id, {
+      title: 'Reviewer',
+      role: 'reviewer',
+      mandate: 'Review diffs',
+    });
+    expect(child.metadata).toMatchObject({
+      parent_session_id: source.id,
+      mount_name: 'Reviewer',
+      mount_role: 'reviewer',
+      mount_mandate: 'Review diffs',
+    });
+  });
+
   it('deletes the created child when mounting fails', async () => {
     const source = await svc.create({
       metadata: { cwd: '/tmp/child-rollback' },
@@ -1505,6 +1611,65 @@ describe('SessionService mount', () => {
     expect(state.injectedReminders.some((entry) => entry.content.includes('<session_mount_changed>'))).toBe(true);
     expect(state.metas.get(subject.id)?.custom['session_self']).toContain('<session_self>');
   });
+
+  it('updateIdentity injects a reminder and does not prompt', async () => {
+    const parent = await svc.create({ metadata: { cwd: '/tmp/identity' }, title: 'Parent' });
+    const child = await svc.createChild(parent.id, {
+      title: 'Reviewer',
+      role: 'reviewer',
+      mandate: 'Review diffs',
+    });
+    state.injectedReminders.length = 0;
+
+    const updated = await svc.updateIdentity(child.id, {
+      name: 'Lead reviewer',
+      tags: ['review'],
+    });
+
+    expect(updated.title).toBe('Lead reviewer');
+    expect(updated.metadata).toMatchObject({
+      mount_name: 'Lead reviewer',
+      session_tags: ['review'],
+    });
+    expect(bridge.rpc.prompt).not.toHaveBeenCalled();
+    expect(state.injectedReminders.length).toBeGreaterThan(0);
+    expect(state.injectedReminders.some((entry) => (
+      entry.variant === 'identity_changed'
+      && entry.content.includes('<session_identity_changed>')
+    ))).toBe(true);
+  });
+
+  it('migrates ghost team members into mounted child sessions', async () => {
+    const host = await svc.create({ metadata: { cwd: '/tmp/ghosts' }, title: 'Host' });
+    const hostMeta = state.metas.get(host.id)!;
+    state.metas.set(host.id, {
+      ...hostMeta,
+      agents: {
+        main: { homedir: '/tmp/main', type: 'main', parentAgentId: null },
+        agent_ghost: {
+          homedir: '/tmp/ghost',
+          type: 'sub',
+          kind: 'team',
+          parentAgentId: 'main',
+          teamLeaderAgentId: 'main',
+          name: 'Ghost Reviewer',
+          role: 'reviewer',
+          mandate: 'Review diffs',
+        },
+      },
+    });
+
+    const graph = await svc.getGraph({});
+    const ghost = state.metas.get(host.id)?.agents['agent_ghost'];
+    expect(ghost?.mountedSessionId).toEqual(expect.any(String));
+    const child = graph.nodes.find((node) => node.id === ghost?.mountedSessionId);
+    expect(child).toBeDefined();
+    expect(child?.metadata).toMatchObject({
+      parent_session_id: host.id,
+      mount_role: 'reviewer',
+      mount_name: 'Ghost Reviewer',
+    });
+  });
 });
 
 describe('SessionService agent tree', () => {
@@ -1532,6 +1697,7 @@ describe('SessionService agent tree', () => {
       },
       custom: {},
     });
+    seedLiveSession(state, 'sess_mounted_reviewer', '/tmp/agent-tree');
     state.usages.set(created.id, {
       total: { inputOther: 10, output: 4, inputCacheRead: 2, inputCacheCreation: 1 },
     });
@@ -1578,10 +1744,17 @@ describe('SessionService agent tree', () => {
       isCustomTitle: true,
       agents: {
         main: { homedir: '/tmp/main', type: 'main', parentAgentId: null },
-        agent_member: { homedir: '/tmp/member', type: 'sub', parentAgentId: 'main', kind: 'team' },
+        agent_member: {
+          homedir: '/tmp/member',
+          type: 'sub',
+          parentAgentId: 'main',
+          kind: 'team',
+          mountedSessionId: 'sess_mounted_member',
+        },
       },
       custom: {},
     });
+    seedLiveSession(state, 'sess_mounted_member', '/tmp/stale-status');
     // The member's turn ended without the terminal event reaching this service —
     // a dropped event, a restart, or a turn started by another path. The live
     // agent is the authority, so the tree must not keep showing `running` and

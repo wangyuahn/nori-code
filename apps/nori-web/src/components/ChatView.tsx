@@ -12,6 +12,7 @@ import { ApprovalPanel } from './ApprovalPanel';
 import { MarkdownView } from './MarkdownView';
 import { QuestionPanel } from './QuestionPanel';
 import { SkillPicker } from './SkillPicker';
+import { SessionIdentityDrawer } from './SessionIdentityDrawer';
 import { UsageOverview } from './UsageOverview';
 import { detectImageMime, isLikelyImageFile } from '../utils/image-mime';
 import { toolCallDetailFields } from '../utils/tool-call-detail';
@@ -246,6 +247,7 @@ export function ChatView(props: ChatViewProps) {
   const [permissionMenuOpen, setPermissionMenuOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [modelSettingOpen, setModelSettingOpen] = useState<'model' | 'thinking' | null>(null);
+  const [identityOpen, setIdentityOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const modelOverrideSessionRef = useRef<string | null>(null);
@@ -925,6 +927,7 @@ export function ChatView(props: ChatViewProps) {
         <div className="composer-toolbar-left">
           <input ref={imageInputRef} className="composer-image-input" type="file" multiple onChange={event => { if (event.target.files) void addFiles(event.target.files); event.target.value = ''; }}/>
           <button type="button" className="composer-image-button" onClick={() => imageInputRef.current?.click()} disabled={attachmentsLoading || attachments.length >= 6 || commandRunning} title={tr('Attach files', '添加文件')} aria-label={tr('Attach files', '添加文件')}><Icon name="plus" size={18}/></button>
+          {session && <button type="button" className="composer-icon-trigger" onClick={() => setIdentityOpen(true)} title={tr('Session settings', '会话设置')} aria-label={tr('Session settings', '会话设置')}><Icon name="settings" size={16}/></button>}
           <div className={`composer-control-popover composer-permission-menu${permissionMenuOpen ? ' open' : ''}`} ref={permissionMenuRef}>
             <button type="button" className={`composer-icon-trigger permission-${selectedPermission}`} onClick={() => { setPermissionMenuOpen(previous => !previous); setModelMenuOpen(false); setModelSettingOpen(null); }} title={tr(`Permission: ${selectedPermissionLabel}`, `权限：${selectedPermissionLabel}`)} aria-label={tr(`Permission: ${selectedPermissionLabel}`, `权限：${selectedPermissionLabel}`)} aria-expanded={permissionMenuOpen}><Icon name="shield" size={16}/></button>
             <div className="composer-permission-popover" role="menu" aria-hidden={!permissionMenuOpen}>
@@ -978,6 +981,7 @@ export function ChatView(props: ChatViewProps) {
         <footer><button type="button" onClick={() => setRewindRequest(null)}>{tr('Cancel', '取消')}</button><button type="button" className="primary" autoFocus onClick={() => void confirmRewind()}>{tr('Rewind', '回溯')}</button></footer>
       </section>
     </div>}
+    {identityOpen && session && <SessionIdentityDrawer session={session} onClose={() => setIdentityOpen(false)} />}
   </section>;
 }
 
