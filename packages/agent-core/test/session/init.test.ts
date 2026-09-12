@@ -233,7 +233,8 @@ describe('Session.init', () => {
         },
       );
 
-      expect(agent.config.systemPrompt).toBe('<system-prompt>');
+      expect(agent.config.systemPrompt.startsWith('<system-prompt>')).toBe(true);
+      expect(agent.config.systemPrompt).toContain('<session_self>');
       expect(capturedContext.agentsMd).toContain('project instructions from disk');
     } finally {
       await session.close();
@@ -518,7 +519,8 @@ describe('AgentAPI.startBtw', () => {
           }),
         );
       expect(scripted.calls).toHaveLength(1);
-      expect(scripted.calls[0]?.systemPrompt).toBe('<system-prompt>');
+      expect(scripted.calls[0]?.systemPrompt.startsWith('<system-prompt>')).toBe(true);
+      expect(scripted.calls[0]?.systemPrompt).toContain('<session_self>');
       expect(scripted.calls[0]?.tools.map((tool) => tool.name)).toEqual([
         'LookupNote',
         'Read',
@@ -605,8 +607,9 @@ describe('AgentAPI.startBtw', () => {
       });
       expect(events.filter((event) => String(event['type']).startsWith('subagent.'))).toEqual([]);
       expect(scripted.calls).toHaveLength(2);
-      expect(scripted.calls[0]?.systemPrompt).toBe('<system-prompt>');
-      expect(scripted.calls[1]?.systemPrompt).toBe('<system-prompt>');
+      expect(scripted.calls[0]?.systemPrompt.startsWith('<system-prompt>')).toBe(true);
+      expect(scripted.calls[1]?.systemPrompt.startsWith('<system-prompt>')).toBe(true);
+      expect(scripted.calls[0]?.systemPrompt).toContain('<session_self>');
       expect(scripted.calls[0]?.tools.map((tool) => tool.name)).toEqual([
         'LookupNote',
         'Read',

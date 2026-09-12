@@ -885,6 +885,9 @@ export class Session {
     );
     if (existing !== undefined) {
       const [agentId, current] = existing;
+      if (current.teamLeaderAgentId !== leaderAgentId) {
+        await this.assertCanCreateDepartment(leaderAgentId);
+      }
       const next: AgentMeta = {
         ...current,
         name: input.identity.name,

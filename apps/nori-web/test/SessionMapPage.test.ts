@@ -1921,23 +1921,34 @@ describe('wire gesture click suppression (live regressions)', () => {
   it('(p) near-miss drop shows error instead of create-new draft', async () => {
     const nodes = [
       session({ id: 'a', title: 'Alpha' }),
-      session({ id: 'b', title: 'Beta' }),
+      session({
+        id: 'child',
+        title: 'Child',
+        metadata: { parent_session_id: 'a' },
+      }),
     ];
     const createChild = vi.spyOn(api.sessions, 'createChild');
     const mount = vi.spyOn(api.sessions, 'mount');
-    const map = await renderMap(nodes, [], { onOpenSession: vi.fn() });
+    const remount = vi.spyOn(api.sessions, 'remount');
+    const map = await renderMap(
+      nodes,
+      [{ child_session_id: 'child', parent_session_id: 'a' }],
+      { onOpenSession: vi.fn() },
+    );
     try {
       const aCard = map.card('a');
-      const bCard = map.card('b');
       const view = map.canvasTransform();
+      // Just outside the parent card: mounting the child under its own parent
+      // is an invalid cycle, so snap must not take it, and the drop is a miss.
       const nearMiss = {
-        x: (Number.parseFloat(bCard.style.left) + 110 + 44) * view.scale + view.x,
-        y: (Number.parseFloat(bCard.style.top) + 48) * view.scale + view.y,
+        x: (Number.parseFloat(aCard.style.left) + 220 + 24) * view.scale + view.x,
+        y: (Number.parseFloat(aCard.style.top) + 48) * view.scale + view.y,
       };
-      const outPort = aCard.querySelector<HTMLElement>('.session-map-port-out')!;
+      const outPort = map.card('child').querySelector<HTMLElement>('.session-map-port-out')!;
       await dragWire(outPort, nearMiss, 35);
       expect(createChild).not.toHaveBeenCalled();
       expect(mount).not.toHaveBeenCalled();
+      expect(remount).not.toHaveBeenCalled();
       expect(map.container.querySelector('.session-map-draft-node')).toBeNull();
       expect(map.container.querySelector('.session-map-error')).not.toBeNull();
       expect(map.container.textContent).toMatch(/missed the node|未命中|real session|真实会话/);

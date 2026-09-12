@@ -146,12 +146,21 @@ export class SessionSubagentHost {
     } catch (error) {
       if (created.length > 0) {
         try {
-          await this.session.dismissTeamMembers(
-            this.ownerAgentId,
-            created.map(({ agentId }) => agentId),
-            'Rolling back an incomplete TeamCreate operation.',
-            true,
-          );
+          const byLeader = new Map<string, string[]>();
+          for (const { agentId } of created) {
+            const leader = this.session.getAgentMetadata(agentId)?.teamLeaderAgentId ?? this.ownerAgentId;
+            const list = byLeader.get(leader) ?? [];
+            list.push(agentId);
+            byLeader.set(leader, list);
+          }
+          for (const [leaderAgentId, agentIds] of byLeader) {
+            await this.session.dismissTeamMembers(
+              leaderAgentId,
+              agentIds,
+              'Rolling back an incomplete TeamCreate operation.',
+              true,
+            );
+          }
         } catch (cleanupError) {
           throw new AggregateError(
             [error, cleanupError],

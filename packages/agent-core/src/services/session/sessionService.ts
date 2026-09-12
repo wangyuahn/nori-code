@@ -1225,17 +1225,26 @@ export class SessionService extends Disposable implements ISessionService {
       metadata: { cwd },
     });
     try {
+      await this.writeMountMetadata(child.id, {
+        parentSessionId: input.parentSessionId,
+        role,
+        mandate,
+        name,
+        clearIdentity: false,
+      });
       await this.core.rpc.bindMountedTeamMember({
         sessionId: input.hostSessionId,
         agentId: input.agentId,
         mountedSessionId: child.id,
       });
-      await this.applyMount(child.id, {
-        parent_session_id: input.parentSessionId,
+      await this.emitMountChanged({
+        sessionId: child.id,
+        oldParentSessionId: null,
+        newParentSessionId: input.parentSessionId,
         role,
         mandate,
-        name,
-      }, 'mount');
+        reason: 'mount',
+      });
     } catch (error) {
       try {
         await this.core.rpc.deleteSession({ sessionId: child.id });
