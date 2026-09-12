@@ -134,7 +134,7 @@ export function seedEdgesFromServerGraph(serverEdges: readonly SessionGraphEdge[
   }));
 }
 
-/** Count incoming parent edges (multi-parent / 兼职 ready). */
+/** Count incoming parent edges. Layout and mount remain single-parent until P3 兼职. */
 export function incomingParentEdgeCount(
   sessionId: string,
   edges: readonly SessionMapEdge[],

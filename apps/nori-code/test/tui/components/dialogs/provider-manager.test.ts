@@ -10,7 +10,7 @@ import { darkColors } from '#/tui/theme/colors';
 
 // Truecolor SGR fragments for the darkColors tokens we assert on
 // (see theme/colors.ts). Forcing chalk.level below guarantees they appear.
-const PRIMARY = '38;2;79;168;255'; // colors.primary  #4FA8FF
+const PRIMARY = '38;2;0;188;212'; // colors.primary  #00BCD4
 const MUTED = '38;2;107;107;107'; // colors.textMuted #6B6B6B
 const BOLD = '[1m';
 const ESC = String.fromCodePoint(27);

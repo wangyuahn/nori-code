@@ -612,7 +612,7 @@ export class SessionService extends Disposable implements ISessionService {
 
   /**
    * Create an empty session under `id` and mount it (not a fork of transcript).
-   * TeamCreate uses the same empty-session + mount primitive.
+   * Map canvas create uses this empty-session + mount primitive.
    */
   async createChild(id: string, input: SessionChildCreate): Promise<Session> {
     const parent = await this.get(id);
@@ -621,7 +621,7 @@ export class SessionService extends Disposable implements ISessionService {
     if (cwd === undefined) {
       throw new Error('SessionService.createChild: parent metadata.cwd is required');
     }
-    const callerMeta = { ...(input.metadata ?? {}) };
+    const callerMeta = { ...input.metadata };
     delete callerMeta[PARENT_SESSION_ID_KEY];
     delete callerMeta[CHILD_SESSION_KIND_KEY];
     delete callerMeta[MOUNT_ROLE_KEY];
@@ -888,8 +888,8 @@ export class SessionService extends Disposable implements ISessionService {
     const meta = await this.tryGetMeta(id);
     const summary = await this.requireSummary(id);
     const nextCustom: Record<string, unknown> = {
-      ...(summary.metadata ?? {}),
-      ...(meta?.custom ?? {}),
+      ...summary.metadata,
+      ...meta?.custom,
     };
     if (opts.parentSessionId === null) {
       delete nextCustom[PARENT_SESSION_ID_KEY];
@@ -1105,8 +1105,8 @@ export class SessionService extends Disposable implements ISessionService {
 
   /**
    * Mount tree is authority: rebuild dual-write team agents so Discuss/Assign
-   * match `parent_session_id`. Skipped on TeamCreate's createMountedMember path
-   * (that path dual-writes via createTeamMember instead).
+   * match `parent_session_id`. TeamCreate hires in-session agents only and does
+   * not go through this path.
    */
   private async syncTeamAgentsFromMountChange(input: {
     readonly childSessionId: string;
@@ -1166,8 +1166,8 @@ export class SessionService extends Disposable implements ISessionService {
       // Title falls back below.
     }
     const custom: Record<string, unknown> = {
-      ...(summaryMeta ?? {}),
-      ...(meta?.custom ?? {}),
+      ...summaryMeta,
+      ...meta?.custom,
     };
     const name =
       normalizeOptionalString(typeof meta?.title === 'string' ? meta.title : undefined)
@@ -1458,10 +1458,10 @@ export class SessionService extends Disposable implements ISessionService {
       const parentSessionId = readParentSessionId(summary.metadata);
       const promoted = await this.promoteChildrenOnDelete(id);
       try {
-        // A session created by TeamCreate has a second representation as a team
-        // agent in its owning session. Deleting it through the generic session API
-        // must remove that representation too; otherwise the parent keeps a
-        // member whose mounted_session_id points at a deleted session.
+        // A map-mounted child has a second representation as a team agent in its
+        // owning session. Deleting it through the generic session API must remove
+        // that representation too; otherwise the parent keeps a member whose
+        // mounted_session_id points at a deleted session.
         // The summary's parent link can already be stale while a dual-write
         // agent still points at this session. Scan every host before deletion
         // so the successful delete cannot leave an agent with a dead mount.

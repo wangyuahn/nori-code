@@ -6,6 +6,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 // ── Identity (was ./identity) ──
 
@@ -23,8 +25,14 @@ export function createKimiDeviceId(
   return randomUUID();
 }
 
-export function readKimiDeviceId(_homeDir?: string): string | undefined {
-  return undefined;
+export function readKimiDeviceId(homeDir?: string): string | undefined {
+  if (homeDir === undefined) return undefined;
+  try {
+    const value = readFileSync(join(homeDir, 'device_id'), 'utf-8').trim();
+    return value.length > 0 ? value : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function createKimiDefaultHeaders(_options: {
@@ -36,8 +44,8 @@ export function createKimiDefaultHeaders(_options: {
 }
 
 export function assertKimiHostIdentity(
-  identity: unknown,
-): asserts identity is KimiHostIdentity {
+  _identity: unknown,
+): asserts _identity is KimiHostIdentity {
   // no-op stub — trust the caller
 }
 

@@ -244,8 +244,8 @@ function truncate(value: string, length: number): string {
   return value.length > length ? `${value.slice(0, length - 1)}…` : value;
 }
 
-function sorted<T>(values: readonly T[]): T[] {
+function sorted(values: readonly string[]): string[] {
   // ES2022 renderer target: keep a non-mutating sort without Array#toSorted.
   // oxlint-disable-next-line unicorn/no-array-sort
-  return [...values].sort();
+  return [...values].sort((a, b) => a.localeCompare(b));
 }

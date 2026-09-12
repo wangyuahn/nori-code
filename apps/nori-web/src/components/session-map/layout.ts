@@ -1,4 +1,4 @@
-import type { Session, SessionAgent, SessionGraph } from '../../api/client';
+import type { Session, SessionGraph } from '../../api/client';
 import { sessionAgentDisplayName } from '../../utils/session-agent';
 import { parentSessionIdOf } from '../../utils/session-mount';
 import { mapMemberRoleLabel, type MapNodeMember } from '../../utils/session-graph';

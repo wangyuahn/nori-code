@@ -7,6 +7,12 @@ import {
   type WebSocketErrorPayload,
 } from '../utils/error-center';
 
+function stringifyUnknown(value: unknown): string {
+  if (typeof value === 'string') return value;
+  const json = JSON.stringify(value);
+  return typeof json === 'string' ? json : '';
+}
+
 export interface GlobalErrorFrame {
   type?: string;
   seq?: number;
@@ -58,7 +64,7 @@ export function reportGlobalFailure(frame: GlobalErrorFrame): void {
     reportAppError({
       source: 'tool',
       eventId,
-      message: payload.message ?? String(payload.output ?? payload.result?.output ?? 'Tool call failed'),
+      message: payload.message ?? stringifyUnknown(payload.output ?? payload.result?.output ?? 'Tool call failed'),
       sessionId: frame.session_id,
       agentId: payload.agentId,
       turnId: payload.turnId,

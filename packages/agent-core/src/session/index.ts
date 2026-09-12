@@ -65,7 +65,6 @@ import {
   canCreateDepartmentInTree,
   DEFAULT_TEAM_MAX_DEPTH,
   departmentDepth,
-  teamDepth,
 } from './team-tree';
 import { withMountTreeMutation } from './mount-mutation';
 import { formatSessionSelf, type SessionSelfInfo } from './session-self';
@@ -2581,7 +2580,7 @@ export class Session {
   private resolvePersistedProfile(
     agent: Agent,
     meta: AgentMeta,
-    parentAgent: Agent | undefined,
+    _parentAgent: Agent | undefined,
   ): ResolvedAgentProfile | undefined {
     const profileName = agent.config.profileName;
     if (profileName === undefined) return undefined;

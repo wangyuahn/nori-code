@@ -4658,6 +4658,20 @@ kbd {
   stroke-width: 1.6;
   opacity: 0.85;
 }
+.session-map-edges path.session-map-edge-collab {
+  pointer-events: stroke;
+  cursor: pointer;
+  stroke-width: 2.2;
+  opacity: 0.95;
+}
+.session-map-edges path.session-map-edge-peer {
+  stroke: #22d3ee;
+  stroke-dasharray: 8 6;
+}
+.session-map-edges path.session-map-edge-service {
+  stroke: #f59e0b;
+  stroke-dasharray: 3 5;
+}
 .session-map-float {
   position: absolute;
   z-index: 5;
@@ -5030,6 +5044,14 @@ kbd {
   stroke-width: 2.5;
   stroke-linecap: round;
 }
+.session-map-wire-preview path.session-map-wire-peer {
+  stroke: #22d3ee;
+  stroke-dasharray: 6 4;
+}
+.session-map-wire-preview path.session-map-wire-service {
+  stroke: #f59e0b;
+  stroke-dasharray: 3 4;
+}
 .session-map-marquee {
   position: absolute;
   z-index: 2;
@@ -5331,6 +5353,20 @@ kbd {
 .session-map-unmount:hover {
   color: var(--nori-text);
   border-color: var(--nori-text-secondary);
+}
+.session-map-pending {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  z-index: 2;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 16px;
+  letter-spacing: 0.02em;
+  color: color-mix(in srgb, var(--nori-text, #e8edf7) 85%, #fbbf24);
+  background: color-mix(in srgb, #92400e 55%, var(--nori-bg, #0c0f14));
+  pointer-events: none;
 }
 .session-map-draft-node {
   position: absolute;

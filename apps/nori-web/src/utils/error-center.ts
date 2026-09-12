@@ -53,7 +53,8 @@ function stablePart(value: unknown): string {
   if (value === undefined) return '';
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
   try {
-    return JSON.stringify(value) ?? String(value);
+    const json = JSON.stringify(value);
+    return typeof json === 'string' ? json : '';
   } catch {
     return textOf(value);
   }

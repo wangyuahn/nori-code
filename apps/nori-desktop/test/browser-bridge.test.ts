@@ -3,6 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { startBrowserBridge } from '../src/main/browser-bridge';
 import type { BrowserViewManager } from '../src/main/browser-view';
 
+function requestUrl(input: string | URL | Request): string {
+  return typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -13,7 +17,7 @@ describe('browser bridge', () => {
     let heartbeatCount = 0;
     let actionPolled = false;
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = String(input);
+      const url = requestUrl(input);
       if (url.endsWith('/heartbeat')) {
         heartbeatCount += 1;
         return response({ connected: true, paused: false, pending: 1 });
@@ -53,7 +57,7 @@ describe('browser bridge', () => {
     let markDelivered: (() => void) | undefined;
     const delivered = new Promise<void>(resolve => { markDelivered = resolve; });
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = String(input);
+      const url = requestUrl(input);
       if (url.endsWith('/actions?wait_ms=20000')) {
         if (!actionPolled) {
           actionPolled = true;

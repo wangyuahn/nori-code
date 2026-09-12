@@ -135,9 +135,13 @@ vi.mock('../../src/tui/theme/detect', () => ({
   detectTerminalTheme: mocks.detectTerminalTheme,
 }));
 
-vi.mock('node:child_process', () => ({
-  execSync: mocks.execSync,
-}));
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return {
+    ...actual,
+    execSync: mocks.execSync,
+  };
+});
 
 describe('runShell', () => {
   beforeEach(() => { process.env['NORI_CODE_HOME'] = '/tmp/nori-code-test-home'; });
@@ -205,7 +209,7 @@ describe('runShell', () => {
     expect(mocks.initializeTelemetry).toHaveBeenCalledWith({
       homeDir: '/tmp/nori-code-test-home',
       deviceId: 'device-1',
-      enabled: true,
+      enabled: false,
       appName: 'nori-code-cli',
       version: '1.2.3-test',
       uiMode: 'shell',

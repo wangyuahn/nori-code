@@ -64,8 +64,8 @@
   "devDependencies": {
     "@nori-code/agent-core": "workspace:^",
     "@nori-code/kaos": "workspace:^",
-    "@nori-code/oauth": "workspace:^",
     "@nori-code/kosong": "workspace:^",
+    "@nori-code/oauth": "workspace:^",
     "@types/yazl": "^2.4.6",
     "jimp": "^1.6.1"
   }

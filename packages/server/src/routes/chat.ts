@@ -13,10 +13,6 @@ import { z } from 'zod';
 import { errEnvelope, okEnvelope } from '../envelope';
 import { defineRoute } from '../middleware/defineRoute';
 
-const sessionIdParamSchema = z.object({
-  session_id: z.string().min(1),
-});
-
 const sessionAgentIdParamSchema = z.object({
   session_id: z.string().min(1),
   agent_id: z.string().min(1),

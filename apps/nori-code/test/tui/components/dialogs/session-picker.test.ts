@@ -97,7 +97,7 @@ describe('SessionPickerComponent', () => {
     expect(output).toContain('Refactor sessions list');
     // Session id is rendered in full, never abbreviated with an ellipsis.
     expect(output).toContain('ses_01HXYABCDEFGHIJK');
-    expect(output).not.toMatch(/ses_01\S*/);
+    expect(output).not.toMatch(/ses_01\S*â€¦/);
     expect(output).toContain('/tmp/project');
     expect(output).toContain('please redesign the picker UI');
   });
@@ -123,7 +123,7 @@ describe('SessionPickerComponent', () => {
 
     const output = renderPlain(component);
 
-    expect(output).not.toMatch(/^\s*/m);
+    expect(output).not.toMatch(/^\s*â€¦/m);
   });
 
   it('truncates overly long last_prompt content', () => {

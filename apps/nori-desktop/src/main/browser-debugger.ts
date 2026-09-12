@@ -125,7 +125,7 @@ export class BrowserDebuggerController {
       const request = params['request'] as { method?: string; url?: string } | undefined;
       this.onNetwork({
         phase: 'request',
-        requestId: String(params['requestId'] ?? ''),
+        requestId: requestIdOf(params),
         timestamp,
         method: request?.method,
         url: request?.url,
@@ -137,7 +137,7 @@ export class BrowserDebuggerController {
       const response = params['response'] as { status?: number; mimeType?: string; url?: string } | undefined;
       this.onNetwork({
         phase: 'response',
-        requestId: String(params['requestId'] ?? ''),
+        requestId: requestIdOf(params),
         timestamp,
         url: response?.url,
         status: response?.status,
@@ -147,13 +147,13 @@ export class BrowserDebuggerController {
       return;
     }
     if (method === 'Network.loadingFinished') {
-      this.onNetwork({ phase: 'finished', requestId: String(params['requestId'] ?? ''), timestamp });
+      this.onNetwork({ phase: 'finished', requestId: requestIdOf(params), timestamp });
       return;
     }
     if (method === 'Network.loadingFailed') {
       this.onNetwork({
         phase: 'failed',
-        requestId: String(params['requestId'] ?? ''),
+        requestId: requestIdOf(params),
         timestamp,
         error: typeof params['errorText'] === 'string' ? params['errorText'] : 'Network request failed.',
       });
@@ -172,4 +172,9 @@ export class BrowserDebuggerController {
 
 function normalizeDialogType(value: unknown): BrowserJavaScriptDialog['type'] {
   return value === 'confirm' || value === 'prompt' || value === 'beforeunload' ? value : 'alert';
+}
+
+function requestIdOf(params: Record<string, unknown>): string {
+  const value = params['requestId'];
+  return typeof value === 'string' ? value : '';
 }

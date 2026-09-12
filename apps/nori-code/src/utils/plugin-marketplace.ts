@@ -85,7 +85,7 @@ export async function loadPluginMarketplace(
       options.workDir,
     );
     raw = await readMarketplaceText(location, fetchImpl);
-    return withLatestVersions(parsePluginMarketplace(raw, location), fetchImpl);
+    return await withLatestVersions(parsePluginMarketplace(raw, location), fetchImpl);
   } catch (error) {
     const fallback =
       configuredSource === undefined ? await getSourceCheckoutMarketplaceLocation() : undefined;

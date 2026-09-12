@@ -85,7 +85,7 @@ Agent 思考或调用工具时，输入框仍然可用，支持以下额外操�
 
 ## 团队工程
 
-Nori Code CLI 2.0 在既有审批与模式控制之上，增加了由持久伙伴会话组成的**部门树**。用 `TeamCreate` 雇佣成员，在 Discuss 中收集团队发言，用 `TeamAssign` 分配执行，并通过 `/map`（终端）或 Web **Map** 视图浏览或调整**会话地图**挂载。
+Nori Code CLI 2.0 在既有审批与模式控制之上，增加了由持久团队伙伴组成的**部门树**。用 `TeamCreate` 雇佣成员，在 Discuss 中收集团队发言，用 `TeamAssign` 分配执行，并通过 `/map`（终端）或 Web **Map** 视图浏览或调整**会话地图**挂载。
 
 - **`/team`** — 打开伙伴会话，或浏览部门汇报与 Discuss 发言
 - **`/map`** — 管理当前工作目录下的会话挂载（`parent_session_id`）

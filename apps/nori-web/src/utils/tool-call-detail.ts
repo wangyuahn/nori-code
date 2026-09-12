@@ -221,7 +221,8 @@ function todoSummary(value: unknown, tr: Translate): string {
     const title = (item as { title?: unknown }).title;
     const status = (item as { status?: unknown }).status;
     const name = typeof title === 'string' && title.trim() !== '' ? title : tr('Untitled todo', '未命名待办');
-    return `${name} (${String(status ?? tr('unknown', '未知'))})`;
+    const statusLabel = typeof status === 'string' ? status : tr('unknown', '未知');
+    return `${name} (${statusLabel})`;
   }).join('\n');
 }
 

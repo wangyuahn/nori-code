@@ -39,6 +39,7 @@ function baseState(overrides: Partial<AppState> = {}): AppState {
     editorCommand: null,
     notifications: { enabled: true, condition: 'unfocused' },
     availableModels: {},
+    teamAgents: [],
     ...overrides,
   } as AppState;
 }

@@ -20,7 +20,7 @@ describe('isConfigStubOrMissing', () => {
   it('returns true when content matches DEFAULT_CONFIG_FILE_TEXT exactly', async () => {
     // From packages/kimi-core/src/harness/configs/toml.ts:42
     const stub =
-      '# ~/.kimi-code/config.toml\n' +
+      '# ~/.nori-code/config.toml\n' +
       '# Runtime settings for Kimi Code.\n' +
       '# This file starts empty so built-in defaults can apply.\n' +
       '# Login will populate managed Kimi provider and model entries.\n';

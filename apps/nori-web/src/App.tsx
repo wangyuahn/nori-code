@@ -1,5 +1,4 @@
 import { Component, Fragment, lazy, Suspense, useCallback, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from 'react';
-import { useBackgroundTasks } from './hooks/useBackgroundTasks';
 import { CronJobPanel } from './components/CronJobPanel';
 import { AccountCenter } from './components/AccountCenter';
 import { CodeView } from './components/CodeView';
@@ -204,9 +203,6 @@ export function App() {
     setActiveAgentSelection(agent && agent.agent_id !== 'main' && agent.kind !== 'main' && sessionId ? { sessionId, agent } : null);
     setActiveView('chat');
   }, [sessionId]);
-  const updateSessionAgents = useCallback((agents: readonly SessionAgent[]) => {
-    setSessionAgents([...agents]);
-  }, []);
   useEffect(() => {
     setPendingAgentOpen(current => (
       current !== null && current.sessionId !== sessionId ? null : current
@@ -241,7 +237,6 @@ export function App() {
       setActiveAgentSelection({ sessionId, agent: current });
     }
   }, [activeAgentSelection, sessionAgents, sessionId]);
-  const backgroundTasks = useBackgroundTasks(sessionId);
   const [activity, setActivity] = useState<readonly SessionActivity[]>([]);
   useEffect(() => {
     let disposed = false;

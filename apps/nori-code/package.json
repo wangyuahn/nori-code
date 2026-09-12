@@ -79,10 +79,10 @@
   "devDependencies": {
     "@nori-code/acp-adapter": "workspace:^",
     "@nori-code/oauth": "workspace:^",
-    "@nori-code/sdk": "workspace:^",
-    "@nori-code/telemetry": "workspace:^",
     "@nori-code/pi-tui": "workspace:^",
+    "@nori-code/sdk": "workspace:^",
     "@nori-code/server": "workspace:^",
+    "@nori-code/telemetry": "workspace:^",
     "@nori-code/vis-server": "workspace:^",
     "@nori-code/vis-web": "workspace:*",
     "@types/semver": "^7.7.0",

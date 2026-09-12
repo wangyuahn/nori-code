@@ -258,7 +258,7 @@ class NodeLanguageServerTransport implements LanguageServerTransport {
         initializationOptions: launch.initializationOptions ?? {},
       });
       const result = await withTimeout(Promise.race([initialize, processFailure]), 12_000, `${launch.id} initialize`);
-      connection.sendNotification('initialized', {});
+      void connection.sendNotification('initialized', {});
       return new NodeLanguageServerTransport(child, connection, result.capabilities ?? {}, diagnosticsTimeoutMs);
     } catch (error) {
       connection.dispose();
@@ -271,13 +271,13 @@ class NodeLanguageServerTransport implements LanguageServerTransport {
     const current = this.documents.get(document.uri);
     if (!current) {
       this.documents.set(document.uri, { text: document.text, version: 1 });
-      this.connection.sendNotification('textDocument/didOpen', { textDocument: { uri: document.uri, languageId: document.languageId, version: 1, text: document.text } });
+      void this.connection.sendNotification('textDocument/didOpen', { textDocument: { uri: document.uri, languageId: document.languageId, version: 1, text: document.text } });
       return;
     }
     if (current.text === document.text) return;
     const next = { text: document.text, version: current.version + 1 };
     this.documents.set(document.uri, next);
-    this.connection.sendNotification('textDocument/didChange', { textDocument: { uri: document.uri, version: next.version }, contentChanges: [{ text: document.text }] });
+    void this.connection.sendNotification('textDocument/didChange', { textDocument: { uri: document.uri, version: next.version }, contentChanges: [{ text: document.text }] });
   }
 
   async diagnostics(document: LanguageServerDocument): Promise<unknown> {
@@ -335,7 +335,7 @@ class NodeLanguageServerTransport implements LanguageServerTransport {
     const fallback = setTimeout(finalize, 1000);
     fallback.unref();
     void this.connection.sendRequest('shutdown').then(() => {
-      this.connection.sendNotification('exit');
+      void this.connection.sendNotification('exit');
       const flush = setTimeout(finalize, 50);
       flush.unref();
     }).catch(finalize);

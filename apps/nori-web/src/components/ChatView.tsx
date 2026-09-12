@@ -7,7 +7,7 @@ import { chatSlashCommandSuggestions, resolveChatSlashCommand, type ChatSlashCom
 import { resolveComposerThinking } from '../utils/model-thinking';
 import { PROJECT_FILE_REFERENCE_EVENT, projectFileMention } from '../projectFileReference';
 import { BROWSER_REFERENCE_EVENT } from '../browserReference';
-import { Icon, type IconName } from './Icon';
+import { Icon } from './Icon';
 import { ApprovalPanel } from './ApprovalPanel';
 import { MarkdownView } from './MarkdownView';
 import { QuestionPanel } from './QuestionPanel';

@@ -69,7 +69,7 @@ export interface ChainResult {
 }
 
 export interface WriteNoteParams {
-  note_type: NoteType | string;
+  note_type: string;
   title: string;
   content: string;
   tags?: string[];

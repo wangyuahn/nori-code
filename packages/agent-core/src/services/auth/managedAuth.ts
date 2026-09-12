@@ -2,9 +2,6 @@ import type { OAuthTokenProviderResolver, BearerTokenProvider } from '../../sess
 import type { OAuthRef } from '../../config';
 import type { IEnvironmentService } from '../environment/environment';
 
-/** Default managed OAuth provider name. */
-const DEFAULT_MANAGED_PROVIDER_NAME = 'managed:nori-code';
-
 interface ServicesAuthLoginOptions {
   readonly baseUrl?: string | undefined;
   readonly oauthHost?: string | undefined;
