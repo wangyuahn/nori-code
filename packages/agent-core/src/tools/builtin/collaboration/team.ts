@@ -334,7 +334,7 @@ function teamDecideJsonSchema(): Record<string, unknown> {
 
 export class TeamDecideTool implements BuiltinTool<TeamDecideInput> {
   readonly name = 'TeamDecide' as const;
-  readonly description = 'Chair a discussion in your own department: run a round, collect a vote, or archive. start requires topic + your own opening statement; continue requires a new statement and keeps the same discussion. Members then speak one at a time in order, and each one is given every statement published before its turn — starting with yours — so write the opening as a request for objections and alternatives rather than a plan to endorse. Your members answer with TeamSpeak, or abstain by skipping it. Open a round whenever the plan changes, two members need the same files, or someone reports a blocker — not only before the first assignment. vote may be used when all assigned results are received and no active work, unresolved block, or pending decision remains; archive only formally ends that Discuss.';
+  readonly description = 'Chair a discussion in your own department: run a round, collect a vote, or archive. start requires topic + your own opening statement; continue requires a new statement and keeps the same discussion. Members speak one at a time in order. Each TeamSpeak is one short, time-limited point — not a complete solution — so keep running action=continue for the next slice. A skipped or timed-out member is an abstention; the round continues. Write the opening as a request for objections and alternatives rather than a plan to endorse. Open a round whenever the plan changes, two members need the same files, or someone reports a blocker — not only before the first assignment. vote may be used when all assigned results are received and no active work, unresolved block, or pending decision remains; archive only formally ends that Discuss.';
   readonly parameters = teamDecideJsonSchema();
 
   constructor(private readonly host: SessionSubagentHost) {}
@@ -362,7 +362,7 @@ export type TeamSpeakInput = z.infer<typeof TeamSpeakInputSchema>;
 /** Publishes a single intentional contribution from the scheduled team member. */
 export class TeamSpeakTool implements BuiltinTool<TeamSpeakInput> {
   readonly name = 'TeamSpeak' as const;
-  readonly description = 'Publish your concise formal position during your scheduled turn in your parent department\'s discussion. The statements handed to you are what earlier speakers already said this round: answer them — build on what holds, say where you disagree and why — rather than repeating them. Only TeamSpeak is a formal statement; other tool calls do not count. No call records the turn as skipped (abstention).';
+  readonly description = 'Publish one short, time-limited formal point during your scheduled Discuss turn: one claim, one disagreement, or one concrete suggestion. Do not finish the whole problem or dump a full plan. Answer the statements already made this round; repeating them is not a contribution. Lead with the decidable point, then at most one sentence of reason. If a wrap-up reminder arrives, TeamSpeak immediately. Only TeamSpeak is a formal statement; other tool calls do not count. No call records the turn as skipped (abstention).';
   readonly parameters = toInputJsonSchema(TeamSpeakInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}

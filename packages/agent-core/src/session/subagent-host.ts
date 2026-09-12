@@ -31,11 +31,43 @@ import TEAM_AGENT_EXECUTION_PROMPT from './team-agent-execution.md?raw';
 import { directMessageRelation } from './team-tree';
 import { validateTeamChatMentions } from './team-chat';
 
-export const DEFAULT_TEAM_DISCUSSION_MEMBER_TIMEOUT_MS = 90 * 1000;
+export const DEFAULT_TEAM_DISCUSSION_MEMBER_TIMEOUT_MS = 2 * 60 * 1000;
 export const DEFAULT_TEAM_DISCUSSION_FIRST_RESPONSE_TIMEOUT_MS = 20 * 1000;
-export const DEFAULT_TEAM_DISCUSSION_MEMBER_MAX_DURATION_MS = 2 * 60 * 1000;
 const TEAM_DISCUSSION_CANCEL_SETTLE_GRACE_MS = 5_000;
 const TEAM_DISCUSSION_MEMBER_MAX_TIMEOUT_MULTIPLIER = 3;
+export const DEFAULT_TEAM_DISCUSSION_MEMBER_MAX_DURATION_MS =
+  DEFAULT_TEAM_DISCUSSION_MEMBER_TIMEOUT_MS * TEAM_DISCUSSION_MEMBER_MAX_TIMEOUT_MULTIPLIER;
+
+export const DISCUSSION_TURN_WRAP_UP_REMINDER = [
+  'This discussion turn is almost out of time.',
+  'Stop planning. Call TeamSpeak now with one short, decidable point (one claim, one disagreement, or one concrete next step).',
+  'Do not finish the whole problem. Remaining detail belongs in the next round.',
+  '本轮时限将到：停止继续想。立刻用 TeamSpeak 给出一个可裁决的短结论；完整方案留给后续轮次。',
+].join(' ');
+
+const DISCUSSION_TURN_INVITE_RULES = [
+  'Discuss is multi-round and time-limited: each scheduled turn is one short, decidable point, never the whole design.',
+  '讨论是多轮且有时限：每轮只推进一步，禁止一轮想完/写完。',
+].join(' ');
+
+const DISCUSSION_SCHEDULED_TURN_RULES = [
+  'Rules for this turn (time-limited, multi-round Discuss):',
+  '- Publish exactly one short TeamSpeak: one claim, one disagreement, or one concrete suggestion.',
+  '- Do not solve the whole problem, write a full plan, or dump a complete design.',
+  '- Read earlier statements this round and answer them; repeating them is not a contribution.',
+  '- Do not call Write/Edit/Bash. Do not tool-spam to think harder. If a fact is missing, say TBD.',
+  '- Lead with the decidable point, then at most one sentence of reason.',
+  '- If time is short, TeamSpeak the current point immediately and stop. Later rounds exist for the rest.',
+  '- Not calling TeamSpeak records this turn as skipped (abstention); your reasoning stays private.',
+  '本轮纪律（有时限、多轮）：',
+  '- 只发一条短 TeamSpeak：一个观点、一个分歧、或一个具体建议。',
+  '- 禁止一轮内想完、写完、做成完整方案或长计划。',
+  '- 先读本轮已有发言再回应；复述不是贡献。',
+  '- 不要为了想清楚狂调工具；缺事实就标明 TBD。',
+  '- 先结论，理由最多一句。',
+  '- 时限将到时立刻 TeamSpeak 当前可裁决点并停；细节留给下一轮。',
+  '- 不调用 TeamSpeak 记为弃权。',
+].join('\n');
 
 const TOOL_CALL_DISABLED_MESSAGE =
   'Tool calls are disabled for side questions. Answer with text only.';
@@ -69,11 +101,11 @@ IMPORTANT:
 const ASK_PARENT_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
 
 export interface SessionSubagentHostOptions {
-  /** Inactivity after first output (text/tool). Thinking deltas do not reset this. */
+  /** Inactivity after first response. Thinking, text, and tool progress all reset this. */
   readonly discussionMemberTimeoutMs?: number;
   /** First model/tool/thinking event must arrive within this window. */
   readonly discussionMemberFirstResponseTimeoutMs?: number;
-  /** Hard cap from turn start, including continuous thinking. */
+  /** Hard cap from turn start. Defaults to 3× discussionMemberTimeoutMs. */
   readonly discussionMemberMaxDurationMs?: number;
 }
 
@@ -99,9 +131,7 @@ export class SessionSubagentHost {
     }
     this.discussionMemberFirstResponseTimeoutMs = Math.min(firstResponseTimeout, timeout);
     const maxDuration = options.discussionMemberMaxDurationMs
-      ?? (options.discussionMemberTimeoutMs === undefined
-        ? DEFAULT_TEAM_DISCUSSION_MEMBER_MAX_DURATION_MS
-        : timeout * TEAM_DISCUSSION_MEMBER_MAX_TIMEOUT_MULTIPLIER);
+      ?? timeout * TEAM_DISCUSSION_MEMBER_MAX_TIMEOUT_MULTIPLIER;
     if (!Number.isFinite(maxDuration) || maxDuration <= 0) {
       throw new Error('discussionMemberMaxDurationMs must be a positive finite number.');
     }
@@ -768,9 +798,9 @@ export class SessionSubagentHost {
   ): Promise<void> {
     if (agentIds.length === 0) return;
     const text = phase === 'started'
-      ? `You have been invited to a team discussion on: ${discussion.topic}. Wait for a scheduled turn before responding; shared updates are injected only when your turn starts.`
+      ? `You have been invited to a team discussion on: ${discussion.topic}. Wait for a scheduled turn before responding; shared updates are injected only when your turn starts. ${DISCUSSION_TURN_INVITE_RULES}`
       : phase === 'joined'
-        ? `You joined the active team discussion on: ${discussion.topic}. Wait for a scheduled turn before responding; you will receive only unread shared updates.`
+        ? `You joined the active team discussion on: ${discussion.topic}. Wait for a scheduled turn before responding; you will receive only unread shared updates. ${DISCUSSION_TURN_INVITE_RULES}`
         : phase === 'kicked'
           ? `You were removed from the active team discussion on: ${discussion.topic}. Do not send further discussion statements unless invited again.`
           : `The team discussion on "${discussion.topic}" has ended and is archived. Do not send further discussion statements.`;
@@ -1323,7 +1353,7 @@ function discussionRoundPrompt(
     .join('\n');
   return [
     'Your scheduled discussion turn has started.',
-    'Call TeamSpeak with your concise final position. Not calling TeamSpeak records this turn as skipped (abstention); your reasoning stays private.',
+    DISCUSSION_SCHEDULED_TURN_RULES,
     updates.length === 0
       ? ''
       : [
@@ -1578,6 +1608,7 @@ async function runDiscussionMemberTurn(
   let firstResponseTimer: ReturnType<typeof setTimeout> | undefined;
   let activityTimer: ReturnType<typeof setTimeout> | undefined;
   let hardTimer: ReturnType<typeof setTimeout> | undefined;
+  let wrapUpTimer: ReturnType<typeof setTimeout> | undefined;
   let firstResponseObserved = false;
   let fullPhaseStarted = false;
   const completion = runDiscussionChildTurnToCompletion(child, controller.signal);
@@ -1605,10 +1636,8 @@ async function runDiscussionMemberTurn(
     }, fullTimeoutMs);
   };
   const unsubscribeProgress = typeof child.turn.onTurnProgress === 'function'
-    ? child.turn.onTurnProgress((event) => {
-      if (!fullPhaseStarted) return;
-      if (event?.type === 'thinking.delta') return;
-      armActivityTimer();
+    ? child.turn.onTurnProgress(() => {
+      if (fullPhaseStarted) armActivityTimer();
     })
     : undefined;
 
@@ -1618,6 +1647,19 @@ async function runDiscussionMemberTurn(
       hardTimedOut = true;
       controller.abort(abortError());
     }, maxDurationMs);
+    // Soft nudge at half the hard cap so the next model step can TeamSpeak
+    // before abort. One timed-out member is skipped; the round continues.
+    wrapUpTimer = setTimeout(() => {
+      wrapUpTimer = undefined;
+      try {
+        child.context.appendSystemReminder?.(DISCUSSION_TURN_WRAP_UP_REMINDER, {
+          kind: 'injection',
+          variant: 'system_reminder',
+        });
+      } catch {
+        // Test doubles and settling turns may lack a reminder sink.
+      }
+    }, Math.max(1, Math.floor(maxDurationMs / 2)));
     if (firstResponse !== undefined) {
       const firstResponseTimeout = new Promise<never>((_, reject) => {
         firstResponseTimer = setTimeout(() => {
@@ -1655,6 +1697,7 @@ async function runDiscussionMemberTurn(
     if (firstResponseTimer !== undefined) clearTimeout(firstResponseTimer);
     clearActivityTimer();
     if (hardTimer !== undefined) clearTimeout(hardTimer);
+    if (wrapUpTimer !== undefined) clearTimeout(wrapUpTimer);
     unsubscribeProgress?.();
     unlinkParentSignal();
   }

@@ -67,7 +67,7 @@
 
 Discuss 是只读团队开会。新会话默认进入该状态（用户可关闭）。期间 `Write`、`Edit`、`Bash`、`SubAgent`、`TaskStop`、`CronCreate`、`CronDelete` 被拦截。没有 session 文件工作流，也没有 `ExitDiscussMode` 模型出口。
 
-**`TeamDecide`** 使用 `action=start` 加主题和开场陈述进入 Discuss；后续使用 `action=continue` 加新陈述继续讨论。成员用 `TeamSpeak` 发言；不调用会记录为 skipped（弃权），再用 `TeamAssign` 进入 Code。UI 的 Discuss/Code 切换也可离开或再进入。
+**`TeamDecide`** 使用 `action=start` 加主题和开场陈述进入 Discuss；后续使用 `action=continue` 加新陈述继续讨论。每条 `TeamSpeak` 只是一个有时限的短观点；不调用或超时记为 skipped（弃权），会议继续，再用 `TeamAssign` 进入 Code。UI 的 Discuss/Code 切换也可离开或再进入。
 
 ## 状态管理
 
@@ -86,7 +86,7 @@ Discuss 是只读团队开会。新会话默认进入该状态（用户可关闭
 | `SubAgent` | SubAgent 模式中自动放行，否则需审批 | 启动一个或多个临时 SubAgent |
 | `TeamCreate` | 自动放行 | 雇佣持久团队伙伴为子会话 |
 | `TeamDecide` | 自动放行 | 开会或在执行后投票 |
-| `TeamSpeak` | 自动放行 | 发布讨论发言；不调用会将本轮记录为 skipped（弃权） |
+| `TeamSpeak` | 自动放行 | 发布一条有时限的短讨论发言；不调用会将本轮记录为 skipped（弃权） |
 | `TeamAssign` | 自动放行 | 分配任务；成功后离开 Discuss 进入 Code |
 | `TeamUpdate` | 自动放行 | 更新名称、角色、职责或标签，不唤醒会话 |
 | `TeamDismiss` | 自动放行 | 解除部门成员并删除其子会话 |

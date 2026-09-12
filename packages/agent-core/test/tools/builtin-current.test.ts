@@ -339,7 +339,9 @@ describe('current builtin collaboration tools', () => {
     expect(TeamStatusInputSchema.safeParse({}).success).toBe(true);
     expect(assign.description).toContain('stay within its non-null assigned task');
     expect(assign.description).toContain('TeamDM');
+    expect(decide.description).toContain('the round continues');
     expect(speak.description).toContain('Only TeamSpeak is a formal statement');
+    expect(speak.description).toContain('wrap-up reminder');
     expect(status.description).toContain('latest explicit TeamDM report status');
     expect(status.description).toContain('Ordinary TeamDM messages are not classified as reports');
     expect(TeamDMInputSchema.safeParse({

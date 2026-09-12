@@ -23,6 +23,8 @@ Typical flow:
 3. **`TeamAssign`** — hand out concrete tasks; success **leaves Discuss** and enters Code so members can execute.
 4. After work, **`TeamDecide`** with `action=vote` — the team votes (`discuss_again` / `proceed` / `abstain`) without re-entering full Discuss.
 
+Discuss is **multi-round and time-limited**. Each `TeamSpeak` is one short, decidable point — not a complete plan. Keep using `TeamDecide` with `action=continue` for the next slice. Thinking still counts as activity. Before the hard time cap, the member is reminded to speak immediately. A skipped or timed-out member is an abstention; later speakers still take their turn.
+
 Toggle Discuss from the UI with **`Shift-Tab`**, **`/discuss`**, or the compatibility alias **`/plan`**. **`TeamAssign`** and the Discuss/Code toggle both leave Discuss; YOLO does not add a separate exit approval.
 
 See [Interaction and input](./interaction.md#mode-switching) for approval behavior and [Built-in tools](../reference/tools.md#discuss) for tool-level detail.

@@ -18,6 +18,7 @@ import {
   DEFAULT_TEAM_DISCUSSION_FIRST_RESPONSE_TIMEOUT_MS,
   DEFAULT_TEAM_DISCUSSION_MEMBER_MAX_DURATION_MS,
   DEFAULT_TEAM_DISCUSSION_MEMBER_TIMEOUT_MS,
+  DISCUSSION_TURN_WRAP_UP_REMINDER,
   SessionSubagentHost,
 } from '../../src/session/subagent-host';
 import type { NoriMemoryProvider } from '../../src/tools/builtin/nori/types';
@@ -473,11 +474,13 @@ describe('SessionSubagentHost', () => {
     }
   });
 
-  it('does not let thinking deltas postpone the output inactivity deadline', async () => {
+  it('lets thinking deltas postpone the output inactivity deadline', async () => {
     vi.useFakeTimers();
     try {
       const transcript = testAgent({ type: 'sub' });
       let active = false;
+      let spoken = false;
+      let complete!: () => void;
       let progressListener: ((event: { readonly type: string }) => void) | undefined;
       const member = agentDouble({
         context: { history: [] },
@@ -496,7 +499,12 @@ describe('SessionSubagentHost', () => {
               progressListener = undefined;
             };
           }),
-          waitForCurrentTurn: vi.fn(async (waitSignal?: AbortSignal) => new Promise((_resolve, reject) => {
+          waitForCurrentTurn: vi.fn(async (waitSignal?: AbortSignal) => new Promise((resolve, reject) => {
+            complete = () => {
+              active = false;
+              spoken = true;
+              resolve({ event: { reason: 'completed' } });
+            };
             waitSignal?.addEventListener('abort', () => {
               active = false;
               reject(waitSignal.reason);
@@ -513,7 +521,7 @@ describe('SessionSubagentHost', () => {
         discussion: {
           participantAgentIds: ['agent-review'],
           status: 'active' as const,
-          topic: 'Stop long thinking',
+          topic: 'Keep long thinking alive',
           startedAt: '2026-08-18T00:00:00.000Z',
           updatedAt: '2026-08-18T00:00:00.000Z',
         },
@@ -539,26 +547,36 @@ describe('SessionSubagentHost', () => {
         acknowledgeTeamDiscussionStatements: vi.fn(async () => undefined),
         beginTeamDiscussionTurn: vi.fn(),
         endTeamDiscussionTurn: vi.fn(),
-        consumeTeamDiscussionSpeak: vi.fn(() => undefined),
+        consumeTeamDiscussionSpeak: vi.fn(() => spoken ? {
+          entryId: 1,
+          agentId: 'agent-review',
+          name: 'Reviewer',
+          message: 'One short point after thinking.',
+        } : undefined),
       });
       const host = new SessionSubagentHost(session, 'main', {
         discussionMemberTimeoutMs: 20,
         discussionMemberFirstResponseTimeoutMs: 10,
       });
-      const resultPromise = host.decideTeamDiscussion('continue', undefined, undefined, signal);
+      let settled = false;
+      const resultPromise = host.decideTeamDiscussion('continue', undefined, undefined, signal)
+        .finally(() => {
+          settled = true;
+        });
       await vi.advanceTimersByTimeAsync(2);
       progressListener?.({ type: 'thinking.delta' });
       await vi.advanceTimersByTimeAsync(10);
       progressListener?.({ type: 'thinking.delta' });
       await vi.advanceTimersByTimeAsync(10);
-      const result = await resultPromise;
+      // Without thinking resets this would already be a 20ms inactivity timeout.
+      expect(settled).toBe(false);
 
-      expect(member.turn.prompt).toHaveBeenCalledTimes(1);
+      complete();
+      const result = await resultPromise;
       expect(result.statements).toEqual([{
         agentId: 'agent-review',
-        skipped: true,
-        reason: 'timeout',
-        error: 'Member discussion turn timed out after 20ms.',
+        statement: 'One short point after thinking.',
+        skipped: false,
       }]);
     } finally {
       vi.useRealTimers();
@@ -660,10 +678,226 @@ describe('SessionSubagentHost', () => {
     }
   });
 
+  it('injects a wrap-up reminder at half the hard duration before aborting', async () => {
+    vi.useFakeTimers();
+    try {
+      const transcript = testAgent({ type: 'sub' });
+      let active = false;
+      let progressListener: ((event: { readonly type: string }) => void) | undefined;
+      const appendSystemReminder = vi.fn();
+      const member = agentDouble({
+        context: { history: [], appendSystemReminder },
+        turn: {
+          get hasActiveTurn() {
+            return active;
+          },
+          prompt: vi.fn(() => {
+            active = true;
+            return 1;
+          }),
+          waitForTurnFirstRequest: vi.fn(() => Promise.resolve()),
+          onTurnProgress: vi.fn((listener: (event: { readonly type: string }) => void) => {
+            progressListener = listener;
+            return () => {
+              progressListener = undefined;
+            };
+          }),
+          waitForCurrentTurn: vi.fn(async (waitSignal?: AbortSignal) => new Promise((_resolve, reject) => {
+            waitSignal?.addEventListener('abort', () => {
+              active = false;
+              reject(waitSignal.reason);
+            }, { once: true });
+          })),
+        },
+      });
+      const discussionMeta = {
+        homedir: '/discussion',
+        type: 'sub' as const,
+        parentAgentId: 'main',
+        kind: 'sub' as const,
+        teamLeaderAgentId: 'main',
+        discussion: {
+          participantAgentIds: ['agent-review'],
+          status: 'active' as const,
+          topic: 'Nudge before the hard cap',
+          startedAt: '2026-08-18T00:00:00.000Z',
+          updatedAt: '2026-08-18T00:00:00.000Z',
+        },
+      };
+      const memberMeta = {
+        homedir: '/review',
+        type: 'sub' as const,
+        parentAgentId: 'main',
+        kind: 'team' as const,
+        teamLeaderAgentId: 'main',
+        name: 'Reviewer',
+      };
+      const session = teamSessionDouble({
+        metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-review': memberMeta } },
+        activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
+        getAgentMetadata: vi.fn((id: string) =>
+          id === 'agent-discussion' ? discussionMeta : id === 'agent-review' ? memberMeta : undefined,
+        ),
+        ensureAgentResumed: vi.fn(async (id: string) =>
+          id === 'agent-discussion' ? transcript.agent : member,
+        ),
+        unreadTeamDiscussionStatements: vi.fn(async () => ({ statements: [], cursor: 0 })),
+        acknowledgeTeamDiscussionStatements: vi.fn(async () => undefined),
+        beginTeamDiscussionTurn: vi.fn(),
+        endTeamDiscussionTurn: vi.fn(),
+        consumeTeamDiscussionSpeak: vi.fn(() => undefined),
+      });
+      const host = new SessionSubagentHost(session, 'main', {
+        discussionMemberTimeoutMs: 50,
+        discussionMemberFirstResponseTimeoutMs: 10,
+        discussionMemberMaxDurationMs: 30,
+      });
+      const resultPromise = host.decideTeamDiscussion('continue', undefined, undefined, signal);
+      await vi.advanceTimersByTimeAsync(2);
+      progressListener?.({ type: 'thinking.delta' });
+      await vi.advanceTimersByTimeAsync(14);
+      expect(appendSystemReminder).toHaveBeenCalledWith(
+        DISCUSSION_TURN_WRAP_UP_REMINDER,
+        { kind: 'injection', variant: 'system_reminder' },
+      );
+      progressListener?.({ type: 'thinking.delta' });
+      await vi.advanceTimersByTimeAsync(16);
+      const result = await resultPromise;
+
+      expect(member.turn.prompt).toHaveBeenCalledTimes(1);
+      expect(result.statements).toEqual([{
+        agentId: 'agent-review',
+        skipped: true,
+        reason: 'timeout',
+        error: 'Member discussion turn exceeded its maximum duration of 30ms.',
+      }]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('uses layered first-response, output-inactivity, and hard-duration defaults', () => {
     expect(DEFAULT_TEAM_DISCUSSION_FIRST_RESPONSE_TIMEOUT_MS).toBe(20_000);
-    expect(DEFAULT_TEAM_DISCUSSION_MEMBER_TIMEOUT_MS).toBe(90_000);
-    expect(DEFAULT_TEAM_DISCUSSION_MEMBER_MAX_DURATION_MS).toBe(120_000);
+    expect(DEFAULT_TEAM_DISCUSSION_MEMBER_TIMEOUT_MS).toBe(120_000);
+    expect(DEFAULT_TEAM_DISCUSSION_MEMBER_MAX_DURATION_MS).toBe(360_000);
+  });
+
+  it('skips a timed-out member and still runs the next speaker', async () => {
+    vi.useFakeTimers();
+    try {
+      const transcript = testAgent({ type: 'sub' });
+      let firstActive = false;
+      let secondSpoken = false;
+      const first = agentDouble({
+        context: { history: [] },
+        turn: {
+          get hasActiveTurn() {
+            return firstActive;
+          },
+          prompt: vi.fn(() => {
+            firstActive = true;
+            return 1;
+          }),
+          waitForTurnFirstRequest: vi.fn(() => Promise.resolve()),
+          onTurnProgress: vi.fn(() => () => {}),
+          waitForCurrentTurn: vi.fn(async (waitSignal?: AbortSignal) => new Promise((_resolve, reject) => {
+            waitSignal?.addEventListener('abort', () => {
+              firstActive = false;
+              reject(waitSignal.reason);
+            }, { once: true });
+          })),
+        },
+      });
+      const second = agentDouble({
+        context: { history: [] },
+        turn: {
+          hasActiveTurn: false,
+          prompt: vi.fn(() => 2),
+          waitForTurnFirstRequest: vi.fn(() => Promise.resolve()),
+          onTurnProgress: vi.fn(() => () => {}),
+          waitForCurrentTurn: vi.fn(async () => {
+            secondSpoken = true;
+            return { event: { reason: 'completed' } };
+          }),
+        },
+      });
+      const discussionMeta = {
+        homedir: '/discussion',
+        type: 'sub' as const,
+        parentAgentId: 'main',
+        kind: 'sub' as const,
+        teamLeaderAgentId: 'main',
+        discussion: {
+          participantAgentIds: ['agent-first', 'agent-second'],
+          status: 'active' as const,
+          topic: 'One timeout does not end the round',
+          startedAt: '2026-08-18T00:00:00.000Z',
+          updatedAt: '2026-08-18T00:00:00.000Z',
+        },
+      };
+      const memberMeta = (name: string) => ({
+        homedir: `/${name.toLowerCase()}`,
+        type: 'sub' as const,
+        parentAgentId: 'main',
+        kind: 'team' as const,
+        teamLeaderAgentId: 'main',
+        name,
+      });
+      const firstMeta = memberMeta('First');
+      const secondMeta = memberMeta('Second');
+      const endTeamDiscussionTurn = vi.fn();
+      const session = teamSessionDouble({
+        metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-first': firstMeta, 'agent-second': secondMeta } },
+        activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
+        getAgentMetadata: vi.fn((id: string) =>
+          id === 'agent-discussion' ? discussionMeta : id === 'agent-first' ? firstMeta : id === 'agent-second' ? secondMeta : undefined,
+        ),
+        ensureAgentResumed: vi.fn(async (id: string) =>
+          id === 'agent-discussion' ? transcript.agent : id === 'agent-first' ? first : second,
+        ),
+        unreadTeamDiscussionStatements: vi.fn(async () => ({ statements: [], cursor: 0 })),
+        acknowledgeTeamDiscussionStatements: vi.fn(async () => undefined),
+        beginTeamDiscussionTurn: vi.fn(),
+        endTeamDiscussionTurn,
+        consumeTeamDiscussionSpeak: vi.fn((_discussionAgentId: string, agentId: string) => (
+          agentId === 'agent-second' && secondSpoken
+            ? {
+              entryId: 1,
+              agentId: 'agent-second',
+              name: 'Second',
+              message: 'Ship the cache key as-is.',
+            }
+            : undefined
+        )),
+      });
+      const host = new SessionSubagentHost(session, 'main', {
+        discussionMemberTimeoutMs: 5,
+        discussionMemberFirstResponseTimeoutMs: 2,
+      });
+      const resultPromise = host.decideTeamDiscussion('continue', undefined, undefined, signal);
+      await vi.advanceTimersByTimeAsync(8);
+      const result = await resultPromise;
+
+      expect(first.turn.prompt).toHaveBeenCalledTimes(1);
+      expect(second.turn.prompt).toHaveBeenCalledTimes(1);
+      expect(endTeamDiscussionTurn).toHaveBeenNthCalledWith(1, 'agent-discussion', 'agent-first');
+      expect(endTeamDiscussionTurn).toHaveBeenNthCalledWith(2, 'agent-discussion', 'agent-second');
+      expect(result.statements).toEqual([
+        {
+          agentId: 'agent-first',
+          skipped: true,
+          reason: 'timeout',
+          error: 'Member discussion turn timed out after 5ms.',
+        },
+        {
+          agentId: 'agent-second',
+          statement: 'Ship the cache key as-is.',
+          skipped: false,
+        },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('retries no-response members once and continues after consecutive failures', async () => {
@@ -977,6 +1211,9 @@ describe('SessionSubagentHost', () => {
     expect(result.statements).toEqual([{ agentId: 'agent-review', skipped: true }]);
     const modelInput = JSON.stringify(member.lastLlmInput());
     expect(modelInput).toContain('Your scheduled discussion turn has started.');
+    expect(modelInput).toContain('Publish exactly one short TeamSpeak');
+    expect(modelInput).toContain('Do not solve the whole problem');
+    expect(modelInput).toContain('If time is short, TeamSpeak the current point immediately');
     expect(modelInput).not.toContain('Discuss this topic as a team partner');
     expect(modelInput).not.toContain('There are no unread shared statements');
     expect(transcript.agent.context.history).not.toContainEqual(
