@@ -1820,6 +1820,7 @@ describe('Session.createAgent', () => {
     // that continues the work, never up to the parent to be passed along.
     expect(member.agent.config.systemPrompt).toContain('Your parent is a recipient in its own right, never a relay');
     expect(member.agent.config.systemPrompt).toContain('hand it to the peer who continues it');
+    expect(member.agent.config.systemPrompt).not.toContain('nori_ask_parent');
     expect(member.agent.config.systemPrompt).toContain('Work on the task your parent assigned you');
     expect(member.agent.config.systemPrompt).toContain('latest content tag');
     expect(member.agent.config.systemPrompt).toContain('Edit tag mismatch');
@@ -1875,6 +1876,7 @@ describe('Session.createAgent', () => {
     ]));
     expect(member.agent.tools.activeToolNames()).not.toContain('EnterDiscussMode');
     expect(member.agent.tools.activeToolNames()).not.toContain('ContextInjection');
+    expect(member.agent.tools.activeToolNames()).not.toContain('nori_ask_parent');
 
     const discussion = await session.createTeamDiscussion(
       main.id,

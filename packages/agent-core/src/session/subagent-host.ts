@@ -73,20 +73,6 @@ IMPORTANT:
 - If you do not know the answer, say so directly.
 `;
 
-const ASK_PARENT_SYSTEM_REMINDER = `
-A child agent has asked you a question and is waiting for your guidance.
-You are answering as the parent agent, with access to the full task context.
-
-IMPORTANT:
-- Answer the child's question directly and concisely.
-- Draw on your knowledge of the overall task, the plan, and past decisions.
-- Do not call any tools. All tool calls are disabled and will be rejected.
-- Answer in a single turn; the child agent is blocked waiting.
-- If you do not know the answer, say so directly and suggest next steps.
-`;
-
-const ASK_PARENT_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
-
 export class SessionSubagentHost {
   constructor(
     private readonly session: Session,
@@ -505,7 +491,7 @@ export class SessionSubagentHost {
       throw new Error(
         `Chat mention target(s) not in this department: ${unknown.join(', ')}. `
         + `Chat only reaches your siblings (${siblings.length > 0 ? siblings.join(', ') : 'none'}) or "all"; `
-        + 'to reach your lead use TeamDM or nori_ask_parent instead.',
+        + 'to reach your lead use TeamDM instead.',
       );
     }
     const record = await this.session.postTeamChatMessage(
@@ -1122,104 +1108,6 @@ export class SessionSubagentHost {
     });
     child.permission.policies.unshift(new DenyAllPermissionPolicy(TOOL_CALL_DISABLED_MESSAGE));
     return id;
-  }
-
-  async askOwnerParent(question: string): Promise<string> {
-    const metadata = this.session.metadata.agents[this.ownerAgentId];
-    if (metadata?.type !== 'sub' || metadata.parentAgentId === null) {
-      throw new Error('nori_ask_parent is only available from a subagent with a parent agent');
-    }
-    const parent = await this.session.ensureAgentResumed(metadata.parentAgentId);
-    const parentHost = parent.subagentHost as SessionSubagentHost | undefined;
-    if (parentHost === undefined) {
-      throw new Error('Parent agent does not have a subagent host');
-    }
-    return parentHost.askParent(question, this.ownerAgentId);
-  }
-
-  async askParent(question: string, childId: string): Promise<string> {
-    const parent = await this.session.ensureAgentResumed(this.ownerAgentId);
-
-    const { agent: answerer } = await this.session.createAgent(
-      {
-        type: 'sub',
-        generate: parent.rawGenerate,
-        persistence: new InMemoryAgentRecordPersistence(),
-      },
-      { parentAgentId: this.ownerAgentId, persistMetadata: false },
-    );
-
-    answerer.config.update({
-      modelAlias: parent.config.modelAlias,
-      thinkingEffort: parent.config.thinkingEffort,
-      systemPrompt: parent.config.systemPrompt,
-    });
-    answerer.tools.copyLoopToolsFrom(parent.tools);
-    answerer.context.useProjectedHistoryFrom(parent.context);
-    answerer.context.appendSystemReminder(ASK_PARENT_SYSTEM_REMINDER.trim(), {
-      kind: 'system_trigger',
-      name: 'ask_parent',
-    });
-    answerer.permission.policies.unshift(new DenyAllPermissionPolicy(TOOL_CALL_DISABLED_MESSAGE));
-
-    const turnId = answerer.turn.prompt(
-      [{ type: 'text', text: `[Child agent ${childId} asks]\n${question}` }],
-      {
-        kind: 'system_trigger',
-        name: 'ask_parent',
-        speaker: { from: 'sub', speakerId: childId, speakerName: 'Team member' },
-      },
-    );
-
-    if (turnId === null) {
-      throw new Error('Could not start ask-parent turn for the parent agent');
-    }
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(new Error('askParent timed out')), ASK_PARENT_TIMEOUT_MS);
-
-    try {
-      await runAgentTurnToCompletion(answerer, controller.signal);
-      const answer = lastAssistantText(answerer);
-      this.recordAskParentExchange(parent, childId, question, answer);
-      return answer;
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  /**
-   * Files the question and the answer into the real parent's transcript.
-   *
-   * The answer itself comes from a throwaway clone of the parent, so without
-   * this the parent (and the human watching it) would never learn that a child
-   * asked anything — the child would act on guidance the parent has no record
-   * of giving. This only appends context: it never starts or steers a turn, so
-   * a working parent is not interrupted and picks the exchange up on its next.
-   */
-  private recordAskParentExchange(
-    parent: Agent,
-    childId: string,
-    question: string,
-    answer: string,
-  ): void {
-    const meta = this.session.getAgentMetadata(childId);
-    const childName = meta?.name ?? childId;
-    const text = [
-      `[${childName} (${childId}) asked you]`,
-      question.trim(),
-      '',
-      '[Answered on your behalf from your own context]',
-      answer.trim().length > 0 ? answer.trim() : '(no answer produced)',
-    ].join('\n');
-    parent.context.appendUserMessage(
-      [{ type: 'text', text: `<system-reminder>\n${text}\n</system-reminder>` }],
-      {
-        kind: 'system_trigger',
-        name: 'ask_parent',
-        speaker: { from: 'sub', speakerId: childId, speakerName: childName },
-      },
-    );
   }
 }
 

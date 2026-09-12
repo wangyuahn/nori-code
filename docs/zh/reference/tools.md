@@ -111,7 +111,6 @@ Nori 专用工具在内置工具集上增加共享记忆、文档写入和已配
 | --- | --- | --- |
 | `nori_memory_search` | 按权限规则处理 | 搜索 Obsidian 共享记忆库 |
 | `nori_memory_write` | 按权限规则处理 | 向记忆库写入 analysis、decision、task 或 review 笔记 |
-| `nori_ask_parent` | 仅子 Agent 可用 | 让子 Agent 向父 Agent 请求指导 |
 
 **`nori_memory_search`** 接受具体的 `keywords`，以及可选的 `note_types`、`top_k`、`include_linked`、`link_depth`、`chain_depth` 和 `follow_up_keywords`。当第一轮结果暴露出更好的关键词或链接笔记时，使用链式检索（`chain_depth: 1` 或 `2`）。
 

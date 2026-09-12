@@ -48,10 +48,6 @@ import { createFakeKaos } from './fixtures/fake-kaos';
 import { executeTool } from './fixtures/execute-tool';
 import { createBackgroundManager } from '../agent/background/helpers';
 import {
-  NoriAskParentInputSchema,
-  NoriAskParentTool,
-} from '../../src/tools/builtin/nori/nori-ask-parent';
-import {
   NoriMemorySearchInputSchema,
   NoriMemorySearchTool,
 } from '../../src/tools/builtin/nori/nori-memory-search';
@@ -521,34 +517,6 @@ describe('current builtin collaboration tools', () => {
     expect(result.output).toContain('Found 2 unique note(s)');
     expect(result.output).toContain('## Hop 1');
     expect(result.output).toContain('Permission Rules');
-  });
-
-  it('nori_ask_parent routes subagent questions through the parent channel', async () => {
-    const askOwnerParent = vi.fn(async () => 'parent answer');
-    const tool = new NoriAskParentTool({
-      type: 'sub',
-      subagentHost: { askOwnerParent },
-    } as unknown as Agent);
-
-    expect(
-      NoriAskParentInputSchema.safeParse({
-        question: 'Which implementation path should I take?',
-        context: 'Two APIs are possible.',
-      }).success,
-    ).toBe(true);
-
-    const result = await executeTool(
-      tool,
-      context({
-        question: 'Which implementation path should I take?',
-        context: 'Two APIs are possible.',
-      }),
-    );
-
-    expect(askOwnerParent).toHaveBeenCalledWith(
-      '[Context]\nTwo APIs are possible.\n\n[Question]\nWhich implementation path should I take?',
-    );
-    expect(result.output).toBe('parent answer');
   });
 });
 
