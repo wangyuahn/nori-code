@@ -9,8 +9,7 @@ export function mapOpenTarget(member: MapNodeMember): MapOpenTarget | undefined 
   if (member.agent !== undefined && member.hostSessionId !== undefined) {
     return { kind: 'agent', hostSessionId: member.hostSessionId, agent: member.agent };
   }
-  if (!member.session.id.startsWith('agent:')) return { kind: 'session', sessionId: member.session.id };
-  return undefined;
+  return { kind: 'session', sessionId: member.session.id };
 }
 
 export function dedupeMapMembers(members: readonly MapNodeMember[], sessions: readonly Session[]): MapNodeMember[] {

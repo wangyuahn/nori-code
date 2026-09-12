@@ -7,11 +7,12 @@ import { chatSlashCommandSuggestions, resolveChatSlashCommand, type ChatSlashCom
 import { resolveComposerThinking } from '../utils/model-thinking';
 import { PROJECT_FILE_REFERENCE_EVENT, projectFileMention } from '../projectFileReference';
 import { BROWSER_REFERENCE_EVENT } from '../browserReference';
-import { Icon } from './Icon';
+import { Icon, type IconName } from './Icon';
 import { ApprovalPanel } from './ApprovalPanel';
 import { MarkdownView } from './MarkdownView';
 import { QuestionPanel } from './QuestionPanel';
 import { SkillPicker } from './SkillPicker';
+import { SessionIdentityDrawer } from './SessionIdentityDrawer';
 import { UsageOverview } from './UsageOverview';
 import { detectImageMime, isLikelyImageFile } from '../utils/image-mime';
 import { toolCallDetailFields } from '../utils/tool-call-detail';
@@ -246,6 +247,7 @@ export function ChatView(props: ChatViewProps) {
   const [permissionMenuOpen, setPermissionMenuOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [modelSettingOpen, setModelSettingOpen] = useState<'model' | 'thinking' | null>(null);
+  const [identityOpen, setIdentityOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const modelOverrideSessionRef = useRef<string | null>(null);
@@ -925,6 +927,7 @@ export function ChatView(props: ChatViewProps) {
         <div className="composer-toolbar-left">
           <input ref={imageInputRef} className="composer-image-input" type="file" multiple onChange={event => { if (event.target.files) void addFiles(event.target.files); event.target.value = ''; }}/>
           <button type="button" className="composer-image-button" onClick={() => imageInputRef.current?.click()} disabled={attachmentsLoading || attachments.length >= 6 || commandRunning} title={tr('Attach files', '添加文件')} aria-label={tr('Attach files', '添加文件')}><Icon name="plus" size={18}/></button>
+          {session && <button type="button" className="composer-icon-trigger" onClick={() => setIdentityOpen(true)} title={tr('Session settings', '会话设置')} aria-label={tr('Session settings', '会话设置')}><Icon name="settings" size={16}/></button>}
           <div className={`composer-control-popover composer-permission-menu${permissionMenuOpen ? ' open' : ''}`} ref={permissionMenuRef}>
             <button type="button" className={`composer-icon-trigger permission-${selectedPermission}`} onClick={() => { setPermissionMenuOpen(previous => !previous); setModelMenuOpen(false); setModelSettingOpen(null); }} title={tr(`Permission: ${selectedPermissionLabel}`, `权限：${selectedPermissionLabel}`)} aria-label={tr(`Permission: ${selectedPermissionLabel}`, `权限：${selectedPermissionLabel}`)} aria-expanded={permissionMenuOpen}><Icon name="shield" size={16}/></button>
             <div className="composer-permission-popover" role="menu" aria-hidden={!permissionMenuOpen}>
@@ -978,6 +981,7 @@ export function ChatView(props: ChatViewProps) {
         <footer><button type="button" onClick={() => setRewindRequest(null)}>{tr('Cancel', '取消')}</button><button type="button" className="primary" autoFocus onClick={() => void confirmRewind()}>{tr('Rewind', '回溯')}</button></footer>
       </section>
     </div>}
+    {identityOpen && session && <SessionIdentityDrawer session={session} onClose={() => setIdentityOpen(false)} />}
   </section>;
 }
 
@@ -1156,22 +1160,27 @@ function WorkGroup({ blocks, live = false }: { blocks: WorkBlock[]; live?: boole
   const { tr } = useI18n();
   const [open, setOpen] = useState(live);
   useEffect(() => { if (!live) setOpen(false); }, [live]);
-  return <details className={`chat-work-group${live ? ' live' : ''}`} open={open} onToggle={event => { setOpen(event.currentTarget.open); }}>
-    <summary>
+  return <details
+    className={`chat-work-group${live ? ' live' : ''}${open ? ' is-open' : ''}`}
+    open={open}
+  >
+    <summary onClick={event => {
+      event.preventDefault();
+      setOpen(value => !value);
+    }}>
       <span className="work-group-headline">{summarizeWorkGroup(blocks, tr)}</span>
       <Icon className="work-group-chevron" name="chevron-down" size={11}/>
     </summary>
-    <div className="work-group-body">
-      {blocks.map((block, index) => {
-        // 只有这一组的最后一块才可能还在写。一段思考后面已经跟了工具调用，说明它
-        // 早就结束了——继续按“正在思考”那样摊开来显示，就成了「下面工具都跑起来了，
-        // 上面的思考框还没收」的那个显示错。
-        const blockLive = live && index === blocks.length - 1;
-        if (block.type === 'thinking') return <ThinkingLine key={block.id} text={block.text} live={blockLive}/>;
-        if (block.type === 'context') return <ContextInjectionRow key={block.id} block={block}/>;
-        if (block.type === 'tool') return <CompactToolCall key={block.id} tool={block.tool}/>;
-        return null;
-      })}
+    <div className="work-group-clip" aria-hidden={!open} inert={!open}>
+      <div className="work-group-body">
+        {blocks.map((block, index) => {
+          const blockLive = live && index === blocks.length - 1;
+          if (block.type === 'thinking') return <ThinkingLine key={block.id} text={block.text} live={blockLive}/>;
+          if (block.type === 'context') return <ContextInjectionRow key={block.id} block={block}/>;
+          if (block.type === 'tool') return <CompactToolCall key={block.id} tool={block.tool}/>;
+          return null;
+        })}
+      </div>
     </div>
   </details>;
 }
@@ -1221,7 +1230,10 @@ function ThinkingLine({ text, live = false }: { text: string; live?: boolean }) 
   const preview = text.trim().split('\n').find(line => line.trim().length > 0) ?? '';
   return <details className={`work-thinking-line${live ? ' live' : ''}`} open={open} onToggle={event => { setOpen(event.currentTarget.open); }}>
     <summary>
-      <span className="work-thinking-preview">{live && !preview ? tr('Thinking…', '思考中…') : preview || tr('Thinking', '思考')}</span>
+      <span className="work-thinking-label">
+        <Icon name="sparkles" size={12}/>
+        <span className="work-thinking-preview">{live && !preview ? tr('Thinking…', '思考中…') : preview || tr('Thinking', '思考')}</span>
+      </span>
       <Icon className="work-thinking-chevron" name="chevron-right" size={11}/>
     </summary>
     <p>{text}</p>
@@ -1243,6 +1255,16 @@ function ContextInjectionRow({ block, label }: { block: Extract<WorkBlock, { typ
   </details>;
 }
 
+function toolIconName(name: string): IconName {
+  const n = name.toLowerCase();
+  if (n === 'read' || n === 'write' || n === 'readfile' || n === 'createfile' || n.startsWith('read') || n.startsWith('write')) return 'document';
+  if (n === 'edit' || n.includes('edit')) return 'edit';
+  if (n === 'bash' || n === 'shell' || n.includes('bash') || n.includes('shell')) return 'terminal';
+  if (n.includes('browser') || n.includes('websearch') || n.includes('web_search')) return 'globe';
+  if (n === 'grep' || n === 'glob' || n === 'search' || n.includes('grep') || n.includes('glob') || n.includes('search')) return 'search';
+  return 'list';
+}
+
 function CompactToolCall({ tool }: { tool: ToolCall }) {
   const { tr } = useI18n();
   const headline = compactToolCallHeadline(tool, tr);
@@ -1250,6 +1272,7 @@ function CompactToolCall({ tool }: { tool: ToolCall }) {
   const isEdit = tool.name.toLowerCase() === 'edit';
   return <details className={`compact-tool-call tool-${tool.name.toLowerCase()}${tool.isError ? ' error' : ''}`}>
     <summary title={tool.result?.slice(0, 600)}>
+      <span className="compact-tool-icon"><Icon name={toolIconName(tool.name)} size={12}/></span>
       <span className="compact-tool-headline">{headline}</span>
       <Icon className="compact-tool-chevron" name="chevron-right" size={11}/>
     </summary>

@@ -149,11 +149,7 @@ export function resolveNodeDragGroupIds(input: {
   const { nodeId, sessionId, selectedIds, component, forceNodes } = input;
   if (selectedIds.includes(sessionId) && selectedIds.length > 0) {
     return forceNodes
-      .filter((candidate) => (
-        selectedIds.includes(candidate.member.session.id)
-        && !candidate.member.session.id.startsWith('agent:')
-        && candidate.member.kind !== 'agent'
-      ))
+      .filter((candidate) => selectedIds.includes(candidate.member.session.id))
       .map((candidate) => candidate.id);
   }
   if (component?.rootNodeId === nodeId) return [...component.nodeIds];
@@ -161,8 +157,9 @@ export function resolveNodeDragGroupIds(input: {
 }
 
 export function mapMembersFromAgentCache(cached: readonly CachedMapAgent[]): MapMemberRef[] {
-  return cached.map((row) => {
-    const ghostId = `agent:${row.hostId}:${row.agentId}`;
+  return cached.flatMap((row) => {
+    const mounted = row.mounted_session_id?.trim();
+    if (mounted === undefined || mounted.length === 0) return [];
     const title = row.title?.trim() || row.agentId;
     const agent: SessionAgent = {
       agent_id: row.agentId,
@@ -171,10 +168,10 @@ export function mapMembersFromAgentCache(cached: readonly CachedMapAgent[]): Map
       role: row.role,
       mandate: row.mandate,
       status: row.status ?? 'idle',
-      mounted_session_id: row.mounted_session_id,
+      mounted_session_id: mounted,
     };
     const session: Session = {
-      id: ghostId,
+      id: mounted,
       title,
       status: row.status ?? 'idle',
       created_at: new Date(0).toISOString(),
@@ -185,7 +182,7 @@ export function mapMembersFromAgentCache(cached: readonly CachedMapAgent[]): Map
         mount_mandate: row.mandate,
       },
     };
-    return { kind: 'agent' as const, hostSessionId: row.hostId, agent, session };
+    return [{ kind: 'session' as const, hostSessionId: row.hostId, agent, session }];
   });
 }
 

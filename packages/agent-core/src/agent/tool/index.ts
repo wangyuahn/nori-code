@@ -533,6 +533,7 @@ export class ToolManager {
           new b.SkillTool(this.agent),
         this.agent.subagentHost && new b.TeamCreateTool(this.agent.subagentHost),
         this.agent.subagentHost && new b.TeamDismissTool(this.agent.subagentHost),
+        this.agent.subagentHost && new b.TeamUpdateTool(this.agent.subagentHost),
         this.agent.subagentHost && new b.TeamAssignTool(this.agent.subagentHost),
         this.agent.subagentHost && new b.TeamBroadcastTool(this.agent.subagentHost),
         this.agent.subagentHost && new b.TeamDMTool(this.agent.subagentHost),

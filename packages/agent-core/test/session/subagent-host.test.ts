@@ -12,9 +12,11 @@ import type { BackgroundTask } from '../../src/agent/background/task';
 import { AGENT_WIRE_PROTOCOL_VERSION } from '../../src/agent/records';
 import type { ResolvedAgentProfile } from '../../src/profile';
 import type { SDKSessionRPC } from '../../src/rpc';
-import { Session } from '../../src/session';
+import { Session, type SessionOptions } from '../../src/session';
 import { ProviderManager } from '../../src/session/provider-manager';
-import { SessionSubagentHost } from '../../src/session/subagent-host';
+import {
+  SessionSubagentHost,
+} from '../../src/session/subagent-host';
 import type { NoriMemoryProvider } from '../../src/tools/builtin/nori/types';
 import { abortError, userCancellationReason } from '../../src/utils/abort';
 import { testAgent, type AgentTestContext } from '../agent/harness/agent';
@@ -95,6 +97,7 @@ type HostSessionMember =
   | 'publishLeadDiscussionStatement'
   | 'publishTeamDiscussionStatement'
   | 'recordTeamReport'
+  | 'recordTeamTurnSkip'
   | 'releaseTeamAssignment'
   | 'teamMemberMetadata'
   | 'unreadTeamDiscussionStatements'
@@ -145,6 +148,7 @@ function teamSessionDouble(parts: Partial<Record<HostSessionMember, unknown>>): 
     publishLeadDiscussionStatement: vi.fn(async () => ({ discussionAgentId: 'agent-discussion', entryId: 1 })),
     publishTeamDiscussionStatement: vi.fn(async () => ({ discussionAgentId: 'agent-discussion', entryId: 1 })),
     recordTeamReport: vi.fn(async () => undefined),
+    recordTeamTurnSkip: vi.fn(async () => undefined),
     releaseTeamAssignment: vi.fn(async () => undefined),
     teamMemberMetadata: vi.fn(() => []),
     unreadTeamDiscussionStatements: vi.fn(async () => ({ statements: [], cursor: 0 })),
@@ -259,397 +263,6 @@ describe('SessionSubagentHost', () => {
     expect(leaseAgentId).toBeUndefined();
   });
 
-  it('switches from first response timeout to a resettable full-turn activity deadline', async () => {
-    vi.useFakeTimers();
-    try {
-      const transcript = testAgent({ type: 'sub' });
-      let active = false;
-      let spoken = false;
-      let firstResponse!: () => void;
-      let complete!: () => void;
-      let progressListener: (() => void) | undefined;
-      const member = agentDouble({
-        context: { history: [] },
-        turn: {
-          get hasActiveTurn() {
-            return active;
-          },
-          prompt: vi.fn(() => {
-            active = true;
-            setTimeout(() => {
-              progressListener?.();
-              firstResponse();
-            }, 1);
-            return 1;
-          }),
-          waitForTurnFirstRequest: vi.fn(() => new Promise<void>((resolve) => {
-            firstResponse = resolve;
-          })),
-          onTurnProgress: vi.fn((listener: () => void) => {
-            progressListener = listener;
-            return () => {
-              progressListener = undefined;
-            };
-          }),
-          waitForCurrentTurn: vi.fn(async (waitSignal?: AbortSignal) => new Promise((resolve, reject) => {
-            complete = () => {
-              active = false;
-              spoken = true;
-              resolve({ event: { reason: 'completed' } });
-            };
-            waitSignal?.addEventListener('abort', () => {
-              active = false;
-              reject(waitSignal.reason);
-            }, { once: true });
-          })),
-        },
-      });
-      const discussionMeta = {
-        homedir: '/discussion',
-        type: 'sub' as const,
-        parentAgentId: 'main',
-        kind: 'sub' as const,
-        teamLeaderAgentId: 'main',
-        discussion: {
-          participantAgentIds: ['agent-review'],
-          status: 'active' as const,
-          topic: 'Allow long member progress',
-          startedAt: '2026-08-18T00:00:00.000Z',
-          updatedAt: '2026-08-18T00:00:00.000Z',
-        },
-      };
-      const memberMeta = {
-        homedir: '/review',
-        type: 'sub' as const,
-        parentAgentId: 'main',
-        kind: 'team' as const,
-        teamLeaderAgentId: 'main',
-        name: 'Reviewer',
-      };
-      const session = teamSessionDouble({
-        metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-review': memberMeta } },
-        activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
-        getAgentMetadata: vi.fn((id: string) =>
-          id === 'agent-discussion' ? discussionMeta : id === 'agent-review' ? memberMeta : undefined,
-        ),
-        ensureAgentResumed: vi.fn(async (id: string) =>
-          id === 'agent-discussion' ? transcript.agent : member,
-        ),
-        unreadTeamDiscussionStatements: vi.fn(async () => ({ statements: [], cursor: 0 })),
-        acknowledgeTeamDiscussionStatements: vi.fn(async () => undefined),
-        beginTeamDiscussionTurn: vi.fn(),
-        endTeamDiscussionTurn: vi.fn(),
-        consumeTeamDiscussionSpeak: vi.fn(() => spoken ? {
-          entryId: 1,
-          agentId: 'agent-review',
-          name: 'Reviewer',
-          message: 'The long tool call completed.',
-        } : undefined),
-      });
-      const host = new SessionSubagentHost(session, 'main', {
-        discussionMemberTimeoutMs: 20,
-        discussionMemberFirstResponseTimeoutMs: 10,
-      });
-      let settled = false;
-      const resultPromise = host.decideTeamDiscussion('continue', undefined, undefined, signal)
-        .finally(() => {
-          settled = true;
-        });
-
-      await vi.advanceTimersByTimeAsync(16);
-      // This is after the 10ms first-response deadline. It must reset the
-      // 20ms inactivity deadline rather than being treated as a timeout.
-      progressListener?.();
-      await vi.advanceTimersByTimeAsync(19);
-      expect(settled).toBe(false);
-
-      complete();
-      const result = await resultPromise;
-      expect(result.statements).toEqual([{
-        agentId: 'agent-review',
-        statement: 'The long tool call completed.',
-        skipped: false,
-      }]);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('reports a full-turn timeout after first response without retrying', async () => {
-    vi.useFakeTimers();
-    try {
-      const transcript = testAgent({ type: 'sub' });
-      let active = false;
-      let firstResponse!: () => void;
-      const member = agentDouble({
-        context: { history: [] },
-        turn: {
-          get hasActiveTurn() {
-            return active;
-          },
-          prompt: vi.fn(() => {
-            active = true;
-            return 1;
-          }),
-          waitForTurnFirstRequest: vi.fn(() => new Promise<void>((resolve) => {
-            firstResponse = resolve;
-            setTimeout(firstResponse, 1);
-          })),
-          onTurnProgress: vi.fn(() => () => {}),
-          waitForCurrentTurn: vi.fn(async (waitSignal?: AbortSignal) => new Promise((_resolve, reject) => {
-            waitSignal?.addEventListener('abort', () => {
-              active = false;
-              reject(waitSignal.reason);
-            }, { once: true });
-          })),
-        },
-      });
-      const discussionMeta = {
-        homedir: '/discussion',
-        type: 'sub' as const,
-        parentAgentId: 'main',
-        kind: 'sub' as const,
-        teamLeaderAgentId: 'main',
-        discussion: {
-          participantAgentIds: ['agent-review'],
-          status: 'active' as const,
-          topic: 'Bound active member turns',
-          startedAt: '2026-08-18T00:00:00.000Z',
-          updatedAt: '2026-08-18T00:00:00.000Z',
-        },
-      };
-      const memberMeta = {
-        homedir: '/review',
-        type: 'sub' as const,
-        parentAgentId: 'main',
-        kind: 'team' as const,
-        teamLeaderAgentId: 'main',
-        name: 'Reviewer',
-      };
-      const session = teamSessionDouble({
-        metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-review': memberMeta } },
-        activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
-        getAgentMetadata: vi.fn((id: string) =>
-          id === 'agent-discussion' ? discussionMeta : id === 'agent-review' ? memberMeta : undefined,
-        ),
-        ensureAgentResumed: vi.fn(async (id: string) =>
-          id === 'agent-discussion' ? transcript.agent : member,
-        ),
-        unreadTeamDiscussionStatements: vi.fn(async () => ({ statements: [], cursor: 0 })),
-        acknowledgeTeamDiscussionStatements: vi.fn(async () => undefined),
-        beginTeamDiscussionTurn: vi.fn(),
-        endTeamDiscussionTurn: vi.fn(),
-        consumeTeamDiscussionSpeak: vi.fn(() => undefined),
-      });
-      const host = new SessionSubagentHost(session, 'main', {
-        discussionMemberTimeoutMs: 5,
-        discussionMemberFirstResponseTimeoutMs: 2,
-      });
-      const resultPromise = host.decideTeamDiscussion('continue', undefined, undefined, signal);
-      await vi.advanceTimersByTimeAsync(7);
-      const result = await resultPromise;
-
-      expect(member.turn.prompt).toHaveBeenCalledTimes(1);
-      expect(result.statements).toEqual([{
-        agentId: 'agent-review',
-        skipped: true,
-        reason: 'timeout',
-        error: 'Member discussion turn timed out after 5ms.',
-      }]);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('retries no-response members once and continues after consecutive failures', async () => {
-    const transcript = testAgent({ type: 'sub' });
-    let firstActive = false;
-    const firstSignals: AbortSignal[] = [];
-    const first = agentDouble({
-      turn: {
-        get hasActiveTurn() { return firstActive; },
-        prompt: vi.fn(() => { firstActive = true; return 1; }),
-        waitForTurnFirstRequest: vi.fn(() => new Promise<void>(() => {})),
-        waitForCurrentTurn: vi.fn(async (waitSignal?: AbortSignal) => {
-          if (waitSignal !== undefined) firstSignals.push(waitSignal);
-          if (waitSignal === undefined) return { event: { reason: 'cancelled' } };
-          await new Promise<void>((_resolve, reject) => {
-            waitSignal.addEventListener('abort', () => {
-              firstActive = false;
-              reject(waitSignal.reason);
-            }, { once: true });
-          });
-          return { event: { reason: 'cancelled' } };
-        }),
-      },
-    });
-    const second = agentDouble({
-      turn: {
-        hasActiveTurn: false,
-        prompt: vi.fn(() => 2),
-        waitForTurnFirstRequest: vi.fn(() => new Promise<void>(() => {})),
-        waitForCurrentTurn: vi.fn(async () => ({ event: { reason: 'completed' } })),
-      },
-    });
-    const discussionMeta = {
-      homedir: '/discussion',
-      type: 'sub' as const,
-      parentAgentId: 'main',
-      kind: 'sub' as const,
-      teamLeaderAgentId: 'main',
-      discussion: {
-        participantAgentIds: ['agent-first', 'agent-second'],
-        status: 'active' as const,
-        topic: 'Bound each member turn',
-        startedAt: '2026-08-18T00:00:00.000Z',
-        updatedAt: '2026-08-18T00:00:00.000Z',
-      },
-    };
-    const memberMeta = (name: string) => ({
-      homedir: `/${name.toLowerCase()}`,
-      type: 'sub' as const,
-      parentAgentId: 'main',
-      kind: 'team' as const,
-      teamLeaderAgentId: 'main',
-      name,
-    });
-    const firstMeta = memberMeta('First');
-    const secondMeta = memberMeta('Second');
-    const endTeamDiscussionTurn = vi.fn();
-    const session = teamSessionDouble({
-      metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-first': firstMeta, 'agent-second': secondMeta } },
-      activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
-      getAgentMetadata: vi.fn((id: string) => id === 'agent-discussion' ? discussionMeta : id === 'agent-first' ? firstMeta : id === 'agent-second' ? secondMeta : undefined),
-      ensureAgentResumed: vi.fn(async (id: string) => id === 'agent-discussion' ? transcript.agent : id === 'agent-first' ? first : second),
-      unreadTeamDiscussionStatements: vi.fn(async () => ({ statements: [], cursor: 0 })),
-      acknowledgeTeamDiscussionStatements: vi.fn(async () => undefined),
-      beginTeamDiscussionTurn: vi.fn(),
-      endTeamDiscussionTurn,
-      consumeTeamDiscussionSpeak: vi.fn(() => undefined),
-    });
-    const host = new SessionSubagentHost(session, 'main', {
-      discussionMemberTimeoutMs: 10,
-      discussionMemberFirstResponseTimeoutMs: 1,
-    });
-
-    const result = await host.decideTeamDiscussion('continue', undefined, undefined, signal);
-
-    expect(firstSignals).toHaveLength(2);
-    expect(firstSignals.every((candidate) => candidate.aborted)).toBe(true);
-    expect(first.turn.waitForCurrentTurn).toHaveBeenCalledTimes(2);
-    expect(second.turn.prompt).toHaveBeenCalledTimes(2);
-    expect(endTeamDiscussionTurn).toHaveBeenNthCalledWith(1, 'agent-discussion', 'agent-first');
-    expect(endTeamDiscussionTurn).toHaveBeenNthCalledWith(2, 'agent-discussion', 'agent-second');
-    expect(result.statements).toEqual([
-      {
-        agentId: 'agent-first',
-        skipped: true,
-        reason: 'no_response',
-        error: 'Member discussion turn produced no text, tool call, or response event within 1ms; retry exhausted (timeout/no_response).',
-      },
-      {
-        agentId: 'agent-second',
-        skipped: true,
-        reason: 'no_response',
-        error: 'Member discussion turn produced no text, tool call, or response event within 1ms; retry exhausted (timeout/no_response).',
-      },
-    ]);
-  });
-
-  it('cancels the first no-response attempt before retrying successfully', async () => {
-    const transcript = testAgent({ type: 'sub' });
-    let attempt = 0;
-    let active = false;
-    let consumed = false;
-    const member = agentDouble({
-      turn: {
-        get hasActiveTurn() {
-          return active;
-        },
-        prompt: vi.fn(() => {
-          attempt += 1;
-          active = true;
-          return attempt;
-        }),
-        waitForTurnFirstRequest: vi.fn(() =>
-          attempt === 1 ? new Promise<void>(() => {}) : Promise.resolve(),
-        ),
-        waitForCurrentTurn: vi.fn(async (waitSignal?: AbortSignal) => {
-          if (attempt === 1) {
-            await new Promise<void>((_resolve, reject) => {
-              waitSignal?.addEventListener('abort', () => {
-                active = false;
-                reject(waitSignal.reason);
-              }, { once: true });
-            });
-          }
-          active = false;
-          return { event: { reason: 'completed' } };
-        }),
-      },
-    });
-    const discussionMeta = {
-      homedir: '/discussion',
-      type: 'sub' as const,
-      parentAgentId: 'main',
-      kind: 'sub' as const,
-      teamLeaderAgentId: 'main',
-      discussion: {
-        participantAgentIds: ['agent-review'],
-        status: 'active' as const,
-        topic: 'Retry a quiet member',
-        startedAt: '2026-08-18T00:00:00.000Z',
-        updatedAt: '2026-08-18T00:00:00.000Z',
-      },
-    };
-    const memberMeta = {
-      homedir: '/review',
-      type: 'sub' as const,
-      parentAgentId: 'main',
-      kind: 'team' as const,
-      teamLeaderAgentId: 'main',
-      name: 'Reviewer',
-    };
-    const session = teamSessionDouble({
-      metadata: { agents: { 'agent-discussion': discussionMeta, 'agent-review': memberMeta } },
-      activeTeamDiscussion: vi.fn(() => ['agent-discussion', discussionMeta] as const),
-      getAgentMetadata: vi.fn((id: string) =>
-        id === 'agent-discussion' ? discussionMeta : id === 'agent-review' ? memberMeta : undefined,
-      ),
-      ensureAgentResumed: vi.fn(async (id: string) =>
-        id === 'agent-discussion' ? transcript.agent : member,
-      ),
-      unreadTeamDiscussionStatements: vi.fn(async () => ({ statements: [], cursor: 0 })),
-      acknowledgeTeamDiscussionStatements: vi.fn(async () => undefined),
-      beginTeamDiscussionTurn: vi.fn(),
-      endTeamDiscussionTurn: vi.fn(),
-      consumeTeamDiscussionSpeak: vi.fn(() => {
-        if (attempt < 2 || consumed) return undefined;
-        consumed = true;
-        return {
-          entryId: 1,
-          agentId: 'agent-review',
-          name: 'Reviewer',
-          message: 'The retry produced a stable answer.',
-        };
-      }),
-    });
-    const host = new SessionSubagentHost(session, 'main', {
-      discussionMemberTimeoutMs: 100,
-      discussionMemberFirstResponseTimeoutMs: 1,
-    });
-
-    const result = await host.decideTeamDiscussion('continue', undefined, undefined, signal);
-
-    expect(member.turn.prompt).toHaveBeenCalledTimes(2);
-    expect(member.turn.waitForCurrentTurn).toHaveBeenCalledTimes(2);
-    expect(result.statements).toEqual([{
-      agentId: 'agent-review',
-      statement: 'The retry produced a stable answer.',
-      skipped: false,
-    }]);
-  });
-
   it('does not retry when the parent turn is cancelled by the user', async () => {
     const transcript = testAgent({ type: 'sub' });
     const parent = new AbortController();
@@ -713,10 +326,7 @@ describe('SessionSubagentHost', () => {
       endTeamDiscussionTurn: vi.fn(),
       consumeTeamDiscussionSpeak: vi.fn(() => undefined),
     });
-    const host = new SessionSubagentHost(session, 'main', {
-      discussionMemberTimeoutMs: 100,
-      discussionMemberFirstResponseTimeoutMs: 20,
-    });
+    const host = new SessionSubagentHost(session, 'main');
 
     await expect(host.decideTeamDiscussion('continue', undefined, undefined, parent.signal))
       .rejects.toThrow('Aborted by the user');
@@ -772,6 +382,10 @@ describe('SessionSubagentHost', () => {
     expect(result.statements).toEqual([{ agentId: 'agent-review', skipped: true }]);
     const modelInput = JSON.stringify(member.lastLlmInput());
     expect(modelInput).toContain('Your scheduled discussion turn has started.');
+    expect(modelInput).toContain('Publish exactly one short TeamSpeak');
+    expect(modelInput).toContain('Do not solve the whole problem');
+    expect(modelInput).toContain('Later rounds exist for the rest');
+    expect(modelInput).toContain('禁止一轮内想完、写完');
     expect(modelInput).not.toContain('Discuss this topic as a team partner');
     expect(modelInput).not.toContain('There are no unread shared statements');
     expect(transcript.agent.context.history).not.toContainEqual(
@@ -2133,6 +1747,7 @@ describe('Session.createAgent', () => {
       'UpdateGoal',
       'mcp__*',
       'TeamCreate',
+      'TeamUpdate',
       'TeamDecide',
       'TeamStatus',
     ]));
@@ -2252,6 +1867,7 @@ describe('Session.createAgent', () => {
     expect(member.agent.tools.activeToolNames()).toEqual(expect.arrayContaining([
       'TeamCreate',
       'TeamDismiss',
+      'TeamUpdate',
       'TeamAssign',
       'TeamBroadcast',
       'TeamDiscussInvite',
@@ -2368,15 +1984,8 @@ describe('Session.createAgent', () => {
   });
 
   it('lets a Team Agent hire its own members up to the configured depth', async () => {
-    const session = new Session({
+    const session = hireableSession({
       id: 'test-department-depth',
-      kaos: createFakeKaos({
-        mkdir: vi.fn().mockResolvedValue(undefined),
-        writeText: vi.fn().mockResolvedValue(0),
-      }),
-      homedir: '/tmp/kimi-session',
-      rpc: createSessionRpc(),
-      initializeMainAgent: false,
       config: { providers: {}, team: { maxDepth: 2 } },
     });
     const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
@@ -2880,6 +2489,52 @@ describe('Session.createAgent', () => {
     expect(session.getAgentMetadata(member.id)).toBeUndefined();
     expect(deleteMountedMember).toHaveBeenCalledWith('sess-mounted-reviewer');
     expect(refreshSystemPrompt).toHaveBeenCalled();
+  });
+
+  it('TeamCreate hires a mounted child session and returns its session id', async () => {
+    const session = hireableSession({ id: 'test-team-create-mounted' });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const host = new SessionSubagentHost(session, main.id);
+    const [member] = await host.createTeam([{
+      name: 'Reviewer',
+      mandate: 'Review behavior before changes.',
+      role: 'reviewer',
+    }]);
+    expect(member?.sessionId).toMatch(/^sess_Reviewer/);
+    expect(session.getAgentMetadata(member!.agentId)?.mountedSessionId).toBe(member!.sessionId);
+  });
+
+  it('TeamUpdate patches identity without prompting a turn', async () => {
+    const prompt = vi.fn();
+    const identityUpdates: Array<{
+      sessionId: string;
+      name?: string;
+      tags?: readonly string[];
+    }> = [];
+    const session = hireableSession({
+      id: 'test-team-update-identity',
+      updateSessionIdentity: async (input) => {
+        identityUpdates.push(input);
+      },
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const host = new SessionSubagentHost(session, main.id);
+    const [member] = await host.createTeam([{
+      name: 'Reviewer',
+      mandate: 'Review PRs.',
+      role: 'reviewer',
+    }]);
+    await host.updateTeamIdentity({
+      agentId: member!.agentId,
+      name: 'Lead reviewer',
+      tags: ['review'],
+    });
+    expect(identityUpdates).toEqual([expect.objectContaining({
+      sessionId: member!.sessionId,
+      name: 'Lead reviewer',
+      tags: ['review'],
+    })]);
+    expect(prompt).not.toHaveBeenCalled();
   });
 
   it('TeamDismiss persists agent removal before deleting mounted sessions', async () => {
@@ -3527,6 +3182,38 @@ function fakeSession(
       },
     ),
   } as unknown as Session;
+}
+
+function hireableSession(
+  options: { id: string } & Partial<SessionOptions>,
+): Session {
+  let session!: Session;
+  const { createMountedChild, kaos, homedir, rpc, initializeMainAgent, id, ...rest } = options;
+  session = new Session({
+    ...rest,
+    id,
+    kaos: kaos ?? createFakeKaos({
+      mkdir: vi.fn().mockResolvedValue(undefined),
+      writeText: vi.fn().mockResolvedValue(0),
+    }),
+    homedir: homedir ?? '/tmp/kimi-session',
+    rpc: rpc ?? createSessionRpc(),
+    initializeMainAgent: initializeMainAgent ?? false,
+    createMountedChild: createMountedChild ?? (async (input) => {
+      const sessionId = `sess_${input.title.replace(/\s+/g, '_')}`;
+      const { agentId } = await session.attachMountedTeamMember({
+        mountedSessionId: sessionId,
+        identity: {
+          name: input.title,
+          role: input.role,
+          mandate: input.mandate,
+        },
+        teamLeaderAgentId: input.teamLeaderAgentId ?? 'main',
+      });
+      return { sessionId, agentId };
+    }),
+  });
+  return session;
 }
 
 function contextProfile(): ResolvedAgentProfile {

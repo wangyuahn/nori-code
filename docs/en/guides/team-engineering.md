@@ -1,13 +1,13 @@
 # Team engineering
 
-Nori Code CLI 2.0 treats a project as a **department tree**, not a single chat transcript with side notes. `TeamCreate` hires durable agents inside the current session; the **conversation map** also shows real mounted child sessions. Discuss rounds gather statements before execution. This page explains how those pieces fit together in the terminal and in Nori Work.
+Nori Code CLI 2.0 treats a project as a **department tree**, not a single chat transcript with side notes. `TeamCreate` hires by creating a **mounted child session** (the same class of node the conversation map already shows) plus a dual-write team agent so Discuss still addresses this department. Discuss rounds gather statements before execution. This page explains how those pieces fit together in the terminal and in Nori Work.
 
 ## Department tree vs SubAgent
 
 Two collaboration models coexist:
 
-- **Team partners** (`TeamCreate`) are **durable department agents** inside the current session. They appear as member cards on the conversation map and keep Discuss/Assign until `TeamDismiss` removes them. `TeamCreate` does **not** create a mounted child session.
-- **Map nodes** are **real child sessions** linked by `parent_session_id`. Creating or wiring a child on the Web Map canvas makes this kind of node and dual-writes a team agent so Discuss still works. A session can have only one parent (part-time / second-parent hire is not supported).
+- **Team partners** (`TeamCreate`) are **real child sessions** mounted under you. They appear as session cards on the conversation map, keep Discuss/Assign until `TeamDismiss` removes them, and dual-write a team agent so Discuss still addresses this department by agent id.
+- **Map nodes** are the same class: **real child sessions** linked by `parent_session_id`. Creating or wiring a child on the Web Map canvas uses the same create-child + mount path as `TeamCreate`. A session can have only one parent (part-time / second-parent hire is not supported).
 - **SubAgents** (`SubAgent`) are **temporary delegates** archived inside the parent's session directory. They finish a bounded task and return a result; they are not map nodes and are not meant as long-lived departments.
 
 The main Agent stays a **read-only coordinator** by default: direct `Write` / `Edit` are blocked (`/setting readonly on`), while hired members execute assigned tracks after `TeamAssign` leaves Discuss. Use `/setting readonly off` only when you want the lead to edit files directly.
@@ -18,10 +18,12 @@ The main Agent stays a **read-only coordinator** by default: direct `Write` / `E
 
 Typical flow:
 
-1. **`TeamCreate`** — hire partners into your department (each is an in-session agent shown as a member card on the map).
+1. **`TeamCreate`** — hire partners into your department (each is a real child session on the map).
 2. **`TeamDecide`** with `action=start` — open Discuss with a topic; members speak with **`TeamSpeak`** (skipping a turn records abstention).
 3. **`TeamAssign`** — hand out concrete tasks; success **leaves Discuss** and enters Code so members can execute.
 4. After work, **`TeamDecide`** with `action=vote` — the team votes (`discuss_again` / `proceed` / `abstain`) without re-entering full Discuss.
+
+Discuss is **multi-round**. Each `TeamSpeak` is one short, decidable point — not a complete plan. Keep using `TeamDecide` with `action=continue` for the next slice. A skipped member is an abstention; later speakers still take their turn.
 
 Toggle Discuss from the UI with **`Shift-Tab`**, **`/discuss`**, or the compatibility alias **`/plan`**. **`TeamAssign`** and the Discuss/Code toggle both leave Discuss; YOLO does not add a separate exit approval.
 
@@ -31,8 +33,9 @@ See [Interaction and input](./interaction.md#mode-switching) for approval behavi
 
 | Tool | Role |
 | --- | --- |
-| `TeamCreate` | Hire one or more partners (`name`, `role`, `mandate` each). Creates in-session agents (member cards on the map; they cannot wire mounts). Respects `/team settings` max department depth. |
-| `TeamDismiss` | Remove partners from your department. Pure `TeamCreate` members are agents only. If a member was hired by mounting a map session (`mounted_session_id` set), that child session is also deleted. Requires a `reason`. If a member is still working, call with `confirm_active=false` first; retry with `confirm_active=true` only after you accept the interruption. |
+| `TeamCreate` | Hire one or more partners (`name`, `role`, `mandate` each). Creates a mounted child session (a session card on the map) and a dual-write team agent so Discuss/Assign still address this department. Respects `/team settings` max department depth. |
+| `TeamDismiss` | Remove partners from your department. Dismissing deletes that child session (and the dual-write team agent). Requires a `reason`. If a member is still working, call with `confirm_active=false` first; retry with `confirm_active=true` only after you accept the interruption. |
+| `TeamUpdate` | Update name, role, mandate, or tags for this session or a member. Related sessions receive a system reminder and do not start a turn. |
 
 `TeamDismiss` is the supported way to remove a hired partner. Unmounting via `/map` detaches the session from the tree but **does not** delete the child session.
 
@@ -59,7 +62,7 @@ Type **`/map`** to browse the mount forest for the current working directory:
 
 ### Web: Map view
 
-In Nori Work / the Web UI, open the sidebar **Map** entry (conversation map). The canvas shows the same mount forest: pan/zoom the tree, open a session into Chat, create a child under a parent, mount or remount with role/mandate, and add local labels or annotation boxes (map-only chrome — not sent to the model).
+In Nori Work / the Web UI, open the sidebar **Map** entry (conversation map). The canvas is a session console, not a static blueprint: pan/zoom the tree, read each card's running state, open a session into Chat, create a child under a parent, stop a running turn, edit name/mandate/tags, mount or remount with role/mandate, and add local labels or annotation boxes (map-only chrome — not sent to the model).
 
 Blueprint gestures:
 
@@ -67,7 +70,8 @@ Blueprint gestures:
 - **Drag an output port onto a card** — silent mount; drop on empty canvas — identity draft then `createChild`.
 - **Drag an input port onto another card** — remount. If the child already has a parent, confirm: this remounts, it does not add a second job.
 - **Alt+click an input port** — unmount to top-level. Mount/unmount on a busy session queues until idle.
-- **Label filters** apply to both the list and the canvas. `TeamCreate` member cards have no wire ports.
+- **Box-select** — a toolbar appears for Open, Stop, Settings, Unmount, and Delete. Right-click the selection for the same batch actions.
+- **Label filters** apply to both the list and the canvas. Every visible card is a real session and can be boxed or wired.
 
 Use **`/web`** from the TUI to hand off the current session to the browser workspace when you want the map on a large screen.
 
@@ -75,8 +79,9 @@ Use **`/web`** from the TUI to hand off the current session to the browser works
 
 Team identity is **not** injected by copying another session's transcript or by a legacy summary tool. Instead:
 
-- **`<session_self>`** — rendered into each session's system prompt from current mount metadata: session id, title, depth, parent, role, mandate, and direct members.
+- **`<session_self>`** — rendered into each session's system prompt from current mount metadata: session id, title, depth, parent, role, mandate, tags, and direct members.
 - **`<session_mount_changed>`** — injected on the next turn for affected sessions when a mount, unmount, remount, or parent deletion occurs (`event.session.mount_changed`).
+- **`<session_identity_changed>`** — injected when name, role, mandate, or tags change. Related sessions are notified and **do not start a turn**.
 
 After mount metadata changes, the runtime refreshes `<session_self>` so every partner knows where it sits in the tree. This is identity and topology only — not shared chat history.
 

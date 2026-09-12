@@ -23,6 +23,7 @@ import {
   sessionStatusResponseSchema,
   updateSessionProfileRequestSchema,
   updateSessionRequestSchema,
+  updateSessionIdentityRequestSchema,
   undoSessionRequestSchema,
   undoSessionResponseSchema,
 } from '../rest/session';
@@ -222,6 +223,21 @@ describe('updateSessionRequestSchema (legacy alias)', () => {
     expect(updateSessionRequestSchema.parse({ metadata: { custom_field: 'x' } })).toEqual(
       updateSessionProfileRequestSchema.parse({ metadata: { custom_field: 'x' } }),
     );
+  });
+});
+
+describe('updateSessionIdentityRequestSchema', () => {
+  it('accepts a name/mandate/tags patch and rejects an empty body', () => {
+    expect(updateSessionIdentityRequestSchema.parse({
+      name: 'Reviewer',
+      mandate: 'Review diffs',
+      tags: ['review'],
+    })).toEqual({
+      name: 'Reviewer',
+      mandate: 'Review diffs',
+      tags: ['review'],
+    });
+    expect(updateSessionIdentityRequestSchema.safeParse({}).success).toBe(false);
   });
 });
 

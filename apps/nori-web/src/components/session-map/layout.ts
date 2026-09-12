@@ -4,7 +4,7 @@ import { parentSessionIdOf } from '../../utils/session-mount';
 import { mapMemberRoleLabel, type MapNodeMember } from '../../utils/session-graph';
 
 export const NODE_W = 220;
-export const NODE_H = 96;
+export const NODE_H = 148;
 export const GAP_X = 36;
 export const GAP_Y = 64;
 export const CANVAS_PAD = 48;
@@ -92,8 +92,6 @@ export function memberProjectCwd(
 ): string | undefined {
   const own = member.session.metadata?.cwd;
   if (typeof own === 'string' && own.trim()) return own.trim();
-  const isGhost = member.kind === 'agent' || member.session.id.startsWith('agent:');
-  if (!isGhost) return undefined;
   const hostId = member.hostSessionId ?? parentSessionIdOf(member.session);
   if (hostId === undefined) return undefined;
   const hostCwd = byId.get(hostId)?.metadata?.cwd;
@@ -165,9 +163,6 @@ export function layoutSessionMountForest(
     return false;
   };
 
-  const isSyntheticAgentCard = (extra: MapMemberRef): boolean => (
-    extra.kind === 'agent' || extra.session.id.startsWith('agent:')
-  );
   const agentByHost = new Map<string, MapMemberRef[]>();
   const agentsByMountedSession = new Map<string, MapMemberRef[]>();
   for (const extra of agentExtras) {
@@ -177,10 +172,13 @@ export function layoutSessionMountForest(
       linked.push(extra);
       agentsByMountedSession.set(mounted, linked);
     }
+    // Ghost `agent:` cards are no longer placed. Dual-write members overlay the
+    // real mounted session via `agentsByMountedSession`.
+    if (extra.kind === 'agent') continue;
     const hostId = extra.hostSessionId;
     if (hostId === undefined || !byId.has(hostId)) continue;
     if (mounted !== undefined && byId.has(mounted)) continue;
-    if (!isSyntheticAgentCard(extra) && byId.has(extra.session.id)) continue;
+    if (byId.has(extra.session.id)) continue;
     const list = agentByHost.get(hostId) ?? [];
     list.push(extra);
     agentByHost.set(hostId, list);
@@ -309,9 +307,6 @@ export function layoutSessionMountForest(
 }
 
 export function nodeKey(member: MapMemberRef): string {
-  if (member.kind === 'agent' && member.agent !== undefined && member.hostSessionId !== undefined) {
-    return `agent:${member.hostSessionId}:${member.agent.agent_id}`;
-  }
   return `session:${member.session.id}`;
 }
 

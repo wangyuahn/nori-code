@@ -8,6 +8,7 @@ import type {
   AgentAPI,
   AttachMountedTeamMemberPayload,
   AttachMountedTeamMemberResult,
+  BindMountedTeamMemberPayload,
   BeginCompactionPayload,
   CancelPayload,
   CancelDiscussPayload,
@@ -99,6 +100,10 @@ export class SessionAPIImpl implements PromisableMethods<SessionAPI> {
       identity: payload.identity,
       teamLeaderAgentId: payload.teamLeaderAgentId,
     });
+  }
+
+  bindMountedTeamMember(payload: BindMountedTeamMemberPayload): Promise<void> {
+    return this.session.bindMountedSessionId(payload.agentId, payload.mountedSessionId);
   }
 
   listSkills(_payload: EmptyPayload): Promise<readonly SkillSummary[]> {

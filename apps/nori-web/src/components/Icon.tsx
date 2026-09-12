@@ -46,7 +46,8 @@ export type IconName =
   | 'minimize'
   | 'maximize'
   | 'restore'
-  | 'document';
+  | 'document'
+  | 'search';
 
 interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'name'> {
   name: IconName;
@@ -101,6 +102,7 @@ export function Icon({ name, size = 18, ...props }: IconProps) {
     maximize: <rect x="5" y="5" width="14" height="14" rx="1"/>,
     restore: <><rect x="7" y="7" width="12" height="12" rx="1"/><path d="M5 16V5h11"/></>,
     document: <><path d="M7 3.5h7.5L19 8v12.5H7z"/><path d="M14.5 3.5V8H19"/><path d="M9.5 12h5M9.5 15.5h5M9.5 19h3.5"/></>,
+    search: <><circle cx="11" cy="11" r="6.5"/><path d="m20 20-3.6-3.6"/></>,
   };
 
   return (

@@ -10,10 +10,10 @@ Nori Code **1.x** already used SubAgents and collaboration tools inside a sessio
 
 | 1.x habit | 2.0 behavior |
 | --- | --- |
-| Treat Team partners as side roles inside one chat | `TeamCreate` hires **in-session department agents** (member cards on the map). Real mounted sessions come from `/map` or the Web Map canvas |
+| Treat Team partners as side roles inside one chat | `TeamCreate` hires **real child sessions** (session cards on the map) and dual-writes a team agent so Discuss still works |
 | Expect partners to share the lead's transcript | Identity comes from **`<session_self>`** and mount-change notices — **not** transcript copying |
 | Use one slash command for “the team UI” | **`/team`** manages department membership (open a partner session, reports, Discuss speech); **`/map`** manages session mounts |
-| Unmount / dismiss interchangeably | **`TeamDismiss`** removes department agents (and deletes a mounted session only if the member was hired by a map mount); **`/map` unmount** only clears the parent link |
+| Unmount / dismiss interchangeably | **`TeamDismiss`** deletes the hired child session; **`/map` unmount** only clears the parent link |
 | Assume the main Agent writes code freely | Main Agent stays a **read-only coordinator** by default (`Write` / `Edit` blocked); members execute after `TeamAssign`. Use `/setting readonly off` only when the lead should edit |
 
 Typical 2.0 flow: `TeamCreate` → Discuss (`TeamDecide` / `TeamSpeak`) → `TeamAssign` (enters Code) → members work and report. Details: [Team engineering](./team-engineering.md).

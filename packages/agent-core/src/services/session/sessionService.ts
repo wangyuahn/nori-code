@@ -25,6 +25,7 @@ import {
   readMountName,
   readMountRole,
   readParentSessionId,
+  readSessionTags,
 } from '../../session/mount-metadata';
 import { withMountTreeMutation } from '../../session/mount-mutation';
 import {
@@ -42,6 +43,7 @@ import {
   type SessionCreate,
   type SessionFork,
   type SessionGraphResponse,
+  type SessionIdentityUpdate,
   type SessionMount,
   type SessionRemount,
   type SessionStatus,
@@ -626,6 +628,7 @@ export class SessionService extends Disposable implements ISessionService {
     delete callerMeta[CHILD_SESSION_KIND_KEY];
     delete callerMeta[MOUNT_ROLE_KEY];
     delete callerMeta[MOUNT_MANDATE_KEY];
+    delete callerMeta[MOUNT_NAME_KEY];
     const child = await this.create({
       title,
       metadata: {
@@ -638,6 +641,7 @@ export class SessionService extends Disposable implements ISessionService {
         parent_session_id: id,
         role: input.role,
         mandate: input.mandate,
+        name: input.name ?? input.title,
       });
     } catch (error) {
       try {
@@ -658,6 +662,19 @@ export class SessionService extends Disposable implements ISessionService {
 
   async remount(id: string, input: SessionRemount): Promise<Session> {
     return this.withMountMutation(() => this.applyMount(id, input, 'remount'));
+  }
+
+  async updateIdentity(id: string, input: SessionIdentityUpdate): Promise<Session> {
+    await this.requireSummary(id);
+    await this.core.rpc.resumeSession({ sessionId: id });
+    await this.core.rpc.updateSessionIdentity({
+      sessionId: id,
+      name: input.name,
+      role: input.role,
+      mandate: input.mandate,
+      tags: input.tags,
+    });
+    return this.get(id);
   }
 
   async unmount(id: string): Promise<Session> {
@@ -703,8 +720,23 @@ export class SessionService extends Disposable implements ISessionService {
     });
     const sorted = all.toSorted((a, b) => b.updatedAt - a.updatedAt);
     const visible = query.excludeEmpty ? sorted.filter((s) => s.lastPrompt) : sorted;
+    let migrated = false;
+    for (const summary of visible) {
+      try {
+        if (await this.migrateGhostTeamMembers(summary.id)) migrated = true;
+      } catch {
+        // Best-effort: a failed ghost migration must not hide the rest of the map.
+      }
+    }
+    const source = migrated
+      ? (await this.core.rpc.listSessions({
+          workDir: query.workDir,
+          includeArchive: query.includeArchive,
+        })).toSorted((a, b) => b.updatedAt - a.updatedAt)
+      : sorted;
+    const nextVisible = query.excludeEmpty ? source.filter((s) => s.lastPrompt) : source;
     const nodes = await Promise.all(
-      visible.map(async (s) => {
+      nextVisible.map(async (s) => {
         const session = this._patchSessionStatus(toProtocolSession(s, await this.tryGetMeta(s.id)));
         await this._attachUsage(session);
         return session;
@@ -739,7 +771,8 @@ export class SessionService extends Disposable implements ISessionService {
     if (oldParentId === input.parent_session_id) {
       const role = normalizeOptionalString(input.role);
       const mandate = normalizeOptionalString(input.mandate);
-      if (role === undefined && mandate === undefined) {
+      const name = normalizeOptionalString(input.name);
+      if (role === undefined && mandate === undefined && name === undefined) {
         // A previous mount may have persisted its parent link before the
         // dual-write attach completed. Re-run the idempotent sync on every
         // same-parent remount so that retrying the operation repairs that
@@ -759,6 +792,7 @@ export class SessionService extends Disposable implements ISessionService {
         parentSessionId: input.parent_session_id,
         role,
         mandate,
+        name,
         clearIdentity: false,
       });
       const updated = await this.get(id);
@@ -784,10 +818,12 @@ export class SessionService extends Disposable implements ISessionService {
     await this.assertAcyclicMount(id, input.parent_session_id);
     const role = normalizeOptionalString(input.role);
     const mandate = normalizeOptionalString(input.mandate);
+    const name = normalizeOptionalString(input.name);
     await this.writeMountMetadata(id, {
       parentSessionId: input.parent_session_id,
       role,
       mandate,
+      name,
       clearIdentity: false,
     });
     const updated = await this.get(id);
@@ -881,6 +917,7 @@ export class SessionService extends Disposable implements ISessionService {
       parentSessionId: string | null;
       role: string | undefined;
       mandate: string | undefined;
+      name?: string | undefined;
       clearIdentity: boolean;
     },
   ): Promise<void> {
@@ -905,6 +942,7 @@ export class SessionService extends Disposable implements ISessionService {
     }
     if (opts.role !== undefined) nextCustom[MOUNT_ROLE_KEY] = opts.role;
     if (opts.mandate !== undefined) nextCustom[MOUNT_MANDATE_KEY] = opts.mandate;
+    if (opts.name !== undefined) nextCustom[MOUNT_NAME_KEY] = opts.name;
     await this.core.rpc.updateSessionMetadata({
       sessionId: id,
       metadata: { custom: nextCustom },
@@ -1023,6 +1061,9 @@ export class SessionService extends Disposable implements ISessionService {
         mandate: readMountMandate(custom) ?? readMountMandate(
           all.find((summary) => summary.id === sessionId)?.metadata,
         ),
+        tags: readSessionTags(custom) ?? readSessionTags(
+          all.find((summary) => summary.id === sessionId)?.metadata,
+        ),
         depth,
         position: parentId === undefined ? 'top-level' : 'member',
         directChildren: children,
@@ -1103,11 +1144,118 @@ export class SessionService extends Disposable implements ISessionService {
     return errors;
   }
 
-  /**
-   * Mount tree is authority: rebuild dual-write team agents so Discuss/Assign
-   * match `parent_session_id`. TeamCreate hires in-session agents only and does
-   * not go through this path.
-   */
+  /** Bind leftover in-session ghost hires to real child sessions. */
+  private async migrateGhostTeamMembers(hostSessionId: string): Promise<boolean> {
+    return this.withMountMutation(() => this.migrateGhostTeamMembersUnlocked(hostSessionId));
+  }
+
+  private async migrateGhostTeamMembersUnlocked(hostSessionId: string): Promise<boolean> {
+    await this.core.rpc.resumeSession({ sessionId: hostSessionId });
+    const meta = await this.tryGetMeta(hostSessionId);
+    if (meta === undefined) return false;
+    const liveIds = new Set(
+      (await this.core.rpc.listSessions({ includeArchive: true })).map((summary) => summary.id),
+    );
+    const ghosts = Object.entries(meta.agents).filter(([, agent]) => (
+      agent.kind === 'team'
+      && (agent.mountedSessionId === undefined || !liveIds.has(agent.mountedSessionId))
+    ));
+    if (ghosts.length === 0) return false;
+
+    const remaining = new Map(ghosts);
+    let migrated = false;
+    const maxPasses = remaining.size + 1;
+    for (let pass = 0; pass < maxPasses && remaining.size > 0; pass++) {
+      let progressed = false;
+      for (const [agentId, agent] of remaining) {
+        const leaderId = agent.teamLeaderAgentId ?? 'main';
+        let parentSessionId = hostSessionId;
+        if (leaderId !== 'main') {
+          if (remaining.has(leaderId)) continue;
+          const leader = meta.agents[leaderId];
+          if (typeof leader?.mountedSessionId === 'string' && liveIds.has(leader.mountedSessionId)) {
+            parentSessionId = leader.mountedSessionId;
+          }
+        }
+        await this.materializeGhostMember({
+          hostSessionId,
+          agentId,
+          agent,
+          parentSessionId,
+        });
+        remaining.delete(agentId);
+        migrated = true;
+        progressed = true;
+      }
+      if (!progressed) {
+        for (const [agentId, agent] of remaining) {
+          await this.materializeGhostMember({
+            hostSessionId,
+            agentId,
+            agent,
+            parentSessionId: hostSessionId,
+          });
+          migrated = true;
+        }
+        remaining.clear();
+      }
+    }
+    return migrated;
+  }
+
+  private async materializeGhostMember(input: {
+    readonly hostSessionId: string;
+    readonly agentId: string;
+    readonly agent: AgentMeta;
+    readonly parentSessionId: string;
+  }): Promise<void> {
+    const parent = await this.get(input.parentSessionId);
+    const cwd = typeof parent.metadata.cwd === 'string' ? parent.metadata.cwd : undefined;
+    if (cwd === undefined) {
+      throw new Error('SessionService.materializeGhostMember: parent metadata.cwd is required');
+    }
+    const name = input.agent.name?.trim() || input.agentId;
+    const role = input.agent.role?.trim() || DEFAULT_MOUNT_MEMBER_ROLE;
+    const mandate = input.agent.mandate?.trim() || DEFAULT_MOUNT_MEMBER_MANDATE;
+    const child = await this.create({
+      title: name,
+      metadata: { cwd },
+    });
+    try {
+      await this.writeMountMetadata(child.id, {
+        parentSessionId: input.parentSessionId,
+        role,
+        mandate,
+        name,
+        clearIdentity: false,
+      });
+      await this.core.rpc.bindMountedTeamMember({
+        sessionId: input.hostSessionId,
+        agentId: input.agentId,
+        mountedSessionId: child.id,
+      });
+      await this.emitMountChanged({
+        sessionId: child.id,
+        oldParentSessionId: null,
+        newParentSessionId: input.parentSessionId,
+        role,
+        mandate,
+        reason: 'mount',
+      });
+    } catch (error) {
+      try {
+        await this.core.rpc.deleteSession({ sessionId: child.id });
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          'Ghost team member migration failed and could not be rolled back.',
+        );
+      }
+      throw error;
+    }
+  }
+
+  /** Rebuild dual-write team agents from the mount tree. */
   private async syncTeamAgentsFromMountChange(input: {
     readonly childSessionId: string;
     readonly oldParentSessionId: string | null;
@@ -1200,6 +1348,7 @@ export class SessionService extends Disposable implements ISessionService {
     // Metadata for dormant sessions is reconstructed by resume; without it a
     // freshly opened parent conversation would incorrectly expose only main.
     await this.core.rpc.resumeSession({ sessionId: id });
+    await this.migrateGhostTeamMembers(id);
     const meta = await this.tryGetMeta(id);
     const agents = new Map(Object.entries(meta?.agents ?? {}));
     if (!agents.has(MAIN_AGENT_ID)) {
@@ -1237,7 +1386,7 @@ export class SessionService extends Disposable implements ISessionService {
             team_report_status: agent.teamReport?.status,
             team_report_summary: agent.teamReport?.summary,
             team_report_received: agent.teamReport?.receivedAt !== undefined,
-            summary: agent.discussion?.topic ?? agent.assignedTask,
+            summary: agent.lastTurnSkip?.error ?? agent.discussion?.topic ?? agent.assignedTask,
             status,
             usage,
             last_active: this._lastActivityByAgent.get(key) ?? new Date(summary.updatedAt).toISOString(),
@@ -1458,13 +1607,7 @@ export class SessionService extends Disposable implements ISessionService {
       const parentSessionId = readParentSessionId(summary.metadata);
       const promoted = await this.promoteChildrenOnDelete(id);
       try {
-        // A map-mounted child has a second representation as a team agent in its
-        // owning session. Deleting it through the generic session API must remove
-        // that representation too; otherwise the parent keeps a member whose
-        // mounted_session_id points at a deleted session.
-        // The summary's parent link can already be stale while a dual-write
-        // agent still points at this session. Scan every host before deletion
-        // so the successful delete cannot leave an agent with a dead mount.
+        // Dual-write agents can outlive a stale parent_session_id; detach everywhere before delete.
         await this.detachMountedTeamAgentsEverywhere(id);
         await this.core.rpc.deleteSession({ sessionId: id });
       } catch (error) {

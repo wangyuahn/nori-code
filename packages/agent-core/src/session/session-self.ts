@@ -18,6 +18,7 @@ export interface SessionSelfInfo {
   readonly parentTitle?: string;
   readonly role?: string;
   readonly mandate?: string;
+  readonly tags?: readonly string[];
   readonly depth: number;
   readonly position: 'top-level' | 'member';
   readonly directChildren: readonly SessionSelfMember[];
@@ -65,6 +66,9 @@ export function formatSessionSelf(info: SessionSelfInfo): string {
   }
   if (info.mandate !== undefined && info.mandate.length > 0) {
     lines.push(`Mandate: ${escapeXml(info.mandate)}`);
+  }
+  if (info.tags !== undefined && info.tags.length > 0) {
+    lines.push(`Tags: ${info.tags.map((tag) => escapeXml(tag)).join(', ')}`);
   }
   if (info.directChildren.length === 0) {
     lines.push('Direct members: (none)');
@@ -115,6 +119,50 @@ export function formatMountChangeNotice(
   lines.push(
     'This is an organization/identity update only. It is not a transcript summary and does not inherit another session\'s conversation.',
     '</session_mount_changed>',
+  );
+  return lines.join('\n');
+}
+
+export interface IdentityChangeInfo {
+  readonly session_id: string;
+  readonly name?: string;
+  readonly role?: string;
+  readonly mandate?: string;
+  readonly tags?: readonly string[];
+}
+
+export type IdentityChangeRecipientRole = 'subject' | 'parent' | 'sibling';
+
+/** One-shot identity edit notice. Does not start a turn. */
+export function formatIdentityChangeNotice(
+  change: IdentityChangeInfo,
+  recipientRole: IdentityChangeRecipientRole,
+): string {
+  const roleLabel = {
+    subject: 'you are the session whose identity changed',
+    parent: 'you are the parent of the session whose identity changed',
+    sibling: 'you are a sibling in the same department',
+  }[recipientRole];
+
+  const lines = [
+    '<session_identity_changed>',
+    `Your role in this notice: ${roleLabel}.`,
+    `Changed session: ${escapeXml(change.session_id)}`,
+    'Reason: identity',
+  ];
+  if (change.name !== undefined) lines.push(`Name: ${escapeXml(change.name)}`);
+  if (change.role !== undefined) lines.push(`Role: ${escapeXml(change.role)}`);
+  if (change.mandate !== undefined) lines.push(`Mandate: ${escapeXml(change.mandate)}`);
+  if (change.tags !== undefined) {
+    lines.push(
+      change.tags.length === 0
+        ? 'Tags: (none)'
+        : `Tags: ${change.tags.map((tag) => escapeXml(tag)).join(', ')}`,
+    );
+  }
+  lines.push(
+    'This is an identity update only. It does not start a turn and is not a transcript summary.',
+    '</session_identity_changed>',
   );
   return lines.join('\n');
 }

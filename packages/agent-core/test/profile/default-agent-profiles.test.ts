@@ -163,6 +163,10 @@ describe('default agent profiles', () => {
       expect(prompt).toContain('TeamAssign');
       expect(prompt).toContain('enters Code');
       expect(prompt).toContain('TeamDecide action=continue');
+      expect(prompt).toContain('multi-round');
+      expect(prompt).not.toContain('time-limited');
+      expect(prompt).not.toContain('wrap-up reminder');
+      expect(prompt).toContain('the round continues');
       expect(prompt).toContain('TeamDM');
       expect(prompt).toContain('not after');
       expect(prompt).toContain('is not a contribution');

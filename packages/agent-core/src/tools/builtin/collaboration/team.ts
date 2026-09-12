@@ -19,7 +19,7 @@ export type TeamCreateInput = z.infer<typeof TeamCreateInputSchema>;
 
 export class TeamCreateTool implements BuiltinTool<TeamCreateInput> {
   readonly name = 'TeamCreate' as const;
-  readonly description = 'Hire durable members into your own department. Each member is one in-session agent (shown as a member card on the conversation map) and keeps Team Discuss/Assign; do not create a second session to represent the same member. Map canvas create/mount is a separate session-forest action. Each member requires a unique non-empty name, role, and mandate. Hire only who the work actually needs: every extra member is one more position to reconcile in every discussion. Fails once the configured team depth limit is reached.';
+  readonly description = 'Hire durable members into your own department. Each hire creates a real child session (mounted under you, shown as a session card on the conversation map) and a dual-write team agent so Discuss/Assign still address this department. Each member requires a unique non-empty name, role, and mandate. Hire only who the work actually needs: every extra member is one more position to reconcile in every discussion. Fails once the configured team depth limit is reached. Dismissing a member deletes that child session; unmount on the map (user only) detaches without deleting.';
   readonly parameters = toInputJsonSchema(TeamCreateInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}
@@ -32,6 +32,7 @@ export class TeamCreateTool implements BuiltinTool<TeamCreateInput> {
         output: JSON.stringify({
           members: (await this.host.createTeam(args.members)).map((member) => ({
             agent_id: member.agentId,
+            session_id: member.sessionId,
             identity: member.identity,
           })),
         }),
@@ -49,7 +50,7 @@ export type TeamDismissInput = z.infer<typeof TeamDismissInputSchema>;
 
 export class TeamDismissTool implements BuiltinTool<TeamDismissInput> {
   readonly name = 'TeamDismiss' as const;
-  readonly description = 'Dismiss members of your own department. TeamCreate members are in-session agents and are removed as agents only. If a member was hired by mounting a map session (has a mounted session id), that session is also deleted. When a member is working, first call with confirm_active=false; retry with confirm_active=true only after confirming the interruption.';
+  readonly description = 'Dismiss members of your own department. Each hire is a real child session: dismissing deletes that session (and the dual-write team agent). Unmount on the map is a separate user action that detaches without deleting. When a member is working, first call with confirm_active=false; retry with confirm_active=true only after confirming the interruption.';
   readonly parameters = toInputJsonSchema(TeamDismissInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}
@@ -61,6 +62,57 @@ export class TeamDismissTool implements BuiltinTool<TeamDismissInput> {
       execute: async () => {
         await this.host.dismissTeam(args.agent_ids, args.reason, args.confirm_active);
         return { output: JSON.stringify({ dismissed: args.agent_ids }) };
+      },
+    };
+  }
+}
+
+export const TeamUpdateInputSchema = z.object({
+  agent_id: z.string().trim().min(1).optional(),
+  name: z.string().trim().min(1).max(120).optional(),
+  role: z.string().trim().min(1).max(4_000).optional(),
+  mandate: z.string().trim().min(1).max(4_000).optional(),
+  tags: z.array(z.string().trim().min(1).max(40)).max(16).optional(),
+}).strict().superRefine((value, ctx) => {
+  if (
+    value.name === undefined
+    && value.role === undefined
+    && value.mandate === undefined
+    && value.tags === undefined
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'At least one of name, role, mandate, or tags is required.',
+    });
+  }
+});
+export type TeamUpdateInput = z.infer<typeof TeamUpdateInputSchema>;
+
+export class TeamUpdateTool implements BuiltinTool<TeamUpdateInput> {
+  readonly name = 'TeamUpdate' as const;
+  readonly description = 'Update name, role, mandate, or tags for this session or a member of your department. Omit agent_id to edit yourself. Related sessions receive a system reminder and do not start a turn.';
+  readonly parameters = toInputJsonSchema(TeamUpdateInputSchema);
+
+  constructor(private readonly host: SessionSubagentHost) {}
+
+  resolveExecution(args: TeamUpdateInput): ToolExecution {
+    return {
+      description: 'Updating team identity',
+      approvalRule: this.name,
+      execute: async () => {
+        await this.host.updateTeamIdentity({
+          agentId: args.agent_id,
+          name: args.name,
+          role: args.role,
+          mandate: args.mandate,
+          tags: args.tags,
+        });
+        return {
+          output: JSON.stringify({
+            updated: true,
+            agent_id: args.agent_id ?? null,
+          }),
+        };
       },
     };
   }
@@ -282,7 +334,7 @@ function teamDecideJsonSchema(): Record<string, unknown> {
 
 export class TeamDecideTool implements BuiltinTool<TeamDecideInput> {
   readonly name = 'TeamDecide' as const;
-  readonly description = 'Chair a discussion in your own department: run a round, collect a vote, or archive. start requires topic + your own opening statement; continue requires a new statement and keeps the same discussion. Members then speak one at a time in order, and each one is given every statement published before its turn — starting with yours — so write the opening as a request for objections and alternatives rather than a plan to endorse. Your members answer with TeamSpeak, or abstain by skipping it. Open a round whenever the plan changes, two members need the same files, or someone reports a blocker — not only before the first assignment. vote may be used when all assigned results are received and no active work, unresolved block, or pending decision remains; archive only formally ends that Discuss.';
+  readonly description = 'Chair a discussion in your own department: run a round, collect a vote, or archive. start requires topic + your own opening statement; continue requires a new statement and keeps the same discussion. Members speak one at a time in order. Each TeamSpeak is one short point in a multi-round Discuss — not a complete solution — so keep running action=continue for the next slice. Do not try to finish the whole problem in one round. Write the opening as a request for objections and alternatives rather than a plan to endorse. Open a round whenever the plan changes, two members need the same files, or someone reports a blocker — not only before the first assignment. vote may be used when all assigned results are received and no active work, unresolved block, or pending decision remains; archive only formally ends that Discuss.';
   readonly parameters = teamDecideJsonSchema();
 
   constructor(private readonly host: SessionSubagentHost) {}
@@ -310,7 +362,7 @@ export type TeamSpeakInput = z.infer<typeof TeamSpeakInputSchema>;
 /** Publishes a single intentional contribution from the scheduled team member. */
 export class TeamSpeakTool implements BuiltinTool<TeamSpeakInput> {
   readonly name = 'TeamSpeak' as const;
-  readonly description = 'Publish your concise formal position during your scheduled turn in your parent department\'s discussion. The statements handed to you are what earlier speakers already said this round: answer them — build on what holds, say where you disagree and why — rather than repeating them. Only TeamSpeak is a formal statement; other tool calls do not count. No call records the turn as skipped (abstention).';
+  readonly description = 'Publish one short formal point during your scheduled Discuss turn: one claim, one disagreement, or one concrete suggestion. Discuss is multi-round — do not finish the whole problem or dump a full plan in this turn. Answer the statements already made this round; repeating them is not a contribution. Lead with the decidable point, then at most one sentence of reason. Remaining detail belongs in later rounds. Only TeamSpeak is a formal statement; other tool calls do not count. No call records the turn as skipped (abstention).';
   readonly parameters = toInputJsonSchema(TeamSpeakInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}

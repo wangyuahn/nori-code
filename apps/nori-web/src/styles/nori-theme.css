@@ -1707,7 +1707,7 @@ kbd {
 .spinner-small { width: 13px; height: 13px; border-width: 1.5px; }
 
 /* Conversation */
-.chat-view { --chat-content-max-width: 920px; --chat-content-gutter: clamp(18px, 5%, 52px); height: 100%; min-height: 0; display: flex; flex-direction: column; container-type: inline-size; background: transparent; }
+.chat-view { --chat-content-max-width: 920px; --chat-content-gutter: clamp(18px, 5%, 52px); height: 100%; min-height: 0; display: flex; flex-direction: column; container-type: inline-size; background: transparent; position: relative; }
 .eyebrow { color: var(--nori-text-muted); font-size: calc(9px * var(--nori-ui-font-scale)); font-weight: 700; letter-spacing: 0; text-transform: uppercase; }
 .chat-messages-shell { position: relative; min-height: 0; flex: 1; }
 .chat-messages { flex: 1; overflow-y: auto; padding: 28px max(var(--chat-content-gutter), calc((100% - var(--chat-content-max-width)) / 2)); }
@@ -2519,7 +2519,7 @@ kbd {
   list-style: none;
 }
 .compact-tool-call > summary::-webkit-details-marker { display: none; }
-.compact-tool-icon { display: grid; width: 19px; height: 19px; place-items: center; border-radius: 4px; color: var(--nori-cyan); background: color-mix(in srgb, var(--nori-cyan) 9%, transparent); }
+.compact-tool-icon { display: grid; flex: none; width: 19px; height: 19px; place-items: center; border-radius: 4px; color: var(--nori-cyan); background: color-mix(in srgb, var(--nori-cyan) 9%, transparent); }
 .compact-tool-call > strong { margin: 0; color: var(--nori-text-secondary); font-size: calc(9px * var(--nori-ui-font-scale)); text-transform: none; }
 .compact-tool-call > span:nth-child(3) { min-width: 0; overflow: hidden; color: var(--nori-text-muted); font-family: var(--nori-font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .compact-tool-call > small, .compact-tool-call > summary > small { color: var(--nori-success); font-size: calc(8px * var(--nori-ui-font-scale)); }
@@ -4094,10 +4094,9 @@ kbd {
    外面去——所以工作流里每一层 grid 的轨道都必须写成 minmax(0, 1fr)。 */
 .work-thinking-line { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; padding: 1px 0 2px; min-width: 0; }
 .work-thinking-line > p, .context-injection-row > pre { min-width: 0; }
-.work-thinking-label { display: flex; align-items: center; gap: 5px; color: var(--nori-text-muted); font-size: calc(9px * var(--nori-ui-font-scale)); }
-.work-thinking-label > svg { color: var(--nori-thinking); }
+.work-thinking-label { display: flex; min-width: 0; flex: 1; align-items: center; gap: 5px; color: var(--nori-thinking); font-size: calc(9px * var(--nori-ui-font-scale)); }
+.work-thinking-label > svg { flex: none; color: var(--nori-thinking); }
 .work-thinking-line > p { max-height: 260px; margin: 0; overflow: auto; color: var(--nori-text-muted); font: italic calc(11px * var(--nori-ui-font-scale))/1.6 var(--nori-font); white-space: pre-wrap; overflow-wrap: anywhere; }
-.work-thinking-line.live > p { max-height: none; }
 /* 工具调用：一行一条（`Read foo.tsx ›`），点一下就地展开细节。 */
 .compact-tool-call { min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
 .compact-tool-call > summary {
@@ -4512,6 +4511,7 @@ kbd {
 .team-tree-legend i.tone-discuss { background: transparent; box-shadow: inset 0 0 0 2px var(--nori-accent, currentColor); }
 .team-tree-legend i.tone-idle { background: var(--nori-border); }
 .team-tree-legend i.tone-attention { background: #d9a13c; }
+.team-tree-legend i.tone-waiting { background: #d9a13c; opacity: .7; }
 .team-tree-legend i.tone-error { background: var(--nori-danger, #e5534b); }
 /* 团队树是张画布：空白处拖动平移、滚轮缩放，所以自己不滚动。 */
 .team-tree-viewport {
@@ -4905,13 +4905,13 @@ kbd {
   position: absolute;
   box-sizing: border-box;
   width: 220px;
-  height: 96px !important;
-  min-height: 96px;
-  max-height: 96px;
+  height: 148px !important;
+  min-height: 148px;
+  max-height: 148px;
   /* Override .team-node { overflow:hidden } — that clipped ports into half-circles
      and sheared glyphs mid-character. */
   overflow: visible !important;
-  padding: 12px 12px 16px;
+  padding: 10px 10px 14px;
   cursor: grab;
   touch-action: none;
 }
@@ -4929,13 +4929,196 @@ kbd {
   overflow: hidden;
 }
 .session-map-node .team-node-name {
-  display: block !important;
+  display: flex !important;
+  align-items: center;
+  gap: 6px;
   flex: 0 0 auto;
   font-size: calc(13px * var(--nori-ui-font-scale));
   line-height: 1.25;
   white-space: nowrap !important;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.session-map-status-badge {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-style: normal;
+  font-weight: 600;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 999px;
+  color: var(--nori-text-secondary);
+  background: color-mix(in srgb, var(--nori-border) 55%, transparent);
+}
+.session-map-status-badge.tone-running,
+.session-map-status-badge.tone-working {
+  color: var(--nori-ok, #3fb27f);
+  background: color-mix(in srgb, var(--nori-ok, #3fb27f) 18%, transparent);
+}
+.session-map-status-badge.tone-waiting {
+  color: var(--nori-warning, #d9a13c);
+  background: color-mix(in srgb, var(--nori-warning, #d9a13c) 18%, transparent);
+}
+.session-map-status-badge.tone-error {
+  color: var(--nori-danger, #e5534b);
+  background: color-mix(in srgb, var(--nori-danger, #e5534b) 18%, transparent);
+}
+.session-map-current-action,
+.session-map-card-error {
+  display: block;
+  flex: 0 0 auto;
+  font-size: 10px;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-map-current-action {
+  color: var(--nori-text-secondary);
+}
+.session-map-current-action[data-action-kind="waiting-approval"],
+.session-map-card-error {
+  color: var(--nori-warning, #d9a13c);
+}
+.session-map-card-error {
+  color: var(--nori-danger, #e5534b);
+}
+.session-map-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: auto;
+}
+.session-map-card-actions button {
+  appearance: none;
+  border: 1px solid var(--nori-border);
+  background: color-mix(in srgb, var(--nori-surface, #111) 70%, transparent);
+  color: var(--nori-text);
+  font: inherit;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.session-map-card-actions button.danger {
+  color: var(--nori-danger, #e5534b);
+}
+.session-map-status-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.session-map-status-filters button.active {
+  border-color: var(--nori-accent, currentColor);
+}
+.session-map-selection-toolbar {
+  left: 50%;
+  bottom: 52px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: min(920px, calc(100% - 24px));
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--nori-surface, #111) 88%, transparent);
+  border: 1px solid var(--nori-border);
+  z-index: 8;
+}
+.session-map-tag-menu {
+  position: relative;
+}
+.session-map-tag-menu-list {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  min-width: 180px;
+  max-height: 240px;
+  overflow: auto;
+  padding: 6px;
+  border-radius: 8px;
+  border: 1px solid var(--nori-border);
+  background: var(--nori-surface, #151515);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 9;
+}
+.session-map-tag-menu-list button {
+  text-align: left;
+}
+.session-map-selection-count {
+  font-size: 12px;
+  color: var(--nori-text-secondary);
+  padding: 0 4px;
+}
+.session-map-queued-banner {
+  left: 50%;
+  bottom: 108px;
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--nori-warning, #d9a13c) 16%, var(--nori-surface, #111));
+  border: 1px solid color-mix(in srgb, var(--nori-warning, #d9a13c) 45%, transparent);
+  z-index: 7;
+}
+.session-identity-drawer {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  background: color-mix(in srgb, #000 28%, transparent);
+}
+.session-identity-drawer-panel {
+  width: min(360px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  padding: 16px;
+  background: var(--nori-surface, #151515);
+  border-left: 1px solid var(--nori-border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.session-identity-drawer-panel header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.session-identity-drawer-panel header p,
+.session-identity-drawer-error {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--nori-text-secondary);
+}
+.session-identity-drawer-error { color: var(--nori-danger, #e5534b); }
+.session-identity-drawer-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--nori-text-secondary);
+}
+.session-identity-drawer-panel input,
+.session-identity-drawer-panel textarea {
+  border: 1px solid var(--nori-border);
+  background: transparent;
+  color: var(--nori-text);
+  border-radius: 6px;
+  padding: 8px;
+  font: inherit;
+}
+.session-identity-drawer-panel footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
 }
 .session-map-node .team-node-sub {
   display: block !important;
@@ -5664,12 +5847,6 @@ kbd {
   border-radius: 0;
   background: transparent;
 }
-.chat-work-group[open] {
-  overflow: hidden;
-  border: 1px solid var(--nori-border);
-  border-radius: 10px;
-  background: var(--nori-surface);
-}
 .chat-work-group > summary {
   display: flex;
   min-height: 22px;
@@ -5679,13 +5856,8 @@ kbd {
   cursor: pointer;
   list-style: none;
 }
-.chat-work-group[open] > summary {
-  min-height: 28px;
-  padding: 6px 10px;
-}
 .chat-work-group > summary::-webkit-details-marker { display: none; }
-.chat-work-group:not([open]) > summary:hover .work-group-headline { color: var(--nori-text-secondary); }
-.chat-work-group[open] > summary:hover { background: var(--nori-surface-hover); }
+.chat-work-group > summary:hover .work-group-headline { color: var(--nori-text-secondary); }
 .work-group-headline {
   min-width: 0;
   overflow: hidden;
@@ -5695,19 +5867,47 @@ kbd {
   white-space: nowrap;
 }
 .chat-work-group.live .work-group-headline { color: var(--nori-text-secondary); }
-.work-group-chevron { flex: none; margin-left: auto; color: var(--nori-text-muted); transition: transform .16s ease; }
+.work-group-chevron { flex: none; margin-left: auto; color: var(--nori-text-muted); transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1); }
+.chat-work-group.is-open > summary .work-group-chevron,
 .chat-work-group[open] > summary .work-group-chevron { transform: rotate(180deg); }
+/* Closed <details> would display:none the clip and skip the 0fr/1fr height transition. */
+details.chat-work-group > .work-group-clip {
+  display: grid !important;
+  grid-template-rows: 0fr;
+  overflow: hidden;
+  transition: grid-template-rows 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+details.chat-work-group.is-open > .work-group-clip,
+details.chat-work-group[open] > .work-group-clip {
+  grid-template-rows: 1fr;
+}
+.work-group-clip > .work-group-body {
+  min-height: 0;
+  overflow: hidden;
+}
+/* Open body must not clip the 260px thinking scroller. */
+details.chat-work-group.is-open > .work-group-clip > .work-group-body,
+details.chat-work-group[open] > .work-group-clip > .work-group-body {
+  overflow: visible;
+}
 .work-group-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
-  padding: 0 10px 8px;
-  border-top: 1px solid var(--nori-border);
+  margin-top: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--nori-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--nori-surface-raised) 70%, transparent);
 }
 .work-group-body > * + * {
   border-top: 1px solid color-mix(in srgb, var(--nori-border) 70%, transparent);
   padding-top: 4px;
   margin-top: 4px;
+}
+@media (prefers-reduced-motion: reduce) {
+  details.chat-work-group > .work-group-clip,
+  .work-group-chevron { transition: none; }
 }
 /* 思考行也能折叠：合起来只留首行预览，展开后是完整的暗淡斜体正文。 */
 .work-thinking-line > summary {
@@ -5731,7 +5931,7 @@ kbd {
   white-space: nowrap;
 }
 .work-thinking-line.live > summary .work-thinking-preview { color: var(--nori-text-secondary); }
-.work-thinking-chevron { flex: none; color: var(--nori-text-muted); transition: transform .16s ease; }
+.work-thinking-chevron { flex: none; color: var(--nori-text-muted); transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1); }
 .work-thinking-line[open] > summary .work-thinking-chevron { transform: rotate(90deg); }
 .work-thinking-line[open] > p {
   margin-top: 4px;

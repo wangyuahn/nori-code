@@ -1,13 +1,13 @@
 # 团队工程
 
-Nori Code CLI 2.0 把项目当作一棵**部门树**，而不是单条聊天记录加旁注。`TeamCreate` 在当前会话里雇佣持久部门 Agent；**会话地图**同时展示这些成员卡片，以及通过挂载产生的真实子会话。Discuss 轮次在动手前收集团队发言。本页说明终端与 Nori Work 中这些能力如何配合。
+Nori Code CLI 2.0 把项目当作一棵**部门树**，而不是单条聊天记录加旁注。`TeamCreate` 通过创建**挂载子会话**雇佣伙伴（与会话地图上已有的节点是同一类），并双写一个团队 Agent，以便 Discuss 仍按本部门寻址。Discuss 轮次在动手前收集团队发言。本页说明终端与 Nori Work 中这些能力如何配合。
 
 ## 部门树与 SubAgent
 
 两种协作模型并存：
 
-- **团队伙伴**（`TeamCreate`）是当前会话里的**持久部门 Agent**。它们出现在会话地图上的成员卡片中，参与 Discuss/Assign，直到 `TeamDismiss` 移除。`TeamCreate` **不会**再创建挂载子会话。
-- **会话地图节点**是通过 `parent_session_id` 挂载的**真实子会话**。在 Web Map 画布上拉线或「新建会话」会创建这类节点，并双写一个团队 Agent 以便 Discuss。一个会话只能有一个父节点（暂不支持兼职）。
+- **团队伙伴**（`TeamCreate`）是挂在你下面的**真实子会话**。它们出现在会话地图上的会话卡片中，参与 Discuss/Assign，直到 `TeamDismiss` 移除；同时双写一个团队 Agent，以便 Discuss 仍按 agent id 寻址本部门。
+- **会话地图节点**与雇佣是同一类：**真实子会话**，通过 `parent_session_id` 链接。在 Web Map 画布上拉线或「新建会话」走的是与 `TeamCreate` 相同的「空子会话 + 挂载」路径。一个会话只能有一个父节点（暂不支持兼职）。
 - **SubAgent**（`SubAgent`）是归档在父会话目录内的**临时代理**，完成有界任务后返回结果；不是地图节点，也不适合作为长期部门。
 
 主 Agent 默认是**只读协调者**：直接 `Write` / `Edit` 会被拦截（`/setting readonly on`），雇佣成员在 `TeamAssign` 离开 Discuss 后执行分配任务。只有在你希望负责人直接改文件时才使用 `/setting readonly off`。
@@ -18,10 +18,12 @@ Nori Code CLI 2.0 把项目当作一棵**部门树**，而不是单条聊天记�
 
 典型流程：
 
-1. **`TeamCreate`** — 在本部门雇佣伙伴（每人是会话内 Agent，地图上显示为成员卡片）。
+1. **`TeamCreate`** — 在本部门雇佣伙伴（每人是地图上的真实子会话）。
 2. **`TeamDecide`**，`action=start` — 以主题开启 Discuss；成员用 **`TeamSpeak`** 发言（本轮不调用会记为弃权）。
 3. **`TeamAssign`** — 分配具体任务；成功后**离开 Discuss** 进入 Code，成员可以执行。
 4. 工作完成后 **`TeamDecide`**，`action=vote` — 全队投票（`discuss_again` / `proceed` / `abstain`），无需再次进入完整 Discuss。
+
+Discuss 是**多轮**的会。每条 `TeamSpeak` 只推进一步（一个可裁决的点），不是完整方案。用 `TeamDecide` 的 `action=continue` 开下一轮。有人弃权只记为该人弃权，后面的人照常发言。
 
 在 UI 中用 **`Shift-Tab`**、**`/discuss`** 或兼容别名 **`/plan`** 切换 Discuss。**`TeamAssign`** 与 Discuss/Code 切换都可以离开 Discuss；YOLO 不会额外增加退出审批。
 
@@ -31,8 +33,9 @@ Nori Code CLI 2.0 把项目当作一棵**部门树**，而不是单条聊天记�
 
 | 工具 | 作用 |
 | --- | --- |
-| `TeamCreate` | 雇佣一名或多名伙伴（各需 `name`、`role`、`mandate`）。创建会话内 Agent（地图上的成员卡片，不能拉线挂载）。受 `/team settings` 最大部门深度限制。 |
-| `TeamDismiss` | 从本部门移除伙伴。纯 `TeamCreate` 成员只删除 Agent；若成员是通过地图挂载雇来的（带有 `mounted_session_id`），会同时删除该挂载子会话。必须提供 `reason`。若成员仍在工作，先以 `confirm_active=false` 调用；确认中断后再以 `confirm_active=true` 重试。 |
+| `TeamCreate` | 雇佣一名或多名伙伴（各需 `name`、`role`、`mandate`）。创建挂载子会话（地图上的会话卡片），并双写团队 Agent，以便 Discuss/Assign 仍按本部门寻址。受 `/team settings` 最大部门深度限制。 |
+| `TeamDismiss` | 从本部门移除伙伴。解雇会删除该子会话（以及双写的团队 Agent）。必须提供 `reason`。若成员仍在工作，先以 `confirm_active=false` 调用；确认中断后再以 `confirm_active=true` 重试。 |
+| `TeamUpdate` | 更新本会话或成员的名称、角色、职责或标签。相关会话会收到系统提醒，但不会被唤醒。 |
 
 `TeamDismiss` 是移除雇佣伙伴的正式路径。通过 `/map` 卸载只会去掉挂载关系，**不会**删除子会话。
 
@@ -59,7 +62,7 @@ Nori Code CLI 2.0 把项目当作一棵**部门树**，而不是单条聊天记�
 
 ### Web：Map 视图
 
-在 Nori Work / Web UI 中，打开侧栏 **Map**（会话地图）。画布展示同一棵挂载树：平移/缩放、打开会话进入 Chat、在父节点下创建子会话、挂载或 remount 并填写 role/mandate，以及添加本地标签与注释框（仅地图装饰，不会发给模型）。
+在 Nori Work / Web UI 中，打开侧栏 **Map**（会话地图）。画布是会话控制台，不是静态蓝图：平移/缩放、读取卡片运行态、打开会话进入 Chat、在父节点下创建子会话、强制停止进行中的回合、编辑名称/职责/标签、挂载或 remount 并填写 role/mandate，以及添加本地标签与注释框（仅地图装饰，不会发给模型）。
 
 蓝图交互：
 
@@ -67,7 +70,8 @@ Nori Code CLI 2.0 把项目当作一棵**部门树**，而不是单条聊天记�
 - **输出口拖到卡片** — 静默挂载；拖到空白 — 打开身份草稿后 `createChild`。
 - **输入口拖到另一张卡片** — 改挂。已有父节点时会确认：这是 remount，不是兼职。
 - **Alt+点击输入口** — 拆挂升为顶层。忙碌会话的挂载/拆挂会排队到空闲。
-- **标签筛选**同时作用于左侧列表和画布。`TeamCreate` 成员卡片没有端口，不能拉线。
+- **框选** — 出现工具条，可打开、停止、设置、拆挂、删除。右键选区可执行同样的批量操作。
+- **标签筛选**同时作用于左侧列表和画布。可见卡片都是真实会话，可以框选或拉线。
 
 需要大屏地图时，可在 TUI 使用 **`/web`** 将当前会话交给浏览器工作台。
 
@@ -75,8 +79,9 @@ Nori Code CLI 2.0 把项目当作一棵**部门树**，而不是单条聊天记�
 
 团队身份**不是**通过复制其他会话 transcript 或旧版摘要工具注入，而是：
 
-- **`<session_self>`** — 根据当前挂载元数据写入各会话 system prompt：会话 id、标题、深度、父节点、role、mandate 及直接下属。
+- **`<session_self>`** — 根据当前挂载元数据写入各会话 system prompt：会话 id、标题、深度、父节点、role、mandate、标签及直接下属。
 - **`<session_mount_changed>`** — 在 mount、unmount、remount 或父节点删除时（`event.session.mount_changed`），在下一回合向受影响会话注入变更通知。
+- **`<session_identity_changed>`** — 名称、角色、职责或标签变更时注入。相关会话会收到提醒，**不会被唤醒**。
 
 挂载元数据变更后，运行时会刷新 `<session_self>`，让每个伙伴知道自己位于树中的位置。这是身份与拓扑信息，**不是**共享聊天历史。
 

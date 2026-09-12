@@ -1,4 +1,10 @@
-import type { Session, SessionAgent, SessionGraphEdge } from '../api/client';
+import type {
+  ApprovalRequest,
+  Session,
+  SessionActivity,
+  SessionAgent,
+  SessionGraphEdge,
+} from '../api/client';
 import type { PendingTopologyOp, SessionMapDoc, SessionMapEdge } from '../components/sessionMapDoc';
 import {
   addSessionMapEdge,
@@ -21,7 +27,7 @@ export interface MapNodeMember {
   kind: 'session' | 'agent';
 }
 
-export type MapNodeStatusTone = 'running' | 'working' | 'idle' | 'error' | 'other';
+export type MapNodeStatusTone = 'running' | 'working' | 'idle' | 'error' | 'waiting' | 'stopped' | 'other';
 
 export interface MapNodeGraphContext {
   sessions: readonly Session[];
@@ -55,6 +61,7 @@ export function sessionIsBusy(session: Session | undefined): boolean {
 }
 
 export function mapMemberStatus(member: MapNodeMember): string {
+  if (isMapTimeoutFailure(member.agent?.summary)) return 'timeout';
   const agentStatus = member.agent?.status?.trim();
   if (agentStatus) return agentStatus;
   return member.session.status?.trim() || 'idle';
@@ -64,11 +71,219 @@ export function mapStatusTone(status: string): MapNodeStatusTone {
   const normalized = status.trim().toLowerCase();
   if (normalized === 'running') return 'running';
   if (normalized === 'working') return 'working';
-  if (normalized === 'idle' || normalized === 'pending' || normalized === 'stopped' || normalized === 'paused') {
-    return 'idle';
+  if (normalized === 'awaiting_approval' || normalized === 'awaiting_question' || normalized === 'waiting') {
+    return 'waiting';
   }
-  if (normalized === 'error' || normalized === 'failed') return 'error';
+  if (normalized === 'aborted' || normalized === 'stopped' || normalized === 'paused') return 'stopped';
+  if (normalized === 'idle' || normalized === 'pending') return 'idle';
+  if (normalized === 'timeout' || normalized === 'error' || normalized === 'failed') return 'error';
   return 'other';
+}
+
+export type MapRuntimeStatus = 'idle' | 'running' | 'working' | 'error' | 'waiting' | 'stopped';
+
+export function mapRuntimeStatus(status: string): MapRuntimeStatus {
+  const tone = mapStatusTone(status);
+  if (tone === 'other') return 'idle';
+  return tone;
+}
+
+export function formatElapsed(ms: number): string | undefined {
+  if (!Number.isFinite(ms) || ms < 0) return undefined;
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${String(Math.max(1, seconds))}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${String(minutes)}m`;
+  const hours = Math.floor(minutes / 60);
+  return `${String(hours)}h ${String(minutes % 60)}m`;
+}
+
+export type MapStatusFilter = 'all' | 'running' | 'error' | 'idle';
+
+/** Readable status word shown on map cards — not the tiny status dot. */
+export function formatMapStatusWord(status: string): string {
+  const normalized = status.trim().toLowerCase();
+  if (normalized === 'running') return 'running';
+  if (normalized === 'working' || normalized === 'active') return 'working';
+  if (normalized === 'awaiting_approval') return 'waiting-approval';
+  if (normalized === 'awaiting_question' || normalized === 'waiting') return 'waiting';
+  if (normalized === 'aborted' || normalized === 'stopped' || normalized === 'paused') return 'stopped';
+  if (normalized === 'idle' || normalized === 'pending') return 'idle';
+  if (normalized === 'timeout') return 'timeout';
+  if (normalized === 'error' || normalized === 'failed') return 'error';
+  return normalized.length > 0 ? normalized : 'idle';
+}
+
+export function formatMapStatusLabel(
+  status: string,
+  lastActive?: string,
+  now = Date.now(),
+): string {
+  const label = formatMapStatusWord(status);
+  const runtime = mapRuntimeStatus(status);
+  if (
+    (runtime === 'running' || runtime === 'working' || runtime === 'waiting')
+    && lastActive !== undefined
+  ) {
+    const elapsed = formatElapsed(now - Date.parse(lastActive));
+    if (elapsed !== undefined) return `${label} · ${elapsed}`;
+  }
+  return label;
+}
+
+export function matchesMapStatusFilter(status: string, filter: MapStatusFilter): boolean {
+  if (filter === 'all') return true;
+  const runtime = mapRuntimeStatus(status);
+  if (filter === 'running') {
+    return runtime === 'running' || runtime === 'working' || runtime === 'waiting';
+  }
+  if (filter === 'error') return runtime === 'error';
+  return runtime === 'idle' || runtime === 'stopped';
+}
+
+export type MapCurrentActionKind = 'thinking' | 'tool' | 'waiting-approval' | 'waiting';
+
+export interface MapCurrentAction {
+  kind: MapCurrentActionKind;
+  detail?: string;
+}
+
+export interface MapLiveTurnHint {
+  thinkingText?: string;
+  toolName?: string;
+}
+
+export interface MapLiveHints {
+  approvals: readonly Pick<ApprovalRequest, 'session_id' | 'agent_id' | 'tool_name'>[];
+  activity: readonly Pick<SessionActivity, 'session_id' | 'agent_id' | 'kind' | 'status'>[];
+  turns: Readonly<Record<string, MapLiveTurnHint>>;
+  errors: readonly { sessionId?: string; agentId?: string; message: string }[];
+}
+
+function clipMapText(value: string, max = 80): string {
+  const text = value.replace(/\s+/g, ' ').trim();
+  if (text.length <= max) return text;
+  return `${text.slice(0, Math.max(1, max - 1))}…`;
+}
+
+function liveHintForMember(
+  member: MapNodeMember,
+  live: MapLiveHints | undefined,
+): {
+  approval?: Pick<ApprovalRequest, 'session_id' | 'agent_id' | 'tool_name'>;
+  activity?: Pick<SessionActivity, 'session_id' | 'agent_id' | 'kind' | 'status'>;
+  turn?: MapLiveTurnHint;
+} {
+  if (live === undefined) return {};
+  const sessionId = member.session.id;
+  const hostId = member.hostSessionId;
+  const agentId = member.agent?.agent_id;
+  const approval = live.approvals.find((item) => {
+    if (item.session_id === sessionId) return true;
+    if (hostId !== undefined && item.session_id === hostId) {
+      return item.agent_id === undefined || agentId === undefined || item.agent_id === agentId;
+    }
+    return false;
+  });
+  const activity = live.activity.find((item) => {
+    if (item.session_id === sessionId) return true;
+    if (hostId !== undefined && item.session_id === hostId) {
+      return agentId === undefined || item.agent_id === agentId;
+    }
+    return false;
+  });
+  const turn = live.turns[sessionId] ?? (hostId !== undefined ? live.turns[hostId] : undefined);
+  return { approval, activity, turn };
+}
+
+/** Current action line: thinking / tool name / waiting for approval. */
+export function describeMapCurrentAction(
+  member: MapNodeMember,
+  live?: MapLiveHints,
+): MapCurrentAction | undefined {
+  const status = mapMemberStatus(member);
+  const { approval, activity, turn } = liveHintForMember(member, live);
+  const approvalTool = approval?.tool_name?.trim() || turn?.toolName?.trim();
+  if (approval !== undefined || status === 'awaiting_approval') {
+    return approvalTool !== undefined && approvalTool.length > 0
+      ? { kind: 'waiting-approval', detail: approvalTool }
+      : { kind: 'waiting-approval' };
+  }
+  if (status === 'awaiting_question') return { kind: 'waiting' };
+  const runningTool = turn?.toolName?.trim();
+  if (runningTool !== undefined && runningTool.length > 0) {
+    return { kind: 'tool', detail: runningTool };
+  }
+  const thinking = turn?.thinkingText?.trim();
+  if (thinking !== undefined && thinking.length > 0) return { kind: 'thinking', detail: clipMapText(thinking, 48) };
+  const runtime = mapRuntimeStatus(status);
+  if (runtime === 'running' || runtime === 'working' || activity !== undefined) {
+    const assigned = member.agent?.assigned_task?.trim();
+    if (assigned !== undefined && assigned.length > 0) return { kind: 'tool', detail: clipMapText(assigned, 48) };
+    return { kind: 'thinking' };
+  }
+  if (runtime === 'waiting') return { kind: 'waiting' };
+  return undefined;
+}
+
+function isMapTimeoutFailure(text: string | undefined): boolean {
+  if (text === undefined || text.trim().length === 0) return false;
+  return /timed out|maximum duration|retry exhausted \(timeout/i.test(text);
+}
+
+/** Failure summary for error/blocked/timeout cards. */
+export function describeMapErrorSummary(
+  member: MapNodeMember,
+  live?: MapLiveHints,
+): string | undefined {
+  const sessionId = member.session.id;
+  const hostId = member.hostSessionId;
+  const agentId = member.agent?.agent_id;
+  const match = live?.errors.find((item) => {
+    if (item.sessionId === sessionId) return true;
+    if (hostId !== undefined && item.sessionId === hostId) {
+      return item.agentId === undefined || agentId === undefined || item.agentId === agentId;
+    }
+    return false;
+  });
+  if (match !== undefined && match.message.trim().length > 0) return clipMapText(match.message);
+  const report = member.agent?.team_report_summary?.trim();
+  if (
+    (member.agent?.team_report_status === 'blocked' || member.agent?.team_report_status === 'needs_decision')
+    && report !== undefined
+    && report.length > 0
+  ) {
+    return clipMapText(report);
+  }
+  const skip = member.agent?.summary?.trim();
+  if (skip !== undefined && isMapTimeoutFailure(skip)) return clipMapText(skip);
+  const runtime = mapRuntimeStatus(mapMemberStatus(member));
+  if (runtime !== 'error' && runtime !== 'stopped') return undefined;
+  if (skip !== undefined && skip.length > 0) return clipMapText(skip);
+  const metadataError = member.session.metadata?.last_error;
+  if (typeof metadataError === 'string' && metadataError.trim().length > 0) {
+    return clipMapText(metadataError);
+  }
+  const summary = member.agent?.summary?.trim() || member.session.last_prompt?.trim();
+  if (summary !== undefined && summary.length > 0) return clipMapText(summary);
+  return undefined;
+}
+
+export function readSessionTags(session: Session): string[] {
+  const value = session.metadata?.session_tags;
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+}
+
+export function mergeSessionTags(
+  current: readonly string[],
+  tag: string,
+  mode: 'add' | 'remove',
+): string[] {
+  const nextTag = tag.trim();
+  if (nextTag.length === 0) return [...current];
+  if (mode === 'add') return [...new Set([...current, nextTag])].slice(0, 16);
+  return current.filter((item) => item !== nextTag);
 }
 
 /** CSS class for sidebar-style status dots on map cards and list rows. */
@@ -77,6 +292,8 @@ export function mapStatusDotClass(status: string): string {
   if (tone === 'running') return 'running';
   if (tone === 'working') return 'active';
   if (tone === 'error') return 'error';
+  if (tone === 'waiting') return 'paused';
+  if (tone === 'stopped') return 'stopped';
   if (tone === 'idle') return 'idle';
   return 'stopped';
 }
@@ -87,11 +304,8 @@ export function mapStatusDotClass(status: string): string {
  */
 export function wireSourceParentSessionId(member: MapNodeMember): string | null {
   if (member.kind === 'agent') return null;
-  if (member.kind === 'session') {
-    const id = member.session.id.trim();
-    if (id.length > 0 && !id.startsWith('agent:')) return id;
-  }
-  return null;
+  const id = member.session.id.trim();
+  return id.length > 0 ? id : null;
 }
 
 /** True when the session has no incoming parent edge and no server parent metadata. */
@@ -147,8 +361,8 @@ export function mapNodeCapabilities(
 ): MapNodeCapabilities {
   const { sessions, mapEdges = [], hasOpenAgentHandler = false } = context;
   const wireSessionId = wireSourceParentSessionId(member);
-  const isAgentGhost = member.kind === 'agent' || member.session.id.startsWith('agent:');
-  const isRealSession = member.kind === 'session' && !member.session.id.startsWith('agent:');
+  const isAgentGhost = false;
+  const isRealSession = member.kind === 'session';
   const parentId = parentSessionIdOf(member.session) ?? member.hostSessionId;
   const sessionIdForTop = wireSessionId ?? (isRealSession ? member.session.id : undefined);
   const isTopLevel = parentId === undefined
@@ -171,7 +385,7 @@ export function mapNodeCapabilities(
     && member.agent !== undefined
     && hasOpenAgentHandler;
   const canMountOthers = canWireOut;
-  const displayTier: MapNodeCapabilities['displayTier'] = isAgentGhost || member.agent
+  const displayTier: MapNodeCapabilities['displayTier'] = member.agent
     ? 'member'
     : parentId !== undefined
       ? 'mounted'

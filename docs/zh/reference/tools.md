@@ -67,7 +67,7 @@
 
 Discuss 是只读团队开会。新会话默认进入该状态（用户可关闭）。期间 `Write`、`Edit`、`Bash`、`SubAgent`、`TaskStop`、`CronCreate`、`CronDelete` 被拦截。没有 session 文件工作流，也没有 `ExitDiscussMode` 模型出口。
 
-**`TeamDecide`** 使用 `action=start` 加主题和开场陈述进入 Discuss；后续使用 `action=continue` 加新陈述继续讨论。成员用 `TeamSpeak` 发言；不调用会记录为 skipped（弃权），再用 `TeamAssign` 进入 Code。UI 的 Discuss/Code 切换也可离开或再进入。
+**`TeamDecide`** 使用 `action=start` 加主题和开场陈述进入 Discuss；后续使用 `action=continue` 加新陈述继续讨论。每条 `TeamSpeak` 只是多轮讨论里的一个短观点，不是完整方案，再用 `TeamAssign` 进入 Code。UI 的 Discuss/Code 切换也可离开或再进入。
 
 ## 状态管理
 
@@ -84,17 +84,18 @@ Discuss 是只读团队开会。新会话默认进入该状态（用户可关闭
 | 工具 | 默认审批 | 说明 |
 | --- | --- | --- |
 | `SubAgent` | SubAgent 模式中自动放行，否则需审批 | 启动一个或多个临时 SubAgent |
-| `TeamCreate` | 自动放行 | 创建持久团队伙伴 |
+| `TeamCreate` | 自动放行 | 雇佣持久团队伙伴为子会话 |
 | `TeamDecide` | 自动放行 | 开会或在执行后投票 |
-| `TeamSpeak` | 自动放行 | 发布讨论发言；不调用会将本轮记录为 skipped（弃权） |
+| `TeamSpeak` | 自动放行 | 发布一条短讨论发言；不调用会将本轮记录为 skipped（弃权） |
 | `TeamAssign` | 自动放行 | 分配任务；成功后离开 Discuss 进入 Code |
-| `TeamDismiss` | 自动放行 | 解除部门成员（仅在存在挂载子会话时删除该会话） |
+| `TeamUpdate` | 自动放行 | 更新名称、角色、职责或标签，不唤醒会话 |
+| `TeamDismiss` | 自动放行 | 解除部门成员并删除其子会话 |
 | `AskUserQuestion` | 自动放行 | 向用户提问以获取结构化输入 |
 | `Skill` | 自动放行 | 调用已注册的 inline Skill |
 
 **`SubAgent`** 是统一的临时代理入口。可用 `prompt_template` + `items`、`tasks`（含 `depends_on` DAG）或 `resume_agent_ids` 一次启动一个或多个完整子会话。完成后归档到父会话，可再打开。一次模型响应若调用 `SubAgent`，该调用必须是该响应中的唯一工具调用。Discuss 期间不要用 SubAgent，先 TeamAssign。
 
-**`TeamCreate`** 每个成员必须有唯一的 `name`、`role`、`mandate`；每次雇佣是当前会话里的部门 Agent（地图上显示为成员卡片），**不会**创建挂载子会话。真实子会话请用 Map 画布创建或挂载。**`TeamDismiss`** 从部门移除成员；需提供 `reason`，仅在确认中断进行中的任务后用 `confirm_active=true` 重试。若该成员是通过地图挂载雇来的（带有 `session_id` / `mounted_session_id`），会同时删除该子会话。**`TeamDecide`** `action=start` 必须有 `topic` 和主持 `statement`。成员只用 `TeamSpeak` 发言。执行后 `action=vote` 不要求 Discuss；全队投票（`discuss_again` / `proceed` / `abstain`），含 `task=null` 的成员。
+**`TeamCreate`** 每个成员必须有唯一的 `name`、`role`、`mandate`；每次雇佣会创建真实挂载子会话（地图上的会话卡片），并双写一个团队 Agent，以便 Discuss/Assign 仍按本部门寻址。**`TeamDismiss`** 从部门移除成员并删除该子会话；需提供 `reason`，仅在确认中断进行中的任务后用 `confirm_active=true` 重试。地图上的拆挂是用户操作，只断开挂载、不删除会话。**`TeamUpdate`** 可改名称、角色、职责或标签；相关会话会收到提醒，但不会被唤醒。**`TeamDecide`** `action=start` 必须有 `topic` 和主持 `statement`。成员只用 `TeamSpeak` 发言。执行后 `action=vote` 不要求 Discuss；全队投票（`discuss_again` / `proceed` / `abstain`），含 `task=null` 的成员。
 
 挂载变更会刷新各会话 system prompt 中的 **`<session_self>`**，并可能在下一回合注入 **`<session_mount_changed>`**。这只是身份与拓扑，**不是** transcript 共享。详见[团队工程](../guides/team-engineering.md#身份模型session_self-与挂载变更)。
 

@@ -255,6 +255,10 @@ exports[`API surface snapshot > matches the documented v1 route table and meta e
     ],
     [
       "PATCH",
+      "/api/v1/sessions/{session_id}/identity",
+    ],
+    [
+      "PATCH",
       "/api/v1/vault/notes/{note_id}",
     ],
     [

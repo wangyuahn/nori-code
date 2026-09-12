@@ -5,6 +5,7 @@
  *   GET     /v1/sessions/{id}             -                     data: Session
  *   GET     /v1/sessions/{id}/profile     -                     data: Session
  *   POST    /v1/sessions/{id}/profile     body: SessionUpdate   data: Session
+ *   PATCH   /v1/sessions/{id}/identity    body: SessionIdentity data: Session
  *   POST    /v1/sessions/{id}:fork        body: SessionFork     data: Session
  *   POST    /v1/sessions/{id}:mount       body: SessionMount    data: Session
  *   POST    /v1/sessions/{id}:unmount     body: SessionUnmount  data: Session
@@ -28,6 +29,7 @@ import {
   sessionChildCreateSchema,
   sessionCreateSchema,
   sessionForkSchema,
+  sessionIdentityUpdateSchema,
   sessionMountSchema,
   sessionRemountSchema,
   sessionSchema,
@@ -119,6 +121,12 @@ export type ListSessionChildrenResponse = z.infer<typeof listSessionChildrenResp
 export const createSessionChildRequestSchema = sessionChildCreateSchema;
 export type CreateSessionChildRequest = z.infer<typeof createSessionChildRequestSchema>;
 
+export const updateSessionIdentityRequestSchema = sessionIdentityUpdateSchema;
+export type UpdateSessionIdentityRequest = z.infer<typeof updateSessionIdentityRequestSchema>;
+
+export const updateSessionIdentityResponseSchema = sessionSchema;
+export type UpdateSessionIdentityResponse = z.infer<typeof updateSessionIdentityResponseSchema>;
+
 export const createSessionChildResponseSchema = sessionSchema;
 export type CreateSessionChildResponse = z.infer<typeof createSessionChildResponseSchema>;
 
@@ -185,9 +193,9 @@ export const sessionAgentTreeNodeSchema = z.object({
   /** Members taking part in this Discuss round; only discussion nodes carry it. */
   discussion_participant_agent_ids: z.array(sessionAgentIdSchema).optional(),
   /**
-   * Dual-write child session created by map mount. Opening this node lets the
+   * Dual-write child session for a department member. Opening this node lets the
    * conversation map resolve the member's owning host agent instead of opening
-   * an empty child-session shell. TeamCreate members do not set this field.
+   * an empty child-session shell. TeamCreate and map mounts both set this field.
    */
   mounted_session_id: z.string().min(1).optional(),
 });

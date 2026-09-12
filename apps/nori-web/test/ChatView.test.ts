@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,6 +10,8 @@ import { I18nProvider } from '../src/i18n';
 import { modelThinkingOptions, resolveComposerThinking } from '../src/utils/model-thinking';
 import { projectFileMention, referenceProjectFile } from '../src/projectFileReference';
 import type { NoriBrowserState, NoriDesktopAPI } from '../src/types/nori-desktop';
+
+const themeCss = readFileSync(path.resolve('src/styles/nori-theme.css'), 'utf8');
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -1444,7 +1448,11 @@ describe('conversation presentation', () => {
     // 正在跑的那一段自动展开，之前已经结束的段落保持收起。
     expect(liveGroups[1]?.classList.contains('live')).toBe(true);
     expect(liveGroups[1]?.open).toBe(true);
+    expect(liveGroups[1]?.classList.contains('is-open')).toBe(true);
     expect(liveGroups[0]?.open).toBe(false);
+    expect(liveGroups[0]?.classList.contains('is-open')).toBe(false);
+    expect(liveGroups[0]?.querySelector(':scope > summary')).not.toBeNull();
+    expect(liveGroups[0]?.querySelector(':scope > .work-group-clip > .work-group-body')).not.toBeNull();
     const groupRows = [...liveGroups[0]!.querySelectorAll('.work-group-body > *')].map(node => node.className);
     expect(groupRows[0]).toContain('work-thinking-line');
     expect(groupRows[1]).toContain('compact-tool-call');
@@ -1471,14 +1479,22 @@ describe('conversation presentation', () => {
     expect(container.querySelector('.chat-message-content:not(.transcript-assistant-output)')?.textContent).toContain('Finished.');
     expect(container.querySelector('.transcript-assistant-output')?.textContent).toContain('The target file is loaded.');
 
-    // 展开工作框后，思考行自己也能折叠/展开。
+    // 展开工作框后，思考行自己也能折叠/展开。点外层 summary，不要点到内层 thinking。
     await act(async () => {
-      groups[0]?.querySelector('summary')?.click();
+      stream.querySelector<HTMLDetailsElement>('.chat-work-group')
+        ?.querySelector<HTMLElement>(':scope > summary')
+        ?.click();
       await Promise.resolve();
     });
-    expect(groups[0]?.open).toBe(true);
-    const thought = groups[0]!.querySelector<HTMLDetailsElement>('.work-thinking-line')!;
+    const openedGroups = [...container.querySelectorAll<HTMLDetailsElement>('.chat-work-stream .chat-work-group')];
+    expect(openedGroups[0]?.open).toBe(true);
+    expect(openedGroups[0]?.classList.contains('is-open')).toBe(true);
+    expect(openedGroups[0]?.querySelector(':scope > summary')).not.toBeNull();
+    expect(openedGroups[0]?.querySelector(':scope > .work-group-clip > .work-group-body')).not.toBeNull();
+    const thought = openedGroups[0]!.querySelector<HTMLDetailsElement>('.work-thinking-line')!;
     expect(thought.open).toBe(false);
+    expect(thought.querySelector('.work-thinking-label')).not.toBeNull();
+    expect(thought.querySelector('.work-thinking-label svg')).not.toBeNull();
     await act(async () => {
       thought.querySelector('summary')?.click();
       await Promise.resolve();
@@ -1487,9 +1503,10 @@ describe('conversation presentation', () => {
     expect(thought.querySelector('p')?.textContent).toContain('Inspecting the relevant call path.');
 
     // 工具行仍是就地展开的一行。
-    const toolRow = groups[0]!.querySelector<HTMLDetailsElement>('.compact-tool-call')!;
+    const toolRow = openedGroups[0]!.querySelector<HTMLDetailsElement>('.compact-tool-call')!;
     expect(toolRow.open).toBe(false);
     expect(toolRow.querySelector('.compact-tool-headline')?.textContent).toMatch(/Read|读取/);
+    expect(toolRow.querySelector('.compact-tool-icon')).not.toBeNull();
     expect(toolRow.querySelector('.compact-tool-chevron')).not.toBeNull();
     await act(async () => {
       toolRow.querySelector('summary')?.click();
@@ -1515,15 +1532,22 @@ describe('conversation presentation', () => {
     expect(group.querySelector('.work-group-body')).not.toBeNull();
 
     await act(async () => {
-      group.querySelector('summary')?.click();
+      container.querySelector<HTMLDetailsElement>('.chat-work-group')
+        ?.querySelector<HTMLElement>(':scope > summary')
+        ?.click();
       await Promise.resolve();
     });
-    expect(group.open).toBe(true);
-    const headlines = [...group.querySelectorAll('.compact-tool-headline')].map(node => node.textContent);
+    const opened = container.querySelector<HTMLDetailsElement>('.chat-work-group')!;
+    expect(opened.open).toBe(true);
+    expect(opened.classList.contains('is-open')).toBe(true);
+    expect(opened.querySelector(':scope > summary')).not.toBeNull();
+    expect(opened.querySelector(':scope > .work-group-clip > .work-group-body')).not.toBeNull();
+    const headlines = [...opened.querySelectorAll('.compact-tool-headline')].map(node => node.textContent);
     expect(headlines).toEqual([
       expect.stringMatching(/pnpm test/),
       expect.stringMatching(/pnpm typecheck/),
     ]);
+    expect(opened.querySelectorAll('.compact-tool-icon')).toHaveLength(2);
   });
 
   it('builds compact tool headlines for common tool names', () => {
@@ -1724,6 +1748,29 @@ describe('live work group boundaries', () => {
     });
 
     expect(container.querySelector('.work-thinking-line')?.classList.contains('live')).toBe(true);
+  });
+
+  it('keeps a 260px cap on live thinking so overflow scrolls inside the box', async () => {
+    expect(themeCss).toMatch(/\.work-thinking-line\s*>\s*p\s*\{[^}]*max-height:\s*260px/);
+    expect(themeCss).not.toMatch(/\.work-thinking-line\.live\s*>\s*p\s*\{[^}]*max-height:\s*none/);
+
+    const thinkingCss = [...themeCss.matchAll(/\.work-thinking-line[^{]*\{[^}]*\}/g)].map(match => match[0]).join('\n');
+    const style = document.createElement('style');
+    style.textContent = thinkingCss;
+    document.head.append(style);
+
+    const lines = Array.from({ length: 40 }, (_, index) => `Reasoning line ${String(index + 1)}.`).join('\n');
+    const blocks = [{ id: 'think-live', type: 'thinking' as const, text: lines }];
+    const { container } = await renderChat({
+      messages: [{ id: 'user-1', role: 'user', text: 'go' }, { ...liveMessage, workBlocks: blocks }],
+      isStreaming: true,
+      streamingTurnId: 'turn-1',
+      workBlocks: blocks,
+    });
+
+    const paragraph = container.querySelector<HTMLParagraphElement>('.work-thinking-line.live > p');
+    expect(paragraph).not.toBeNull();
+    expect(getComputedStyle(paragraph!).maxHeight).toBe('260px');
   });
 });
 
