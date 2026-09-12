@@ -518,6 +518,7 @@ export interface BindMountedTeamMemberPayload {
 }
 
 export interface UpdateSessionIdentityPayload {
+  readonly sessionId: string;
   readonly name?: string;
   readonly role?: string;
   readonly mandate?: string;
@@ -584,9 +585,7 @@ export interface CoreAPI extends SessionAPIWithId {
   /** Promote a mounted session to top-level. */
   unmountSession: (payload: UnmountSessionPayload) => SessionSummary;
   /** Update name / role / mandate / tags; injects a reminder and does not prompt. */
-  updateSessionIdentity: (
-    payload: WithSessionId<UpdateSessionIdentityPayload>,
-  ) => SessionSummary;
+  updateSessionIdentity: (payload: UpdateSessionIdentityPayload) => SessionSummary;
   exportSession: (payload: ExportSessionPayload) => ExportSessionResult;
   listPlugins: (payload: EmptyPayload) => readonly PluginSummary[];
   installPlugin: (payload: InstallPluginPayload) => PluginSummary;

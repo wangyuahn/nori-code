@@ -978,9 +978,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     return this.sessionApi(sessionId).bindMountedTeamMember(payload);
   }
 
-  async updateSessionIdentity(
-    input: SessionScopedPayload<UpdateSessionIdentityPayload>,
-  ): Promise<SessionSummary> {
+  async updateSessionIdentity(input: UpdateSessionIdentityPayload): Promise<SessionSummary> {
     return this.applySessionIdentityUpdate(input);
   }
 
@@ -1811,7 +1809,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
   }
 
   private async applySessionIdentityUpdate(
-    input: SessionScopedPayload<UpdateSessionIdentityPayload>,
+    input: UpdateSessionIdentityPayload,
   ): Promise<SessionSummary> {
     const name = normalizeOptionalMountString(input.name);
     const role = normalizeOptionalMountString(input.role);

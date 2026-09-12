@@ -1170,7 +1170,7 @@ export class SessionService extends Disposable implements ISessionService {
     const maxPasses = remaining.size + 1;
     for (let pass = 0; pass < maxPasses && remaining.size > 0; pass++) {
       let progressed = false;
-      for (const [agentId, agent] of [...remaining]) {
+      for (const [agentId, agent] of remaining) {
         const leaderId = agent.teamLeaderAgentId ?? 'main';
         let parentSessionId = hostSessionId;
         if (leaderId !== 'main') {

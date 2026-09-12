@@ -136,7 +136,7 @@ export function matchesMapStatusFilter(status: string, filter: MapStatusFilter):
     return runtime === 'running' || runtime === 'working' || runtime === 'waiting';
   }
   if (filter === 'error') return runtime === 'error';
-  return runtime === 'idle' || runtime === 'stopped' || runtime === 'other';
+  return runtime === 'idle' || runtime === 'stopped';
 }
 
 export type MapCurrentActionKind = 'thinking' | 'tool' | 'waiting-approval' | 'waiting';
