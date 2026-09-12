@@ -1020,8 +1020,8 @@ function discussionSpeakerDisplayName(
 }
 
 /**
- * 发言人角色标签。`sub` 是子代理向上问的那一路（nori_ask_parent），
- * 原来会掉到 else 分支被标成「主持」，反了。
+ * 发言人角色标签。`sub` 是子代理旁路发言；旧 transcript 仍可能带这个 from，
+ * 不能掉到默认分支被标成「主持」。
  */
 function discussionSpeakerRoleLabel(
   from: NonNullable<ChatMessage['speaker']>['from'] | undefined,

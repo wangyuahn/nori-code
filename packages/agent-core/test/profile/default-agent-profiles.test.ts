@@ -76,9 +76,11 @@ describe('default agent profiles', () => {
       expect(tools).toContain('TeamSpeak');
       expect(tools).toContain('TeamStatus');
       expect(tools).not.toContain('ExitDiscussMode');
+      expect(tools).not.toContain('nori_ask_parent');
     }
     expect(DEFAULT_AGENT_PROFILES['nori-agent']?.systemPrompt(promptContext)).toContain('TeamDecide');
     expect(DEFAULT_AGENT_PROFILES['nori-coder']?.systemPrompt(promptContext)).toContain('TeamAssign');
+    expect(DEFAULT_AGENT_PROFILES['agent']?.systemPrompt(promptContext)).not.toContain('nori_ask_parent');
   });
 
   it('fails loudly when an embedded system prompt source is missing', () => {

@@ -146,7 +146,7 @@ export type TeamDMInput = z.infer<typeof TeamDMInputSchema>;
 
 export class TeamDMTool implements BuiltinTool<TeamDMInput> {
   readonly name = 'TeamDM' as const;
-  readonly description = 'Send a private message at any time, in Discuss or Code, for coordination, handoff, or progress. Three kinds of recipient are reachable by agent_id: a peer in your own department (the members your parent hired alongside you), a member you hired yourself, and your direct parent. Peers reach each other directly here — your parent is a recipient, not a relay. For a task report, set report_status to completed, blocked, or needs_decision and provide report_summary; a report always travels to your parent. Ordinary messages without report_status are never classified as reports. TeamSpeak is only for formal Discuss turns.';
+  readonly description = 'Send a private message at any time, in Discuss or Code, for coordination, handoff, progress, or a question only your parent can answer (scope, priority, a trade-off between members). Three kinds of recipient are reachable by agent_id: a peer in your own department (the members your parent hired alongside you), a member you hired yourself, and your direct parent. Peers reach each other directly here — your parent is a recipient, not a relay. For a task report, set report_status to completed, blocked, or needs_decision and provide report_summary; a report always travels to your parent. Use report_status=needs_decision when you are blocked on a parent decision. Ordinary messages without report_status are never classified as reports. TeamSpeak is only for formal Discuss turns.';
   readonly parameters = toInputJsonSchema(TeamDMInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}

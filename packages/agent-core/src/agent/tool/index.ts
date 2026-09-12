@@ -531,8 +531,6 @@ export class ToolManager {
         this.agent.cron && new b.CronDeleteTool(this.agent.cron),
         this.agent.skills?.registry.listInvocableSkills().length &&
           new b.SkillTool(this.agent),
-        this.agent.subagentHost &&
-          new b.NoriAskParentTool(this.agent),
         this.agent.subagentHost && new b.TeamCreateTool(this.agent.subagentHost),
         this.agent.subagentHost && new b.TeamDismissTool(this.agent.subagentHost),
         this.agent.subagentHost && new b.TeamAssignTool(this.agent.subagentHost),
