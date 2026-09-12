@@ -1,31 +1,16 @@
 # Nori Code / Nori Work
 
-> **Multi-agent coding workspace — decompose, distribute, verify, remember.**
+> **A department of agents — discuss, assign, execute, remember.**
 
-Nori orchestrates multiple AI agents to plan, implement, review, and persist knowledge across sessions. Not another chat-over-code tool — a **multi-agent engineering workspace**.
+Nori Code is a terminal coding agent. Nori Work is the companion Electron workbench. Together they treat a project as a **department tree of real sessions**, not one chat with side notes.
 
-[中文说明](README.zh-CN.md)
+Hire durable partners. They speak in **multi-round Discuss** (one short `TeamSpeak` per turn, then `action=continue`). `TeamAssign` enters Code. The **conversation map** is the session console: open, stop, mount, and edit identity.
+
+[中文说明](README.zh-CN.md) · [Getting started](docs/en/guides/getting-started.md) · [Team engineering](docs/en/guides/team-engineering.md)
 
 ![Nori Work conversation workspace](docs/images/nori-work-overview.png)
 
 ![Nori Work browser workspace](docs/images/nori-work-browser.png)
-
-> [!NOTE]
-> **v2.0** adds **team engineering**: a department tree of durable partner sessions, Discuss/Assign before Code, and a **conversation map** (`/map` in the TUI, **Map** in Nori Work) linked by `parent_session_id`. Identity is injected via `<session_self>` and mount-change notices — not transcript copying.
-
-> [!NOTE]
-> **v1.0.0** was the first stable Nori Code and Nori Work release. Existing Nori Work installations are fully replaced during upgrade while user data is preserved.
-
-### What's included in v1.0.0
-
-- Browser page actions no longer wait for the 90-second bridge timeout when no page is open; the Agent immediately receives an instruction to navigate first.
-- Browser tools remain registered while the desktop bridge reconnects, and independent heartbeats prevent long-running actions from making the bridge appear offline.
-- Local `.html` and `.htm` files open in the embedded browser without granting arbitrary `file://` access.
-- Desktop packaging rejects stale Web/SEA artifacts, and startup recovers from stale or incompatible local-server locks instead of silently connecting to an old backend.
-- Regular Agent and SubAgent work is visible by project and session with nested ownership, output, correct completion counts, and completed/failed states.
-- Opening **Chat** reliably returns to the conversation view and session list.
-- The vault no longer creates empty legacy plural folders; Related links use Obsidian-compatible paths and include both outgoing links and backlinks.
-- Built-in LSP discovery covers common language servers instead of reporting "No language server is configured" when a supported server is available.
 
 ---
 
@@ -33,94 +18,82 @@ Nori orchestrates multiple AI agents to plan, implement, review, and persist kno
 
 | | Nori Code | Nori Work |
 |---|---|---|
-| **What** | Terminal CLI/TUI for focused coding sessions | Electron desktop workbench |
-| **Who for** | Terminal-first power users | Full workspace with browser, terminal, Git, filesystem |
-| **Interface** | Ink-based TUI with split panes | Multi-panel Electron desktop |
-| **Start** | `nori` | Standalone installer (see releases) |
+| **What** | Terminal CLI / TUI | Electron desktop workbench |
+| **Who for** | Terminal-first sessions | Chat, files, Git, terminal, browser, and Map on one screen |
+| **Start** | `nori` | Installer from [Releases](https://github.com/wangyuahn/nori-code/releases), or `nori web` for the browser workspace |
+
+The CLI package on npm is `nori-code`. The executable is `nori`. Published CLI requires **Node.js ≥ 22.19.0**. Developing this monorepo requires **Node.js ≥ 24.15.0** and **pnpm 10.33.0**.
 
 ---
 
-## Why Nori
+## How work moves
 
-Most AI coding tools are **single-agent chat shells**: one model, one context, one turn at a time. Nori is built differently:
+1. **`TeamCreate`** — hire partners. Each hire is a **mounted child session** (a card on the map) plus a team agent so Discuss still addresses this department.
+2. **`TeamDecide action=start`** — open Discuss. Members speak in order with **`TeamSpeak`**: one claim, one disagreement, or one concrete suggestion. Do not finish the whole problem in a single turn. Use **`action=continue`** for the next slice. A skipped turn is an abstention; later speakers still run. While Discuss is open, `Write` / `Edit` / `Bash` stay blocked.
+3. **`TeamAssign`** — hand out file-bounded tasks. Success **leaves Discuss** and enters Code.
+4. **Code** — members execute. `TeamChat` is peer traffic; `TeamDM` is one-to-one (including reports to the parent: `completed` / `blocked` / `needs_decision`).
+5. **Map** — the same sessions. Click to select, open chat, force-stop a turn, create a child, edit name/role/mandate/tags, unmount, or delete. Box-select for batch actions.
 
-- **Parallel, not serial.** Complex tasks decompose into DAG-shaped agent workflows — plan → implement → verify → review — running in parallel with dependency scheduling.
-- **Memory, not amnesia.** Architecture decisions, code reviews, and patterns persist in a bidirectional-link vault. What you learned last month is available next session.
-- **Policy, not guesswork.** `nori.yaml` enforces deterministic rules: search memory before coding, run tests before exit, review before merge. AI flexibility backed by project discipline.
-- **Desktop, not a web tab.** Nori Work is an Electron native workspace — a proper local workbench.
+The main Agent is a **read-only coordinator** by default (`/setting readonly on`). Members execute assigned tracks. Use `/setting readonly off` only when the lead should edit files.
 
----
+**SubAgent** is a different model: a temporary delegate archived under the parent session. It is not a map node and is not a long-lived department.
 
-## Key Features
-
-### 🧠 Multi-Agent DAG Orchestration
-SubAgent splits a task into parallel sub-agents with explicit dependency chaining. A multi-file refactor dispatches `{ plan, implement-1, implement-2, verify, review }` concurrently — no manual turn-by-turn handholding.
-
-### 👥 Team engineering (2.0)
-`TeamCreate` hires durable partners as **mounted child sessions** on the conversation map. Discuss (`TeamDecide` / `TeamSpeak`) gathers statements before `TeamAssign` enters Code; the main Agent stays read-only while members execute. `/team` opens partner sessions; `/map` manages mounts. `TeamDismiss` removes partners and deletes their sessions. Web **Map** mirrors the same forest with pan/zoom and local annotations.
-
-### 📚 Persistent Project Memory
-Every decision, review, and pattern lands in an Obsidian-compatible vault with `[[wiki-links]]`. The planner searches it automatically before each implementation phase. Cross-session knowledge means Nori gets smarter about *your project* over time.
-
-### ⚙️ Policy-as-Code (`nori.yaml`)
-Codify project rules that the agent loop enforces automatically:
-```yaml
-rules:
-  - name: search_before_code
-    condition: { on_phase: implement, stage: enter }
-    prompt: "Search vault for prior decisions and patterns."
-    enforced: true
-```
-Orchestrator, coder, and reviewer can each use a different model/provider.
-
-### 🔌 Provider Flexibility
-Bring any OpenAI-compatible provider — local (Ollama, LM Studio) or cloud. Each agent role (orchestrator / coder / reviewer) can run its own model.
-
-### 🖥️ Nori Work Engineering Workspace
-Nori Work keeps the conversation, project files, live code changes, Git operations, LSP results, a persistent PTY terminal, and a multi-tab embedded browser in one resizable desktop layout. Inspector tools can be reordered or opened in standalone windows. Custom Agent roles define their own instructions and explicit read, write, terminal, web, and delegation permissions.
-
-Agent and SubAgent work always runs in the background. The main model can inspect, pause, guide, resume, or stop a SubAgent while the collaboration view shows its project/session tree, status, output, and token usage.
-
-### 🌐 Agent-Controlled Browser
-The embedded browser is available to the main Agent through a structured Browser tool: navigate, snapshot stable element references, click, type, upload files, capture screenshots, inspect console/network activity, and work with page annotations. It supports web URLs and local `.html`/`.htm` files while blocking privileged URLs and arbitrary local files. User takeover can pause automation at any time, and actions fail immediately with actionable feedback when no page is open.
-
-### 🔗 Obsidian-Compatible Knowledge
-Memory notes use vault-relative `[[folder/note|Title]]` links. Nori Work renders outgoing links, backlinks, and the movable knowledge graph while retaining compatibility with legacy vault layouts and Obsidian.
+`TeamDismiss` deletes a hired child session. Unmount on the map only drops the parent link.
 
 ---
 
-## Roadmap
+## Surfaces
 
-| Priority | Feature | Status |
-|----------|---------|--------|
-| P0 | **Built-in LSP** — diagnostics, hover, definitions, references, symbols, rename, and formatting | ✅ Implemented |
-| P0 | **Custom Agent Profiles** — user-defined roles, prompts, base profiles, and tool permissions | ✅ Implemented |
-| P0 | **Nori Work — Embedded Terminal** (persistent node-pty sessions) | ✅ Implemented |
-| P0 | **Nori Work — Embedded Browser** (isolated WebContentsView tabs for research and preview) | ✅ Implemented |
-| P0 | **Nori Work — Filesystem Sandbox** (whitelist + blocklist) | 📝 Planned |
-| P0 | **Nori Work — System Tray / Notifications** | ✅ Implemented |
-| P0 | **Nori Work — Secure Preload Bridge** | ✅ Implemented |
-| P1 | **Agent Browser Tool** — navigation, snapshots, interaction, uploads, diagnostics, and annotations | ✅ Implemented |
-| P0 | **Team engineering** — department tree, Discuss/Assign, conversation map, `/team` / `/map` | ✅ Implemented |
+| Surface | What it is for |
+|---|---|
+| `nori` | Interactive TUI in the project directory |
+| `/team` (alias `/agents`) | Open a partner session, reports, this-round Discuss speech, max department depth |
+| `/map` | Mount forest: open, mount, unmount |
+| `Shift-Tab` / `/discuss` | Toggle Discuss / Code (`/plan` is a compatibility alias) |
+| `Ctrl-Y` | Show or hide the Discuss / Chat pane |
+| `nori web` | Hand the current session to the browser workspace |
+| Nori Work **Map** | Pan/zoom console: create, wire, stop, settings, filters, box-select |
+
+Identity is **`<session_self>`** plus mount/identity change notices. Partners do not share the lead's transcript.
 
 ---
 
-## Quick Start
+## Also in the box
+
+- **Memory** — Obsidian-compatible vault (`nori_memory_search` / `nori_memory_write`) with `[[wiki-links]]`, backlinks, and a graph in Nori Work.
+- **`nori.yaml`** — project phases, vault path, and enforced rules (for example search memory before implement).
+- **Providers** — OpenAI-compatible cloud or local (Ollama, LM Studio). Configure with `/login` or `/provider`.
+- **Browser tool** — navigate, snapshot, click, type, screenshot. Local `.html` / `.htm` are allowed; arbitrary `file://` is not. Actions fail immediately when no page is open.
+- **LSP** — diagnostics and navigation when a language server is available.
+
+---
+
+## Quick start
 
 ```sh
 npm install -g nori-code
+# or: pnpm add -g nori-code
 
-# Interactive TUI
+cd your-project
 nori
-
-# One-shot prompt
-nori -p "your task"
-
-# Start the local web workspace
-nori web
 ```
 
-Nori Work is available as a **standalone desktop installer**. Download the stable [v1.0.0 release](https://github.com/wangyuahn/nori-code/releases/tag/v1.0.0), or browse all builds on [Releases](https://github.com/wangyuahn/nori-code/releases).
+First launch: `/login` or `/provider`, then `/model`. Try:
+
+```
+Take a look at this project and explain the main directories.
+```
+
+Non-interactive:
+
+```sh
+nori -p "your task"
+nori -c                 # resume previous session
+nori web                # browser workspace
+nori upgrade            # update the CLI
+```
+
+Nori Work desktop builds: [Releases](https://github.com/wangyuahn/nori-code/releases).
 
 ### From source
 
@@ -137,19 +110,30 @@ pnpm dev:desktop   # Desktop workbench
 
 ---
 
-## Packages
+## Documentation
 
-| Package | Role |
-|---------|------|
-| `apps/nori-code` | CLI/TUI entry point |
-| `apps/nori-web` | Web UI (loaded by desktop) |
-| `apps/nori-desktop` | Electron desktop workbench |
-| `packages/agent-core` | Agent, session, Team/SubAgent, tool, workflow engine |
-| `packages/server` | REST/WebSocket server |
-| `packages/kosong` | Model/provider abstraction |
-| `packages/kaos` | File, process, environment abstractions |
+| Topic | English | 中文 |
+|---|---|---|
+| Install and first launch | [Getting started](docs/en/guides/getting-started.md) | [开始使用](docs/zh/guides/getting-started.md) |
+| Department tree, Discuss, Map | [Team engineering](docs/en/guides/team-engineering.md) | [团队工程](docs/zh/guides/team-engineering.md) |
+| 1.x → 2.0 | [Migration](docs/en/guides/migration.md) | [迁移](docs/zh/guides/migration.md) |
+| Built-in tools | [Tools](docs/en/reference/tools.md) | [工具](docs/zh/reference/tools.md) |
+
+---
+
+## Repository map
+
+| Path | Role |
+|---|---|
+| `apps/nori-code` | CLI / TUI (`nori`) |
+| `apps/nori-web` | Web UI (desktop and `nori web`) |
+| `apps/nori-desktop` | Electron workbench |
+| `packages/agent-core` | Agent, Session, Team, tools |
+| `packages/server` | REST + WebSocket (`/api/v1`) |
+| `packages/kosong` | Model / provider layer |
+| `packages/kaos` | Files, processes, environment |
 | `packages/node-sdk` | Public TypeScript SDK |
-| `packages/oauth` | Authentication and provider registry |
+| `packages/oauth` | Auth |
 
 ---
 
@@ -160,13 +144,13 @@ pnpm typecheck
 pnpm lint
 pnpm test
 pnpm build
-pnpm check:brand    # Verify no stray Kimi branding
+pnpm check:brand    # no leftover Kimi branding
 ```
 
-Run focused checks per affected package first; expand to root-level checks before commit.
+Run focused checks on the package you touched; run the root commands before merge.
 
 ---
 
 ## License
 
-MIT. Based on [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code) (MIT), from which Nori forked and grew its own architecture: multi-agent DAG orchestration, persistent memory, desktop environment, policy engine, and independent branding. Required upstream compatibility is maintained where shared protocol surfaces apply.
+MIT. Forked from [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code) (MIT). Nori keeps the shared protocol surfaces it still needs, and owns its department-tree runtime, conversation map, memory vault, desktop workbench, and branding.

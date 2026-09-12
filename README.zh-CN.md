@@ -1,31 +1,16 @@
 # Nori Code / Nori Work
 
-> **多智能体编程工作区 —— 分解、分发、验证、记忆。**
+> **一整个部门的 Agent —— 讨论、分配、执行、记住。**
 
-Nori 编排多个 AI Agent 协同完成代码的规划、实现、审查和跨会话知识持久化。不是一个聊天的代码工具，而是一个**多 Agent 工程工作台**。
+Nori Code 是终端里的编程 Agent。Nori Work 是配套的 Electron 工作台。二者把项目当成一棵**真实会话组成的部门树**，而不是单条聊天加旁注。
 
-[English](README.md)
+雇佣持久伙伴。他们在**多轮 Discuss** 里发言（每轮一条短 `TeamSpeak`，再用 `action=continue`）。`TeamAssign` 进入 Code。**会话地图**是会话控制台：打开、停止、挂载、改身份。
+
+[English](README.md) · [开始使用](docs/zh/guides/getting-started.md) · [团队工程](docs/zh/guides/team-engineering.md)
 
 ![Nori Work 对话工作区](docs/images/nori-work-overview.png)
 
 ![Nori Work 浏览器工作区](docs/images/nori-work-browser.png)
-
-> [!NOTE]
-> **v2.0** 新增**团队工程**：持久伙伴会话组成的部门树、进入 Code 前的 Discuss/Assign，以及由 `parent_session_id` 连接的**会话地图**（TUI `/map`、Nori Work **Map**）。身份通过 `<session_self>` 与挂载变更通知注入，而非复制 transcript。
-
-> [!NOTE]
-> **v1.0.0** 是 Nori Code 与 Nori Work 的首个正式稳定版本。升级时会完整覆盖旧版 Nori Work 程序文件，同时保留用户数据。
-
-### v1.0.0 包含的内容
-
-- 没有打开页面时，Browser 的页面操作不再等待 90 秒桥接超时；Agent 会立即收到“先导航”的可执行提示。
-- 桌面桥接重连期间 Browser 工具仍保持注册；独立心跳避免长时间操作被误判为离线。
-- 内嵌浏览器可直接打开本地 `.html` 与 `.htm`，但不会放开任意 `file://` 文件访问。
-- 桌面打包会拒绝陈旧的 Web/SEA 产物；启动时会恢复陈旧或不兼容的本地服务锁，不再静默连接旧后端。
-- 普通 Agent 与 SubAgent 按项目和会话展示调用归属、嵌套关系、输出、正确完成数量及完成/失败状态。
-- 点击“对话”会可靠返回聊天主区域与会话列表。
-- Vault 不再创建空的旧版复数目录；Related 使用 Obsidian 兼容路径，并同时显示出链与反向链接。
-- 内置 LSP 可发现主流语言服务器，不再在已有可用服务器时统一提示“未配置语言服务器”。
 
 ---
 
@@ -33,75 +18,53 @@ Nori 编排多个 AI Agent 协同完成代码的规划、实现、审查和跨�
 
 | | Nori Code | Nori Work |
 |---|---|---|
-| **定位** | 终端 CLI/TUI | Electron 桌面工作台 |
-| **适合谁** | 终端重度用户 | 桌面 IDE 偏好者 |
-| **界面** | Ink 分屏 TUI | 多面板 Electron 桌面 |
-| **启动** | `nori` | 独立安装包（见 releases） |
+| **定位** | 终端 CLI / TUI | Electron 桌面工作台 |
+| **适合谁** | 终端里的会话 | 对话、文件、Git、终端、浏览器和 Map 在同一屏 |
+| **启动** | `nori` | [Releases](https://github.com/wangyuahn/nori-code/releases) 安装包，或 `nori web` 打开浏览器工作台 |
+
+npm 包名是 `nori-code`，可执行文件是 `nori`。已发布 CLI 需要 **Node.js ≥ 22.19.0**。开发本仓库需要 **Node.js ≥ 24.15.0** 和 **pnpm 10.33.0**。
 
 ---
 
-## 为什么是 Nori
+## 工作怎么走
 
-大多数 AI 编程工具是**单 Agent 聊天壳** —— 一个模型、一个上下文、一问一答。Nori 不一样：
+1. **`TeamCreate`** — 雇佣伙伴。每次雇佣是一个**挂载子会话**（地图上的卡片），并双写团队 Agent，以便 Discuss 仍按本部门寻址。
+2. **`TeamDecide action=start`** — 开启 Discuss。成员按顺序 **`TeamSpeak`**：一个观点、一个分歧、或一个具体建议。禁止一轮把问题想完。用 **`action=continue`** 开下一轮。本轮不发言记为弃权，后面的人照常发言。Discuss 期间 `Write` / `Edit` / `Bash` 被拦截。
+3. **`TeamAssign`** — 按文件边界分配任务。成功后**离开 Discuss** 进入 Code。
+4. **Code** — 成员执行。`TeamChat` 是同伴之间的工作流量；`TeamDM` 是一对一（包括向父级汇报：`completed` / `blocked` / `needs_decision`）。
+5. **地图** — 还是这些会话。单击选中、打开聊天、强制停止、新建子会话、改名称/角色/职责/标签、拆挂或删除。框选可批量操作。
 
-- **并行而非串行。** 复杂任务拆解为 DAG 结构的 Agent 工作流 —— 规划 → 实现 → 验证 → 审查 —— 带依赖调度的并行执行。
-- **记忆而非失忆。** 架构决策、代码审查、设计模式持久化到双向链接记忆库。上个月学到的东西，下个会话还能用。
-- **策略而非猜测。** `nori.yaml` 强制执行确定性规则：编码前搜索记忆、退出前跑测试、合并前审查。AI 的灵活性加上项目级的纪律约束。
-- **桌面而非浏览器标签。** Nori Work 是基于 Electron 的原生桌面工作台。
+主 Agent 默认是**只读协调者**（`/setting readonly on`）。成员执行分配任务。只有在你希望负责人直接改文件时才 `/setting readonly off`。
 
----
+**SubAgent** 是另一套模型：归档在父会话下的临时代理，不是地图节点，也不适合当长期部门。
 
-## 核心能力
-
-### 🧠 多 Agent DAG 编排
-SubAgent 将任务拆解为带显式依赖链的并行子 Agent。多文件重构自动派发 `{ 规划, 实现-1, 实现-2, 验证, 审查 }` 并行工作，无需手动一问一答。
-
-### 👥 团队工程（2.0）
-`TeamCreate` 将会话地图上的**挂载子会话**雇佣为持久伙伴。Discuss（`TeamDecide` / `TeamSpeak`）在 `TeamAssign` 进入 Code 前收集团队发言；主 Agent 保持只读，成员执行分配任务。`/team` 打开伙伴会话；`/map` 管理挂载。`TeamDismiss` 移除伙伴并删除对应会话。Web **Map** 提供同一挂载森林的平移/缩放与本地标注。
-
-### 📚 持久项目记忆
-每个决策、审查和模式都写入 Obsidian 兼容的 `[[双向链接]]` 记忆库。规划阶段自动检索历史上下文。Nori 会随着时间推移越来越了解**你的项目**。
-
-### ⚙️ 策略即代码 (`nori.yaml`)
-将项目规则编码为 Agent 循环自动执行：
-```yaml
-rules:
-  - name: search_before_code
-    condition: { on_phase: implement, stage: enter }
-    prompt: "搜索记忆库，查找已有决策和模式。"
-    enforced: true
-```
-编排器、编码器和审查器可各自使用不同的模型/Provider。
-
-### 🔌 Provider 灵活接入
-接入任何兼容 OpenAI 接口的 Provider —— 本地（Ollama、LM Studio）或云端。每个 Agent 角色（编排器/编码器/审查器）可使用不同模型。
-
-### 🖥️ Nori Work 工程工作台
-Nori Work 将对话、项目文件、实时代码更改、Git 操作、LSP 结果、持久 PTY 终端和多标签内嵌浏览器放在同一个可调整大小的桌面布局中。右侧检查器工具可以调整顺序，也可以单独打开为独立窗口。用户可创建自定义 Agent 角色，并分别配置角色说明以及读取、写入、终端、联网和委派权限。
-
-SubAgent 始终可以一次启动多个子会话。主模型可以查询、暂停、插入指令、恢复或终止这些子会话；团队树按项目和会话展示调用树、状态、输出与 token 用量。
-
-### 🌐 Agent 可控浏览器
-主 Agent 可通过结构化 Browser 工具操作内嵌浏览器：导航、获取带稳定元素引用的页面快照、点击、输入、上传文件、截图、检查控制台与网络活动，以及处理网页标注。浏览器支持网页 URL 和本地 `.html`/`.htm` 文件，同时拦截特权 URL 与任意本地文件。用户可以随时接管并暂停自动化；没有打开页面时，操作会立即返回可执行的错误提示，而不是等待超时。
-
-### 🔗 Obsidian 兼容知识库
-记忆笔记使用 Vault 相对路径格式 `[[folder/note|Title]]`。Nori Work 可展示出链、反向链接和可移动的知识图谱，同时兼容旧 Vault 布局与 Obsidian。
+`TeamDismiss` 会删除被雇佣的子会话。地图上拆挂只去掉父链接。
 
 ---
 
-## 开发路线
+## 界面
 
-| 优先级 | 功能 | 状态 |
-|--------|------|------|
-| P0 | **内置 LSP** — 诊断、悬浮信息、定义、引用、符号、重命名和格式化 | ✅ 已实现 |
-| P0 | **自定义 Agent 配置** — 自定义角色、Prompt、基础 Profile 与工具权限 | ✅ 已实现 |
-| P0 | **Nori Work — 内嵌终端**（持久 node-pty 会话） | ✅ 已实现 |
-| P0 | **Nori Work — 内嵌浏览器**（用于研究与预览的隔离 WebContentsView 标签页） | ✅ 已实现 |
-| P0 | **Nori Work — 文件系统沙箱**（白名单 + 黑名单） | 📝 规划中 |
-| P0 | **Nori Work — 系统托盘 / 通知** | ✅ 已实现 |
-| P0 | **Nori Work — 安全 Preload 桥接** | ✅ 已实现 |
-| P1 | **Agent 内置浏览器** — 导航、快照、交互、上传、诊断与网页标注 | ✅ 已实现 |
-| P0 | **团队工程** — 部门树、Discuss/Assign、会话地图、`/team` / `/map` | ✅ 已实现 |
+| 入口 | 用途 |
+|---|---|
+| `nori` | 在项目目录里开交互 TUI |
+| `/team`（别名 `/agents`） | 打开伙伴会话、汇报、本轮 Discuss 发言、最大部门深度 |
+| `/map` | 挂载森林：打开、挂载、拆挂 |
+| `Shift-Tab` / `/discuss` | 切换 Discuss / Code（`/plan` 是兼容别名） |
+| `Ctrl-Y` | 显示或隐藏 Discuss / Chat 栏 |
+| `nori web` | 把当前会话交给浏览器工作台 |
+| Nori Work **Map** | 平移/缩放控制台：创建、接线、停止、设置、筛选、框选 |
+
+身份是 **`<session_self>`** 加上挂载/身份变更通知。伙伴**不会**复制负责人的 transcript。
+
+---
+
+## 一并带上的能力
+
+- **记忆** — Obsidian 兼容的 Vault（`nori_memory_search` / `nori_memory_write`），`[[wiki-links]]`、反向链接，Nori Work 里有图谱。
+- **`nori.yaml`** — 项目阶段、Vault 路径、强制规则（例如进入实现前先搜记忆）。
+- **供应商** — 兼容 OpenAI 的云端或本地（Ollama、LM Studio）。用 `/login` 或 `/provider` 配置。
+- **Browser 工具** — 导航、快照、点击、输入、截图。允许本地 `.html` / `.htm`，不允许任意 `file://`。没有打开页面时操作立即失败。
+- **LSP** — 有语言服务器时提供诊断与跳转。
 
 ---
 
@@ -109,18 +72,28 @@ SubAgent 始终可以一次启动多个子会话。主模型可以查询、暂�
 
 ```sh
 npm install -g nori-code
+# 或：pnpm add -g nori-code
 
-# 交互式 TUI
+cd your-project
 nori
-
-# 单次任务
-nori -p "你的任务"
-
-# 启动本地 Web 工作台
-nori web
 ```
 
-Nori Work 桌面版提供**独立安装包**。可直接下载正式稳定的 [v1.0.0](https://github.com/wangyuahn/nori-code/releases/tag/v1.0.0)，或在 [Releases](https://github.com/wangyuahn/nori-code/releases) 查看全部构建。
+第一次启动：`/login` 或 `/provider`，再 `/model`。可以先试：
+
+```
+看一下这个项目，解释主要目录做什么。
+```
+
+非交互：
+
+```sh
+nori -p "你的任务"
+nori -c                 # 恢复上一会话
+nori web                # 浏览器工作台
+nori upgrade            # 升级 CLI
+```
+
+Nori Work 桌面安装包：[Releases](https://github.com/wangyuahn/nori-code/releases)。
 
 ### 从源码运行
 
@@ -137,23 +110,34 @@ pnpm dev:desktop   # 桌面工作台
 
 ---
 
-## 代码包
+## 文档
 
-| 包 | 职责 |
-|----|------|
-| `apps/nori-code` | CLI/TUI 入口 |
-| `apps/nori-web` | Web UI（桌面端加载） |
-| `apps/nori-desktop` | Electron 桌面工作台 |
-| `packages/agent-core` | Agent、Session、Team/SubAgent、Tool、Workflow 引擎 |
-| `packages/server` | REST/WebSocket 服务 |
-| `packages/kosong` | 模型/Provider 抽象层 |
-| `packages/kaos` | 文件、进程、环境抽象 |
-| `packages/node-sdk` | 公开 TypeScript SDK |
-| `packages/oauth` | 认证与 Provider 注册 |
+| 主题 | English | 中文 |
+|---|---|---|
+| 安装与第一次启动 | [Getting started](docs/en/guides/getting-started.md) | [开始使用](docs/zh/guides/getting-started.md) |
+| 部门树、Discuss、地图 | [Team engineering](docs/en/guides/team-engineering.md) | [团队工程](docs/zh/guides/team-engineering.md) |
+| 1.x → 2.0 | [Migration](docs/en/guides/migration.md) | [迁移](docs/zh/guides/migration.md) |
+| 内置工具 | [Tools](docs/en/reference/tools.md) | [工具](docs/zh/reference/tools.md) |
 
 ---
 
-## 开发与验证
+## 仓库地图
+
+| 路径 | 职责 |
+|---|---|
+| `apps/nori-code` | CLI / TUI（`nori`） |
+| `apps/nori-web` | Web UI（桌面端与 `nori web`） |
+| `apps/nori-desktop` | Electron 工作台 |
+| `packages/agent-core` | Agent、Session、Team、工具 |
+| `packages/server` | REST + WebSocket（`/api/v1`） |
+| `packages/kosong` | 模型 / 供应商层 |
+| `packages/kaos` | 文件、进程、环境 |
+| `packages/node-sdk` | 公开 TypeScript SDK |
+| `packages/oauth` | 认证 |
+
+---
+
+## 开发
 
 ```sh
 pnpm typecheck
@@ -163,10 +147,10 @@ pnpm build
 pnpm check:brand    # 检查是否残留 Kimi 品牌标识
 ```
 
-开发时先跑定点检查，提交前扩大到全量验证。
+先跑你改过的包，合并前再跑根目录命令。
 
 ---
 
 ## 协议
 
-MIT。本项目基于 [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code)（MIT 协议）fork 并发展出自己的架构：多 Agent DAG 编排、持久记忆、桌面环境、策略引擎和独立品牌。在共享协议层面保持必要的上游兼容性。
+MIT。从 [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code)（MIT）fork。Nori 只保留仍需要的共享协议面，部门树运行时、会话地图、记忆库、桌面工作台和品牌是自己的。
