@@ -1922,9 +1922,7 @@ export function SessionMapPage({
       return;
     }
 
-    // Right mouse button → pan canvas (UE-style). Click without drag opens
-    // the create menu on pointerup. Do not preventDefault here: that cancels
-    // `contextmenu` in Chromium, so the menu never appears for a real click.
+    // Right-click pan. Do not preventDefault: Chromium then drops contextmenu.
     if (event.button === 2) {
       rightPanMovedRef.current = false;
       stopFollowFocus();

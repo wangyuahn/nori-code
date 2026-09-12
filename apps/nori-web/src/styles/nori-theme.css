@@ -5870,8 +5870,7 @@ kbd {
 .work-group-chevron { flex: none; margin-left: auto; color: var(--nori-text-muted); transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1); }
 .chat-work-group.is-open > summary .work-group-chevron,
 .chat-work-group[open] > summary .work-group-chevron { transform: rotate(180deg); }
-/* Closed <details> uses display:none on non-summary children, which skips height
-   transitions. Keep the clip in the tree and drive 0fr/1fr from `.is-open` / `[open]`. */
+/* Closed <details> would display:none the clip and skip the 0fr/1fr height transition. */
 details.chat-work-group > .work-group-clip {
   display: grid !important;
   grid-template-rows: 0fr;
@@ -5886,7 +5885,7 @@ details.chat-work-group[open] > .work-group-clip {
   min-height: 0;
   overflow: hidden;
 }
-/* While open, do not clip the thinking <p> scroller (260px cap + overflow auto). */
+/* Open body must not clip the 260px thinking scroller. */
 details.chat-work-group.is-open > .work-group-clip > .work-group-body,
 details.chat-work-group[open] > .work-group-clip > .work-group-body {
   overflow: visible;

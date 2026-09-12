@@ -1174,9 +1174,6 @@ function WorkGroup({ blocks, live = false }: { blocks: WorkBlock[]; live?: boole
     <div className="work-group-clip" aria-hidden={!open} inert={!open}>
       <div className="work-group-body">
         {blocks.map((block, index) => {
-          // 只有这一组的最后一块才可能还在写。一段思考后面已经跟了工具调用，说明它
-          // 早就结束了——继续按“正在思考”那样摊开来显示，就成了「下面工具都跑起来了，
-          // 上面的思考框还没收」的那个显示错。
           const blockLive = live && index === blocks.length - 1;
           if (block.type === 'thinking') return <ThinkingLine key={block.id} text={block.text} live={blockLive}/>;
           if (block.type === 'context') return <ContextInjectionRow key={block.id} block={block}/>;

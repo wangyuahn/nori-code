@@ -144,7 +144,7 @@ export class TurnFlow {
   private readonly telemetryModeByTurn = new Map<number, 'agent' | 'discuss'>();
   private readonly currentStepByTurn = new Map<number, number>();
   private readonly interruptedTelemetryTurnIds = new Set<number>();
-  private readonly turnProgressListeners = new Set<() => void>();
+  private readonly turnProgressListeners = new Set<(event: { readonly type: string }) => void>();
   private readonly stepFailureByTurn = new Map<number, LoopTurnInterruptedEvent>();
   private currentStep = 0;
 
@@ -405,11 +405,10 @@ export class TurnFlow {
   }
 
   /**
-   * Subscribe to live progress from the active turn. This is intentionally
-   * separate from the first-request promise: callers such as Discuss need to
-   * extend an inactivity deadline for every meaningful model/tool event.
+   * Subscribe to live progress from the active turn. Separate from the
+   * first-request promise so Discuss can treat thinking vs text/tool differently.
    */
-  onTurnProgress(listener: () => void): () => void {
+  onTurnProgress(listener: (event: { readonly type: string }) => void): () => void {
     this.ensureActiveTurn();
     this.turnProgressListeners.add(listener);
     return () => {
@@ -1260,9 +1259,10 @@ export class TurnFlow {
         break;
     }
     if (event.type !== 'turn.interrupted') {
+      const progress = { type: event.type };
       for (const listener of Array.from(this.turnProgressListeners)) {
         try {
-          listener();
+          listener(progress);
         } catch {
           // Progress observers are control-plane consumers; they must not
           // break the model/tool event pipeline.

@@ -1144,10 +1144,7 @@ export class SessionService extends Disposable implements ISessionService {
     return errors;
   }
 
-  /**
-   * One-shot: TeamCreate used to hire in-session ghosts. Bind each ghost to a
-   * real child session so the map only shows session cards.
-   */
+  /** Bind leftover in-session ghost hires to real child sessions. */
   private async migrateGhostTeamMembers(hostSessionId: string): Promise<boolean> {
     return this.withMountMutation(() => this.migrateGhostTeamMembersUnlocked(hostSessionId));
   }
@@ -1258,11 +1255,7 @@ export class SessionService extends Disposable implements ISessionService {
     }
   }
 
-  /**
-   * Mount tree is authority: rebuild dual-write team agents so Discuss/Assign
-   * match `parent_session_id`. TeamCreate now creates a mounted child through
-   * the same attach path.
-   */
+  /** Rebuild dual-write team agents from the mount tree. */
   private async syncTeamAgentsFromMountChange(input: {
     readonly childSessionId: string;
     readonly oldParentSessionId: string | null;
@@ -1393,7 +1386,7 @@ export class SessionService extends Disposable implements ISessionService {
             team_report_status: agent.teamReport?.status,
             team_report_summary: agent.teamReport?.summary,
             team_report_received: agent.teamReport?.receivedAt !== undefined,
-            summary: agent.discussion?.topic ?? agent.assignedTask,
+            summary: agent.lastTurnSkip?.error ?? agent.discussion?.topic ?? agent.assignedTask,
             status,
             usage,
             last_active: this._lastActivityByAgent.get(key) ?? new Date(summary.updatedAt).toISOString(),
@@ -1614,13 +1607,7 @@ export class SessionService extends Disposable implements ISessionService {
       const parentSessionId = readParentSessionId(summary.metadata);
       const promoted = await this.promoteChildrenOnDelete(id);
       try {
-        // A map-mounted child has a second representation as a team agent in its
-        // owning session. Deleting it through the generic session API must remove
-        // that representation too; otherwise the parent keeps a member whose
-        // mounted_session_id points at a deleted session.
-        // The summary's parent link can already be stale while a dual-write
-        // agent still points at this session. Scan every host before deletion
-        // so the successful delete cannot leave an agent with a dead mount.
+        // Dual-write agents can outlive a stale parent_session_id; detach everywhere before delete.
         await this.detachMountedTeamAgentsEverywhere(id);
         await this.core.rpc.deleteSession({ sessionId: id });
       } catch (error) {

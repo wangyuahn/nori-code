@@ -61,6 +61,7 @@ export function sessionIsBusy(session: Session | undefined): boolean {
 }
 
 export function mapMemberStatus(member: MapNodeMember): string {
+  if (isMapTimeoutFailure(member.agent?.summary)) return 'timeout';
   const agentStatus = member.agent?.status?.trim();
   if (agentStatus) return agentStatus;
   return member.session.status?.trim() || 'idle';
@@ -75,7 +76,7 @@ export function mapStatusTone(status: string): MapNodeStatusTone {
   }
   if (normalized === 'aborted' || normalized === 'stopped' || normalized === 'paused') return 'stopped';
   if (normalized === 'idle' || normalized === 'pending') return 'idle';
-  if (normalized === 'error' || normalized === 'failed') return 'error';
+  if (normalized === 'timeout' || normalized === 'error' || normalized === 'failed') return 'error';
   return 'other';
 }
 
@@ -108,6 +109,7 @@ export function formatMapStatusWord(status: string): string {
   if (normalized === 'awaiting_question' || normalized === 'waiting') return 'waiting';
   if (normalized === 'aborted' || normalized === 'stopped' || normalized === 'paused') return 'stopped';
   if (normalized === 'idle' || normalized === 'pending') return 'idle';
+  if (normalized === 'timeout') return 'timeout';
   if (normalized === 'error' || normalized === 'failed') return 'error';
   return normalized.length > 0 ? normalized : 'idle';
 }
@@ -224,7 +226,12 @@ export function describeMapCurrentAction(
   return undefined;
 }
 
-/** Failure summary for error/blocked cards. */
+function isMapTimeoutFailure(text: string | undefined): boolean {
+  if (text === undefined || text.trim().length === 0) return false;
+  return /timed out|maximum duration|retry exhausted \(timeout/i.test(text);
+}
+
+/** Failure summary for error/blocked/timeout cards. */
 export function describeMapErrorSummary(
   member: MapNodeMember,
   live?: MapLiveHints,
@@ -248,7 +255,11 @@ export function describeMapErrorSummary(
   ) {
     return clipMapText(report);
   }
-  if (mapRuntimeStatus(mapMemberStatus(member)) !== 'error') return undefined;
+  const skip = member.agent?.summary?.trim();
+  if (isMapTimeoutFailure(skip)) return clipMapText(skip);
+  const runtime = mapRuntimeStatus(mapMemberStatus(member));
+  if (runtime !== 'error' && runtime !== 'stopped') return undefined;
+  if (skip !== undefined && skip.length > 0) return clipMapText(skip);
   const metadataError = member.session.metadata?.last_error;
   if (typeof metadataError === 'string' && metadataError.trim().length > 0) {
     return clipMapText(metadataError);

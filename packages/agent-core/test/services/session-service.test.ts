@@ -1737,6 +1737,41 @@ describe('SessionService agent tree', () => {
     expect(tree.agents.find(agent => agent.id === 'agent_reviewer')?.last_active).toMatch(/Z$/);
   });
 
+  it('surfaces a discussion timeout skip on the agent tree summary', async () => {
+    const created = await svc.create({ metadata: { cwd: '/tmp/timeout-skip' } });
+    state.metas.set(created.id, {
+      title: 'Timeout skip',
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+      isCustomTitle: true,
+      agents: {
+        main: { homedir: '/tmp/main', type: 'main', parentAgentId: null },
+        agent_reviewer: {
+          homedir: '/tmp/agent_reviewer',
+          type: 'sub',
+          kind: 'team',
+          parentAgentId: 'main',
+          name: 'Reviewer',
+          role: 'reviewer',
+          mandate: 'Review behavior',
+          mountedSessionId: 'sess_mounted_timeout',
+          lastTurnSkip: {
+            reason: 'timeout',
+            error: 'Member discussion turn timed out after 90s.',
+          },
+        },
+      },
+      custom: {},
+    });
+    seedLiveSession(state, 'sess_mounted_timeout', '/tmp/timeout-skip');
+
+    const tree = await svc.listAgents(created.id);
+    expect(tree.agents.find((agent) => agent.id === 'agent_reviewer')).toEqual(expect.objectContaining({
+      summary: 'Member discussion turn timed out after 90s.',
+      mounted_session_id: 'sess_mounted_timeout',
+    }));
+  });
+
   it('reports a member idle when a turn.started event was never followed by a turn end', async () => {
     const created = await svc.create({ metadata: { cwd: '/tmp/stale-status' } });
     state.metas.set(created.id, {

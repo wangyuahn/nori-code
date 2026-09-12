@@ -31,8 +31,9 @@ import TEAM_AGENT_EXECUTION_PROMPT from './team-agent-execution.md?raw';
 import { directMessageRelation } from './team-tree';
 import { validateTeamChatMentions } from './team-chat';
 
-export const DEFAULT_TEAM_DISCUSSION_MEMBER_TIMEOUT_MS = 2 * 60 * 1000;
-export const DEFAULT_TEAM_DISCUSSION_FIRST_RESPONSE_TIMEOUT_MS = 10 * 1000;
+export const DEFAULT_TEAM_DISCUSSION_MEMBER_TIMEOUT_MS = 90 * 1000;
+export const DEFAULT_TEAM_DISCUSSION_FIRST_RESPONSE_TIMEOUT_MS = 20 * 1000;
+export const DEFAULT_TEAM_DISCUSSION_MEMBER_MAX_DURATION_MS = 2 * 60 * 1000;
 const TEAM_DISCUSSION_CANCEL_SETTLE_GRACE_MS = 5_000;
 const TEAM_DISCUSSION_MEMBER_MAX_TIMEOUT_MULTIPLIER = 3;
 
@@ -68,15 +69,18 @@ IMPORTANT:
 const ASK_PARENT_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
 
 export interface SessionSubagentHostOptions {
-  /** Maximum time a single member may occupy a scheduled Discuss turn. */
+  /** Inactivity after first output (text/tool). Thinking deltas do not reset this. */
   readonly discussionMemberTimeoutMs?: number;
-  /** Maximum time before a scheduled member must emit its first response event. */
+  /** First model/tool/thinking event must arrive within this window. */
   readonly discussionMemberFirstResponseTimeoutMs?: number;
+  /** Hard cap from turn start, including continuous thinking. */
+  readonly discussionMemberMaxDurationMs?: number;
 }
 
 export class SessionSubagentHost {
   private readonly discussionMemberTimeoutMs: number;
   private readonly discussionMemberFirstResponseTimeoutMs: number;
+  private readonly discussionMemberMaxDurationMs: number;
 
   constructor(
     private readonly session: Session,
@@ -94,6 +98,14 @@ export class SessionSubagentHost {
       throw new Error('discussionMemberFirstResponseTimeoutMs must be a positive finite number.');
     }
     this.discussionMemberFirstResponseTimeoutMs = Math.min(firstResponseTimeout, timeout);
+    const maxDuration = options.discussionMemberMaxDurationMs
+      ?? (options.discussionMemberTimeoutMs === undefined
+        ? DEFAULT_TEAM_DISCUSSION_MEMBER_MAX_DURATION_MS
+        : timeout * TEAM_DISCUSSION_MEMBER_MAX_TIMEOUT_MULTIPLIER);
+    if (!Number.isFinite(maxDuration) || maxDuration <= 0) {
+      throw new Error('discussionMemberMaxDurationMs must be a positive finite number.');
+    }
+    this.discussionMemberMaxDurationMs = maxDuration;
   }
 
   async createTeam(
@@ -936,6 +948,7 @@ export class SessionSubagentHost {
               signal,
               this.discussionMemberTimeoutMs,
               this.discussionMemberFirstResponseTimeoutMs,
+              this.discussionMemberMaxDurationMs,
             );
           } catch (error) {
             sent = this.session.consumeTeamDiscussionSpeak(discussionAgentId, agentId);
@@ -994,6 +1007,7 @@ export class SessionSubagentHost {
             ...(toolErrors.length > 0 ? { toolErrors } : {}),
           };
           statements.push(skipped);
+          await this.session.recordTeamTurnSkip?.(agentId, reason, detail);
           await this.appendDiscussionSkip(discussionAgentId, meta.name ?? '团队成员', reason, detail);
         } else {
           const detail = toolErrors.length > 0 ? discussionToolErrorText(toolErrors) : undefined;
@@ -1004,6 +1018,7 @@ export class SessionSubagentHost {
             ...(detail === undefined ? {} : { reason, error: detail, toolErrors }),
           };
           statements.push(skipped);
+          await this.session.recordTeamTurnSkip?.(agentId, reason, detail ?? 'Member abstained from this discussion turn.');
           await this.appendDiscussionSkip(discussionAgentId, meta.name ?? '团队成员', reason, detail);
         }
       }
@@ -1553,6 +1568,7 @@ async function runDiscussionMemberTurn(
   parentSignal: AbortSignal,
   fullTimeoutMs: number,
   firstResponseTimeoutMs: number,
+  maxDurationMs: number,
 ): Promise<void> {
   const controller = new AbortController();
   const unlinkParentSignal = linkAbortSignal(parentSignal, controller);
@@ -1567,16 +1583,12 @@ async function runDiscussionMemberTurn(
   const completion = runDiscussionChildTurnToCompletion(child, controller.signal);
   void completion.catch(() => undefined);
 
-  // Lightweight test transports may not expose this internal turn signal. The
-  // production Agent does, so only the production path gets the shorter first
-  // response deadline.
   const waitForFirstResponse = typeof child.turn.waitForTurnFirstRequest === 'function'
     ? child.turn.waitForTurnFirstRequest()
     : undefined;
   const firstResponse = waitForFirstResponse?.then(() => {
     firstResponseObserved = true;
   });
-  const maxDurationMs = fullTimeoutMs * TEAM_DISCUSSION_MEMBER_MAX_TIMEOUT_MULTIPLIER;
   const clearActivityTimer = (): void => {
     if (activityTimer !== undefined) {
       clearTimeout(activityTimer);
@@ -1593,15 +1605,14 @@ async function runDiscussionMemberTurn(
     }, fullTimeoutMs);
   };
   const unsubscribeProgress = typeof child.turn.onTurnProgress === 'function'
-    ? child.turn.onTurnProgress(() => {
-      if (fullPhaseStarted) armActivityTimer();
+    ? child.turn.onTurnProgress((event) => {
+      if (!fullPhaseStarted) return;
+      if (event?.type === 'thinking.delta') return;
+      armActivityTimer();
     })
     : undefined;
 
   try {
-    // The hard cap starts with the member turn and bounds a stream of
-    // continuous progress. The normal full-turn deadline is an inactivity
-    // deadline and starts only after the first response event.
     hardTimer = setTimeout(() => {
       hardTimer = undefined;
       hardTimedOut = true;

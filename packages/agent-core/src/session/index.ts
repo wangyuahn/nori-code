@@ -169,6 +169,8 @@ export interface AgentMeta {
   readonly assignedAt?: string;
   /** Latest report for the current or most recent TeamAssign lease. */
   readonly teamReport?: TeamReportRecord;
+  /** Last skipped Discuss turn, shown on the conversation map until the next turn. */
+  readonly lastTurnSkip?: { readonly reason: string; readonly error: string };
   /** Standalone session shown for this member on the conversation map. */
   readonly mountedSessionId?: string;
   /** Present only on an agent-scoped, archived-or-active team discussion transcript. */
@@ -722,9 +724,7 @@ export class Session {
   }
 
   /**
-   * Creates a durable member of `leaderAgentId`'s department as a mounted child
-   * session (same backend as map canvas createChild). Dual-write team agents
-   * remain the Discuss/Assign address in this session.
+   * Hire a durable member as a mounted child session (same path as map createChild).
    */
   async createMountedChild(input: {
     readonly parentSessionId: string;
@@ -1263,6 +1263,7 @@ export class Session {
         ...current,
         assignedTask: assignment.task ?? undefined,
         assignedAt: assignment.task === null ? undefined : assignedAt,
+        lastTurnSkip: undefined,
         teamReport: assignment.task === null
           ? current.teamReport
           : {
@@ -1368,6 +1369,26 @@ export class Session {
     await this.writeMetadata();
     this.emitTeamStatus(agentId);
     return true;
+  }
+
+  async recordTeamTurnSkip(agentId: string, reason: string, detail: string): Promise<void> {
+    const meta = this.metadata.agents[agentId];
+    if (meta?.kind !== 'team') return;
+    const error = detail.trim();
+    if (error.length === 0) return;
+    this.metadata.agents[agentId] = {
+      ...meta,
+      lastTurnSkip: { reason, error },
+    };
+    await this.writeMetadata();
+    this.emitTeamStatus(agentId);
+  }
+
+  private clearTeamTurnSkip(agentId: string): void {
+    const meta = this.metadata.agents[agentId];
+    if (meta?.kind !== 'team' || meta.lastTurnSkip === undefined) return;
+    this.metadata.agents[agentId] = { ...meta, lastTurnSkip: undefined };
+    void this.writeMetadata();
   }
 
   /**
@@ -1805,6 +1826,7 @@ export class Session {
     }
     this.teamDiscussionSpeaks.get(discussionAgentId)?.delete(agentId);
     this.activeTeamDiscussionTurns.set(discussionAgentId, agentId);
+    this.clearTeamTurnSkip(agentId);
     if (meta?.discussion !== undefined) {
       this.metadata.agents[discussionAgentId] = {
         ...meta,

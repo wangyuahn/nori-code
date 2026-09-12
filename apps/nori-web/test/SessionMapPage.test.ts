@@ -38,6 +38,7 @@ import {
   mapNodeCapabilities,
   mapStatusDotClass,
   formatMapStatusLabel,
+  mapMemberStatus,
   matchesMapStatusFilter,
   pendingTopologyOpsReady,
   reconcileParentEdgesWithServer,
@@ -256,6 +257,7 @@ describe('session map layout', () => {
     expect(formatMapStatusLabel('idle')).toBe('idle');
     expect(formatMapStatusLabel('awaiting_approval')).toBe('waiting-approval');
     expect(formatMapStatusLabel('aborted')).toBe('stopped');
+    expect(formatMapStatusLabel('timeout')).toBe('timeout');
     expect(formatMapStatusLabel(
       'running',
       '2026-01-01T00:00:00.000Z',
@@ -293,6 +295,29 @@ describe('session map layout', () => {
         metadata: { last_error: 'tool timed out' },
       }),
     })).toBe('tool timed out');
+    expect(describeMapErrorSummary({
+      kind: 'session',
+      session: session({ id: 'slow', title: 'Slow', status: 'aborted' }),
+      agent: {
+        agent_id: 'reviewer',
+        kind: 'team',
+        name: 'Reviewer',
+        status: 'aborted',
+        summary: 'Member discussion turn timed out after 90s.',
+      },
+    })).toBe('Member discussion turn timed out after 90s.');
+    expect(mapMemberStatus({
+      kind: 'session',
+      session: session({ id: 'slow', title: 'Slow', status: 'aborted' }),
+      agent: {
+        agent_id: 'reviewer',
+        kind: 'team',
+        name: 'Reviewer',
+        status: 'aborted',
+        summary: 'Member discussion turn timed out after 90s.',
+      },
+    })).toBe('timeout');
+    expect(matchesMapStatusFilter('timeout', 'error')).toBe(true);
   });
 });
 
