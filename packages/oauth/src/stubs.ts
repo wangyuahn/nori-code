@@ -35,16 +35,12 @@ export function readKimiDeviceId(homeDir?: string): string | undefined {
   }
 }
 
-export function createKimiDefaultHeaders(options: {
+export function createKimiDefaultHeaders(_options: {
   homeDir: string;
   userAgentProduct?: string;
   version?: string;
 }): Record<string, string> {
-  const headers: Record<string, string> = {};
-  if (options.userAgentProduct !== undefined && options.version !== undefined) {
-    headers['User-Agent'] = `${options.userAgentProduct}/${options.version}`;
-  }
-  return headers;
+  return {};
 }
 
 export function assertKimiHostIdentity(

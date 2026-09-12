@@ -7,11 +7,10 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-import { createKimiDefaultHeaders, type KimiHostIdentity } from '@nori-code/oauth';
+import { type KimiHostIdentity } from '@nori-code/oauth';
 
 import { CLI_USER_AGENT_PRODUCT } from '#/constant/app';
 
-import { getDataDir } from '../utils/paths';
 import { KIMI_BUILD_INFO } from './build-info';
 
 const MODULE_DIR = import.meta.dirname;
@@ -64,8 +63,5 @@ export function createKimiCodeUserAgent(version = getVersion()): string {
 }
 
 export function buildKimiDefaultHeaders(version: string): Record<string, string> {
-  return createKimiDefaultHeaders({
-    homeDir: getDataDir(),
-    ...createKimiCodeHostIdentity(version),
-  });
+  return { 'User-Agent': createKimiCodeUserAgent(version) };
 }
