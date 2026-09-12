@@ -2645,11 +2645,11 @@ const TEAM_MANAGEMENT_TOOLS = [
 ] as const;
 
 /**
- * A member additionally speaks in its parent's discussion, chats with its
- * siblings, and can put a blocking question to its parent. `main` has no
- * parent, so it never takes a participant turn and gets none of these.
+ * A member additionally speaks in its parent's discussion and chats with its
+ * siblings. Questions to the parent go through TeamDM. `main` has no parent,
+ * so it never takes a participant turn and gets none of these.
  */
-const TEAM_MEMBER_TOOLS = [...TEAM_MANAGEMENT_TOOLS, 'TeamSpeak', 'TeamChat', 'nori_ask_parent'] as const;
+const TEAM_MEMBER_TOOLS = [...TEAM_MANAGEMENT_TOOLS, 'TeamSpeak', 'TeamChat'] as const;
 
 
 function validateTeamIdentity(identity: TeamIdentity | undefined): asserts identity is TeamIdentity {

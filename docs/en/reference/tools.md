@@ -110,7 +110,6 @@ Nori-specific tools extend the built-in tool set with shared memory, documentati
 | --- | --- | --- |
 | `nori_memory_search` | Follows permission rules | Search the Obsidian shared memory vault |
 | `nori_memory_write` | Follows permission rules | Write analysis, decision, task, or review notes to the vault |
-| `nori_ask_parent` | Subagent only | Let a subagent ask its parent Agent for guidance |
 
 **`nori_memory_search`** accepts concrete `keywords`, optional `note_types`, `top_k`, `include_linked`, `link_depth`, `chain_depth`, and `follow_up_keywords`. Use chained retrieval (`chain_depth: 1` or `2`) when the first results reveal better terms or linked notes.
 
