@@ -29,11 +29,16 @@ import {
   tidyComponentAroundRoot,
   wireSourceParentSessionId,
   zoomTreeView,
+  NODE_H,
+  NODE_W,
 } from '../src/components/SessionMapPage';
 import {
+  describeMapCurrentAction,
+  describeMapErrorSummary,
   mapNodeCapabilities,
   mapStatusDotClass,
   formatMapStatusLabel,
+  matchesMapStatusFilter,
   pendingTopologyOpsReady,
   reconcileParentEdgesWithServer,
   upsertParentMapEdge,
@@ -249,13 +254,45 @@ describe('session map layout', () => {
 
   it('formats a readable map status with running duration', () => {
     expect(formatMapStatusLabel('idle')).toBe('idle');
-    expect(formatMapStatusLabel('awaiting_approval')).toBe('waiting');
+    expect(formatMapStatusLabel('awaiting_approval')).toBe('waiting-approval');
     expect(formatMapStatusLabel('aborted')).toBe('stopped');
     expect(formatMapStatusLabel(
       'running',
       '2026-01-01T00:00:00.000Z',
       Date.parse('2026-01-01T00:02:00.000Z'),
     )).toBe('running · 2m');
+  });
+
+  it('describes thinking, tool, and waiting-approval current actions', () => {
+    const member = {
+      kind: 'session' as const,
+      session: session({ id: 'a', title: 'Alpha', status: 'running' }),
+    };
+    expect(describeMapCurrentAction(member)?.kind).toBe('thinking');
+    expect(describeMapCurrentAction(member, {
+      approvals: [{ session_id: 'a', tool_name: 'Bash' }],
+      activity: [],
+      turns: {},
+      errors: [],
+    })).toEqual({ kind: 'waiting-approval', detail: 'Bash' });
+    expect(describeMapCurrentAction(member, {
+      approvals: [],
+      activity: [],
+      turns: { a: { toolName: 'Read' } },
+      errors: [],
+    })).toEqual({ kind: 'tool', detail: 'Read' });
+    expect(matchesMapStatusFilter('running', 'running')).toBe(true);
+    expect(matchesMapStatusFilter('idle', 'running')).toBe(false);
+    expect(matchesMapStatusFilter('error', 'error')).toBe(true);
+    expect(describeMapErrorSummary({
+      kind: 'session',
+      session: session({
+        id: 'err',
+        title: 'Broken',
+        status: 'error',
+        metadata: { last_error: 'tool timed out' },
+      }),
+    })).toBe('tool timed out');
   });
 });
 
@@ -301,7 +338,7 @@ describe('SessionMapPage smoke', () => {
     }
   });
 
-  it('renders list + canvas and opens a session on click', async () => {
+  it('renders list + canvas and selects a session on click', async () => {
     const nodes = [
       session({ id: 'a', title: 'Alpha' }),
       session({ id: 'b', title: 'Beta', metadata: { parent_session_id: 'a', mount_role: 'member' } }),
@@ -337,6 +374,11 @@ describe('SessionMapPage smoke', () => {
         .find((candidate) => candidate.textContent?.includes('Alpha'));
       expect(node).not.toBeNull();
       await act(async () => { node!.click(); });
+      expect(onOpen).not.toHaveBeenCalled();
+      expect(node!.className).toContain('selected');
+      const open = node!.querySelector<HTMLButtonElement>('[data-map-action="open"]');
+      expect(open).toBeTruthy();
+      await act(async () => { open!.click(); });
       expect(onOpen).toHaveBeenCalled();
     } finally {
       await act(async () => { root.unmount(); });
@@ -557,7 +599,7 @@ describe('SessionMapPage smoke', () => {
       const memberNode = [...container.querySelectorAll<HTMLElement>('.session-map-node')]
         .find((el) => el.textContent?.includes('Reviewer'));
       expect(memberNode).toBeTruthy();
-      await act(async () => { memberNode!.click(); });
+      await act(async () => { memberNode!.querySelector<HTMLButtonElement>('[data-map-action="open"]')!.click(); });
       expect(onOpenAgent).toHaveBeenCalledWith('root', expect.objectContaining({
         agent_id: 'member_1',
         mounted_session_id: 'child',
@@ -605,7 +647,7 @@ describe('SessionMapPage smoke', () => {
       const childNode = [...container.querySelectorAll<HTMLElement>('.session-map-node')]
         .find((el) => el.textContent?.includes('Orphan Mount'));
       expect(childNode).toBeTruthy();
-      await act(async () => { childNode!.click(); });
+      await act(async () => { childNode!.querySelector<HTMLButtonElement>('[data-map-action="open"]')!.click(); });
       await act(async () => {
         await Promise.resolve();
         await Promise.resolve();
@@ -1412,8 +1454,8 @@ describe('wire gesture click suppression (live regressions)', () => {
     const emptyClientPoint = () => {
       const view = canvasTransform();
       const cards = [...container.querySelectorAll<HTMLElement>('.session-map-node')];
-      const maxRight = Math.max(...cards.map((el) => Number.parseFloat(el.style.left) + 220));
-      const maxBottom = Math.max(...cards.map((el) => Number.parseFloat(el.style.top) + 96));
+      const maxRight = Math.max(...cards.map((el) => Number.parseFloat(el.style.left) + NODE_W));
+      const maxBottom = Math.max(...cards.map((el) => Number.parseFloat(el.style.top) + NODE_H));
       return {
         x: (maxRight + 240) * view.scale + view.x,
         y: (maxBottom + 240) * view.scale + view.y,
@@ -1583,6 +1625,9 @@ describe('wire gesture click suppression (live regressions)', () => {
         }));
       });
       await act(async () => { map.card('a').click(); });
+      expect(onOpenSession).not.toHaveBeenCalled();
+      expect(map.card('a').className).toContain('selected');
+      await act(async () => { map.card('a').querySelector<HTMLButtonElement>('[data-map-action="open"]')!.click(); });
       expect(onOpenSession).toHaveBeenCalledWith('a');
     } finally {
       await act(async () => { map.root.unmount(); });
@@ -2117,6 +2162,101 @@ describe('wire gesture click suppression (live regressions)', () => {
       });
       expect(abort).toHaveBeenCalledWith('a');
       expect(abort).toHaveBeenCalledWith('b');
+    } finally {
+      await act(async () => { map.root.unmount(); });
+      map.container.remove();
+      localStorage.removeItem('nori-session-map-doc');
+    }
+  });
+
+  it('selects with click/shift, filters by status, and exposes card console actions', async () => {
+    const nodes = [
+      session({
+        id: 'run',
+        title: 'Runner',
+        status: 'running',
+        updated_at: '2026-01-01T00:00:00.000Z',
+      }),
+      session({
+        id: 'err',
+        title: 'Broken',
+        status: 'error',
+        metadata: { last_error: 'disk full on example.com' },
+      }),
+      session({ id: 'idle', title: 'Idle One', status: 'idle' }),
+    ];
+    const onOpen = vi.fn();
+    const abort = vi.spyOn(api.sessions, 'abort').mockResolvedValue(undefined as never);
+    const updateIdentity = vi.spyOn(api.sessions, 'updateIdentity').mockImplementation(async (id, patch) => (
+      session({ id, title: id, metadata: { session_tags: patch.tags ?? [] } })
+    ));
+    const map = await renderMap(nodes, [], { onOpenSession: onOpen });
+    try {
+      expect(map.card('run').querySelector('.session-map-status-badge')?.textContent).toMatch(/running/);
+      expect(map.card('run').querySelector('[data-action-kind="thinking"]')?.textContent).toMatch(/thinking|思考中/);
+      expect(map.card('err').querySelector('.session-map-card-error')?.textContent).toMatch(/disk full/);
+
+      await act(async () => { map.card('run').click(); });
+      expect(onOpen).not.toHaveBeenCalled();
+      expect(map.card('run').className).toContain('selected');
+      await act(async () => {
+        map.card('err').dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+      });
+      expect(map.card('err').className).toContain('selected');
+      expect(map.container.querySelector('.session-map-selection-toolbar')?.textContent).toMatch(/2 selected|已选 2/);
+
+      const selectAll = map.container.querySelector<HTMLButtonElement>('[data-map-action="select-all"]');
+      await act(async () => { selectAll!.click(); });
+      expect(map.card('idle').className).toContain('selected');
+      expect(map.container.querySelector('.session-map-selection-count')?.textContent).toMatch(/3 selected|已选 3/);
+
+      const runningFilter = map.container.querySelector<HTMLButtonElement>('[data-status-filter="running"]');
+      await act(async () => { runningFilter!.click(); });
+      expect(map.container.querySelector('[data-session-id="run"]')).toBeTruthy();
+      expect(map.container.querySelector('[data-session-id="idle"]')).toBeNull();
+      expect(map.container.querySelector('[data-session-id="err"]')).toBeNull();
+
+      await act(async () => { runningFilter!.click(); });
+      const errorFilter = map.container.querySelector<HTMLButtonElement>('[data-status-filter="error"]');
+      await act(async () => { errorFilter!.click(); });
+      expect(map.container.querySelector('[data-session-id="err"]')).toBeTruthy();
+      expect(map.container.querySelector('[data-session-id="run"]')).toBeNull();
+      await act(async () => { errorFilter!.click(); });
+
+      await act(async () => { map.card('run').querySelector<HTMLButtonElement>('[data-map-action="open"]')!.click(); });
+      expect(onOpen).toHaveBeenCalledWith('run');
+      await act(async () => { map.card('run').querySelector<HTMLButtonElement>('[data-map-action="stop"]')!.click(); await Promise.resolve(); });
+      expect(abort).toHaveBeenCalledWith('run');
+
+      await act(async () => { map.card('run').click(); });
+      await act(async () => {
+        map.card('err').dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+      });
+      const toolbar = map.container.querySelector('.session-map-selection-toolbar');
+      const tags = toolbar!.querySelector<HTMLButtonElement>('[data-map-action="tags"]');
+      await act(async () => { tags!.click(); });
+      const addIdentity = [...map.container.querySelectorAll('button')].find((el) => (
+        /Add identity tag|添加身份标签/.test(el.textContent ?? '')
+      ));
+      const prompt = vi.spyOn(window, 'prompt').mockReturnValue('review');
+      await act(async () => {
+        addIdentity!.click();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(prompt).toHaveBeenCalled();
+      expect(updateIdentity).toHaveBeenCalled();
+      prompt.mockRestore();
+
+      await act(async () => { map.card('run').click(); });
+      await act(async () => {
+        map.card('idle').dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+      });
+      const laterToolbar = map.container.querySelector('.session-map-selection-toolbar');
+      await act(async () => {
+        laterToolbar!.querySelector<HTMLButtonElement>('[data-map-action="open"]')!.click();
+      });
+      expect(map.container.querySelector('.session-map-hint-toast')?.textContent).toMatch(/1 of 2|只打开 1/);
     } finally {
       await act(async () => { map.root.unmount(); });
       map.container.remove();
@@ -2944,12 +3084,12 @@ describe('wire parent helpers', () => {
 
   it('hit-tests the TOP IN port with a generous radius', () => {
     const nodes = [{ id: 'n1', x: 200, y: 200 }];
-    // IN port at (200, 200 - 48) = (200, 152) for NODE_H=96
-    const hit = hitSessionMapNode(nodes, 200, 152, { preferPort: 'in' });
+    const inY = 200 - NODE_H / 2;
+    const hit = hitSessionMapNode(nodes, 200, inY, { preferPort: 'in' });
     expect(hit?.id).toBe('n1');
-    const nearMiss = hitSessionMapNode(nodes, 200, 152 - 30, { preferPort: 'in', portRadius: 36 });
+    const nearMiss = hitSessionMapNode(nodes, 200, inY - 30, { preferPort: 'in', portRadius: 36 });
     expect(nearMiss?.id).toBe('n1');
-    const far = hitSessionMapNode(nodes, 200, 152 - 80, { preferPort: 'in', portRadius: 36 });
+    const far = hitSessionMapNode(nodes, 200, inY - 80, { preferPort: 'in', portRadius: 36 });
     expect(far).toBeUndefined();
   });
 

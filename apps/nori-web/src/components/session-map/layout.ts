@@ -4,7 +4,7 @@ import { parentSessionIdOf } from '../../utils/session-mount';
 import { mapMemberRoleLabel, type MapNodeMember } from '../../utils/session-graph';
 
 export const NODE_W = 220;
-export const NODE_H = 96;
+export const NODE_H = 148;
 export const GAP_X = 36;
 export const GAP_Y = 64;
 export const CANVAS_PAD = 48;

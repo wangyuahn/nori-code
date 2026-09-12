@@ -450,9 +450,19 @@ export function toggleSessionLabel(
   labelId: string,
 ): SessionMapDoc {
   const current = doc.sessionLabels[sessionId] ?? [];
-  const next = current.includes(labelId)
-    ? current.filter((id) => id !== labelId)
-    : [...current, labelId];
+  return assignSessionLabel(doc, sessionId, labelId, !current.includes(labelId));
+}
+
+export function assignSessionLabel(
+  doc: SessionMapDoc,
+  sessionId: string,
+  labelId: string,
+  assigned: boolean,
+): SessionMapDoc {
+  const current = doc.sessionLabels[sessionId] ?? [];
+  const has = current.includes(labelId);
+  if (assigned === has) return doc;
+  const next = assigned ? [...current, labelId] : current.filter((id) => id !== labelId);
   return {
     ...doc,
     sessionLabels: {

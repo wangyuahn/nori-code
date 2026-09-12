@@ -25,7 +25,7 @@ import { useI18n } from '../i18n';
 import { sessionAgentDisplayName } from '../utils/session-agent';
 import { parentSessionIdOf, wouldCreateMountCycle } from '../utils/session-mount';
 import { dedupeMapMembers, mapOpenTarget } from '../utils/session-map-open';
-import { reportAppError } from '../utils/error-center';
+import { getAppErrors, reportAppError, subscribeAppErrors } from '../utils/error-center';
 import {
   CANVAS_PAD,
   MAX_SCALE,
@@ -79,6 +79,7 @@ export {
   sessionLabel,
   zoomTreeView,
 } from './session-map/layout';
+export { NODE_H, NODE_W } from './session-map/layout';
 export type { MapMemberRef, PlacedNode, TreeView } from './session-map/layout';
 export {
   COLLIDE_RADIUS,
@@ -102,19 +103,27 @@ export type { ForceMapLink, ForceMapNode, MapComponentInfo } from './session-map
 import {
   canMountMemberUnder,
   clearPendingTopology,
+  describeMapCurrentAction,
+  describeMapErrorSummary,
   disconnectParentEdges,
+  formatMapStatusLabel,
+  mapMemberStatus,
   mapNodeCapabilities,
   mapParentByChildFromEdges,
   mapStatusDotClass,
-  formatMapStatusLabel,
+  matchesMapStatusFilter,
   mergeGraphWithMapEdges,
+  mergeSessionTags,
   pendingTopologyOpsReady,
   queuePendingTopology,
+  readSessionTags,
   reconcileParentEdgesWithServer,
   sessionIsBusy,
   upsertParentMapEdge,
   upsertTypedMapEdge,
   wireSourceParentSessionId,
+  type MapLiveHints,
+  type MapStatusFilter,
 } from '../utils/session-graph';
 import { completeMountIdentityFromPrompt } from './mountIdentityComplete';
 import { SessionIdentityDrawer } from './SessionIdentityDrawer';
@@ -131,6 +140,7 @@ import {
   saveCachedMapAgents,
   saveSessionMapDoc,
   sessionMatchesLabelFilter,
+  assignSessionLabel,
   toggleSessionLabel,
   type MapAnnotationBox,
   type SessionMapDoc,
@@ -520,8 +530,17 @@ export function SessionMapPage({
   const [canvasMenu, setCanvasMenu] = useState<CanvasContextMenu | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [identitySession, setIdentitySession] = useState<Session | null>(null);
+  const [statusFilter, setStatusFilter] = useState<MapStatusFilter>('all');
+  const [tagMenuOpen, setTagMenuOpen] = useState(false);
+  const [liveHints, setLiveHints] = useState<MapLiveHints>({
+    approvals: [],
+    activity: [],
+    turns: {},
+    errors: [],
+  });
   const selectedIdsRef = useRef(selectedIds);
   selectedIdsRef.current = selectedIds;
+  const selectAllVisibleRef = useRef<() => void>(() => {});
   const [activeLabelIds, setActiveLabelIds] = useState<string[]>([]);
   const [listOpen, setListOpen] = useState(false);
   const forceNodesRef = useRef(forceNodes);
@@ -730,9 +749,18 @@ export function SessionMapPage({
     return () => window.removeEventListener('blur', onBlur);
   }, [cancelWireDrag, detachNodeDragListeners]);
 
-  // Escape: wire → marquee → draft (even while typing in draft INPUT) → menus/editors/selection.
+  // Escape: wire → marquee → draft → menus/editors/selection.
+  // Ctrl/Cmd+A selects every visible session card.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      const target = event.target;
+      const typing = target instanceof HTMLElement
+        && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+      if ((event.key === 'a' || event.key === 'A') && (event.metaKey || event.ctrlKey) && !typing) {
+        event.preventDefault();
+        selectAllVisibleRef.current();
+        return;
+      }
       if (event.key !== 'Escape') return;
       if (wireDragRef.current !== null) {
         event.preventDefault();
@@ -751,13 +779,10 @@ export function SessionMapPage({
         cancelDraftRef.current();
         return;
       }
-      const target = event.target;
-      if (target instanceof HTMLElement
-        && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-        return;
-      }
+      if (typing) return;
       setSelectionMenu(null);
       setNodeMenu(null);
+      setTagMenuOpen(false);
       setBindAnnotationId(null);
       setEditingAnnotationId(null);
       setSelectedIds((ids) => (ids.length > 0 ? [] : ids));
@@ -957,6 +982,49 @@ export function SessionMapPage({
       for (const extra of extras) alive.add(nodeKey(extra));
       pruneStalePositions(alive);
 
+      const busyNodes = next.nodes.filter((node) => {
+        const status = node.status.trim().toLowerCase();
+        return status === 'running'
+          || status === 'working'
+          || status === 'awaiting_approval'
+          || status === 'awaiting_question';
+      }).slice(0, 16);
+      const [activityResult, approvalResult] = await Promise.allSettled([
+        api.sessions.getActivity(),
+        api.approvals.list(),
+      ]);
+      const activity = activityResult.status === 'fulfilled' ? activityResult.value.items : [];
+      const approvals = approvalResult.status === 'fulfilled' ? approvalResult.value.items : [];
+      const turns: Record<string, { thinkingText?: string; toolName?: string }> = {};
+      if (busyNodes.length > 0) {
+        const snapshots = await Promise.allSettled(
+          busyNodes.map((node) => api.sessions.getSnapshot(node.id)),
+        );
+        snapshots.forEach((result, index) => {
+          if (result.status !== 'fulfilled') return;
+          const node = busyNodes[index];
+          if (node === undefined) return;
+          const turn = result.value.in_flight_turn;
+          const pending = result.value.pending_approvals?.[0];
+          turns[node.id] = {
+            thinkingText: turn?.step_thinking_text || turn?.thinking_text,
+            toolName: turn?.running_tools[0]?.name ?? pending?.tool_name,
+          };
+        });
+      }
+      if (!disposedRef.current && revision === refreshRevision.current) {
+        setLiveHints({
+          approvals,
+          activity,
+          turns,
+          errors: getAppErrors().map((item) => ({
+            sessionId: item.sessionId,
+            agentId: item.agentId,
+            message: item.message,
+          })),
+        });
+      }
+
       const readyOps = pendingTopologyOpsReady(mapDocRef.current, next.nodes);
       if (readyOps.length > 0 && !busyRef.current) {
         let doc = mapDocRef.current;
@@ -1035,6 +1103,32 @@ export function SessionMapPage({
     }, AGENT_POLL_MS);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => subscribeAppErrors((errors) => {
+    setLiveHints((previous) => ({
+      ...previous,
+      errors: errors.map((item) => ({
+        sessionId: item.sessionId,
+        agentId: item.agentId,
+        message: item.message,
+      })),
+    }));
+  }), []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const busy = forceNodesRef.current.some((node) => {
+        const status = mapMemberStatus(node.member);
+        return sessionIsBusy(node.member.session)
+          || status === 'running'
+          || status === 'working'
+          || status === 'awaiting_approval'
+          || status === 'awaiting_question';
+      });
+      if (busy) scheduleRedraw();
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [scheduleRedraw]);
 
   useEffect(() => {
     const el = viewportRef.current;
@@ -1132,6 +1226,7 @@ export function SessionMapPage({
   const filteredList = useMemo(() => {
     const q = query.trim().toLowerCase();
     return listMembers.filter((member) => {
+      if (!matchesMapStatusFilter(mapMemberStatus(member), statusFilter)) return false;
       const sessionId = member.session.id;
       if (activeLabelIds.length > 0
         && !sessionMatchesLabelFilter(sessionId, mapDoc.sessionLabels, activeLabelIds)
@@ -1153,18 +1248,30 @@ export function SessionMapPage({
       ).toLowerCase();
       const cwd = (memberProjectCwd(member, byId) ?? '').toLowerCase();
       const folder = cwd ? projectFolderName(cwd).toLowerCase() : '';
+      const tags = readSessionTags(member.session).join(' ').toLowerCase();
       return title.includes(q)
         || prompt.includes(q)
         || sessionId.toLowerCase().includes(q)
         || role.includes(q)
         || mandate.includes(q)
+        || tags.includes(q)
         || (member.agent?.agent_id ?? '').toLowerCase().includes(q)
         || cwd.includes(q)
         || folder.includes(q);
     });
-  }, [activeLabelIds, byId, listMembers, mapDoc.sessionLabels, mapDoc.topLevelRoles, query]);
+  }, [activeLabelIds, byId, listMembers, mapDoc.sessionLabels, mapDoc.topLevelRoles, query, statusFilter]);
 
   const visibleIds = useMemo(() => new Set(filteredList.map((member) => nodeKey(member))), [filteredList]);
+  const busyVisibleCount = useMemo(() => (
+    filteredList.filter((member) => {
+      const status = mapMemberStatus(member);
+      return sessionIsBusy(member.session)
+        || status === 'running'
+        || status === 'working'
+        || status === 'awaiting_approval'
+        || status === 'awaiting_question';
+    }).length
+  ), [filteredList]);
 
   // Drop selection entries that filters hide — batch delete/annotate must not
   // act on invisible nodes the user can no longer see.
@@ -1191,7 +1298,7 @@ export function SessionMapPage({
       { nodes: serverGraph.nodes, edges: layoutEdges },
       agentExtras,
     );
-    if (query.trim() === '' && activeLabelIds.length === 0) return base;
+    if (query.trim() === '' && activeLabelIds.length === 0 && statusFilter === 'all') return base;
     const wanted = new Set(visibleIds);
     const parentOf = new Map<string, string>();
     for (const { from, to } of base.edges) {
@@ -1206,7 +1313,7 @@ export function SessionMapPage({
       wanted.has(nodeKey(from.member)) && wanted.has(nodeKey(to.member))
     ));
     return { ...base, placed, edges };
-  }, [graph, sessions, agentExtras, query, visibleIds, mapDoc.edges, activeLabelIds]);
+  }, [graph, sessions, agentExtras, query, visibleIds, mapDoc.edges, activeLabelIds, statusFilter]);
 
   const topologyKey = useMemo(() => {
     const nodePart = treeLayout.placed.map((node) => {
@@ -2494,7 +2601,7 @@ export function SessionMapPage({
   }, [persistPositions, scheduleRedraw]);
   releaseDragPinsRef.current = releaseDragPinsAndSettle;
 
-  const finishMarquee = useCallback(() => {
+  const finishMarquee = useCallback((additive = false) => {
     const box = marqueeRef.current;
     marqueeRef.current = null;
     setMarquee(null);
@@ -2504,7 +2611,7 @@ export function SessionMapPage({
     const top = Math.min(box.startY, box.endY);
     const bottom = Math.max(box.startY, box.endY);
     if (right - left < 12 || bottom - top < 12) {
-      clearSelection();
+      if (!additive) clearSelection();
       return;
     }
 
@@ -2523,7 +2630,9 @@ export function SessionMapPage({
         hitIds.push(sessionId);
       }
     }
-    setSelectedIds(hitIds);
+    setSelectedIds((current) => (
+      additive ? [...new Set([...current, ...hitIds])] : hitIds
+    ));
     setSelectionBox({ startX: left, startY: top, endX: right, endY: bottom });
     setSelectionMenu(null);
   }, [clearSelection]);
@@ -2699,7 +2808,7 @@ export function SessionMapPage({
           cancelMarquee();
           return;
         }
-        finishMarquee();
+        finishMarquee(event.shiftKey);
         return;
       }
       if (dragRef.current) {
@@ -2827,7 +2936,7 @@ export function SessionMapPage({
     );
   };
 
-  const handleNodeClick = (member: MapMemberRef) => {
+  const handleNodeClick = (member: MapMemberRef, event?: ReactMouseEvent) => {
     const key = nodeKey(member);
     // Safety net below the capture-phase swallow: a click that belongs to a
     // just-finished wire gesture must never open a session, even if it was
@@ -2869,7 +2978,13 @@ export function SessionMapPage({
       });
       return;
     }
-    openMember(member);
+    if (event?.shiftKey) {
+      setSelectedIds((ids) => (
+        ids.includes(sessionId) ? ids.filter((id) => id !== sessionId) : [...ids, sessionId]
+      ));
+      return;
+    }
+    setSelectedIds([sessionId]);
   };
 
   const submitMount = async () => {
@@ -3179,7 +3294,87 @@ export function SessionMapPage({
     const members = selectedMembers();
     const member = members[0];
     if (member === undefined) return;
+    if (selectedIds.length > 1) {
+      showHint(tr(
+        `Opening 1 of ${String(selectedIds.length)} selected sessions.`,
+        `已选 ${String(selectedIds.length)} 个，只打开 1 个。`,
+      ));
+    }
+    setSelectionMenu(null);
     openMember(member);
+  };
+
+  const selectAllVisible = useCallback(() => {
+    const ids = filteredList
+      .filter((member) => member.kind === 'session')
+      .map((member) => member.session.id);
+    setSelectedIds(ids);
+    setSelectionMenu(null);
+    setTagMenuOpen(false);
+  }, [filteredList]);
+  selectAllVisibleRef.current = selectAllVisible;
+
+  const applyMapLabelToSelected = (labelId: string, assigned: boolean) => {
+    let doc = mapDocRef.current;
+    for (const sessionId of selectedIdsRef.current) {
+      doc = assignSessionLabel(doc, sessionId, labelId, assigned);
+    }
+    persistDoc(doc);
+    setTagMenuOpen(false);
+    setSelectionMenu(null);
+  };
+
+  const applyIdentityTagToSelected = async (mode: 'add' | 'remove') => {
+    const tag = window.prompt(
+      mode === 'add'
+        ? tr('Identity tag to add', '要添加的身份标签')
+        : tr('Identity tag to remove', '要移除的身份标签'),
+    );
+    if (tag === null || !tag.trim()) return;
+    const ids = [...selectedIdsRef.current];
+    setBusyLocked(true);
+    setTagMenuOpen(false);
+    setSelectionMenu(null);
+    const failures: string[] = [];
+    try {
+      for (const sessionId of ids) {
+        const session = byId.get(sessionId);
+        if (session === undefined) continue;
+        try {
+          await api.sessions.updateIdentity(sessionId, {
+            tags: mergeSessionTags(readSessionTags(session), tag, mode),
+          });
+        } catch (err) {
+          failures.push(`${sessionId.slice(0, 8)}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      await refresh();
+      onGraphChanged?.();
+      if (failures.length > 0) {
+        showError(tr(
+          `Tag update finished with ${String(failures.length)} failure(s).`,
+          `标签更新完成，${String(failures.length)} 项失败。`,
+        ));
+      }
+    } finally {
+      if (!disposedRef.current) setBusyLocked(false);
+      else busyRef.current = false;
+    }
+  };
+
+  const createChildForSession = (sessionId: string) => {
+    const node = forceNodesRef.current.find((candidate) => (
+      candidate.member.session.id === sessionId
+    ));
+    void createSessionNodeAt(
+      node?.x ?? 0,
+      (node?.y ?? 0) + NODE_H / 2 + 28,
+      sessionId,
+    );
+  };
+
+  const stopCardEvent = (event: { stopPropagation: () => void }) => {
+    event.stopPropagation();
   };
 
   const openIdentityForSession = (sessionId: string) => {
@@ -3199,6 +3394,10 @@ export function SessionMapPage({
     event.preventDefault();
     event.stopPropagation();
     setSelectionMenu(null);
+    setTagMenuOpen(false);
+    if (!selectedIdsRef.current.includes(member.session.id)) {
+      setSelectedIds([member.session.id]);
+    }
     setNodeMenu({
       sessionId: member.session.id,
       x: event.clientX,
@@ -3557,6 +3756,24 @@ export function SessionMapPage({
                   const pendingOp = (mapDoc.pendingTopology ?? []).find(
                     (op) => op.childSessionId === member.session.id,
                   );
+                  const currentAction = describeMapCurrentAction(member, liveHints);
+                  const errorSummary = describeMapErrorSummary(member, liveHints);
+                  const actionLabel = currentAction === undefined
+                    ? undefined
+                    : currentAction.kind === 'thinking'
+                      ? (currentAction.detail !== undefined
+                        ? tr(`thinking · ${currentAction.detail}`, `思考中 · ${currentAction.detail}`)
+                        : tr('thinking', '思考中'))
+                      : currentAction.kind === 'tool'
+                        ? currentAction.detail
+                        : currentAction.kind === 'waiting-approval'
+                          ? (currentAction.detail !== undefined
+                            ? tr(
+                              `waiting-approval · ${currentAction.detail}`,
+                              `等授权 · ${currentAction.detail}`,
+                            )
+                            : tr('waiting-approval', '等授权'))
+                          : tr('waiting', '等待中');
                   return (
                     <div
                       key={node.id}
@@ -3572,13 +3789,20 @@ export function SessionMapPage({
                       }
                       style={{ left, top, width: NODE_W, height: NODE_H }}
                       onPointerDown={(event) => startNodeDrag(event, node)}
-                      onClick={() => handleNodeClick(member)}
+                      onClick={(event) => handleNodeClick(member, event)}
+                      onDoubleClick={() => openMember(member)}
                       onContextMenu={(event) => openNodeContextMenu(event, member)}
                       onKeyDown={(event) => {
-                        if (event.key !== 'Enter' && event.key !== ' ') return;
+                        if (event.key === 'Enter') {
+                          if (draft !== null) return;
+                          event.preventDefault();
+                          openMember(member);
+                          return;
+                        }
+                        if (event.key !== ' ') return;
                         if (draft !== null) return;
                         event.preventDefault();
-                        handleNodeClick(member);
+                        handleNodeClick(member, event as unknown as ReactMouseEvent);
                       }}
                       role="button"
                       tabIndex={0}
@@ -3641,6 +3865,97 @@ export function SessionMapPage({
                             </span>
                           )
                           : null}
+                        {actionLabel !== undefined && (
+                          <span
+                            className="session-map-current-action"
+                            data-action-kind={currentAction?.kind}
+                            title={actionLabel}
+                          >
+                            {actionLabel}
+                          </span>
+                        )}
+                        {errorSummary !== undefined && (
+                          <span className="session-map-card-error" title={errorSummary}>
+                            {errorSummary}
+                          </span>
+                        )}
+                        <span className="session-map-card-actions">
+                          <button
+                            type="button"
+                            data-map-action="open"
+                            title={tr('Open chat', '打开对话')}
+                            onPointerDown={stopCardEvent}
+                            onClick={(event) => {
+                              stopCardEvent(event);
+                              openMember(member);
+                            }}
+                          >
+                            {tr('Open', '打开')}
+                          </button>
+                          <button
+                            type="button"
+                            data-map-action="stop"
+                            title={tr('Stop', '停止')}
+                            onPointerDown={stopCardEvent}
+                            onClick={(event) => {
+                              stopCardEvent(event);
+                              void abortSessionMember(member).then(() => refresh());
+                            }}
+                          >
+                            {tr('Stop', '停止')}
+                          </button>
+                          <button
+                            type="button"
+                            data-map-action="child"
+                            title={tr('New child session', '新建子会话')}
+                            onPointerDown={stopCardEvent}
+                            onClick={(event) => {
+                              stopCardEvent(event);
+                              createChildForSession(member.session.id);
+                            }}
+                          >
+                            {tr('Child', '子会话')}
+                          </button>
+                          <button
+                            type="button"
+                            data-map-action="settings"
+                            title={tr('Session settings', '会话设置')}
+                            onPointerDown={stopCardEvent}
+                            onClick={(event) => {
+                              stopCardEvent(event);
+                              openIdentityForSession(member.session.id);
+                            }}
+                          >
+                            {tr('Settings', '设置')}
+                          </button>
+                          {caps.canDisconnect && (
+                            <button
+                              type="button"
+                              data-map-action="unmount"
+                              title={tr('Unmount to top-level', '拆挂升顶层')}
+                              onPointerDown={stopCardEvent}
+                              onClick={(event) => {
+                                stopCardEvent(event);
+                                confirmUnmountSession(member.session.id, memberLabel(member));
+                              }}
+                            >
+                              {tr('Unmount', '拆挂')}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            data-map-action="delete"
+                            className="danger"
+                            title={tr('Delete session', '删除会话')}
+                            onPointerDown={stopCardEvent}
+                            onClick={(event) => {
+                              stopCardEvent(event);
+                              void deleteSession(member.session.id);
+                            }}
+                          >
+                            {tr('Delete', '删除')}
+                          </button>
+                        </span>
                       </div>
                       {caps.canWireOut && (
                         <span
@@ -3826,6 +4141,15 @@ export function SessionMapPage({
                 `${String(allNodes.length)} sessions · ${String(filteredList.length)} shown`,
                 `${String(allNodes.length)} 个会话 · 显示 ${String(filteredList.length)}`,
               )}
+              {selectedIds.length > 0
+                ? tr(
+                  ` · ${String(selectedIds.length)} selected`,
+                  ` · 已选 ${String(selectedIds.length)}`,
+                )
+                : ''}
+              {busyVisibleCount > 0
+                ? tr(` · ${String(busyVisibleCount)} busy`, ` · ${String(busyVisibleCount)} 个忙碌`)
+                : ''}
               {(mapDoc.pendingTopology ?? []).length > 0
                 ? tr(
                   ` · ${String((mapDoc.pendingTopology ?? []).length)} queued`,
@@ -3869,6 +4193,41 @@ export function SessionMapPage({
             >
               {tr('List', '列表')}
             </button>
+            <button
+              type="button"
+              className="session-map-tool"
+              data-map-action="select-all"
+              onClick={() => selectAllVisible()}
+            >
+              {tr('Select all visible', '全选可见')}
+            </button>
+            <button
+              type="button"
+              className="session-map-tool"
+              data-map-action="clear-selection"
+              disabled={selectedIds.length === 0}
+              onClick={() => clearSelection()}
+            >
+              {tr('Clear selection', '清除选择')}
+            </button>
+            <div className="session-map-status-filters" role="group" aria-label={tr('Filter by status', '按状态筛选')}>
+              {([
+                ['running', tr('Running', '运行中')],
+                ['error', tr('Error', '出错')],
+                ['idle', tr('Idle', '空闲')],
+              ] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={'session-map-tool' + (statusFilter === value ? ' active' : '')}
+                  data-status-filter={value}
+                  aria-pressed={statusFilter === value}
+                  onClick={() => setStatusFilter((current) => (current === value ? 'all' : value))}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             <div className="team-tree-legend">
               <span><i className="tone-running" />{tr('Running', '运行中')}</span>
               <span><i className="tone-attention" />{tr('Working', '工作中')}</span>
@@ -4109,15 +4468,28 @@ export function SessionMapPage({
                 `已选 ${String(selectedIds.length)}`,
               )}
             </span>
-            <button type="button" className="session-map-tool" disabled={busy} onClick={() => openSelectedSession()}>
+            <button type="button" className="session-map-tool" data-map-action="open" disabled={busy} onClick={() => openSelectedSession()}>
               {tr('Open', '打开')}
             </button>
-            <button type="button" className="session-map-tool" disabled={busy} onClick={() => void abortSelectedSessions()}>
+            <button type="button" className="session-map-tool" data-map-action="stop" disabled={busy} onClick={() => void abortSelectedSessions()}>
               {tr('Stop', '停止')}
             </button>
             <button
               type="button"
               className="session-map-tool"
+              data-map-action="child"
+              disabled={busy || selectedIds.length !== 1}
+              onClick={() => {
+                const id = selectedIds[0];
+                if (id !== undefined) createChildForSession(id);
+              }}
+            >
+              {tr('Child', '子会话')}
+            </button>
+            <button
+              type="button"
+              className="session-map-tool"
+              data-map-action="settings"
               disabled={busy || selectedIds.length !== 1}
               onClick={() => {
                 const id = selectedIds[0];
@@ -4126,11 +4498,53 @@ export function SessionMapPage({
             >
               {tr('Settings', '设置')}
             </button>
-            <button type="button" className="session-map-tool" disabled={busy} onClick={() => void unmountSelectedSessions()}>
+            <div className="session-map-tag-menu">
+              <button
+                type="button"
+                className="session-map-tool"
+                data-map-action="tags"
+                disabled={busy}
+                onClick={() => setTagMenuOpen((open) => !open)}
+              >
+                {tr('Tags', '标签')}
+              </button>
+              {tagMenuOpen && (
+                <div className="session-map-tag-menu-list" role="menu">
+                  {mapDoc.labels.map((label) => (
+                    <div key={label.id}>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => applyMapLabelToSelected(label.id, true)}
+                      >
+                        {tr(`Add “${label.name}”`, `打上「${label.name}」`)}
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => applyMapLabelToSelected(label.id, false)}
+                      >
+                        {tr(`Remove “${label.name}”`, `去掉「${label.name}」`)}
+                      </button>
+                    </div>
+                  ))}
+                  <button type="button" role="menuitem" onClick={() => void applyIdentityTagToSelected('add')}>
+                    {tr('Add identity tag…', '添加身份标签…')}
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => void applyIdentityTagToSelected('remove')}>
+                    {tr('Remove identity tag…', '移除身份标签…')}
+                  </button>
+                </div>
+              )}
+            </div>
+            <button type="button" className="session-map-tool" data-map-action="unmount" disabled={busy} onClick={() => void unmountSelectedSessions()}>
               {tr('Unmount', '拆挂')}
             </button>
-            <button type="button" className="session-map-tool danger" disabled={busy} onClick={() => void deleteSelectedSessions()}>
+            <button type="button" className="session-map-tool danger" data-map-action="delete" disabled={busy} onClick={() => void deleteSelectedSessions()}>
               {tr('Delete', '删除')}
+            </button>
+            <button type="button" className="session-map-tool" onClick={() => clearSelection()}>
+              {tr('Clear', '清除')}
             </button>
           </div>
         )}
@@ -4168,6 +4582,47 @@ export function SessionMapPage({
                 <button type="button" role="menuitem" disabled={busy} onClick={() => void abortSelectedSessions()}>
                   {tr('Stop', '停止')}
                 </button>
+                {selectedIds.length === 1 && (
+                  <>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={busy}
+                      onClick={() => {
+                        const id = selectedIds[0];
+                        if (id !== undefined) createChildForSession(id);
+                      }}
+                    >
+                      {tr('New child session', '新建子会话')}
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        const id = selectedIds[0];
+                        if (id !== undefined) openIdentityForSession(id);
+                      }}
+                    >
+                      {tr('Session settings…', '会话设置…')}
+                    </button>
+                  </>
+                )}
+                {mapDoc.labels.map((label) => (
+                  <div key={label.id}>
+                    <button type="button" role="menuitem" onClick={() => applyMapLabelToSelected(label.id, true)}>
+                      {tr(`Add label “${label.name}”`, `打上标签「${label.name}」`)}
+                    </button>
+                    <button type="button" role="menuitem" onClick={() => applyMapLabelToSelected(label.id, false)}>
+                      {tr(`Remove label “${label.name}”`, `去掉标签「${label.name}」`)}
+                    </button>
+                  </div>
+                ))}
+                <button type="button" role="menuitem" onClick={() => void applyIdentityTagToSelected('add')}>
+                  {tr('Add identity tag…', '添加身份标签…')}
+                </button>
+                <button type="button" role="menuitem" onClick={() => void applyIdentityTagToSelected('remove')}>
+                  {tr('Remove identity tag…', '移除身份标签…')}
+                </button>
                 <button type="button" role="menuitem" disabled={busy} onClick={() => void unmountSelectedSessions()}>
                   {tr('Unmount', '拆挂')}
                 </button>
@@ -4179,6 +4634,9 @@ export function SessionMapPage({
                   onClick={() => void deleteSelectedSessions()}
                 >
                   {tr(`Delete (${String(selectedIds.length)})`, `删除 (${String(selectedIds.length)})`)}
+                </button>
+                <button type="button" role="menuitem" onClick={() => clearSelection()}>
+                  {tr('Clear selection', '清除选择')}
                 </button>
               </>
             )}
@@ -4281,6 +4739,12 @@ export function SessionMapPage({
                 </button>
               );
             })}
+            <button type="button" role="menuitem" onClick={() => void applyIdentityTagToSelected('add')}>
+              {tr('Add identity tag…', '添加身份标签…')}
+            </button>
+            <button type="button" role="menuitem" onClick={() => void applyIdentityTagToSelected('remove')}>
+              {tr('Remove identity tag…', '移除身份标签…')}
+            </button>
             <button
               type="button"
               role="menuitem"
