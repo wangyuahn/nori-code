@@ -15,7 +15,7 @@ Nori Code CLI 是一个运行在终端中的 AI 编程 Agent，帮助你完成�
 
 ## 安装
 
-用 npm 或 pnpm 全局安装已发布的包。需要 Node.js 22.19.0 或更高版本（仓库本地开发的 engines 可能更严格）。
+用 npm 或 pnpm 全局安装已发布的包。需要 Node.js 24.15.0 或更高版本（见仓库 `engines` 字段）。
 
 ```sh
 node --version
@@ -105,7 +105,7 @@ Nori Code CLI 会自动调用文件读取、搜索等工具浏览相关内容后
 在 src/utils 里新增一个函数，用来把任意字符串转成 kebab-case，并补一个单元测试
 ```
 
-Nori Code CLI 会规划步骤，在需要代码改动时通过 `SubAgent` 或雇佣的团队伙伴委派实现，运行相关检查，并在每一步告诉你它做了什么。如果希望主 Agent 在审批后直接编辑文件，可使用 `/setting readonly off`。
+Nori Code CLI 会规划步骤，在需要并行推进时用 `TeamCreate` 雇佣团队伙伴，先 Discuss 再 `TeamAssign`，并在每一步告诉你它做了什么。临时 `SubAgent` 编排已在 v2.0 删除。如果希望主 Agent 在审批后直接编辑文件，可使用 `/setting readonly off`。
 
 ::: tip 不知道能做什么？输入 `/help`
 随时在输入框输入 `/help`，可以打开内置的命令和快捷键面板，按 `↑`/`↓` 翻看，`Esc` 关闭。退出时输入 `/exit`，或按 `Ctrl-C` 两次，或在输入框为空时按 `Ctrl-D`。

@@ -6,6 +6,10 @@ outline: 2
 
 本页记录 Kimi Code CLI 每个版本的变更内容。
 
+::: warning 注意
+本页仍是**上游 Kimi Code CLI** 的变更记录。Nori 自己的版本说明在仓库 [CHANGELOG.md](https://github.com/wangyuahn/nori-code/blob/master/CHANGELOG.md)。当前产品是团队工程；SubAgent DAG 已删除。见 GitHub [README](https://github.com/wangyuahn/nori-code/blob/master/README.zh-CN.md)。
+:::
+
 ## 0.22.0（2026-07-02）
 
 ### 新功能

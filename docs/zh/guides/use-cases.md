@@ -24,7 +24,7 @@ src/runtime 下的 event loop 是怎么工作的？事件从哪里产生、又�
 这个项目里「权限审批」是怎么实现的？涉及哪些文件，关键类型是什么？
 ```
 
-大型调研可以让主 Agent 派发**子 Agent** 并行处理子任务，详见 [Agent 与子 Agent](../customization/agents.md)。
+大型调研用 `TeamCreate` 雇佣团队伙伴，先 Discuss 再分配轨道，详见[团队工程](./team-engineering.md)。与 Codex / Claude Code 子 Agent 的对照见 GitHub [README](https://github.com/wangyuahn/nori-code/blob/master/README.zh-CN.md)。
 
 ## 实现新功能
 

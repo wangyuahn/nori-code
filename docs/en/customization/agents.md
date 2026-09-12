@@ -1,10 +1,12 @@
 # Agents and Sub-Agents
 
-Every session in Nori Code CLI is driven by a **main Agent**. The main Agent understands the user's intent, plans steps, calls tools, and when needed dispatches **sub-agents** to handle more focused sub-tasks — for example, exploring an unfamiliar codebase, reviewing multiple implementations in parallel, or planning a large refactor without touching the main context.
+Every session in Nori Code CLI is driven by a **main Agent**. In 2.0 the main Agent leads a **department tree** of durable **team partners** (`TeamCreate`). Partners are real child sessions on the conversation map; they Discuss, receive assignments, and execute while the lead stays read-only by default. See [Team engineering](../guides/team-engineering.md).
 
-In Nori Code CLI 2.0, the main Agent also leads a **department tree** of durable **team partners** (`TeamCreate`). Partners are real child sessions on the conversation map, with a dual-write team agent so Discuss still addresses this department; they Discuss, receive assignments, and execute work while the lead stays read-only by default. Temporary **SubAgents** remain the tool for bounded delegation inside a single session archive. See [Team engineering](../guides/team-engineering.md) for the full workflow.
+::: warning Note
+The temporary `SubAgent` tool and its DAG fan-out were **removed** in v2.0. Team Engineering is the only delegation path. This page still contains leftover SubAgent copy from the Kimi Code fork and should not be read as current product. For what Nori is now versus Codex / Claude Code, see the GitHub [README](https://github.com/wangyuahn/nori-code/blob/master/README.md).
+:::
 
-A sub-agent receives a task description from the main Agent, works in its own isolated context, and then returns its conclusions. It does not communicate with the user directly, and its intermediate reasoning and tool call records do not mix into the main Agent's history.
+The sections below are **stale** (built-in sub-agent types, `SubAgent.tasks`, nesting depth). Until this page is rewritten, use Team tools (`TeamCreate`, `TeamDecide`, `TeamSpeak`, `TeamAssign`) instead of anything named SubAgent.
 
 ## Main Agent and read-only mode
 

@@ -77,7 +77,7 @@ $NORI_CODE_HOME  （默认 ~/.nori-code）
 - **`state.json`**：会话标题、`lastPrompt`、创建/更新时间、`forkedFrom` 等元数据；若会话位于会话地图上，还会包含 `parent_session_id`、`mount_role`、`mount_mandate` 等挂载字段。
 - **`upcoming-goals.json`**：由 `/goal next <objective>` 创建的 TUI 专属队列。它不属于 Agent 对话；只有当前目标完成并提升后续目标后，才会进入 Agent 对话。
 - **`agents/main/wire.jsonl`**：主 Agent 的完整通信记录，用于会话恢复和回放。
-- **`agents/agent-0/` 等**：主 Agent、团队伙伴和 SubAgent 的会话记录目录，各自含 `wire.jsonl`。已完成的临时 SubAgent 会保留在会话归档中并可重新打开，不会被删除。
+- **`agents/agent-0/` 等**：主 Agent 与团队伙伴的会话记录目录，各自含 `wire.jsonl`。v2.0 之前的临时 SubAgent 归档可能仍留在磁盘上；新工作使用团队子会话。
 - **`logs/nori-code.log`**：该会话的诊断日志，只有发生诊断事件时才存在。
 - **`tasks/`**：后台任务持久化——`tasks/<task_id>.json` 保存状态/pid/退出码，`tasks/<task_id>/output.log` 保存输出。
 - **`cron/`**：定时任务持久化，`nori resume` 时重新加载到调度器。详见[定时任务](../reference/tools.md#定时任务)。

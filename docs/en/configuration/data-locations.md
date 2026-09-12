@@ -77,7 +77,7 @@ Inside each session directory:
 - **`state.json`**: session metadata including title, `lastPrompt`, creation/update timestamps, `forkedFrom`, and mount fields such as `parent_session_id`, `mount_role`, and `mount_mandate` when the session sits on the conversation map.
 - **`upcoming-goals.json`**: the TUI-only queue created by `/goal next <objective>`. It is not part of the agent conversation until a queued goal is promoted after the current goal completes.
 - **`agents/main/wire.jsonl`**: the main Agent's complete communication record, used for session resumption and replay.
-- **`agents/agent-0/` etc.**: main, team, and SubAgent transcript directories, each containing its own `wire.jsonl`. Completed temporary SubAgents remain reopenable in the session archive rather than being deleted.
+- **`agents/agent-0/` etc.**: main and team transcript directories, each containing its own `wire.jsonl`. Temporary SubAgent archives from before v2.0 may still exist on disk; new work uses Team child sessions.
 - **`logs/nori-code.log`**: diagnostic log for this session; only present when a diagnostic event occurs.
 - **`tasks/`**: background task persistence — `tasks/<task_id>.json` stores status/pid/exit code; `tasks/<task_id>/output.log` stores output.
 - **`cron/`**: scheduled task persistence; reloaded into the scheduler when `nori resume` runs. See [Scheduled tasks](../reference/tools.md#scheduled-tasks).

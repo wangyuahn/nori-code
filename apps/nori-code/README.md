@@ -1,6 +1,6 @@
 # Nori Code
 
-> Loop-core multi-agent coding CLI.
+> Terminal CLI/TUI for Nori. Early project — **Team Engineering** is the product, not the deleted SubAgent DAG.
 
 ## Install
 
@@ -15,6 +15,8 @@ Verify:
 nori --version
 ```
 
+Requires Node.js `>=24.15.0`.
+
 ## Quick Start
 
 ```sh
@@ -28,18 +30,19 @@ On first launch, configure a provider with `/provider` and select a model with `
 Take a look at this project and explain the main directories.
 ```
 
-## Key Features
+## What this CLI does now
 
-- **Tree-structured team.** `TeamCreate` hires durable partners as mounted child sessions. `TeamDecide` / `TeamSpeak` run Discuss; `TeamAssign` enters Code; `TeamDismiss` removes partners and deletes their sessions.
+- **Department tree.** `TeamCreate` hires durable partners as mounted child sessions. `TeamDecide` / `TeamSpeak` run Discuss; `TeamAssign` enters Code; `TeamDismiss` removes partners and deletes their sessions.
 - **Conversation map.** Sessions link via `parent_session_id`. `/map` in the TUI and the Web **Map** view browse, open, mount, unmount, and remount nodes.
 - **Main read-only by default.** The lead coordinates; members execute assigned tracks. Toggle with `/setting readonly off` when needed.
 - **Persistent memory.** Architecture decisions and patterns persist in a bidirectional-link vault via `nori_memory_search` / `nori_memory_write`.
-- **Policy-as-Code.** `nori.yaml` enforces deterministic rules: search vault before coding, run tests before exit, require review before merge.
-- **Desktop workbench.** Nori Work pairs with the CLI for browser, terminal, Git, and the session map on a large screen.
+- **Inherited harness.** MCP, Skills, Hooks, and tool approvals come from the Kimi Code fork. They work; they are not the differentiator.
+
+`nori.yaml` is **not** a DAG scheduler. The runtime injects rule prompts and review/memory gates; it does not execute `phases:` as an orchestrator. LSP and Git in Nori Work are a rough shell. Full comparison and gap list: the project [README](../../README.md).
 
 ## Documentation
 
-User docs live under [`docs/`](../docs/) (VitePress, English and Chinese). Start with [Team engineering](../docs/en/guides/team-engineering.md) for 2.0 department workflows, or the project root [README](../README.md) for product overview.
+User docs live under [`docs/`](../../docs/) (VitePress, English and Chinese). Start with [Team engineering](../../docs/en/guides/team-engineering.md).
 
 ## Repository
 
@@ -47,4 +50,4 @@ User docs live under [`docs/`](../docs/) (VitePress, English and Chinese). Start
 
 ## License
 
-MIT. Based on [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code) (MIT) — see the project root [README](../README.md) for the full attribution and history.
+MIT. Based on [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code) (MIT) — see the project root [README](../../README.md).

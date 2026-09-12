@@ -19,8 +19,8 @@ features:
     details: Hire durable partners with TeamCreate. Discuss before Code, then TeamAssign — each partner is a real child session on the conversation map.
   - title: Conversation map
     details: Sessions link via parent_session_id. Browse and remount with /map in the TUI or the Map view in Nori Work.
-  - title: SubAgent DAG
-    details: Bounded temporary delegates still run plan → implement → verify → review in parallel inside a session archive.
+  - title: Honest about gaps
+    details: LSP and Git are a rough shell. Throwaway SubAgent DAG orchestration was removed — Team Engineering is the only delegation path. See the GitHub README.
   - title: Nori Work
-    details: Electron workbench with chat, browser, terminal, Git, and the same conversation map on a large screen.
+    details: Electron workbench with chat, browser, terminal, and the same conversation map. Early project — several inspector surfaces are still unfinished.
 ---

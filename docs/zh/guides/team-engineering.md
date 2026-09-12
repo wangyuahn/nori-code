@@ -2,19 +2,24 @@
 
 Nori Code CLI 2.0 把项目当作一棵**部门树**，而不是单条聊天记录加旁注。`TeamCreate` 通过创建**挂载子会话**雇佣伙伴（与会话地图上已有的节点是同一类），并双写一个团队 Agent，以便 Discuss 仍按本部门寻址。Discuss 轮次在动手前收集团队发言。本页说明终端与 Nori Work 中这些能力如何配合。
 
-## 部门树与 SubAgent
+::: warning 注意
+临时 `SubAgent` DAG 编排已在 v2.0 **删除**。把工作交给另一个 Agent 的唯一方式是团队工程。与 Codex / Claude Code 的对照，以及 LSP、Git 仍是毛坯等缺口，见 GitHub [README](https://github.com/wangyuahn/nori-code/blob/master/README.zh-CN.md)。
+:::
 
-两种协作模型并存：
+## 部门树与会话地图
+
+协作模型只有一套，出现在两个面上：
 
 - **团队伙伴**（`TeamCreate`）是挂在你下面的**真实子会话**。它们出现在会话地图上的会话卡片中，参与 Discuss/Assign，直到 `TeamDismiss` 移除；同时双写一个团队 Agent，以便 Discuss 仍按 agent id 寻址本部门。
 - **会话地图节点**与雇佣是同一类：**真实子会话**，通过 `parent_session_id` 链接。在 Web Map 画布上拉线或「新建会话」走的是与 `TeamCreate` 相同的「空子会话 + 挂载」路径。一个会话只能有一个父节点（暂不支持兼职）。
-- **SubAgent**（`SubAgent`）是归档在父会话目录内的**临时代理**，完成有界任务后返回结果；不是地图节点，也不适合作为长期部门。
+
+双写（子会话 + 父会话里的 team agent）是为了让 Discuss 仍按 agent id 说话、地图按 session id 说话。这是接缝，不是已经磨平的统一身份。
 
 主 Agent 默认是**只读协调者**：直接 `Write` / `Edit` 会被拦截（`/setting readonly on`），雇佣成员在 `TeamAssign` 离开 Discuss 后执行分配任务。只有在你希望负责人直接改文件时才使用 `/setting readonly off`。
 
 ## Discuss 与 Code
 
-**Discuss** 是只读团队会议。开启期间，`Write`、`Edit`、`Bash`、`SubAgent` 及部分调度工具会被拦截，直到团队进入 **Code**。
+**Discuss** 是只读团队会议。开启期间，`Write`、`Edit`、`Bash`、`TaskStop`、`CronCreate`、`CronDelete` 会被拦截，直到团队进入 **Code**。
 
 典型流程：
 
@@ -100,5 +105,5 @@ Discuss 是**多轮**的会。每条 `TeamSpeak` 只推进一步（一个可裁�
 
 - [斜杠命令](../reference/slash-commands.md) — `/team`、`/map`、`/discuss`、`/web`
 - [内置工具](../reference/tools.md#协作工具) — `TeamCreate`、`TeamAssign`、`TeamDismiss` 等
-- [Agent 与子 Agent](../customization/agents.md) — 只读主 Agent 与 SubAgent 委派
 - [会话与上下文](./sessions.md) — 存储布局与会话元数据
+- GitHub [README](https://github.com/wangyuahn/nori-code/blob/master/README.zh-CN.md) — 现在的 Nori 相对 Codex / Claude Code，以及缺口清单

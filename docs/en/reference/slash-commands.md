@@ -4,6 +4,10 @@ Slash commands are built-in control commands provided by Nori Code CLI in the in
 
 After typing the full command name, press `Enter` to execute. If the `/`-prefixed input does not match any built-in or Skill command, it is sent to the Agent as a regular message.
 
+::: warning Note
+`/subagent` is leftover copy. Temporary SubAgent mode was removed in v2.0; use `/team` and Team tools. See the GitHub [README](https://github.com/wangyuahn/nori-code/blob/master/README.md).
+:::
+
 ::: tip
 Some commands are only available in the idle state. Executing these commands while a session is streaming output or compacting context will be blocked — press `Esc` or `Ctrl-C` to interrupt first. The "Always available" column in the tables below indicates commands that are also available during streaming.
 :::
@@ -54,8 +58,8 @@ Some commands are only available in the idle state. Executing these commands whi
 | `/team [settings]` | `/agents` | Open a hired partner's session, or browse reports and this-round Discuss speech. Enter opens the selected member (Main returns to the lead session). Tab shows details. A discussion row opens the Discuss pane. `/team settings` sets max department depth | Yes |
 | `/map` | — | Browse the conversation map (session mount forest) for the current working directory. Enter opens a session; M mount (child then parent); U unmount. See [Team engineering](../guides/team-engineering.md) | Yes |
 | `/plan clear` | — | Clear legacy plan state | No |
-| `/subagent on\|off` | — | Turn SubAgent mode on or off without sending a prompt. | No |
-| `/subagent <task>` | — | Turn SubAgent mode on, then send `<task>` as a normal prompt. If the turn completes normally, SubAgent mode turns off automatically. In `manual` permission mode, Nori Code asks whether to switch to `auto` or `yolo` before starting. | No |
+| `/subagent on\|off` | — | **Removed in v2.0.** Temporary SubAgent mode is gone; use `/team`. | No |
+| `/subagent <task>` | — | **Removed in v2.0.** Hire partners with Team Engineering instead. | No |
 | `/goal [...]` | — | Start or manage an autonomous goal | See below |
 
 ::: warning
