@@ -1159,9 +1159,11 @@ function WorkGroup({ blocks, live = false }: { blocks: WorkBlock[]; live?: boole
   return <details
     className={`chat-work-group${live ? ' live' : ''}${open ? ' is-open' : ''}`}
     open={open}
-    onToggle={event => { setOpen(event.currentTarget.open); }}
   >
-    <summary>
+    <summary onClick={event => {
+      event.preventDefault();
+      setOpen(value => !value);
+    }}>
       <span className="work-group-headline">{summarizeWorkGroup(blocks, tr)}</span>
       <Icon className="work-group-chevron" name="chevron-down" size={11}/>
     </summary>

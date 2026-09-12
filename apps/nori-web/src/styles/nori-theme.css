@@ -4097,7 +4097,6 @@ kbd {
 .work-thinking-label { display: flex; min-width: 0; flex: 1; align-items: center; gap: 5px; color: var(--nori-thinking); font-size: calc(9px * var(--nori-ui-font-scale)); }
 .work-thinking-label > svg { flex: none; color: var(--nori-thinking); }
 .work-thinking-line > p { max-height: 260px; margin: 0; overflow: auto; color: var(--nori-text-muted); font: italic calc(11px * var(--nori-ui-font-scale))/1.6 var(--nori-font); white-space: pre-wrap; overflow-wrap: anywhere; }
-.work-thinking-line.live > p { max-height: none; }
 /* 工具调用：一行一条（`Read foo.tsx ›`），点一下就地展开细节。 */
 .compact-tool-call { min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
 .compact-tool-call > summary {
@@ -5685,21 +5684,28 @@ kbd {
 }
 .chat-work-group.live .work-group-headline { color: var(--nori-text-secondary); }
 .work-group-chevron { flex: none; margin-left: auto; color: var(--nori-text-muted); transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1); }
-.chat-work-group.is-open > summary .work-group-chevron { transform: rotate(180deg); }
+.chat-work-group.is-open > summary .work-group-chevron,
+.chat-work-group[open] > summary .work-group-chevron { transform: rotate(180deg); }
 /* Closed <details> uses display:none on non-summary children, which skips height
-   transitions. Keep the clip in the tree and drive 0fr/1fr from `.is-open`. */
+   transitions. Keep the clip in the tree and drive 0fr/1fr from `.is-open` / `[open]`. */
 details.chat-work-group > .work-group-clip {
   display: grid !important;
   grid-template-rows: 0fr;
   overflow: hidden;
   transition: grid-template-rows 240ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-details.chat-work-group.is-open > .work-group-clip {
+details.chat-work-group.is-open > .work-group-clip,
+details.chat-work-group[open] > .work-group-clip {
   grid-template-rows: 1fr;
 }
 .work-group-clip > .work-group-body {
   min-height: 0;
   overflow: hidden;
+}
+/* While open, do not clip the thinking <p> scroller (260px cap + overflow auto). */
+details.chat-work-group.is-open > .work-group-clip > .work-group-body,
+details.chat-work-group[open] > .work-group-clip > .work-group-body {
+  overflow: visible;
 }
 .work-group-body {
   display: grid;
