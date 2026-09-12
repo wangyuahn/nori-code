@@ -134,6 +134,9 @@ function makeSessionService(sessions: Map<string, Session>): ISessionService {
     createChild: async () => {
       throw new Error('not implemented');
     },
+    updateIdentity: async () => {
+      throw new Error('not implemented');
+    },
     mount: async () => {
       throw new Error('not implemented');
     },

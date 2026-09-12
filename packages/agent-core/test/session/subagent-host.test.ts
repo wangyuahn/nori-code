@@ -12,7 +12,7 @@ import type { BackgroundTask } from '../../src/agent/background/task';
 import { AGENT_WIRE_PROTOCOL_VERSION } from '../../src/agent/records';
 import type { ResolvedAgentProfile } from '../../src/profile';
 import type { SDKSessionRPC } from '../../src/rpc';
-import { Session } from '../../src/session';
+import { Session, type SessionOptions } from '../../src/session';
 import { ProviderManager } from '../../src/session/provider-manager';
 import { SessionSubagentHost } from '../../src/session/subagent-host';
 import type { NoriMemoryProvider } from '../../src/tools/builtin/nori/types';
@@ -3569,19 +3569,21 @@ function fakeSession(
 }
 
 function hireableSession(
-  options: ConstructorParameters<typeof Session>[0] & { id: string },
+  options: { id: string } & Partial<SessionOptions>,
 ): Session {
   let session!: Session;
+  const { createMountedChild, kaos, homedir, rpc, initializeMainAgent, id, ...rest } = options;
   session = new Session({
-    kaos: createFakeKaos({
+    ...rest,
+    id,
+    kaos: kaos ?? createFakeKaos({
       mkdir: vi.fn().mockResolvedValue(undefined),
       writeText: vi.fn().mockResolvedValue(0),
     }),
-    homedir: '/tmp/kimi-session',
-    rpc: createSessionRpc(),
-    initializeMainAgent: false,
-    ...options,
-    createMountedChild: options.createMountedChild ?? (async (input) => {
+    homedir: homedir ?? '/tmp/kimi-session',
+    rpc: rpc ?? createSessionRpc(),
+    initializeMainAgent: initializeMainAgent ?? false,
+    createMountedChild: createMountedChild ?? (async (input) => {
       const sessionId = `sess_${input.title.replace(/\s+/g, '_')}`;
       const { agentId } = await session.attachMountedTeamMember({
         mountedSessionId: sessionId,

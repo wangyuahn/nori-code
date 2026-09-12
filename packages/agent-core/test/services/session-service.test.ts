@@ -387,11 +387,11 @@ function makeFakeBridge(state: FakeBridgeState): ICoreProcessService {
           agents: {},
           custom: {},
         };
-        const custom: Record<string, unknown> = { ...existing.custom };
-        if (payload.name !== undefined) custom.mount_name = payload.name;
-        if (payload.role !== undefined) custom.mount_role = payload.role;
-        if (payload.mandate !== undefined) custom.mount_mandate = payload.mandate;
-        if (payload.tags !== undefined) custom.session_tags = [...payload.tags];
+        const custom = { ...existing.custom };
+        if (payload.name !== undefined) custom['mount_name'] = payload.name;
+        if (payload.role !== undefined) custom['mount_role'] = payload.role;
+        if (payload.mandate !== undefined) custom['mount_mandate'] = payload.mandate;
+        if (payload.tags !== undefined) custom['session_tags'] = [...payload.tags];
         state.metas.set(payload.sessionId, {
           ...existing,
           title: payload.name ?? existing.title,
@@ -405,7 +405,9 @@ function makeFakeBridge(state: FakeBridgeState): ICoreProcessService {
             metadata: { ...state.sessions[index]!.metadata, ...custom },
           };
         }
-        const parentId = typeof custom.parent_session_id === 'string' ? custom.parent_session_id : undefined;
+        const parentId = typeof custom['parent_session_id'] === 'string'
+          ? custom['parent_session_id']
+          : undefined;
         const recipients = [payload.sessionId];
         if (parentId !== undefined) {
           recipients.push(parentId);
