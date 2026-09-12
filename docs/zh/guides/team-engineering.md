@@ -23,7 +23,7 @@ Nori Code CLI 2.0 把项目当作一棵**部门树**，而不是单条聊天记�
 3. **`TeamAssign`** — 分配具体任务；成功后**离开 Discuss** 进入 Code，成员可以执行。
 4. 工作完成后 **`TeamDecide`**，`action=vote` — 全队投票（`discuss_again` / `proceed` / `abstain`），无需再次进入完整 Discuss。
 
-Discuss 是**多轮且有时限**的会。每条 `TeamSpeak` 只推进一步（一个可裁决的点），不是完整方案。用 `TeamDecide` 的 `action=continue` 开下一轮。思考仍算活动。硬时限到来前会催促成员立刻发言。有人超时或弃权只记为该人弃权，后面的人照常发言。
+Discuss 是**多轮**的会。每条 `TeamSpeak` 只推进一步（一个可裁决的点），不是完整方案。用 `TeamDecide` 的 `action=continue` 开下一轮。有人弃权只记为该人弃权，后面的人照常发言。
 
 在 UI 中用 **`Shift-Tab`**、**`/discuss`** 或兼容别名 **`/plan`** 切换 Discuss。**`TeamAssign`** 与 Discuss/Code 切换都可以离开 Discuss；YOLO 不会额外增加退出审批。
 

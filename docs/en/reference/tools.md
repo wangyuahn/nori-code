@@ -67,7 +67,7 @@ In the default Nori read-only posture, the main Agent can still use `Bash` for b
 
 Discuss is a read-only team meeting. New sessions start here unless the user turned that default off. While Discuss is active, `Write`, `Edit`, `Bash`, `SubAgent`, `TaskStop`, `CronCreate`, and `CronDelete` are blocked. There is no session-file workflow and no `ExitDiscussMode` model exit.
 
-**`TeamDecide`** uses `action=start` with a topic and opening statement to enter Discuss, then `action=continue` with a new statement for later rounds. Each `TeamSpeak` is one short, time-limited point; a skipped or timed-out member is an abstention and the round continues. Use `TeamAssign` to enter Code. The UI Discuss/Code toggle can also leave or re-enter this stage.
+**`TeamDecide`** uses `action=start` with a topic and opening statement to enter Discuss, then `action=continue` with a new statement for later rounds. Each `TeamSpeak` is one short point in a multi-round Discuss, not a complete plan. Use `TeamAssign` to enter Code. The UI Discuss/Code toggle can also leave or re-enter this stage.
 
 ## State Management
 
@@ -86,7 +86,7 @@ Collaboration tools handle inter-Agent coordination, user interaction, and Skill
 | `SubAgent` | Auto-allow in SubAgent mode; otherwise requires approval | Launch one or many temporary SubAgents |
 | `TeamCreate` | Auto-allow | Hire durable team partners as child sessions |
 | `TeamDecide` | Auto-allow | Start/continue discussion, or vote after execution |
-| `TeamSpeak` | Auto-allow | Publish one short, time-limited discussion point; not calling it records the turn as skipped (abstention) |
+| `TeamSpeak` | Auto-allow | Publish one short discussion point; not calling it records the turn as skipped (abstention) |
 | `TeamAssign` | Auto-allow | Assign work; success leaves Discuss and enters Code |
 | `TeamUpdate` | Auto-allow | Update name, role, mandate, or tags without starting a turn |
 | `TeamDismiss` | Auto-allow | Dismiss department members and delete their child sessions |

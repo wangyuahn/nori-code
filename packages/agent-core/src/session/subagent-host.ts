@@ -16,7 +16,6 @@ import type {
 } from '../tools/builtin/collaboration/team-status';
 import {
   abortError,
-  createDeadlineAbortSignal,
   linkAbortSignal,
 } from '../utils/abort';
 import type {
@@ -31,41 +30,29 @@ import TEAM_AGENT_EXECUTION_PROMPT from './team-agent-execution.md?raw';
 import { directMessageRelation } from './team-tree';
 import { validateTeamChatMentions } from './team-chat';
 
-export const DEFAULT_TEAM_DISCUSSION_MEMBER_TIMEOUT_MS = 2 * 60 * 1000;
-export const DEFAULT_TEAM_DISCUSSION_FIRST_RESPONSE_TIMEOUT_MS = 20 * 1000;
 const TEAM_DISCUSSION_CANCEL_SETTLE_GRACE_MS = 5_000;
-const TEAM_DISCUSSION_MEMBER_MAX_TIMEOUT_MULTIPLIER = 3;
-export const DEFAULT_TEAM_DISCUSSION_MEMBER_MAX_DURATION_MS =
-  DEFAULT_TEAM_DISCUSSION_MEMBER_TIMEOUT_MS * TEAM_DISCUSSION_MEMBER_MAX_TIMEOUT_MULTIPLIER;
-
-export const DISCUSSION_TURN_WRAP_UP_REMINDER = [
-  'This discussion turn is almost out of time.',
-  'Stop planning. Call TeamSpeak now with one short, decidable point (one claim, one disagreement, or one concrete next step).',
-  'Do not finish the whole problem. Remaining detail belongs in the next round.',
-  '本轮时限将到：停止继续想。立刻用 TeamSpeak 给出一个可裁决的短结论；完整方案留给后续轮次。',
-].join(' ');
 
 const DISCUSSION_TURN_INVITE_RULES = [
-  'Discuss is multi-round and time-limited: each scheduled turn is one short, decidable point, never the whole design.',
-  '讨论是多轮且有时限：每轮只推进一步，禁止一轮想完/写完。',
+  'Discuss is multi-round: each scheduled turn is one short, decidable point, never the whole design. Remaining work belongs in later rounds.',
+  '讨论是多轮的：每轮只推进一步，禁止一轮想完/写完。完整方案留给后续轮次。',
 ].join(' ');
 
 const DISCUSSION_SCHEDULED_TURN_RULES = [
-  'Rules for this turn (time-limited, multi-round Discuss):',
+  'Rules for this turn (multi-round Discuss — do not finish the problem here):',
   '- Publish exactly one short TeamSpeak: one claim, one disagreement, or one concrete suggestion.',
-  '- Do not solve the whole problem, write a full plan, or dump a complete design.',
+  '- Do not solve the whole problem, write a full plan, or dump a complete design in this turn.',
+  '- Later rounds exist for the rest. The chair will call TeamDecide action=continue.',
   '- Read earlier statements this round and answer them; repeating them is not a contribution.',
   '- Do not call Write/Edit/Bash. Do not tool-spam to think harder. If a fact is missing, say TBD.',
   '- Lead with the decidable point, then at most one sentence of reason.',
-  '- If time is short, TeamSpeak the current point immediately and stop. Later rounds exist for the rest.',
   '- Not calling TeamSpeak records this turn as skipped (abstention); your reasoning stays private.',
-  '本轮纪律（有时限、多轮）：',
+  '本轮纪律（多轮讨论，禁止一轮想完整）：',
   '- 只发一条短 TeamSpeak：一个观点、一个分歧、或一个具体建议。',
   '- 禁止一轮内想完、写完、做成完整方案或长计划。',
+  '- 细节和完整方案留给后续轮次（主席会 action=continue）。',
   '- 先读本轮已有发言再回应；复述不是贡献。',
   '- 不要为了想清楚狂调工具；缺事实就标明 TBD。',
   '- 先结论，理由最多一句。',
-  '- 时限将到时立刻 TeamSpeak 当前可裁决点并停；细节留给下一轮。',
   '- 不调用 TeamSpeak 记为弃权。',
 ].join('\n');
 
@@ -100,43 +87,11 @@ IMPORTANT:
 
 const ASK_PARENT_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
 
-export interface SessionSubagentHostOptions {
-  /** Inactivity after first response. Thinking, text, and tool progress all reset this. */
-  readonly discussionMemberTimeoutMs?: number;
-  /** First model/tool/thinking event must arrive within this window. */
-  readonly discussionMemberFirstResponseTimeoutMs?: number;
-  /** Hard cap from turn start. Defaults to 3× discussionMemberTimeoutMs. */
-  readonly discussionMemberMaxDurationMs?: number;
-}
-
 export class SessionSubagentHost {
-  private readonly discussionMemberTimeoutMs: number;
-  private readonly discussionMemberFirstResponseTimeoutMs: number;
-  private readonly discussionMemberMaxDurationMs: number;
-
   constructor(
     private readonly session: Session,
     private readonly ownerAgentId: string,
-    options: SessionSubagentHostOptions = {},
-  ) {
-    const timeout = options.discussionMemberTimeoutMs ?? DEFAULT_TEAM_DISCUSSION_MEMBER_TIMEOUT_MS;
-    if (!Number.isFinite(timeout) || timeout <= 0) {
-      throw new Error('discussionMemberTimeoutMs must be a positive finite number.');
-    }
-    this.discussionMemberTimeoutMs = timeout;
-    const firstResponseTimeout =
-      options.discussionMemberFirstResponseTimeoutMs ?? DEFAULT_TEAM_DISCUSSION_FIRST_RESPONSE_TIMEOUT_MS;
-    if (!Number.isFinite(firstResponseTimeout) || firstResponseTimeout <= 0) {
-      throw new Error('discussionMemberFirstResponseTimeoutMs must be a positive finite number.');
-    }
-    this.discussionMemberFirstResponseTimeoutMs = Math.min(firstResponseTimeout, timeout);
-    const maxDuration = options.discussionMemberMaxDurationMs
-      ?? timeout * TEAM_DISCUSSION_MEMBER_MAX_TIMEOUT_MULTIPLIER;
-    if (!Number.isFinite(maxDuration) || maxDuration <= 0) {
-      throw new Error('discussionMemberMaxDurationMs must be a positive finite number.');
-    }
-    this.discussionMemberMaxDurationMs = maxDuration;
-  }
+  ) {}
 
   async createTeam(
     members: readonly TeamIdentity[],
@@ -945,58 +900,26 @@ export class SessionSubagentHost {
       try {
         // A member may still be finishing an assigned execution turn. Wait that
         // turn out instead of reading a status flag and abstaining on the
-        // member's behalf — but cap the wait, so one wedged member is skipped
-        // (and its turn cancelled) rather than stalling the whole round.
-        await waitForAgentAvailabilityWithTimeout(
-          participant,
-          signal,
-          this.discussionMemberTimeoutMs,
-        );
+        // member's behalf. Do not abort the member to reclaim the slot.
+        await waitForAgentAvailability(participant, signal);
         historyStart = participant.context?.history.length ?? 0;
         const unread = await this.session.unreadTeamDiscussionStatements(discussionAgentId, agentId);
         this.session.beginTeamDiscussionTurn(discussionAgentId, agentId);
-        let acknowledged = false;
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-          if (attempt > 0) signal.throwIfAborted();
-          await startScheduledAgentPrompt(
-            participant,
-            [{ type: 'text', text: discussionRoundPrompt(unread.statements) }],
-            this.teamLeadPromptOrigin(),
-            signal,
-            this.discussionMemberTimeoutMs,
-          );
-          // Mark messages as read only after this agent accepted the turn. That
-          // prevents a rejected prompt from silently losing an unread update,
-          // while keeping accepted messages from being replayed into its cache.
-          if (!acknowledged) {
-            await this.session.acknowledgeTeamDiscussionStatements(discussionAgentId, agentId, unread.cursor);
-            acknowledged = true;
-          }
-          try {
-            await runDiscussionMemberTurn(
-              participant,
-              signal,
-              this.discussionMemberTimeoutMs,
-              this.discussionMemberFirstResponseTimeoutMs,
-              this.discussionMemberMaxDurationMs,
-            );
-          } catch (error) {
-            sent = this.session.consumeTeamDiscussionSpeak(discussionAgentId, agentId);
-            if (sent !== undefined) break;
-            if (
-              error instanceof DiscussionNoResponseError
-              && attempt === 0
-              && !signal.aborted
-            ) {
-              continue;
-            }
-            failure = error instanceof DiscussionNoResponseError && attempt > 0
-              ? new DiscussionNoResponseError(this.discussionMemberFirstResponseTimeoutMs, true)
-              : error;
-            break;
-          }
+        await startScheduledAgentPrompt(
+          participant,
+          [{ type: 'text', text: discussionRoundPrompt(unread.statements) }],
+          this.teamLeadPromptOrigin(),
+          signal,
+        );
+        // Mark messages as read only after this agent accepted the turn. That
+        // prevents a rejected prompt from silently losing an unread update,
+        // while keeping accepted messages from being replayed into its cache.
+        await this.session.acknowledgeTeamDiscussionStatements(discussionAgentId, agentId, unread.cursor);
+        try {
+          await runDiscussionMemberTurn(participant, signal);
+        } catch (error) {
           sent = this.session.consumeTeamDiscussionSpeak(discussionAgentId, agentId);
-          break;
+          if (sent === undefined) failure = error;
         }
         if (sent === undefined && failure === undefined) {
           sent = this.session.consumeTeamDiscussionSpeak(discussionAgentId, agentId);
@@ -1017,18 +940,12 @@ export class SessionSubagentHost {
         } else if (failure !== undefined && signal.aborted) {
           cancelDiscussion = true;
         } else if (failure !== undefined) {
-          const reason = failure instanceof DiscussionNoResponseError
-            ? failure.reason
-            : failure instanceof DiscussionTurnTimeoutError
-              ? 'timeout'
-              : isAbortError(failure)
-                ? 'cancelled'
-              : toolErrors.length > 0
-                ? 'tool_failed'
-                : 'failed';
-          const detail = failure instanceof DiscussionNoResponseError || failure instanceof DiscussionTurnTimeoutError
-            ? failure.message
-            : discussionFailureDetail(failure, toolErrors);
+          const reason = isAbortError(failure)
+            ? 'cancelled'
+            : toolErrors.length > 0
+              ? 'tool_failed'
+              : 'failed';
+          const detail = discussionFailureDetail(failure, toolErrors);
           const skipped = {
             agentId,
             skipped: true,
@@ -1082,13 +999,9 @@ export class SessionSubagentHost {
     for (const [agentId] of voters) {
       signal.throwIfAborted();
       const participant = await this.session.ensureAgentResumed(agentId);
-      // One deadline covers waiting the member out, claiming its turn, and the
-      // vote turn itself, so a member that never frees its turn abstains instead
-      // of failing the whole vote — and its wedged turn is cancelled on the way.
-      const deadline = createDeadlineAbortSignal(signal, this.discussionMemberTimeoutMs);
       let vote: TeamVote['vote'];
       try {
-        await waitForAgentAvailability(participant, deadline.signal);
+        await waitForAgentAvailability(participant, signal);
         // Voting is a scheduled participant turn too. Deliver only this
         // participant's unread statement suffix, then acknowledge it only after
         // the prompt was accepted so a failed vote can retry without losing
@@ -1098,18 +1011,16 @@ export class SessionSubagentHost {
           participant,
           [{ type: 'text', text: discussionVotePrompt(unread.statements) }],
           this.teamLeadPromptOrigin(),
-          deadline.signal,
+          signal,
         );
         await this.session.acknowledgeTeamDiscussionStatements(discussionAgentId, agentId, unread.cursor);
-        await runDiscussionChildTurnToCompletion(participant, deadline.signal);
+        await runDiscussionChildTurnToCompletion(participant, signal);
         vote = parseTeamVote(lastAssistantText(participant));
       } catch (error) {
         // A session-level cancel must not be laundered into an abstention.
         if (signal.aborted) throw signal.reason;
         void error;
         vote = 'abstain';
-      } finally {
-        deadline.clear();
       }
       votes.push({ agentId, vote });
       await this.appendDiscussionVote(discussionAgentId, agentId, vote);
@@ -1473,28 +1384,16 @@ async function startAgentPrompt(
  * Waits for `agent` to go idle and then starts a turn, returning its id. This is
  * how scheduled team work (a discussion round, a vote) claims a member: one that
  * is momentarily busy gets waited for instead of being recorded as an
- * abstention. `timeoutMs` bounds the wait *and* the retries, so a member that
- * keeps re-arming a turn cannot livelock the scheduler.
+ * abstention. The wait follows the parent signal only — it does not abort the
+ * member to reclaim the slot.
  */
 async function startScheduledAgentPrompt(
   agent: Agent,
   input: Parameters<Agent['turn']['requestPrompt']>[0],
   origin: PromptOrigin,
   signal: AbortSignal,
-  timeoutMs?: number,
 ): Promise<number> {
-  if (timeoutMs === undefined || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    return startAgentPromptWhenIdle(agent, input, origin, signal);
-  }
-  const deadline = createDeadlineAbortSignal(signal, timeoutMs);
-  try {
-    return await startAgentPromptWhenIdle(agent, input, origin, deadline.signal);
-  } catch (error) {
-    if (deadline.timedOut() && !signal.aborted) throw new DiscussionTurnTimeoutError(timeoutMs);
-    throw error;
-  } finally {
-    deadline.clear();
-  }
+  return startAgentPromptWhenIdle(agent, input, origin, signal);
 }
 
 async function startAgentPromptWhenIdle(
@@ -1514,31 +1413,6 @@ async function startAgentPromptWhenIdle(
     if (start.kind === 'unstarted') {
       throw new Error('Agent accepted no turn for the scheduled prompt.');
     }
-  }
-}
-
-async function waitForAgentAvailabilityWithTimeout(
-  agent: Agent,
-  signal: AbortSignal,
-  timeoutMs?: number,
-): Promise<void> {
-  if (timeoutMs === undefined || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    await waitForAgentAvailability(agent, signal);
-    return;
-  }
-  const deadline = createDeadlineAbortSignal(signal, timeoutMs);
-  try {
-    await waitForAgentAvailability(agent, deadline.signal);
-  } catch (error) {
-    // The deadline cancels the member's in-flight turn on the way out, which is
-    // how a wedged turn's lease gets reclaimed. Report it as a timeout so the
-    // caller records a `timeout` skip rather than an opaque abort.
-    if (deadline.timedOut() && !signal.aborted) {
-      throw new DiscussionTurnTimeoutError(timeoutMs);
-    }
-    throw error;
-  } finally {
-    deadline.clear();
   }
 }
 
@@ -1567,138 +1441,15 @@ async function runAgentTurnToCompletion(agent: Agent, signal?: AbortSignal): Pro
   }
 }
 
-class DiscussionNoResponseError extends Error {
-  readonly reason = 'no_response' as const;
-
-  constructor(timeoutMs: number, retryExhausted: boolean) {
-    super(
-      retryExhausted
-        ? `Member discussion turn produced no text, tool call, or response event within ${timeoutMs}ms; retry exhausted (timeout/no_response).`
-        : `Member discussion turn produced no text, tool call, or response event within ${timeoutMs}ms; retrying once.`,
-    );
-    this.name = 'DiscussionNoResponseError';
-  }
-}
-
-class DiscussionTurnTimeoutError extends Error {
-  readonly reason = 'timeout' as const;
-
-  constructor(timeoutMs: number, hardLimit = false) {
-    super(
-      hardLimit
-        ? `Member discussion turn exceeded its maximum duration of ${timeoutMs}ms.`
-        : `Member discussion turn timed out after ${timeoutMs}ms.`,
-    );
-    this.name = 'DiscussionTurnTimeoutError';
-  }
-}
-
 async function runDiscussionMemberTurn(
   child: Agent,
   parentSignal: AbortSignal,
-  fullTimeoutMs: number,
-  firstResponseTimeoutMs: number,
-  maxDurationMs: number,
 ): Promise<void> {
   const controller = new AbortController();
   const unlinkParentSignal = linkAbortSignal(parentSignal, controller);
-  let activityTimedOut = false;
-  let hardTimedOut = false;
-  let firstResponseTimedOut = false;
-  let firstResponseTimer: ReturnType<typeof setTimeout> | undefined;
-  let activityTimer: ReturnType<typeof setTimeout> | undefined;
-  let hardTimer: ReturnType<typeof setTimeout> | undefined;
-  let wrapUpTimer: ReturnType<typeof setTimeout> | undefined;
-  let firstResponseObserved = false;
-  let fullPhaseStarted = false;
-  const completion = runDiscussionChildTurnToCompletion(child, controller.signal);
-  void completion.catch(() => undefined);
-
-  const waitForFirstResponse = typeof child.turn.waitForTurnFirstRequest === 'function'
-    ? child.turn.waitForTurnFirstRequest()
-    : undefined;
-  const firstResponse = waitForFirstResponse?.then(() => {
-    firstResponseObserved = true;
-  });
-  const clearActivityTimer = (): void => {
-    if (activityTimer !== undefined) {
-      clearTimeout(activityTimer);
-      activityTimer = undefined;
-    }
-  };
-  const armActivityTimer = (): void => {
-    clearActivityTimer();
-    if (!fullPhaseStarted) return;
-    activityTimer = setTimeout(() => {
-      activityTimer = undefined;
-      activityTimedOut = true;
-      controller.abort(abortError());
-    }, fullTimeoutMs);
-  };
-  const unsubscribeProgress = typeof child.turn.onTurnProgress === 'function'
-    ? child.turn.onTurnProgress(() => {
-      if (fullPhaseStarted) armActivityTimer();
-    })
-    : undefined;
-
   try {
-    hardTimer = setTimeout(() => {
-      hardTimer = undefined;
-      hardTimedOut = true;
-      controller.abort(abortError());
-    }, maxDurationMs);
-    // Soft nudge at half the hard cap so the next model step can TeamSpeak
-    // before abort. One timed-out member is skipped; the round continues.
-    wrapUpTimer = setTimeout(() => {
-      wrapUpTimer = undefined;
-      try {
-        child.context.appendSystemReminder?.(DISCUSSION_TURN_WRAP_UP_REMINDER, {
-          kind: 'injection',
-          variant: 'system_reminder',
-        });
-      } catch {
-        // Test doubles and settling turns may lack a reminder sink.
-      }
-    }, Math.max(1, Math.floor(maxDurationMs / 2)));
-    if (firstResponse !== undefined) {
-      const firstResponseTimeout = new Promise<never>((_, reject) => {
-        firstResponseTimer = setTimeout(() => {
-          firstResponseTimedOut = true;
-          controller.abort(abortError());
-          reject(new DiscussionNoResponseError(firstResponseTimeoutMs, false));
-        }, firstResponseTimeoutMs);
-      });
-      await Promise.race([completion, firstResponse, firstResponseTimeout]);
-      if (!firstResponseObserved) {
-        await completion;
-        throw new DiscussionNoResponseError(firstResponseTimeoutMs, false);
-      }
-      if (firstResponseTimer !== undefined) clearTimeout(firstResponseTimer);
-    }
-    fullPhaseStarted = true;
-    armActivityTimer();
-    await completion;
-  } catch (error) {
-    // Always wait for the cancelled attempt to settle before the caller can
-    // launch a retry; otherwise the old turn can become a zombie TeamSpeak
-    // publisher or race the new turn for the same qualification.
-    if (firstResponseTimedOut || activityTimedOut || hardTimedOut) {
-      await completion.catch(() => undefined);
-      if (firstResponseTimedOut) {
-        throw new DiscussionNoResponseError(firstResponseTimeoutMs, false);
-      }
-      throw new DiscussionTurnTimeoutError(
-        hardTimedOut ? maxDurationMs : fullTimeoutMs,
-        hardTimedOut,
-      );
-    }
-    throw error;
+    await runDiscussionChildTurnToCompletion(child, controller.signal);
   } finally {
-    if (firstResponseTimer !== undefined) clearTimeout(firstResponseTimer);
-    clearActivityTimer();
-    if (hardTimer !== undefined) clearTimeout(hardTimer);
-    if (wrapUpTimer !== undefined) clearTimeout(wrapUpTimer);
-    unsubscribeProgress?.();
     unlinkParentSignal();
   }
 }

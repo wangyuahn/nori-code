@@ -2,4 +2,4 @@
 "nori-code": patch
 ---
 
-Hire team members as real child sessions and manage them from the conversation map, including status, stop, and batch actions. Discuss turns stay short and multi-round: thinking keeps the turn alive, a wrap-up reminder is injected before the hard cap, and a timed-out member is skipped so the round continues.
+Hire team members as real child sessions and manage them from the conversation map, including status, stop, and batch actions. Discuss turns are not aborted by a timeout; members speak one short point per round and continue across later rounds instead of finishing the whole problem in one turn.
