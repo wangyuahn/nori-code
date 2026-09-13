@@ -10,16 +10,13 @@ import {
   addSessionMapEdge,
   edgesForLayout,
   incomingParentEdgeCount,
+  isUnappliedExtraJob,
   newEdgeId,
-  removeSessionMapEdgeByEndpoints,
   seedEdgesFromServerGraph,
 } from '../components/sessionMapDoc';
 import { parentSessionIdOf, wouldCreateMountCycle } from './session-mount';
 
-/** Permission-gated tool name for top-level self-bootstrap role (P1 stub). */
-export const SELF_BOOTSTRAP_ROLE_TOOL = 'SessionSelfBootstrap';
-
-/** Unified map node — one class for sessions, agents, roots, and mounted children. */
+/** Map metadata for a Session card; agent data may enrich the same card. */
 export interface MapNodeMember {
   session: Session;
   hostSessionId?: string;
@@ -32,9 +29,6 @@ export type MapNodeStatusTone = 'running' | 'working' | 'idle' | 'error' | 'wait
 export interface MapNodeGraphContext {
   sessions: readonly Session[];
   mapEdges?: readonly SessionMapEdge[];
-  /** Local top-level self-bootstrap roles (map doc) until server sync. */
-  topLevelRoles?: Readonly<Record<string, string>>;
-  hasOpenAgentHandler?: boolean;
 }
 
 export interface MapNodeCapabilities {
@@ -42,22 +36,20 @@ export interface MapNodeCapabilities {
   status: string;
   statusTone: MapNodeStatusTone;
   isTopLevel: boolean;
-  isMember: boolean;
-  isAgentGhost: boolean;
   isRealSession: boolean;
-  canSelfBootstrapRole: boolean;
   canWireOut: boolean;
   canWireIn: boolean;
   canDelete: boolean;
   canDisconnect: boolean;
-  canOpenAsSession: boolean;
-  canOpenAsAgent: boolean;
-  canMountOthers: boolean;
-  displayTier: 'top' | 'mounted' | 'member';
 }
 
 export function sessionIsBusy(session: Session | undefined): boolean {
-  return session?.status === 'running' || session?.status === 'working';
+  const status = session?.status?.trim().toLowerCase();
+  return status === 'running'
+    || status === 'working'
+    || status === 'awaiting_approval'
+    || status === 'awaiting_question'
+    || status === 'waiting';
 }
 
 export function mapMemberStatus(member: MapNodeMember): string {
@@ -286,7 +278,7 @@ export function mergeSessionTags(
   return current.filter((item) => item !== nextTag);
 }
 
-/** CSS class for sidebar-style status dots on map cards and list rows. */
+/** CSS class for sidebar-style status dots on map cards. */
 export function mapStatusDotClass(status: string): string {
   const tone = mapStatusTone(status);
   if (tone === 'running') return 'running';
@@ -319,15 +311,6 @@ export function isTopLevelSessionNode(
   return parentSessionIdOf(node) === undefined;
 }
 
-/** Top-level nodes may self-bootstrap role; mounted members may not. */
-export function allowsSelfBootstrapRole(
-  sessionId: string,
-  doc: { edges?: readonly SessionMapEdge[] },
-  sessions: readonly Session[],
-): boolean {
-  return isTopLevelSessionNode(sessionId, doc.edges ?? [], sessions);
-}
-
 /** Whether `childId` may mount under `parentId` without creating a cycle. */
 export function canMountMemberUnder(
   childId: string,
@@ -339,13 +322,14 @@ export function canMountMemberUnder(
   return !wouldCreateMountCycle(childId, parentId, sessions, mapParentByChild);
 }
 
-/** Build child→parent map from SessionMapDoc parent edges. */
+/** Build child→parent map from live SessionMapDoc parent edges. */
 export function mapParentByChildFromEdges(
-  mapEdges: readonly { type: string; source: string; target: string }[],
+  mapEdges: readonly Pick<SessionMapEdge, 'type' | 'source' | 'target' | 'status'>[],
 ): Map<string, string> {
   const out = new Map<string, string>();
   for (const edge of mapEdges) {
     if (edge.type !== 'parent') continue;
+    if (isUnappliedExtraJob(edge) || edge.status === 'draft') continue;
     out.set(edge.target, edge.source);
   }
   return out;
@@ -359,20 +343,15 @@ export function mapNodeCapabilities(
   member: MapNodeMember,
   context: MapNodeGraphContext,
 ): MapNodeCapabilities {
-  const { sessions, mapEdges = [], hasOpenAgentHandler = false } = context;
+  const { sessions, mapEdges = [] } = context;
   const wireSessionId = wireSourceParentSessionId(member);
-  const isAgentGhost = false;
   const isRealSession = member.kind === 'session';
   const parentId = parentSessionIdOf(member.session) ?? member.hostSessionId;
-  const sessionIdForTop = wireSessionId ?? (isRealSession ? member.session.id : undefined);
   const isTopLevel = parentId === undefined
-    && !isAgentGhost
-    && (sessionIdForTop === undefined || isTopLevelSessionNode(sessionIdForTop, mapEdges, sessions));
-  const isMember = parentId !== undefined || isAgentGhost || member.agent !== undefined;
+    && isRealSession
+    && isTopLevelSessionNode(member.session.id, mapEdges, sessions);
   const status = mapMemberStatus(member);
   const statusTone = mapStatusTone(status);
-  const canSelfBootstrapRole = sessionIdForTop !== undefined
-    && allowsSelfBootstrapRole(sessionIdForTop, { edges: mapEdges }, sessions);
   const canWireOut = wireSessionId !== null;
   const canWireIn = isRealSession;
   const canDelete = isRealSession;
@@ -380,50 +359,26 @@ export function mapNodeCapabilities(
     parentSessionIdOf(member.session) !== undefined
     || incomingParentEdgeCount(member.session.id, mapEdges) > 0
   );
-  const canOpenAsSession = isRealSession;
-  const canOpenAsAgent = parentId !== undefined
-    && member.agent !== undefined
-    && hasOpenAgentHandler;
-  const canMountOthers = canWireOut;
-  const displayTier: MapNodeCapabilities['displayTier'] = member.agent
-    ? 'member'
-    : parentId !== undefined
-      ? 'mounted'
-      : 'top';
-
   return {
     wireSessionId,
     status,
     statusTone,
     isTopLevel,
-    isMember,
-    isAgentGhost,
     isRealSession,
-    canSelfBootstrapRole,
     canWireOut,
     canWireIn,
     canDelete,
     canDisconnect,
-    canOpenAsSession,
-    canOpenAsAgent,
-    displayTier,
-    canMountOthers,
   };
 }
 
-/** Resolve role label: agent → mount metadata → local top-level bootstrap. */
+/** Resolve the role for the work represented by a session card. */
 export function mapMemberRoleLabel(
   member: MapNodeMember,
-  topLevelRoles: Readonly<Record<string, string>> = {},
 ): string | undefined {
   if (typeof member.agent?.role === 'string' && member.agent.role.trim()) return member.agent.role;
   const mountRole = member.session.metadata?.mount_role;
   if (typeof mountRole === 'string' && mountRole.trim()) return mountRole;
-  const wireId = wireSourceParentSessionId(member);
-  if (wireId !== null) {
-    const local = topLevelRoles[wireId];
-    if (typeof local === 'string' && local.trim()) return local.trim();
-  }
   return undefined;
 }
 
@@ -456,7 +411,20 @@ export function mergeGraphWithMapEdges(
   const seeded = mapEdges.length > 0
     ? mapEdges
     : seedEdgesFromServerGraph(serverEdges);
-  const layoutEdges = edgesForLayout(seeded, sessions);
+  // An unapplied extra job is deliberately visual only while the server still
+  // has single-parent mounts. It must not pull the child into a second force
+  // component or make cycle checks/layout treat the intent as live topology.
+  const effectiveForLayout = seeded.filter((edge) => (
+    edge.type === 'parent' && !isUnappliedExtraJob(edge)
+  ));
+  // Keep the server graph as a fallback when a local document contains only
+  // a visual pending edge (or has not caught up with a newly mounted session).
+  // Local effective edges come last so an intentional pending remount still
+  // controls the temporary layout while reconciliation is in flight.
+  const layoutEdges = edgesForLayout([
+    ...seedEdgesFromServerGraph(serverEdges),
+    ...effectiveForLayout,
+  ], sessions);
   return { layoutEdges, visualEdges: [...seeded] };
 }
 
@@ -490,15 +458,21 @@ export function clearPendingTopology(doc: SessionMapDoc, childSessionId: string)
 
 /**
  * Persist a parent edge locally (source = parent, target = child).
- * Server mount is single-parent: a second parent replaces the first (not 兼职).
+ * Preserve existing parent edges so the map can represent multiple jobs.
  */
 export function upsertParentMapEdge(
   doc: SessionMapDoc,
   parentSessionId: string,
   childSessionId: string,
-  fields?: Pick<SessionMapEdge, 'mandate' | 'task' | 'returnTo' | 'status'>,
+  fields?: Pick<SessionMapEdge, 'role' | 'mandate' | 'task' | 'returnTo' | 'status'>,
 ): SessionMapDoc {
-  return addSessionMapEdge(disconnectParentEdges(doc, childSessionId), {
+  const withoutSameJob = {
+    ...doc,
+    edges: (doc.edges ?? []).filter((edge) => !(
+      edge.type === 'parent' && edge.source === parentSessionId && edge.target === childSessionId
+    )),
+  };
+  return addSessionMapEdge(withoutSameJob, {
     type: 'parent',
     source: parentSessionId,
     target: childSessionId,
@@ -506,31 +480,25 @@ export function upsertParentMapEdge(
   });
 }
 
-/** Persist a peer/service edge once per endpoint pair (local visual links). */
+/** Legacy compatibility helper. Non-parent edge types are ignored by the map. */
 export function upsertTypedMapEdge(
   doc: SessionMapDoc,
   edge: Omit<SessionMapEdge, 'id'> & { id?: string },
 ): SessionMapDoc {
-  if (edge.type === 'parent') {
-    return upsertParentMapEdge(doc, edge.source, edge.target, {
-      mandate: edge.mandate,
-      task: edge.task,
-      returnTo: edge.returnTo,
-      status: edge.status,
-    });
-  }
-  let next = removeSessionMapEdgeByEndpoints(doc, edge.type, edge.source, edge.target);
-  if (edge.type === 'peer') {
-    // Peer links are undirected: A→B and B→A are the same collaboration edge.
-    next = removeSessionMapEdgeByEndpoints(next, 'peer', edge.target, edge.source);
-  }
-  return addSessionMapEdge(next, edge);
+  if (edge.type !== 'parent') return doc;
+  return upsertParentMapEdge(doc, edge.source, edge.target, {
+    role: edge.role,
+    mandate: edge.mandate,
+    task: edge.task,
+    returnTo: edge.returnTo,
+    status: edge.status,
+  });
 }
 
 function parentEdgeSignature(edges: readonly SessionMapEdge[]): string {
   return edges
     .filter((edge) => edge.type === 'parent')
-    .map((edge) => `${edge.source}->${edge.target}`)
+    .map((edge) => `${edge.source}->${edge.target}:${edge.status ?? ''}`)
     .sort()
     .join('|');
 }
@@ -545,7 +513,7 @@ function nonParentEdgeSignature(edges: readonly SessionMapEdge[]): string {
 
 /**
  * Align local parent edges with the server mount forest.
- * Peer/service edges stay local. Pending topology children are left alone until flush.
+ * Pending topology children are left alone until flush.
  */
 export function reconcileParentEdgesWithServer(
   doc: SessionMapDoc,
@@ -555,11 +523,22 @@ export function reconcileParentEdgesWithServer(
     (doc.pendingTopology ?? []).map((op) => op.childSessionId),
   );
   const local = doc.edges ?? [];
+  for (const edge of local) {
+    if (edge.type === 'parent' && (
+      edge.status === 'draft'
+      || isUnappliedExtraJob(edge)
+      || edge.status === 'error'
+    )) {
+      pendingChildren.add(edge.target);
+    }
+  }
   const nonParent = local.filter((edge) => edge.type !== 'parent');
-  const localByChild = new Map<string, SessionMapEdge>();
+  const localByChild = new Map<string, SessionMapEdge[]>();
   for (const edge of local) {
     if (edge.type !== 'parent') continue;
-    localByChild.set(edge.target, edge);
+    const entries = localByChild.get(edge.target) ?? [];
+    entries.push(edge);
+    localByChild.set(edge.target, entries);
   }
 
   const nextParent: SessionMapEdge[] = [];
@@ -568,30 +547,38 @@ export function reconcileParentEdgesWithServer(
     const child = server.child_session_id;
     const parent = server.parent_session_id;
     seenChildren.add(child);
-    const existing = localByChild.get(child);
-    if (pendingChildren.has(child) && existing !== undefined) {
-      nextParent.push(existing);
-      continue;
-    }
-    if (existing !== undefined && existing.source === parent) {
-      nextParent.push(existing);
-      continue;
-    }
+    const existing = localByChild.get(child) ?? [];
+    const matching = existing.find((edge) => edge.source === parent);
+    const pending = existing.filter((edge) => (
+      edge.status === 'draft'
+      || isUnappliedExtraJob(edge)
+      || edge.status === 'error'
+    ));
+    // A server edge is authoritative and therefore always rendered as a live
+    // work edge. Keep local identity fields when possible, but never carry a
+    // pending/draft status onto an edge the server confirms as mounted.
+    const metadata = matching ?? existing.find((edge) => (
+      edge.status !== 'draft' && !isUnappliedExtraJob(edge)
+    ));
     nextParent.push({
-      id: existing?.id ?? newEdgeId(),
+      id: metadata?.id ?? newEdgeId(),
       type: 'parent',
       source: parent,
       target: child,
-      mandate: existing?.mandate,
-      task: existing?.task,
-      returnTo: existing?.returnTo,
-      status: existing?.status,
+      role: metadata?.role,
+      mandate: metadata?.mandate,
+      task: metadata?.task,
+      returnTo: metadata?.returnTo,
     });
+    for (const edge of pending) {
+      if (edge.source !== parent && !nextParent.some((candidate) => candidate.id === edge.id)) {
+        nextParent.push(edge);
+      }
+    }
   }
   for (const child of pendingChildren) {
     if (seenChildren.has(child)) continue;
-    const existing = localByChild.get(child);
-    if (existing !== undefined) nextParent.push(existing);
+    nextParent.push(...(localByChild.get(child) ?? []));
   }
 
   const nextEdges = [...nextParent, ...nonParent];

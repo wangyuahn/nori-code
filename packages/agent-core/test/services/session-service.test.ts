@@ -1199,6 +1199,23 @@ describe('SessionService.fork', () => {
 });
 
 describe('SessionService children', () => {
+  it('reports that the parent needs a project folder when creating a child', async () => {
+    const source = await svc.create({
+      metadata: { cwd: '/tmp/child-project-required' },
+      title: 'Parent',
+    });
+    const summaryIndex = state.sessions.findIndex((item) => item.id === source.id);
+    if (summaryIndex < 0) throw new Error('test session was not created');
+    const summary = state.sessions[summaryIndex]!;
+    state.sessions[summaryIndex] = { ...summary, workDir: '', metadata: {} };
+    const metadata = state.metas.get(source.id);
+    if (metadata !== undefined) state.metas.set(source.id, { ...metadata, custom: {} });
+
+    const { SessionProjectRequiredError } = await import('../../src/services/session/session');
+    await expect(svc.createChild(source.id, { title: 'Child' }))
+      .rejects.toBeInstanceOf(SessionProjectRequiredError);
+  });
+
   it('creates an empty child session and mounts it under the parent', async () => {
     const source = await svc.create({
       metadata: { cwd: '/tmp/child', source: true },

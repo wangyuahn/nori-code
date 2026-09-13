@@ -1,35 +1,41 @@
-import type { Session, SessionAgent } from '../api/client';
+import type { Session } from '../api/client';
 import type { MapNodeMember } from './session-graph';
 
 export type MapOpenTarget =
-  | { kind: 'session'; sessionId: string }
-  | { kind: 'agent'; hostSessionId: string; agent: SessionAgent };
+  | { kind: 'session'; sessionId: string };
 
 export function mapOpenTarget(member: MapNodeMember): MapOpenTarget | undefined {
-  if (member.agent !== undefined && member.hostSessionId !== undefined) {
-    return { kind: 'agent', hostSessionId: member.hostSessionId, agent: member.agent };
-  }
-  return { kind: 'session', sessionId: member.session.id };
+  // Every map card represents a Session. Agent metadata is decoration; the
+  // card always opens the session object it is rendering.
+  const sessionId = member.session.id.trim();
+  return sessionId.length > 0 ? { kind: 'session', sessionId } : undefined;
 }
 
 export function dedupeMapMembers(members: readonly MapNodeMember[], sessions: readonly Session[]): MapNodeMember[] {
-  const sessionIds = new Set(sessions.map((session) => session.id));
-  const mounted = new Set<string>();
   const agentKeys = new Set<string>();
-  const output: MapNodeMember[] = [];
+  const bySessionId = new Map<string, MapNodeMember>();
   for (const member of members) {
-    const mountedId = member.agent?.mounted_session_id;
-    if (mountedId !== undefined && sessionIds.has(mountedId)) continue;
-    if (mountedId !== undefined) {
-      if (mounted.has(mountedId)) continue;
-      mounted.add(mountedId);
-    }
+    // A TeamCreate agent without a durable Session is not a map object.
+    // Mounted sessions may still carry agent metadata, but they arrive as
+    // `kind: 'session'` and are handled below.
+    if (member.kind === 'agent') continue;
     if (member.agent !== undefined && member.hostSessionId !== undefined) {
       const key = `${member.hostSessionId}:${member.agent.agent_id}`;
       if (agentKeys.has(key)) continue;
       agentKeys.add(key);
     }
-    output.push(member);
+    const sessionId = member.session.id.trim();
+    if (sessionId.length === 0) continue;
+    const existing = bySessionId.get(sessionId);
+    if (existing === undefined || (existing.agent === undefined && member.agent !== undefined)) {
+      bySessionId.set(sessionId, member);
+    }
   }
-  return output;
+  // Keep the durable session list's order when it is available. This makes a
+  // duplicate agent overlay deterministic without moving a card on refresh.
+  const order = new Map(sessions.map((session, index) => [session.id, index]));
+  return [...bySessionId.values()].sort((left, right) => (
+    (order.get(left.session.id) ?? Number.MAX_SAFE_INTEGER)
+      - (order.get(right.session.id) ?? Number.MAX_SAFE_INTEGER)
+  ));
 }

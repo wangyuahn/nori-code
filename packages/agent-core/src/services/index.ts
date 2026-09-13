@@ -126,6 +126,7 @@ export {
   ISessionService,
   SessionNotFoundError,
   SessionMountCycleError,
+  SessionProjectRequiredError,
   SessionUndoUnavailableError,
   toProtocolSession,
 } from './session/session';

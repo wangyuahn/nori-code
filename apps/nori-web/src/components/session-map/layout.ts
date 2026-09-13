@@ -4,12 +4,12 @@ import { parentSessionIdOf } from '../../utils/session-mount';
 import { mapMemberRoleLabel, type MapNodeMember } from '../../utils/session-graph';
 
 export const NODE_W = 220;
-export const NODE_H = 148;
+export const NODE_H = 120;
 export const GAP_X = 36;
 export const GAP_Y = 64;
 export const CANVAS_PAD = 48;
-export const MIN_SCALE = 0.55;
-export const MAX_SCALE = 2.5;
+export const MIN_SCALE = 0.2;
+export const MAX_SCALE = 4;
 export const FIT_MAX_SCALE = 1.35;
 
 export interface TreeView {
@@ -75,15 +75,16 @@ export function sessionLabel(session: Session): string {
 }
 
 export function memberLabel(member: MapMemberRef): string {
-  if (member.agent !== undefined) return sessionAgentDisplayName(member.agent);
+  // A dual-write agent enriches the session card; it never replaces the
+  // session identity shown on the map.
+  if (member.kind === 'agent' && member.agent !== undefined) return sessionAgentDisplayName(member.agent);
   return sessionLabel(member.session);
 }
 
 export function memberRole(
   member: MapMemberRef,
-  topLevelRoles: Readonly<Record<string, string>> = {},
 ): string | undefined {
-  return mapMemberRoleLabel(member, topLevelRoles);
+  return mapMemberRoleLabel(member);
 }
 
 export function memberProjectCwd(

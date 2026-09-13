@@ -1,6 +1,6 @@
 /**
- * Conversation map: session mount forest plus TeamCreate member cards.
- * Full-bleed blueprint canvas with d3-force layout; department members open through host agents.
+ * Conversation map: Session cards and their work edges on a user-owned canvas.
+ * Agent metadata enriches a Session card but never becomes a separate map object.
  */
 
 import {
@@ -20,11 +20,9 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 
-import { api, type Session, type SessionAgent, type SessionGraph } from '../api/client';
+import { api, type Session, type SessionGraph } from '../api/client';
 import { useI18n } from '../i18n';
-import { sessionAgentDisplayName } from '../utils/session-agent';
 import { parentSessionIdOf, wouldCreateMountCycle } from '../utils/session-mount';
-import { dedupeMapMembers, mapOpenTarget } from '../utils/session-map-open';
 import { getAppErrors, reportAppError, subscribeAppErrors } from '../utils/error-center';
 import {
   CANVAS_PAD,
@@ -40,7 +38,6 @@ import {
   memberRole,
   nodeKey,
   projectFolderName,
-  sessionLabel,
   type MapMemberRef,
   type TreeView,
   zoomTreeView,
@@ -50,7 +47,6 @@ import {
   HOME_PULL_STRENGTH,
   LINK_DISTANCE,
   LINK_STRENGTH,
-  REARRANGE_SETTLE_MS,
   SESSION_MAP_AMBIENT_HOME_GRAVITY,
   SETTLE_ALPHA,
   buildMapComponents,
@@ -58,14 +54,60 @@ import {
   forceIntraComponentCollide,
   isComponentRootPin,
   mapMembersFromAgentCache,
-  resolveMapNodeSpawnPosition,
   resolveNodeDragGroupIds,
-  snapComponentChildrenToLiveRoot,
+  buildForceMapNodes,
   tidyComponentAroundRoot,
   type ForceMapLink,
   type ForceMapNode,
   type MapComponentInfo,
 } from './session-map/motion';
+
+import {
+  canMountMemberUnder,
+  clearPendingTopology,
+  describeMapCurrentAction,
+  describeMapErrorSummary,
+  disconnectParentEdges,
+  mapMemberStatus,
+  mapRuntimeStatus,
+  mapNodeCapabilities,
+  mapParentByChildFromEdges,
+  mapStatusDotClass,
+  formatElapsed,
+  formatMapStatusWord,
+  mergeGraphWithMapEdges,
+  pendingTopologyOpsReady,
+  queuePendingTopology,
+  reconcileParentEdgesWithServer,
+  sessionIsBusy,
+  upsertParentMapEdge,
+  wireSourceParentSessionId,
+  type MapLiveHints,
+} from '../utils/session-graph';
+import { SessionIdentityDrawer, type SessionIdentityDraftValues, type SessionIdentityParentStatus } from './SessionIdentityDrawer';
+import { Icon } from './Icon';
+import {
+  annotationBounds,
+  DEFAULT_ANNOTATION_COLORS,
+  canonicalMapPositionKey,
+  lookupMapPosition,
+  loadCachedMapAgents,
+  loadCachedMapGraph,
+  loadSessionMapDoc,
+  normalizeMapPositions,
+  newAnnotationId,
+  removeEdgesForSession,
+  isUnappliedExtraJob,
+  UNAPPLIED_EXTRA_JOB_STATUS,
+  removeSessionMapEdgeByEndpoints,
+  rectsIntersect,
+  saveCachedMapAgents,
+  saveCachedMapGraph,
+  saveSessionMapDoc,
+  type MapAnnotationBox,
+  type SessionMapDoc,
+  type SessionMapEdge,
+} from './sessionMapDoc';
 
 export {
   ensureGraphEdges,
@@ -76,7 +118,6 @@ export {
   memberRole,
   nodeKey,
   projectFolderName,
-  sessionLabel,
   zoomTreeView,
 } from './session-map/layout';
 export { NODE_H, NODE_W } from './session-map/layout';
@@ -86,7 +127,6 @@ export {
   HOME_PULL_STRENGTH,
   LINK_DISTANCE,
   LINK_STRENGTH,
-  REARRANGE_SETTLE_MS,
   SESSION_MAP_AMBIENT_HOME_GRAVITY,
   SETTLE_ALPHA,
   buildMapComponents,
@@ -96,59 +136,77 @@ export {
   mapMembersFromAgentCache,
   resolveMapNodeSpawnPosition,
   resolveNodeDragGroupIds,
+  buildForceMapNodes,
   snapComponentChildrenToLiveRoot,
   tidyComponentAroundRoot,
 } from './session-map/motion';
 export type { ForceMapLink, ForceMapNode, MapComponentInfo } from './session-map/motion';
-import {
-  canMountMemberUnder,
-  clearPendingTopology,
-  describeMapCurrentAction,
-  describeMapErrorSummary,
-  disconnectParentEdges,
-  formatMapStatusLabel,
-  mapMemberStatus,
-  mapNodeCapabilities,
-  mapParentByChildFromEdges,
-  mapStatusDotClass,
-  matchesMapStatusFilter,
-  mergeGraphWithMapEdges,
-  mergeSessionTags,
-  pendingTopologyOpsReady,
-  queuePendingTopology,
-  readSessionTags,
-  reconcileParentEdgesWithServer,
-  sessionIsBusy,
-  upsertParentMapEdge,
-  upsertTypedMapEdge,
-  wireSourceParentSessionId,
-  type MapLiveHints,
-  type MapStatusFilter,
-} from '../utils/session-graph';
-import { completeMountIdentityFromPrompt } from './mountIdentityComplete';
-import { SessionIdentityDrawer } from './SessionIdentityDrawer';
-import {
-  annotationBounds,
-  DEFAULT_ANNOTATION_COLORS,
-  loadCachedMapAgents,
-  loadSessionMapDoc,
-  newAnnotationId,
-  newLabelId,
-  removeEdgesForSession,
-  removeSessionMapEdge,
-  rectsIntersect,
-  saveCachedMapAgents,
-  saveSessionMapDoc,
-  sessionMatchesLabelFilter,
-  assignSessionLabel,
-  toggleSessionLabel,
-  type MapAnnotationBox,
-  type SessionMapDoc,
-  type SessionMapEdge,
-  type SessionMapEdgeType,
-} from './sessionMapDoc';
 
 export { parentSessionIdOf };
+
+function hydrateMapPositions(
+  positions: Record<string, { x: number; y: number }> | undefined,
+): Map<string, { x: number; y: number }> {
+  const map = new Map<string, { x: number; y: number }>();
+  for (const [id, pos] of Object.entries(normalizeMapPositions(positions) ?? {})) {
+    map.set(id, pos);
+  }
+  return map;
+}
+
+function forgetMapNodePosition(
+  positions: Map<string, { x: number; y: number }>,
+  sessionId: string,
+): void {
+  positions.delete(sessionId);
+  positions.delete(canonicalMapPositionKey(sessionId));
+}
+
+function createInitialForceGraph(
+  sessions: readonly Session[],
+  cachedGraph: SessionGraph | null,
+): {
+  nodes: ForceMapNode[];
+  links: ForceMapLink[];
+  positions: Map<string, { x: number; y: number }>;
+} {
+  const cachedDoc = loadSessionMapDoc();
+  const positions = hydrateMapPositions(cachedDoc.positions);
+  const cachedById = new Map((cachedGraph?.nodes ?? []).map((node) => [node.id, node]));
+  for (const session of sessions) cachedById.set(session.id, session);
+  const initialGraph = ensureGraphEdges({
+    nodes: [...cachedById.values()],
+    edges: [
+      ...(cachedGraph?.edges ?? []),
+      ...(cachedDoc.edges ?? [])
+        .filter((edge) => edge.type === 'parent')
+        .map((edge) => ({
+          parent_session_id: edge.source,
+          child_session_id: edge.target,
+        })),
+    ],
+  });
+  const initialAgents = mapMembersFromAgentCache(loadCachedMapAgents())
+    .filter((member) => cachedById.has(member.session.id));
+  const initialLayout = layoutSessionMountForest(initialGraph, initialAgents);
+  const { nodes } = buildForceMapNodes({
+    placed: initialLayout.placed,
+    previousById: new Map(),
+    positions,
+  });
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const links: ForceMapLink[] = [];
+  const seen = new Set<string>();
+  for (const edge of initialGraph.edges) {
+    const source = `session:${edge.parent_session_id}`;
+    const target = `session:${edge.child_session_id}`;
+    const key = `${source}->${target}`;
+    if (seen.has(key) || !nodeIds.has(source) || !nodeIds.has(target)) continue;
+    seen.add(key);
+    links.push({ source, target });
+  }
+  return { nodes, links, positions };
+}
 
 const CLICK_MOVE_THRESHOLD = 5;
 /**
@@ -157,11 +215,6 @@ const CLICK_MOVE_THRESHOLD = 5;
  * node cards / ports are swallowed so wiring can never open a session.
  */
 const WIRE_CLICK_SUPPRESS_MS = 600;
-/**
- * Collide radius for free placement (not forced into tree slots).
- */
-const REARRANGE_HOME_STRENGTH = 0.9;
-const REARRANGE_LINK_STRENGTH = 0.01;
 /** UE-style port hit radius (world units) — slightly tighter than full card half-width. */
 const PORT_HIT_RADIUS = 28;
 /** Snap / near-miss feedback when the drop barely misses a valid port. */
@@ -170,17 +223,44 @@ const BODY_PORT_SLOP = 8;
 /** Non-sticky errors auto-dismiss; mount failures stay until dismissed. */
 const ERROR_AUTO_DISMISS_MS = 6_500;
 const HINT_AUTO_DISMISS_MS = 2_800;
-/** Left floating list — focus uses optical center of free canvas. */
+/** Focus uses the optical center of the free canvas. */
 const FOCUS_INSET_TOP = 72;
 const FOCUS_INSET_BOTTOM = 36;
-const FOCUS_INSET_LEFT_LIST = 200;
 const AGENT_POLL_MS = 4_000;
 const MIN_ANNOTATION_SIZE = 48;
+const MAP_FIRST_USE_HINT_KEY = 'nori-session-map-first-use-hint';
 
-/** Floating chrome insets — reserve left strip when the session list is open. */
-function focusInsetForViewport(width: number, listOpen: boolean): { left: number; top: number; bottom: number } {
+function localizedMapStatus(
+  status: string,
+  tr: (english: string, chinese: string) => string,
+): string {
+  const word = formatMapStatusWord(status);
+  if (word === 'running') return tr('running', '运行中');
+  if (word === 'working') return tr('working', '工作中');
+  if (word === 'waiting-approval') return tr('waiting-approval', '等授权');
+  if (word === 'waiting') return tr('waiting', '等待中');
+  if (word === 'stopped') return tr('stopped', '已停止');
+  if (word === 'idle') return tr('idle', '空闲');
+  if (word === 'timeout') return tr('timeout', '超时');
+  if (word === 'error') return tr('error', '错误');
+  return word;
+}
+
+function localizedMapError(
+  summary: string,
+  tr: (english: string, chinese: string) => string,
+): string {
+  if (/[一-鿿]/u.test(summary)) return summary;
+  if (/cycle|mount_cycle|40921/i.test(summary)) return tr('This job would create a cycle.', '这份工作会形成循环。');
+  if (/busy|queued|in progress/i.test(summary)) return tr('This session is still working.', '这场会话还在工作。');
+  if (/timeout|timed out|maximum duration/i.test(summary)) return tr('This run timed out.', '这次运行超时了。');
+  if (/not available|not found|missing/i.test(summary)) return tr('This session is no longer available.', '这个会话已经不在了。');
+  return tr('The session reported an error. Try again.', '这场会话出了问题，可以重试。');
+}
+
+function focusInsetForViewport(): { left: number; top: number; bottom: number } {
   return {
-    left: listOpen && width > 640 ? FOCUS_INSET_LEFT_LIST : 16,
+    left: 16,
     top: FOCUS_INSET_TOP,
     bottom: FOCUS_INSET_BOTTOM,
   };
@@ -190,9 +270,7 @@ export { wireSourceParentSessionId };
 
 /** Whether dropping a wire onto `target` is a legal mount/reconnect or collab link. */
 export function isValidWireTarget(
-  wire: Pick<WireDragState, 'side' | 'parentSessionId' | 'childSessionId' | 'fromId'> & {
-    edgeType?: SessionMapEdgeType;
-  },
+  wire: Pick<WireDragState, 'side' | 'parentSessionId' | 'childSessionId' | 'fromId'>,
   target: ForceMapNode,
   nodes: readonly Session[],
   mapEdges: readonly SessionMapEdge[] = [],
@@ -201,13 +279,6 @@ export function isValidWireTarget(
   if (!caps.canWireIn) return false;
   if (target.id === wire.fromId) return false;
   const targetId = target.member.session.id;
-  const edgeType = wire.edgeType ?? 'parent';
-  if (edgeType === 'peer' || edgeType === 'service') {
-    const otherId = wire.side === 'out' ? wire.parentSessionId : wire.childSessionId;
-    if (otherId.length === 0 || targetId === otherId) return false;
-    if (otherId.startsWith('agent:') || targetId.startsWith('agent:')) return false;
-    return true;
-  }
   const mapParents = mapParentByChildFromEdges(mapEdges);
   if (wire.side === 'out') {
     const parentId = wire.parentSessionId;
@@ -275,21 +346,30 @@ function linkEndpoint(node: ForceMapNode, side: 'bottom' | 'top'): { x: number; 
 
 /** On-canvas identity editor — blank-canvas create-new ONLY (link-existing is silent). */
 interface MountDraft {
+  id: string;
   /** Captured parent session id — never activeSessionId. */
   parentId: string;
   title: string;
   role: string;
   mandate: string;
   prompt: string;
+  status?: 'editing' | 'asking-parent' | 'error' | 'creating';
+  error?: string;
   /** World-space anchor for the on-canvas identity editor (drop point). */
   worldX: number;
   worldY: number;
 }
 
+interface TopLevelCreatePlaceholder {
+  id: string;
+  worldX: number;
+  worldY: number;
+  status: 'editing' | 'creating' | 'error';
+  title?: string;
+}
+
 interface WireDragState {
   fromId: string;
-  /** Edge type chosen at wire start (Shift=peer, Alt=service, default=parent). */
-  edgeType: SessionMapEdgeType;
   /**
    * OUT: parenting wire from source OUT → drop on child IN/card or empty.
    * IN: reconnect wire from child IN → drop on new parent OUT/card.
@@ -320,13 +400,7 @@ interface NodeContextMenu {
   x: number;
   y: number;
   canUnmount: boolean;
-  canSelfBootstrapRole: boolean;
   label: string;
-}
-
-interface SelectionContextMenu {
-  x: number;
-  y: number;
 }
 
 interface CanvasContextMenu {
@@ -336,10 +410,25 @@ interface CanvasContextMenu {
   worldY: number;
 }
 
-function wireEdgeTypeFromModifiers(event: Pick<ReactPointerEvent, 'shiftKey' | 'altKey'>): SessionMapEdgeType {
-  if (event.altKey) return 'service';
-  if (event.shiftKey) return 'peer';
-  return 'parent';
+interface WorkEdgeContextMenu {
+  parentId: string;
+  childId: string;
+  x: number;
+  y: number;
+}
+
+interface WorkEdgeEditor {
+  parentId: string;
+  childId: string;
+  role: string;
+  mandate: string;
+  saving: boolean;
+  error?: string;
+}
+
+interface DraftContextMenu {
+  x: number;
+  y: number;
 }
 
 interface MarqueeState {
@@ -347,6 +436,59 @@ interface MarqueeState {
   startY: number;
   endX: number;
   endY: number;
+  additive?: boolean;
+}
+
+type RightClickHit =
+  | { type: 'canvas' }
+  | { type: 'node'; sessionId: string }
+  | { type: 'edge'; parentId: string; childId: string }
+  | { type: 'draft' };
+
+type MapStageGesture =
+  | { kind: 'idle' }
+  | {
+    kind: 'right-click-pending';
+    pointerId: number;
+    originX: number;
+    originY: number;
+    view: TreeView;
+    hit: RightClickHit;
+  }
+  | {
+    kind: 'panning';
+    pointerId: number;
+    originX: number;
+    originY: number;
+    view: TreeView;
+    source: 'right' | 'middle' | 'space';
+  }
+  | { kind: 'pan-done' }
+  | { kind: 'right-click' };
+
+function isBlockingStageGesture(kind: MapStageGesture['kind']): boolean {
+  return kind === 'panning' || kind === 'right-click-pending';
+}
+
+function resolveRightClickHit(target: EventTarget | null): RightClickHit {
+  if (!(target instanceof Element)) return { type: 'canvas' };
+  if (target.closest('.session-map-draft-node') !== null) return { type: 'draft' };
+  const node = target.closest('.session-map-node');
+  if (node instanceof HTMLElement) {
+    const sessionId = node.dataset.sessionId;
+    if (typeof sessionId === 'string' && sessionId.length > 0) {
+      return { type: 'node', sessionId };
+    }
+  }
+  const edge = target.closest('[data-parent-id][data-child-id]');
+  if (edge instanceof Element) {
+    const parentId = edge.getAttribute('data-parent-id');
+    const childId = edge.getAttribute('data-child-id');
+    if (parentId !== null && childId !== null) {
+      return { type: 'edge', parentId, childId };
+    }
+  }
+  return { type: 'canvas' };
 }
 
 /**
@@ -432,9 +574,7 @@ export function findNearestValidWireTarget(
   forceNodes: ReadonlyArray<ForceMapNode>,
   worldX: number,
   worldY: number,
-  wire: Pick<WireDragState, 'side' | 'parentSessionId' | 'childSessionId' | 'fromId'> & {
-    edgeType?: SessionMapEdgeType;
-  },
+  wire: Pick<WireDragState, 'side' | 'parentSessionId' | 'childSessionId' | 'fromId'>,
   nodes: readonly Session[],
   mapEdges: readonly SessionMapEdge[] = [],
   maxDistance = NEAR_MISS_RADIUS,
@@ -485,21 +625,44 @@ export function nearestSessionMapNodeDistance(
 export function SessionMapPage({
   sessions,
   activeSessionId,
-  activeAgentId,
   onOpenSession,
-  onOpenAgent,
   onGraphChanged,
+  onCreateTopLevelSession,
+  onChooseProject,
+  preferredCreateCwd,
+  onAskParentIdentity,
 }: {
   sessions: readonly Session[];
   activeSessionId?: string;
-  activeAgentId?: string;
   onOpenSession: (sessionId: string) => void;
-  /** Open a durable team agent inside its host session (legacy / agent-only members). */
-  onOpenAgent?: (hostSessionId: string, agent: SessionAgent) => void;
   onGraphChanged?: () => void;
+  /** Same create path as the Projects sidebar — Map only supplies the canvas position. */
+  onCreateTopLevelSession?: (cwd: string) => Promise<string | null>;
+  onChooseProject?: (options?: {
+    createSession?: boolean;
+    parentSessionId?: string;
+    stayOnMap?: boolean;
+    worldX?: number;
+    worldY?: number;
+    onCreated?: (sessionId: string | null) => void;
+    onSelected?: (cwd: string) => void;
+  }) => void;
+  /** Prefer the sidebar's current project folder when creating from the canvas. */
+  preferredCreateCwd?: string;
+  /** Optional constrained parent-side identity draft capability. */
+  onAskParentIdentity?: (input: { parentSessionId: string; brief: string }) => Promise<{
+    title: string;
+    role: string;
+    mandate: string;
+  }>;
 }) {
   const { tr } = useI18n();
-  const [graph, setGraph] = useState<SessionGraph | null>(null);
+  const cachedGraph = loadCachedMapGraph();
+  const initialForceRef = useRef<ReturnType<typeof createInitialForceGraph>>(undefined);
+  if (initialForceRef.current === undefined) {
+    initialForceRef.current = createInitialForceGraph(sessions, cachedGraph);
+  }
+  const [graph, setGraph] = useState<SessionGraph | null>(() => cachedGraph);
   const [agentExtras, setAgentExtras] = useState<MapMemberRef[]>(() => (
     mapMembersFromAgentCache(loadCachedMapAgents())
   ));
@@ -507,31 +670,58 @@ export function SessionMapPage({
   const [errorSticky, setErrorSticky] = useState(false);
   const errorStickyRef = useRef(false);
   const [hint, setHint] = useState<string | null>(null);
+  const [firstUseHintVisible, setFirstUseHintVisible] = useState(() => {
+    try {
+      return localStorage.getItem(MAP_FIRST_USE_HINT_KEY) !== '1';
+    } catch {
+      return true;
+    }
+  });
   const [query, setQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchOpenRef = useRef(false);
+  searchOpenRef.current = searchOpen;
+  const searchIndexRef = useRef(0);
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setQuery('');
+    searchIndexRef.current = 0;
+  }, []);
+  const openSearch = useCallback(() => {
+    setSearchOpen(true);
+    window.setTimeout(() => searchInputRef.current?.focus(), 0);
+  }, []);
   const [view, setView] = useState<TreeView>({ x: 0, y: 0, scale: 1 });
   const [panning, setPanning] = useState(false);
   const [draft, setDraft] = useState<MountDraft | null>(null);
+  const [topLevelPlaceholder, setTopLevelPlaceholder] = useState<TopLevelCreatePlaceholder | null>(null);
+  const [stoppingIds, setStoppingIds] = useState<Set<string>>(() => new Set());
+  const [stopErrors, setStopErrors] = useState<Set<string>>(() => new Set());
+  const [nodeErrors, setNodeErrors] = useState<Record<string, string>>({});
   const [wireDrag, setWireDrag] = useState<WireDragState | null>(null);
   const [wireSnapTargetId, setWireSnapTargetId] = useState<string | null>(null);
   const wireDragRef = useRef<WireDragState | null>(null);
-  const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const disposedRef = useRef(false);
   const [mapDoc, setMapDoc] = useState<SessionMapDoc>(() => loadSessionMapDoc());
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
-  const [bindAnnotationId, setBindAnnotationId] = useState<string | null>(null);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
-  const [forceNodes, setForceNodes] = useState<ForceMapNode[]>([]);
-  const [forceLinks, setForceLinks] = useState<ForceMapLink[]>([]);
+  const [forceNodes, setForceNodes] = useState<ForceMapNode[]>(() => initialForceRef.current!.nodes);
+  const [forceLinks, setForceLinks] = useState<ForceMapLink[]>(() => initialForceRef.current!.links);
   const [nodeMenu, setNodeMenu] = useState<NodeContextMenu | null>(null);
   const [marquee, setMarquee] = useState<MarqueeState | null>(null);
-  const [selectionBox, setSelectionBox] = useState<MarqueeState | null>(null);
-  const [selectionMenu, setSelectionMenu] = useState<SelectionContextMenu | null>(null);
   const [canvasMenu, setCanvasMenu] = useState<CanvasContextMenu | null>(null);
+  const [workEdgeMenu, setWorkEdgeMenu] = useState<WorkEdgeContextMenu | null>(null);
+  const [workEdgeEditor, setWorkEdgeEditor] = useState<WorkEdgeEditor | null>(null);
+  const [draftMenu, setDraftMenu] = useState<DraftContextMenu | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectedWorkEdge, setSelectedWorkEdge] = useState<{ parentId: string; childId: string } | null>(null);
+  const [confirmWorkEdge, setConfirmWorkEdge] = useState<{ parentId: string; childId: string } | null>(null);
+  const [deleteConfirmSessionId, setDeleteConfirmSessionId] = useState<string | null>(null);
+  const [deleteSelectionConfirm, setDeleteSelectionConfirm] = useState(false);
+  const [batchFailure, setBatchFailure] = useState<string | null>(null);
   const [identitySession, setIdentitySession] = useState<Session | null>(null);
-  const [statusFilter, setStatusFilter] = useState<MapStatusFilter>('all');
-  const [tagMenuOpen, setTagMenuOpen] = useState(false);
   const [liveHints, setLiveHints] = useState<MapLiveHints>({
     approvals: [],
     activity: [],
@@ -540,9 +730,6 @@ export function SessionMapPage({
   });
   const selectedIdsRef = useRef(selectedIds);
   selectedIdsRef.current = selectedIds;
-  const selectAllVisibleRef = useRef<() => void>(() => {});
-  const [activeLabelIds, setActiveLabelIds] = useState<string[]>([]);
-  const [listOpen, setListOpen] = useState(false);
   const forceNodesRef = useRef(forceNodes);
   forceNodesRef.current = forceNodes;
   const [, redraw] = useState(0);
@@ -560,10 +747,18 @@ export function SessionMapPage({
     origin: { x: number; y: number; width: number; height: number };
     moved: boolean;
   } | null>(null);
+  const draftDragRef = useRef<{
+    startClientX: number;
+    startClientY: number;
+    originX: number;
+    originY: number;
+    grabWorldX: number;
+    grabWorldY: number;
+    moved: boolean;
+  } | null>(null);
 
   const viewportRef = useRef<HTMLDivElement>(null);
-  const panOrigin = useRef<{ x: number; y: number; view: TreeView } | null>(null);
-  const rightPanMovedRef = useRef(false);
+  const gestureRef = useRef<MapStageGesture>({ kind: 'idle' });
   const refreshRevision = useRef(0);
   /** Last activeSessionId we centered on (avoids re-stealing pan on graph poll). */
   const centeredSessionRef = useRef<string | undefined>(undefined);
@@ -574,19 +769,11 @@ export function SessionMapPage({
   /** Follow active node while mount/agent topology finishes loading. */
   const followFocusUntilRef = useRef(0);
   const followRafRef = useRef<number | null>(null);
-  const rearrangeTimerRef = useRef<number | null>(null);
-  const rearrangeGenerationRef = useRef(0);
-  /** While true, poll refresh must not rebuild the graph mid-rearrange/settle. */
-  const rearrangeActiveRef = useRef(false);
   const simulationRef = useRef<Simulation<ForceMapNode, ForceMapLink> | null>(null);
   /** Hydrate from map doc immediately so first paint never teleports from forest seeds. */
-  const positionsRef = useRef<Map<string, { x: number; y: number }>>((() => {
-    const map = new Map<string, { x: number; y: number }>();
-    for (const [id, pos] of Object.entries(loadSessionMapDoc().positions ?? {})) {
-      map.set(id, pos);
-    }
-    return map;
-  })());
+  const positionsRef = useRef<Map<string, { x: number; y: number }>>(
+    initialForceRef.current!.positions,
+  );
   const topologyKeyRef = useRef('');
   const seedByIdRef = useRef(new Map<string, { x: number; y: number }>());
   const componentIndexRef = useRef(new Map<string, MapComponentInfo>());
@@ -602,14 +789,11 @@ export function SessionMapPage({
     /** Force-node ids dragged together (includes primary). */
     groupNodeIds: string[];
     groupStartPositions: Map<string, { x: number; y: number }>;
-    /** When true the ephemeral selection box follows until pointerup. */
-    fromSelection: boolean;
-    /** World-space selection rect at drag start (translated with the group). */
-    selectionBoxOrigin: MarqueeState | null;
   } | null>(null);
   const releaseDragPinsRef = useRef<(groupNodeIds: readonly string[]) => void>(() => {});
   const marqueeRef = useRef<MarqueeState | null>(null);
   const suppressClickRef = useRef<string | null>(null);
+  const spacePressedRef = useRef(false);
   /** Timestamp until which node/port clicks are swallowed after a wire gesture. */
   const suppressMapClickUntilRef = useRef(0);
   const viewRef = useRef(view);
@@ -619,7 +803,7 @@ export function SessionMapPage({
   const mapDocRef = useRef(mapDoc);
   mapDocRef.current = mapDoc;
   const cancelDraftRef = useRef<() => void>(() => {});
-  const agentWarnShownRef = useRef(false);
+  const dismissUnappliedExtraJobRef = useRef<(parentId: string, childId: string) => void>(() => {});
   const wireListenersRef = useRef<{
     move: (event: PointerEvent) => void;
     up: (event: PointerEvent) => void;
@@ -630,12 +814,15 @@ export function SessionMapPage({
   } | null>(null);
 
   const persistPositions = useCallback((positions: Map<string, { x: number; y: number }>) => {
-    const nextPositions: Record<string, { x: number; y: number }> = {
+    const merged: Record<string, { x: number; y: number }> = {
       ...mapDocRef.current.positions,
     };
     for (const [id, pos] of positions) {
-      nextPositions[id] = { x: pos.x, y: pos.y };
+      merged[id] = { x: pos.x, y: pos.y };
     }
+    const nextPositions = normalizeMapPositions(merged);
+    const canonical = hydrateMapPositions(nextPositions);
+    positionsRef.current = canonical;
     const next = { ...mapDocRef.current, positions: nextPositions };
     mapDocRef.current = next;
     setMapDoc(next);
@@ -701,7 +888,7 @@ export function SessionMapPage({
       const target = event.target as HTMLElement | null;
       // Node cards, ports, and note boxes (a wire dropped onto a note must not
       // also open the note editor).
-      if (target?.closest('.session-map-node, .session-map-port, .session-map-annotation') !== null) {
+      if (target?.closest('.session-map-node, .session-map-port, .session-map-annotation, .session-map-edges') !== null) {
         event.preventDefault();
         event.stopPropagation();
       }
@@ -728,6 +915,7 @@ export function SessionMapPage({
   // in-flight gestures down. Keep selection box/ids; only dismiss menus.
   useEffect(() => {
     const onBlur = () => {
+      spacePressedRef.current = false;
       cancelWireDrag();
       const drag = dragRef.current;
       detachNodeDragListeners();
@@ -736,29 +924,49 @@ export function SessionMapPage({
       }
       dragRef.current = null;
       annotationDragRef.current = null;
-      panOrigin.current = null;
+      gestureRef.current = { kind: 'idle' };
       setPanning(false);
       if (marqueeRef.current !== null) {
         marqueeRef.current = null;
         setMarquee(null);
       }
-      setSelectionMenu(null);
       setNodeMenu(null);
+      setWorkEdgeMenu(null);
+      setDraftMenu(null);
     };
     window.addEventListener('blur', onBlur);
     return () => window.removeEventListener('blur', onBlur);
   }, [cancelWireDrag, detachNodeDragListeners]);
 
-  // Escape: wire → marquee → draft → menus/editors/selection.
-  // Ctrl/Cmd+A selects every visible session card.
+  // Escape: wire → menu → search → draft → selection.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target;
       const typing = target instanceof HTMLElement
         && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
-      if ((event.key === 'a' || event.key === 'A') && (event.metaKey || event.ctrlKey) && !typing) {
+      const typingInSearch = target === searchInputRef.current;
+      if (event.key === ' ' && !typing) {
+        spacePressedRef.current = true;
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && (!typing || typingInSearch)) {
         event.preventDefault();
-        selectAllVisibleRef.current();
+        openSearch();
+        return;
+      }
+      if ((event.key === 'Delete' || event.key === 'Backspace') && !typing && selectedWorkEdge !== null) {
+        event.preventDefault();
+        const edge = selectedWorkEdge;
+        const stored = (mapDocRef.current.edges ?? []).find((candidate) => (
+          candidate.type === 'parent'
+          && candidate.source === edge.parentId
+          && candidate.target === edge.childId
+        ));
+        if (stored !== undefined && isUnappliedExtraJob(stored)) {
+          dismissUnappliedExtraJobRef.current(edge.parentId, edge.childId);
+          return;
+        }
+        setConfirmWorkEdge(edge);
         return;
       }
       if (event.key !== 'Escape') return;
@@ -767,36 +975,58 @@ export function SessionMapPage({
         cancelWireDrag();
         return;
       }
+      if (nodeMenu !== null || canvasMenu !== null || workEdgeMenu !== null || draftMenu !== null || confirmWorkEdge !== null || workEdgeEditor !== null || identitySession !== null) {
+        event.preventDefault();
+        setNodeMenu(null);
+        setCanvasMenu(null);
+        setWorkEdgeMenu(null);
+        setDraftMenu(null);
+        setConfirmWorkEdge(null);
+        setWorkEdgeEditor(null);
+        setIdentitySession(null);
+        return;
+      }
+      if (searchOpenRef.current) {
+        event.preventDefault();
+        closeSearch();
+        return;
+      }
+      if (topLevelPlaceholder !== null && topLevelPlaceholder.status === 'editing') {
+        event.preventDefault();
+        setTopLevelPlaceholder(null);
+        return;
+      }
       if (marqueeRef.current !== null) {
         event.preventDefault();
         marqueeRef.current = null;
         setMarquee(null);
         return;
       }
-      // Draft cancel wins over INPUT focus — Esc always aborts an open identity draft.
       if (draftRef.current !== null) {
         event.preventDefault();
         cancelDraftRef.current();
         return;
       }
       if (typing) return;
-      setSelectionMenu(null);
-      setNodeMenu(null);
-      setTagMenuOpen(false);
-      setBindAnnotationId(null);
       setEditingAnnotationId(null);
       setSelectedIds((ids) => (ids.length > 0 ? [] : ids));
+      setSelectedWorkEdge(null);
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (event.key === ' ') spacePressedRef.current = false;
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [cancelWireDrag]);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, [cancelWireDrag, canvasMenu, closeSearch, confirmWorkEdge, draftMenu, identitySession, nodeMenu, openSearch, selectedWorkEdge, topLevelPlaceholder, workEdgeEditor, workEdgeMenu]);
 
   const clearError = useCallback(() => {
     errorStickyRef.current = false;
     setErrorSticky(false);
     setError(null);
-    // Allow agent-refresh warnings to surface again after the user dismisses.
-    agentWarnShownRef.current = false;
   }, []);
 
   const showError = useCallback((message: string, sticky = false) => {
@@ -806,9 +1036,25 @@ export function SessionMapPage({
     reportAppError({ source: 'map', message, operation: 'map' });
   }, []);
 
-  const setBusyLocked = useCallback((next: boolean) => {
+  const showNodeError = useCallback((sessionId: string, message: string) => {
+    setNodeErrors((current) => ({ ...current, [sessionId]: message }));
+    window.setTimeout(() => {
+      setNodeErrors((current) => {
+        if (current[sessionId] !== message) return current;
+        const next = { ...current };
+        delete next[sessionId];
+        return next;
+      });
+    }, ERROR_AUTO_DISMISS_MS);
+  }, []);
+
+  const setTopologyBusy = useCallback((next: boolean) => {
     busyRef.current = next;
-    setBusy(next);
+    // Mutations are object-local. The canvas remains interactive while a
+    // session, edge, or deletion request is in flight.
+    if (draftRef.current !== null && next) {
+      setDraft((current) => current === null ? current : { ...current, status: current.status === 'creating' ? 'creating' : current.status });
+    }
   }, []);
 
   const showHint = useCallback((message: string) => {
@@ -828,6 +1074,11 @@ export function SessionMapPage({
     return () => window.clearTimeout(timer);
   }, [hint]);
 
+  const dismissFirstUseHint = useCallback(() => {
+    setFirstUseHintVisible(false);
+    try { localStorage.setItem(MAP_FIRST_USE_HINT_KEY, '1'); } catch { /* best effort */ }
+  }, []);
+
   // Settled positions are user-owned: persist when the simulation comes to
   // rest and on unload, otherwise simulation drift is lost on reload.
   useEffect(() => {
@@ -837,14 +1088,17 @@ export function SessionMapPage({
   }, [persistPositions]);
 
   const persistDoc = useCallback((next: SessionMapDoc) => {
-    setMapDoc(next);
-    saveSessionMapDoc(next);
+    const canonical = {
+      ...next,
+      positions: normalizeMapPositions(next.positions),
+    };
+    mapDocRef.current = canonical;
+    setMapDoc(canonical);
+    saveSessionMapDoc(canonical);
   }, []);
 
   const clearSelection = useCallback(() => {
     setSelectedIds([]);
-    setSelectionBox(null);
-    setSelectionMenu(null);
   }, []);
 
   const componentIndex = useMemo(
@@ -879,7 +1133,6 @@ export function SessionMapPage({
   const refreshAgents = useCallback(async (nodes: readonly Session[]): Promise<MapMemberRef[]> => {
     const focusIds = agentHostIdsFor(nodes);
     const extras: MapMemberRef[] = [];
-    const agentErrors: string[] = [];
     await Promise.all(focusIds.map(async (hostId) => {
       try {
         const result = await api.sessions.getAgents(hostId);
@@ -888,67 +1141,55 @@ export function SessionMapPage({
           const mountedId = agent.mounted_session_id;
           if (mountedId === undefined || mountedId.length === 0) continue;
           const mountedSession = nodes.find((node) => node.id === mountedId);
+          // A TeamCreate member without a durable Session has no map card.
+          // Agent metadata may enrich an existing card, but never creates one.
+          if (mountedSession === undefined) continue;
           extras.push({
             kind: 'session',
-            session: mountedSession ?? {
-              id: mountedId,
-              title: sessionAgentDisplayName(agent),
-              status: agent.status,
-              created_at: agent.last_active ?? new Date().toISOString(),
-              updated_at: agent.last_active ?? new Date().toISOString(),
-              metadata: {
-                parent_session_id: hostId,
-                mount_role: agent.role,
-                mount_mandate: agent.mandate,
-              },
-            },
+            session: mountedSession,
             hostSessionId: hostId,
             agent,
           });
         }
-      } catch (err) {
-        agentErrors.push(err instanceof Error ? err.message : String(err));
+      } catch {
+        // Agent/activity enrichment is best effort. A missing member response
+        // must never replace the session map or expose server diagnostics.
       }
     }));
-    if (agentErrors.length === 0) {
-      agentWarnShownRef.current = false;
-    } else if (!agentWarnShownRef.current && !errorStickyRef.current) {
-      agentWarnShownRef.current = true;
-      showError(tr(
-        `Could not refresh team members (${agentErrors[0]}). Session mounts still shown.`,
-        `无法刷新团队成员（${agentErrors[0]}）。会话挂载仍可用。`,
-      ));
-    }
     return extras;
-  }, [agentHostIdsFor, showError, tr]);
+  }, [agentHostIdsFor]);
 
   const pruneStalePositions = useCallback((aliveKeys: ReadonlySet<string>) => {
-    let changed = false;
-    const stale: string[] = [];
-    for (const key of positionsRef.current.keys()) {
-      if (!aliveKeys.has(key)) stale.push(key);
+    const live = new Map<string, { x: number; y: number }>();
+    for (const [key, pos] of positionsRef.current) {
+      const canonical = canonicalMapPositionKey(key);
+      if (!aliveKeys.has(canonical)) continue;
+      if (key === canonical || !live.has(canonical)) live.set(canonical, pos);
     }
-    for (const key of stale) {
-      positionsRef.current.delete(key);
-      changed = true;
+    for (const [key, pos] of positionsRef.current) {
+      const canonical = canonicalMapPositionKey(key);
+      if (key === canonical && aliveKeys.has(canonical)) live.set(canonical, pos);
     }
+    positionsRef.current = live;
+
     const persisted = mapDocRef.current.positions;
-    if (persisted === undefined && !changed) return;
-    const nextPositions: Record<string, { x: number; y: number }> = {};
-    for (const [id, pos] of Object.entries(persisted ?? {})) {
-      if (aliveKeys.has(id) || positionsRef.current.has(id)) {
-        nextPositions[id] = pos;
-      } else {
-        changed = true;
-      }
-    }
-    for (const [id, pos] of positionsRef.current) {
-      nextPositions[id] = pos;
-    }
-    if (!changed && Object.keys(nextPositions).length === Object.keys(persisted ?? {}).length) return;
+    const nextPositions = normalizeMapPositions({
+      ...Object.fromEntries(
+        Object.entries(persisted ?? {}).filter(([id]) => (
+          aliveKeys.has(canonicalMapPositionKey(id)) || live.has(canonicalMapPositionKey(id))
+        )),
+      ),
+      ...Object.fromEntries(live),
+    });
+    const persistedKeys = Object.keys(persisted ?? {});
+    const nextKeys = Object.keys(nextPositions ?? {});
+    const unchanged = persistedKeys.length === nextKeys.length
+      && nextKeys.every((key) => persisted?.[key]?.x === nextPositions?.[key]?.x
+        && persisted?.[key]?.y === nextPositions?.[key]?.y);
+    if (unchanged) return;
     const next = {
       ...mapDocRef.current,
-      positions: Object.keys(nextPositions).length > 0 ? nextPositions : undefined,
+      positions: nextPositions,
     };
     mapDocRef.current = next;
     setMapDoc(next);
@@ -958,8 +1199,9 @@ export function SessionMapPage({
   const refresh = useCallback(async () => {
     // Poll/mutation refreshes must never stomp an open identity draft or an
     // in-flight wire/node drag — graph data would shift nodes mid-gesture.
-    if (draftRef.current !== null || wireDragRef.current !== null || dragRef.current !== null
-      || annotationDragRef.current !== null || rearrangeActiveRef.current
+    if (wireDragRef.current !== null || dragRef.current !== null
+      || annotationDragRef.current !== null
+      || draftDragRef.current !== null
       || marqueeRef.current !== null) {
       return;
     }
@@ -972,9 +1214,16 @@ export function SessionMapPage({
         setMapDoc(reconciled);
         saveSessionMapDoc(reconciled);
       }
+      // Graph nodes are the first revalidation layer; activity and agent
+      // extras enrich cards later and must not gate the canvas.
+      if (!disposedRef.current && revision === refreshRevision.current) {
+        setGraph(next);
+        saveCachedMapGraph(next);
+      }
       const extras = await refreshAgents(next.nodes);
       if (disposedRef.current || revision !== refreshRevision.current) return;
       setGraph(next);
+      saveCachedMapGraph(next);
       setAgentExtras(extras);
       saveCachedMapAgents(cachedAgentsFromMapMembers(extras));
       const alive = new Set<string>();
@@ -1036,7 +1285,10 @@ export function SessionMapPage({
                 mandate: op.mandate,
               });
               doc = clearPendingTopology(
-                upsertParentMapEdge(doc, op.parentSessionId, op.childSessionId),
+                upsertParentMapEdge(doc, op.parentSessionId, op.childSessionId, {
+                  role: op.role,
+                  mandate: op.mandate,
+                }),
                 op.childSessionId,
               );
             } else if (op.kind === 'remount' && op.parentSessionId !== undefined) {
@@ -1045,16 +1297,23 @@ export function SessionMapPage({
                 mandate: op.mandate,
               });
               doc = clearPendingTopology(
-                upsertParentMapEdge(doc, op.parentSessionId, op.childSessionId),
+                upsertParentMapEdge(doc, op.parentSessionId, op.childSessionId, {
+                  role: op.role,
+                  mandate: op.mandate,
+                }),
                 op.childSessionId,
               );
             } else if (op.kind === 'unmount') {
               await api.sessions.unmount(op.childSessionId);
               doc = clearPendingTopology(disconnectParentEdges(doc, op.childSessionId), op.childSessionId);
             }
-          } catch (flushError) {
+          } catch {
             if (disposedRef.current || revision !== refreshRevision.current) return;
-            showError(flushError instanceof Error ? flushError.message : String(flushError));
+            const failedDoc = clearPendingTopology(doc, op.childSessionId);
+            doc = op.parentSessionId !== undefined
+              ? upsertParentMapEdge(failedDoc, op.parentSessionId, op.childSessionId, { status: 'error' })
+              : failedDoc;
+            showHint(tr('这份工作暂时没生效，可以重试。', '这份工作暂时没生效，可以重试。'));
             break;
           }
         }
@@ -1069,18 +1328,30 @@ export function SessionMapPage({
           setGraph(refreshed);
         }
       }
-    } catch (err) {
+    } catch {
       if (disposedRef.current || revision !== refreshRevision.current) return;
-      showError(err instanceof Error ? err.message : String(err));
-      // Fall back to sidebar sessions + metadata edges so hierarchy still renders.
-      const fallback = ensureGraphEdges({ nodes: [...sessions], edges: [] });
+      showError(
+        (graph !== null || forceNodesRef.current.length > 0)
+          ? tr('Cannot refresh the map. Showing the last saved map.', '连不上，下面是上次的地图。')
+          : tr('The map could not be loaded.', '地图暂时打不开。'),
+      );
+      // Keep the last successful graph when the server is unavailable. Sidebar
+      // data may still be loading (or may be a partial page), so replacing the
+      // snapshot with `sessions` alone would make cached nodes disappear.
+      const fallbackById = new Map((graph?.nodes ?? []).map((node) => [node.id, node]));
+      for (const session of sessions) fallbackById.set(session.id, session);
+      const fallback = ensureGraphEdges({
+        nodes: [...fallbackById.values()],
+        edges: graph?.edges ?? [],
+      });
       const extras = await refreshAgents(fallback.nodes);
       if (disposedRef.current || revision !== refreshRevision.current) return;
       setGraph(fallback);
+      saveCachedMapGraph(fallback);
       setAgentExtras(extras);
       saveCachedMapAgents(cachedAgentsFromMapMembers(extras));
     }
-  }, [onGraphChanged, pruneStalePositions, refreshAgents, sessions, showError]);
+  }, [graph, onGraphChanged, pruneStalePositions, refreshAgents, sessions, showError, tr]);
 
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
@@ -1153,56 +1424,34 @@ export function SessionMapPage({
     return () => observer.disconnect();
   }, []);
 
-  const allNodes = useMemo(() => graph?.nodes ?? [...sessions], [graph, sessions]);
+  const allNodes = useMemo(() => {
+    const merged = new Map((graph?.nodes ?? []).map((node) => [node.id, node]));
+    for (const session of sessions) merged.set(session.id, session);
+    return [...merged.values()];
+  }, [graph, sessions]);
   const byId = useMemo(() => new Map(allNodes.map((session) => [session.id, session])), [allNodes]);
 
   const mapGraphContext = useMemo(() => ({
     sessions: allNodes,
     mapEdges: mapDoc.edges ?? [],
-    topLevelRoles: mapDoc.topLevelRoles ?? {},
-    hasOpenAgentHandler: onOpenAgent !== undefined,
-  }), [allNodes, mapDoc.edges, mapDoc.topLevelRoles, onOpenAgent]);
+  }), [allNodes, mapDoc.edges]);
 
   const memberCaps = useCallback((member: MapMemberRef) => (
     mapNodeCapabilities(member, mapGraphContext)
   ), [mapGraphContext]);
 
-  const selectedParentSessionId = useMemo(() => {
-    if (selectedIds.length !== 1) return undefined;
-    const sessionId = selectedIds[0]!;
-    const sessionNode = byId.get(sessionId);
-    if (sessionNode === undefined) return undefined;
-    const caps = mapNodeCapabilities({ kind: 'session', session: sessionNode }, mapGraphContext);
-    return caps.canMountOthers ? sessionId : undefined;
-  }, [byId, mapGraphContext, selectedIds]);
-
-  const listClickTimerRef = useRef<number | null>(null);
-
   const openMember = useCallback((member: MapMemberRef) => {
-    if (performance.now() <= suppressMapClickUntilRef.current || draft !== null) return;
-    const target = mapOpenTarget(member);
-    if (target === undefined) {
+    if (performance.now() <= suppressMapClickUntilRef.current) return;
+    const sessionId = member.session.id.trim();
+    if (sessionId.length === 0) {
       showError(tr('This team member is no longer available.', '这个团队成员已不可用。'));
       return;
     }
     clearError();
-    if (target.kind === 'session') {
-      onOpenSession(target.sessionId);
-    } else if (onOpenAgent !== undefined) {
-      onOpenAgent(target.hostSessionId, target.agent);
-    } else {
-      onOpenSession(target.agent.mounted_session_id ?? target.hostSessionId);
-    }
-  }, [clearError, draft, onOpenAgent, onOpenSession, showError, tr]);
-
-  const agentOnlyExtras = useMemo(() => (
-    dedupeMapMembers(agentExtras.filter((extra) => {
-      if (extra.kind === 'session') return false;
-      const mounted = extra.agent?.mounted_session_id;
-      if (mounted !== undefined && byId.has(mounted)) return false;
-      return true;
-    }), allNodes)
-  ), [agentExtras, byId]);
+    setSelectedIds([]);
+    setSelectedWorkEdge(null);
+    onOpenSession(sessionId);
+  }, [clearError, onOpenSession, showError, tr]);
 
   const listMembers = useMemo(() => {
     const sessionMembers: MapMemberRef[] = allNodes.map((session) => {
@@ -1220,27 +1469,17 @@ export function SessionMapPage({
         agent: linked?.agent,
       };
     });
-    return [...sessionMembers, ...agentOnlyExtras];
-  }, [agentExtras, agentOnlyExtras, allNodes]);
+    return sessionMembers;
+  }, [agentExtras, allNodes]);
 
   const filteredList = useMemo(() => {
     const q = query.trim().toLowerCase();
     return listMembers.filter((member) => {
-      if (!matchesMapStatusFilter(mapMemberStatus(member), statusFilter)) return false;
       const sessionId = member.session.id;
-      if (activeLabelIds.length > 0
-        && !sessionMatchesLabelFilter(sessionId, mapDoc.sessionLabels, activeLabelIds)
-        && !(member.kind === 'agent' && sessionMatchesLabelFilter(
-          member.hostSessionId ?? sessionId,
-          mapDoc.sessionLabels,
-          activeLabelIds,
-        ))) {
-        return false;
-      }
       if (!q) return true;
       const title = memberLabel(member).toLowerCase();
       const prompt = (member.session.last_prompt ?? '').toLowerCase();
-      const role = (memberRole(member, mapDoc.topLevelRoles) ?? '').toLowerCase();
+      const role = (memberRole(member) ?? '').toLowerCase();
       const mandate = (
         typeof member.session.metadata?.mount_mandate === 'string'
           ? member.session.metadata.mount_mandate
@@ -1248,47 +1487,26 @@ export function SessionMapPage({
       ).toLowerCase();
       const cwd = (memberProjectCwd(member, byId) ?? '').toLowerCase();
       const folder = cwd ? projectFolderName(cwd).toLowerCase() : '';
-      const tags = readSessionTags(member.session).join(' ').toLowerCase();
       return title.includes(q)
         || prompt.includes(q)
         || sessionId.toLowerCase().includes(q)
         || role.includes(q)
         || mandate.includes(q)
-        || tags.includes(q)
         || (member.agent?.agent_id ?? '').toLowerCase().includes(q)
         || cwd.includes(q)
         || folder.includes(q);
     });
-  }, [activeLabelIds, byId, listMembers, mapDoc.sessionLabels, mapDoc.topLevelRoles, query, statusFilter]);
+  }, [byId, listMembers, query]);
 
   const visibleIds = useMemo(() => new Set(filteredList.map((member) => nodeKey(member))), [filteredList]);
-  const busyVisibleCount = useMemo(() => (
-    filteredList.filter((member) => {
-      const status = mapMemberStatus(member);
-      return sessionIsBusy(member.session)
-        || status === 'running'
-        || status === 'working'
-        || status === 'awaiting_approval'
-        || status === 'awaiting_question';
-    }).length
-  ), [filteredList]);
-
-  // Drop selection entries that filters hide — batch delete/annotate must not
-  // act on invisible nodes the user can no longer see.
   useEffect(() => {
-    const visibleSessionIds = new Set(
-      filteredList
-        .filter((member) => member.kind === 'session')
-        .map((member) => member.session.id),
-    );
-    setSelectedIds((ids) => {
-      const next = ids.filter((id) => visibleSessionIds.has(id));
-      return next.length === ids.length ? ids : next;
-    });
-  }, [filteredList]);
-
+    searchIndexRef.current = 0;
+  }, [query]);
   const treeLayout = useMemo(() => {
-    const serverGraph = ensureGraphEdges(graph ?? { nodes: [...sessions], edges: [] });
+    const serverGraph = ensureGraphEdges({
+      nodes: allNodes,
+      edges: graph?.edges ?? [],
+    });
     const { layoutEdges } = mergeGraphWithMapEdges(
       serverGraph.nodes,
       serverGraph.edges,
@@ -1296,42 +1514,57 @@ export function SessionMapPage({
     );
     const base = layoutSessionMountForest(
       { nodes: serverGraph.nodes, edges: layoutEdges },
-      agentExtras,
+      agentExtras.filter((extra) => serverGraph.nodes.some((node) => node.id === extra.session.id)),
     );
-    if (query.trim() === '' && activeLabelIds.length === 0 && statusFilter === 'all') return base;
-    const wanted = new Set(visibleIds);
-    const parentOf = new Map<string, string>();
-    for (const { from, to } of base.edges) {
-      parentOf.set(nodeKey(to.member), nodeKey(from.member));
-    }
-    for (const id of wanted) {
-      const parent = parentOf.get(id);
-      if (parent !== undefined) wanted.add(parent);
-    }
-    const placed = base.placed.filter((node) => wanted.has(nodeKey(node.member)));
-    const edges = base.edges.filter(({ from, to }) => (
-      wanted.has(nodeKey(from.member)) && wanted.has(nodeKey(to.member))
-    ));
-    return { ...base, placed, edges };
-  }, [graph, sessions, agentExtras, query, visibleIds, mapDoc.edges, activeLabelIds, statusFilter]);
+    return base;
+  }, [allNodes, graph?.edges, agentExtras, mapDoc.edges]);
+
+  // Layout is still seeded as a forest for stable placement, but rendering
+  // follows the persisted work edges. This keeps additional parent jobs
+  // visible as honest pending intent instead of silently collapsing them.
+  const visualWorkEdges = useMemo(() => {
+    const serverFallback = treeLayout.edges.map(({ from, to }) => ({
+      source: from.member.session.id,
+      target: to.member.session.id,
+      status: undefined as string | undefined,
+      role: undefined as string | undefined,
+      mandate: undefined as string | undefined,
+    }));
+    const persisted = (mapDoc.edges ?? [])
+      .filter((edge) => edge.type === 'parent')
+      .filter((edge) => edge.source !== edge.target)
+      .filter((edge) => allNodes.some((node) => node.id === edge.source)
+        && (allNodes.some((node) => node.id === edge.target) || edge.target === draftRef.current?.id))
+      .map((edge) => ({
+        source: edge.source,
+        target: edge.target,
+        status: edge.status,
+        role: edge.role,
+        mandate: edge.mandate,
+      }));
+    const seen = new Set(persisted.map((edge) => `${edge.source}->${edge.target}`));
+    return [
+      ...persisted,
+      ...serverFallback.filter((edge) => !seen.has(`${edge.source}->${edge.target}`)),
+    ];
+  }, [allNodes, draft?.id, mapDoc.edges, treeLayout.edges]);
 
   const topologyKey = useMemo(() => {
     const nodePart = treeLayout.placed.map((node) => {
       const agent = node.member.agent;
       return `${nodeKey(node.member)}:${agent?.agent_id ?? ''}:${agent?.mounted_session_id ?? ''}`;
     }).sort().join('\0');
-    const edgePart = treeLayout.edges
-      .map(({ from, to }) => `${nodeKey(from.member)}->${nodeKey(to.member)}`)
+    const edgePart = visualWorkEdges
+      .map((edge) => `${edge.source}->${edge.target}`)
       .sort()
       .join('\0');
     return `${nodePart}\u0001${edgePart}`;
-  }, [treeLayout]);
+  }, [treeLayout, visualWorkEdges]);
 
   // Rebuild force graph when mount topology / filter set changes.
   // Existing ids keep positionsRef / previous sim coords — never teleport on agent poll.
   useEffect(() => {
     if (topologyKeyRef.current === topologyKey) return;
-    const hadTopology = topologyKeyRef.current !== '';
     topologyKeyRef.current = topologyKey;
     // Slot targets may shift when agents/mounts arrive. Only re-allow autofocus if
     // the user has not already pan/zoomed away from the initial focus.
@@ -1339,120 +1572,35 @@ export function SessionMapPage({
       centeredSessionRef.current = undefined;
     }
 
-    const seeds = new Map<string, { x: number; y: number }>();
-    for (const placed of treeLayout.placed) {
-      seeds.set(nodeKey(placed.member), {
-        x: placed.x + NODE_W / 2,
-        y: placed.y + NODE_H / 2,
-      });
-    }
-    seedByIdRef.current = seeds;
-
-    // Prefer in-memory drag pins; fall back to persisted doc positions once.
-    const persisted = mapDocRef.current.positions ?? {};
+    const persisted = normalizeMapPositions(mapDocRef.current.positions) ?? {};
     for (const [id, pos] of Object.entries(persisted)) {
-      if (!positionsRef.current.has(id)) {
+      if (lookupMapPosition(positionsRef.current, id) === undefined) {
         positionsRef.current.set(id, pos);
       }
     }
 
     const previousById = new Map(forceNodesRef.current.map((node) => [node.id, node]));
-    const childKeys = new Set(
-      treeLayout.edges.map(({ to }) => nodeKey(to.member)),
-    );
-
-    // First pass: resolve positions for known ids (preserve) and hosts.
-    const provisional = new Map<string, { x: number; y: number }>();
-    for (const placed of treeLayout.placed) {
-      const id = nodeKey(placed.member);
-      const prev = previousById.get(id);
-      const spawn = resolveMapNodeSpawnPosition({
-        id,
-        previous: prev,
-        cached: positionsRef.current.get(id),
-        seed: seeds.get(id),
-      });
-      provisional.set(id, spawn);
-    }
-    // Second pass: brand-new nodes without cache sit near their host (no (0,0) pop).
-    for (const placed of treeLayout.placed) {
-      const id = nodeKey(placed.member);
-      if (previousById.has(id) || positionsRef.current.has(id)) continue;
-      const hostId = placed.member.hostSessionId
-        ?? parentSessionIdOf(placed.member.session);
-      if (hostId === undefined) continue;
-      const hostPos = provisional.get(`session:${hostId}`);
-      if (hostPos === undefined) continue;
-      const nearHost = resolveMapNodeSpawnPosition({
-        id,
-        hostPosition: hostPos,
-        seed: seeds.get(id),
-      });
-      provisional.set(id, nearHost);
-    }
-
-    const nodes: ForceMapNode[] = treeLayout.placed.map((placed) => {
-      const id = nodeKey(placed.member);
-      const prev = previousById.get(id);
-      const pos = provisional.get(id) ?? seeds.get(id)!;
-      const isRoot = !childKeys.has(id);
-      // Preserve root pins; children stay unpinned so tidy home can run.
-      const fx = isRoot ? (prev?.fx ?? pos.x) : null;
-      const fy = isRoot ? (prev?.fy ?? pos.y) : null;
-      positionsRef.current.set(id, { x: pos.x, y: pos.y });
-      return {
-        id,
-        member: placed.member,
-        x: pos.x,
-        y: pos.y,
-        fx,
-        fy,
-        vx: prev?.vx ?? 0,
-        vy: prev?.vy ?? 0,
-      };
+    const { nodes, seeds } = buildForceMapNodes({
+      placed: treeLayout.placed,
+      previousById,
+      positions: positionsRef.current,
     });
-
-    // After createChild/mount/unmount (topology change), snap children to tidy
-    // slots under each root — does not move user-placed roots.
-    if (hadTopology) {
-      const index = buildMapComponents(nodes, treeLayout.edges.map(({ from, to }) => ({
-        source: nodeKey(from.member),
-        target: nodeKey(to.member),
-      })));
-      const seen = new Set<string>();
-      for (const node of nodes) {
-        const comp = index.get(node.id);
-        if (comp === undefined || seen.has(comp.componentId)) continue;
-        seen.add(comp.componentId);
-        const root = nodes.find((candidate) => candidate.id === comp.rootNodeId);
-        if (root === undefined) continue;
-        const targets = tidyComponentAroundRoot({
-          rootNodeId: comp.rootNodeId,
-          nodeIds: comp.nodeIds,
-          rootPosition: { x: root.x ?? 0, y: root.y ?? 0 },
-          seeds,
-        });
-        for (const child of nodes) {
-          if (child.id === comp.rootNodeId) continue;
-          if (!comp.nodeIds.includes(child.id)) continue;
-          // Only auto-tidy nodes that just appeared (no prior sim state).
-          if (previousById.has(child.id)) continue;
-          const target = targets.get(child.id);
-          if (target === undefined) continue;
-          child.x = target.x;
-          child.y = target.y;
-          positionsRef.current.set(child.id, target);
-        }
-      }
+    seedByIdRef.current = seeds;
+    for (const node of nodes) {
+      if (node.fx == null || node.fy == null) continue;
+      positionsRef.current.set(node.id, { x: node.fx, y: node.fy });
     }
 
-    const links: ForceMapLink[] = treeLayout.edges.map(({ from, to }) => ({
-      source: nodeKey(from.member),
-      target: nodeKey(to.member),
-    }));
+    const nodeIds = new Set(treeLayout.placed.map((placed) => nodeKey(placed.member)));
+    const links: ForceMapLink[] = visualWorkEdges
+      .filter((edge) => nodeIds.has(`session:${edge.source}`) && nodeIds.has(`session:${edge.target}`))
+      .map((edge) => ({
+        source: `session:${edge.source}`,
+        target: `session:${edge.target}`,
+      }));
     setForceNodes(nodes);
     setForceLinks(links);
-  }, [topologyKey, treeLayout]);
+  }, [topologyKey, treeLayout, visualWorkEdges]);
 
   // Merge into an existing simulation when possible — full restart teleports the forest.
   useEffect(() => {
@@ -1484,7 +1632,6 @@ export function SessionMapPage({
 
     const homeStrength = (node: ForceMapNode): number => {
       if (!SESSION_MAP_AMBIENT_HOME_GRAVITY) return 0;
-      if (rearrangeActiveRef.current) return 0;
       if (isComponentRootPin(node.id, componentIndexRef.current)) return 0;
       if (dragRef.current?.groupNodeIds.includes(node.id)) return 0;
       return HOME_PULL_STRENGTH;
@@ -1517,25 +1664,38 @@ export function SessionMapPage({
         .velocityDecay(0.52)
         .on('tick', () => {
           for (const node of forceNodesRef.current) {
-            positionsRef.current.set(node.id, {
-              x: node.x ?? 0,
-              y: node.y ?? 0,
-            });
+            if (node.fx == null || node.fy == null) continue;
+            positionsRef.current.set(node.id, { x: node.fx, y: node.fy });
           }
           scheduleRedraw();
         })
         .on('end', () => {
+          for (const node of forceNodesRef.current) {
+            const x = node.x ?? 0;
+            const y = node.y ?? 0;
+            node.x = x;
+            node.y = y;
+            node.fx = x;
+            node.fy = y;
+            node.vx = 0;
+            node.vy = 0;
+            positionsRef.current.set(node.id, { x, y });
+          }
           persistPositions(positionsRef.current);
           scheduleRedraw();
         });
       simulationRef.current = simulation;
+      const needsSettle = forceNodes.some((node) => node.fx == null || node.fy == null);
+      if (needsSettle) simulation.alpha(SETTLE_ALPHA);
+      else simulation.alpha(0).stop();
     } else {
       simulation.nodes(forceNodes);
       const linkForce = simulation.force('link') as ReturnType<typeof forceLink<ForceMapNode, ForceMapLink>> | undefined;
       linkForce?.links(forceLinks);
       linkForce?.strength(LINK_STRENGTH);
-      // Mild settle for newcomers only — do not hard-restart alpha to 1.
-      if (!rearrangeActiveRef.current) {
+      const needsSettle = forceNodes.some((node) => node.fx == null || node.fy == null);
+      if (needsSettle) {
+        // Mild settle for newcomers only — pinned user coords stay put.
         simulation.alpha(Math.max(simulation.alpha(), SETTLE_ALPHA * 0.45)).restart();
       }
     }
@@ -1565,25 +1725,18 @@ export function SessionMapPage({
       { x: target.x - NODE_W / 2, y: target.y - NODE_H / 2 },
       { width, height },
       { width: NODE_W, height: NODE_H },
-      focusInsetForViewport(width, listOpen),
+      focusInsetForViewport(),
     ));
     return true;
-  }, [listOpen, viewportSize.height, viewportSize.width]);
+  }, [viewportSize.height, viewportSize.width]);
 
   const findActiveForceNode = useCallback((sessionId: string | undefined): ForceMapNode | undefined => {
     if (sessionId === undefined) return undefined;
-    if (activeAgentId !== undefined && activeAgentId !== 'main') {
-      const agentNode = forceNodesRef.current.find((node) => (
-        node.member.hostSessionId === sessionId
-        && node.member.agent?.agent_id === activeAgentId
-      ));
-      if (agentNode !== undefined) return agentNode;
-    }
     return forceNodesRef.current.find((node) => (
       node.member.session.id === sessionId
       || node.member.agent?.mounted_session_id === sessionId
     ));
-  }, [activeAgentId]);
+  }, []);
 
   const stopFollowFocus = useCallback(() => {
     followFocusUntilRef.current = 0;
@@ -1672,205 +1825,7 @@ export function SessionMapPage({
 
   useEffect(() => () => {
     stopFollowFocus();
-    if (rearrangeTimerRef.current !== null) {
-      window.clearTimeout(rearrangeTimerRef.current);
-      rearrangeTimerRef.current = null;
-    }
-    rearrangeGenerationRef.current += 1;
   }, [stopFollowFocus]);
-
-  const rearrange = useCallback(() => {
-    // One-shot intra-component tidy — targets are relative to each root's current
-    // position (no global forest-slot gravity).
-    const nodes = forceNodesRef.current;
-    if (nodes.length === 0) return;
-    rearrangeActiveRef.current = true;
-
-    const seeds = new Map<string, { x: number; y: number }>();
-    for (const placed of treeLayout.placed) {
-      seeds.set(nodeKey(placed.member), {
-        x: placed.x + NODE_W / 2,
-        y: placed.y + NODE_H / 2,
-      });
-    }
-    seedByIdRef.current = seeds;
-
-    const targets = new Map<string, { x: number; y: number }>();
-    const seen = new Set<string>();
-    for (const node of nodes) {
-      const meta = componentIndexRef.current.get(node.id);
-      if (meta === undefined || seen.has(meta.componentId)) continue;
-      seen.add(meta.componentId);
-      const root = nodes.find((candidate) => candidate.id === meta.rootNodeId) ?? node;
-      const tidied = tidyComponentAroundRoot({
-        rootNodeId: meta.rootNodeId,
-        nodeIds: meta.nodeIds,
-        rootPosition: { x: root.x ?? 0, y: root.y ?? 0 },
-        seeds,
-      });
-      for (const [id, pos] of tidied) targets.set(id, pos);
-    }
-
-    for (const node of nodes) {
-      node.fx = null;
-      node.fy = null;
-      node.vx = (node.vx ?? 0) * 0.15;
-      node.vy = (node.vy ?? 0) * 0.15;
-    }
-
-    const simulation = simulationRef.current;
-    if (simulation === null) {
-      rearrangeActiveRef.current = false;
-      return;
-    }
-
-    const homeX = (node: ForceMapNode): number => targets.get(node.id)?.x ?? node.x ?? 0;
-    const homeY = (node: ForceMapNode): number => targets.get(node.id)?.y ?? node.y ?? 0;
-    simulation.force('homeX', forceX<ForceMapNode>(homeX).strength(REARRANGE_HOME_STRENGTH));
-    simulation.force('homeY', forceY<ForceMapNode>(homeY).strength(REARRANGE_HOME_STRENGTH));
-    const linkForce = simulation.force('link') as ReturnType<typeof forceLink<ForceMapNode, ForceMapLink>> | undefined;
-    linkForce?.strength(REARRANGE_LINK_STRENGTH);
-    simulation.alphaTarget(0.18).alpha(1).restart();
-    redraw((value) => value + 1);
-
-    if (rearrangeTimerRef.current !== null) {
-      window.clearTimeout(rearrangeTimerRef.current);
-      rearrangeTimerRef.current = null;
-    }
-    simulation.on('end', null);
-    const generation = ++rearrangeGenerationRef.current;
-
-    const finishRearrange = () => {
-      if (generation !== rearrangeGenerationRef.current) return;
-      if (simulationRef.current !== simulation) return;
-      try {
-        // Restore ambient child tidy homes (roots stay pinned).
-        const ambientHome = (node: ForceMapNode): { x: number; y: number } => {
-          const comp = componentIndexRef.current.get(node.id);
-          if (comp === undefined || comp.rootNodeId === node.id) {
-            return { x: node.x ?? 0, y: node.y ?? 0 };
-          }
-          const root = forceNodesRef.current.find((candidate) => candidate.id === comp.rootNodeId);
-          return tidyComponentAroundRoot({
-            rootNodeId: comp.rootNodeId,
-            nodeIds: comp.nodeIds,
-            rootPosition: { x: root?.x ?? 0, y: root?.y ?? 0 },
-            seeds: seedByIdRef.current,
-          }).get(node.id) ?? { x: node.x ?? 0, y: node.y ?? 0 };
-        };
-        simulation.force(
-          'homeX',
-          forceX<ForceMapNode>((node) => ambientHome(node).x).strength((node) => (
-            isComponentRootPin(node.id, componentIndexRef.current) ? 0 : HOME_PULL_STRENGTH
-          )),
-        );
-        simulation.force(
-          'homeY',
-          forceY<ForceMapNode>((node) => ambientHome(node).y).strength((node) => (
-            isComponentRootPin(node.id, componentIndexRef.current) ? 0 : HOME_PULL_STRENGTH
-          )),
-        );
-        linkForce?.strength(LINK_STRENGTH);
-        simulation.alphaTarget(0).alpha(0);
-        for (const node of forceNodesRef.current) {
-          // Hard-snap to tidy homes — do not keep mid-sim coords (d3 ticks can
-          // stall after fake timers / background throttling).
-          const x = homeX(node);
-          const y = homeY(node);
-          node.x = x;
-          node.y = y;
-          node.vx = 0;
-          node.vy = 0;
-          // Keep only roots pinned so ambient tidy can settle children.
-          if (isComponentRootPin(node.id, componentIndexRef.current)) {
-            node.fx = x;
-            node.fy = y;
-          } else {
-            node.fx = null;
-            node.fy = null;
-          }
-          positionsRef.current.set(node.id, { x, y });
-        }
-        persistPositions(positionsRef.current);
-        // Brief settle so unpinned children finish under their root.
-        simulation.alpha(SETTLE_ALPHA).restart();
-        simulation.on('end', () => {
-          persistPositions(positionsRef.current);
-          scheduleRedraw();
-        });
-        scheduleRedraw();
-      } finally {
-        rearrangeActiveRef.current = false;
-      }
-    };
-
-    simulation.on('end', () => {
-      simulation.on('end', null);
-      if (rearrangeTimerRef.current !== null) {
-        window.clearTimeout(rearrangeTimerRef.current);
-        rearrangeTimerRef.current = null;
-      }
-      finishRearrange();
-    });
-    rearrangeTimerRef.current = window.setTimeout(() => {
-      rearrangeTimerRef.current = null;
-      simulation.on('end', null);
-      finishRearrange();
-    }, REARRANGE_SETTLE_MS);
-
-    if (activeSessionId !== undefined) {
-      const target = findActiveForceNode(activeSessionId);
-      if (target !== undefined) {
-        userAdjustedViewRef.current = false;
-        centeredSessionRef.current = activeSessionId;
-        startFollowFocus(activeSessionId, 900);
-        return;
-      }
-    }
-    if (!userAdjustedViewRef.current) {
-      setView(fitTreeView(
-        { width: treeLayout.width, height: treeLayout.height },
-        viewportSize,
-      ));
-    }
-  }, [
-    activeSessionId,
-    findActiveForceNode,
-    persistPositions,
-    scheduleRedraw,
-    startFollowFocus,
-    treeLayout.height,
-    treeLayout.placed,
-    treeLayout.width,
-    viewportSize,
-  ]);
-
-  const focusActive = useCallback(() => {
-    userAdjustedViewRef.current = false;
-    const target = findActiveForceNode(activeSessionId);
-    if (target !== undefined) {
-      if (activeSessionId !== undefined) {
-        centeredSessionRef.current = activeSessionId;
-        focusNode(target);
-        startFollowFocus(activeSessionId, 600);
-        return;
-      }
-      focusNode(target);
-      return;
-    }
-    setView(fitTreeView(
-      { width: treeLayout.width, height: treeLayout.height },
-      viewportSize,
-    ));
-  }, [
-    activeSessionId,
-    findActiveForceNode,
-    focusNode,
-    startFollowFocus,
-    treeLayout.height,
-    treeLayout.width,
-    viewportSize,
-  ]);
 
   // Wheel must be a native non-passive listener: React's synthetic onWheel is
   // passive on the root, so preventDefault there cannot stop page scroll/zoom.
@@ -1879,15 +1834,20 @@ export function SessionMapPage({
     event.preventDefault();
     const el = viewportRef.current;
     if (!el) return;
-    if (event.deltaY === 0) return;
     markUserAdjustedView();
     stopFollowFocus();
     const current = viewRef.current;
     const rect = el.getBoundingClientRect();
-    // Wheel / trackpad vertical scroll → zoom only (UE-style). Ctrl+wheel is redundant.
+    if (event.deltaY === 0 && event.deltaX !== 0) {
+      setView(snapMapView({
+        ...current,
+        x: current.x - event.deltaX,
+      }));
+      return;
+    }
     setView(zoomTreeView(
       current,
-      current.scale * (event.deltaY < 0 ? 1.1 : 0.9),
+      current.scale * (event.deltaY < 0 ? 1.12 : 0.89),
       event.clientX - rect.left,
       event.clientY - rect.top,
     ));
@@ -1901,111 +1861,240 @@ export function SessionMapPage({
     return () => el.removeEventListener('wheel', handler);
   }, []);
 
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const onContextMenu = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('.session-identity-drawer, input, textarea, [contenteditable="true"]') !== null) return;
+      event.preventDefault();
+    };
+    const onSelectStart = (event: Event) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('input, textarea, [contenteditable="true"]') !== null) return;
+      event.preventDefault();
+    };
+    el.addEventListener('contextmenu', onContextMenu, true);
+    el.addEventListener('selectstart', onSelectStart, true);
+    return () => {
+      el.removeEventListener('contextmenu', onContextMenu, true);
+      el.removeEventListener('selectstart', onSelectStart, true);
+    };
+  }, []);
+
   const onPointerDown = (event: ReactPointerEvent) => {
     const target = event.target as HTMLElement;
-    if (target.closest('.session-map-draft-node') !== null) return;
+    const isDraft = target.closest('.session-map-draft-node') !== null;
     if (target.closest('.session-map-context-menu') !== null) return;
-    if (target.closest('.session-map-selection-box') !== null) return;
-    if (target.closest('.session-map-list-panel') !== null) return;
+    if (target.closest('.session-identity-drawer') !== null) return;
+
+    const gesture = gestureRef.current;
+    if (gesture.kind === 'pan-done' || gesture.kind === 'right-click') {
+      gestureRef.current = { kind: 'idle' };
+    }
+
+    const rightOrMiddle = event.button === 2 || event.button === 1;
+    if (rightOrMiddle && marqueeRef.current !== null) {
+      marqueeRef.current = null;
+      setMarquee(null);
+    }
+
+    const otherGesture = wireDragRef.current !== null
+      || dragRef.current !== null
+      || annotationDragRef.current !== null
+      || draftDragRef.current !== null
+      || isBlockingStageGesture(gestureRef.current.kind);
+    if (rightOrMiddle) {
+      if (otherGesture) return;
+    } else if (otherGesture || marqueeRef.current !== null) {
+      return;
+    }
+
     setNodeMenu(null);
-    setSelectionMenu(null);
     setCanvasMenu(null);
-    if (draftRef.current !== null) {
-      if (target.closest('.session-map-node, .session-map-annotation-chrome, .session-map-float') === null) {
-        cancelDraftRef.current();
-      }
+    setWorkEdgeMenu(null);
+    setWorkEdgeEditor(null);
+    setSelectedWorkEdge(null);
+    setDraftMenu(null);
+    if (event.button === 0 && spacePressedRef.current) {
+      event.preventDefault();
+      stopFollowFocus();
+      (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+      gestureRef.current = {
+        kind: 'panning',
+        pointerId: event.pointerId,
+        originX: event.clientX,
+        originY: event.clientY,
+        view: viewRef.current,
+        source: 'space',
+      };
+      setPanning(true);
+      return;
+    }
+    if (event.button === 0 && isDraft) {
       return;
     }
     // Annotation body uses pointer-events:none — only chrome (title/resize) captures.
     // Do not treat the annotation shell as a blocker for marquee/pan.
-    if (target.closest('.session-map-node, .session-map-annotation-chrome, .session-map-float') !== null) {
+    if (event.button === 0 && target.closest('.session-map-node, .session-map-annotation-chrome, .session-map-float') !== null) {
       return;
     }
 
-    // Right-click pan. Do not preventDefault: Chromium then drops contextmenu.
-    if (event.button === 2) {
-      rightPanMovedRef.current = false;
+    // Right-drag pans. Pure right-click stays pending until pointerup so a
+    // menu can open without a pan or a leftover marquee.
+    if (event.button === 2 || event.button === 1) {
       stopFollowFocus();
+      event.preventDefault();
       (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-      panOrigin.current = { x: event.clientX, y: event.clientY, view: viewRef.current };
-      setPanning(true);
+      if (event.button === 1) {
+        gestureRef.current = {
+          kind: 'panning',
+          pointerId: event.pointerId,
+          originX: event.clientX,
+          originY: event.clientY,
+          view: viewRef.current,
+          source: 'middle',
+        };
+        setPanning(true);
+        return;
+      }
+      gestureRef.current = {
+        kind: 'right-click-pending',
+        pointerId: event.pointerId,
+        originX: event.clientX,
+        originY: event.clientY,
+        view: viewRef.current,
+        hit: resolveRightClickHit(event.target),
+      };
       return;
     }
 
     if (event.button !== 0) return;
+    // Alt is reserved for disconnecting a work edge / connected port.
+    // Empty canvas must not start a marquee or pan from this modifier.
+    if (event.altKey) return;
 
     stopFollowFocus();
     // Left drag on empty canvas → ephemeral marquee (node selection region).
     const world = clientToWorld(event.clientX, event.clientY);
     if (world === null) return;
-    const next = { startX: world.x, startY: world.y, endX: world.x, endY: world.y };
+    const next = {
+      startX: world.x,
+      startY: world.y,
+      endX: world.x,
+      endY: world.y,
+      additive: event.shiftKey,
+    };
     marqueeRef.current = next;
     setMarquee(next);
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
   };
 
+  const openWorkEdgeEditor = (parentId: string, childId: string) => {
+    const edge = (mapDocRef.current.edges ?? []).find((candidate) => (
+      candidate.type === 'parent'
+      && candidate.source === parentId
+      && candidate.target === childId
+    ));
+    const child = byId.get(childId);
+    const childServerParent = parentSessionIdOf(child);
+    // Mount metadata belongs to the currently mounted job. A new job for the
+    // same child must start with an empty role/mandate so it cannot silently
+    // inherit the old parent's identity.
+    const isCurrentServerEdge = childServerParent === parentId;
+    setWorkEdgeMenu(null);
+    setWorkEdgeEditor({
+      parentId,
+      childId,
+      role: edge?.role ?? (isCurrentServerEdge && typeof child?.metadata?.mount_role === 'string' ? child.metadata.mount_role : ''),
+      mandate: edge?.mandate ?? (isCurrentServerEdge && typeof child?.metadata?.mount_mandate === 'string' ? child.metadata.mount_mandate : ''),
+      saving: false,
+    });
+  };
+
+  const selectWorkEdge = useCallback((parentId: string, childId: string) => {
+    setSelectedIds([]);
+    setSelectedWorkEdge({ parentId, childId });
+    setWorkEdgeEditor(null);
+    setWorkEdgeMenu(null);
+    setConfirmWorkEdge(null);
+  }, []);
+
+  const dismissUnappliedExtraJob = useCallback((parentId: string, childId: string) => {
+    persistDoc(removeSessionMapEdgeByEndpoints(mapDocRef.current, 'parent', parentId, childId));
+    setSelectedWorkEdge((current) => (
+      current !== null && current.parentId === parentId && current.childId === childId
+        ? null
+        : current
+    ));
+    setWorkEdgeMenu(null);
+    setConfirmWorkEdge(null);
+  }, [persistDoc]);
+  dismissUnappliedExtraJobRef.current = dismissUnappliedExtraJob;
+
   const executeSilentLink = useCallback(async (
     childId: string,
     parentId: string,
-    edgeType: SessionMapEdgeType = 'parent',
-  ) => {
-    if (edgeType !== 'parent') {
-      busyRef.current = false;
-      if (childId.startsWith('agent:') || parentId.startsWith('agent:')) {
-        showError(tr('Wire target must be a real session card.', '连线目标必须是真实会话卡片。'));
-        return;
-      }
-      persistDoc(upsertTypedMapEdge(mapDocRef.current, { type: edgeType, source: parentId, target: childId }));
-      showHint(edgeType === 'peer'
-        ? tr('Peer link saved on the map (local; not a mount).', '已在地图上保存对等连线（仅本地，不是挂载）。')
-        : tr('Service link saved on the map (local; not a mount).', '已在地图上保存服务连线（仅本地，不是挂载）。'));
-      return;
-    }
+    forceRemount = false,
+  ): Promise<'added' | 'remounted' | 'pending' | 'unapplied' | 'already' | 'rejected'> => {
     const child = allNodes.find((session) => session.id === childId);
     const parent = allNodes.find((session) => session.id === parentId);
     const mapParents = mapParentByChildFromEdges(mapDocRef.current.edges ?? []);
     const serverParent = parentSessionIdOf(child);
+    const existingEdge = (mapDocRef.current.edges ?? []).find((edge) => (
+      edge.type === 'parent'
+      && edge.source === parentId
+      && edge.target === childId
+    ));
+    const hasExistingParentEdge = serverParent === parentId || (
+      existingEdge !== undefined && existingEdge.status !== 'error'
+    );
     const currentParent = serverParent ?? mapParents.get(childId);
-    if (currentParent === parentId) {
+    if (hasExistingParentEdge && !forceRemount) {
       busyRef.current = false;
+      if (existingEdge !== undefined && isUnappliedExtraJob(existingEdge)) {
+        selectWorkEdge(parentId, childId);
+        return 'unapplied';
+      }
       showHint(tr('Already mounted under this parent.', '已挂载在该父节点下。'));
-      return;
+      return 'already';
     }
     if (wouldCreateMountCycle(childId, parentId, allNodes, mapParents)) {
       busyRef.current = false;
-      showError(tr(
-        'Cannot mount here — would create a cycle in the session tree.',
-        '无法挂载 — 会在会话树中形成环。',
-      ), true);
-      return;
-    }
-    if (currentParent !== undefined) {
-      const childLabel = child?.title?.trim() || childId.slice(0, 10);
-      const currentParentLabel = allNodes.find((session) => session.id === currentParent)?.title?.trim()
-        || currentParent.slice(0, 10);
-      const confirmed = window.confirm(tr(
-        `“${childLabel}” already has a parent (“${currentParentLabel}”). A session can have only one parent — this remounts it, it does not add a second job. Continue?`,
-        `「${childLabel}」已挂在「${currentParentLabel}」下。会话只能有一个父节点（暂不支持兼职），继续会改挂而不是增加第二份工作。继续吗？`,
+      showNodeError(childId, tr(
+        'Cannot mount here — it would create a cycle.',
+        '不能挂到自己的下级。',
       ));
-      if (!confirmed) {
-        busyRef.current = false;
-        return;
-      }
+      return 'rejected';
+    }
+    if (currentParent !== undefined && !forceRemount) {
+      busyRef.current = false;
+      // Down-port hire: never remount. The server still stores one parent, so
+      // keep this second job as an honest unapplied line until the user
+      // explicitly chooses to move the live mount.
+      persistDoc(upsertParentMapEdge(mapDocRef.current, parentId, childId, {
+        status: UNAPPLIED_EXTRA_JOB_STATUS,
+      }));
+      selectWorkEdge(parentId, childId);
+      return 'unapplied';
     }
     if (sessionIsBusy(child) || sessionIsBusy(parent)) {
       busyRef.current = false;
-      persistDoc(queuePendingTopology(mapDocRef.current, {
-        kind: serverParent !== undefined ? 'remount' : 'mount',
+      const pendingKind = forceRemount || serverParent !== undefined ? 'remount' : 'mount';
+      let pendingDoc = queuePendingTopology(mapDocRef.current, {
+        kind: pendingKind,
         childSessionId: childId,
         parentSessionId: parentId,
-      }));
+      });
+      pendingDoc = upsertParentMapEdge(pendingDoc, parentId, childId, { status: 'pending' });
+      persistDoc(pendingDoc);
       showHint(tr(
-        'Session busy — mount queued until the current turn finishes.',
-        '会话忙碌 — 挂载已排队，将在当前轮次结束后应用。',
+        'Waiting for it to finish.',
+        '等它说完。',
       ));
-      return;
+      return 'pending';
     }
-    setBusyLocked(true);
+    busyRef.current = true;
     clearError();
     try {
       if (serverParent !== undefined) {
@@ -2013,77 +2102,35 @@ export function SessionMapPage({
       } else {
         await api.sessions.mount(childId, parentId, {});
       }
-      if (disposedRef.current) return;
-      persistDoc(clearPendingTopology(
-        upsertParentMapEdge(mapDocRef.current, parentId, childId),
-        childId,
-      ));
+      if (disposedRef.current) return 'rejected';
+      let nextDoc = upsertParentMapEdge(mapDocRef.current, parentId, childId);
+      if (serverParent !== undefined) {
+        nextDoc = {
+          ...nextDoc,
+          edges: (nextDoc.edges ?? []).filter((edge) => !(
+            edge.type === 'parent' && edge.target === childId && edge.source !== parentId
+          )),
+        };
+      }
+      persistDoc(clearPendingTopology(nextDoc, childId));
       await refresh();
-      if (disposedRef.current) return;
+      if (disposedRef.current) return 'rejected';
       onGraphChanged?.();
-    } catch (err) {
-      if (disposedRef.current) return;
-      const message = err instanceof Error ? err.message : String(err);
+      return serverParent === undefined ? 'added' : 'remounted';
+    } catch (error) {
+      if (disposedRef.current) return 'rejected';
+      const message = error instanceof Error ? error.message : String(error);
       const cycleHint = /cycle|环|40921|mount_cycle/i.test(message);
-      showError(cycleHint
-        ? tr(
-          'Cannot mount here — would create a cycle in the session tree.',
-          '无法挂载 — 会在会话树中形成环。',
-        )
-        : tr(
-          `Mount failed: ${message}`,
-          `挂载失败：${message}`,
-        ), true);
+      persistDoc(upsertParentMapEdge(mapDocRef.current, parentId, childId, { status: 'error' }));
+      showNodeError(childId, cycleHint
+        ? tr('Cannot mount here — it would create a cycle.', '不能挂到自己的下级。')
+        : tr('This job could not be connected. Try again.', '这份工作没接上，可以再试一次。'));
+      return 'rejected';
     } finally {
-      if (!disposedRef.current) setBusyLocked(false);
+      if (!disposedRef.current) busyRef.current = false;
       else busyRef.current = false;
     }
-  }, [allNodes, clearError, onGraphChanged, persistDoc, refresh, setBusyLocked, showError, showHint, tr]);
-
-  const focusMemberOnCanvas = useCallback((member: MapMemberRef) => {
-    const key = nodeKey(member);
-    const target = forceNodesRef.current.find((node) => node.id === key);
-    if (target === undefined) {
-      showHint(tr('Node not on canvas — clear filters or open list.', '节点不在画布上 — 请清除筛选或打开列表。'));
-      return false;
-    }
-    markUserAdjustedView();
-    stopFollowFocus();
-    return focusNode(target);
-  }, [focusNode, markUserAdjustedView, showHint, stopFollowFocus, tr]);
-
-  const mountMemberUnderParent = useCallback(async (member: MapMemberRef, parentSessionId: string) => {
-    const caps = memberCaps(member);
-    if (!caps.isRealSession) return;
-    const childId = member.session.id;
-    const mapParents = mapParentByChildFromEdges(mapDocRef.current.edges ?? []);
-    if (!canMountMemberUnder(childId, parentSessionId, allNodes, mapParents)) {
-      showError(tr(
-        'Cannot mount here — would create a cycle in the session tree.',
-        '无法挂载 — 会在会话树中形成环。',
-      ), true);
-      return;
-    }
-    await executeSilentLink(childId, parentSessionId, 'parent');
-  }, [allNodes, executeSilentLink, memberCaps, showError, tr]);
-
-  const handleListItemClick = useCallback((member: MapMemberRef) => {
-    if (listClickTimerRef.current !== null) {
-      window.clearTimeout(listClickTimerRef.current);
-    }
-    listClickTimerRef.current = window.setTimeout(() => {
-      listClickTimerRef.current = null;
-      focusMemberOnCanvas(member);
-    }, 220);
-  }, [focusMemberOnCanvas]);
-
-  const handleListItemDoubleClick = useCallback((member: MapMemberRef) => {
-    if (listClickTimerRef.current !== null) {
-      window.clearTimeout(listClickTimerRef.current);
-      listClickTimerRef.current = null;
-    }
-    openMember(member);
-  }, [openMember]);
+  }, [allNodes, clearError, onGraphChanged, persistDoc, refresh, selectWorkEdge, showHint, showNodeError, tr]);
 
   const finishWireDrag = useCallback(async (event: PointerEvent) => {
     const active = wireDragRef.current;
@@ -2102,10 +2149,6 @@ export function SessionMapPage({
     if (Math.hypot(event.clientX - active.startClientX, event.clientY - active.startClientY) < 12) {
       return;
     }
-
-    // Sync lock immediately so another port gesture cannot start while we
-    // resolve the drop (React `busy` state still lags one render).
-    busyRef.current = true;
 
     const world = clientToWorld(event.clientX, event.clientY);
     if (world === null) {
@@ -2140,17 +2183,35 @@ export function SessionMapPage({
     }
 
     if (hit === undefined) {
-      const self = hitSessionMapNode(forceNodesRef.current, worldX, worldY, { preferPort });
-      if (self !== undefined) {
+      // The first hit test excludes the wire source so a card cannot be
+      // mistaken for a valid target. Keep a second hit only for explaining
+      // an invalid drop, especially a self-connection or a cycle.
+      const invalidHit = hitSessionMapNode(forceNodesRef.current, worldX, worldY, { preferPort });
+      if (invalidHit?.id === active.fromId) {
         busyRef.current = false;
+        showNodeError(active.fromId, tr('Cannot connect a session to itself.', '不能把会话挂到自己身上。'));
         return;
+      }
+      if (invalidHit !== undefined) {
+        const invalidNode = forceNodesRef.current.find((node) => node.id === invalidHit.id);
+        const invalidSessionId = invalidNode?.member.session.id;
+        const cycle = invalidSessionId !== undefined && (
+          active.side === 'out'
+            ? wouldCreateMountCycle(invalidSessionId, active.parentSessionId, allNodes, mapParentByChildFromEdges(mapDocRef.current.edges ?? []))
+            : wouldCreateMountCycle(active.childSessionId, invalidSessionId, allNodes, mapParentByChildFromEdges(mapDocRef.current.edges ?? []))
+        );
+        if (cycle) {
+          busyRef.current = false;
+          showNodeError(active.fromId, tr('Cannot mount here — it would create a cycle.', '不能挂到自己的下级。'));
+          return;
+        }
       }
       const nearest = nearestSessionMapNodeDistance(forceNodesRef.current, worldX, worldY, active.fromId);
       if (nearest !== undefined && nearest <= NEAR_MISS_RADIUS) {
         busyRef.current = false;
-        showError(tr(
-          'Drop missed the node — aim for the port or card.',
-          '未命中节点 — 请对准端口或卡片。',
+        showNodeError(active.fromId, tr(
+          'Drop missed the node. Aim for the port or card.',
+          '未命中节点，请对准端口或卡片。',
         ));
         return;
       }
@@ -2164,10 +2225,8 @@ export function SessionMapPage({
       }
       if (hit === undefined) {
         busyRef.current = false;
-        showError(tr(
-          'Drop on another session card (or its output port) to reconnect.',
-          '请拖到另一个会话卡片（或其输出口）上以重新挂载。',
-        ));
+        // Reconnecting from the input port is intentionally cancellable:
+        // dropping on empty space does not create a parent or mutate state.
         return;
       }
       if (!isValidWireTarget(active, hit, allNodes, mapDocRef.current.edges ?? [])) {
@@ -2178,12 +2237,9 @@ export function SessionMapPage({
           allNodes,
           mapParentByChildFromEdges(mapDocRef.current.edges ?? []),
         )) {
-          showError(tr(
-            'Cannot mount here — would create a cycle in the session tree.',
-            '无法挂载 — 会在会话树中形成环。',
-          ), true);
+          showNodeError(active.fromId, tr('Cannot mount here — it would create a cycle.', '不能挂到自己的下级。'));
         } else {
-          showError(tr('Reconnect target must be a real session card.', '重连目标必须是真实会话卡片。'));
+          showNodeError(active.fromId, tr('Move this job to another session card.', '请改挂到另一张会话卡片。'));
         }
         return;
       }
@@ -2192,7 +2248,7 @@ export function SessionMapPage({
         busyRef.current = false;
         return;
       }
-      await executeSilentLink(childId, parentId, active.edgeType);
+      await executeSilentLink(childId, parentId, true);
       return;
     }
 
@@ -2203,20 +2259,6 @@ export function SessionMapPage({
     }
 
     if (hit !== undefined) {
-      if (active.edgeType !== 'parent') {
-        if (!isValidWireTarget(active, hit, allNodes, mapDocRef.current.edges ?? [])) {
-          busyRef.current = false;
-          showError(tr('Wire target must be a real session card.', '连线目标必须是真实会话卡片。'));
-          return;
-        }
-        const childId = hit.member.session.id;
-        if (childId === parentSessionId) {
-          busyRef.current = false;
-          return;
-        }
-        await executeSilentLink(childId, parentSessionId, active.edgeType);
-        return;
-      }
       if (!isValidWireTarget(active, hit, allNodes, mapDocRef.current.edges ?? [])) {
         busyRef.current = false;
         if (hit.member.session.id === parentSessionId) {
@@ -2227,12 +2269,9 @@ export function SessionMapPage({
           allNodes,
           mapParentByChildFromEdges(mapDocRef.current.edges ?? []),
         )) {
-          showError(tr(
-            'Cannot mount here — would create a cycle in the session tree.',
-            '无法挂载 — 会在会话树中形成环。',
-          ), true);
+          showNodeError(active.fromId, tr('Cannot mount here — it would create a cycle.', '不能挂到自己的下级。'));
         } else {
-          showError(tr('Wire target must be a real session card.', '连线目标必须是真实会话卡片。'));
+          showNodeError(active.fromId, tr('Wire to a real session card.', '请连接到真实的会话卡片。'));
         }
         return;
       }
@@ -2241,25 +2280,36 @@ export function SessionMapPage({
         busyRef.current = false;
         return;
       }
-      await executeSilentLink(childId, parentSessionId, active.edgeType);
+      const result = await executeSilentLink(childId, parentSessionId);
+      // A new job gets its own identity. The child title remains the session
+      // name; role and responsibility belong to this parent edge.
+      // An unapplied extra job is selected instead — it is not live yet.
+      if (result === 'added' || result === 'pending') {
+        openWorkEdgeEditor(parentSessionId, childId);
+      }
       return;
     }
 
-    // Local identity draft — not a mount mutation (parent edges only).
-    if (active.edgeType !== 'parent') {
-      busyRef.current = false;
-      showHint(tr('Drop on a session card to create a peer/service edge.', '请拖到会话卡片上以创建对等/服务连线。'));
-      return;
-    }
-    busyRef.current = false;
+    // Dropping on empty space creates a draft node. The parent edge is
+    // persisted as soon as the draft appears and remains until Esc/abandon.
+    const draftId = `draft:${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
     setDraft({
+      id: draftId,
       parentId: parentSessionId,
-      title: tr('New member', '新成员'),
+      title: '',
       role: '',
       mandate: '',
       prompt: '',
+      status: 'editing',
       worldX,
-      worldY,
+      worldY: worldY + NODE_H / 2,
+    });
+    persistDoc({
+      ...upsertParentMapEdge(mapDocRef.current, parentSessionId, draftId, { status: 'draft' }),
+      positions: {
+        ...mapDocRef.current.positions,
+        [draftId]: { x: worldX, y: worldY + NODE_H / 2 },
+      },
     });
   }, [
     allNodes,
@@ -2267,9 +2317,11 @@ export function SessionMapPage({
     clientToWorld,
     detachWireListeners,
     executeSilentLink,
-    showError,
     showHint,
+    showNodeError,
+    persistDoc,
     tr,
+    openWorkEdgeEditor,
   ]);
 
   const startWireFromPort = (
@@ -2285,50 +2337,38 @@ export function SessionMapPage({
     // front so even a bare port click can never open the node.
     armClickSuppression();
 
-    // Alt+click input port of a mounted child → disconnect (unmount).
-    // Do this before the busy gate so refresh/in-flight mutations cannot swallow the feedback.
-    if (side === 'in' && event.altKey) {
-      const caps = memberCaps(node.member);
-      if (!caps.canDisconnect) {
-        showError(tr(
-          'Only mounted session cards can disconnect from the input port.',
-          '只有已挂载的会话卡片才能从输入口断连。',
-        ));
-        return;
-      }
-      const label = memberLabel(node.member);
-      const confirmed = window.confirm(tr(
-        `Disconnect “${label}” from its parent? It becomes a top-level session.`,
-        `将「${label}」从父节点拆挂？它会升为顶层会话。`,
-      ));
-      if (!confirmed) return;
-      void unmountSession(node.member.session.id);
-      return;
-    }
-
-    if (busy || busyRef.current || draft !== null || wireDragRef.current !== null) return;
-    // Binding notes and wiring are mutually exclusive — leave bind mode.
-    if (bindAnnotationId !== null) setBindAnnotationId(null);
-
+    if (wireDragRef.current !== null || dragRef.current !== null || marqueeRef.current !== null
+      || annotationDragRef.current !== null || draftDragRef.current !== null
+      || isBlockingStageGesture(gestureRef.current.kind)) return;
     stopFollowFocus();
     dragRef.current = null;
     detachWireListeners();
+
+    if (event.altKey) {
+      disconnectWorkFromPort(node, side);
+      return;
+    }
 
     if (side === 'in') {
       // UE Blueprint: drag FROM input pin to reconnect under a different parent.
       const childSessionId = wireSourceParentSessionId(node.member);
       if (childSessionId === null) {
-        showError(tr(
+        showNodeError(node.member.session.id, tr(
           'Only real session cards can reconnect from the input port.',
           '只有真实会话卡片才能从输入口重连。',
         ));
+        return;
+      }
+      const hasCurrentWork = parentSessionIdOf(node.member.session) !== undefined
+        || (mapDocRef.current.edges ?? []).some((edge) => edge.type === 'parent' && edge.target === childSessionId);
+      if (!hasCurrentWork) {
+        showHint(tr('This session has no job to move.', '这场会话现在没有可改挂的工作。'));
         return;
       }
       const fromX = node.x ?? 0;
       const fromY = (node.y ?? 0) - NODE_H / 2;
       const next: WireDragState = {
         fromId: node.id,
-        edgeType: 'parent',
         side: 'in',
         parentSessionId: '',
         childSessionId,
@@ -2345,9 +2385,9 @@ export function SessionMapPage({
     } else {
       const parentSessionId = wireSourceParentSessionId(node.member);
       if (parentSessionId === null) {
-        showError(tr(
-          'Department members hired with TeamCreate are not session nodes. Wire from a real session card, or create a child on the canvas.',
-          'TeamCreate 雇佣的部门成员不是会话节点。请从真实会话卡片拉线，或在画布上新建子会话。',
+        showNodeError(node.member.session.id, tr(
+          'This member has no session card yet. Wire from a real session card, or create a member on the canvas.',
+          '这个成员还没有自己的会话卡。请从真实会话卡片拉线，或在画布上生一个成员。',
         ));
         return;
       }
@@ -2355,7 +2395,6 @@ export function SessionMapPage({
       const fromY = (node.y ?? 0) + NODE_H / 2;
       const next: WireDragState = {
         fromId: node.id,
-        edgeType: wireEdgeTypeFromModifiers(event),
         side: 'out',
         parentSessionId,
         childSessionId: '',
@@ -2411,39 +2450,136 @@ export function SessionMapPage({
 
   // setDraft + ref mirror must move together: refresh() gates on draftRef.
   const clearDraft = () => {
+    const current = draftRef.current;
+    if (current !== null) {
+      const next = {
+        ...mapDocRef.current,
+        edges: (mapDocRef.current.edges ?? []).filter((edge) => edge.target !== current.id),
+        positions: Object.fromEntries(Object.entries(mapDocRef.current.positions ?? {}).filter(([id]) => id !== current.id)),
+      };
+      persistDoc(next);
+    }
     draftRef.current = null;
     setDraft(null);
+  };
+
+  const startDraftDrag = (event: ReactPointerEvent) => {
+    if (event.button !== 0 || draftRef.current === null) return;
+    if (wireDragRef.current !== null || dragRef.current !== null || annotationDragRef.current !== null
+      || marqueeRef.current !== null || isBlockingStageGesture(gestureRef.current.kind)) return;
+    if ((event.target as HTMLElement).closest('input, textarea, button, .session-map-port') !== null) return;
+    const current = draftRef.current;
+    event.stopPropagation();
+    event.preventDefault();
+    const origin = { x: current.worldX, y: current.worldY };
+    const grab = clientToWorld(event.clientX, event.clientY);
+    draftDragRef.current = {
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      originX: origin.x,
+      originY: origin.y,
+      grabWorldX: grab?.x ?? origin.x,
+      grabWorldY: grab?.y ?? origin.y,
+      moved: false,
+    };
+    const onMove = (moveEvent: PointerEvent) => {
+      const drag = draftDragRef.current;
+      const activeDraft = draftRef.current;
+      if (drag === null || activeDraft === null) return;
+      if (!drag.moved && Math.hypot(moveEvent.clientX - drag.startClientX, moveEvent.clientY - drag.startClientY) <= CLICK_MOVE_THRESHOLD) return;
+      drag.moved = true;
+      const world = clientToWorld(moveEvent.clientX, moveEvent.clientY);
+      if (world === null) return;
+      const next = { ...activeDraft, worldX: drag.originX + (world.x - drag.grabWorldX), worldY: drag.originY + (world.y - drag.grabWorldY) };
+      draftRef.current = next;
+      setDraft(next);
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', onUp, true);
+      window.removeEventListener('pointercancel', onUp, true);
+      draftDragRef.current = null;
+      if (draftRef.current?.status === 'editing') {
+        const activeDraft = draftRef.current;
+        persistDoc({
+          ...upsertParentMapEdge(mapDocRef.current, activeDraft.parentId, activeDraft.id, { status: 'draft' }),
+          positions: {
+            ...mapDocRef.current.positions,
+            [activeDraft.id]: { x: activeDraft.worldX, y: activeDraft.worldY },
+          },
+        });
+      }
+    };
+    window.addEventListener('pointermove', onMove, true);
+    window.addEventListener('pointerup', onUp, true);
+    window.addEventListener('pointercancel', onUp, true);
   };
 
   const cancelDraft = () => {
     // Esc must dismiss the draft even while the user is mid-edit; only block
     // during an in-flight createChild (busy) so we do not orphan a half-created session.
-    if (draft === null || busy || busyRef.current) return;
+    if (draft === null || busyRef.current || draft.status === 'creating') return;
     clearDraft();
   };
   cancelDraftRef.current = () => {
     cancelDraft();
   };
 
-  /**
-   * Local-only identity fill from the brief — never sendPrompt to the parent
-   * (avoids transcript pollution, cost, and tool runs).
-   */
-  const fillIdentityFromPrompt = () => {
-    if (draft === null || draft.prompt.trim().length === 0 || busy || busyRef.current) return;
-    const local = completeMountIdentityFromPrompt(draft.prompt.trim());
-    setDraft({
-      ...draft,
-      title: local.title || draft.title,
-      role: local.role || draft.role,
-      mandate: local.mandate || draft.mandate,
-    });
-  };
-
   const onPointerMove = (event: ReactPointerEvent) => {
     // Wire drag is tracked via window capture listeners (see startWireFromPort).
     // Annotation drag likewise uses window listeners (see startAnnotationDrag).
     if (wireDragRef.current !== null || annotationDragRef.current !== null) return;
+    const gesture = gestureRef.current;
+    if (gesture.kind === 'right-click-pending' || (gesture.kind === 'panning' && gesture.source === 'right')) {
+      event.preventDefault();
+      if (marqueeRef.current !== null) {
+        marqueeRef.current = null;
+        setMarquee(null);
+      }
+      if (event.pointerId !== gesture.pointerId) return;
+      if (gesture.kind === 'right-click-pending') {
+        if (!pointerMovedBeyondClickThreshold(
+          { startX: gesture.originX, startY: gesture.originY },
+          event,
+        )) {
+          return;
+        }
+        const next = {
+          kind: 'panning' as const,
+          pointerId: gesture.pointerId,
+          originX: gesture.originX,
+          originY: gesture.originY,
+          view: gesture.view,
+          source: 'right' as const,
+        };
+        gestureRef.current = next;
+        setPanning(true);
+        markUserAdjustedView();
+        setView({
+          ...next.view,
+          x: next.view.x + (event.clientX - next.originX),
+          y: next.view.y + (event.clientY - next.originY),
+        });
+        return;
+      }
+    }
+    if (gesture.kind === 'panning') {
+      if (event.pointerId !== gesture.pointerId) return;
+      event.preventDefault();
+      const next = {
+        ...gesture.view,
+        x: gesture.view.x + (event.clientX - gesture.originX),
+        y: gesture.view.y + (event.clientY - gesture.originY),
+      };
+      if (
+        Math.abs(next.x - gesture.view.x) > CLICK_MOVE_THRESHOLD
+        || Math.abs(next.y - gesture.view.y) > CLICK_MOVE_THRESHOLD
+      ) {
+        markUserAdjustedView();
+      }
+      setView(next);
+      return;
+    }
     if (marqueeRef.current !== null) {
       const world = clientToWorld(event.clientX, event.clientY);
       if (world === null) return;
@@ -2454,22 +2590,7 @@ export function SessionMapPage({
     }
     if (dragRef.current) {
       applyNodeDragMove(event.clientX, event.clientY);
-      return;
     }
-    if (!panOrigin.current) return;
-    const next = {
-      ...panOrigin.current.view,
-      x: panOrigin.current.view.x + (event.clientX - panOrigin.current.x),
-      y: panOrigin.current.view.y + (event.clientY - panOrigin.current.y),
-    };
-    if (
-      Math.abs(next.x - panOrigin.current.view.x) > CLICK_MOVE_THRESHOLD
-      || Math.abs(next.y - panOrigin.current.view.y) > CLICK_MOVE_THRESHOLD
-    ) {
-      rightPanMovedRef.current = true;
-      markUserAdjustedView();
-    }
-    setView(next);
   };
 
   const applyNodeDragMove = (clientX: number, clientY: number) => {
@@ -2507,21 +2628,11 @@ export function SessionMapPage({
       groupNode.y = y;
       positionsRef.current.set(nodeId, { x, y });
     }
-    if (drag.fromSelection && drag.selectionBoxOrigin !== null) {
-      const origin = drag.selectionBoxOrigin;
-      setSelectionBox({
-        startX: origin.startX + dx,
-        startY: origin.startY + dy,
-        endX: origin.endX + dx,
-        endY: origin.endY + dy,
-      });
-    }
     redraw((value) => value + 1);
   };
 
-  /** After a drag, keep only component roots pinned so tidy-under-root can run. */
+  /** After a drag, pin every moved node where the user dropped it. */
   const releaseDragPinsAndSettle = useCallback((groupNodeIds: readonly string[]) => {
-    const touchedComponents = new Set<string>();
     for (const nodeId of groupNodeIds) {
       const groupNode = forceNodesRef.current.find((candidate) => candidate.id === nodeId);
       if (groupNode === undefined) continue;
@@ -2529,74 +2640,13 @@ export function SessionMapPage({
       const y = groupNode.y ?? 0;
       groupNode.x = x;
       groupNode.y = y;
+      groupNode.vx = 0;
+      groupNode.vy = 0;
+      groupNode.fx = x;
+      groupNode.fy = y;
       positionsRef.current.set(groupNode.id, { x, y });
-      if (isComponentRootPin(groupNode.id, componentIndexRef.current)) {
-        groupNode.fx = x;
-        groupNode.fy = y;
-      } else {
-        groupNode.fx = null;
-        groupNode.fy = null;
-      }
-      const comp = componentIndexRef.current.get(groupNode.id);
-      if (comp !== undefined) touchedComponents.add(comp.componentId);
-    }
-    // Unpin non-dragged siblings and seed them toward tidy slots under the
-    // (possibly moved) root — 组内整理 follows the top node.
-    for (const node of forceNodesRef.current) {
-      const comp = componentIndexRef.current.get(node.id);
-      if (comp === undefined || !touchedComponents.has(comp.componentId)) continue;
-      if (isComponentRootPin(node.id, componentIndexRef.current)) {
-        const x = node.x ?? 0;
-        const y = node.y ?? 0;
-        node.fx = x;
-        node.fy = y;
-        continue;
-      }
-      node.fx = null;
-      node.fy = null;
-    }
-    for (const componentId of touchedComponents) {
-      const sample = forceNodesRef.current.find((node) => (
-        componentIndexRef.current.get(node.id)?.componentId === componentId
-      ));
-      const meta = sample !== undefined ? componentIndexRef.current.get(sample.id) : undefined;
-      if (meta === undefined) continue;
-      const root = forceNodesRef.current.find((node) => node.id === meta.rootNodeId);
-      if (root === undefined) continue;
-      const rootWasDragged = groupNodeIds.includes(meta.rootNodeId);
-      if (rootWasDragged) {
-        // Root moved (whole-tree drag OR selection of only the root): hard-snap
-        // children to tidy slots under the LIVE root, then short settle.
-        const snapped = snapComponentChildrenToLiveRoot({
-          rootNodeId: meta.rootNodeId,
-          nodeIds: meta.nodeIds,
-          rootPosition: { x: root.x ?? 0, y: root.y ?? 0 },
-          seeds: seedByIdRef.current,
-          nodes: forceNodesRef.current,
-        });
-        for (const [id, pos] of snapped) {
-          positionsRef.current.set(id, pos);
-        }
-        continue;
-      }
-      const targets = tidyComponentAroundRoot({
-        rootNodeId: meta.rootNodeId,
-        nodeIds: meta.nodeIds,
-        rootPosition: { x: root.x ?? 0, y: root.y ?? 0 },
-        seeds: seedByIdRef.current,
-      });
-      for (const node of forceNodesRef.current) {
-        if (!meta.nodeIds.includes(node.id) || node.id === meta.rootNodeId) continue;
-        if (groupNodeIds.includes(node.id)) continue;
-        const target = targets.get(node.id);
-        if (target === undefined) continue;
-        // Soft nudge when a non-root leaf moved — ambient home finishes settle.
-        node.vx = ((target.x - (node.x ?? 0)) * 0.35);
-        node.vy = ((target.y - (node.y ?? 0)) * 0.35);
-      }
     }
     persistPositions(positionsRef.current);
-    simulationRef.current?.alpha(SETTLE_ALPHA).alphaTarget(0).restart();
     scheduleRedraw();
   }, [persistPositions, scheduleRedraw]);
   releaseDragPinsRef.current = releaseDragPinsAndSettle;
@@ -2630,12 +2680,12 @@ export function SessionMapPage({
         hitIds.push(sessionId);
       }
     }
+    const mergeSelection = additive || box.additive === true;
     setSelectedIds((current) => (
-      additive ? [...new Set([...current, ...hitIds])] : hitIds
+      mergeSelection ? [...new Set([...current, ...hitIds])] : hitIds
     ));
-    setSelectionBox({ startX: left, startY: top, endX: right, endY: bottom });
-    setSelectionMenu(null);
-  }, [clearSelection]);
+    if (hitIds.length > 0) armClickSuppression();
+  }, [armClickSuppression, clearSelection]);
 
   const cancelMarquee = useCallback(() => {
     if (marqueeRef.current === null) return;
@@ -2644,18 +2694,17 @@ export function SessionMapPage({
   }, []);
 
   const annotateSelection = useCallback(() => {
-    if (selectionBox === null) return;
-    const left = Math.min(selectionBox.startX, selectionBox.endX);
-    const right = Math.max(selectionBox.startX, selectionBox.endX);
-    const top = Math.min(selectionBox.startY, selectionBox.endY);
-    const bottom = Math.max(selectionBox.startY, selectionBox.endY);
+    const selected = forceNodesRef.current.filter((node) => selectedIds.includes(node.member.session.id));
+    if (selected.length === 0) return;
+    const left = Math.min(...selected.map((node) => (node.x ?? 0) - NODE_W / 2)) - 16;
+    const right = Math.max(...selected.map((node) => (node.x ?? 0) + NODE_W / 2)) + 16;
+    const top = Math.min(...selected.map((node) => (node.y ?? 0) - NODE_H / 2)) - 16;
+    const bottom = Math.max(...selected.map((node) => (node.y ?? 0) + NODE_H / 2)) + 16;
     const color = DEFAULT_ANNOTATION_COLORS[mapDocRef.current.annotations.length % DEFAULT_ANNOTATION_COLORS.length]!;
-    const annotation: MapAnnotationBox = {
+      const annotation: MapAnnotationBox = {
       id: newAnnotationId(),
-      title: tr('Note', '注释'),
+      title: tr('Group box', '分组框'),
       color,
-      // Soft bind only — rect from the marquee is the persistent visual source of truth.
-      nodeIds: [...selectedIds],
       rect: {
         x: left,
         y: top,
@@ -2668,25 +2717,14 @@ export function SessionMapPage({
       annotations: [...mapDocRef.current.annotations, annotation],
     });
     setEditingAnnotationId(annotation.id);
-    setBindAnnotationId(null);
-    setSelectionMenu(null);
     clearSelection();
-  }, [clearSelection, persistDoc, selectedIds, selectionBox, tr]);
-
-  const openSelectionContextMenu = (event: ReactMouseEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setNodeMenu(null);
-    setCanvasMenu(null);
-    setSelectionMenu({ x: event.clientX, y: event.clientY });
-  };
+  }, [clearSelection, persistDoc, selectedIds, tr]);
 
   const openCanvasContextMenu = (event: ReactMouseEvent) => {
     if ((event.target as HTMLElement).closest('.session-map-node') !== null) return;
     event.preventDefault();
     event.stopPropagation();
     setNodeMenu(null);
-    setSelectionMenu(null);
     const world = clientToWorld(event.clientX, event.clientY);
     setCanvasMenu({
       x: event.clientX,
@@ -2696,7 +2734,72 @@ export function SessionMapPage({
     });
   };
 
+  const blockContextMenuIfGesture = (event: { preventDefault: () => void; stopPropagation: () => void }): boolean => {
+    event.preventDefault();
+    const kind = gestureRef.current.kind;
+    if (kind === 'idle') return false;
+    event.stopPropagation();
+    if (kind === 'pan-done' || kind === 'right-click') {
+      gestureRef.current = { kind: 'idle' };
+    }
+    return true;
+  };
+
+  const openRightClickMenu = (hit: RightClickHit, clientX: number, clientY: number) => {
+    if (hit.type === 'node') {
+      const member = forceNodesRef.current.find((node) => node.member.session.id === hit.sessionId)?.member;
+      if (member === undefined) return;
+      const caps = memberCaps(member);
+      if (!caps.isRealSession) return;
+      setCanvasMenu(null);
+      setWorkEdgeMenu(null);
+      setDraftMenu(null);
+      setNodeMenu({
+        sessionId: member.session.id,
+        x: clientX,
+        y: clientY,
+        canUnmount: caps.canDisconnect,
+        label: memberLabel(member),
+      });
+      return;
+    }
+    if (hit.type === 'edge') {
+      setSelectedIds([]);
+      setSelectedWorkEdge({ parentId: hit.parentId, childId: hit.childId });
+      setNodeMenu(null);
+      setCanvasMenu(null);
+      setDraftMenu(null);
+      setWorkEdgeMenu({
+        parentId: hit.parentId,
+        childId: hit.childId,
+        x: clientX,
+        y: clientY,
+      });
+      return;
+    }
+    if (hit.type === 'draft') {
+      if (draftRef.current === null) return;
+      setNodeMenu(null);
+      setCanvasMenu(null);
+      setWorkEdgeMenu(null);
+      setDraftMenu({ x: clientX, y: clientY });
+      return;
+    }
+    setNodeMenu(null);
+    setWorkEdgeMenu(null);
+    setDraftMenu(null);
+    const world = clientToWorld(clientX, clientY);
+    setCanvasMenu({
+      x: clientX,
+      y: clientY,
+      worldX: world?.x ?? CANVAS_PAD,
+      worldY: world?.y ?? CANVAS_PAD,
+    });
+  };
+
   const resolveCreateSessionCwd = (): string | undefined => {
+    const preferred = preferredCreateCwd?.trim();
+    if (preferred) return preferred;
     const active = activeSessionId ? byId.get(activeSessionId) : undefined;
     const activeCwd = active?.metadata?.cwd;
     if (typeof activeCwd === 'string' && activeCwd.trim()) return activeCwd.trim();
@@ -2713,54 +2816,83 @@ export function SessionMapPage({
     if (parentId !== undefined) {
       if (parentId.startsWith('agent:') || !byId.has(parentId)) {
         showError(tr(
-          'Create under a real session card, not an agent ghost.',
-          '请在真实会话卡片下创建，而不是代理幽灵节点。',
+          'Create under a real session card.',
+          '请在真实的会话卡片下创建。',
         ), true);
         return;
       }
+      const draftId = `draft:${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
       setDraft({
+        id: draftId,
         parentId,
-        title: tr('New member', '新成员'),
+        title: '',
         role: '',
         mandate: '',
         prompt: '',
+        status: 'editing',
         worldX,
-        worldY,
+        worldY: worldY + NODE_H / 2,
+      });
+      persistDoc({
+        ...upsertParentMapEdge(mapDocRef.current, parentId, draftId, { status: 'draft' }),
+        positions: {
+          ...mapDocRef.current.positions,
+          [draftId]: { x: worldX, y: worldY + NODE_H / 2 },
+        },
       });
       return;
     }
-    const cwd = resolveCreateSessionCwd();
-    if (cwd === undefined) {
+    if (onCreateTopLevelSession === undefined) {
       showError(tr(
-        'No project folder — open a session with a cwd first.',
-        '没有项目目录 — 请先打开带有 cwd 的会话。',
+        'Cannot create a session from the map.',
+        '无法从地图创建会话。',
       ), true);
       return;
     }
-    setBusyLocked(true);
+    const placeholderId = `creating:${Date.now().toString(36)}`;
+    setTopLevelPlaceholder({ id: placeholderId, worldX, worldY, status: 'editing' });
     clearError();
-    try {
-      const created = await api.sessions.create({ cwd, smart_title: true });
-      if (disposedRef.current || !created?.id) return;
-      positionsRef.current.set(`session:${created.id}`, { x: worldX, y: worldY });
-      persistDoc({
-        ...mapDocRef.current,
-        positions: {
-          ...mapDocRef.current.positions,
-          [`session:${created.id}`]: { x: worldX, y: worldY },
-        },
+  };
+
+  const submitTopLevelCreate = async (values: SessionIdentityDraftValues) => {
+    const placeholder = topLevelPlaceholder;
+    if (placeholder === null || onCreateTopLevelSession === undefined) return;
+    const { id: placeholderId, worldX, worldY } = placeholder;
+    setTopLevelPlaceholder({ ...placeholder, status: 'creating', title: values.name.trim() });
+    const runCreate = async (cwd: string) => {
+      try {
+        const createdId = await onCreateTopLevelSession(cwd);
+        if (disposedRef.current || !createdId) {
+          setTopLevelPlaceholder((current) => current?.id === placeholderId ? { ...current, status: 'error' } : current);
+          return;
+        }
+        if (values.name.trim().length > 0 || values.role.trim().length > 0 || values.mandate.trim().length > 0) {
+          await api.sessions.updateIdentity(createdId, {
+            name: values.name.trim() || undefined,
+            role: values.role.trim() || undefined,
+            mandate: values.mandate.trim() || undefined,
+          }).catch(() => undefined);
+        }
+        await finalizeTopLevelCreate(placeholderId, createdId, worldX, worldY);
+      } catch {
+        if (disposedRef.current) return;
+        setTopLevelPlaceholder((current) => current?.id === placeholderId ? { ...current, status: 'error' } : current);
+      }
+    };
+    const cwd = resolveCreateSessionCwd();
+    if (cwd === undefined) {
+      if (onChooseProject === undefined) {
+        setTopLevelPlaceholder((current) => current?.id === placeholderId ? { ...current, status: 'error' } : current);
+        return;
+      }
+      onChooseProject({
+        createSession: false,
+        stayOnMap: true,
+        onSelected: (folder) => { void runCreate(folder); },
       });
-      await refresh();
-      if (disposedRef.current) return;
-      onGraphChanged?.();
-      showHint(tr('Session node created.', '已创建会话节点。'));
-    } catch (err) {
-      if (disposedRef.current) return;
-      showError(err instanceof Error ? err.message : String(err), true);
-    } finally {
-      if (!disposedRef.current) setBusyLocked(false);
-      else busyRef.current = false;
+      return;
     }
+    await runCreate(cwd);
   };
 
   const finishNodeDrag = (event: { clientX: number; clientY: number; type: string }) => {
@@ -2772,17 +2904,16 @@ export function SessionMapPage({
     if (drag.pinned) {
       releaseDragPinsAndSettle(drag.groupNodeIds);
     }
-    // Ephemeral selection rect follows during drag, then disappears on mouseup.
-    if (drag.fromSelection) {
-      setSelectionBox(null);
-    }
     suppressClickRef.current = drag.moved || event.type === 'pointercancel' ? drag.node.id : null;
     dragRef.current = null;
   };
 
   const onPointerUp = (event: ReactPointerEvent) => {
-    const rightPan = panOrigin.current !== null && event.button === 2;
-    const rightClickCreate = rightPan && event.type !== 'pointercancel' && !rightPanMovedRef.current;
+    const gesture = gestureRef.current;
+    const rightPending = gesture.kind === 'right-click-pending';
+    const rightPan = gesture.kind === 'panning' && gesture.source === 'right';
+    const blockingPan = isBlockingStageGesture(gesture.kind);
+    let openedRightClickMenu = false;
     // Unified cleanup: no matter which gesture path ran (wire early-returns
     // included), pan state must always be released.
     try {
@@ -2802,6 +2933,20 @@ export function SessionMapPage({
         }
         return;
       }
+      if (rightPending || rightPan || event.button === 2) {
+        if (marqueeRef.current !== null) {
+          cancelMarquee();
+        }
+        if (
+          gesture.kind === 'right-click-pending'
+          && event.button === 2
+          && event.type !== 'pointercancel'
+        ) {
+          openRightClickMenu(gesture.hit, event.clientX, event.clientY);
+          openedRightClickMenu = true;
+        }
+        return;
+      }
       if (marqueeRef.current !== null) {
         // pointercancel must not persist a note — abort the marquee.
         if (event.type === 'pointercancel') {
@@ -2816,26 +2961,18 @@ export function SessionMapPage({
         return;
       }
     } finally {
-      panOrigin.current = null;
+      if (openedRightClickMenu) {
+        gestureRef.current = { kind: 'right-click' };
+      } else if (rightPan) {
+        gestureRef.current = { kind: 'pan-done' };
+      } else if (blockingPan) {
+        gestureRef.current = { kind: 'idle' };
+      }
       setPanning(false);
-      if (rightClickCreate) {
-        const target = event.target as HTMLElement;
-        if (
-          target.closest('.session-map-node') === null
-          && target.closest('.session-map-context-menu') === null
-          && target.closest('.session-map-draft-node') === null
-          && target.closest('.session-map-list-panel') === null
-          && target.closest('.session-map-selection-box') === null
-        ) {
-          setNodeMenu(null);
-          setSelectionMenu(null);
-          const world = clientToWorld(event.clientX, event.clientY);
-          setCanvasMenu({
-            x: event.clientX,
-            y: event.clientY,
-            worldX: world?.x ?? CANVAS_PAD,
-            worldY: world?.y ?? CANVAS_PAD,
-          });
+      if (rightPending || rightPan || event.button === 2) {
+        if (marqueeRef.current !== null) {
+          marqueeRef.current = null;
+          setMarquee(null);
         }
       }
     }
@@ -2852,10 +2989,10 @@ export function SessionMapPage({
     event: ReactPointerEvent,
     primary: ForceMapNode,
     groupNodeIds: string[],
-    fromSelection: boolean,
   ) => {
+    if (wireDragRef.current !== null || annotationDragRef.current !== null || draftDragRef.current !== null
+      || marqueeRef.current !== null || isBlockingStageGesture(gestureRef.current.kind)) return;
     stopFollowFocus();
-    setSelectionMenu(null);
     const grab = clientToWorld(event.clientX, event.clientY);
     try {
       (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
@@ -2872,10 +3009,6 @@ export function SessionMapPage({
       pinned: false,
       groupNodeIds,
       groupStartPositions: new Map(),
-      fromSelection,
-      selectionBoxOrigin: fromSelection && selectionBox !== null
-        ? { ...selectionBox }
-        : null,
     };
     suppressClickRef.current = null;
 
@@ -2887,7 +3020,9 @@ export function SessionMapPage({
     };
     const onUp = (pointerEvent: PointerEvent) => {
       finishNodeDrag(pointerEvent);
-      panOrigin.current = null;
+      if (isBlockingStageGesture(gestureRef.current.kind)) {
+        gestureRef.current = { kind: 'idle' };
+      }
       setPanning(false);
     };
     window.addEventListener('pointermove', onMove, true);
@@ -2898,7 +3033,7 @@ export function SessionMapPage({
 
   const startNodeDrag = (event: ReactPointerEvent, node: ForceMapNode) => {
     if (event.button !== 0) return;
-    if ((event.target as HTMLElement).closest('.session-map-port') !== null) return;
+    if ((event.target as HTMLElement).closest('.session-map-port, .session-map-stop-button') !== null) return;
     event.stopPropagation();
     const sessionId = node.member.session.id;
     const selectedIdsNow = selectedIdsRef.current;
@@ -2915,24 +3050,6 @@ export function SessionMapPage({
       event,
       node,
       groupNodeIds,
-      selectionBox !== null && selectedIdsNow.includes(sessionId),
-    );
-  };
-
-  const startSelectionBoxDrag = (event: ReactPointerEvent) => {
-    if (event.button !== 0) return;
-    event.stopPropagation();
-    event.preventDefault();
-    const selectedNodes = forceNodesRef.current.filter((candidate) => (
-      selectedIds.includes(candidate.member.session.id)
-    ));
-    if (selectedNodes.length === 0) return;
-    const primary = selectedNodes[0]!;
-    beginGroupDrag(
-      event,
-      primary,
-      selectedNodes.map((candidate) => candidate.id),
-      true,
     );
   };
 
@@ -2946,113 +3063,197 @@ export function SessionMapPage({
       suppressClickRef.current = null;
       return;
     }
-    // While the identity draft is open it owns the canvas: node clicks must
-    // not navigate away and silently discard the draft.
-    if (draft !== null) return;
     const sessionId = member.session.id;
-    if (bindAnnotationId !== null) {
-      const box = mapDoc.annotations.find((item) => item.id === bindAnnotationId);
-      if (box === undefined) {
-        setBindAnnotationId(null);
-        return;
-      }
-      const nodeIds = box.nodeIds.includes(sessionId)
-        ? box.nodeIds.filter((id) => id !== sessionId)
-        : [...box.nodeIds, sessionId];
-      persistDoc({
-        ...mapDoc,
-        annotations: mapDoc.annotations.map((item) => {
-          if (item.id !== bindAnnotationId) return item;
-          // Unbinding the last node: freeze the current visual bounds into the
-          // rect so the box does not snap back to a stale position.
-          if (nodeIds.length === 0 && item.nodeIds.length > 0) {
-            return {
-              ...item,
-              nodeIds,
-              // Prefer the existing free rect; only freeze a hull when none exists.
-              rect: item.rect ?? annotationBounds(item, placedForAnnotations, { width: NODE_W, height: NODE_H }),
-            };
-          }
-          return { ...item, nodeIds };
-        }),
-      });
-      return;
-    }
     if (event?.shiftKey) {
+      setSelectedWorkEdge(null);
       setSelectedIds((ids) => (
         ids.includes(sessionId) ? ids.filter((id) => id !== sessionId) : [...ids, sessionId]
       ));
       return;
     }
-    setSelectedIds([sessionId]);
+    // A normal click enters the session. Selection is an explicit Shift gesture
+    // or marquee, so opening a chat never leaves a stale selected state behind.
+    openMember(member);
   };
 
-  const submitMount = async () => {
-    if (draft === null) return;
-    if (draft.parentId.startsWith('agent:') || !byId.has(draft.parentId)) {
-      showError(tr(
-        'The parent session no longer exists. Close this draft and retry.',
-        '父会话已不存在。请关闭此草稿后重试。',
-      ), true);
+  const submitMount = async (cwdOverride?: string) => {
+    const currentDraft = draftRef.current ?? draft;
+    if (currentDraft === null) return;
+    if (!currentDraft.title.trim() || !currentDraft.role.trim() || !currentDraft.mandate.trim()) {
+      showHint(tr('Fill in title, role, and responsibility first.', '请先填好标题、角色和职责。'));
       return;
     }
-    setBusyLocked(true);
+    if (currentDraft.parentId.startsWith('agent:') || !byId.has(currentDraft.parentId)) {
+      setDraft({
+        ...currentDraft,
+        status: 'error',
+        error: tr('The parent session is gone. Abandon this draft and try again.', '父会话已不存在，请放弃这张草稿后重试。'),
+      });
+      return;
+    }
+    const draftId = currentDraft.id;
+    setDraft({ ...currentDraft, status: 'creating', error: undefined });
     clearError();
     try {
+      const parent = byId.get(currentDraft.parentId);
+      const selectedCwd = cwdOverride?.trim() || preferredCreateCwd?.trim();
+      if (!parent?.metadata?.cwd && !selectedCwd) {
+        onChooseProject?.({
+          createSession: false,
+          parentSessionId: currentDraft.parentId,
+          onSelected: (cwd) => { void submitMount(cwd); },
+        });
+        setDraft((active) => active?.id === draftId ? {
+          ...active,
+          status: 'error',
+          error: tr('Choose a project folder for this member first.', '请先为这个成员选择项目文件夹。'),
+        } : active);
+        return;
+      }
+      if (!parent?.metadata?.cwd && selectedCwd) {
+        if (parent === undefined) return;
+        await api.sessions.updateProfile(parent.id, {
+          metadata: { ...parent.metadata, cwd: selectedCwd },
+        });
+      }
       const options = {
-        role: draft.role.trim() || undefined,
-        mandate: draft.mandate.trim() || undefined,
+        role: currentDraft.role.trim() || undefined,
+        mandate: currentDraft.mandate.trim() || undefined,
       };
-      const created = await api.sessions.createChild(draft.parentId, {
-        title: draft.title.trim() || tr('New member', '新成员'),
+      const created = await api.sessions.createChild(currentDraft.parentId, {
+        title: currentDraft.title.trim() || tr('New member', '新成员'),
         role: options.role,
         mandate: options.mandate,
       });
       if (disposedRef.current) return;
-      const dropX = draft.worldX;
-      const dropY = draft.worldY + NODE_H / 2;
+      const dropX = currentDraft.worldX;
+      const dropY = currentDraft.worldY;
       positionsRef.current.set(`session:${created.id}`, { x: dropX, y: dropY });
       persistPositions(positionsRef.current);
-      persistDoc(upsertParentMapEdge(mapDocRef.current, draft.parentId, created.id, {
+      persistDoc(upsertParentMapEdge(mapDocRef.current, currentDraft.parentId, created.id, {
         mandate: options.mandate,
       }));
       clearDraft();
       await refresh();
       if (disposedRef.current) return;
       onGraphChanged?.();
-    } catch (err) {
+    } catch (error) {
       if (disposedRef.current) return;
-      showError(err instanceof Error ? err.message : String(err), true);
+      const message = error instanceof Error ? error.message : String(error);
+      const errorText = /cwd|project|directory/i.test(message)
+        ? tr('Choose a project folder for this member first.', '请先为这个成员选择项目文件夹。')
+        : tr('The member could not be created. You can edit the draft and try again.', '成员没建成功，可以修改草稿后再试。');
+      setDraft((current) => current?.id === draftId ? { ...current, status: 'error', error: errorText } : current);
     } finally {
-      if (!disposedRef.current) setBusyLocked(false);
-      else busyRef.current = false;
+      busyRef.current = false;
     }
   };
 
-  const confirmUnmountSession = (sessionId: string, label: string) => {
-    const confirmed = window.confirm(tr(
-      `Disconnect “${label}” from its parent? It becomes a top-level session.`,
-      `将「${label}」从父节点拆挂？它会升为顶层会话。`,
-    ));
-    if (!confirmed) return;
-    void unmountSession(sessionId);
+  const askParentToWriteIdentity = async (brief?: string) => {
+    const current = draftRef.current;
+    if (current === null) return;
+    const prompt = (brief ?? current.prompt).trim();
+    if (prompt.length === 0) {
+      setDraft({
+        ...current,
+        status: 'error',
+        error: tr('Write a Prompt first, then ask the parent to fill the identity.', '先写 Prompt，再让父节点填写。'),
+      });
+      return;
+    }
+    const parent = byId.get(current.parentId);
+    if (sessionIsBusy(parent)) {
+      setDraft({
+        ...current,
+        prompt,
+        status: 'error',
+        error: tr('Wait for the parent to finish before asking for an identity.', '等父亲说完再写身份。'),
+      });
+      return;
+    }
+    if (parent?.agent_config?.discuss_mode === true) {
+      setDraft({
+        ...current,
+        prompt,
+        status: 'error',
+        error: tr('Wait for the parent to finish its discussion.', '等父亲开完会再写身份。'),
+      });
+      return;
+    }
+    if (onAskParentIdentity === undefined) {
+      setDraft({
+        ...current,
+        prompt,
+        status: 'error',
+        error: tr('父亲这次没写出来，你可以自己填。', '父亲这次没写出来，你可以自己填。'),
+      });
+      return;
+    }
+    setDraft({ ...current, prompt, status: 'asking-parent', error: undefined });
+    try {
+      const identity = await onAskParentIdentity({
+        parentSessionId: current.parentId,
+        brief: prompt,
+      });
+      if (draftRef.current?.id !== current.id) return;
+      setDraft({
+        ...current,
+        prompt,
+        title: identity.title.trim(),
+        role: identity.role.trim(),
+        mandate: identity.mandate.trim(),
+        status: 'editing',
+        error: undefined,
+      });
+    } catch {
+      if (draftRef.current?.id !== current.id) return;
+      setDraft({
+        ...current,
+        prompt,
+        status: 'error',
+        error: tr('父亲这次没写出来，你可以自己填。', '父亲这次没写出来，你可以自己填。'),
+      });
+    }
   };
 
   const unmountSession = async (sessionId: string) => {
     const child = allNodes.find((session) => session.id === sessionId);
+    const serverParent = parentSessionIdOf(child);
+    const pendingOnlyEdges = (mapDocRef.current.edges ?? []).filter((edge) => (
+      edge.type === 'parent'
+      && edge.target === sessionId
+      && isUnappliedExtraJob(edge)
+    ));
+    if (serverParent === undefined && pendingOnlyEdges.length > 0) {
+      let next = mapDocRef.current;
+      for (const edge of pendingOnlyEdges) {
+        next = removeSessionMapEdgeByEndpoints(next, 'parent', edge.source, edge.target);
+      }
+      persistDoc(next);
+      setNodeMenu(null);
+      showHint(tr('已结束这份工作', '已结束这份工作'));
+      return;
+    }
     if (sessionIsBusy(child)) {
-      persistDoc(queuePendingTopology(mapDocRef.current, {
+      let pendingDoc = queuePendingTopology(mapDocRef.current, {
         kind: 'unmount',
         childSessionId: sessionId,
-      }));
+      });
+      pendingDoc = {
+        ...pendingDoc,
+        edges: (pendingDoc.edges ?? []).map((edge) => (
+          edge.type === 'parent' && edge.target === sessionId ? { ...edge, status: 'pending' } : edge
+        )),
+      };
+      persistDoc(pendingDoc);
       setNodeMenu(null);
       showHint(tr(
-        'Session busy — unmount queued until the current turn finishes.',
-        '会话忙碌 — 拆挂已排队，将在当前轮次结束后应用。',
+        'Waiting for it to finish.',
+        '等它说完。',
       ));
       return;
     }
-    setBusyLocked(true);
+    busyRef.current = true;
     clearError();
     setNodeMenu(null);
     try {
@@ -3062,25 +3263,177 @@ export function SessionMapPage({
       await refresh();
       if (disposedRef.current) return;
       onGraphChanged?.();
-    } catch (err) {
+    } catch {
       if (disposedRef.current) return;
-      showError(err instanceof Error ? err.message : String(err));
+      showNodeError(sessionId, tr('The session could not be ended. Try again.', '这份工作没结束，可以再试一次。'));
     } finally {
-      if (!disposedRef.current) setBusyLocked(false);
+      if (!disposedRef.current) busyRef.current = false;
       else busyRef.current = false;
     }
   };
 
-  const deleteSession = async (sessionId: string) => {
-    const label = byId.get(sessionId)?.title?.trim() || sessionId.slice(0, 10);
+  const endWorkEdge = async (parentId: string, childId: string) => {
+    setWorkEdgeMenu(null);
+    setSelectedWorkEdge(null);
+    setConfirmWorkEdge(null);
+    const child = byId.get(childId);
+    const serverParent = parentSessionIdOf(child);
+    const isServerEdge = serverParent === parentId;
+    if (!isServerEdge || childId.startsWith('draft:')) {
+      persistDoc(removeSessionMapEdgeByEndpoints(mapDocRef.current, 'parent', parentId, childId));
+      showHint(tr('已结束这份工作', '已结束这份工作'));
+      return;
+    }
+    if (sessionIsBusy(child)) {
+      let pendingDoc = queuePendingTopology(mapDocRef.current, { kind: 'unmount', childSessionId: childId });
+      pendingDoc = {
+        ...pendingDoc,
+        edges: (pendingDoc.edges ?? []).map((edge) => (
+          edge.type === 'parent' && edge.source === parentId && edge.target === childId
+            ? { ...edge, status: 'pending' }
+            : edge
+        )),
+      };
+      persistDoc(pendingDoc);
+      showHint(tr('等它说完再结束这份工作', '等它说完再结束这份工作'));
+      return;
+    }
+    try {
+      await api.sessions.unmount(childId);
+      persistDoc(removeSessionMapEdgeByEndpoints(mapDocRef.current, 'parent', parentId, childId));
+      await refresh();
+      onGraphChanged?.();
+      showHint(tr('已结束这份工作', '已结束这份工作'));
+    } catch {
+      showNodeError(childId, tr('This job could not be ended. Try again.', '这份工作没结束，可以再试一次。'));
+    }
+  };
+
+  function disconnectWorkFromPort(node: ForceMapNode, side: 'in' | 'out') {
+    const sessionId = node.member.session.id;
+    const incoming = visualWorkEdges.filter((edge) => edge.target === sessionId);
+    const outgoing = visualWorkEdges.filter((edge) => edge.source === sessionId);
+    const candidates = side === 'in' ? incoming : outgoing;
+    if (candidates.length === 1) {
+      void endWorkEdge(candidates[0]!.source, candidates[0]!.target);
+      return;
+    }
+    if (side === 'in') {
+      const serverParent = parentSessionIdOf(node.member.session);
+      const live = incoming.find((edge) => edge.source === serverParent);
+      if (live !== undefined) {
+        void endWorkEdge(live.source, live.target);
+        return;
+      }
+      if (serverParent !== undefined || incoming.length > 0) {
+        void unmountSession(sessionId);
+        return;
+      }
+      showHint(tr('This session has no job to disconnect.', '这场会话现在没有可拆的工作。'));
+      return;
+    }
+    if (outgoing.length > 1) {
+      showHint(tr(
+        'Alt-click the work edge to end that job.',
+        '按住 Alt 点那条工作边来结束这份工作。',
+      ));
+      return;
+    }
+    showHint(tr('This session has no job to disconnect.', '这场会话现在没有可拆的工作。'));
+  }
+
+  const retryWorkEdge = async (parentId: string, childId: string) => {
+    setWorkEdgeMenu(null);
+    const child = byId.get(childId);
+    const currentParent = parentSessionIdOf(child)
+      ?? mapParentByChildFromEdges(mapDocRef.current.edges ?? []).get(childId);
+    const result = await executeSilentLink(childId, parentId, currentParent === parentId);
+    if (result === 'added' || result === 'pending') {
+      openWorkEdgeEditor(parentId, childId);
+    }
+  };
+
+  const saveWorkEdgeIdentity = async () => {
+    const current = workEdgeEditor;
+    if (current === null || current.saving) return;
+    const role = current.role.trim() || undefined;
+    const mandate = current.mandate.trim() || undefined;
+    const existing = (mapDocRef.current.edges ?? []).find((edge) => (
+      edge.type === 'parent'
+      && edge.source === current.parentId
+      && edge.target === current.childId
+    ));
+    const child = byId.get(current.childId);
+    const parent = byId.get(current.parentId);
+    const serverParent = parentSessionIdOf(child);
+    const isLiveEdge = (existing === undefined || !isUnappliedExtraJob(existing)) && serverParent === current.parentId;
+    if (isLiveEdge && (sessionIsBusy(child) || sessionIsBusy(parent))) {
+      setWorkEdgeEditor({
+        ...current,
+        error: tr('等它说完再改这份工作。', '等它说完再改这份工作。'),
+      });
+      return;
+    }
+    setWorkEdgeEditor({ ...current, saving: true, error: undefined });
+    let nextDoc = upsertParentMapEdge(mapDocRef.current, current.parentId, current.childId, {
+      role,
+      mandate,
+      status: existing?.status,
+    });
+    if (!isLiveEdge && existing?.status === 'pending') {
+      nextDoc = {
+        ...nextDoc,
+        pendingTopology: (nextDoc.pendingTopology ?? []).map((op) => (
+          op.childSessionId === current.childId
+            && op.parentSessionId === current.parentId
+            ? { ...op, role, mandate }
+            : op
+        )),
+      };
+    }
+    persistDoc(nextDoc);
+    if (!isLiveEdge) {
+      setWorkEdgeEditor(null);
+      showHint(tr('这份工作身份已更新。', '这份工作身份已更新。'));
+      return;
+    }
+    try {
+      await api.sessions.remount(current.childId, current.parentId, { role, mandate });
+      if (disposedRef.current) return;
+      await refresh();
+      if (disposedRef.current) return;
+      setWorkEdgeEditor(null);
+      onGraphChanged?.();
+      showHint(tr('这份工作身份已更新。', '这份工作身份已更新。'));
+    } catch {
+      if (disposedRef.current) return;
+      persistDoc(upsertParentMapEdge(mapDocRef.current, current.parentId, current.childId, {
+        role,
+        mandate,
+        status: 'error',
+      }));
+      setWorkEdgeEditor({
+        ...current,
+        saving: false,
+        error: tr('这份工作身份没保存好，可以再试一次。', '这份工作身份没保存好，可以再试一次。'),
+      });
+    }
+  };
+
+  const warningsForSession = (sessionId: string): string[] => {
+    const childCount = allNodes.filter((node) => parentSessionIdOf(node) === sessionId).length;
+    return childCount > 0 ? [tr(`${String(childCount)} mounted sessions become independent.`, `${String(childCount)} 个成员会话会变成独立会话。`)] : [];
+  };
+
+  const deleteSession = async (sessionId: string, confirmed = false) => {
     // Cascade-aware: deleting a host strands children/agents — say so up front.
     const childCount = allNodes.filter((node) => parentSessionIdOf(node) === sessionId).length;
     const memberCount = agentExtras.filter((extra) => extra.hostSessionId === sessionId).length;
     const warnings: string[] = [];
     if (childCount > 0) {
       warnings.push(tr(
-        `${String(childCount)} mounted child session(s) will promote to top level.`,
-        `${String(childCount)} 个已挂载子会话将升为顶层。`,
+        `${String(childCount)} mounted sessions will become top-level conversations.`,
+        `${String(childCount)} 个成员会话将升为顶层对话。`,
       ));
     }
     if (memberCount > 0) {
@@ -3089,38 +3442,33 @@ export function SessionMapPage({
         `${String(memberCount)} 个托管团队成员将随之移除。`,
       ));
     }
-    const ok = window.confirm(
-      tr(
-        `Delete session “${label}”? This cannot be undone.`,
-        `删除会话「${label}」？此操作不可撤销。`,
-      ) + (warnings.length > 0 ? `\n${warnings.join('\n')}` : ''),
-    );
-    if (!ok) {
-      setNodeMenu(null);
+    if (!confirmed) {
+      setDeleteConfirmSessionId(sessionId);
       return;
     }
-    setBusyLocked(true);
+    busyRef.current = true;
     clearError();
+    setDeleteConfirmSessionId(null);
     setNodeMenu(null);
     try {
       await api.sessions.delete(sessionId);
       if (disposedRef.current) return;
-      positionsRef.current.delete(`session:${sessionId}`);
+      forgetMapNodePosition(positionsRef.current, sessionId);
       persistDoc(removeEdgesForSession(mapDocRef.current, sessionId));
       persistPositions(positionsRef.current);
       await refresh();
       if (disposedRef.current) return;
       onGraphChanged?.();
-    } catch (err) {
+    } catch {
       if (disposedRef.current) return;
-      showError(err instanceof Error ? err.message : String(err));
+      showNodeError(sessionId, tr('The session could not be deleted. Try again.', '会话没删掉，可以再试一次。'));
     } finally {
-      if (!disposedRef.current) setBusyLocked(false);
+      if (!disposedRef.current) busyRef.current = false;
       else busyRef.current = false;
     }
   };
 
-  const deleteSelectedSessions = async () => {
+  const deleteSelectedSessions = async (confirmed = false) => {
     const ids = [...selectedIds];
     if (ids.length === 0) return;
 
@@ -3130,8 +3478,8 @@ export function SessionMapPage({
       const memberCount = agentExtras.filter((extra) => extra.hostSessionId === sessionId).length;
       if (childCount > 0) {
         warnings.push(tr(
-          `“${byId.get(sessionId)?.title?.trim() || sessionId.slice(0, 10)}”: ${String(childCount)} child(ren) promote to top level.`,
-          `「${byId.get(sessionId)?.title?.trim() || sessionId.slice(0, 10)}」：${String(childCount)} 个子会话将升为顶层。`,
+          `“${byId.get(sessionId)?.title?.trim() || sessionId.slice(0, 10)}”: ${String(childCount)} mounted session(s) become top-level conversations.`,
+          `「${byId.get(sessionId)?.title?.trim() || sessionId.slice(0, 10)}」：${String(childCount)} 个成员会话将升为顶层对话。`,
         ));
       }
       if (memberCount > 0) {
@@ -3142,17 +3490,16 @@ export function SessionMapPage({
       }
     }
 
-    const ok = window.confirm(
-      tr(
-        `Delete ${String(ids.length)} selected session(s)? This cannot be undone.`,
-        `删除已选中的 ${String(ids.length)} 个会话？此操作不可撤销。`,
-      ) + (warnings.length > 0 ? `\n${warnings.join('\n')}` : ''),
-    );
-    if (!ok) return;
+    if (!confirmed) {
+      setDeleteSelectionConfirm(true);
+      return;
+    }
 
-    setBusyLocked(true);
+    busyRef.current = true;
+    setBatchFailure(null);
     clearError();
     setNodeMenu(null);
+    setDeleteSelectionConfirm(false);
     const failures: string[] = [];
     let doc = mapDocRef.current;
     try {
@@ -3161,33 +3508,32 @@ export function SessionMapPage({
           await api.sessions.delete(sessionId);
           if (disposedRef.current) return;
           doc = removeEdgesForSession(doc, sessionId);
-          positionsRef.current.delete(`session:${sessionId}`);
-        } catch (err) {
+          forgetMapNodePosition(positionsRef.current, sessionId);
+        } catch {
           failures.push(tr(
-            `Delete ${sessionId.slice(0, 8)}…: ${err instanceof Error ? err.message : String(err)}`,
-            `删除 ${sessionId.slice(0, 8)}…：${err instanceof Error ? err.message : String(err)}`,
+            `Could not delete ${byId.get(sessionId)?.title?.trim() || sessionId.slice(0, 8)}.`,
+            `「${byId.get(sessionId)?.title?.trim() || sessionId.slice(0, 8)}」没删掉。`,
           ));
         }
       }
       mapDocRef.current = doc;
       persistDoc(doc);
       persistPositions(positionsRef.current);
-      setSelectionMenu(null);
       clearSelection();
       await refresh();
       if (disposedRef.current) return;
       onGraphChanged?.();
       if (failures.length > 0) {
-        showError(tr(
-          `Batch delete finished with ${String(failures.length)} failure(s): ${failures.slice(0, 3).join(' · ')}`,
-          `批量删除完成，${String(failures.length)} 项失败：${failures.slice(0, 3).join(' · ')}`,
+        setBatchFailure(tr(
+          `${String(failures.length)} session(s) could not be deleted.`,
+          `${String(failures.length)} 个会话没删掉。`,
         ));
       }
-    } catch (err) {
+    } catch {
       if (disposedRef.current) return;
-      showError(err instanceof Error ? err.message : String(err));
+      showError(tr('批量删除没完成，可以再试一次', '批量删除没完成，可以再试一次'));
     } finally {
-      if (!disposedRef.current) setBusyLocked(false);
+      if (!disposedRef.current) busyRef.current = false;
       else busyRef.current = false;
     }
   };
@@ -3198,6 +3544,15 @@ export function SessionMapPage({
       .filter((node) => wanted.has(node.member.session.id))
       .map((node) => node.member);
   };
+
+  const selectedHasBusySession = selectedMembers().some((member) => {
+    const tone = memberCaps(member).statusTone;
+    return sessionIsBusy(member.session) || tone === 'running' || tone === 'working' || tone === 'waiting';
+  });
+  const selectedHasWork = selectedIds.some((sessionId) => (
+    parentSessionIdOf(byId.get(sessionId)) !== undefined
+    || (mapDoc.edges ?? []).some((edge) => edge.type === 'parent' && edge.target === sessionId)
+  ));
 
   const abortSessionMember = async (member: MapMemberRef): Promise<void> => {
     const tasks = [api.sessions.abort(member.session.id)];
@@ -3211,26 +3566,40 @@ export function SessionMapPage({
     }
   };
 
+  const stopMember = async (member: MapMemberRef) => {
+    const id = member.session.id;
+    setStoppingIds((current) => new Set(current).add(id));
+    setStopErrors((current) => { const next = new Set(current); next.delete(id); return next; });
+    try {
+      await abortSessionMember(member);
+      await refresh();
+    } catch {
+      setStopErrors((current) => new Set(current).add(id));
+    } finally {
+      setStoppingIds((current) => { const next = new Set(current); next.delete(id); return next; });
+    }
+  };
+
   const abortSelectedSessions = async () => {
     const members = selectedMembers();
     if (members.length === 0) return;
-    setBusyLocked(true);
+    busyRef.current = true;
+    setBatchFailure(null);
     clearError();
-    setSelectionMenu(null);
     const failures: string[] = [];
     try {
       for (const member of members) {
         try {
           await abortSessionMember(member);
-        } catch (err) {
-          failures.push(memberLabel(member) + ': ' + (err instanceof Error ? err.message : String(err)));
+        } catch {
+          failures.push(memberLabel(member));
         }
       }
       await refresh();
       if (failures.length > 0) {
-        showError(tr(
-          `Stop finished with ${String(failures.length)} failure(s): ${failures.slice(0, 3).join(' · ')}`,
-          `停止完成，${String(failures.length)} 项失败：${failures.slice(0, 3).join(' · ')}`,
+        setBatchFailure(tr(
+          `${String(failures.length)} session(s) did not stop.`,
+          `${String(failures.length)} 个会话没停住。`,
         ));
       } else {
         showHint(tr(
@@ -3239,138 +3608,76 @@ export function SessionMapPage({
         ));
       }
     } finally {
-      if (!disposedRef.current) setBusyLocked(false);
+      if (!disposedRef.current) busyRef.current = false;
       else busyRef.current = false;
     }
   };
 
   const unmountSelectedSessions = async () => {
-    const ids = selectedIds.filter((id) => parentSessionIdOf(byId.get(id)) !== undefined);
+    const ids = selectedIds.filter((id) => (
+      parentSessionIdOf(byId.get(id)) !== undefined
+      || (mapDocRef.current.edges ?? []).some((edge) => (
+        edge.type === 'parent' && edge.target === id && isUnappliedExtraJob(edge)
+      ))
+    ));
     if (ids.length === 0) {
       showHint(tr('No mounted sessions in the selection.', '选中项里没有已挂载会话。'));
       return;
     }
-    const confirmed = window.confirm(tr(
-      `Unmount ${String(ids.length)} selected session(s) to top-level?`,
-      `将已选中的 ${String(ids.length)} 个会话拆挂为顶层？`,
-    ));
-    if (!confirmed) return;
-    setBusyLocked(true);
+    setTopologyBusy(true);
+    setBatchFailure(null);
     clearError();
-    setSelectionMenu(null);
     const failures: string[] = [];
     try {
       for (const sessionId of ids) {
         try {
           const child = byId.get(sessionId);
+          const serverParent = parentSessionIdOf(child);
+          const pendingOnlyEdges = (mapDocRef.current.edges ?? []).filter((edge) => (
+            edge.type === 'parent'
+            && edge.target === sessionId
+            && isUnappliedExtraJob(edge)
+          ));
+          if (serverParent === undefined && pendingOnlyEdges.length > 0) {
+            let next = mapDocRef.current;
+            for (const edge of pendingOnlyEdges) {
+              next = removeSessionMapEdgeByEndpoints(next, 'parent', edge.source, edge.target);
+            }
+            persistDoc(next);
+            continue;
+          }
           if (sessionIsBusy(child)) {
-            persistDoc(queuePendingTopology(mapDocRef.current, {
+            let pendingDoc = queuePendingTopology(mapDocRef.current, {
               kind: 'unmount',
               childSessionId: sessionId,
-            }));
+            });
+            pendingDoc = {
+              ...pendingDoc,
+              edges: (pendingDoc.edges ?? []).map((edge) => (
+                edge.type === 'parent' && edge.target === sessionId ? { ...edge, status: 'pending' } : edge
+              )),
+            };
+            persistDoc(pendingDoc);
             continue;
           }
           await api.sessions.unmount(sessionId);
           persistDoc(disconnectParentEdges(mapDocRef.current, sessionId));
-        } catch (err) {
-          failures.push(sessionId.slice(0, 8) + ': ' + (err instanceof Error ? err.message : String(err)));
+        } catch {
+          failures.push(byId.get(sessionId)?.title?.trim() || sessionId.slice(0, 8));
         }
       }
       await refresh();
       onGraphChanged?.();
       if (failures.length > 0) {
-        showError(tr(
-          `Unmount finished with ${String(failures.length)} failure(s).`,
-          `拆挂完成，${String(failures.length)} 项失败。`,
+        setBatchFailure(tr(
+          `${String(failures.length)} job(s) could not be ended.`,
+          `${String(failures.length)} 份工作没结束。`,
         ));
       }
     } finally {
-      if (!disposedRef.current) setBusyLocked(false);
+      if (!disposedRef.current) setTopologyBusy(false);
       else busyRef.current = false;
     }
-  };
-
-  const openSelectedSession = () => {
-    const members = selectedMembers();
-    const member = members[0];
-    if (member === undefined) return;
-    if (selectedIds.length > 1) {
-      showHint(tr(
-        `Opening 1 of ${String(selectedIds.length)} selected sessions.`,
-        `已选 ${String(selectedIds.length)} 个，只打开 1 个。`,
-      ));
-    }
-    setSelectionMenu(null);
-    openMember(member);
-  };
-
-  const selectAllVisible = useCallback(() => {
-    const ids = filteredList
-      .filter((member) => member.kind === 'session')
-      .map((member) => member.session.id);
-    setSelectedIds(ids);
-    setSelectionMenu(null);
-    setTagMenuOpen(false);
-  }, [filteredList]);
-  selectAllVisibleRef.current = selectAllVisible;
-
-  const applyMapLabelToSelected = (labelId: string, assigned: boolean) => {
-    let doc = mapDocRef.current;
-    for (const sessionId of selectedIdsRef.current) {
-      doc = assignSessionLabel(doc, sessionId, labelId, assigned);
-    }
-    persistDoc(doc);
-    setTagMenuOpen(false);
-    setSelectionMenu(null);
-  };
-
-  const applyIdentityTagToSelected = async (mode: 'add' | 'remove') => {
-    const tag = window.prompt(
-      mode === 'add'
-        ? tr('Identity tag to add', '要添加的身份标签')
-        : tr('Identity tag to remove', '要移除的身份标签'),
-    );
-    if (tag === null || !tag.trim()) return;
-    const ids = [...selectedIdsRef.current];
-    setBusyLocked(true);
-    setTagMenuOpen(false);
-    setSelectionMenu(null);
-    const failures: string[] = [];
-    try {
-      for (const sessionId of ids) {
-        const session = byId.get(sessionId);
-        if (session === undefined) continue;
-        try {
-          await api.sessions.updateIdentity(sessionId, {
-            tags: mergeSessionTags(readSessionTags(session), tag, mode),
-          });
-        } catch (err) {
-          failures.push(`${sessionId.slice(0, 8)}: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
-      await refresh();
-      onGraphChanged?.();
-      if (failures.length > 0) {
-        showError(tr(
-          `Tag update finished with ${String(failures.length)} failure(s).`,
-          `标签更新完成，${String(failures.length)} 项失败。`,
-        ));
-      }
-    } finally {
-      if (!disposedRef.current) setBusyLocked(false);
-      else busyRef.current = false;
-    }
-  };
-
-  const createChildForSession = (sessionId: string) => {
-    const node = forceNodesRef.current.find((candidate) => (
-      candidate.member.session.id === sessionId
-    ));
-    void createSessionNodeAt(
-      node?.x ?? 0,
-      (node?.y ?? 0) + NODE_H / 2 + 28,
-      sessionId,
-    );
   };
 
   const stopCardEvent = (event: { stopPropagation: () => void }) => {
@@ -3378,10 +3685,11 @@ export function SessionMapPage({
   };
 
   const openIdentityForSession = (sessionId: string) => {
-    const session = byId.get(sessionId);
+    const session = byId.get(sessionId)
+      ?? sessions.find((item) => item.id === sessionId)
+      ?? forceNodesRef.current.find((node) => node.member.session.id === sessionId)?.member.session;
     if (session === undefined) return;
     setNodeMenu(null);
-    setSelectionMenu(null);
     setIdentitySession(session);
   };
 
@@ -3389,51 +3697,17 @@ export function SessionMapPage({
     event: ReactMouseEvent,
     member: MapMemberRef,
   ) => {
+    if (blockContextMenuIfGesture(event)) return;
     const caps = memberCaps(member);
     if (!caps.isRealSession) return;
-    event.preventDefault();
     event.stopPropagation();
-    setSelectionMenu(null);
-    setTagMenuOpen(false);
-    if (!selectedIdsRef.current.includes(member.session.id)) {
-      setSelectedIds([member.session.id]);
-    }
     setNodeMenu({
       sessionId: member.session.id,
       x: event.clientX,
       y: event.clientY,
       canUnmount: caps.canDisconnect,
-      canSelfBootstrapRole: caps.canSelfBootstrapRole,
       label: memberLabel(member),
     });
-  };
-
-  const promptSelfBootstrapRole = (sessionId: string) => {
-    const current = mapDoc.topLevelRoles?.[sessionId]
-      ?? (typeof byId.get(sessionId)?.metadata?.mount_role === 'string'
-        ? byId.get(sessionId)!.metadata!.mount_role as string
-        : '');
-    const next = window.prompt(
-      tr('Self-bootstrap role for this top-level session (local until server sync)', '顶层会话自举角色（本地保存，待服务端同步）'),
-      current,
-    );
-    if (next === null) return;
-    const role = next.trim();
-    const topLevelRoles = { ...mapDoc.topLevelRoles };
-    if (role.length === 0) {
-      delete topLevelRoles[sessionId];
-    } else {
-      topLevelRoles[sessionId] = role;
-    }
-    persistDoc({
-      ...mapDoc,
-      topLevelRoles: Object.keys(topLevelRoles).length > 0 ? topLevelRoles : undefined,
-    });
-    setNodeMenu(null);
-    showHint(tr(
-      'Role saved locally. Mounting disables self-bootstrap until unmounted.',
-      '角色已本地保存。挂载后将禁用自举，拆挂回顶层后恢复。',
-    ));
   };
 
   const updateAnnotation = (id: string, patch: Partial<MapAnnotationBox>) => {
@@ -3462,6 +3736,8 @@ export function SessionMapPage({
     bounds: { x: number; y: number; width: number; height: number },
   ) => {
     if (event.button !== 0) return;
+    if (wireDragRef.current !== null || dragRef.current !== null || draftDragRef.current !== null
+      || marqueeRef.current !== null || isBlockingStageGesture(gestureRef.current.kind)) return;
     event.stopPropagation();
     event.preventDefault();
     annotationDragRef.current = {
@@ -3519,8 +3795,29 @@ export function SessionMapPage({
   const removeAnnotation = (id: string) => {
     persistDoc({ ...mapDoc, annotations: mapDoc.annotations.filter((item) => item.id !== id) });
     if (editingAnnotationId === id) setEditingAnnotationId(null);
-    if (bindAnnotationId === id) setBindAnnotationId(null);
   };
+
+  const finalizeTopLevelCreate = useCallback(async (
+    placeholderId: string,
+    createdId: string,
+    worldX: number,
+    worldY: number,
+  ) => {
+    if (disposedRef.current) return;
+    setTopLevelPlaceholder((current) => current?.id === placeholderId ? null : current);
+    positionsRef.current.set(`session:${createdId}`, { x: worldX, y: worldY });
+    persistDoc({
+      ...mapDocRef.current,
+      positions: {
+        ...mapDocRef.current.positions,
+        [`session:${createdId}`]: { x: worldX, y: worldY },
+      },
+    });
+    await refresh();
+    if (disposedRef.current) return;
+    onGraphChanged?.();
+    showHint(tr('Session node created.', '已创建会话节点。'));
+  }, [onGraphChanged, persistDoc, refresh, showHint, tr]);
 
   let minX = 0;
   let minY = 0;
@@ -3542,8 +3839,6 @@ export function SessionMapPage({
     maxY = Math.max(maxY, b.y + b.height + CANVAS_PAD);
   }
 
-  const editingAnnotation = mapDoc.annotations.find((item) => item.id === editingAnnotationId);
-
   const wireValidTargetIds = useMemo(() => {
     if (wireDrag === null) return new Set<string>();
     const ids = new Set<string>();
@@ -3564,8 +3859,19 @@ export function SessionMapPage({
     maxX = Math.max(maxX, draft.worldX + 140 + CANVAS_PAD);
     maxY = Math.max(maxY, draft.worldY + 320 + CANVAS_PAD);
   }
+  if (topLevelPlaceholder !== null) {
+    minX = Math.min(minX, topLevelPlaceholder.worldX - NODE_W / 2 - CANVAS_PAD);
+    minY = Math.min(minY, topLevelPlaceholder.worldY - NODE_H / 2 - CANVAS_PAD);
+    maxX = Math.max(maxX, topLevelPlaceholder.worldX + NODE_W / 2 + CANVAS_PAD);
+    maxY = Math.max(maxY, topLevelPlaceholder.worldY + NODE_H / 2 + CANVAS_PAD);
+  }
   const contentWidth = Math.max(1, maxX - minX);
   const contentHeight = Math.max(1, maxY - minY);
+  const showFirstUseHint = firstUseHintVisible
+    && forceNodes.length > 0
+    && !sessions.some((session) => parentSessionIdOf(session) !== undefined)
+    && (graph?.edges ?? []).length === 0
+    && !(mapDoc.edges ?? []).some((edge) => edge.type === 'parent');
 
   return (
     <div className="view-page view-page-wide session-map-page">
@@ -3574,32 +3880,20 @@ export function SessionMapPage({
         className={
           'session-map-stage'
           + (panning ? ' panning' : '')
-          + (bindAnnotationId !== null ? ' binding-note' : '')
           + (wireDrag !== null ? ' wiring' : '')
           + (marquee !== null ? ' marqueeing' : '')
-          + (selectionBox !== null ? ' selecting' : '')
-          + (busy ? ' busy' : '')
         }
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
         onContextMenu={(event) => {
-          if ((event.target as HTMLElement).closest('.session-map-node') !== null) return;
-          if ((event.target as HTMLElement).closest('.session-map-context-menu') !== null) return;
-          event.preventDefault();
-          if (rightPanMovedRef.current) return;
+          const target = event.target as HTMLElement;
+          if (target.closest('.session-identity-drawer, input, textarea') !== null) return;
+          if (blockContextMenuIfGesture(event)) return;
+          if (target.closest('.session-map-node') !== null) return;
+          if (target.closest('.session-map-context-menu') !== null) return;
           openCanvasContextMenu(event);
-        }}
-        onDoubleClick={(event) => {
-          // Require Alt or Shift to avoid accidental rearrange on empty canvas.
-          if (!event.altKey && !event.shiftKey) return;
-          if ((event.target as HTMLElement).closest(
-            '.session-map-node, .session-map-annotation-chrome, .session-map-float, .session-map-draft-node',
-          ) !== null) {
-            return;
-          }
-          rearrange();
         }}
       >
         {error && (
@@ -3620,12 +3914,31 @@ export function SessionMapPage({
         )}
         {hint && (
           <div className="session-map-float session-map-hint-toast" role="status">
-            {hint}
+            <span>{hint}</span>
+            <button
+              type="button"
+              aria-label={tr('Dismiss', '关闭')}
+              title={tr('Dismiss', '关闭')}
+              onClick={() => setHint(null)}
+            >×</button>
           </div>
         )}
-        {busy && <div className="session-map-busy-overlay" aria-busy="true" aria-live="polite" />}
-        {forceNodes.length === 0 && mapDoc.annotations.length === 0
-          ? <div className="session-map-stage-empty">{tr('No sessions yet.', '还没有会话。')}</div>
+        {showFirstUseHint && (
+          <div className="session-map-float session-map-hint-toast session-map-first-use-hint" role="status">
+            <span>{tr(
+              'Drag from a card bottom edge to empty space to create a member. The parent writes the identity.',
+              '从卡片下缘拉到空白，会生出一个新成员。身份由那个父亲来写。',
+            )}</span>
+            <button
+              type="button"
+              aria-label={tr('Dismiss', '关闭')}
+              title={tr('Dismiss', '关闭')}
+              onClick={dismissFirstUseHint}
+            >×</button>
+          </div>
+        )}
+        {forceNodes.length === 0 && mapDoc.annotations.length === 0 && draft === null && topLevelPlaceholder === null
+          ? <div className="session-map-stage-empty">{tr('Start a conversation with + on the left, or right-click empty space to create one.', '从左边 + 开始一场对话，或在空白处右键新建。')}</div>
           : (
               <div
                 className="session-map-canvas"
@@ -3641,7 +3954,6 @@ export function SessionMapPage({
                       className={
                         'session-map-annotation'
                         + (editingAnnotationId === box.id ? ' editing' : '')
-                        + (bindAnnotationId === box.id ? ' binding' : '')
                       }
                       style={{
                         left: bounds.x,
@@ -3657,10 +3969,40 @@ export function SessionMapPage({
                         className="session-map-annotation-chrome session-map-annotation-titlebar"
                         onPointerDown={(event) => startAnnotationDrag(event, box.id, 'move', bounds)}
                       >
-                        <span className="session-map-annotation-title">{box.title || tr('Note', '注释')}</span>
+                        <span className="session-map-annotation-title">{box.title || tr('Group box', '分组框')}</span>
                       </div>
-                      {box.nodeIds.length === 0 && (
-                        <span className="session-map-annotation-empty">{tr('Empty box', '空框')}</span>
+                      {editingAnnotationId === box.id && (
+                        <div
+                          className="session-map-annotation-editor"
+                          onPointerDown={(event) => event.stopPropagation()}
+                        >
+                          <input
+                            autoFocus
+                            value={box.title}
+                            aria-label={tr('Group box title', '分组框标题')}
+                            onChange={(event) => updateAnnotation(box.id, { title: event.target.value })}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter' || event.key === 'Escape') {
+                                event.preventDefault();
+                                setEditingAnnotationId(null);
+                              }
+                            }}
+                          />
+                          <div className="session-map-note-colors" role="group" aria-label={tr('Group box color', '分组框颜色')}>
+                            {DEFAULT_ANNOTATION_COLORS.map((color) => (
+                              <button
+                                key={color}
+                                type="button"
+                                className={'session-map-note-color' + (box.color === color ? ' active' : '')}
+                                style={{ background: color }}
+                                aria-label={color}
+                                onClick={() => updateAnnotation(box.id, { color })}
+                              />
+                            ))}
+                          </div>
+                          <button type="button" className="session-map-note-delete" onClick={() => removeAnnotation(box.id)}>{tr('Delete', '删除')}</button>
+                          <button type="button" className="session-map-note-done" onClick={() => setEditingAnnotationId(null)}>{tr('Done', '完成')}</button>
+                        </div>
                       )}
                       <span
                         className="session-map-annotation-chrome session-map-annotation-resize"
@@ -3676,88 +4018,130 @@ export function SessionMapPage({
                   height={contentHeight}
                   style={{ left: minX, top: minY }}
                 >
-                  {forceLinks.map((link) => {
-                    const from = typeof link.source === 'string'
-                      ? forceNodes.find((node) => node.id === link.source)
-                      : link.source;
-                    const to = typeof link.target === 'string'
-                      ? forceNodes.find((node) => node.id === link.target)
-                      : link.target;
+                  {visualWorkEdges.map((edge) => {
+                    const from = forceNodes.find((node) => node.member.session.id === edge.source);
+                    const to = edge.target === draft?.id
+                      ? { x: draft.worldX, y: draft.worldY } as ForceMapNode
+                      : forceNodes.find((node) => node.member.session.id === edge.target);
                     if (!from || !to) return null;
                     const start = linkEndpoint(from, 'bottom');
                     const end = linkEndpoint(to, 'top');
                     const midY = (start.y + end.y) / 2;
                     const d = `M ${start.x - minX} ${start.y - minY} C ${start.x - minX} ${midY - minY}, ${end.x - minX} ${midY - minY}, ${end.x - minX} ${end.y - minY}`;
+                    const isPending = edge.status === 'pending';
+                    const isUnapplied = isUnappliedExtraJob({ type: 'parent', status: edge.status });
+                    const isError = edge.status === 'error';
+                    const edgeRole = edge.role?.trim();
+                    const edgeMandate = edge.mandate?.replace(/\s+/g, ' ').trim();
+                    const edgeIdentity = [edgeRole, edgeMandate]
+                      .filter((value): value is string => value !== undefined && value.length > 0)
+                      .join(' · ')
+                      .slice(0, 120);
                     return (
+                      <g key={`${edge.source}->${edge.target}`}>
+                      <title>{tr(
+                        `Work for “${byId.get(edge.source)?.title?.trim() || edge.source}”: ${edgeIdentity || 'job'}`,
+                        `给「${byId.get(edge.source)?.title?.trim() || edge.source}」干：${edgeIdentity || '工作'}`,
+                      )}</title>
                       <path
-                        key={`${typeof link.source === 'string' ? link.source : link.source.id}->${typeof link.target === 'string' ? link.target : link.target.id}`}
+                        data-parent-id={edge.source}
+                        data-child-id={edge.target}
+                        data-edge-status={edge.status}
+                        className={selectedWorkEdge !== null
+                          && selectedWorkEdge.parentId === edge.source
+                          && selectedWorkEdge.childId === edge.target
+                          ? `selected${isPending || isUnapplied ? ' pending-multi-parent' : isError ? 'error' : ''}`
+                          : isPending || isUnapplied ? 'pending-multi-parent' : isError ? 'error' : undefined}
                         d={d}
-                      />
-                    );
-                  })}
-                  {(mapDoc.edges ?? []).filter((edge) => edge.type === 'peer' || edge.type === 'service').map((edge) => {
-                    const from = forceNodes.find((node) => node.member.session.id === edge.source);
-                    const to = forceNodes.find((node) => node.member.session.id === edge.target);
-                    if (from === undefined || to === undefined) return null;
-                    const start = linkEndpoint(from, 'bottom');
-                    const end = linkEndpoint(to, 'top');
-                    const midY = (start.y + end.y) / 2;
-                    const d = `M ${start.x - minX} ${start.y - minY} C ${start.x - minX} ${midY - minY}, ${end.x - minX} ${midY - minY}, ${end.x - minX} ${end.y - minY}`;
-                    return (
-                      <path
-                        key={edge.id}
-                        className={`session-map-edge-collab session-map-edge-${edge.type}`}
-                        d={d}
-                        data-edge-type={edge.type}
-                        onPointerDown={(event) => event.stopPropagation()}
+                        aria-label={edge.mandate ?? tr('Work edge', '工作边')}
+                        role="button"
+                        onPointerDown={(event) => {
+                          // Left-click selects the edge; right/middle drag must
+                          // bubble to the stage so it pans the world.
+                          if (event.button === 0) event.stopPropagation();
+                          if (event.button !== 0 || !event.altKey) return;
+                          event.preventDefault();
+                          armClickSuppression();
+                          if (wireDragRef.current !== null || dragRef.current !== null || marqueeRef.current !== null
+                            || annotationDragRef.current !== null || draftDragRef.current !== null
+                            || isBlockingStageGesture(gestureRef.current.kind)) return;
+                          void endWorkEdge(edge.source, edge.target);
+                        }}
                         onClick={(event) => {
                           event.stopPropagation();
-                          persistDoc(removeSessionMapEdge(mapDocRef.current, edge.id));
-                          showHint(tr('Removed the local map link.', '已移除本地地图连线。'));
+                          if (event.altKey) return;
+                          setSelectedIds([]);
+                          setSelectedWorkEdge({ parentId: edge.source, childId: edge.target });
                         }}
-                      >
-                        <title>
-                          {edge.type === 'peer'
-                            ? tr('Peer link · click to remove', '对等连线 · 点击删除')
-                            : tr('Service link · click to remove', '服务连线 · 点击删除')}
-                        </title>
-                      </path>
+                        onContextMenu={(event) => {
+                          if (blockContextMenuIfGesture(event)) return;
+                          event.stopPropagation();
+                          setSelectedIds([]);
+                          setSelectedWorkEdge({ parentId: edge.source, childId: edge.target });
+                          setNodeMenu(null);
+                          setCanvasMenu(null);
+                          setWorkEdgeMenu({
+                            parentId: edge.source,
+                            childId: edge.target,
+                            x: event.clientX,
+                            y: event.clientY,
+                          });
+                        }}
+                      />
+                      {(isPending || isUnapplied || isError) && (
+                        <text x={(start.x + end.x) / 2 - minX + 6} y={midY - minY - 4} className="session-map-edge-pending-label">
+                          {isUnapplied
+                            ? tr("Can't work for two people at once yet.", '现在还不能同时给两个人干活')
+                            : isError
+                              ? tr('Could not connect', '没接上')
+                              : tr('Waiting', '等它说完')}
+                        </text>
+                      )}
+                      </g>
                     );
                   })}
                 </svg>
                 {forceNodes.map((node) => {
                   const member = node.member;
                   const caps = memberCaps(member);
-                  const parentId = parentSessionIdOf(member.session) ?? member.hostSessionId;
-                  const parentSession = parentId !== undefined ? byId.get(parentId) : undefined;
-                  const parentName = parentSession !== undefined
-                    ? sessionLabel(parentSession)
-                    : parentId !== undefined
-                      ? parentId.slice(0, 8)
-                      : undefined;
-                  const isActive = activeSessionId !== undefined && (
-                    member.session.id === activeSessionId
-                    || member.agent?.mounted_session_id === activeSessionId
-                  );
-                  const role = memberRole(member, mapDoc.topLevelRoles);
-                  const projectCwd = memberProjectCwd(member, byId);
+                  const isActive = activeSessionId !== undefined
+                    && member.session.id === activeSessionId;
+                  const workEdges = visualWorkEdges.filter((edge) => edge.target === member.session.id);
+                  const role = workEdges.length > 1
+                    ? tr(`${String(workEdges.length)} jobs`, `${String(workEdges.length)} 份工作`)
+                    : workEdges[0]?.role
+                      || workEdges[0]?.mandate?.split(/[\n.!?。！？]/, 1)[0]?.trim()
+                      || memberRole(member);
+                  const parentCwd = workEdges.length === 1
+                    ? byId.get(workEdges[0]!.source)?.metadata?.cwd
+                    : undefined;
+                  const ownCwd = member.session.metadata?.cwd;
+                  const exceptionalCwd = typeof ownCwd === 'string' && ownCwd.trim()
+                    && typeof parentCwd === 'string' && parentCwd.trim()
+                    && ownCwd.trim() !== parentCwd.trim()
+                    ? ownCwd.trim()
+                    : undefined;
                   const statusClass = mapStatusDotClass(caps.status);
-                  const tierLabel = caps.displayTier === 'member'
-                    ? tr('member', '成员')
-                    : caps.displayTier === 'mounted'
-                      ? (parentName !== undefined
-                        ? tr(`under ${parentName}`, `挂在「${parentName.length > 14 ? `${parentName.slice(0, 14)}…` : parentName}」`)
-                        : tr('mounted', '已挂载'))
-                      : tr('top-level', '顶层');
+                  const runtimeTone = mapRuntimeStatus(caps.status);
+                  const runtimeSince = member.agent?.last_active ?? member.session.updated_at;
+                  const runtimeElapsed = (runtimeTone === 'running' || runtimeTone === 'working' || runtimeTone === 'waiting')
+                    ? formatElapsed(Date.now() - Date.parse(runtimeSince))
+                    : undefined;
+                  const currentAction = describeMapCurrentAction(member, liveHints);
+                  const isRuntimeBusy = sessionIsBusy(member.session)
+                    || caps.statusTone === 'waiting'
+                    || caps.statusTone === 'running'
+                    || caps.statusTone === 'working'
+                    || currentAction !== undefined;
+                  const statusLabel = localizedMapStatus(caps.status, tr);
                   const left = Math.round((node.x ?? 0) - NODE_W / 2);
                   const top = Math.round((node.y ?? 0) - NODE_H / 2);
                   const isWireTarget = wireValidTargetIds.has(node.id);
                   const isWireSnap = wireSnapTargetId === node.id;
-                  const pendingOp = (mapDoc.pendingTopology ?? []).find(
-                    (op) => op.childSessionId === member.session.id,
-                  );
-                  const currentAction = describeMapCurrentAction(member, liveHints);
-                  const errorSummary = describeMapErrorSummary(member, liveHints);
+                  const isSearchMatch = query.trim().length > 0 && visibleIds.has(node.id);
+                  const rawErrorSummary = describeMapErrorSummary(member, liveHints);
+                  const errorSummary = nodeErrors[member.session.id]
+                    ?? (rawErrorSummary === undefined ? undefined : localizedMapError(rawErrorSummary, tr));
                   const actionLabel = currentAction === undefined
                     ? undefined
                     : currentAction.kind === 'thinking'
@@ -3780,29 +4164,24 @@ export function SessionMapPage({
                       className={
                         'team-node session-map-node'
                         + (isActive ? ' active' : '')
-                        + (caps.displayTier === 'top' ? ' top-level' : caps.displayTier === 'mounted' ? ' mounted' : ' member')
                         + ` status-${caps.statusTone}`
+                        + (nodeErrors[member.session.id] !== undefined ? ' has-local-error' : '')
                         + (selectedIds.includes(member.session.id) ? ' selected' : '')
                         + (isWireTarget ? ' wire-target-valid' : '')
                         + (isWireSnap ? ' wire-target-snap' : '')
-                        + (pendingOp !== undefined ? ' pending-topology' : '')
+                        + (isSearchMatch ? ' search-match' : '')
                       }
                       style={{ left, top, width: NODE_W, height: NODE_H }}
                       onPointerDown={(event) => startNodeDrag(event, node)}
                       onClick={(event) => handleNodeClick(member, event)}
-                      onDoubleClick={() => openMember(member)}
                       onContextMenu={(event) => openNodeContextMenu(event, member)}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter') {
-                          if (draft !== null) return;
                           event.preventDefault();
+                          if (selectedIdsRef.current.length > 1) return;
                           openMember(member);
                           return;
                         }
-                        if (event.key !== ' ') return;
-                        if (draft !== null) return;
-                        event.preventDefault();
-                        handleNodeClick(member, event as unknown as ReactMouseEvent);
                       }}
                       role="button"
                       tabIndex={0}
@@ -3817,8 +4196,8 @@ export function SessionMapPage({
                             + (isWireSnap && wireDrag?.side === 'out' ? ' wire-snap' : '')
                           }
                           title={tr(
-                            'Input · drag to reconnect · Alt+click to disconnect',
-                            '输入口 · 拖动重连 · Alt+点击断连',
+                            'Input · drag to move this job · Alt-click to disconnect',
+                            '输入口 · 拖动改挂这份工作 · Alt+左键断连',
                           )}
                           onPointerDown={(event) => startWireFromPort(event, node, 'in')}
                         />
@@ -3827,45 +4206,14 @@ export function SessionMapPage({
                         <span className="team-node-name" title={memberLabel(member)}>
                           <i className={`status-dot ${statusClass}`} aria-hidden />
                           {memberLabel(member)}
-                          <em
-                            className={`session-map-status-badge tone-${caps.statusTone}`}
-                            title={formatMapStatusLabel(
-                              caps.status,
-                              member.agent?.last_active ?? member.session.updated_at,
-                            )}
-                          >
-                            {formatMapStatusLabel(
-                              caps.status,
-                              member.agent?.last_active ?? member.session.updated_at,
-                            )}
-                          </em>
                         </span>
-                        <span className="team-node-sub" title={tierLabel}>
-                          {tierLabel}
-                          {role ? ` · ${role}` : ''}
+                        <span className="session-map-status-badge" data-status={runtimeTone}>
+                          {statusLabel}
+                          {runtimeElapsed !== undefined && <small className="session-map-runtime-elapsed">{runtimeElapsed}</small>}
                         </span>
-                        {projectCwd !== undefined ? (
-                          <span className="team-node-project" title={projectCwd}>
-                            {tr('Project', '项目')}
-                            {': '}
-                            {projectFolderName(projectCwd)}
-                          </span>
-                        ) : null}
-                        {member.agent?.mandate || (typeof member.session.metadata?.mount_mandate === 'string'
-                          ? member.session.metadata.mount_mandate
-                          : undefined)
-                          ? (
-                            <span
-                              className="team-node-task"
-                              title={member.agent?.mandate
-                                ?? (member.session.metadata?.mount_mandate as string)}
-                            >
-                              {member.agent?.mandate
-                                ?? (member.session.metadata?.mount_mandate as string)}
-                            </span>
-                          )
-                          : null}
-                        {actionLabel !== undefined && (
+                        {role && <span className="team-node-sub" title={role}>{role}</span>}
+                        {exceptionalCwd && <span className="team-node-project" title={exceptionalCwd}>{projectFolderName(exceptionalCwd)}</span>}
+                        {errorSummary === undefined && actionLabel !== undefined && (
                           <span
                             className="session-map-current-action"
                             data-action-kind={currentAction?.kind}
@@ -3879,84 +4227,25 @@ export function SessionMapPage({
                             {errorSummary}
                           </span>
                         )}
-                        <span className="session-map-card-actions">
-                          <button
-                            type="button"
-                            data-map-action="open"
-                            title={tr('Open chat', '打开对话')}
-                            onPointerDown={stopCardEvent}
-                            onClick={(event) => {
-                              stopCardEvent(event);
-                              openMember(member);
-                            }}
-                          >
-                            {tr('Open', '打开')}
-                          </button>
-                          <button
-                            type="button"
-                            data-map-action="stop"
-                            title={tr('Stop', '停止')}
-                            onPointerDown={stopCardEvent}
-                            onClick={(event) => {
-                              stopCardEvent(event);
-                              void abortSessionMember(member).then(() => refresh());
-                            }}
-                          >
-                            {tr('Stop', '停止')}
-                          </button>
-                          <button
-                            type="button"
-                            data-map-action="child"
-                            title={tr('New child session', '新建子会话')}
-                            onPointerDown={stopCardEvent}
-                            onClick={(event) => {
-                              stopCardEvent(event);
-                              createChildForSession(member.session.id);
-                            }}
-                          >
-                            {tr('Child', '子会话')}
-                          </button>
-                          <button
-                            type="button"
-                            data-map-action="settings"
-                            title={tr('Session settings', '会话设置')}
-                            onPointerDown={stopCardEvent}
-                            onClick={(event) => {
-                              stopCardEvent(event);
-                              openIdentityForSession(member.session.id);
-                            }}
-                          >
-                            {tr('Settings', '设置')}
-                          </button>
-                          {caps.canDisconnect && (
-                            <button
-                              type="button"
-                              data-map-action="unmount"
-                              title={tr('Unmount to top-level', '拆挂升顶层')}
-                              onPointerDown={stopCardEvent}
-                              onClick={(event) => {
-                                stopCardEvent(event);
-                                confirmUnmountSession(member.session.id, memberLabel(member));
-                              }}
-                            >
-                              {tr('Unmount', '拆挂')}
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            data-map-action="delete"
-                            className="danger"
-                            title={tr('Delete session', '删除会话')}
-                            onPointerDown={stopCardEvent}
-                            onClick={(event) => {
-                              stopCardEvent(event);
-                              void deleteSession(member.session.id);
-                            }}
-                          >
-                            {tr('Delete', '删除')}
-                          </button>
-                        </span>
                       </div>
+                        {isRuntimeBusy && (
+                          <button
+                            type="button"
+                            className="session-map-stop-button"
+                            data-map-action="stop"
+                            disabled={stoppingIds.has(member.session.id)}
+                            aria-label={tr('Stop session', '停止会话')}
+                            title={tr('Stop session', '停止会话')}
+                            onPointerDown={stopCardEvent}
+                            onClick={(event) => {
+                              stopCardEvent(event);
+                              void stopMember(member);
+                            }}
+                          >
+                            <Icon name="stop" size={10} />
+                          </button>
+                        )}
+                        {stopErrors.has(member.session.id) && <span className="session-map-stop-error">{tr('Could not stop', '没停住')}</span>}
                       {caps.canWireOut && (
                         <span
                           className={
@@ -3965,72 +4254,15 @@ export function SessionMapPage({
                             + (isWireSnap && wireDrag?.side === 'in' ? ' wire-snap' : '')
                           }
                           title={tr(
-                            'Output · drag to create / remount child · Shift+drag peer · Alt+drag service',
-                            '输出口 · 拖出创建或改挂子节点 · Shift 对等 · Alt 服务',
+                            'Output · drag to create a child or add a job',
+                            '输出口 · 拖出创建孩子或增加一份工作',
                           )}
                           onPointerDown={(event) => startWireFromPort(event, node, 'out')}
                         />
                       )}
-                      {pendingOp !== undefined && (
-                        <span
-                          className="session-map-pending"
-                          title={tr(
-                            `Queued ${pendingOp.kind} until idle (${pendingOp.queuedAt})`,
-                            `已排队 ${pendingOp.kind === 'unmount' ? '拆挂' : pendingOp.kind === 'remount' ? '改挂' : '挂载'}，等待空闲（${pendingOp.queuedAt}）`,
-                          )}
-                        >
-                          {tr(
-                            pendingOp.kind === 'unmount'
-                              ? 'queued unmount'
-                              : pendingOp.kind === 'remount'
-                                ? 'queued remount'
-                                : 'queued mount',
-                            pendingOp.kind === 'unmount'
-                              ? '排队拆挂'
-                              : pendingOp.kind === 'remount'
-                                ? '排队改挂'
-                                : '排队挂载',
-                          )}
-                        </span>
-                      )}
-                      {caps.canDisconnect && bindAnnotationId === null && (
-                        <span
-                          className="session-map-unmount"
-                          role="presentation"
-                          title={tr('Unmount to top-level', '拆挂升顶层')}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            confirmUnmountSession(member.session.id, memberLabel(member));
-                          }}
-                        >
-                          ×
-                        </span>
-                      )}
                     </div>
                   );
                 })}
-                {selectionBox !== null && (
-                  <div
-                    className="session-map-selection-box"
-                    style={{
-                      left: Math.min(selectionBox.startX, selectionBox.endX),
-                      top: Math.min(selectionBox.startY, selectionBox.endY),
-                      width: Math.abs(selectionBox.endX - selectionBox.startX),
-                      height: Math.abs(selectionBox.endY - selectionBox.startY),
-                    }}
-                    onPointerDown={startSelectionBoxDrag}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      // Drag-end synthesizes a click — ignore so we do not wipe the gesture.
-                      if (suppressClickRef.current !== null) {
-                        suppressClickRef.current = null;
-                        return;
-                      }
-                      clearSelection();
-                    }}
-                    onContextMenu={openSelectionContextMenu}
-                  />
-                )}
                 {marquee !== null && (
                   <div
                     className="session-map-marquee"
@@ -4050,415 +4282,140 @@ export function SessionMapPage({
                     style={{ left: minX, top: minY }}
                   >
                     <path
-                      className={stickyWire.edgeType !== 'parent' ? `session-map-wire-${stickyWire.edgeType}` : undefined}
                       d={`M ${stickyWire.fromX - minX} ${stickyWire.fromY - minY} L ${stickyWire.toX - minX} ${stickyWire.toY - minY}`}
                     />
                   </svg>
                 )}
                 {draft && (
                   <div
-                    className="session-map-draft-node"
-                    role="dialog"
-                    aria-modal="false"
+                    className="team-node session-map-node session-map-draft-node"
+                    role="presentation"
                     style={{
-                      left: Math.round(draft.worldX - 130),
-                      top: Math.round(draft.worldY),
+                      left: Math.round(draft.worldX - NODE_W / 2),
+                      top: Math.round(draft.worldY - NODE_H / 2),
+                      width: NODE_W,
+                      height: NODE_H,
                     }}
-                    onPointerDown={(event) => event.stopPropagation()}
+                    onPointerDown={startDraftDrag}
                     onClick={(event) => event.stopPropagation()}
+                    onContextMenu={(event) => {
+                      if (blockContextMenuIfGesture(event)) return;
+                      event.stopPropagation();
+                      setNodeMenu(null);
+                      setCanvasMenu(null);
+                      setWorkEdgeMenu(null);
+                      setDraftMenu({ x: event.clientX, y: event.clientY });
+                    }}
                   >
-                    <h3>{tr('New member identity', '新成员身份')}</h3>
-                    <p className="session-map-draft-meta">
-                      {tr(
-                        `Under ${draft.parentId.slice(0, 10)}… · confirm to create`,
-                        `挂到 ${draft.parentId.slice(0, 10)}… · 确认后创建`,
+                    <span className="session-map-port session-map-port-in connected" aria-hidden />
+                    <span className="session-map-draft-badge">{tr('Draft', '草稿')}</span>
+                    <div className="session-map-node-body session-map-draft-body">
+                      <span className="team-node-name">
+                        <i className="status-dot idle" aria-hidden />
+                        {draft.title.trim() || tr('New member', '新成员')}
+                      </span>
+                      <span className="session-map-status-badge" data-status="idle">
+                        {draft.status === 'asking-parent'
+                          ? tr('Parent is writing…', '父节点正在填写…')
+                          : draft.status === 'creating'
+                            ? tr('Being born…', '正在出生…')
+                            : draft.status === 'error'
+                              ? (draft.error ?? tr('Could not create', '没建成功'))
+                              : tr('Draft', '草稿')}
+                      </span>
+                      {(draft.role.trim() || draft.mandate.trim()) && (
+                        <span className="team-node-sub">{draft.role.trim() || draft.mandate.trim()}</span>
                       )}
-                    </p>
-                    <label>
-                      {tr('Title', '标题')}
-                      <input
-                        value={draft.title}
-                        onChange={(event) => setDraft({ ...draft, title: event.target.value })}
-                      />
-                    </label>
-                    <label>
-                      {tr('Role', '角色')}
-                      <input
-                        value={draft.role}
-                        onChange={(event) => setDraft({ ...draft, role: event.target.value })}
-                      />
-                    </label>
-                    <label>
-                      {tr('Mandate', '职责')}
-                      <textarea
-                        value={draft.mandate}
-                        onChange={(event) => setDraft({ ...draft, mandate: event.target.value })}
-                        rows={3}
-                      />
-                    </label>
-                    <label>
-                      {tr('Brief for local parse', '提示词（本地解析，不启动父会话）')}
-                      <textarea
-                        value={draft.prompt}
-                        onChange={(event) => setDraft({ ...draft, prompt: event.target.value })}
-                        rows={2}
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      className="session-map-tool"
-                      disabled={busy || draft.prompt.trim().length === 0}
-                      onClick={() => fillIdentityFromPrompt()}
-                    >
-                      {tr('Parse locally (no parent turn)', '本地解析（不启动父会话）')}
-                    </button>
-                    <div className="session-map-draft-actions">
-                      <button type="button" disabled={busy} onClick={() => cancelDraft()}>
-                        {tr('Cancel', '取消')}
-                      </button>
-                      <button
-                        type="button"
-                        className="primary"
-                        disabled={busy}
-                        onClick={() => void submitMount()}
-                      >
-                        {busy
-                          ? tr('Working…', '处理中…')
-                          : tr('Confirm', '确认')}
-                      </button>
                     </div>
+                    <span className="session-map-port session-map-port-out" aria-hidden />
+                  </div>
+                )}
+                {topLevelPlaceholder && (
+                  <div
+                    className={`team-node session-map-node session-map-create-placeholder status-${topLevelPlaceholder.status}`}
+                    style={{
+                      left: Math.round(topLevelPlaceholder.worldX - NODE_W / 2),
+                      top: Math.round(topLevelPlaceholder.worldY - NODE_H / 2),
+                      width: NODE_W,
+                      height: NODE_H,
+                    }}
+                  >
+                    <span className="session-map-node-body">
+                      <span className="team-node-name"><i className="status-dot" aria-hidden />{
+                        topLevelPlaceholder.status === 'creating'
+                          ? tr('Starting…', '正在开始…')
+                          : topLevelPlaceholder.status === 'editing'
+                            ? (topLevelPlaceholder.title?.trim() || tr('New session', '新会话'))
+                            : tr('Could not start', '没建起来')
+                      }</span>
+                      {topLevelPlaceholder.status === 'error' && (
+                        <span className="session-map-draft-actions">
+                          <button type="button" onClick={() => setTopLevelPlaceholder({ ...topLevelPlaceholder, status: 'editing' })}>{tr('Try again', '再试一次')}</button>
+                          <button type="button" onClick={() => setTopLevelPlaceholder(null)}>{tr('Remove', '去掉')}</button>
+                        </span>
+                      )}
+                    </span>
                   </div>
                 )}
               </div>
             )}
 
         <header className="session-map-float session-map-float-top">
-          <div className="session-map-float-title">
-            <div className="view-eyebrow">{tr('Map', '地图')}</div>
-            <h2>{tr('Conversation Map', '对话地图')}</h2>
-            <div className="session-map-count">
-              {tr(
-                `${String(allNodes.length)} sessions · ${String(filteredList.length)} shown`,
-                `${String(allNodes.length)} 个会话 · 显示 ${String(filteredList.length)}`,
-              )}
-              {selectedIds.length > 0
-                ? tr(
-                  ` · ${String(selectedIds.length)} selected`,
-                  ` · 已选 ${String(selectedIds.length)}`,
-                )
-                : ''}
-              {busyVisibleCount > 0
-                ? tr(` · ${String(busyVisibleCount)} busy`, ` · ${String(busyVisibleCount)} 个忙碌`)
-                : ''}
-              {(mapDoc.pendingTopology ?? []).length > 0
-                ? tr(
-                  ` · ${String((mapDoc.pendingTopology ?? []).length)} queued`,
-                  ` · ${String((mapDoc.pendingTopology ?? []).length)} 项排队`,
-                )
-                : ''}
-            </div>
-          </div>
-          <div className="session-map-search-wrap session-map-search-inline">
-            <input
-              className="session-map-search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={tr('Search title / project / members…', '搜索标题 / 项目 / 成员…')}
-            />
-            {query.trim() !== '' && (
-              <button
-                type="button"
-                className="session-map-search-clear"
-                aria-label={tr('Clear search', '清除搜索')}
-                onClick={() => setQuery('')}
-              >
-                ×
-              </button>
-            )}
-          </div>
-          {query.trim() !== '' && selectedParentSessionId !== undefined && (
-            <div className="session-map-mount-hint">
-              {tr(
-                'Select a search result → Mount to attach under the selected parent.',
-                '在搜索结果上点击「挂载」以挂到当前选中的父节点。',
-              )}
-            </div>
-          )}
-          <div className="session-map-toolbar">
+          <div className="session-map-float-title" aria-hidden="true">{tr('Map', '地图')}</div>
+          <div className="session-map-search-cluster">
             <button
               type="button"
-              className={'session-map-tool' + (listOpen ? ' active' : '')}
-              onClick={() => setListOpen((open) => !open)}
-              title={tr('Toggle session list', '切换会话列表')}
+              className="session-map-search-toggle"
+              aria-label={tr('Search', '搜索')}
+              aria-expanded={searchOpen}
+              title={tr('Search', '搜索')}
+              onClick={() => {
+                if (searchOpen) {
+                  closeSearch();
+                  return;
+                }
+                openSearch();
+              }}
             >
-              {tr('List', '列表')}
+              <Icon name="search" size={14} />
             </button>
-            <button
-              type="button"
-              className="session-map-tool"
-              data-map-action="select-all"
-              onClick={() => selectAllVisible()}
-            >
-              {tr('Select all visible', '全选可见')}
-            </button>
-            <button
-              type="button"
-              className="session-map-tool"
-              data-map-action="clear-selection"
-              disabled={selectedIds.length === 0}
-              onClick={() => clearSelection()}
-            >
-              {tr('Clear selection', '清除选择')}
-            </button>
-            <div className="session-map-status-filters" role="group" aria-label={tr('Filter by status', '按状态筛选')}>
-              {([
-                ['running', tr('Running', '运行中')],
-                ['error', tr('Error', '出错')],
-                ['idle', tr('Idle', '空闲')],
-              ] as const).map(([value, label]) => (
+            {searchOpen && (
+              <div className="session-map-search-wrap session-map-search-inline">
+                <input
+                  ref={searchInputRef}
+                  className="session-map-search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      closeSearch();
+                      return;
+                    }
+                    if (event.key !== 'Enter') return;
+                    const matches = forceNodesRef.current.filter((node) => visibleIds.has(node.id));
+                    if (matches.length === 0) return;
+                    event.preventDefault();
+                    const index = searchIndexRef.current % matches.length;
+                    searchIndexRef.current += 1;
+                    markUserAdjustedView();
+                    focusNode(matches[index]);
+                  }}
+                  placeholder={tr('Search title / project / members…', '搜索标题 / 项目 / 成员…')}
+                />
                 <button
-                  key={value}
                   type="button"
-                  className={'session-map-tool' + (statusFilter === value ? ' active' : '')}
-                  data-status-filter={value}
-                  aria-pressed={statusFilter === value}
-                  onClick={() => setStatusFilter((current) => (current === value ? 'all' : value))}
+                  className="session-map-search-clear"
+                  aria-label={tr('Close search', '关闭搜索')}
+                  onClick={() => closeSearch()}
                 >
-                  {label}
+                  ×
                 </button>
-              ))}
-            </div>
-            <div className="team-tree-legend">
-              <span><i className="tone-running" />{tr('Running', '运行中')}</span>
-              <span><i className="tone-attention" />{tr('Working', '工作中')}</span>
-              <span><i className="tone-idle" />{tr('Idle', '空闲')}</span>
-              <span><i className="tone-waiting" />{tr('Waiting', '等待中')}</span>
-              <span><i className="tone-muted" />{tr('Stopped', '已停止')}</span>
-              <span><i className="tone-error" />{tr('Error', '错误')}</span>
-            </div>
-          </div>
-          <div className="session-map-float-zoom">
-            <button type="button" className="session-map-tool" onClick={rearrange} title={tr('Rearrange (or Alt+double-click empty)', '规整（或 Alt+双击空白）')}>
-              {tr('Rearrange', '规整')}
-            </button>
-            <button type="button" className="session-map-tool" onClick={focusActive} title={tr('Focus', '聚焦')}>
-              {tr('Focus', '聚焦')}
-            </button>
-            <button
-              type="button"
-              className="session-map-tool session-map-zoom-btn"
-              aria-label={tr('Zoom in', '放大')}
-              onClick={() => {
-                markUserAdjustedView();
-                stopFollowFocus();
-                const cx = viewportSize.width / 2;
-                const cy = viewportSize.height / 2;
-                setView(zoomTreeView(view, view.scale * 1.15, cx, cy));
-              }}
-            >
-              +
-            </button>
-            <button
-              type="button"
-              className="session-map-tool session-map-zoom-btn"
-              aria-label={tr('Zoom out', '缩小')}
-              onClick={() => {
-                markUserAdjustedView();
-                stopFollowFocus();
-                const cx = viewportSize.width / 2;
-                const cy = viewportSize.height / 2;
-                setView(zoomTreeView(view, view.scale / 1.15, cx, cy));
-              }}
-            >
-              −
-            </button>
+              </div>
+            )}
           </div>
         </header>
-
-        <div className="session-map-float session-map-label-bar">
-            {mapDoc.labels.map((label) => (
-              <button
-                key={label.id}
-                type="button"
-                className={'session-map-label-chip' + (activeLabelIds.includes(label.id) ? ' active' : '')}
-                style={{ ['--map-label-color' as string]: label.color }}
-                onClick={() => setActiveLabelIds((ids) => (
-                  ids.includes(label.id) ? ids.filter((id) => id !== label.id) : [...ids, label.id]
-                ))}
-              >
-                {label.name}
-              </button>
-            ))}
-            <button
-              type="button"
-              className="session-map-tool session-map-label-add"
-              onClick={() => {
-                const name = window.prompt(tr('New label name', '新标签名称'));
-                if (name === null || !name.trim()) return;
-                const color = DEFAULT_ANNOTATION_COLORS[mapDoc.labels.length % DEFAULT_ANNOTATION_COLORS.length]!;
-                persistDoc({
-                  ...mapDoc,
-                  labels: [...mapDoc.labels, { id: newLabelId(), name: name.trim(), color }],
-                });
-              }}
-            >
-              {tr('+ Label', '+ 标签')}
-            </button>
-            {activeLabelIds.length > 0 && (
-              <button
-                type="button"
-                className="session-map-tool"
-                onClick={() => setActiveLabelIds([])}
-              >
-                {tr('Clear filter', '清除筛选')}
-              </button>
-            )}
-        </div>
-
-        {listOpen && (
-          <aside className="session-map-float session-map-list-panel" aria-label={tr('Session list', '会话列表')}>
-            <div className="session-map-list-scroll">
-              {filteredList.length === 0 ? (
-                <div className="session-map-list-empty">{tr('No matches', '无匹配')}</div>
-              ) : filteredList.map((member) => {
-                const id = member.session.id;
-                const caps = memberCaps(member);
-                const isActive = activeSessionId !== undefined && (
-                  id === activeSessionId || member.agent?.mounted_session_id === activeSessionId
-                );
-                const canMountHere = selectedParentSessionId !== undefined
-                  && caps.isRealSession
-                  && canMountMemberUnder(
-                    id,
-                    selectedParentSessionId,
-                    allNodes,
-                    mapParentByChildFromEdges(mapDoc.edges ?? []),
-                  )
-                  && parentSessionIdOf(member.session) !== selectedParentSessionId;
-                const tierLabel = caps.displayTier === 'member'
-                  ? tr('member', '成员')
-                  : caps.displayTier === 'mounted'
-                    ? tr('mounted', '已挂载')
-                    : tr('top-level', '顶层');
-                return (
-                  <div
-                    key={nodeKey(member)}
-                    className={'session-map-list-item' + (isActive ? ' active' : '')}
-                  >
-                    <button
-                      type="button"
-                      className="session-map-list-main"
-                      onClick={() => handleListItemClick(member)}
-                      onDoubleClick={() => handleListItemDoubleClick(member)}
-                    >
-                      <span className="session-map-list-title">
-                        <i className={`status-dot ${mapStatusDotClass(caps.status)}`} aria-hidden />
-                        {memberLabel(member)}
-                      </span>
-                      <span className="session-map-list-meta">
-                        {tierLabel}
-                        {(() => {
-                          const cwd = memberProjectCwd(member, byId);
-                          return cwd ? ` · ${projectFolderName(cwd)}` : '';
-                        })()}
-                      </span>
-                    </button>
-                    <div className="session-map-list-actions">
-                      <button
-                        type="button"
-                        className="session-map-list-action"
-                        title={tr('Open chat', '打开对话')}
-                        onClick={() => openMember(member)}
-                      >
-                        {tr('Open', '打开')}
-                      </button>
-                      {canMountHere && (
-                        <button
-                          type="button"
-                          className="session-map-list-action primary"
-                          title={tr('Mount under selected parent', '挂载到选中父节点')}
-                          disabled={busy}
-                          onClick={() => void mountMemberUnderParent(member, selectedParentSessionId!)}
-                        >
-                          {tr('Mount', '挂载')}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </aside>
-        )}
-
-        {editingAnnotation && (
-          <div className="session-map-float session-map-note-editor">
-            <label>
-              {tr('Note title', '注释标题')}
-              <input
-                autoFocus
-                value={editingAnnotation.title}
-                onChange={(event) => updateAnnotation(editingAnnotation.id, { title: event.target.value })}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    setEditingAnnotationId(null);
-                  }
-                }}
-              />
-            </label>
-            <div className="session-map-note-colors" role="group" aria-label={tr('Note color', '注释颜色')}>
-              {DEFAULT_ANNOTATION_COLORS.map((color) => (
-                <button
-                  key={color}
-                  type="button"
-                  className={'session-map-note-color' + (editingAnnotation.color === color ? ' active' : '')}
-                  style={{ background: color }}
-                  aria-label={color}
-                  onClick={() => updateAnnotation(editingAnnotation.id, { color })}
-                />
-              ))}
-            </div>
-            <button
-              type="button"
-              className={'session-map-tool' + (bindAnnotationId === editingAnnotation.id ? ' active' : '')}
-              onClick={() => setBindAnnotationId((id) => (id === editingAnnotation.id ? null : editingAnnotation.id))}
-            >
-              {tr('Bind nodes', '绑定节点')}
-            </button>
-            <button type="button" className="session-map-tool" onClick={() => removeAnnotation(editingAnnotation.id)}>
-              {tr('Delete note', '删除注释')}
-            </button>
-            <button type="button" className="session-map-tool" onClick={() => setEditingAnnotationId(null)}>
-              {tr('Done', '完成')}
-            </button>
-          </div>
-        )}
-
-        <span className="session-map-float session-map-hint">
-          {bindAnnotationId
-            ? tr('Click nodes to soft-bind / unbind this note', '点击节点软绑定/解绑此注释框')
-            : wireDrag !== null
-              ? wireDrag.edgeType === 'peer'
-                ? tr('Drop on a session card to create a peer link (local, not a mount)', '放到会话卡片上创建对等连线（仅本地，不是挂载）')
-                : wireDrag.edgeType === 'service'
-                  ? tr('Drop on a session card to create a service link (local, not a mount)', '放到会话卡片上创建服务连线（仅本地，不是挂载）')
-                  : wireDrag.side === 'in'
-                    ? tr('Drop on a parent card / output port to reconnect', '放到父卡片或输出口上重连')
-                    : tr('Drop on a card / input port to link, or empty canvas for a new child', '放到卡片/输入口直接挂载，或空白处新建子节点')
-              : draft !== null
-                ? tr('Edit identity on the canvas · Esc cancels', '在画布上编辑身份 · Esc 取消')
-                : tr('Right-click new session · right-drag pan · Shift+drag peer · Alt+drag service · Alt+click IN to disconnect', '右键新建会话 · 右键拖动画布 · Shift 对等连线 · Alt 服务连线 · Alt+点击输入口断连')}
-        </span>
-
-        {(mapDoc.pendingTopology ?? []).length > 0 && (
-          <div className="session-map-float session-map-queued-banner" role="status">
-            {tr(
-              `${String((mapDoc.pendingTopology ?? []).length)} topology change(s) waiting for idle sessions.`,
-              `${String((mapDoc.pendingTopology ?? []).length)} 项拓扑变更正在等待会话空闲。`,
-            )}
-          </div>
-        )}
 
         {selectedIds.length > 0 && (
           <div className="session-map-float session-map-selection-toolbar" role="toolbar">
@@ -4468,84 +4425,26 @@ export function SessionMapPage({
                 `已选 ${String(selectedIds.length)}`,
               )}
             </span>
-            <button type="button" className="session-map-tool" data-map-action="open" disabled={busy} onClick={() => openSelectedSession()}>
-              {tr('Open', '打开')}
+            <button type="button" className="session-map-tool" onClick={() => annotateSelection()}>
+              {tr('Create group box', '创建分组框')}
             </button>
-            <button type="button" className="session-map-tool" data-map-action="stop" disabled={busy} onClick={() => void abortSelectedSessions()}>
-              {tr('Stop', '停止')}
-            </button>
-            <button
-              type="button"
-              className="session-map-tool"
-              data-map-action="child"
-              disabled={busy || selectedIds.length !== 1}
-              onClick={() => {
-                const id = selectedIds[0];
-                if (id !== undefined) createChildForSession(id);
-              }}
-            >
-              {tr('Child', '子会话')}
-            </button>
-            <button
-              type="button"
-              className="session-map-tool"
-              data-map-action="settings"
-              disabled={busy || selectedIds.length !== 1}
-              onClick={() => {
-                const id = selectedIds[0];
-                if (id !== undefined) openIdentityForSession(id);
-              }}
-            >
-              {tr('Settings', '设置')}
-            </button>
-            <div className="session-map-tag-menu">
-              <button
-                type="button"
-                className="session-map-tool"
-                data-map-action="tags"
-                disabled={busy}
-                onClick={() => setTagMenuOpen((open) => !open)}
-              >
-                {tr('Tags', '标签')}
-              </button>
-              {tagMenuOpen && (
-                <div className="session-map-tag-menu-list" role="menu">
-                  {mapDoc.labels.map((label) => (
-                    <div key={label.id}>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => applyMapLabelToSelected(label.id, true)}
-                      >
-                        {tr(`Add “${label.name}”`, `打上「${label.name}」`)}
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => applyMapLabelToSelected(label.id, false)}
-                      >
-                        {tr(`Remove “${label.name}”`, `去掉「${label.name}」`)}
-                      </button>
-                    </div>
-                  ))}
-                  <button type="button" role="menuitem" onClick={() => void applyIdentityTagToSelected('add')}>
-                    {tr('Add identity tag…', '添加身份标签…')}
-                  </button>
-                  <button type="button" role="menuitem" onClick={() => void applyIdentityTagToSelected('remove')}>
-                    {tr('Remove identity tag…', '移除身份标签…')}
-                  </button>
-                </div>
-              )}
-            </div>
-            <button type="button" className="session-map-tool" data-map-action="unmount" disabled={busy} onClick={() => void unmountSelectedSessions()}>
-              {tr('Unmount', '拆挂')}
-            </button>
-            <button type="button" className="session-map-tool danger" data-map-action="delete" disabled={busy} onClick={() => void deleteSelectedSessions()}>
+            {selectedHasBusySession && <button type="button" className="session-map-tool" data-map-action="stop" onClick={() => void abortSelectedSessions()}>
+              {tr('Stop all', '全部停止')}
+            </button>}
+            {selectedHasWork && <button type="button" className="session-map-tool" data-map-action="unmount" onClick={() => void unmountSelectedSessions()}>
+              {tr('Let independent', '让他们独立')}
+            </button>}
+            <button type="button" className="session-map-tool danger" data-map-action="delete" onClick={() => void deleteSelectedSessions()}>
               {tr('Delete', '删除')}
             </button>
-            <button type="button" className="session-map-tool" onClick={() => clearSelection()}>
-              {tr('Clear', '清除')}
-            </button>
+            {deleteSelectionConfirm && (
+              <span className="session-map-inline-confirm" role="group">
+                <span>{tr('This cannot be undone.', '此操作不可撤销。')}</span>
+                <button type="button" className="danger" onClick={() => void deleteSelectedSessions(true)}>{tr('Delete', '删除')}</button>
+                <button type="button" onClick={() => setDeleteSelectionConfirm(false)}>{tr('Keep', '保留')}</button>
+              </span>
+            )}
+            {batchFailure !== null && <span className="session-map-card-error" role="status">{batchFailure}</span>}
           </div>
         )}
 
@@ -4559,88 +4458,66 @@ export function SessionMapPage({
             }}
           />
         )}
-
-        {selectionMenu !== null && (
-          <div
-            className="session-map-context-menu session-map-float"
-            style={{ left: selectionMenu.x, top: selectionMenu.y }}
-            role="menu"
-            onPointerDown={(event) => event.stopPropagation()}
-          >
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => annotateSelection()}
-            >
-              {tr('Annotate', '注释')}
-            </button>
-            {selectedIds.length > 0 && (
-              <>
-                <button type="button" role="menuitem" disabled={busy} onClick={() => openSelectedSession()}>
-                  {tr('Open', '打开')}
-                </button>
-                <button type="button" role="menuitem" disabled={busy} onClick={() => void abortSelectedSessions()}>
-                  {tr('Stop', '停止')}
-                </button>
-                {selectedIds.length === 1 && (
-                  <>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      disabled={busy}
-                      onClick={() => {
-                        const id = selectedIds[0];
-                        if (id !== undefined) createChildForSession(id);
-                      }}
-                    >
-                      {tr('New child session', '新建子会话')}
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        const id = selectedIds[0];
-                        if (id !== undefined) openIdentityForSession(id);
-                      }}
-                    >
-                      {tr('Session settings…', '会话设置…')}
-                    </button>
-                  </>
-                )}
-                {mapDoc.labels.map((label) => (
-                  <div key={label.id}>
-                    <button type="button" role="menuitem" onClick={() => applyMapLabelToSelected(label.id, true)}>
-                      {tr(`Add label “${label.name}”`, `打上标签「${label.name}」`)}
-                    </button>
-                    <button type="button" role="menuitem" onClick={() => applyMapLabelToSelected(label.id, false)}>
-                      {tr(`Remove label “${label.name}”`, `去掉标签「${label.name}」`)}
-                    </button>
-                  </div>
-                ))}
-                <button type="button" role="menuitem" onClick={() => void applyIdentityTagToSelected('add')}>
-                  {tr('Add identity tag…', '添加身份标签…')}
-                </button>
-                <button type="button" role="menuitem" onClick={() => void applyIdentityTagToSelected('remove')}>
-                  {tr('Remove identity tag…', '移除身份标签…')}
-                </button>
-                <button type="button" role="menuitem" disabled={busy} onClick={() => void unmountSelectedSessions()}>
-                  {tr('Unmount', '拆挂')}
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="danger"
-                  disabled={busy}
-                  onClick={() => void deleteSelectedSessions()}
-                >
-                  {tr(`Delete (${String(selectedIds.length)})`, `删除 (${String(selectedIds.length)})`)}
-                </button>
-                <button type="button" role="menuitem" onClick={() => clearSelection()}>
-                  {tr('Clear selection', '清除选择')}
-                </button>
-              </>
-            )}
-          </div>
+        {identitySession === null && draft !== null && (
+          <SessionIdentityDrawer
+            key={`${draft.id}:${draft.status === 'asking-parent' ? 'writing' : 'form'}`}
+            mode="create"
+            parentTitle={byId.get(draft.parentId)?.title?.trim() || draft.parentId}
+            allowAskParent
+            initialValues={{
+              name: draft.title,
+              role: draft.role,
+              mandate: draft.mandate,
+              prompt: draft.prompt,
+            }}
+            parentStatus={((): SessionIdentityParentStatus => {
+              if (draft.status === 'asking-parent') return 'writing';
+              if (draft.status === 'error') return 'failed';
+              const parent = byId.get(draft.parentId);
+              if (sessionIsBusy(parent) || parent?.agent_config?.discuss_mode === true) return 'waiting';
+              return 'idle';
+            })()}
+            parentMessage={draft.error}
+            submitting={draft.status === 'creating'}
+            onAskParent={(prompt) => void askParentToWriteIdentity(prompt)}
+            onChange={(values) => {
+              setDraft((current) => current === null ? current : {
+                ...current,
+                title: values.name,
+                role: values.role,
+                mandate: values.mandate,
+                prompt: values.prompt,
+              });
+            }}
+            onSubmit={async (values) => {
+              const current = draftRef.current;
+              if (current === null) return;
+              const next = {
+                ...current,
+                title: values.name,
+                role: values.role,
+                mandate: values.mandate,
+                prompt: values.prompt,
+              };
+              draftRef.current = next;
+              setDraft(next);
+              await submitMount();
+            }}
+            onClose={() => cancelDraft()}
+          />
+        )}
+        {identitySession === null && draft === null && topLevelPlaceholder !== null && topLevelPlaceholder.status !== 'error' && (
+          <SessionIdentityDrawer
+            mode="create"
+            initialValues={{ name: topLevelPlaceholder.title ?? '', role: '', mandate: '', prompt: '' }}
+            requireCompleteIdentity={false}
+            submitting={topLevelPlaceholder.status === 'creating'}
+            onSubmit={(values) => submitTopLevelCreate(values)}
+            onClose={() => {
+              if (topLevelPlaceholder.status === 'creating') return;
+              setTopLevelPlaceholder(null);
+            }}
+          />
         )}
 
         {nodeMenu !== null && (
@@ -4653,7 +4530,6 @@ export function SessionMapPage({
             <button
               type="button"
               role="menuitem"
-              disabled={busy}
               onClick={() => {
                 const node = forceNodesRef.current.find((candidate) => (
                   candidate.member.session.id === nodeMenu.sessionId
@@ -4665,102 +4541,66 @@ export function SessionMapPage({
                 );
               }}
             >
-              {tr('New child session', '新建子会话')}
+                {tr('Create a new member', '生一个新成员')}
             </button>
-            <button
-              type="button"
-              role="menuitem"
-              disabled={busy}
-              onClick={() => {
-                const node = forceNodesRef.current.find((candidate) => (
-                  candidate.member.session.id === nodeMenu.sessionId
-                ));
-                if (node !== undefined) openMember(node.member);
-                setNodeMenu(null);
-              }}
-            >
-              {tr('Open chat', '打开对话')}
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              disabled={busy}
-              onClick={() => {
-                const node = forceNodesRef.current.find((candidate) => (
-                  candidate.member.session.id === nodeMenu.sessionId
-                ));
-                if (node !== undefined) void abortSessionMember(node.member).then(() => refresh());
-                setNodeMenu(null);
-              }}
-            >
-              {tr('Stop', '停止')}
-            </button>
+            {(() => {
+              const node = forceNodesRef.current.find((candidate) => candidate.member.session.id === nodeMenu.sessionId);
+              const stoppable = node !== undefined && (sessionIsBusy(node.member.session) || ['waiting', 'running', 'working'].includes(memberCaps(node.member).statusTone));
+              return stoppable ? <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  if (node !== undefined) void abortSessionMember(node.member).then(() => refresh());
+                  setNodeMenu(null);
+                }}
+              >{tr('Stop', '停止')}</button> : null;
+            })()}
             <button
               type="button"
               role="menuitem"
               onClick={() => openIdentityForSession(nodeMenu.sessionId)}
             >
-              {tr('Session settings…', '会话设置…')}
+              {tr('Identity…', '身份…')}
             </button>
-            {nodeMenu.canSelfBootstrapRole && (
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => promptSelfBootstrapRole(nodeMenu.sessionId)}
-              >
-                {tr('Set self-bootstrap role…', '设置自举角色…')}
-              </button>
-            )}
-            {nodeMenu.canUnmount && (
-              <button
-                type="button"
-                role="menuitem"
-                disabled={busy}
-                onClick={() => confirmUnmountSession(nodeMenu.sessionId, nodeMenu.label)}
-              >
-                {tr('Unmount to top-level', '拆挂升顶层')}
-              </button>
-            )}
-            {mapDoc.labels.map((label) => {
-              const assigned = (mapDoc.sessionLabels[nodeMenu.sessionId] ?? []).includes(label.id);
-              return (
+            {nodeMenu.canUnmount && (() => {
+              const jobs = visualWorkEdges.filter((edge) => edge.target === nodeMenu.sessionId);
+              if (jobs.length <= 1) {
+                return (
+                  <button type="button" role="menuitem" onClick={() => void unmountSession(nodeMenu.sessionId)}>
+                    {tr('End all jobs', '结束全部工作')}
+                  </button>
+                );
+              }
+              return jobs.map((job) => (
                 <button
-                  key={label.id}
+                  key={`${job.source}->${job.target}`}
                   type="button"
                   role="menuitem"
                   onClick={() => {
-                    persistDoc(toggleSessionLabel(mapDoc, nodeMenu.sessionId, label.id));
                     setNodeMenu(null);
+                    setConfirmWorkEdge({ parentId: job.source, childId: job.target });
                   }}
                 >
-                  {assigned
-                    ? tr(`Remove label “${label.name}”`, `移除标签「${label.name}」`)
-                    : tr(`Add label “${label.name}”`, `添加标签「${label.name}」`)}
+                  {tr(`End the job for “${byId.get(job.source)?.title?.trim() || job.source}”`, `结束给「${byId.get(job.source)?.title?.trim() || job.source}」的工作`)}
                 </button>
-              );
-            })}
-            <button type="button" role="menuitem" onClick={() => void applyIdentityTagToSelected('add')}>
-              {tr('Add identity tag…', '添加身份标签…')}
-            </button>
-            <button type="button" role="menuitem" onClick={() => void applyIdentityTagToSelected('remove')}>
-              {tr('Remove identity tag…', '移除身份标签…')}
-            </button>
+              ));
+            })()}
             <button
               type="button"
               role="menuitem"
               className="danger"
-              disabled={busy}
-              onClick={() => void deleteSession(nodeMenu.sessionId)}
+              onClick={() => setDeleteConfirmSessionId(nodeMenu.sessionId)}
             >
               {tr('Delete session…', '删除会话…')}
             </button>
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => setNodeMenu(null)}
-            >
-              {tr('Cancel', '取消')}
-            </button>
+            {deleteConfirmSessionId === nodeMenu.sessionId && (
+              <div className="session-map-inline-confirm" role="group">
+                <span>{tr(`Delete “${nodeMenu.label}”?`, `删除「${nodeMenu.label}」？`)}</span>
+                {warningsForSession(nodeMenu.sessionId).map((warning) => <small key={warning}>{warning}</small>)}
+                <button type="button" className="danger" onClick={() => void deleteSession(nodeMenu.sessionId, true)}>{tr('Delete', '删除')}</button>
+                <button type="button" onClick={() => setDeleteConfirmSessionId(null)}>{tr('Keep', '保留')}</button>
+              </div>
+            )}
           </div>
         )}
 
@@ -4774,20 +4614,191 @@ export function SessionMapPage({
             <button
               type="button"
               role="menuitem"
-              disabled={busy}
               onClick={() => void createSessionNodeAt(canvasMenu.worldX, canvasMenu.worldY)}
             >
-              {tr('New session here', '在此新建会话')}
+              {tr('Create session here', '在此新建会话')}
             </button>
             <button
               type="button"
               role="menuitem"
-              onClick={() => setCanvasMenu(null)}
+              onClick={() => {
+                setCanvasMenu(null);
+                markUserAdjustedView();
+                setView(fitTreeView({ width: treeLayout.width, height: treeLayout.height }, viewportSize));
+              }}
             >
-              {tr('Cancel', '取消')}
+              {tr('Fit to view', '适应画面')}
             </button>
           </div>
         )}
+
+        {draftMenu !== null && draft !== null && (
+          <div
+            className="session-map-context-menu session-map-float"
+            style={{ left: draftMenu.x, top: draftMenu.y }}
+            role="menu"
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <button type="button" role="menuitem" disabled={draft.status === 'asking-parent' || draft.status === 'creating'} onClick={() => { setDraftMenu(null); void askParentToWriteIdentity(); }}>
+              {draft.status === 'asking-parent' ? tr('Parent is writing…', '父节点正在填写…') : tr('Ask parent to fill', '让父节点填写')}
+            </button>
+            <button type="button" role="menuitem" disabled={draft.status === 'creating'} onClick={() => { setDraftMenu(null); cancelDraft(); }}>
+              {tr('Abandon draft', '放弃草稿')}
+            </button>
+          </div>
+        )}
+
+        {workEdgeMenu !== null && (() => {
+          const menuEdge = (mapDoc.edges ?? []).find((edge) => (
+            edge.type === 'parent'
+            && edge.source === workEdgeMenu.parentId
+            && edge.target === workEdgeMenu.childId
+          ));
+          const unapplied = menuEdge !== undefined && isUnappliedExtraJob(menuEdge);
+          return (
+          <div
+            className="session-map-context-menu session-map-float"
+            style={{ left: workEdgeMenu.x, top: workEdgeMenu.y }}
+            role="menu"
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            {unapplied ? (
+              <>
+                <button
+                  type="button"
+                  role="menuitem"
+                  data-map-action="dismiss-unapplied"
+                  onClick={() => dismissUnappliedExtraJob(workEdgeMenu.parentId, workEdgeMenu.childId)}
+                >
+                  {tr('Remove this line', '去掉这条')}
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  data-map-action="remount-unapplied"
+                  onClick={() => {
+                    const { parentId, childId } = workEdgeMenu;
+                    setWorkEdgeMenu(null);
+                    void executeSilentLink(childId, parentId, true);
+                  }}
+                >
+                  {tr('Move the job here', '改挂过来')}
+                </button>
+              </>
+            ) : (
+              <>
+            <button type="button" role="menuitem" onClick={() => setConfirmWorkEdge({ parentId: workEdgeMenu.parentId, childId: workEdgeMenu.childId })}>
+              {tr('End this job', '结束这份工作')}
+            </button>
+            {menuEdge?.status === 'error' && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void retryWorkEdge(workEdgeMenu.parentId, workEdgeMenu.childId)}
+              >
+                {tr('Retry connection', '重试连接')}
+              </button>
+            )}
+            <button type="button" role="menuitem" onClick={() => openWorkEdgeEditor(workEdgeMenu.parentId, workEdgeMenu.childId)}>
+              {tr('Edit job identity…', '改这份身份…')}
+            </button>
+              </>
+            )}
+          </div>
+          );
+        })()}
+        {workEdgeEditor !== null && (
+          <div
+            className="session-map-work-edge-editor session-map-float"
+            role="dialog"
+            aria-label={tr('Work identity', '工作身份')}
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <strong>{tr('Work identity', '工作身份')}</strong>
+            <span className="session-map-work-edge-editor-context">
+              {tr(
+                `For “${byId.get(workEdgeEditor.childId)?.title?.trim() || workEdgeEditor.childId}” under “${byId.get(workEdgeEditor.parentId)?.title?.trim() || workEdgeEditor.parentId}”`,
+                `「${byId.get(workEdgeEditor.childId)?.title?.trim() || workEdgeEditor.childId}」给「${byId.get(workEdgeEditor.parentId)?.title?.trim() || workEdgeEditor.parentId}」的工作`,
+              )}
+            </span>
+            <label>
+              {tr('Role', '角色')}
+              <input
+                value={workEdgeEditor.role}
+                disabled={workEdgeEditor.saving}
+                onChange={(event) => setWorkEdgeEditor({ ...workEdgeEditor, role: event.target.value })}
+              />
+            </label>
+            <label>
+              {tr('Responsibility', '职责')}
+              <textarea
+                rows={3}
+                value={workEdgeEditor.mandate}
+                disabled={workEdgeEditor.saving}
+                onChange={(event) => setWorkEdgeEditor({ ...workEdgeEditor, mandate: event.target.value })}
+              />
+            </label>
+            {workEdgeEditor.error && <span className="session-map-card-error">{workEdgeEditor.error}</span>}
+            <div className="session-map-inline-confirm">
+              <button type="button" disabled={workEdgeEditor.saving} onClick={() => setWorkEdgeEditor(null)}>{tr('Cancel', '取消')}</button>
+              <button type="button" className="primary" disabled={workEdgeEditor.saving} onClick={() => void saveWorkEdgeIdentity()}>
+                {workEdgeEditor.saving ? tr('Saving…', '正在保存…') : tr('Save', '保存')}
+              </button>
+            </div>
+          </div>
+        )}
+        {selectedWorkEdge !== null && (mapDoc.edges ?? []).some((edge) => (
+          edge.type === 'parent'
+          && edge.source === selectedWorkEdge.parentId
+          && edge.target === selectedWorkEdge.childId
+          && isUnappliedExtraJob(edge)
+        )) && (
+          <div
+            className="session-map-float session-map-edge-confirm"
+            data-map-unapplied-job
+            role="status"
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <span>{tr("Can't work for two people at once yet.", '现在还不能同时给两个人干活')}</span>
+            <button
+              type="button"
+              data-map-action="dismiss-unapplied"
+              onClick={() => dismissUnappliedExtraJob(selectedWorkEdge.parentId, selectedWorkEdge.childId)}
+            >
+              {tr('Remove this line', '去掉这条')}
+            </button>
+            <button
+              type="button"
+              className="primary"
+              data-map-action="remount-unapplied"
+              onClick={() => void executeSilentLink(selectedWorkEdge.childId, selectedWorkEdge.parentId, true)}
+            >
+              {tr('Move the job here', '改挂过来')}
+            </button>
+          </div>
+        )}
+        {confirmWorkEdge !== null && (
+          <div className="session-map-float session-map-edge-confirm" role="alertdialog">
+            <span>{tr(`End the job for “${byId.get(confirmWorkEdge.parentId)?.title?.trim() || confirmWorkEdge.parentId}”?`, `结束给「${byId.get(confirmWorkEdge.parentId)?.title?.trim() || confirmWorkEdge.parentId}」的这份工作？`)}</span>
+            <button type="button" className="danger" onClick={() => void endWorkEdge(confirmWorkEdge.parentId, confirmWorkEdge.childId)}>{tr('End job', '结束工作')}</button>
+            <button type="button" onClick={() => setConfirmWorkEdge(null)}>{tr('Keep', '保留')}</button>
+          </div>
+        )}
+        <button
+          type="button"
+          className="session-map-zoom"
+          aria-label={tr('Reset zoom to 100%', '重置缩放到 100%')}
+          title={tr('Reset zoom to 100%', '重置缩放到 100%')}
+          onClick={() => {
+            const centerX = viewportSize.width / 2;
+            const centerY = viewportSize.height / 2;
+            setView(zoomTreeView(viewRef.current, 1, centerX, centerY));
+            markUserAdjustedView();
+            stopFollowFocus();
+          }}
+        >
+          {Math.round(view.scale * 100)}%
+        </button>
       </div>
     </div>
   );

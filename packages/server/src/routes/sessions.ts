@@ -32,7 +32,7 @@ import {
   workspaceIdSchema,
   type Event,
 } from '@nori-code/protocol';
-import { IPromptService, ISessionService, SessionMountCycleError, SessionNotFoundError, SessionUndoUnavailableError, ErrorCodes, KimiError, IWorkspaceRegistry, WorkspaceNotFoundError, IEventService, type IInstantiationService, type SessionClientTelemetry } from '@nori-code/agent-core';
+import { IPromptService, ISessionService, SessionMountCycleError, SessionNotFoundError, SessionProjectRequiredError, SessionUndoUnavailableError, ErrorCodes, KimiError, IWorkspaceRegistry, WorkspaceNotFoundError, IEventService, type IInstantiationService, type SessionClientTelemetry } from '@nori-code/agent-core';
 import { z } from 'zod';
 
 
@@ -828,6 +828,10 @@ function sendMappedError(
   }
   if (err instanceof SessionMountCycleError) {
     reply.send(errEnvelope(ErrorCode.SESSION_MOUNT_CYCLE, err.message, requestId));
+    return;
+  }
+  if (err instanceof SessionProjectRequiredError) {
+    reply.send(errEnvelope(ErrorCode.VALIDATION_FAILED, err.message, requestId));
     return;
   }
   if (err instanceof WorkspaceNotFoundError) {

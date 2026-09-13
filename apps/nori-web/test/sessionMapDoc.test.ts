@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { completeMountIdentityFromPrompt, parseMountIdentityJson } from '../src/components/mountIdentityComplete';
 import {
   annotationBounds,
+  canonicalMapPositionKey,
   edgesForLayout,
   emptySessionMapDoc,
   loadCachedMapAgents,
+  lookupMapPosition,
+  normalizeMapPositions,
   parseCachedMapAgents,
   parseSessionMapDoc,
   saveCachedMapAgents,
@@ -15,47 +17,29 @@ import {
 import { parentSessionIdOf } from '../src/utils/session-mount';
 import type { Session } from '../src/api/client';
 
-describe('completeMountIdentityFromPrompt', () => {
-  it('fills from keyed lines', () => {
-    expect(completeMountIdentityFromPrompt('title: Alice\nrole: reviewer\nmandate: Review auth PRs')).toEqual({
-      title: 'Alice',
-      role: 'reviewer',
-      mandate: 'Review auth PRs',
-    });
-  });
-
-  it('parses Chinese prose', () => {
-    const filled = completeMountIdentityFromPrompt('作为 security engineer，负责审查认证相关变更');
-    expect(filled.role).toMatch(/security engineer/i);
-    expect(filled.mandate).toMatch(/审查认证/);
-    expect(filled.title.length).toBeGreaterThan(0);
-  });
-});
-
-describe('parseMountIdentityJson', () => {
-  it('parses bare JSON and fenced replies', () => {
-    expect(parseMountIdentityJson('{"title":"A","role":"r","mandate":"m"}')).toEqual({
-      title: 'A',
-      role: 'r',
-      mandate: 'm',
-    });
-    expect(parseMountIdentityJson('Here:\n```json\n{"title":"B","role":"dev","mandate":"ship"}\n```')).toEqual({
-      title: 'B',
-      role: 'dev',
-      mandate: 'ship',
-    });
-  });
-
-  it('returns null for non-identity JSON', () => {
-    expect(parseMountIdentityJson('not json')).toBeNull();
-    expect(parseMountIdentityJson('{"ok":true}')).toBeNull();
-  });
-});
-
 describe('sessionMapDoc', () => {
   it('parses empty / corrupt storage as empty doc', () => {
     expect(parseSessionMapDoc(null)).toEqual(emptySessionMapDoc());
     expect(parseSessionMapDoc('{')).toEqual(emptySessionMapDoc());
+  });
+
+  it('rewrites bare session position keys to session:id and keeps world centers', () => {
+    expect(canonicalMapPositionKey('abc')).toBe('session:abc');
+    expect(canonicalMapPositionKey('session:abc')).toBe('session:abc');
+    expect(canonicalMapPositionKey('draft:x')).toBe('draft:x');
+    expect(lookupMapPosition({ abc: { x: 10, y: 20 } }, 'session:abc')).toEqual({ x: 10, y: 20 });
+    expect(lookupMapPosition({ 'session:abc': { x: 3, y: 4 }, abc: { x: 1, y: 2 } }, 'abc'))
+      .toEqual({ x: 3, y: 4 });
+    expect(normalizeMapPositions({ abc: { x: 8, y: 9 }, 'session:abc': { x: 80, y: 90 } }))
+      .toEqual({ 'session:abc': { x: 80, y: 90 } });
+    const doc = parseSessionMapDoc(JSON.stringify({
+      version: 2,
+      annotations: [],
+      labels: [],
+      sessionLabels: {},
+      positions: { root: { x: 400, y: 300 } },
+    }));
+    expect(doc.positions).toEqual({ 'session:root': { x: 400, y: 300 } });
   });
 
   it('parses and loads agents cache for map first-paint', () => {
@@ -74,7 +58,7 @@ describe('sessionMapDoc', () => {
     ]);
   });
 
-  it('computes note bounds from soft-bound nodes and keeps empty rect', () => {
+  it('uses an explicit note rect and ignores legacy node bindings', () => {
     const withNodes = annotationBounds(
       { id: 'a', title: 'Group', color: '#3b82f6', nodeIds: ['x', 'y'] },
       [
@@ -83,8 +67,7 @@ describe('sessionMapDoc', () => {
       ],
       { width: 200, height: 72 },
     );
-    expect(withNodes.width).toBeGreaterThan(200);
-    expect(withNodes.x).toBeLessThan(40);
+    expect(withNodes).toEqual({ x: 40, y: 40, width: 248, height: 120 });
 
     const empty = annotationBounds(
       {

@@ -150,6 +150,15 @@ export class SessionMountCycleError extends Error {
   }
 }
 
+export class SessionProjectRequiredError extends Error {
+  readonly sessionId: string;
+  constructor(sessionId: string) {
+    super('The parent session needs a project folder before creating a child session.');
+    this.name = 'SessionProjectRequiredError';
+    this.sessionId = sessionId;
+  }
+}
+
 export function toProtocolSession(
   summary: SessionSummary,
   meta?: SessionMeta | undefined,

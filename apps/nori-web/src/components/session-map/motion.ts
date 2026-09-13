@@ -3,13 +3,13 @@ import type { SimulationLinkDatum, SimulationNodeDatum } from 'd3-force';
 import type { Session, SessionAgent } from '../../api/client';
 import { sessionAgentDisplayName } from '../../utils/session-agent';
 import { parentSessionIdOf } from '../../utils/session-mount';
-import type { CachedMapAgent } from '../sessionMapDoc';
-import { CANVAS_PAD, GAP_Y, NODE_H, NODE_W } from './layout';
-import type { MapMemberRef } from './layout';
+import { lookupMapPosition, type CachedMapAgent } from '../sessionMapDoc';
+import { CANVAS_PAD, GAP_Y, NODE_H, NODE_W, nodeKey } from './layout';
+import type { MapMemberRef, PlacedNode } from './layout';
 
 export const HOME_PULL_STRENGTH = 0.22;
-export const SESSION_MAP_AMBIENT_HOME_GRAVITY = true;
-export const REARRANGE_SETTLE_MS = 1_200;
+/** Idle / drag must not yank children back; home pull stays unused. */
+export const SESSION_MAP_AMBIENT_HOME_GRAVITY = false;
 export const SETTLE_ALPHA = 0.38;
 export const LINK_STRENGTH = 0.02;
 export const LINK_DISTANCE = NODE_H + GAP_Y;
@@ -217,6 +217,78 @@ export function resolveMapNodeSpawnPosition(input: {
   if (hostPosition !== undefined) return { x: hostPosition.x, y: hostPosition.y + NODE_H + GAP_Y };
   if (seed !== undefined) return { x: seed.x, y: seed.y };
   return { x: CANVAS_PAD + NODE_W / 2, y: CANVAS_PAD + NODE_H / 2 };
+}
+
+function forestSeedCenter(placed: PlacedNode): { x: number; y: number } {
+  return { x: placed.x + NODE_W / 2, y: placed.y + NODE_H / 2 };
+}
+
+/**
+ * Force-node world coordinates are card **centers**. Forest layout stores
+ * top-left `placed.x/y`; convert once here so persist/render never mix them.
+ *
+ * Persisted / previous centers are pinned (`fx/fy`). Brand-new nodes stay
+ * unpinned for one collision settle and spawn beside their host — never (0,0).
+ */
+export function buildForceMapNodes(input: {
+  placed: readonly PlacedNode[];
+  previousById: ReadonlyMap<string, ForceMapNode>;
+  positions: ReadonlyMap<string, { x: number; y: number }>;
+}): { nodes: ForceMapNode[]; seeds: Map<string, { x: number; y: number }> } {
+  const seeds = new Map<string, { x: number; y: number }>();
+  for (const placed of input.placed) {
+    seeds.set(nodeKey(placed.member), forestSeedCenter(placed));
+  }
+
+  const provisional = new Map<string, { x: number; y: number }>();
+  for (const placed of input.placed) {
+    const id = nodeKey(placed.member);
+    const prev = input.previousById.get(id);
+    const cached = lookupMapPosition(input.positions, id);
+    provisional.set(id, resolveMapNodeSpawnPosition({
+      id,
+      previous: prev,
+      cached,
+      seed: seeds.get(id),
+    }));
+  }
+
+  for (const placed of input.placed) {
+    const id = nodeKey(placed.member);
+    const prev = input.previousById.get(id);
+    const cached = lookupMapPosition(input.positions, id);
+    if (prev !== undefined || cached !== undefined) continue;
+    const hostId = placed.member.hostSessionId ?? parentSessionIdOf(placed.member.session);
+    if (hostId === undefined) continue;
+    const hostPos = provisional.get(`session:${hostId}`)
+      ?? lookupMapPosition(input.positions, `session:${hostId}`);
+    if (hostPos === undefined) continue;
+    provisional.set(id, resolveMapNodeSpawnPosition({
+      id,
+      hostPosition: hostPos,
+      seed: seeds.get(id),
+    }));
+  }
+
+  const nodes: ForceMapNode[] = input.placed.map((placed) => {
+    const id = nodeKey(placed.member);
+    const prev = input.previousById.get(id);
+    const pos = provisional.get(id) ?? seeds.get(id)!;
+    const cached = lookupMapPosition(input.positions, id);
+    const hasStablePosition = prev !== undefined || cached !== undefined;
+    return {
+      id,
+      member: placed.member,
+      x: pos.x,
+      y: pos.y,
+      fx: hasStablePosition ? pos.x : undefined,
+      fy: hasStablePosition ? pos.y : undefined,
+      vx: prev?.vx ?? 0,
+      vy: prev?.vy ?? 0,
+    };
+  });
+
+  return { nodes, seeds };
 }
 
 /** Collision force scoped to one component, so unrelated roots never attract. */

@@ -269,8 +269,11 @@ export interface SessionRealtimeStatus {
 
 export interface SessionCreateOptions {
   cwd: string;
-  agent_config?: SessionAgentConfig;
+  /** Discuss is an in-session mode and is never inherited by a new session. */
+  agent_config?: Omit<SessionAgentConfig, 'discuss_mode'>;
   smart_title?: boolean;
+  activate?: boolean;
+  reportError?: boolean;
 }
 
 export interface WorkspaceFolderEntry {
@@ -1092,7 +1095,7 @@ export function createClient(
           },
         ),
 
-      updateProfile: (id: string, patch: { title?: string; agent_config?: SessionAgentConfig; agent_id?: string }) =>
+      updateProfile: (id: string, patch: { title?: string; metadata?: Record<string, unknown>; agent_config?: SessionAgentConfig; agent_id?: string }) =>
         request<Session>(
           `/sessions/${encodeURIComponent(id)}/profile`,
           undefined,

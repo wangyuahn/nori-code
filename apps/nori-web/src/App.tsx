@@ -18,6 +18,7 @@ import type { ChatSlashCommandName } from './utils/chat-slash-commands';
 import { installSoundUnlock } from './notificationSounds';
 import { useGlobalApprovals } from './hooks/useGlobalApprovals';
 import { useBrowserPermissions } from './hooks/useBrowser';
+import { SessionIdentityDrawer } from './components/SessionIdentityDrawer';
 import { ErrorCenter } from './components/ErrorCenter';
 import { reportAppError } from './utils/error-center';
 import { useGlobalErrors } from './hooks/useGlobalErrors';
@@ -73,9 +74,6 @@ class MapViewBoundary extends Component<
         <div className="view-page view-page-wide session-map-page session-map-error-page">
           <div className="view-stack" style={{ padding: 24, gap: 12 }}>
             <p>{this.props.fallbackLabel}</p>
-            <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, opacity: 0.75 }}>
-              {this.state.error.message}
-            </pre>
             <div style={{ display: 'flex', gap: 8 }}>
               <button
                 type="button"
@@ -137,6 +135,11 @@ export function App() {
   const [selectedProjectRoot, setSelectedProjectRoot] = useState<string | null>(null);
   const [folderPickerOpen, setFolderPickerOpen] = useState(false);
   const [pendingInitialMessage, setPendingInitialMessage] = useState<InitialMessage | null>(null);
+  const [pendingCreateSession, setPendingCreateSession] = useState(false);
+  const [pendingProjectParentId, setPendingProjectParentId] = useState<string | null>(null);
+  const [pendingCreateStayOnMap, setPendingCreateStayOnMap] = useState(false);
+  const pendingMapCreateRef = useRef<((sessionId: string | null) => void) | null>(null);
+  const pendingProjectSelectionRef = useRef<((cwd: string) => void) | null>(null);
   const [queuedFirstMessage, setQueuedFirstMessage] = useState<(InitialMessage & { sessionId: string }) | null>(null);
   const [draftAgentConfig, setDraftAgentConfig] = useState<SessionAgentConfig>({
     model: '',
@@ -441,27 +444,45 @@ export function App() {
     await updateActiveAgentProfile({ goal_control: action });
   };
 
-  const createConversation = async (cwd: string, firstMessage?: InitialMessage) => {
-    setSelectedProjectRoot(cwd);
-    const createdId = await createNewSession({
+  const createTopLevelSession = useCallback(async (
+    cwd: string,
+    options?: { activate?: boolean; reportError?: boolean },
+  ) => {
+    return createNewSession({
       cwd,
       smart_title: true,
+      activate: options?.activate,
+      reportError: options?.reportError,
       agent_config: {
         model: draftAgentConfig.model?.trim() || undefined,
         thinking: draftAgentConfig.thinking,
         permission_mode: draftAgentConfig.permission_mode,
-        discuss_mode: draftAgentConfig.discuss_mode,
       },
     });
+  }, [createNewSession, draftAgentConfig]);
+
+  const createMapTopLevelSession = useCallback(async (cwd: string) => {
+    return createTopLevelSession(cwd, { activate: false, reportError: false });
+  }, [createTopLevelSession]);
+
+  const createConversation = async (cwd: string, firstMessage?: InitialMessage) => {
+    setSelectedProjectRoot(cwd);
+    const createdId = await createTopLevelSession(cwd);
     if (createdId && firstMessage) setQueuedFirstMessage({ sessionId: createdId, ...firstMessage });
     return createdId !== null;
   };
 
-  const chooseProject = async (firstMessage?: InitialMessage) => {
+  const chooseProject = async (firstMessage?: InitialMessage, options?: { createSession?: boolean }) => {
     if (window.noriDesktop?.selectProjectDirectory) {
       const cwd = await window.noriDesktop.selectProjectDirectory();
       if (!cwd) return false;
       if (firstMessage) return createConversation(cwd, firstMessage);
+      if (options?.createSession || pendingCreateSession) {
+        setPendingCreateSession(false);
+        const created = await createConversation(cwd);
+        if (created) setActiveView('chat');
+        return created;
+      }
       setSelectedProjectRoot(cwd);
       switchSession(null);
       return true;
@@ -472,12 +493,15 @@ export function App() {
   };
 
   const startNewConversation = () => {
-    if (activeSession?.agent_config) {
-      setDraftAgentConfig(previous => ({ ...previous, ...activeSession.agent_config }));
+    const cwd = selectedProjectRoot?.trim() || activeSession?.metadata?.cwd?.trim();
+    if (!cwd) {
+      setPendingCreateSession(true);
+      void chooseProject(undefined, { createSession: true });
+      return;
     }
-    setSelectedProjectRoot(null);
-    switchSession(null);
-    setActiveView('chat');
+    void createTopLevelSession(cwd).then((createdId) => {
+      if (createdId) setActiveView('chat');
+    });
   };
 
   const handleSendMessage = async (text: string, attachments: PromptAttachment[] = [], behavior: 'queue' | 'steer' = 'queue', options?: PromptExecutionOptions) => {
@@ -531,34 +555,30 @@ export function App() {
             <Suspense
               fallback={(
                 <div className="view-page view-page-wide session-map-page">
-                  <div className="session-map-stage session-map-stage-empty">
-                    {tr('Loading map…', '地图加载中…')}
-                  </div>
+                  <div className="session-map-stage session-map-stage-loading" aria-busy="true" />
                 </div>
               )}
             >
               <SessionMapPage
                 sessions={sessions}
                 activeSessionId={sessionId ?? undefined}
-                activeAgentId={activeAgentId}
                 onOpenSession={(id) => {
                   switchSession(id);
                   selectSessionAgent(null);
                   setActiveView('chat');
                   closeSidebarOnNarrowViewport();
                 }}
-                onOpenAgent={(hostSessionId, agent) => {
-                  setPendingAgentOpen({ sessionId: hostSessionId, agent });
-                  if (hostSessionId === sessionId) {
-                    setActiveAgentSelection({ sessionId: hostSessionId, agent });
-                  } else {
-                    setActiveAgentSelection(null);
-                  }
-                  switchSession(hostSessionId);
-                  setActiveView('chat');
-                  closeSidebarOnNarrowViewport();
-                }}
                 onGraphChanged={() => { void refreshSessions(); }}
+                onCreateTopLevelSession={createMapTopLevelSession}
+                onChooseProject={(options) => {
+                  setPendingCreateSession(options?.createSession === true);
+                  setPendingProjectParentId(options?.parentSessionId ?? null);
+                  setPendingCreateStayOnMap(options?.stayOnMap === true);
+                  pendingMapCreateRef.current = options?.onCreated ?? null;
+                  pendingProjectSelectionRef.current = options?.onSelected ?? null;
+                  setFolderPickerOpen(true);
+                }}
+                preferredCreateCwd={selectedProjectRoot ?? activeSession?.metadata?.cwd}
               />
             </Suspense>
           </MapViewBoundary>
@@ -747,13 +767,55 @@ export function App() {
       <ErrorCenter />
       <ProjectFolderPicker
         open={folderPickerOpen}
-        onClose={() => { setFolderPickerOpen(false); setPendingInitialMessage(null); }}
-        onSelect={cwd => {
-          const firstMessage = pendingInitialMessage ?? undefined;
+        onClose={() => {
+          pendingMapCreateRef.current?.(null);
           setFolderPickerOpen(false);
           setPendingInitialMessage(null);
+          setPendingCreateSession(false);
+          setPendingProjectParentId(null);
+          setPendingCreateStayOnMap(false);
+          pendingMapCreateRef.current = null;
+          pendingProjectSelectionRef.current = null;
+        }}
+        onSelect={cwd => {
+          const firstMessage = pendingInitialMessage ?? undefined;
+          const shouldCreate = pendingCreateSession;
+          const parentId = pendingProjectParentId;
+          const stayOnMap = pendingCreateStayOnMap;
+          const onMapCreated = pendingMapCreateRef.current;
+          const onProjectSelected = pendingProjectSelectionRef.current;
+          setFolderPickerOpen(false);
+          setPendingInitialMessage(null);
+          setPendingCreateSession(false);
+          setPendingProjectParentId(null);
+          setPendingCreateStayOnMap(false);
+          pendingMapCreateRef.current = null;
+          pendingProjectSelectionRef.current = null;
           if (firstMessage) {
             void createConversation(cwd, firstMessage);
+          } else if (shouldCreate) {
+            if (stayOnMap) {
+              setSelectedProjectRoot(cwd);
+              void createMapTopLevelSession(cwd).then((createdId) => {
+                onMapCreated?.(createdId);
+              }, () => {
+                onMapCreated?.(null);
+              });
+            } else {
+              void createConversation(cwd).then((created) => {
+                if (created) setActiveView('chat');
+              });
+            }
+          } else if (parentId) {
+            const parent = sessions.find(session => session.id === parentId);
+            const metadata = parent?.metadata === undefined
+              ? { cwd }
+              : { ...parent.metadata, cwd };
+            void api.sessions.updateProfile(parentId, { metadata }).then(() => {
+              setSelectedProjectRoot(cwd);
+              void refreshSessions();
+              onProjectSelected?.(cwd);
+            });
           } else {
             setSelectedProjectRoot(cwd);
             switchSession(null);
@@ -1013,6 +1075,7 @@ function SessionsList({
   const [contextMenu, setContextMenu] = useState<{ session: Session; x: number; y: number } | null>(null);
   const [actionSessionId, setActionSessionId] = useState<string | null>(null);
   const [actionDialog, setActionDialog] = useState<{ action: 'rename' | 'fork'; session: Session; value: string } | null>(null);
+  const [identitySession, setIdentitySession] = useState<Session | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
@@ -1201,12 +1264,22 @@ function SessionsList({
       </div>
       {contextMenu && <div className="session-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={event => event.stopPropagation()} role="menu">
         <button role="menuitem" onClick={() => void runSessionAction('rename', contextMenu.session)}><Icon name="chat" size={14}/>{tr('Rename session', '重命名会话')}</button>
+        <button role="menuitem" onClick={() => {
+          setIdentitySession(contextMenu.session);
+          setContextMenu(null);
+        }}><Icon name="user" size={14}/>{tr('Identity', '身份')}</button>
         <button role="menuitem" onClick={() => void runSessionAction('fork', contextMenu.session)}><Icon name="plus" size={14}/>{tr('Fork session', 'Fork 会话')}</button>
         <button role="menuitem" onClick={() => void runSessionAction('export', contextMenu.session)}><Icon name="upload" size={14}/>{tr('Export Markdown', '导出 Markdown')}</button>
         {!contextMenu.session.archived && <button role="menuitem" onClick={() => void runSessionAction('archive', contextMenu.session)}><Icon name="archive" size={14} />{tr('Archive session', '归档会话')}</button>}
         <button className="danger" role="menuitem" onClick={() => void runSessionAction('delete', contextMenu.session)}><Icon name="trash" size={14} />{tr('Delete session', '删除会话')}</button>
       </div>}
-      {(actionError || actionNotice) && <div className={`session-action-notice${actionError ? ' error' : ' success'}`} role="status" aria-live="polite"><Icon name={actionError ? 'alert' : 'check'} size={14}/><span>{actionError ?? actionNotice}</span></div>}
+      {identitySession && (
+        <SessionIdentityDrawer
+          session={identitySession}
+          onClose={() => setIdentitySession(null)}
+          onSaved={() => { void onRefresh(); }}
+        />
+      )}
       {actionDialog && <div className="session-action-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && actionSessionId === null) setActionDialog(null); }}>
         <form className="session-action-dialog" role="dialog" aria-modal="true" aria-labelledby="session-action-title" onSubmit={event => { event.preventDefault(); void submitActionDialog(); }}>
           <header><div><span>{tr('Conversation', '会话')}</span><h2 id="session-action-title">{actionDialog.action === 'rename' ? tr('Rename conversation', '重命名会话') : tr('Fork conversation', '创建会话分支')}</h2></div><button type="button" onClick={() => setActionDialog(null)} disabled={actionSessionId !== null} aria-label={tr('Close', '关闭')}><Icon name="close" size={14}/></button></header>

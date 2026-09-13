@@ -67,6 +67,7 @@ import {
   ISessionService,
   SessionMountCycleError,
   SessionNotFoundError,
+  SessionProjectRequiredError,
   SessionUndoUnavailableError,
   toProtocolSession,
   type SessionCreateOptions,
@@ -619,9 +620,11 @@ export class SessionService extends Disposable implements ISessionService {
   async createChild(id: string, input: SessionChildCreate): Promise<Session> {
     const parent = await this.get(id);
     const title = input.title ?? `Child: ${parent.title || parent.id}`;
-    const cwd = typeof parent.metadata.cwd === 'string' ? parent.metadata.cwd : undefined;
+    const cwd = typeof parent.metadata.cwd === 'string' && parent.metadata.cwd.trim().length > 0
+      ? parent.metadata.cwd.trim()
+      : undefined;
     if (cwd === undefined) {
-      throw new Error('SessionService.createChild: parent metadata.cwd is required');
+      throw new SessionProjectRequiredError(id);
     }
     const callerMeta = { ...input.metadata };
     delete callerMeta[PARENT_SESSION_ID_KEY];

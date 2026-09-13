@@ -263,22 +263,32 @@ export function useSessions() {
       if (!cwd) {
         throw new Error('请先选择一个项目文件夹。');
       }
+      const requestedConfig = options?.agent_config;
+      // A new top-level session starts outside any department. Keep runtime
+      // controls such as model/thinking/permission, but never carry Discuss
+      // state across the session boundary.
+      const { discuss_mode: _ignoredDiscussMode, ...createAgentConfig } = requestedConfig ?? {};
+      const agentConfig = Object.keys(createAgentConfig).length > 0 ? createAgentConfig : undefined;
       let created = await api.sessions.create({
         cwd,
-        agent_config: options?.agent_config,
+        agent_config: agentConfig,
         smart_title: options?.smart_title ?? true,
       });
       if (!created?.id) return null;
-      if (options?.agent_config) {
-        created = await api.sessions.updateProfile(created.id, { agent_config: options.agent_config });
+      if (agentConfig) {
+        created = await api.sessions.updateProfile(created.id, { agent_config: agentConfig });
       }
       setSessions(previous => [created, ...previous.filter(session => session.id !== created.id)]);
-      setSessionId(created.id);
-      syncSessionLocation(created.id);
+      if (options?.activate !== false) {
+        setSessionId(created.id);
+        syncSessionLocation(created.id);
+      }
       void refresh();
       return created.id;
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create session');
+      if (options?.reportError !== false) {
+        setError(e instanceof Error ? e.message : 'Failed to create session');
+      }
       return null;
     } finally {
       setCreating(false);

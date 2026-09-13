@@ -1,18 +1,41 @@
 /**
  * Conversation-map document: explicit session-node edges (source of truth for topology
- * chrome), UE note boxes, labels, and pinned positions. Persisted in localStorage so
+ * chrome), note boxes, and pinned positions. Persisted in localStorage so
  * nori-web stays off agent-core until server graph storage lands.
- *
- * Labels: Map page surfaces filter chips + assign-from-context when labels exist;
- * the schema remains the source of truth for create/assign persistence.
+ * Legacy label fields are parsed for forward compatibility but are not rendered
+ * by the map. Identity labels belong to the session identity panel.
  */
 
-import type { Session, SessionGraphEdge } from '../api/client';
+import type { Session, SessionGraph, SessionGraphEdge } from '../api/client';
 import { parentSessionIdOf } from '../utils/session-mount';
 
 export const SESSION_MAP_DOC_KEY = 'nori-session-map-doc';
 /** Stale-while-revalidate cache so map members paint before getAgents returns. */
 export const SESSION_MAP_AGENTS_CACHE_KEY = 'nori-session-map-agents-cache';
+export const SESSION_MAP_GRAPH_CACHE_KEY = 'nori-session-map-graph-cache';
+
+/** Last successful graph response used for stale-while-revalidate first paint. */
+export function loadCachedMapGraph(): SessionGraph | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(SESSION_MAP_GRAPH_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as SessionGraph;
+    if (!parsed || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function saveCachedMapGraph(graph: SessionGraph): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(SESSION_MAP_GRAPH_CACHE_KEY, JSON.stringify(graph));
+  } catch {
+    // Storage is best effort; the live graph remains authoritative.
+  }
+}
 
 /** Lightweight agent ghost snapshot for first-paint map hydration. */
 export interface CachedMapAgent {
@@ -30,8 +53,8 @@ export interface MapAnnotationBox {
   title: string;
   /** Hex/CSS color; missing/invalid values normalize on parse. */
   color: string;
-  /** Soft binding — missing ids are ignored; empty boxes keep a free rect. */
-  nodeIds: string[];
+  /** Legacy soft bindings are read but never maintained by the map. */
+  nodeIds?: string[];
   rect?: { x: number; y: number; width: number; height: number };
 }
 
@@ -41,16 +64,17 @@ export interface MapLabelDef {
   color: string;
 }
 
-export type SessionMapEdgeType = 'parent' | 'peer' | 'service';
+export type SessionMapEdgeType = 'parent';
 
 /** Explicit map edge — persisted as topology truth (server sync for parent edges). */
 export interface SessionMapEdge {
   readonly id: string;
   type: SessionMapEdgeType;
-  /** Parent / peer / service client session id. */
+  /** Parent session id for this job. */
   source: string;
-  /** Child / peer / service provider session id. */
+  /** Child session id receiving this job. */
   target: string;
+  role?: string;
   mandate?: string;
   task?: string;
   returnTo?: string;
@@ -74,14 +98,16 @@ export interface SessionMapDoc {
   labels: MapLabelDef[];
   /** sessionId → label ids */
   sessionLabels: Record<string, string[]>;
-  /** Force-node id (`session:…` / `agent:…`) → pinned world center. */
+  /**
+   * Force-node id (`session:…`, legacy `agent:…`, `draft:…`) → pinned world
+   * **center**. Bare session ids are accepted on read and rewritten to
+   * `session:id` on the next persist so refresh never treats them as new.
+   */
   positions?: Record<string, { x: number; y: number }>;
   /** Explicit edges — source of truth for map topology (P1). */
   edges?: SessionMapEdge[];
   /** Mount mutations waiting for idle sessions (applied after agent turn). */
   pendingTopology?: PendingTopologyOp[];
-  /** Top-level self-bootstrap roles (local until server metadata sync). */
-  topLevelRoles?: Record<string, string>;
 }
 
 export const DEFAULT_ANNOTATION_COLORS = [
@@ -107,7 +133,7 @@ export function isSessionMapEdge(value: unknown): value is SessionMapEdge {
   if (typeof edge.id !== 'string' || typeof edge.source !== 'string' || typeof edge.target !== 'string') {
     return false;
   }
-  return edge.type === 'parent' || edge.type === 'peer' || edge.type === 'service';
+  return edge.type === 'parent';
 }
 
 export function normalizeSessionMapEdge(edge: SessionMapEdge): SessionMapEdge {
@@ -118,6 +144,7 @@ export function normalizeSessionMapEdge(edge: SessionMapEdge): SessionMapEdge {
     target: edge.target,
   };
   if (typeof edge.mandate === 'string' && edge.mandate.trim()) out.mandate = edge.mandate.trim();
+  if (typeof edge.role === 'string' && edge.role.trim()) out.role = edge.role.trim();
   if (typeof edge.task === 'string' && edge.task.trim()) out.task = edge.task.trim();
   if (typeof edge.returnTo === 'string' && edge.returnTo.trim()) out.returnTo = edge.returnTo.trim();
   if (typeof edge.status === 'string' && edge.status.trim()) out.status = edge.status.trim();
@@ -134,7 +161,16 @@ export function seedEdgesFromServerGraph(serverEdges: readonly SessionGraphEdge[
   }));
 }
 
-/** Count incoming parent edges. Layout and mount remain single-parent until P3 兼职. */
+/** Local-only extra job while the server still stores a single parent. */
+export const UNAPPLIED_EXTRA_JOB_STATUS = 'pending-multi-parent';
+
+export function isUnappliedExtraJob(
+  edge: Pick<SessionMapEdge, 'type' | 'status'>,
+): boolean {
+  return edge.type === 'parent' && edge.status === UNAPPLIED_EXTRA_JOB_STATUS;
+}
+
+/** Count all incoming work edges for a session, including unapplied extra jobs. */
 export function incomingParentEdgeCount(
   sessionId: string,
   edges: readonly SessionMapEdge[],
@@ -180,6 +216,7 @@ export function addSessionMapEdge(
     type: edge.type,
     source: edge.source,
     target: edge.target,
+    role: edge.role,
     mandate: edge.mandate,
     task: edge.task,
     returnTo: edge.returnTo,
@@ -235,7 +272,6 @@ export function parseSessionMapDoc(raw: string | null | undefined): SessionMapDo
       positions: parsePositions(parsed.positions),
       edges,
       pendingTopology: parsePendingTopology(parsed.pendingTopology),
-      topLevelRoles: parseTopLevelRoles(parsed.topLevelRoles),
     };
   } catch {
     return emptySessionMapDoc();
@@ -252,7 +288,12 @@ export function saveSessionMapDoc(
   doc: SessionMapDoc,
   storage: Pick<Storage, 'setItem'> = localStorage,
 ): void {
-  storage.setItem(SESSION_MAP_DOC_KEY, JSON.stringify(doc));
+  // Drop legacy canvas labels and soft bindings on the next write. Identity
+  // labels are owned by the session identity API, while annotations are free
+  // rectangles with no node membership database.
+  const annotations = doc.annotations.map(({ nodeIds: _legacyNodeIds, ...annotation }) => annotation);
+  const { labels: _legacyLabels, sessionLabels: _legacySessionLabels, ...rest } = doc;
+  storage.setItem(SESSION_MAP_DOC_KEY, JSON.stringify({ ...rest, annotations }));
 }
 
 export function parseCachedMapAgents(raw: string | null | undefined): CachedMapAgent[] {
@@ -311,7 +352,7 @@ function isAnnotationBox(value: unknown): value is MapAnnotationBox {
   if (value === null || typeof value !== 'object') return false;
   const box = value as MapAnnotationBox & { color?: unknown; rect?: unknown };
   if (typeof box.id !== 'string' || typeof box.title !== 'string') return false;
-  if (!Array.isArray(box.nodeIds) || !box.nodeIds.every((id) => typeof id === 'string')) return false;
+  if (box.nodeIds !== undefined && (!Array.isArray(box.nodeIds) || !box.nodeIds.every((id) => typeof id === 'string'))) return false;
   // color optional on wire — normalize later; reject only if present and non-string
   if (box.color !== undefined && typeof box.color !== 'string') return false;
   // Invalid rect is stripped in normalize, not a hard reject.
@@ -330,7 +371,6 @@ function normalizeAnnotationBox(box: MapAnnotationBox): MapAnnotationBox {
     id: box.id,
     title: box.title,
     color,
-    nodeIds: box.nodeIds,
     rect,
   };
 }
@@ -367,12 +407,64 @@ function parsePendingTopology(value: unknown): PendingTopologyOp[] | undefined {
   return out.length > 0 ? out : undefined;
 }
 
-function parseTopLevelRoles(value: unknown): Record<string, string> | undefined {
-  if (value === null || value === undefined || typeof value !== 'object') return undefined;
-  const out: Record<string, string> = {};
-  for (const [sessionId, role] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof sessionId !== 'string' || typeof role !== 'string' || !role.trim()) continue;
-    out[sessionId] = role.trim();
+const SESSION_POSITION_PREFIX = 'session:';
+
+/** Persist key for a force node. Bare session ids become `session:id`. */
+export function canonicalMapPositionKey(id: string): string {
+  if (
+    id.startsWith(SESSION_POSITION_PREFIX)
+    || id.startsWith('draft:')
+    || id.startsWith('agent:')
+  ) {
+    return id;
+  }
+  return `${SESSION_POSITION_PREFIX}${id}`;
+}
+
+/** Keys to probe when reading a stored center (`session:id` then bare `id`). */
+export function mapPositionLookupKeys(nodeId: string): string[] {
+  const canonical = canonicalMapPositionKey(nodeId);
+  const keys = [canonical];
+  if (canonical.startsWith(SESSION_POSITION_PREFIX)) {
+    const bare = canonical.slice(SESSION_POSITION_PREFIX.length);
+    if (bare.length > 0) keys.push(bare);
+  }
+  if (nodeId !== canonical) keys.push(nodeId);
+  return keys;
+}
+
+export function lookupMapPosition(
+  positions: ReadonlyMap<string, { x: number; y: number }> | Record<string, { x: number; y: number }> | undefined,
+  nodeId: string,
+): { x: number; y: number } | undefined {
+  if (positions === undefined) return undefined;
+  const keys = mapPositionLookupKeys(nodeId);
+  if (positions instanceof Map) {
+    for (const key of keys) {
+      const hit = positions.get(key);
+      if (hit !== undefined) return hit;
+    }
+    return undefined;
+  }
+  for (const key of keys) {
+    const hit = positions[key];
+    if (hit !== undefined) return hit;
+  }
+  return undefined;
+}
+
+/**
+ * Rewrite bare session ids to `session:id`. When both forms exist, keep the
+ * canonical entry (what drag/settle persist) rather than the legacy key.
+ */
+export function normalizeMapPositions(
+  positions: Record<string, { x: number; y: number }> | undefined,
+): Record<string, { x: number; y: number }> | undefined {
+  if (positions === undefined) return undefined;
+  const out: Record<string, { x: number; y: number }> = {};
+  for (const [id, pos] of Object.entries(positions)) {
+    const key = canonicalMapPositionKey(id);
+    if (id === key || out[key] === undefined) out[key] = pos;
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }
@@ -389,7 +481,7 @@ function parsePositions(
       out[id] = { x: point.x, y: point.y };
     }
   }
-  return Object.keys(out).length > 0 ? out : undefined;
+  return normalizeMapPositions(out);
 }
 
 export function newAnnotationId(): string {
@@ -409,8 +501,8 @@ export interface PlacedBounds {
 
 /**
  * Bounds for a note box.
- * Explicit `rect` (marquee annotate) is the source of truth — never replace with a
- * node hull unless the box has no rect (legacy / bind-only notes).
+ * Explicit `rect` is the source of truth. Legacy nodeIds are intentionally
+ * ignored so a visual group never moves when a node is dragged.
  */
 export function annotationBounds(
   box: MapAnnotationBox,
@@ -420,17 +512,7 @@ export function annotationBounds(
   if (box.rect !== undefined && isValidAnnotationRect(box.rect)) {
     return box.rect;
   }
-  const bound = placed.filter((node) => box.nodeIds.includes(node.session.id));
-  if (bound.length === 0) {
-    return { x: 40, y: 40, width: nodeSize.width + 48, height: nodeSize.height + 48 };
-  }
-  const pad = 18;
-  const titleRoom = 22;
-  const minX = Math.min(...bound.map((n) => n.x)) - pad;
-  const minY = Math.min(...bound.map((n) => n.y)) - pad - titleRoom;
-  const maxX = Math.max(...bound.map((n) => n.x + nodeSize.width)) + pad;
-  const maxY = Math.max(...bound.map((n) => n.y + nodeSize.height)) + pad;
-  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  return { x: 40, y: 40, width: nodeSize.width + 48, height: nodeSize.height + 48 };
 }
 
 /** Keep sessions that carry any of the active label filters (empty filter = all). */
