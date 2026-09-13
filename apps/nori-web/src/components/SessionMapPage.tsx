@@ -90,6 +90,9 @@ import {
   annotationBounds,
   DEFAULT_ANNOTATION_COLORS,
   canonicalMapPositionKey,
+  bareMapSessionId,
+  findParentMapEdge,
+  isLiveLayoutParentEdge,
   lookupMapPosition,
   loadCachedMapAgents,
   loadCachedMapGraph,
@@ -160,6 +163,7 @@ function forgetMapNodePosition(
 ): void {
   positions.delete(sessionId);
   positions.delete(canonicalMapPositionKey(sessionId));
+  positions.delete(bareMapSessionId(sessionId));
 }
 
 function createInitialForceGraph(
@@ -268,7 +272,7 @@ function focusInsetForViewport(): { left: number; top: number; bottom: number } 
 
 export { wireSourceParentSessionId };
 
-/** Whether dropping a wire onto `target` is a legal mount/reconnect or collab link. */
+/** Whether dropping a wire onto `target` is a legal mount or reconnect. */
 export function isValidWireTarget(
   wire: Pick<WireDragState, 'side' | 'parentSessionId' | 'childSessionId' | 'fromId'>,
   target: ForceMapNode,
@@ -569,6 +573,12 @@ function portWorldPosition(node: { x?: number; y?: number }, side: 'in' | 'out')
   return { x, y: side === 'in' ? y - NODE_H / 2 : y + NODE_H / 2 };
 }
 
+/** Keep port/edge hits usable after zoom-out without changing the 1× radius. */
+function scaledWorldRadius(base: number, scale: number): number {
+  if (!(scale > 0) || !Number.isFinite(scale)) return base;
+  return Math.max(base, 16 / scale);
+}
+
 /** Nearest legal port/body for rubber-band snap while dragging or near-miss on drop. */
 export function findNearestValidWireTarget(
   forceNodes: ReadonlyArray<ForceMapNode>,
@@ -683,10 +693,12 @@ export function SessionMapPage({
   const searchOpenRef = useRef(false);
   searchOpenRef.current = searchOpen;
   const searchIndexRef = useRef(0);
+  const [searchFocusId, setSearchFocusId] = useState<string | null>(null);
   const closeSearch = useCallback(() => {
     setSearchOpen(false);
     setQuery('');
     searchIndexRef.current = 0;
+    setSearchFocusId(null);
   }, []);
   const openSearch = useCallback(() => {
     setSearchOpen(true);
@@ -938,7 +950,8 @@ export function SessionMapPage({
     return () => window.removeEventListener('blur', onBlur);
   }, [cancelWireDrag, detachNodeDragListeners]);
 
-  // Escape: wire → menu → search → draft → selection.
+  // Escape: in-progress wire first (don't leave a rubber band), then overlay
+  // menus/drawers, then search, then marquee/draft, then selection.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target;
@@ -954,20 +967,23 @@ export function SessionMapPage({
         openSearch();
         return;
       }
-      if ((event.key === 'Delete' || event.key === 'Backspace') && !typing && selectedWorkEdge !== null) {
-        event.preventDefault();
-        const edge = selectedWorkEdge;
-        const stored = (mapDocRef.current.edges ?? []).find((candidate) => (
-          candidate.type === 'parent'
-          && candidate.source === edge.parentId
-          && candidate.target === edge.childId
-        ));
-        if (stored !== undefined && isUnappliedExtraJob(stored)) {
-          dismissUnappliedExtraJobRef.current(edge.parentId, edge.childId);
+      if ((event.key === 'Delete' || event.key === 'Backspace') && !typing) {
+        if (selectedWorkEdge !== null) {
+          event.preventDefault();
+          const edge = selectedWorkEdge;
+          const stored = findParentMapEdge(mapDocRef.current.edges, edge.parentId, edge.childId);
+          if (stored !== undefined && isUnappliedExtraJob(stored)) {
+            dismissUnappliedExtraJobRef.current(edge.parentId, edge.childId);
+            return;
+          }
+          setConfirmWorkEdge(edge);
           return;
         }
-        setConfirmWorkEdge(edge);
-        return;
+        if (selectedIdsRef.current.length > 0) {
+          event.preventDefault();
+          setDeleteSelectionConfirm(true);
+          return;
+        }
       }
       if (event.key !== 'Escape') return;
       if (wireDragRef.current !== null) {
@@ -1202,6 +1218,7 @@ export function SessionMapPage({
     if (wireDragRef.current !== null || dragRef.current !== null
       || annotationDragRef.current !== null
       || draftDragRef.current !== null
+      || draftRef.current !== null
       || marqueeRef.current !== null) {
       return;
     }
@@ -1227,8 +1244,11 @@ export function SessionMapPage({
       setAgentExtras(extras);
       saveCachedMapAgents(cachedAgentsFromMapMembers(extras));
       const alive = new Set<string>();
-      for (const node of next.nodes) alive.add(`session:${node.id}`);
+      for (const node of next.nodes) alive.add(canonicalMapPositionKey(node.id));
       for (const extra of extras) alive.add(nodeKey(extra));
+      for (const key of positionsRef.current.keys()) {
+        if (key.startsWith('draft:') || key.startsWith('creating:')) alive.add(key);
+      }
       pruneStalePositions(alive);
 
       const busyNodes = next.nodes.filter((node) => {
@@ -1501,6 +1521,7 @@ export function SessionMapPage({
   const visibleIds = useMemo(() => new Set(filteredList.map((member) => nodeKey(member))), [filteredList]);
   useEffect(() => {
     searchIndexRef.current = 0;
+    setSearchFocusId(null);
   }, [query]);
   const treeLayout = useMemo(() => {
     const serverGraph = ensureGraphEdges({
@@ -1555,6 +1576,7 @@ export function SessionMapPage({
       return `${nodeKey(node.member)}:${agent?.agent_id ?? ''}:${agent?.mounted_session_id ?? ''}`;
     }).sort().join('\0');
     const edgePart = visualWorkEdges
+      .filter((edge) => isLiveLayoutParentEdge({ type: 'parent', status: edge.status }))
       .map((edge) => `${edge.source}->${edge.target}`)
       .sort()
       .join('\0');
@@ -1593,6 +1615,7 @@ export function SessionMapPage({
 
     const nodeIds = new Set(treeLayout.placed.map((placed) => nodeKey(placed.member)));
     const links: ForceMapLink[] = visualWorkEdges
+      .filter((edge) => isLiveLayoutParentEdge({ type: 'parent', status: edge.status }))
       .filter((edge) => nodeIds.has(`session:${edge.source}`) && nodeIds.has(`session:${edge.target}`))
       .map((edge) => ({
         source: `session:${edge.source}`,
@@ -1904,6 +1927,11 @@ export function SessionMapPage({
       || annotationDragRef.current !== null
       || draftDragRef.current !== null
       || isBlockingStageGesture(gestureRef.current.kind);
+    if (rightOrMiddle && wireDragRef.current !== null) {
+      cancelWireDrag();
+      gestureRef.current = { kind: 'pan-done' };
+      return;
+    }
     if (rightOrMiddle) {
       if (otherGesture) return;
     } else if (otherGesture || marqueeRef.current !== null) {
@@ -1991,11 +2019,7 @@ export function SessionMapPage({
   };
 
   const openWorkEdgeEditor = (parentId: string, childId: string) => {
-    const edge = (mapDocRef.current.edges ?? []).find((candidate) => (
-      candidate.type === 'parent'
-      && candidate.source === parentId
-      && candidate.target === childId
-    ));
+    const edge = findParentMapEdge(mapDocRef.current.edges, parentId, childId);
     const child = byId.get(childId);
     const childServerParent = parentSessionIdOf(child);
     // Mount metadata belongs to the currently mounted job. A new job for the
@@ -2041,11 +2065,7 @@ export function SessionMapPage({
     const parent = allNodes.find((session) => session.id === parentId);
     const mapParents = mapParentByChildFromEdges(mapDocRef.current.edges ?? []);
     const serverParent = parentSessionIdOf(child);
-    const existingEdge = (mapDocRef.current.edges ?? []).find((edge) => (
-      edge.type === 'parent'
-      && edge.source === parentId
-      && edge.target === childId
-    ));
+    const existingEdge = findParentMapEdge(mapDocRef.current.edges, parentId, childId);
     const hasExistingParentEdge = serverParent === parentId || (
       existingEdge !== undefined && existingEdge.status !== 'error'
     );
@@ -2140,7 +2160,7 @@ export function SessionMapPage({
     wireDragRef.current = null;
     setWireDrag(null);
     setWireSnapTargetId(null);
-    if (active === null || event.type === 'pointercancel') return;
+    if (active === null || event.type === 'pointercancel' || event.button !== 0) return;
 
     armClickSuppression();
 
@@ -2158,9 +2178,12 @@ export function SessionMapPage({
     let { x: worldX, y: worldY } = world;
 
     const preferPort = active.side === 'out' ? 'in' : 'out';
+    const hitRadius = scaledWorldRadius(PORT_HIT_RADIUS, viewRef.current.scale);
+    const snapRadius = scaledWorldRadius(NEAR_MISS_RADIUS, viewRef.current.scale);
     const hitRaw = hitSessionMapNode(forceNodesRef.current, worldX, worldY, {
       excludeId: active.fromId,
       preferPort,
+      portRadius: hitRadius,
     });
     let hit = hitRaw === undefined
       ? undefined
@@ -2174,6 +2197,7 @@ export function SessionMapPage({
         active,
         allNodes,
         mapDocRef.current.edges ?? [],
+        snapRadius,
       );
       if (snap !== undefined) {
         hit = snap.node;
@@ -2186,7 +2210,10 @@ export function SessionMapPage({
       // The first hit test excludes the wire source so a card cannot be
       // mistaken for a valid target. Keep a second hit only for explaining
       // an invalid drop, especially a self-connection or a cycle.
-      const invalidHit = hitSessionMapNode(forceNodesRef.current, worldX, worldY, { preferPort });
+      const invalidHit = hitSessionMapNode(forceNodesRef.current, worldX, worldY, {
+        preferPort,
+        portRadius: hitRadius,
+      });
       if (invalidHit?.id === active.fromId) {
         busyRef.current = false;
         showNodeError(active.fromId, tr('Cannot connect a session to itself.', '不能把会话挂到自己身上。'));
@@ -2207,7 +2234,7 @@ export function SessionMapPage({
         }
       }
       const nearest = nearestSessionMapNodeDistance(forceNodesRef.current, worldX, worldY, active.fromId);
-      if (nearest !== undefined && nearest <= NEAR_MISS_RADIUS) {
+      if (nearest !== undefined && nearest <= snapRadius) {
         busyRef.current = false;
         showNodeError(active.fromId, tr(
           'Drop missed the node. Aim for the port or card.',
@@ -2422,7 +2449,7 @@ export function SessionMapPage({
         current,
         allNodes,
         mapDocRef.current.edges ?? [],
-        NEAR_MISS_RADIUS,
+        scaledWorldRadius(NEAR_MISS_RADIUS, viewRef.current.scale),
       );
       const toX = snap?.portX ?? world.x;
       const toY = snap?.portY ?? world.y;
@@ -2692,6 +2719,28 @@ export function SessionMapPage({
     marqueeRef.current = null;
     setMarquee(null);
   }, []);
+
+  const createGroupBoxAt = (worldX: number, worldY: number) => {
+    const color = DEFAULT_ANNOTATION_COLORS[mapDocRef.current.annotations.length % DEFAULT_ANNOTATION_COLORS.length]!;
+    const annotation: MapAnnotationBox = {
+      id: newAnnotationId(),
+      title: tr('Group box', '分组框'),
+      color,
+      rect: {
+        x: worldX - 24,
+        y: worldY - 24,
+        width: NODE_W + 48,
+        height: NODE_H + 48,
+      },
+    };
+    persistDoc({
+      ...mapDocRef.current,
+      annotations: [...mapDocRef.current.annotations, annotation],
+    });
+    setEditingAnnotationId(annotation.id);
+    setCanvasMenu(null);
+    clearSelection();
+  };
 
   const annotateSelection = useCallback(() => {
     const selected = forceNodesRef.current.filter((node) => selectedIds.includes(node.member.session.id));
@@ -3278,6 +3327,12 @@ export function SessionMapPage({
     setConfirmWorkEdge(null);
     const child = byId.get(childId);
     const serverParent = parentSessionIdOf(child);
+    const stored = findParentMapEdge(mapDocRef.current.edges, parentId, childId);
+    if (stored !== undefined && isUnappliedExtraJob(stored)) {
+      dismissUnappliedExtraJob(parentId, childId);
+      showHint(tr('Removed this extra job line.', '已去掉这条'));
+      return;
+    }
     const isServerEdge = serverParent === parentId;
     if (!isServerEdge || childId.startsWith('draft:')) {
       persistDoc(removeSessionMapEdgeByEndpoints(mapDocRef.current, 'parent', parentId, childId));
@@ -3358,11 +3413,7 @@ export function SessionMapPage({
     if (current === null || current.saving) return;
     const role = current.role.trim() || undefined;
     const mandate = current.mandate.trim() || undefined;
-    const existing = (mapDocRef.current.edges ?? []).find((edge) => (
-      edge.type === 'parent'
-      && edge.source === current.parentId
-      && edge.target === current.childId
-    ));
+    const existing = findParentMapEdge(mapDocRef.current.edges, current.parentId, current.childId);
     const child = byId.get(current.childId);
     const parent = byId.get(current.parentId);
     const serverParent = parentSessionIdOf(child);
@@ -3872,6 +3923,12 @@ export function SessionMapPage({
     && !sessions.some((session) => parentSessionIdOf(session) !== undefined)
     && (graph?.edges ?? []).length === 0
     && !(mapDoc.edges ?? []).some((edge) => edge.type === 'parent');
+  const selectedUnappliedEdge = selectedWorkEdge === null
+    ? undefined
+    : findParentMapEdge(mapDoc.edges, selectedWorkEdge.parentId, selectedWorkEdge.childId);
+  const showUnappliedJobBar = selectedUnappliedEdge !== undefined
+    && isUnappliedExtraJob(selectedUnappliedEdge)
+    && workEdgeMenu === null;
 
   return (
     <div className="view-page view-page-wide session-map-page">
@@ -4037,6 +4094,43 @@ export function SessionMapPage({
                       .filter((value): value is string => value !== undefined && value.length > 0)
                       .join(' · ')
                       .slice(0, 120);
+                    const selected = selectedWorkEdge !== null
+                      && selectedWorkEdge.parentId === edge.source
+                      && selectedWorkEdge.childId === edge.target;
+                    const toneClass = isPending || isUnapplied
+                      ? ' pending-multi-parent'
+                      : isError ? ' error' : '';
+                    const hitWidth = scaledWorldRadius(14, snappedView.scale);
+                    const onEdgePointerDown = (event: ReactPointerEvent<SVGPathElement>) => {
+                      if (event.button === 0) event.stopPropagation();
+                      if (event.button !== 0 || !event.altKey) return;
+                      event.preventDefault();
+                      armClickSuppression();
+                      if (wireDragRef.current !== null || dragRef.current !== null || marqueeRef.current !== null
+                        || annotationDragRef.current !== null || draftDragRef.current !== null
+                        || isBlockingStageGesture(gestureRef.current.kind)) return;
+                      void endWorkEdge(edge.source, edge.target);
+                    };
+                    const onEdgeClick = (event: ReactMouseEvent<SVGPathElement>) => {
+                      event.stopPropagation();
+                      if (event.altKey) return;
+                      setSelectedIds([]);
+                      setSelectedWorkEdge({ parentId: edge.source, childId: edge.target });
+                    };
+                    const onEdgeContextMenu = (event: ReactMouseEvent<SVGPathElement>) => {
+                      if (blockContextMenuIfGesture(event)) return;
+                      event.stopPropagation();
+                      setSelectedIds([]);
+                      setSelectedWorkEdge({ parentId: edge.source, childId: edge.target });
+                      setNodeMenu(null);
+                      setCanvasMenu(null);
+                      setWorkEdgeMenu({
+                        parentId: edge.source,
+                        childId: edge.target,
+                        x: event.clientX,
+                        y: event.clientY,
+                      });
+                    };
                     return (
                       <g key={`${edge.source}->${edge.target}`}>
                       <title>{tr(
@@ -4044,49 +4138,22 @@ export function SessionMapPage({
                         `给「${byId.get(edge.source)?.title?.trim() || edge.source}」干：${edgeIdentity || '工作'}`,
                       )}</title>
                       <path
+                        className={`session-map-edge-hit${selected ? ' selected' : ''}${toneClass}`}
+                        d={d}
+                        style={{ strokeWidth: hitWidth }}
                         data-parent-id={edge.source}
                         data-child-id={edge.target}
                         data-edge-status={edge.status}
-                        className={selectedWorkEdge !== null
-                          && selectedWorkEdge.parentId === edge.source
-                          && selectedWorkEdge.childId === edge.target
-                          ? `selected${isPending || isUnapplied ? ' pending-multi-parent' : isError ? 'error' : ''}`
-                          : isPending || isUnapplied ? 'pending-multi-parent' : isError ? 'error' : undefined}
-                        d={d}
                         aria-label={edge.mandate ?? tr('Work edge', '工作边')}
                         role="button"
-                        onPointerDown={(event) => {
-                          // Left-click selects the edge; right/middle drag must
-                          // bubble to the stage so it pans the world.
-                          if (event.button === 0) event.stopPropagation();
-                          if (event.button !== 0 || !event.altKey) return;
-                          event.preventDefault();
-                          armClickSuppression();
-                          if (wireDragRef.current !== null || dragRef.current !== null || marqueeRef.current !== null
-                            || annotationDragRef.current !== null || draftDragRef.current !== null
-                            || isBlockingStageGesture(gestureRef.current.kind)) return;
-                          void endWorkEdge(edge.source, edge.target);
-                        }}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          if (event.altKey) return;
-                          setSelectedIds([]);
-                          setSelectedWorkEdge({ parentId: edge.source, childId: edge.target });
-                        }}
-                        onContextMenu={(event) => {
-                          if (blockContextMenuIfGesture(event)) return;
-                          event.stopPropagation();
-                          setSelectedIds([]);
-                          setSelectedWorkEdge({ parentId: edge.source, childId: edge.target });
-                          setNodeMenu(null);
-                          setCanvasMenu(null);
-                          setWorkEdgeMenu({
-                            parentId: edge.source,
-                            childId: edge.target,
-                            x: event.clientX,
-                            y: event.clientY,
-                          });
-                        }}
+                        onPointerDown={onEdgePointerDown}
+                        onClick={onEdgeClick}
+                        onContextMenu={onEdgeContextMenu}
+                      />
+                      <path
+                        className={`session-map-edge-visible${selected ? ' selected' : ''}${toneClass}`}
+                        d={d}
+                        aria-hidden
                       />
                       {(isPending || isUnapplied || isError) && (
                         <text x={(start.x + end.x) / 2 - minX + 6} y={midY - minY - 4} className="session-map-edge-pending-label">
@@ -4170,6 +4237,7 @@ export function SessionMapPage({
                         + (isWireTarget ? ' wire-target-valid' : '')
                         + (isWireSnap ? ' wire-target-snap' : '')
                         + (isSearchMatch ? ' search-match' : '')
+                        + (searchFocusId === node.id ? ' search-match-current' : '')
                       }
                       style={{ left, top, width: NODE_W, height: NODE_H }}
                       onPointerDown={(event) => startNodeDrag(event, node)}
@@ -4399,8 +4467,10 @@ export function SessionMapPage({
                     event.preventDefault();
                     const index = searchIndexRef.current % matches.length;
                     searchIndexRef.current += 1;
+                    const focused = matches[index];
+                    setSearchFocusId(focused?.id ?? null);
                     markUserAdjustedView();
-                    focusNode(matches[index]);
+                    focusNode(focused);
                   }}
                   placeholder={tr('Search title / project / members…', '搜索标题 / 项目 / 成员…')}
                 />
@@ -4564,26 +4634,51 @@ export function SessionMapPage({
             </button>
             {nodeMenu.canUnmount && (() => {
               const jobs = visualWorkEdges.filter((edge) => edge.target === nodeMenu.sessionId);
+              const parentTitle = (parentId: string) => byId.get(parentId)?.title?.trim() || parentId;
               if (jobs.length <= 1) {
+                const only = jobs[0];
+                if (only !== undefined && isUnappliedExtraJob({ type: 'parent', status: only.status })) {
+                  return (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setNodeMenu(null);
+                        dismissUnappliedExtraJob(only.source, only.target);
+                      }}
+                    >
+                      {tr('Remove this line', '去掉这条')}
+                    </button>
+                  );
+                }
                 return (
                   <button type="button" role="menuitem" onClick={() => void unmountSession(nodeMenu.sessionId)}>
                     {tr('End all jobs', '结束全部工作')}
                   </button>
                 );
               }
-              return jobs.map((job) => (
-                <button
-                  key={`${job.source}->${job.target}`}
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setNodeMenu(null);
-                    setConfirmWorkEdge({ parentId: job.source, childId: job.target });
-                  }}
-                >
-                  {tr(`End the job for “${byId.get(job.source)?.title?.trim() || job.source}”`, `结束给「${byId.get(job.source)?.title?.trim() || job.source}」的工作`)}
-                </button>
-              ));
+              return jobs.map((job) => {
+                const unapplied = isUnappliedExtraJob({ type: 'parent', status: job.status });
+                return (
+                  <button
+                    key={`${job.source}->${job.target}`}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setNodeMenu(null);
+                      if (unapplied) {
+                        dismissUnappliedExtraJob(job.source, job.target);
+                        return;
+                      }
+                      setConfirmWorkEdge({ parentId: job.source, childId: job.target });
+                    }}
+                  >
+                    {unapplied
+                      ? tr(`Remove the extra job from “${parentTitle(job.source)}”`, `去掉给「${parentTitle(job.source)}」的这条`)
+                      : tr(`End the job for “${parentTitle(job.source)}”`, `结束给「${parentTitle(job.source)}」的工作`)}
+                  </button>
+                );
+              });
             })()}
             <button
               type="button"
@@ -4629,6 +4724,13 @@ export function SessionMapPage({
             >
               {tr('Fit to view', '适应画面')}
             </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => createGroupBoxAt(canvasMenu.worldX, canvasMenu.worldY)}
+            >
+              {tr('Create group box', '创建分组框')}
+            </button>
           </div>
         )}
 
@@ -4649,11 +4751,7 @@ export function SessionMapPage({
         )}
 
         {workEdgeMenu !== null && (() => {
-          const menuEdge = (mapDoc.edges ?? []).find((edge) => (
-            edge.type === 'parent'
-            && edge.source === workEdgeMenu.parentId
-            && edge.target === workEdgeMenu.childId
-          ));
+          const menuEdge = findParentMapEdge(mapDoc.edges, workEdgeMenu.parentId, workEdgeMenu.childId);
           const unapplied = menuEdge !== undefined && isUnappliedExtraJob(menuEdge);
           return (
           <div
@@ -4747,12 +4845,7 @@ export function SessionMapPage({
             </div>
           </div>
         )}
-        {selectedWorkEdge !== null && (mapDoc.edges ?? []).some((edge) => (
-          edge.type === 'parent'
-          && edge.source === selectedWorkEdge.parentId
-          && edge.target === selectedWorkEdge.childId
-          && isUnappliedExtraJob(edge)
-        )) && (
+        {showUnappliedJobBar && selectedWorkEdge !== null && (
           <div
             className="session-map-float session-map-edge-confirm"
             data-map-unapplied-job

@@ -4674,15 +4674,22 @@ kbd {
   pointer-events: none;
   overflow: visible;
 }
-.session-map-edges path {
+.session-map-edges path.session-map-edge-hit {
   fill: none;
   pointer-events: stroke;
   cursor: pointer;
+  stroke: transparent;
+  stroke-dasharray: none;
+  opacity: 1;
+}
+.session-map-edges path.session-map-edge-visible {
+  fill: none;
+  pointer-events: none;
   stroke: color-mix(in srgb, var(--nori-accent, #7aa86d) 55%, var(--nori-border));
   stroke-width: 1.6;
   opacity: 0.85;
 }
-.session-map-edges path.selected {
+.session-map-edges path.session-map-edge-visible.selected {
   stroke: var(--nori-accent, #7aa86d);
   stroke-width: 3;
 }
@@ -4820,11 +4827,6 @@ kbd {
   padding: 8px 10px;
   font-size: calc(12px * var(--nori-ui-font-scale));
 }
-.session-map-count {
-  margin-top: 2px;
-  color: var(--nori-text-secondary);
-  font-size: calc(11px * var(--nori-ui-font-scale));
-}
 .session-map-search-wrap {
   position: relative;
   display: flex;
@@ -4928,15 +4930,6 @@ kbd {
 }
 .session-map-annotation-editor button:hover { color: var(--nori-text); }
 .session-map-annotation-editor .session-map-note-delete { color: var(--nori-danger, #e5534b); }
-.session-map-annotation-empty {
-  position: absolute;
-  right: 8px;
-  bottom: 4px;
-  font-size: 10px;
-  color: var(--nori-text-secondary);
-  opacity: 0.8;
-  pointer-events: none;
-}
 .session-map-annotation-resize {
   position: absolute;
   right: 0;
@@ -4969,8 +4962,8 @@ kbd {
 }
 .session-map-stop-button {
   position: absolute;
-  top: 6px;
-  right: 6px;
+  top: -10px;
+  right: -10px;
   width: 24px;
   height: 24px;
   padding: 0;
@@ -4991,8 +4984,8 @@ kbd {
 .session-map-stop-button:disabled { opacity: 0.6; cursor: wait; }
 .session-map-stop-error {
   position: absolute;
-  right: 7px;
-  top: 31px;
+  right: -10px;
+  top: 16px;
   font-size: 9px;
   color: var(--nori-danger, #e5534b);
 }
@@ -5311,6 +5304,9 @@ kbd {
 .session-map-node.search-match {
   border-color: var(--nori-accent, #7aa86d);
 }
+.session-map-node.search-match-current {
+  box-shadow: inset 0 0 0 2px var(--nori-accent, #7aa86d);
+}
 .session-map-context-menu {
   position: fixed;
   z-index: 40;
@@ -5412,12 +5408,6 @@ kbd {
 .session-map-node.has-local-error {
   border-left: 3px solid var(--nori-danger, #e5534b);
 }
-.session-map-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
 .session-map-tool {
   border: 1px solid color-mix(in srgb, var(--nori-border) 80%, transparent);
   background: color-mix(in srgb, var(--nori-surface, transparent) 40%, transparent);
@@ -5454,7 +5444,7 @@ kbd {
 }
 .session-map-draft-node .session-map-node-body {
   padding: 0;
-  gap: 4px;
+  gap: 2px;
   overflow: hidden;
 }
 .session-map-draft-badge {
@@ -5473,22 +5463,6 @@ kbd {
   pointer-events: none;
   z-index: 2;
 }
-.session-map-draft-node .session-map-node-body {
-  padding: 0;
-  gap: 2px;
-}
-.session-map-draft-node label { gap: 2px; font-size: 9px; }
-.session-map-draft-node input,
-.session-map-draft-node textarea { padding: 3px 5px; min-height: 0; line-height: 1.1; }
-.session-map-draft-node textarea { height: 24px; }
-.session-map-draft-node h3 {
-  font-size: 12px;
-}
-.session-map-draft-node small {
-  color: var(--nori-text-secondary);
-  font-size: 10px;
-  font-weight: 500;
-}
 .session-map-create-placeholder {
   opacity: 0.65;
   border-style: dashed;
@@ -5497,12 +5471,12 @@ kbd {
 .session-map-create-placeholder.status-error {
   border-color: var(--nori-danger, #e5534b);
 }
-.session-map-edges path.pending-multi-parent {
+.session-map-edges path.session-map-edge-visible.pending-multi-parent {
   stroke-dasharray: 2 5;
   opacity: 0.5;
   stroke: var(--nori-text-secondary);
 }
-.session-map-edges path.error {
+.session-map-edges path.session-map-edge-visible.error {
   stroke-dasharray: 3 4;
   stroke: var(--nori-danger, #e5534b);
   opacity: 0.85;
@@ -5584,35 +5558,6 @@ kbd {
   color: var(--nori-text);
   padding: 5px 10px;
   cursor: pointer;
-}
-.session-map-draft-node h3 {
-  margin: 0;
-  font-size: calc(13px * var(--nori-ui-font-scale));
-  font-weight: 600;
-  color: var(--nori-text);
-}
-.session-map-draft-meta {
-  margin: 0;
-  font-size: 11px;
-  color: var(--nori-text-secondary);
-  line-height: 1.35;
-}
-.session-map-draft-node label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 11px;
-  color: var(--nori-text-secondary);
-}
-.session-map-draft-node input,
-.session-map-draft-node textarea {
-  border: 1px solid var(--nori-border);
-  border-radius: 6px;
-  background: color-mix(in srgb, #0c0f14 80%, transparent);
-  color: var(--nori-text);
-  padding: 6px 8px;
-  font: inherit;
-  resize: vertical;
 }
 .session-map-draft-actions {
   display: flex;

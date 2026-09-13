@@ -1868,6 +1868,7 @@ describe('wire gesture click suppression (live regressions)', () => {
       const menu = map.container.querySelector('.session-map-context-menu');
       expect(menu?.textContent).toMatch(/Create session here|在此新建会话/);
       expect(menu?.textContent).toMatch(/Fit to view|适应画面/);
+      expect(menu?.textContent).toMatch(/Create group box|创建分组框/);
       expect(map.container.querySelector('.session-map-marquee')).toBeNull();
     } finally {
       await act(async () => { map.root.unmount(); });
@@ -2375,8 +2376,8 @@ describe('wire gesture click suppression (live regressions)', () => {
       const panel = map.container.querySelector('[data-map-unapplied-job]');
       expect(panel).not.toBeNull();
       expect(panel!.textContent).toMatch(/Can't work for two people at once yet|现在还不能同时给两个人干活/);
-      expect(panel!.querySelector('[data-map-action="dismiss-unapplied"]')).not.toBeNull();
-      expect(panel!.querySelector('[data-map-action="remount-unapplied"]')).not.toBeNull();
+      expect(map.container.querySelectorAll('[data-map-action="dismiss-unapplied"]')).toHaveLength(1);
+      expect(map.container.querySelectorAll('[data-map-action="remount-unapplied"]')).toHaveLength(1);
       expect(map.card('child').textContent).toMatch(/2 jobs|2 份工作/);
     } finally {
       await act(async () => { map.root.unmount(); });
@@ -2446,6 +2447,68 @@ describe('wire gesture click suppression (live regressions)', () => {
       expect(remount).not.toHaveBeenCalled();
       expect(map.container.querySelector('path[data-parent-id="other"][data-child-id="child"]')).toBeNull();
       expect(map.container.querySelector('path[data-parent-id="parent"][data-child-id="child"]')).not.toBeNull();
+      expect(map.container.querySelector('[data-map-unapplied-job]')).toBeNull();
+    } finally {
+      await act(async () => { map.root.unmount(); });
+      map.container.remove();
+      localStorage.removeItem('nori-session-map-doc');
+    }
+  });
+
+  it('Alt+left-click on an unapplied extra job removes the line without unmounting', async () => {
+    const parent = session({ id: 'parent', title: 'Parent' });
+    const child = session({ id: 'child', title: 'Child', metadata: { parent_session_id: 'parent' } });
+    const other = session({ id: 'other', title: 'Other' });
+    const unmount = vi.spyOn(api.sessions, 'unmount');
+    const remount = vi.spyOn(api.sessions, 'remount');
+    const map = await renderMap(
+      [parent, child, other],
+      [{ child_session_id: 'child', parent_session_id: 'parent' }],
+      { onOpenSession: vi.fn() },
+    );
+    try {
+      const outPort = map.card('other').querySelector<HTMLElement>('.session-map-port-out');
+      await dragWire(outPort!, map.clientPointOf('child', 8), 84);
+      const extra = map.container.querySelector<SVGPathElement>('path[data-parent-id="other"][data-child-id="child"]');
+      expect(extra).toBeTruthy();
+      await act(async () => {
+        extra!.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true, cancelable: true, button: 0, altKey: true,
+          clientX: 20, clientY: 20, pointerId: 85, pointerType: 'mouse',
+        }));
+      });
+      expect(unmount).not.toHaveBeenCalled();
+      expect(remount).not.toHaveBeenCalled();
+      expect(map.container.querySelector('path[data-parent-id="other"][data-child-id="child"]')).toBeNull();
+      expect(map.container.querySelector('path[data-parent-id="parent"][data-child-id="child"]')).not.toBeNull();
+    } finally {
+      await act(async () => { map.root.unmount(); });
+      map.container.remove();
+      localStorage.removeItem('nori-session-map-doc');
+    }
+  });
+
+  it('Delete on a selected unapplied extra job removes the line without unmounting', async () => {
+    const parent = session({ id: 'parent', title: 'Parent' });
+    const child = session({ id: 'child', title: 'Child', metadata: { parent_session_id: 'parent' } });
+    const other = session({ id: 'other', title: 'Other' });
+    const unmount = vi.spyOn(api.sessions, 'unmount');
+    const remount = vi.spyOn(api.sessions, 'remount');
+    const map = await renderMap(
+      [parent, child, other],
+      [{ child_session_id: 'child', parent_session_id: 'parent' }],
+      { onOpenSession: vi.fn() },
+    );
+    try {
+      const outPort = map.card('other').querySelector<HTMLElement>('.session-map-port-out');
+      await dragWire(outPort!, map.clientPointOf('child', 8), 86);
+      expect(map.container.querySelector('[data-map-unapplied-job]')).not.toBeNull();
+      await act(async () => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
+      });
+      expect(unmount).not.toHaveBeenCalled();
+      expect(remount).not.toHaveBeenCalled();
+      expect(map.container.querySelector('path[data-parent-id="other"][data-child-id="child"]')).toBeNull();
       expect(map.container.querySelector('[data-map-unapplied-job]')).toBeNull();
     } finally {
       await act(async () => { map.root.unmount(); });
@@ -2528,6 +2591,38 @@ describe('wire gesture click suppression (live regressions)', () => {
       });
       expect(map.container.querySelector('.session-map-stage.wiring')).toBeNull();
       expect(map.container.querySelector('.session-map-draft-node')).toBeNull();
+      expect(mount).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => { map.root.unmount(); });
+      map.container.remove();
+      localStorage.removeItem('nori-session-map-doc');
+    }
+  });
+
+  it('right-click during a wire cancels it without creating a draft or opening a menu', async () => {
+    const nodes = [session({ id: 'a', title: 'Alpha' }), session({ id: 'b', title: 'Beta' })];
+    const mount = vi.spyOn(api.sessions, 'mount');
+    const map = await renderMap(nodes, [], { onOpenSession: vi.fn() });
+    try {
+      const outPort = map.card('a').querySelector<HTMLElement>('.session-map-port-out');
+      const stage = map.container.querySelector<HTMLElement>('.session-map-stage');
+      const empty = map.emptyClientPoint();
+      await act(async () => {
+        outPort!.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true, cancelable: true, button: 0,
+          clientX: 64, clientY: 64, pointerId: 34, pointerType: 'mouse',
+        }));
+      });
+      expect(map.container.querySelector('.session-map-stage.wiring')).not.toBeNull();
+      await act(async () => {
+        stage!.dispatchEvent(new PointerEvent('pointerdown', {
+          bubbles: true, cancelable: true, button: 2, buttons: 2,
+          clientX: empty.x, clientY: empty.y, pointerId: 34, pointerType: 'mouse',
+        }));
+      });
+      expect(map.container.querySelector('.session-map-stage.wiring')).toBeNull();
+      expect(map.container.querySelector('.session-map-draft-node')).toBeNull();
+      expect(map.container.querySelector('.session-map-context-menu')).toBeNull();
       expect(mount).not.toHaveBeenCalled();
     } finally {
       await act(async () => { map.root.unmount(); });
@@ -4256,6 +4351,33 @@ describe('redesigned conversation map contracts', () => {
       await act(async () => { toggle().click(); });
       expect(container.querySelector('.session-map-search')).toBeNull();
       expect(container.querySelector('.session-map-search-toggle')).not.toBeNull();
+    } finally {
+      await act(async () => { root.unmount(); });
+      container.remove();
+    }
+  });
+
+  it('Enter in search jumps to the next matching card', async () => {
+    const { container, root } = await render([
+      session({ id: 'alpha', title: 'Alpha review' }),
+      session({ id: 'beta', title: 'Beta review' }),
+    ]);
+    try {
+      await act(async () => {
+        container.querySelector<HTMLButtonElement>('.session-map-search-toggle')!.click();
+      });
+      const input = container.querySelector<HTMLInputElement>('.session-map-search');
+      expect(input).not.toBeNull();
+      await act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+        setter?.call(input, 'review');
+        input!.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      expect(container.querySelectorAll('.session-map-node.search-match')).toHaveLength(2);
+      await act(async () => {
+        input!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      });
+      expect(container.querySelector('.session-map-node.search-match-current')).not.toBeNull();
     } finally {
       await act(async () => { root.unmount(); });
       container.remove();

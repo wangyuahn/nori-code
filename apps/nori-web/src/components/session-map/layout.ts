@@ -2,6 +2,7 @@ import type { Session, SessionGraph } from '../../api/client';
 import { sessionAgentDisplayName } from '../../utils/session-agent';
 import { parentSessionIdOf } from '../../utils/session-mount';
 import { mapMemberRoleLabel, type MapNodeMember } from '../../utils/session-graph';
+import { canonicalMapPositionKey } from '../sessionMapDoc';
 
 export const NODE_W = 220;
 export const NODE_H = 120;
@@ -308,7 +309,7 @@ export function layoutSessionMountForest(
 }
 
 export function nodeKey(member: MapMemberRef): string {
-  return `session:${member.session.id}`;
+  return canonicalMapPositionKey(member.session.id);
 }
 
 export { parentSessionIdOf };

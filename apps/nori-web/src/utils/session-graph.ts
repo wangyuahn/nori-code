@@ -10,6 +10,7 @@ import {
   addSessionMapEdge,
   edgesForLayout,
   incomingParentEdgeCount,
+  isLiveLayoutParentEdge,
   isUnappliedExtraJob,
   newEdgeId,
   seedEdgesFromServerGraph,
@@ -261,23 +262,6 @@ export function describeMapErrorSummary(
   return undefined;
 }
 
-export function readSessionTags(session: Session): string[] {
-  const value = session.metadata?.session_tags;
-  if (!Array.isArray(value)) return [];
-  return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
-}
-
-export function mergeSessionTags(
-  current: readonly string[],
-  tag: string,
-  mode: 'add' | 'remove',
-): string[] {
-  const nextTag = tag.trim();
-  if (nextTag.length === 0) return [...current];
-  if (mode === 'add') return [...new Set([...current, nextTag])].slice(0, 16);
-  return current.filter((item) => item !== nextTag);
-}
-
 /** CSS class for sidebar-style status dots on map cards. */
 export function mapStatusDotClass(status: string): string {
   const tone = mapStatusTone(status);
@@ -414,9 +398,7 @@ export function mergeGraphWithMapEdges(
   // An unapplied extra job is deliberately visual only while the server still
   // has single-parent mounts. It must not pull the child into a second force
   // component or make cycle checks/layout treat the intent as live topology.
-  const effectiveForLayout = seeded.filter((edge) => (
-    edge.type === 'parent' && !isUnappliedExtraJob(edge)
-  ));
+  const effectiveForLayout = seeded.filter((edge) => isLiveLayoutParentEdge(edge));
   // Keep the server graph as a fallback when a local document contains only
   // a visual pending edge (or has not caught up with a newly mounted session).
   // Local effective edges come last so an intentional pending remount still

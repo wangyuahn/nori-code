@@ -5,6 +5,7 @@ import {
   canonicalMapPositionKey,
   edgesForLayout,
   emptySessionMapDoc,
+  isLiveLayoutParentEdge,
   loadCachedMapAgents,
   lookupMapPosition,
   normalizeMapPositions,
@@ -27,6 +28,7 @@ describe('sessionMapDoc', () => {
     expect(canonicalMapPositionKey('abc')).toBe('session:abc');
     expect(canonicalMapPositionKey('session:abc')).toBe('session:abc');
     expect(canonicalMapPositionKey('draft:x')).toBe('draft:x');
+    expect(canonicalMapPositionKey('creating:x')).toBe('creating:x');
     expect(lookupMapPosition({ abc: { x: 10, y: 20 } }, 'session:abc')).toEqual({ x: 10, y: 20 });
     expect(lookupMapPosition({ 'session:abc': { x: 3, y: 4 }, abc: { x: 1, y: 2 } }, 'abc'))
       .toEqual({ x: 3, y: 4 });
@@ -120,7 +122,7 @@ describe('sessionMapDoc', () => {
     expect(doc.annotations[2]!.rect).toBeUndefined();
   });
 
-  it('doc schema helpers for labels (Map page surfaces filter chips)', () => {
+  it('keeps legacy label helpers for stored documents', () => {
     const doc = toggleSessionLabel(
       {
         ...emptySessionMapDoc(),
@@ -174,5 +176,23 @@ describe('edgesForLayout', () => {
     expect(layout).toEqual([
       { parent_session_id: 'b', child_session_id: 'child' },
     ]);
+  });
+
+  it('does not let an unapplied extra job replace the live parent in layout', () => {
+    const sessions = [
+      session({ id: 'live' }),
+      session({ id: 'extra' }),
+      session({ id: 'child', metadata: { parent_session_id: 'live' } }),
+    ];
+    const layout = edgesForLayout([
+      { id: 'live', type: 'parent', source: 'live', target: 'child' },
+      { id: 'extra', type: 'parent', source: 'extra', target: 'child', status: 'pending-multi-parent' },
+    ], sessions);
+    expect(layout).toEqual([
+      { parent_session_id: 'live', child_session_id: 'child' },
+    ]);
+    expect(isLiveLayoutParentEdge({ type: 'parent', status: 'pending-multi-parent' })).toBe(false);
+    expect(isLiveLayoutParentEdge({ type: 'parent', status: 'draft' })).toBe(false);
+    expect(isLiveLayoutParentEdge({ type: 'parent' })).toBe(true);
   });
 });

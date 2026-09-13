@@ -170,6 +170,28 @@ export function isUnappliedExtraJob(
   return edge.type === 'parent' && edge.status === UNAPPLIED_EXTRA_JOB_STATUS;
 }
 
+/**
+ * Parent edges that participate in mount layout, force links, and cycle checks.
+ * Unapplied extra jobs, drafts, and failed intents stay visual-only.
+ */
+export function isLiveLayoutParentEdge(
+  edge: Pick<SessionMapEdge, 'type' | 'status'>,
+): boolean {
+  if (edge.type !== 'parent') return false;
+  if (isUnappliedExtraJob(edge)) return false;
+  return edge.status !== 'draft' && edge.status !== 'error';
+}
+
+export function findParentMapEdge(
+  edges: readonly SessionMapEdge[] | undefined,
+  parentId: string,
+  childId: string,
+): SessionMapEdge | undefined {
+  return (edges ?? []).find((edge) => (
+    edge.type === 'parent' && edge.source === parentId && edge.target === childId
+  ));
+}
+
 /** Count all incoming work edges for a session, including unapplied extra jobs. */
 export function incomingParentEdgeCount(
   sessionId: string,
@@ -188,7 +210,7 @@ export function edgesForLayout(
   // appears under its parent instead of as a second forest root.
   const byChild = new Map<string, SessionGraphEdge>();
   for (const edge of mapEdges) {
-    if (edge.type !== 'parent') continue;
+    if (!isLiveLayoutParentEdge(edge)) continue;
     byChild.set(edge.target, {
       parent_session_id: edge.source,
       child_session_id: edge.target,
@@ -409,12 +431,19 @@ function parsePendingTopology(value: unknown): PendingTopologyOp[] | undefined {
 
 const SESSION_POSITION_PREFIX = 'session:';
 
+/** Strip a `session:` force-node prefix. Draft / agent keys are left unchanged. */
+export function bareMapSessionId(id: string): string {
+  if (id.startsWith(SESSION_POSITION_PREFIX)) return id.slice(SESSION_POSITION_PREFIX.length);
+  return id;
+}
+
 /** Persist key for a force node. Bare session ids become `session:id`. */
 export function canonicalMapPositionKey(id: string): string {
   if (
     id.startsWith(SESSION_POSITION_PREFIX)
     || id.startsWith('draft:')
     || id.startsWith('agent:')
+    || id.startsWith('creating:')
   ) {
     return id;
   }
@@ -426,7 +455,7 @@ export function mapPositionLookupKeys(nodeId: string): string[] {
   const canonical = canonicalMapPositionKey(nodeId);
   const keys = [canonical];
   if (canonical.startsWith(SESSION_POSITION_PREFIX)) {
-    const bare = canonical.slice(SESSION_POSITION_PREFIX.length);
+    const bare = bareMapSessionId(canonical);
     if (bare.length > 0) keys.push(bare);
   }
   if (nodeId !== canonical) keys.push(nodeId);
@@ -486,10 +515,6 @@ function parsePositions(
 
 export function newAnnotationId(): string {
   return `ann_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-export function newLabelId(): string {
-  return `lbl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export interface PlacedBounds {
