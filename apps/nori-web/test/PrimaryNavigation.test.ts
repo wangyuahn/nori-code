@@ -2,8 +2,8 @@ import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { countActiveAgents, PrimaryNavigation, WindowControls } from '../src/App';
-import type { SessionActivity } from '../src/api/client';
+import { countActiveAgents, departmentAgentsFromSessions, PrimaryNavigation, WindowControls } from '../src/App';
+import type { Session, SessionActivity } from '../src/api/client';
 import { I18nProvider } from '../src/i18n';
 import type { NoriDesktopAPI } from '../src/types/nori-desktop';
 
@@ -98,6 +98,76 @@ describe('PrimaryNavigation', () => {
     expect(countActiveAgents(activity, 'session-b')).toBe(1);
     expect(countActiveAgents(activity, 'session-missing')).toBe(0);
     expect(countActiveAgents([])).toBe(0);
+  });
+});
+
+describe('departmentAgentsFromSessions', () => {
+  const parent: Session = {
+    id: 'sess_parent',
+    title: 'Lead',
+    status: 'idle',
+    created_at: '2026-01-01T00:00:00.000Z',
+    updated_at: '2026-01-02T00:00:00.000Z',
+    metadata: { cwd: '/work/demo' },
+  };
+  const child: Session = {
+    id: 'sess_child',
+    title: 'Fallback title',
+    status: 'running',
+    created_at: '2026-01-01T00:00:00.000Z',
+    updated_at: '2026-01-03T00:00:00.000Z',
+    metadata: {
+      parent_session_id: 'sess_parent',
+      mount_name: 'Reviewer',
+      mount_role: 'reviewer',
+      mount_mandate: 'Review diffs',
+      department_assigned_task: 'Ship the parser',
+    },
+  };
+
+  it('reads mounted children from the session forest, not a shadow agent tree', () => {
+    expect(departmentAgentsFromSessions([parent, child], parent)).toEqual([
+      expect.objectContaining({
+        agent_id: 'sess_child',
+        kind: 'team',
+        parent_agent_id: 'sess_parent',
+        name: 'Reviewer',
+        role: 'reviewer',
+        mandate: 'Review diffs',
+        assigned_task: 'Ship the parser',
+        status: 'running',
+        last_active: '2026-01-03T00:00:00.000Z',
+        mounted_session_id: 'sess_child',
+      }),
+    ]);
+  });
+
+  it('uses the same siblings when the viewer is a child session', () => {
+    const sibling: Session = {
+      ...child,
+      id: 'sess_sibling',
+      title: 'Writer',
+      metadata: { parent_session_id: 'sess_parent', mount_name: 'Writer' },
+    };
+    const members = departmentAgentsFromSessions([parent, child, sibling], child);
+    expect(members.map(member => member.agent_id).sort()).toEqual(['sess_child', 'sess_sibling']);
+    expect(members.every(member => member.parent_agent_id === 'sess_parent')).toBe(true);
+  });
+
+  it('includes a nested lead\'s own children alongside its sibling department', () => {
+    const nested: Session = {
+      id: 'sess_nested',
+      title: 'Intern',
+      status: 'idle',
+      created_at: '2026-01-01T00:00:00.000Z',
+      updated_at: '2026-01-04T00:00:00.000Z',
+      metadata: { parent_session_id: 'sess_child', mount_name: 'Intern' },
+    };
+    const members = departmentAgentsFromSessions([parent, child, nested], child);
+    expect(members).toEqual(expect.arrayContaining([
+      expect.objectContaining({ agent_id: 'sess_child', parent_agent_id: 'sess_parent' }),
+      expect.objectContaining({ agent_id: 'sess_nested', parent_agent_id: 'sess_child', name: 'Intern' }),
+    ]));
   });
 });
 

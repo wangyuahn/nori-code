@@ -1,10 +1,9 @@
 /**
  * Team-engineering snapshot helpers for the TUI.
  *
- * The CLI cannot call agent-core `listAgents`. It reconstructs a department
- * tree from session resume metadata, live `agent.status.updated` /
- * `discussion.updated` events, and Team* tool results — enough to browse
- * members, roles, and reports in a terminal list.
+ * Durable members are mounted child Sessions. Resume metadata may still carry
+ * leftover parent-session team shadows and Discuss nodes; the forest comes
+ * from `getSessionGraph`, live Team* results, and status events.
  */
 
 export type TeamAgentKind = 'main' | 'team' | 'discussion' | 'independent';
@@ -119,7 +118,9 @@ export function teamAgentsFromSessionMetadata(metadata: unknown): TeamAgentSnaps
   const snapshots: TeamAgentSnapshot[] = [];
   for (const [agentId, raw] of Object.entries(agentsRecord)) {
     const snapshot = snapshotFromMetadataEntry(agentId, raw);
-    if (snapshot !== undefined) snapshots.push(snapshot);
+    // Durable members live on the Session forest. Drop leftover parent-session
+    // team shadows so /team and the footer cannot reopen a second identity.
+    if (snapshot !== undefined && snapshot.kind !== 'team') snapshots.push(snapshot);
   }
   if (!snapshots.some((agent) => agent.agentId === MAIN_AGENT_ID || agent.kind === 'main')) {
     snapshots.unshift({
@@ -130,6 +131,69 @@ export function teamAgentsFromSessionMetadata(metadata: unknown): TeamAgentSnaps
     });
   }
   return snapshots;
+}
+
+/** Keep Discuss / independent transcripts from metadata; members from the forest. */
+export function mergeDepartmentSnapshots(
+  metadataAgents: readonly TeamAgentSnapshot[],
+  forestMembers: readonly TeamAgentSnapshot[],
+): TeamAgentSnapshot[] {
+  const byId = new Map<string, TeamAgentSnapshot>();
+  for (const agent of metadataAgents) {
+    if (agent.kind === 'team') continue;
+    byId.set(agent.agentId, agent);
+  }
+  if (![...byId.values()].some((agent) => agent.kind === 'main' || agent.agentId === MAIN_AGENT_ID)) {
+    byId.set(MAIN_AGENT_ID, {
+      agentId: MAIN_AGENT_ID,
+      kind: 'main',
+      name: 'Main',
+      parentAgentId: null,
+    });
+  }
+  for (const member of forestMembers) {
+    if (member.kind !== 'team') continue;
+    const sessionId = member.mountedSessionId ?? member.agentId;
+    if (sessionId.length === 0) continue;
+    byId.set(member.agentId, {
+      ...member,
+      mountedSessionId: sessionId,
+    });
+  }
+  return [...byId.values()];
+}
+
+/** Direct children of `hostSessionId` on a session graph. */
+export function teamAgentsFromSessionGraph(
+  hostSessionId: string,
+  hostTitle: string,
+  graph: {
+    readonly nodes: ReadonlyArray<{
+      readonly id: string;
+      readonly title?: string;
+      readonly metadata?: Record<string, unknown> | null;
+    }>;
+    readonly edges: ReadonlyArray<{
+      readonly parentSessionId: string;
+      readonly childSessionId: string;
+    }>;
+  },
+): TeamAgentSnapshot[] {
+  const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+  const children = graph.edges
+    .filter((edge) => edge.parentSessionId === hostSessionId)
+    .map((edge) => byId.get(edge.childSessionId))
+    .filter((node): node is NonNullable<typeof node> => node !== undefined);
+  return teamAgentsFromMountedChildren(
+    hostTitle,
+    children.map((child) => ({
+      id: child.id,
+      title: child.title,
+      name: typeof child.metadata?.['mount_name'] === 'string' ? child.metadata['mount_name'] : child.title,
+      role: typeof child.metadata?.['mount_role'] === 'string' ? child.metadata['mount_role'] : undefined,
+      mandate: typeof child.metadata?.['mount_mandate'] === 'string' ? child.metadata['mount_mandate'] : undefined,
+    })),
+  );
 }
 
 /** Department members as mounted child Sessions of `hostSessionId`. */
@@ -160,6 +224,15 @@ export function teamAgentsFromMountedChildren(
       mountedSessionId: child.id,
     })),
   ];
+}
+
+/** Session a `/team` row should resume. Main stays put; leftovers without a child session are skipped. */
+export function teamMemberSessionId(agent: TeamAgentSnapshot): string | undefined {
+  if (agent.kind === 'main') return undefined;
+  if (agent.mountedSessionId !== undefined && agent.mountedSessionId.length > 0) {
+    return agent.mountedSessionId;
+  }
+  return undefined;
 }
 
 export function flattenTeamTree(agents: readonly TeamAgentSnapshot[]): TeamTreeRow[] {
@@ -589,7 +662,7 @@ function applyTeamCreate(
         parentAgentId,
         role: member.role,
         mandate: member.mandate,
-        mountedSessionId: member.mountedSessionId,
+        mountedSessionId: member.mountedSessionId ?? member.agentId,
         status: 'idle',
       });
     }
@@ -782,7 +855,8 @@ function readCreatedMembers(
   for (const raw of members) {
     const record = asRecord(raw);
     const identity = asRecord(record['identity']);
-    const agentId = readString(record['agentId']) ?? readString(record['agent_id']);
+    const sessionId = readString(record['session_id']) ?? readString(record['sessionId']);
+    const agentId = readString(record['agentId']) ?? readString(record['agent_id']) ?? sessionId;
     const name = readString(identity['name']) ?? readString(record['name']);
     if (agentId === undefined || name === undefined) continue;
     created.push({
@@ -790,7 +864,7 @@ function readCreatedMembers(
       name,
       role: readString(identity['role']) ?? readString(record['role']),
       mandate: readString(identity['mandate']) ?? readString(record['mandate']),
-      mountedSessionId: readString(record['session_id']),
+      mountedSessionId: sessionId ?? agentId,
     });
   }
   return created;

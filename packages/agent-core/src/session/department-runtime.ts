@@ -102,4 +102,82 @@ export function syntheticTeamMeta(snapshot: DepartmentMemberSnapshot): {
   };
 }
 
+function remapShadowId(id: string, fromAgentId: string, childSessionId: string): string {
+  return id === fromAgentId ? childSessionId : id;
+}
+
+/**
+ * Rewrite leftover parent-session team agent ids to the durable child Session
+ * id after a shadow transcript has been copied across.
+ */
+export function remapShadowTeamAgents<T extends {
+  readonly chat?: {
+    readonly messages?: ReadonlyArray<{
+      readonly agentId: string;
+      readonly mentions: readonly string[];
+    }>;
+  };
+  readonly discussion?: {
+    readonly participantAgentIds: readonly string[];
+    readonly currentTurnAgentId?: string;
+    readonly readCursors?: Readonly<Record<string, number>>;
+    readonly statements?: ReadonlyArray<{ readonly agentId: string }>;
+  };
+}>(
+  agents: Readonly<Record<string, T>>,
+  fromAgentId: string,
+  childSessionId: string,
+): Record<string, T> {
+  const next: Record<string, T> = {};
+  for (const [agentId, meta] of Object.entries(agents)) {
+    let updated = meta;
+    const chat = meta.chat;
+    if (chat?.messages !== undefined) {
+      updated = {
+        ...updated,
+        chat: {
+          ...chat,
+          messages: chat.messages.map((record) => ({
+            ...record,
+            agentId: remapShadowId(record.agentId, fromAgentId, childSessionId),
+            mentions: record.mentions.map((mention) => (
+              remapShadowId(mention, fromAgentId, childSessionId)
+            )),
+          })),
+        },
+      };
+    }
+    const discussion = meta.discussion;
+    if (discussion !== undefined) {
+      const readCursors = discussion.readCursors === undefined
+        ? undefined
+        : Object.fromEntries(
+          Object.entries(discussion.readCursors).map(([id, cursor]) => [
+            remapShadowId(id, fromAgentId, childSessionId),
+            cursor,
+          ]),
+        );
+      updated = {
+        ...updated,
+        discussion: {
+          ...discussion,
+          participantAgentIds: discussion.participantAgentIds.map((id) => (
+            remapShadowId(id, fromAgentId, childSessionId)
+          )),
+          currentTurnAgentId: discussion.currentTurnAgentId === undefined
+            ? undefined
+            : remapShadowId(discussion.currentTurnAgentId, fromAgentId, childSessionId),
+          readCursors,
+          statements: discussion.statements?.map((record) => ({
+            ...record,
+            agentId: remapShadowId(record.agentId, fromAgentId, childSessionId),
+          })),
+        },
+      };
+    }
+    next[agentId] = updated;
+  }
+  return next;
+}
+
 export type { TeamDiscussionStatementRecord };

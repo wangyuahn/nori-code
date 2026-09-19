@@ -37,6 +37,7 @@ import {
   SessionService,
   toProtocolSession,
 } from '../../src/services';
+import { remapShadowTeamAgents } from '../../src';
 
 type WithSessionId<T> = T & { readonly sessionId: string };
 
@@ -371,22 +372,10 @@ function makeFakeBridge(state: FakeBridgeState): ICoreProcessService {
         if (meta === undefined) return;
         const nextAgents = { ...meta.agents };
         delete nextAgents[payload.agentId];
-        for (const [agentId, agent] of Object.entries(nextAgents)) {
-          const chat = agent.chat;
-          if (chat?.messages === undefined) continue;
-          nextAgents[agentId] = {
-            ...agent,
-            chat: {
-              ...chat,
-              messages: chat.messages.map((record) => (
-                record.agentId === payload.agentId
-                  ? { ...record, agentId: payload.childSessionId }
-                  : record
-              )),
-            },
-          };
-        }
-        state.metas.set(payload.sessionId, { ...meta, agents: nextAgents });
+        state.metas.set(payload.sessionId, {
+          ...meta,
+          agents: remapShadowTeamAgents(nextAgents, payload.agentId, payload.childSessionId),
+        });
       },
     ),
     fillChildIdentity: vi.fn().mockResolvedValue({
@@ -1422,11 +1411,9 @@ describe('SessionService mount', () => {
     expect((await svc.get(child.id)).metadata['parent_session_id']).toBe(parent.id);
     expect(teamShadowsFor(state, parent.id, child.id)).toHaveLength(0);
     const tree = await svc.listAgents(parent.id);
-    expect(tree.agents.find((agent) => agent.id === child.id)).toMatchObject({
-      kind: 'team',
-      mounted_session_id: child.id,
-      role: 'reviewer',
-    });
+    expect(tree.agents.find((agent) => agent.id === child.id)).toBeUndefined();
+    expect(tree.agents.find((agent) => agent.kind === 'team')).toBeUndefined();
+    expect((await svc.listChildren(parent.id, {})).items.map((item) => item.id)).toEqual([child.id]);
   });
 
   it('unmounts a session back to top-level', async () => {
@@ -1698,6 +1685,132 @@ describe('SessionService mount', () => {
       mount_role: 'reviewer',
       mount_name: 'Ghost Reviewer',
     });
+    const tree = await svc.listAgents(host.id);
+    expect(tree.agents.find((agent) => agent.id === child?.id)).toBeUndefined();
+    expect(tree.agents.find((agent) => agent.kind === 'team')).toBeUndefined();
+  });
+
+  it('materializes a ghost member from the leftover homedir when the parent cwd is empty', async () => {
+    const host = await svc.create({ metadata: { cwd: '/tmp/ghosts-empty' }, title: 'Host' });
+    const summaryIndex = state.sessions.findIndex((item) => item.id === host.id);
+    const summary = state.sessions[summaryIndex]!;
+    state.sessions[summaryIndex] = { ...summary, workDir: '', metadata: {} };
+    const hostMeta = state.metas.get(host.id)!;
+    state.metas.set(host.id, {
+      ...hostMeta,
+      custom: {},
+      agents: {
+        main: { homedir: '/tmp/main', type: 'main', parentAgentId: null },
+        agent_ghost: {
+          homedir: '/tmp/from-ghost',
+          type: 'sub',
+          kind: 'team',
+          parentAgentId: 'main',
+          teamLeaderAgentId: 'main',
+          name: 'Inherited Reviewer',
+          role: 'reviewer',
+          mandate: 'Review diffs',
+        },
+      },
+    });
+
+    const graph = await svc.getGraph({});
+    const child = graph.nodes.find((node) => node.metadata['parent_session_id'] === host.id);
+    expect(child).toBeDefined();
+    expect(child?.metadata).toMatchObject({
+      cwd: '/tmp/from-ghost',
+      parent_session_id: host.id,
+      mount_name: 'Inherited Reviewer',
+    });
+  });
+
+  it('materializes a ghost member from the user home when every cwd source is empty', async () => {
+    const { homedir } = await import('node:os');
+    const host = await svc.create({ metadata: { cwd: '/tmp/ghosts-home' }, title: 'Host' });
+    const summaryIndex = state.sessions.findIndex((item) => item.id === host.id);
+    const summary = state.sessions[summaryIndex]!;
+    state.sessions[summaryIndex] = { ...summary, workDir: '', metadata: {} };
+    const hostMeta = state.metas.get(host.id)!;
+    state.metas.set(host.id, {
+      ...hostMeta,
+      custom: {},
+      agents: {
+        main: { homedir: '', type: 'main', parentAgentId: null },
+        agent_ghost: {
+          homedir: '',
+          type: 'sub',
+          kind: 'team',
+          parentAgentId: 'main',
+          teamLeaderAgentId: 'main',
+          name: 'Home Reviewer',
+          role: 'reviewer',
+          mandate: 'Review diffs',
+        },
+      },
+    });
+
+    const graph = await svc.getGraph({});
+    const child = graph.nodes.find((node) => node.metadata['parent_session_id'] === host.id);
+    expect(child).toBeDefined();
+    expect(child?.metadata).toMatchObject({
+      cwd: homedir(),
+      parent_session_id: host.id,
+      mount_name: 'Home Reviewer',
+    });
+  });
+
+  it('rewrites Discuss participants from a dropped shadow agent to the child session', async () => {
+    const host = await svc.create({ metadata: { cwd: '/tmp/ghost-discuss' }, title: 'Host' });
+    const hostMeta = state.metas.get(host.id)!;
+    state.metas.set(host.id, {
+      ...hostMeta,
+      agents: {
+        main: { homedir: '/tmp/main', type: 'main', parentAgentId: null },
+        agent_ghost: {
+          homedir: '/tmp/ghost',
+          type: 'sub',
+          kind: 'team',
+          parentAgentId: 'main',
+          teamLeaderAgentId: 'main',
+          name: 'Ghost Reviewer',
+          role: 'reviewer',
+          mandate: 'Review diffs',
+        },
+        discuss_1: {
+          homedir: '/tmp/discuss',
+          type: 'sub',
+          parentAgentId: 'main',
+          discussion: {
+            participantAgentIds: ['agent_ghost'],
+            status: 'active',
+            topic: 'Align on the parser',
+            startedAt: '2026-08-20T00:00:00.000Z',
+            updatedAt: '2026-08-20T00:00:00.000Z',
+            currentTurnAgentId: 'agent_ghost',
+            readCursors: { agent_ghost: 1 },
+            statements: [{
+              entryId: 1,
+              agentId: 'agent_ghost',
+              name: 'Ghost Reviewer',
+              message: 'I can take the parser.',
+            }],
+          },
+        },
+      },
+    });
+
+    const graph = await svc.getGraph({});
+    const child = graph.nodes.find((node) => node.metadata['parent_session_id'] === host.id);
+    expect(child).toBeDefined();
+    const discussion = state.metas.get(host.id)?.agents['discuss_1']?.discussion;
+    expect(discussion?.participantAgentIds).toEqual([child!.id]);
+    expect(discussion?.currentTurnAgentId).toBe(child!.id);
+    expect(discussion?.readCursors).toEqual({ [child!.id]: 1 });
+    expect(discussion?.statements?.[0]?.agentId).toBe(child!.id);
+    const tree = await svc.listAgents(host.id);
+    expect(tree.agents.find((agent) => agent.id === 'discuss_1')).toMatchObject({
+      discussion_participant_agent_ids: [child!.id],
+    });
   });
 
   it('fillIdentity asks the parent session for a member identity', async () => {
@@ -1716,7 +1829,7 @@ describe('SessionService mount', () => {
 });
 
 describe('SessionService agent tree', () => {
-  it('lists mounted child sessions as department members with live status', async () => {
+  it('drops leftover team shadows and does not re-add forest children as team nodes', async () => {
     const created = await svc.create({ metadata: { cwd: '/tmp/agent-tree' } });
     state.metas.set(created.id, {
       title: 'Agent tree',
@@ -1766,25 +1879,17 @@ describe('SessionService agent tree', () => {
         status: 'idle',
         usage: { input_other: 10, output: 4, input_cache_read: 2, input_cache_creation: 1 },
       }),
-      expect.objectContaining({
-        id: 'sess_mounted_reviewer',
-        kind: 'team',
-        parent_agent_id: 'main',
-        name: 'Reviewer',
-        role: 'reviewer',
-        mandate: 'Review behavior',
-        status: 'running',
-        mounted_session_id: 'sess_mounted_reviewer',
-      }),
     ]));
     expect(tree.agents.find((agent) => agent.id === 'agent_reviewer')).toBeUndefined();
-    const reviewer = tree.agents.find((agent) => agent.id === 'sess_mounted_reviewer');
-    expect(reviewer).not.toHaveProperty('title');
-    expect(reviewer).not.toHaveProperty('intro');
-    expect(reviewer?.last_active).toMatch(/Z$/);
+    expect(tree.agents.find((agent) => agent.id === 'sess_mounted_reviewer')).toBeUndefined();
+    expect(tree.agents.find((agent) => agent.kind === 'team')).toBeUndefined();
+    expect((await svc.listChildren(created.id, {})).items.map((item) => item.id)).toEqual([
+      'sess_mounted_reviewer',
+    ]);
+    expect((await svc.getStatus('sess_mounted_reviewer')).status).toBe('running');
   });
 
-  it('surfaces a discussion timeout skip on the agent tree summary', async () => {
+  it('keeps a child-session timeout skip on the forest member, not the parent agent tree', async () => {
     const created = await svc.create({ metadata: { cwd: '/tmp/timeout-skip' } });
     state.metas.set(created.id, {
       title: 'Timeout skip',
@@ -1820,11 +1925,14 @@ describe('SessionService agent tree', () => {
     });
 
     const tree = await svc.listAgents(created.id);
-    expect(tree.agents.find((agent) => agent.id === 'sess_mounted_timeout')).toEqual(expect.objectContaining({
-      summary: 'Member discussion turn timed out after 90s.',
-      mounted_session_id: 'sess_mounted_timeout',
-    }));
+    expect(tree.agents.find((agent) => agent.id === 'sess_mounted_timeout')).toBeUndefined();
     expect(tree.agents.find((agent) => agent.id === 'agent_reviewer')).toBeUndefined();
+    expect((await svc.get('sess_mounted_timeout')).metadata).toMatchObject({
+      department_last_turn_skip: {
+        reason: 'timeout',
+        error: 'Member discussion turn timed out after 90s.',
+      },
+    });
   });
 
   it('reports a member idle when a turn.started event was never followed by a turn end', async () => {
@@ -1861,8 +1969,9 @@ describe('SessionService agent tree', () => {
 
     const tree = await svc.listAgents(created.id);
 
-    expect(tree.agents.find(agent => agent.id === 'sess_mounted_member')?.status).toBe('idle');
+    expect(tree.agents.find(agent => agent.id === 'sess_mounted_member')).toBeUndefined();
     expect(tree.agents.find(agent => agent.id === 'agent_member')).toBeUndefined();
+    expect((await svc.getStatus('sess_mounted_member')).status).toBe('idle');
   });
 });
 

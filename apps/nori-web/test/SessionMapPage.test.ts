@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api, type Session } from '../src/api/client';
 import {
   buildMapComponents,
-  cachedAgentsFromMapMembers,
   centerViewOnNode,
   findNearestValidWireTarget,
   fitTreeView,
@@ -12,7 +11,6 @@ import {
   HOME_PULL_STRENGTH,
   isComponentRootPin,
   isValidWireTarget,
-  mapMembersFromAgentCache,
   resolveMapNodeSpawnPosition,
   resolveNodeDragGroupIds,
   buildForceMapNodes,
@@ -50,12 +48,8 @@ import {
 } from '../src/utils/session-graph';
 import { I18nProvider } from '../src/i18n';
 import {
-  loadCachedMapAgents,
   loadSessionMapDoc,
-  parseCachedMapAgents,
-  saveCachedMapAgents,
   saveCachedMapGraph,
-  SESSION_MAP_AGENTS_CACHE_KEY,
   SESSION_MAP_GRAPH_CACHE_KEY,
   type SessionMapEdge,
   parseSessionMapDoc,
@@ -70,7 +64,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
   localStorage.removeItem('nori-session-map-doc');
-  localStorage.removeItem(SESSION_MAP_AGENTS_CACHE_KEY);
   localStorage.removeItem(SESSION_MAP_GRAPH_CACHE_KEY);
 });
 
@@ -131,7 +124,6 @@ describe('session map layout', () => {
       kind: 'session',
       session: hosted,
       hostSessionId: 'root',
-      agent: { agent_id: 'a1', kind: 'team', name: 'Reviewer', role: 'reviewer', status: 'idle' },
     }, byId)).toBe('/home/user/nori-code');
   });
 
@@ -167,7 +159,7 @@ describe('session map layout', () => {
     expect(child!.y).toBeGreaterThan(root!.y);
   });
 
-  it('does not place synthetic agent cards; mounted members overlay the session', () => {
+  it('places only session cards for a mounted child, never an agent ghost', () => {
     const nodes = [
       session({ id: 'root', title: 'Root' }),
       session({
@@ -176,59 +168,29 @@ describe('session map layout', () => {
         metadata: { parent_session_id: 'root', mount_role: 'reviewer' },
       }),
     ];
-    const { placed, edges } = layoutSessionMountForest(
-      { nodes, edges: [{ child_session_id: 'child', parent_session_id: 'root' }] },
-      [{
-        kind: 'agent',
-        hostSessionId: 'root',
-        session: session({
-          id: 'agent:root:a1',
-          title: 'Reviewer',
-          metadata: { parent_session_id: 'root', mount_role: 'reviewer' },
-        }),
-        agent: {
-          agent_id: 'a1',
-          kind: 'team',
-          name: 'Reviewer',
-          role: 'reviewer',
-          status: 'idle',
-          mounted_session_id: 'child',
-        },
-      }],
-    );
+    const { placed, edges } = layoutSessionMountForest({
+      nodes,
+      edges: [{ child_session_id: 'child', parent_session_id: 'root' }],
+    });
     expect(placed).toHaveLength(2);
     expect(edges).toHaveLength(1);
+    expect(placed.every((node) => node.member.kind === 'session')).toBe(true);
     expect(placed.some((node) => node.member.session.id.startsWith('agent:'))).toBe(false);
-    expect(placed.find((node) => node.member.session.id === 'child')?.member.agent?.agent_id).toBe('a1');
+    expect(placed.find((node) => node.member.session.id === 'child')?.member.session.title).toBe('Reviewer');
   });
 
-  it('does not place a stale agent ghost when another host claims a mounted session', () => {
+  it('does not invent a card for a host that is not in the session forest', () => {
     const nodes = [
       session({ id: 'root', title: 'Root' }),
       session({ id: 'other', title: 'Other' }),
       session({ id: 'child', title: 'Child', metadata: { parent_session_id: 'root' } }),
     ];
-    const staleAgent = {
-      agent_id: 'stale_member',
-      kind: 'team' as const,
-      name: 'Stale member',
-      status: 'idle',
-      mounted_session_id: 'child',
-    };
-    const { placed } = layoutSessionMountForest(
-      { nodes, edges: [{ child_session_id: 'child', parent_session_id: 'root' }] },
-      [{
-        kind: 'agent',
-        hostSessionId: 'other',
-        session: session({ id: 'agent:other:stale_member', title: 'Stale member' }),
-        agent: staleAgent,
-      }],
-    );
-
-    expect(placed.find((node) => node.member.session.id === 'child')?.member.agent).toBeUndefined();
-    // Mounted session is already a node — never spawn an agent: duplicate for any host.
+    const { placed } = layoutSessionMountForest({
+      nodes,
+      edges: [{ child_session_id: 'child', parent_session_id: 'root' }],
+    });
+    expect(placed.map((node) => node.member.session.id).sort()).toEqual(['child', 'other', 'root']);
     expect(placed.some((node) => node.member.session.id.startsWith('agent:'))).toBe(false);
-    expect(placed.some((node) => node.member.agent?.agent_id === 'stale_member')).toBe(false);
   });
 
   it('keeps fit/zoom helpers stable', () => {
@@ -306,25 +268,25 @@ describe('session map layout', () => {
     })).toBe('tool timed out');
     expect(describeMapErrorSummary({
       kind: 'session',
-      session: session({ id: 'slow', title: 'Slow', status: 'aborted' }),
-      agent: {
-        agent_id: 'reviewer',
-        kind: 'team',
-        name: 'Reviewer',
+      session: session({
+        id: 'slow',
+        title: 'Slow',
         status: 'aborted',
-        summary: 'Member discussion turn timed out after 90s.',
-      },
+        metadata: {
+          department_last_turn_skip: { error: 'Member discussion turn timed out after 90s.' },
+        },
+      }),
     })).toBe('Member discussion turn timed out after 90s.');
     expect(mapMemberStatus({
       kind: 'session',
-      session: session({ id: 'slow', title: 'Slow', status: 'aborted' }),
-      agent: {
-        agent_id: 'reviewer',
-        kind: 'team',
-        name: 'Reviewer',
+      session: session({
+        id: 'slow',
+        title: 'Slow',
         status: 'aborted',
-        summary: 'Member discussion turn timed out after 90s.',
-      },
+        metadata: {
+          department_last_turn_skip: { error: 'Member discussion turn timed out after 90s.' },
+        },
+      }),
     })).toBe('timeout');
     expect(matchesMapStatusFilter('timeout', 'error')).toBe(true);
   });
@@ -496,7 +458,6 @@ describe('SessionMapPage smoke', () => {
         root.render(createElement(I18nProvider, null, createElement(SessionMapPage, {
           sessions: nodes,
           onOpenSession: vi.fn(),
-          onOpenAgent: vi.fn(),
         })));
         await Promise.resolve();
         await Promise.resolve();
@@ -561,7 +522,6 @@ describe('SessionMapPage smoke', () => {
     vi.spyOn(api.sessions, 'createChild').mockResolvedValue(session({ id: 'should-not-create' }));
     mockViewport();
 
-    const onOpenAgent = vi.fn();
     const onOpenSession = vi.fn();
     const container = document.createElement('div');
     document.body.append(container);
@@ -571,7 +531,6 @@ describe('SessionMapPage smoke', () => {
         root.render(createElement(I18nProvider, null, createElement(SessionMapPage, {
           sessions: nodes,
           onOpenSession,
-          onOpenAgent,
         })));
         await Promise.resolve();
         await Promise.resolve();
@@ -583,14 +542,13 @@ describe('SessionMapPage smoke', () => {
       expect([...container.querySelectorAll<HTMLElement>('.session-map-node')]
         .some((el) => el.dataset.sessionId?.startsWith('agent:'))).toBe(false);
       expect(api.sessions.createChild).not.toHaveBeenCalled();
-      expect(onOpenAgent).not.toHaveBeenCalled();
     } finally {
       await act(async () => { root.unmount(); });
       container.remove();
     }
   });
 
-  it.skip('opens a mounted child session from the map card', async () => {
+  it('opens a mounted child session from the map card', async () => {
     const nodes = [
       session({ id: 'root', title: 'Root' }),
       session({
@@ -603,21 +561,8 @@ describe('SessionMapPage smoke', () => {
       nodes,
       edges: [{ child_session_id: 'child', parent_session_id: 'root' }],
     });
-    vi.spyOn(api.sessions, 'getAgents').mockImplementation(async (id) => id === 'root'
-      ? {
-          items: [{
-            agent_id: 'member_1',
-            kind: 'team',
-            name: 'Reviewer',
-            role: 'reviewer',
-            status: 'idle',
-            mounted_session_id: 'child',
-          }],
-        }
-      : { items: [] });
     mockViewport();
 
-    const onOpenAgent = vi.fn();
     const onOpenSession = vi.fn();
     const container = document.createElement('div');
     document.body.append(container);
@@ -627,75 +572,24 @@ describe('SessionMapPage smoke', () => {
         root.render(createElement(I18nProvider, null, createElement(SessionMapPage, {
           sessions: nodes,
           onOpenSession,
-          onOpenAgent,
         })));
         await Promise.resolve();
         await Promise.resolve();
         await Promise.resolve();
       });
 
-      const memberNode = [...container.querySelectorAll<HTMLElement>('.session-map-node')]
-        .find((el) => el.textContent?.includes('Reviewer'));
-      expect(memberNode).toBeTruthy();
-      await act(async () => { memberNode!.querySelector<HTMLButtonElement>('[data-map-action="open"]')!.click(); });
+      const memberNode = container.querySelector<HTMLElement>('[data-session-id="child"]');
+      expect(memberNode).not.toBeNull();
+      await act(async () => { memberNode!.click(); });
       expect(onOpenSession).toHaveBeenCalledWith('child');
-      expect(onOpenAgent).not.toHaveBeenCalled();
     } finally {
       await act(async () => { root.unmount(); });
       container.remove();
     }
   });
 
-  it.skip('opens mounted child via onOpenSession when getAgents returns no agent', async () => {
-    const nodes = [
-      session({ id: 'root', title: 'Root' }),
-      session({
-        id: 'child',
-        title: 'Orphan Mount',
-        metadata: { parent_session_id: 'root', mount_role: 'worker' },
-      }),
-    ];
-    vi.spyOn(api.sessions, 'getGraph').mockResolvedValue({
-      nodes,
-      edges: [{ child_session_id: 'child', parent_session_id: 'root' }],
-    });
-    vi.spyOn(api.sessions, 'getAgents').mockResolvedValue({ items: [] });
-    mockViewport();
 
-    const onOpenAgent = vi.fn();
-    const onOpenSession = vi.fn();
-    const container = document.createElement('div');
-    document.body.append(container);
-    const root = createRoot(container);
-    try {
-      await act(async () => {
-        root.render(createElement(I18nProvider, null, createElement(SessionMapPage, {
-          sessions: nodes,
-          onOpenSession,
-          onOpenAgent,
-        })));
-        await Promise.resolve();
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-
-      const childNode = [...container.querySelectorAll<HTMLElement>('.session-map-node')]
-        .find((el) => el.textContent?.includes('Orphan Mount'));
-      expect(childNode).toBeTruthy();
-      await act(async () => { childNode!.querySelector<HTMLButtonElement>('[data-map-action="open"]')!.click(); });
-      await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-      expect(onOpenSession).toHaveBeenCalledWith('child');
-      expect(onOpenAgent).not.toHaveBeenCalled();
-    } finally {
-      await act(async () => { root.unmount(); });
-      container.remove();
-    }
-  });
-
-  it.skip('shows blueprint ports and parent name on mounted children', async () => {
+  it('shows blueprint ports on mounted children', async () => {
     const nodes = [
       session({ id: 'a', title: 'Alpha Host' }),
       session({
@@ -708,7 +602,6 @@ describe('SessionMapPage smoke', () => {
       nodes,
       edges: [{ child_session_id: 'b', parent_session_id: 'a' }],
     });
-    vi.spyOn(api.sessions, 'getAgents').mockResolvedValue({ items: [] });
     mockViewport();
 
     const container = document.createElement('div');
@@ -726,7 +619,6 @@ describe('SessionMapPage smoke', () => {
 
       expect(container.querySelectorAll('.session-map-port-out').length).toBeGreaterThanOrEqual(1);
       expect(container.querySelectorAll('.session-map-port-in').length).toBeGreaterThanOrEqual(1);
-      expect(container.textContent).toMatch(/挂在「Alpha Host」|under Alpha Host/);
     } finally {
       await act(async () => { root.unmount(); });
       container.remove();
@@ -1252,13 +1144,13 @@ describe('SessionMapPage smoke', () => {
 
   it('resolveMapNodeSpawnPosition prefers cache over forest seed and never (0,0) when host exists', () => {
     expect(resolveMapNodeSpawnPosition({
-      id: 'agent:host:a1',
+      id: 'session:child',
       cached: { x: 321, y: 654 },
       seed: { x: 10, y: 10 },
       hostPosition: { x: 100, y: 100 },
     })).toEqual({ x: 321, y: 654 });
     expect(resolveMapNodeSpawnPosition({
-      id: 'agent:host:a1',
+      id: 'session:child',
       hostPosition: { x: 100, y: 200 },
       seed: { x: 999, y: 999 },
     })).toEqual({ x: 100, y: 200 + NODE_H + 64 });
@@ -1299,26 +1191,6 @@ describe('SessionMapPage smoke', () => {
     expect(rebuilt.nodes.find((node) => node.id === 'session:child')).toMatchObject({
       x: 800, y: 400 + NODE_H + 64,
     });
-  });
-
-  it('agents cache round-trips for stale-while-revalidate first paint', () => {
-    localStorage.removeItem(SESSION_MAP_AGENTS_CACHE_KEY);
-    const members = mapMembersFromAgentCache([{
-      hostId: 'host',
-      agentId: 'a1',
-      title: 'Reviewer',
-      role: 'reviewer',
-      mounted_session_id: 'child',
-    }]);
-    expect(members).toHaveLength(1);
-    expect(members[0]!.session.id).toBe('child');
-    expect(members[0]!.kind).toBe('session');
-    saveCachedMapAgents(cachedAgentsFromMapMembers(members));
-    expect(loadCachedMapAgents()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ hostId: 'host', agentId: 'a1', title: 'Reviewer' }),
-    ]));
-    expect(parseCachedMapAgents('{')).toEqual([]);
-    localStorage.removeItem(SESSION_MAP_AGENTS_CACHE_KEY);
   });
 
   it.skip('LMB marquee selects; right-click selection Annotate persists a note', async () => {
@@ -1482,7 +1354,6 @@ describe('wire gesture click suppression (live regressions)', () => {
     edges: Array<{ child_session_id: string; parent_session_id: string }>,
     props: {
       onOpenSession?: (id: string) => void;
-      onOpenAgent?: never;
       activeSessionId?: string;
       onCreateTopLevelSession?: (cwd: string) => Promise<string | null>;
       preferredCreateCwd?: string;
@@ -3536,27 +3407,10 @@ describe('wire parent helpers', () => {
       kind: 'session',
       session: session({ id: 'b', title: 'Beta' }),
     })).toBe('b');
-    // Pure agent ghost with no dual-write session — still non-wireable.
     expect(wireSourceParentSessionId({
-      kind: 'agent',
-      hostSessionId: 'host',
-      session: session({ id: 'agent:host:m1', title: 'Ghost' }),
-      agent: { agent_id: 'm1', kind: 'team', name: 'Ghost', status: 'idle' },
+      kind: 'session',
+      session: session({ id: '', title: 'Empty' }),
     })).toBeNull();
-    // A mounted agent ghost still is not a real session node and cannot wire.
-    expect(wireSourceParentSessionId({
-      kind: 'agent',
-      hostSessionId: 'host',
-      session: session({ id: 'agent:host:ghost', title: 'L2 ghost' }),
-      agent: {
-        agent_id: 'ghost',
-        kind: 'team',
-        name: 'L2',
-        status: 'idle',
-        mounted_session_id: '11111111-1111-4111-8111-111111111111',
-      },
-    })).toBeNull();
-    // Dual-write session card with agent attached.
     expect(wireSourceParentSessionId({
       kind: 'session',
       hostSessionId: 'host',
@@ -3565,13 +3419,6 @@ describe('wire parent helpers', () => {
         title: 'L1-B',
         metadata: { parent_session_id: 'host', mount_role: 'member' },
       }),
-      agent: {
-        agent_id: 'm2',
-        kind: 'team',
-        name: 'L1-B',
-        status: 'idle',
-        mounted_session_id: 'child-sess',
-      },
     })).toBe('child-sess');
   });
 
@@ -3597,41 +3444,26 @@ describe('wire parent helpers', () => {
     expect(after.get('session:child')).toEqual({ x: 400, y: 460 });
   });
 
-  it('nested dual-write member keeps agent on the session card (no host ghost)', () => {
+  it('nested mounted sessions stay session cards with no agent ghost', () => {
     const nodes = [
       session({ id: 'root', title: '打招呼' }),
       session({ id: 'l1', title: 'L1', metadata: { parent_session_id: 'root', mount_role: 'member' } }),
       session({ id: 'l2', title: 'L2', metadata: { parent_session_id: 'l1', mount_role: 'member' } }),
     ];
-    const { placed } = layoutSessionMountForest(
-      {
-        nodes,
-        edges: [
-          { child_session_id: 'l1', parent_session_id: 'root' },
-          { child_session_id: 'l2', parent_session_id: 'l1' },
-        ],
-      },
-      [{
-        kind: 'agent',
-        hostSessionId: 'root',
-        session: session({ id: 'agent:root:l2', title: 'L2 ghost' }),
-        agent: {
-          agent_id: 'l2',
-          kind: 'team',
-          name: 'L2',
-          role: 'member',
-          status: 'idle',
-          mounted_session_id: 'l2',
-        },
-      }],
-    );
+    const { placed } = layoutSessionMountForest({
+      nodes,
+      edges: [
+        { child_session_id: 'l1', parent_session_id: 'root' },
+        { child_session_id: 'l2', parent_session_id: 'l1' },
+      ],
+    });
     expect(placed.find((node) => node.member.session.id.startsWith('agent:'))).toBeUndefined();
     const l2 = placed.find((node) => node.member.session.id === 'l2');
-    expect(l2?.member.agent?.agent_id).toBe('l2');
+    expect(l2?.member.kind).toBe('session');
     expect(wireSourceParentSessionId(l2!.member)).toBe('l2');
   });
 
-  it('createChild+mount: no agent ghost when mounted_session_id is already in the graph', () => {
+  it('createChild+mount places the child session once', () => {
     const nodes = [
       session({ id: 'root', title: '你好问候' }),
       session({
@@ -3640,49 +3472,15 @@ describe('wire parent helpers', () => {
         metadata: { parent_session_id: 'root', mount_role: 'member' },
       }),
     ];
-    const extras = [
-      {
-        kind: 'session' as const,
-        hostSessionId: 'root',
-        session: nodes[1]!,
-        agent: {
-          agent_id: 'member_1',
-          kind: 'team' as const,
-          name: 'New member',
-          role: 'member',
-          status: 'idle',
-          mounted_session_id: 'child',
-        },
-      },
-      {
-        kind: 'agent' as const,
-        hostSessionId: 'root',
-        session: session({ id: 'agent:root:member_1', title: 'New member' }),
-        agent: {
-          agent_id: 'member_1',
-          kind: 'team' as const,
-          name: 'New member',
-          role: 'member',
-          status: 'idle',
-          mounted_session_id: 'child',
-        },
-      },
-    ];
-    const { placed } = layoutSessionMountForest(
-      { nodes, edges: [{ child_session_id: 'child', parent_session_id: 'root' }] },
-      extras,
-    );
-    const keys = placed.map((node) => (
-      node.member.kind === 'agent'
-        ? `agent:${node.member.hostSessionId}:${node.member.agent?.agent_id}`
-        : `session:${node.member.session.id}`
-    ));
+    const { placed } = layoutSessionMountForest({
+      nodes,
+      edges: [{ child_session_id: 'child', parent_session_id: 'root' }],
+    });
+    const keys = placed.map((node) => `session:${node.member.session.id}`);
     expect(keys.filter((key) => key === 'session:child')).toHaveLength(1);
     expect(keys.filter((key) => key === 'session:root')).toHaveLength(1);
     expect(placed.some((node) => node.member.session.id.startsWith('agent:'))).toBe(false);
     expect(placed).toHaveLength(2);
-    expect(placed.find((node) => node.member.session.id === 'child')?.member.agent?.agent_id)
-      .toBe('member_1');
   });
 
   it('mapDoc layout edge alone does not double-place child as a second root', () => {
@@ -3691,63 +3489,22 @@ describe('wire parent helpers', () => {
       session({ id: 'root', title: '你好问候' }),
       session({ id: 'child', title: 'New member' }), // no metadata parent yet
     ];
-    const { placed } = layoutSessionMountForest(
-      { nodes, edges: [{ child_session_id: 'child', parent_session_id: 'root' }] },
-      [{
-        kind: 'agent',
-        hostSessionId: 'root',
-        session: session({ id: 'agent:root:m1', title: 'New member' }),
-        agent: {
-          agent_id: 'm1',
-          kind: 'team',
-          name: 'New member',
-          role: 'member',
-          status: 'idle',
-          mounted_session_id: 'child',
-        },
-      }],
-    );
+    const { placed } = layoutSessionMountForest({
+      nodes,
+      edges: [{ child_session_id: 'child', parent_session_id: 'root' }],
+    });
     expect(placed.filter((node) => node.member.session.id === 'child')).toHaveLength(1);
     expect(placed.filter((node) => node.member.session.id === 'root')).toHaveLength(1);
     expect(placed.some((node) => node.member.session.id.startsWith('agent:'))).toBe(false);
     expect(placed).toHaveLength(2);
   });
 
-  it('mounted session in nodes without parent edge still skips agent ghost', () => {
-    // Dual-write race: session exists in the graph but parent edge/metadata has
-    // not landed yet — must still not place agent: ghost beside the real card.
+  it('unconnected sessions still place as their own cards', () => {
     const nodes = [
       session({ id: 'root', title: 'Root' }),
-      session({ id: 'child', title: 'New member' }), // no parent_session_id, no edge
+      session({ id: 'child', title: 'New member' }),
     ];
-    const { placed } = layoutSessionMountForest(
-      { nodes, edges: [] },
-      [{
-        kind: 'agent',
-        hostSessionId: 'root',
-        session: session({ id: 'agent:root:m1', title: 'New member' }),
-        agent: {
-          agent_id: 'm1',
-          kind: 'team',
-          name: 'New member',
-          role: 'member',
-          status: 'idle',
-          mounted_session_id: 'child',
-        },
-      }, {
-        kind: 'session',
-        hostSessionId: 'root',
-        session: nodes[1]!,
-        agent: {
-          agent_id: 'm1',
-          kind: 'team',
-          name: 'New member',
-          role: 'member',
-          status: 'idle',
-          mounted_session_id: 'child',
-        },
-      }],
-    );
+    const { placed } = layoutSessionMountForest({ nodes, edges: [] });
     expect(placed.filter((node) => node.member.session.id === 'child')).toHaveLength(1);
     expect(placed.filter((node) => node.member.session.id === 'root')).toHaveLength(1);
     expect(placed.some((node) => node.member.session.id.startsWith('agent:'))).toBe(false);
@@ -3912,23 +3669,18 @@ describe('map node capabilities', () => {
     expect(mapStatusDotClass(childCaps.status)).toBe('running');
   });
 
-  it('allows dual-write members to wire out via mounted_session_id', () => {
+  it('lets a mounted child session wire out from the forest card', () => {
     const host = session({ id: 'host', title: 'Host' });
     const child = session({
       id: 'child',
       title: 'Child',
+      status: 'working',
       metadata: { parent_session_id: 'host' },
     });
     const member = mapNodeCapabilities({
       kind: 'session',
       session: child,
       hostSessionId: 'host',
-      agent: {
-        agent_id: 'a1',
-        kind: 'team',
-        status: 'working',
-        mounted_session_id: 'child',
-      },
     }, { sessions: [host, child] });
     expect(member.canWireOut).toBe(true);
     expect(member.wireSessionId).toBe('child');
@@ -4212,7 +3964,6 @@ describe('redesigned conversation map contracts', () => {
         root.render(createElement(I18nProvider, null, createElement(SessionMapPage, {
           sessions: [rootSession, child],
           onOpenSession: onOpen,
-          onOpenAgent: vi.fn(),
         })));
         await Promise.resolve();
         await Promise.resolve();
@@ -4439,47 +4190,28 @@ describe('redesigned conversation map contracts', () => {
     expect(pruned.edges?.map((edge) => edge.id)).toEqual(['live', 'draft']);
   });
 
-  it('uses the mounted session id as the open target even when agent metadata is present', () => {
+  it('opens the session card through its own session id', () => {
     const target = mapOpenTarget({
       kind: 'session',
       hostSessionId: 'root',
       session: session({ id: 'child', title: 'Child' }),
-      agent: {
-        agent_id: 'agent-1',
-        kind: 'team',
-        status: 'idle',
-        mounted_session_id: 'different-session',
-      },
     });
     expect(target).toEqual({ kind: 'session', sessionId: 'child' });
   });
 
-  it('keeps the durable session when an agent overlay has the same mounted id', () => {
+  it('keeps one durable session when the same child appears twice', () => {
     const child = session({ id: 'child', title: 'Child' });
     const result = dedupeMapMembers([
       { kind: 'session', session: child },
-      {
-        kind: 'session',
-        session: child,
-        hostSessionId: 'parent',
-        agent: { agent_id: 'member', kind: 'team', status: 'idle', mounted_session_id: 'child' },
-      },
+      { kind: 'session', session: child, hostSessionId: 'parent' },
     ], [child]);
     expect(result).toHaveLength(1);
     expect(result[0]?.session.id).toBe('child');
-    expect(result[0]?.agent?.agent_id).toBe('member');
   });
 
-  it('does not turn a cached TeamCreate member without a Session into a map card', async () => {
+  it('does not turn a missing TeamCreate member into a map card', async () => {
     const rootSession = session({ id: 'root', title: 'Root' });
-    saveCachedMapAgents([{
-      hostId: 'root',
-      agentId: 'ghost',
-      title: 'Ghost member',
-      mounted_session_id: 'missing-session',
-    }]);
     vi.spyOn(api.sessions, 'getGraph').mockResolvedValue({ nodes: [rootSession], edges: [] });
-    vi.spyOn(api.sessions, 'getAgents').mockResolvedValue({ items: [] });
     mockViewport();
     const container = document.createElement('div');
     document.body.append(container);

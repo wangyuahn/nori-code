@@ -10,6 +10,20 @@ import { sessionAgentDisplayName } from '../utils/session-agent';
  * 人类只读——这是成员之间的通道。自己这方的气泡用主题色区分。
  */
 
+function meetingParticipantNames(
+  round: SessionAgent | undefined,
+  sessionAgents: readonly SessionAgent[],
+  nameOf: (agentId: string) => string,
+): string[] {
+  const invited = round?.discussion_participant_agent_ids ?? [];
+  const resolved = invited.filter(id => sessionAgents.some(agent => agent.agent_id === id));
+  if (resolved.length > 0) return resolved.map(nameOf);
+  const leaderId = round?.parent_agent_id;
+  return sessionAgents
+    .filter(agent => agent.kind === 'team' && agent.parent_agent_id === leaderId && agent.archived !== true)
+    .map(agent => sessionAgentDisplayName(agent));
+}
+
 function messageTimeOf(message: ChatMessage): number {
   const parsed = Date.parse(message.createdAt ?? '');
   return Number.isFinite(parsed) ? parsed : 0;
@@ -137,12 +151,12 @@ export function DepartmentMeetingPanel({ sessionId, discussionAgentId, selfAgent
     const agent = sessionAgents.find(candidate => candidate.agent_id === agentId);
     return agent === undefined ? agentId : sessionAgentDisplayName(agent);
   };
-  // 轮次节点自己带着议题（summary）、主持人（父级）和参会名单。
+  // 轮次节点自己带着议题（summary）、主持人（父级）。参会名单只认还活在部门森林里的 Session。
   const round = sessionAgents.find(candidate => candidate.agent_id === discussionAgentId);
   const header = <MeetingHeader
     topic={round?.summary?.trim() || null}
     leadName={round?.parent_agent_id === undefined ? null : nameOf(round.parent_agent_id)}
-    participants={(round?.discussion_participant_agent_ids ?? []).map(nameOf)}
+    participants={meetingParticipantNames(round, sessionAgents, nameOf)}
   />;
   const empty = (note: string) => (
     <div className="department-panel">

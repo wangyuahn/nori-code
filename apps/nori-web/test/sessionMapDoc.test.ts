@@ -6,12 +6,9 @@ import {
   edgesForLayout,
   emptySessionMapDoc,
   isLiveLayoutParentEdge,
-  loadCachedMapAgents,
   lookupMapPosition,
   normalizeMapPositions,
-  parseCachedMapAgents,
   parseSessionMapDoc,
-  saveCachedMapAgents,
   sessionMatchesLabelFilter,
   toggleSessionLabel,
 } from '../src/components/sessionMapDoc';
@@ -42,22 +39,6 @@ describe('sessionMapDoc', () => {
       positions: { root: { x: 400, y: 300 } },
     }));
     expect(doc.positions).toEqual({ 'session:root': { x: 400, y: 300 } });
-  });
-
-  it('parses and loads agents cache for map first-paint', () => {
-    expect(parseCachedMapAgents(null)).toEqual([]);
-    expect(parseCachedMapAgents('[{"hostId":"h","agentId":"a","title":"T"}]')).toEqual([
-      { hostId: 'h', agentId: 'a', title: 'T' },
-    ]);
-    const storage = {
-      store: '' as string,
-      getItem() { return this.store || null; },
-      setItem(_key: string, value: string) { this.store = value; },
-    };
-    saveCachedMapAgents([{ hostId: 'h', agentId: 'a1', role: 'dev' }], storage);
-    expect(loadCachedMapAgents(storage)).toEqual([
-      { hostId: 'h', agentId: 'a1', role: 'dev' },
-    ]);
   });
 
   it('uses an explicit note rect and ignores legacy node bindings', () => {

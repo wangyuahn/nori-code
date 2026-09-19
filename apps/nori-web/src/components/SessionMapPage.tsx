@@ -1,6 +1,6 @@
 /**
  * Conversation map: Session cards and their work edges on a user-owned canvas.
- * Agent metadata enriches a Session card but never becomes a separate map object.
+ * Every card is a Session. Department members are child Sessions on the same forest.
  */
 
 import {
@@ -51,10 +51,8 @@ import {
   SESSION_MAP_AMBIENT_HOME_GRAVITY,
   SETTLE_ALPHA,
   buildMapComponents,
-  cachedAgentsFromMapMembers,
   forceIntraComponentCollide,
   isComponentRootPin,
-  mapMembersFromAgentCache,
   resolveNodeDragGroupIds,
   buildForceMapNodes,
   tidyComponentAroundRoot,
@@ -96,7 +94,6 @@ import {
   findParentMapEdge,
   isLiveLayoutParentEdge,
   lookupMapPosition,
-  loadCachedMapAgents,
   loadCachedMapGraph,
   loadSessionMapDoc,
   normalizeMapPositions,
@@ -106,7 +103,6 @@ import {
   UNAPPLIED_EXTRA_JOB_STATUS,
   removeSessionMapEdgeByEndpoints,
   rectsIntersect,
-  saveCachedMapAgents,
   saveCachedMapGraph,
   saveSessionMapDoc,
   type MapAnnotationBox,
@@ -135,10 +131,8 @@ export {
   SESSION_MAP_AMBIENT_HOME_GRAVITY,
   SETTLE_ALPHA,
   buildMapComponents,
-  cachedAgentsFromMapMembers,
   forceIntraComponentCollide,
   isComponentRootPin,
-  mapMembersFromAgentCache,
   resolveMapNodeSpawnPosition,
   resolveNodeDragGroupIds,
   buildForceMapNodes,
@@ -192,9 +186,7 @@ function createInitialForceGraph(
         })),
     ],
   });
-  const initialAgents = mapMembersFromAgentCache(loadCachedMapAgents())
-    .filter((member) => cachedById.has(member.session.id));
-  const initialLayout = layoutSessionMountForest(initialGraph, initialAgents);
+  const initialLayout = layoutSessionMountForest(initialGraph);
   const { nodes } = buildForceMapNodes({
     placed: initialLayout.placed,
     previousById: new Map(),
@@ -232,7 +224,7 @@ const HINT_AUTO_DISMISS_MS = 2_800;
 /** Focus uses the optical center of the free canvas. */
 const FOCUS_INSET_TOP = 72;
 const FOCUS_INSET_BOTTOM = 36;
-const AGENT_POLL_MS = 4_000;
+const MAP_POLL_MS = 4_000;
 const MIN_ANNOTATION_SIZE = 48;
 const MAP_FIRST_USE_HINT_KEY = 'nori-session-map-first-use-hint';
 
@@ -677,9 +669,6 @@ export function SessionMapPage({
     initialForceRef.current = createInitialForceGraph(sessions, cachedGraph);
   }
   const [graph, setGraph] = useState<SessionGraph | null>(() => cachedGraph);
-  const [agentExtras, setAgentExtras] = useState<MapMemberRef[]>(() => (
-    mapMembersFromAgentCache(loadCachedMapAgents())
-  ));
   const [error, setError] = useState<string | null>(null);
   const [errorSticky, setErrorSticky] = useState(false);
   const errorStickyRef = useRef(false);
@@ -753,8 +742,6 @@ export function SessionMapPage({
   const scheduleRedraw = useCallback((_force = false) => {
     redraw((value) => value + 1);
   }, []);
-  const agentExtrasRef = useRef(agentExtras);
-  agentExtrasRef.current = agentExtras;
   const annotationDragRef = useRef<{
     id: string;
     mode: 'move' | 'resize';
@@ -1127,57 +1114,6 @@ export function SessionMapPage({
   );
   componentIndexRef.current = componentIndex;
 
-  /**
-   * Hosts that need agent overlay: graph roots, parents of mounted children,
-   * and hosts we already know from prior extras — never every mounted leaf.
-   */
-  const agentHostIdsFor = useCallback((nodes: readonly Session[]): string[] => {
-    const focusIds = new Set<string>();
-    if (activeSessionId) focusIds.add(activeSessionId);
-    for (const node of nodes) {
-      const parentId = parentSessionIdOf(node);
-      if (parentId !== undefined) {
-        focusIds.add(parentId);
-      } else {
-        focusIds.add(node.id);
-      }
-    }
-    for (const extra of agentExtrasRef.current) {
-      if (extra.hostSessionId !== undefined) focusIds.add(extra.hostSessionId);
-    }
-    const nodeIds = new Set(nodes.map((node) => node.id));
-    return [...focusIds].filter((id) => nodeIds.has(id) || id === activeSessionId);
-  }, [activeSessionId]);
-
-  const refreshAgents = useCallback(async (nodes: readonly Session[]): Promise<MapMemberRef[]> => {
-    const focusIds = agentHostIdsFor(nodes);
-    const extras: MapMemberRef[] = [];
-    await Promise.all(focusIds.map(async (hostId) => {
-      try {
-        const result = await api.sessions.getAgents(hostId);
-        for (const agent of result.items ?? []) {
-          if (agent.kind !== 'team' || agent.archived) continue;
-          const mountedId = agent.mounted_session_id;
-          if (mountedId === undefined || mountedId.length === 0) continue;
-          const mountedSession = nodes.find((node) => node.id === mountedId);
-          // A TeamCreate member without a durable Session has no map card.
-          // Agent metadata may enrich an existing card, but never creates one.
-          if (mountedSession === undefined) continue;
-          extras.push({
-            kind: 'session',
-            session: mountedSession,
-            hostSessionId: hostId,
-            agent,
-          });
-        }
-      } catch {
-        // Agent/activity enrichment is best effort. A missing member response
-        // must never replace the session map or expose server diagnostics.
-      }
-    }));
-    return extras;
-  }, [agentHostIdsFor]);
-
   const pruneStalePositions = useCallback((aliveKeys: ReadonlySet<string>) => {
     const live = new Map<string, { x: number; y: number }>();
     for (const [key, pos] of positionsRef.current) {
@@ -1236,21 +1172,14 @@ export function SessionMapPage({
         setMapDoc(reconciled);
         saveSessionMapDoc(reconciled);
       }
-      // Graph nodes are the first revalidation layer; activity and agent
-      // extras enrich cards later and must not gate the canvas.
+      // Graph nodes are the first revalidation layer; live activity enriches
+      // cards later and must not gate the canvas.
       if (!disposedRef.current && revision === refreshRevision.current) {
         setGraph(next);
         saveCachedMapGraph(next);
       }
-      const extras = await refreshAgents(next.nodes);
-      if (disposedRef.current || revision !== refreshRevision.current) return;
-      setGraph(next);
-      saveCachedMapGraph(next);
-      setAgentExtras(extras);
-      saveCachedMapAgents(cachedAgentsFromMapMembers(extras));
       const alive = new Set<string>();
       for (const node of next.nodes) alive.add(canonicalMapPositionKey(node.id));
-      for (const extra of extras) alive.add(nodeKey(extra));
       for (const key of positionsRef.current.keys()) {
         if (key.startsWith('draft:') || key.startsWith('creating:')) alive.add(key);
       }
@@ -1369,14 +1298,11 @@ export function SessionMapPage({
         nodes: [...fallbackById.values()],
         edges: graph?.edges ?? [],
       });
-      const extras = await refreshAgents(fallback.nodes);
       if (disposedRef.current || revision !== refreshRevision.current) return;
       setGraph(fallback);
       saveCachedMapGraph(fallback);
-      setAgentExtras(extras);
-      saveCachedMapAgents(cachedAgentsFromMapMembers(extras));
     }
-  }, [graph, onGraphChanged, pruneStalePositions, refreshAgents, sessions, showError, tr]);
+  }, [graph, onGraphChanged, pruneStalePositions, sessions, showError, tr]);
 
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
@@ -1396,7 +1322,7 @@ export function SessionMapPage({
   useEffect(() => {
     const timer = window.setInterval(() => {
       void refreshRef.current();
-    }, AGENT_POLL_MS);
+    }, MAP_POLL_MS);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -1479,23 +1405,12 @@ export function SessionMapPage({
   }, [clearError, onOpenSession, showError, tr]);
 
   const listMembers = useMemo(() => {
-    const sessionMembers: MapMemberRef[] = allNodes.map((session) => {
-      const parentId = parentSessionIdOf(session);
-      const linked = parentId === undefined
-        ? undefined
-        : agentExtras.find((extra) => (
-          extra.agent?.mounted_session_id === session.id
-          && extra.hostSessionId === parentId
-        ));
-      return {
-        session,
-        kind: 'session' as const,
-        hostSessionId: linked?.hostSessionId ?? parentId,
-        agent: linked?.agent,
-      };
-    });
-    return sessionMembers;
-  }, [agentExtras, allNodes]);
+    return allNodes.map((session) => ({
+      session,
+      kind: 'session' as const,
+      hostSessionId: parentSessionIdOf(session),
+    }));
+  }, [allNodes]);
 
   const filteredList = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -1508,7 +1423,7 @@ export function SessionMapPage({
       const mandate = (
         typeof member.session.metadata?.mount_mandate === 'string'
           ? member.session.metadata.mount_mandate
-          : member.agent?.mandate ?? ''
+          : ''
       ).toLowerCase();
       const cwd = (memberProjectCwd(member, byId) ?? '').toLowerCase();
       const folder = cwd ? projectFolderName(cwd).toLowerCase() : '';
@@ -1517,7 +1432,6 @@ export function SessionMapPage({
         || sessionId.toLowerCase().includes(q)
         || role.includes(q)
         || mandate.includes(q)
-        || (member.agent?.agent_id ?? '').toLowerCase().includes(q)
         || cwd.includes(q)
         || folder.includes(q);
     });
@@ -1538,12 +1452,12 @@ export function SessionMapPage({
       serverGraph.edges,
       mapDoc.edges ?? [],
     );
-    const base = layoutSessionMountForest(
-      { nodes: serverGraph.nodes, edges: layoutEdges },
-      agentExtras.filter((extra) => serverGraph.nodes.some((node) => node.id === extra.session.id)),
-    );
+    const base = layoutSessionMountForest({
+      nodes: serverGraph.nodes,
+      edges: layoutEdges,
+    });
     return base;
-  }, [allNodes, graph?.edges, agentExtras, mapDoc.edges]);
+  }, [allNodes, graph?.edges, mapDoc.edges]);
 
   // Layout is still seeded as a forest for stable placement, but rendering
   // follows the persisted work edges. This keeps additional parent jobs
@@ -1576,10 +1490,7 @@ export function SessionMapPage({
   }, [allNodes, draft?.id, mapDoc.edges, treeLayout.edges]);
 
   const topologyKey = useMemo(() => {
-    const nodePart = treeLayout.placed.map((node) => {
-      const agent = node.member.agent;
-      return `${nodeKey(node.member)}:${agent?.agent_id ?? ''}:${agent?.mounted_session_id ?? ''}`;
-    }).sort().join('\0');
+    const nodePart = treeLayout.placed.map((node) => nodeKey(node.member)).sort().join('\0');
     const edgePart = visualWorkEdges
       .filter((edge) => isLiveLayoutParentEdge({ type: 'parent', status: edge.status }))
       .map((edge) => `${edge.source}->${edge.target}`)
@@ -1589,7 +1500,7 @@ export function SessionMapPage({
   }, [treeLayout, visualWorkEdges]);
 
   // Rebuild force graph when mount topology / filter set changes.
-  // Existing ids keep positionsRef / previous sim coords — never teleport on agent poll.
+  // Existing ids keep positionsRef / previous sim coords — never teleport on graph poll.
   useEffect(() => {
     if (topologyKeyRef.current === topologyKey) return;
     topologyKeyRef.current = topologyKey;
@@ -1760,10 +1671,7 @@ export function SessionMapPage({
 
   const findActiveForceNode = useCallback((sessionId: string | undefined): ForceMapNode | undefined => {
     if (sessionId === undefined) return undefined;
-    return forceNodesRef.current.find((node) => (
-      node.member.session.id === sessionId
-      || node.member.agent?.mounted_session_id === sessionId
-    ));
+    return forceNodesRef.current.find((node) => node.member.session.id === sessionId);
   }, []);
 
   const stopFollowFocus = useCallback(() => {
@@ -3495,20 +3403,13 @@ export function SessionMapPage({
   };
 
   const deleteSession = async (sessionId: string, confirmed = false) => {
-    // Cascade-aware: deleting a host strands children/agents — say so up front.
+    // Cascade-aware: deleting a host strands mounted children — say so up front.
     const childCount = allNodes.filter((node) => parentSessionIdOf(node) === sessionId).length;
-    const memberCount = agentExtras.filter((extra) => extra.hostSessionId === sessionId).length;
     const warnings: string[] = [];
     if (childCount > 0) {
       warnings.push(tr(
         `${String(childCount)} mounted sessions will become top-level conversations.`,
         `${String(childCount)} 个成员会话将升为顶层对话。`,
-      ));
-    }
-    if (memberCount > 0) {
-      warnings.push(tr(
-        `${String(memberCount)} team member(s) hosted here will lose their entry point.`,
-        `${String(memberCount)} 个托管团队成员将随之移除。`,
       ));
     }
     if (!confirmed) {
@@ -3544,17 +3445,10 @@ export function SessionMapPage({
     const warnings: string[] = [];
     for (const sessionId of ids) {
       const childCount = allNodes.filter((node) => parentSessionIdOf(node) === sessionId).length;
-      const memberCount = agentExtras.filter((extra) => extra.hostSessionId === sessionId).length;
       if (childCount > 0) {
         warnings.push(tr(
           `“${byId.get(sessionId)?.title?.trim() || sessionId.slice(0, 10)}”: ${String(childCount)} mounted session(s) become top-level conversations.`,
           `「${byId.get(sessionId)?.title?.trim() || sessionId.slice(0, 10)}」：${String(childCount)} 个成员会话将升为顶层对话。`,
-        ));
-      }
-      if (memberCount > 0) {
-        warnings.push(tr(
-          `“${byId.get(sessionId)?.title?.trim() || sessionId.slice(0, 10)}”: ${String(memberCount)} team member(s) lose their entry point.`,
-          `「${byId.get(sessionId)?.title?.trim() || sessionId.slice(0, 10)}」：${String(memberCount)} 名托管成员将随之移除。`,
         ));
       }
     }
@@ -3624,15 +3518,7 @@ export function SessionMapPage({
   ));
 
   const abortSessionMember = async (member: MapMemberRef): Promise<void> => {
-    const tasks = [api.sessions.abort(member.session.id)];
-    if (member.agent !== undefined && member.hostSessionId !== undefined) {
-      tasks.push(api.sessions.abort(member.hostSessionId, member.agent.agent_id));
-    }
-    const results = await Promise.allSettled(tasks);
-    const failed = results.find((result) => result.status === 'rejected');
-    if (failed !== undefined && failed.status === 'rejected') {
-      throw failed.reason;
-    }
+    await api.sessions.abort(member.session.id);
   };
 
   const stopMember = async (member: MapMemberRef) => {
@@ -4208,7 +4094,7 @@ export function SessionMapPage({
                     : undefined;
                   const statusClass = mapStatusDotClass(caps.status);
                   const runtimeTone = mapRuntimeStatus(caps.status);
-                  const runtimeSince = member.agent?.last_active ?? member.session.updated_at;
+                  const runtimeSince = member.session.updated_at;
                   const runtimeElapsed = (runtimeTone === 'running' || runtimeTone === 'working' || runtimeTone === 'waiting')
                     ? formatElapsed(Date.now() - Date.parse(runtimeSince))
                     : undefined;
@@ -4671,7 +4557,7 @@ export function SessionMapPage({
                 }
                 return (
                   <button type="button" role="menuitem" onClick={() => void unmountSession(nodeMenu.sessionId)}>
-                    {tr('End all jobs', '结束全部工作')}
+                    {tr('Disconnect', '断连')}
                   </button>
                 );
               }
@@ -4693,7 +4579,7 @@ export function SessionMapPage({
                   >
                     {unapplied
                       ? tr(`Remove the extra job from “${parentTitle(job.source)}”`, `去掉给「${parentTitle(job.source)}」的这条`)
-                      : tr(`End the job for “${parentTitle(job.source)}”`, `结束给「${parentTitle(job.source)}」的工作`)}
+                      : tr(`Disconnect from “${parentTitle(job.source)}”`, `断开与「${parentTitle(job.source)}」的工作`)}
                   </button>
                 );
               });
@@ -4804,7 +4690,7 @@ export function SessionMapPage({
             ) : (
               <>
             <button type="button" role="menuitem" onClick={() => setConfirmWorkEdge({ parentId: workEdgeMenu.parentId, childId: workEdgeMenu.childId })}>
-              {tr('End this job', '结束这份工作')}
+              {tr('Disconnect', '断连')}
             </button>
             {menuEdge?.status === 'error' && (
               <button
@@ -4895,7 +4781,7 @@ export function SessionMapPage({
         )}
         {confirmWorkEdge !== null && (
           <div className="session-map-float session-map-edge-confirm" role="alertdialog">
-            <span>{tr(`End the job for “${byId.get(confirmWorkEdge.parentId)?.title?.trim() || confirmWorkEdge.parentId}”?`, `结束给「${byId.get(confirmWorkEdge.parentId)?.title?.trim() || confirmWorkEdge.parentId}」的这份工作？`)}</span>
+            <span>{tr(`Disconnect from “${byId.get(confirmWorkEdge.parentId)?.title?.trim() || confirmWorkEdge.parentId}”?`, `断开与「${byId.get(confirmWorkEdge.parentId)?.title?.trim() || confirmWorkEdge.parentId}」的工作？`)}</span>
             <button type="button" className="danger" onClick={() => void endWorkEdge(confirmWorkEdge.parentId, confirmWorkEdge.childId)}>{tr('End job', '结束工作')}</button>
             <button type="button" onClick={() => setConfirmWorkEdge(null)}>{tr('Keep', '保留')}</button>
           </div>

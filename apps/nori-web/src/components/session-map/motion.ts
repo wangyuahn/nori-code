@@ -1,9 +1,7 @@
 import type { SimulationLinkDatum, SimulationNodeDatum } from 'd3-force';
 
-import type { Session, SessionAgent } from '../../api/client';
-import { sessionAgentDisplayName } from '../../utils/session-agent';
 import { parentSessionIdOf } from '../../utils/session-mount';
-import { lookupMapPosition, type CachedMapAgent } from '../sessionMapDoc';
+import { lookupMapPosition } from '../sessionMapDoc';
 import { CANVAS_PAD, GAP_Y, NODE_H, NODE_W, nodeKey } from './layout';
 import type { MapMemberRef, PlacedNode } from './layout';
 
@@ -154,51 +152,6 @@ export function resolveNodeDragGroupIds(input: {
   }
   if (component?.rootNodeId === nodeId) return [...component.nodeIds];
   return [nodeId];
-}
-
-export function mapMembersFromAgentCache(cached: readonly CachedMapAgent[]): MapMemberRef[] {
-  return cached.flatMap((row) => {
-    const mounted = row.mounted_session_id?.trim();
-    if (mounted === undefined || mounted.length === 0) return [];
-    const title = row.title?.trim() || row.agentId;
-    const agent: SessionAgent = {
-      agent_id: row.agentId,
-      kind: 'team',
-      name: title,
-      role: row.role,
-      mandate: row.mandate,
-      status: row.status ?? 'idle',
-      mounted_session_id: mounted,
-    };
-    const session: Session = {
-      id: mounted,
-      title,
-      status: row.status ?? 'idle',
-      created_at: new Date(0).toISOString(),
-      updated_at: new Date(0).toISOString(),
-      metadata: {
-        parent_session_id: row.hostId,
-        mount_role: row.role,
-        mount_mandate: row.mandate,
-      },
-    };
-    return [{ kind: 'session' as const, hostSessionId: row.hostId, agent, session }];
-  });
-}
-
-export function cachedAgentsFromMapMembers(extras: readonly MapMemberRef[]): CachedMapAgent[] {
-  return extras.flatMap((extra) => {
-    if (extra.agent === undefined || extra.hostSessionId === undefined) return [];
-    return [{
-      hostId: extra.hostSessionId,
-      agentId: extra.agent.agent_id,
-      mounted_session_id: extra.agent.mounted_session_id,
-      title: sessionAgentDisplayName(extra.agent),
-      role: extra.agent.role,
-      status: extra.agent.status,
-      mandate: extra.agent.mandate,
-    }];
-  });
 }
 
 export function resolveMapNodeSpawnPosition(input: {

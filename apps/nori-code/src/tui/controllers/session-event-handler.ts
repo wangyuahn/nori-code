@@ -89,6 +89,7 @@ import {
   extractTeamSpeechText,
   isTeamSpeechTool,
   shouldPaintDiscussUtterance,
+  mergeDepartmentSnapshots,
   teamAgentsFromSessionMetadata,
   type TeamAgentSnapshot,
   type TeamReportStatus,
@@ -968,7 +969,10 @@ export class SessionEventHandler {
       this.host.updateTerminalTitle();
     }
     if (event.patch?.['agents'] !== undefined) {
-      this.setTeamAgents(teamAgentsFromSessionMetadata(event.patch));
+      this.setTeamAgents(mergeDepartmentSnapshots(
+        teamAgentsFromSessionMetadata(event.patch),
+        this.host.state.appState.teamAgents,
+      ));
     }
   }
 
@@ -1004,8 +1008,10 @@ export class SessionEventHandler {
   }
 
   seedTeamAgentsFromSession(session: Session): void {
-    const agents = teamAgentsFromSessionMetadata(session.getResumeState()?.sessionMetadata);
-    this.host.setAppState({ teamAgents: agents });
+    this.setTeamAgents(mergeDepartmentSnapshots(
+      teamAgentsFromSessionMetadata(session.getResumeState()?.sessionMetadata),
+      this.host.state.appState.teamAgents,
+    ));
     this.host.teamViewController.seedFromSession(session);
   }
 

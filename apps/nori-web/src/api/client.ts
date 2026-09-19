@@ -155,7 +155,7 @@ export interface SessionAgent {
   discussion_turn_agent_id?: string;
   /** Members taking part in this Discuss round; only discussion nodes carry it. */
   discussion_participant_agent_ids?: readonly string[];
-  /** Dual-write child session for TeamCreate / map mount members. */
+  /** Child session that owns this durable member. */
   mounted_session_id?: string;
 }
 

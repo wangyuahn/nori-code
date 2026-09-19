@@ -1,3 +1,5 @@
+import { homedir } from 'node:os';
+
 import { Disposable, IInstantiationService, InstantiationType, registerSingleton } from '../../di';
 import { Emitter } from '../../base/common/event';
 import { ErrorCodes, KimiError } from '../../errors';
@@ -16,9 +18,6 @@ import {
   CHILD_SESSION_KIND_KEY,
   DEFAULT_MOUNT_MEMBER_MANDATE,
   DEFAULT_MOUNT_MEMBER_ROLE,
-  DEPARTMENT_ASSIGNED_TASK_KEY,
-  DEPARTMENT_LAST_TURN_SKIP_KEY,
-  DEPARTMENT_TEAM_REPORT_KEY,
   MOUNT_MANDATE_KEY,
   MOUNT_NAME_KEY,
   MOUNT_ROLE_KEY,
@@ -82,29 +81,6 @@ const MAX_PAGE_SIZE = 100;
 const DEFAULT_UNDO_MESSAGE_PAGE_SIZE = 50;
 const MAX_UNDO_MESSAGE_PAGE_SIZE = 100;
 const MAIN_AGENT_ID = 'main';
-
-function isTeamReportStatus(value: unknown): value is {
-  readonly status: 'unreported' | 'completed' | 'blocked' | 'needs_decision';
-  readonly summary?: string;
-  readonly receivedAt?: string;
-} {
-  if (value === undefined || typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const record = value as Record<string, unknown>;
-  return record.status === 'unreported'
-    || record.status === 'completed'
-    || record.status === 'blocked'
-    || record.status === 'needs_decision';
-}
-
-function isTurnSkip(value: unknown): value is { readonly reason: string; readonly error: string } {
-  if (value === undefined || typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const record = value as Record<string, unknown>;
-  return typeof record.reason === 'string' && typeof record.error === 'string';
-}
 
 interface PromotedMount {
   readonly sessionId: string;
@@ -1253,13 +1229,20 @@ export class SessionService extends Disposable implements ISessionService {
   }): Promise<void> {
     const parent = await this.get(input.parentSessionId);
     const parentSummary = await this.requireSummary(input.parentSessionId);
-    const hostSummary = await this.requireSummary(input.hostSessionId);
-    const cwd = (
-      typeof parent.metadata.cwd === 'string' && parent.metadata.cwd.trim().length > 0
-        ? parent.metadata.cwd.trim()
-        : undefined
-    ) ?? parentSummary.workDir ?? hostSummary.workDir;
-    if (cwd === undefined || cwd.trim().length === 0) {
+    const host = input.hostSessionId === input.parentSessionId
+      ? parent
+      : await this.get(input.hostSessionId);
+    const hostSummary = input.hostSessionId === input.parentSessionId
+      ? parentSummary
+      : await this.requireSummary(input.hostSessionId);
+    const cwd =
+      normalizeOptionalString(typeof parent.metadata.cwd === 'string' ? parent.metadata.cwd : undefined)
+      ?? normalizeOptionalString(parentSummary.workDir)
+      ?? normalizeOptionalString(typeof host.metadata.cwd === 'string' ? host.metadata.cwd : undefined)
+      ?? normalizeOptionalString(hostSummary.workDir)
+      ?? normalizeOptionalString(input.agent.homedir)
+      ?? normalizeOptionalString(homedir());
+    if (cwd === undefined) {
       return;
     }
     const name = input.agent.name?.trim() || input.agentId;
@@ -1400,8 +1383,9 @@ export class SessionService extends Disposable implements ISessionService {
         parentAgentId: null,
       });
     }
-    // Durable members are child Sessions. Drop leftover parent-session team
-    // shadows from the product tree; keep discussion / independent transcripts.
+    // Durable members are child Sessions on the mount forest. Drop leftover
+    // parent-session team shadows; keep discussion / independent transcripts.
+    // Do not re-add children as fake team nodes — GUI and Team* read the forest.
     for (const [agentId, agent] of [...agents.entries()]) {
       if (agent.kind === 'team') agents.delete(agentId);
     }
@@ -1447,44 +1431,6 @@ export class SessionService extends Disposable implements ISessionService {
           };
         }),
     );
-    const all = await this.core.rpc.listSessions({ includeArchive: true });
-    const children = all.filter((entry) => readParentSessionId(entry.metadata) === id);
-    for (const child of children) {
-      if (nodes.some((node) => node.id === child.id)) continue;
-      const custom = child.metadata as Record<string, unknown> | undefined;
-      const childMeta = await this.tryGetMeta(child.id);
-      const childCustom: Record<string, unknown> = { ...custom, ...childMeta?.custom };
-      const key = sessionAgentKey(child.id, MAIN_AGENT_ID);
-      let usage: SessionAgentTreeNode['usage'];
-      try {
-        usage = mapAgentUsage(await this.core.rpc.getUsage({ sessionId: child.id, agentId: MAIN_AGENT_ID }));
-      } catch {
-        usage = undefined;
-      }
-      const status = await this._readAuthoritativeStatus(child.id, MAIN_AGENT_ID);
-      const report = childCustom[DEPARTMENT_TEAM_REPORT_KEY];
-      const skip = childCustom[DEPARTMENT_LAST_TURN_SKIP_KEY];
-      nodes.push({
-        id: child.id,
-        kind: 'team',
-        parent_agent_id: MAIN_AGENT_ID,
-        name: readMountName(childCustom) ?? child.title ?? child.id,
-        role: readMountRole(childCustom),
-        mandate: readMountMandate(childCustom),
-        assigned_task: typeof childCustom[DEPARTMENT_ASSIGNED_TASK_KEY] === 'string'
-          ? childCustom[DEPARTMENT_ASSIGNED_TASK_KEY] as string
-          : undefined,
-        team_report_status: isTeamReportStatus(report) ? report.status : undefined,
-        team_report_summary: isTeamReportStatus(report) ? report.summary : undefined,
-        team_report_received: isTeamReportStatus(report) && report.receivedAt !== undefined,
-        summary: isTurnSkip(skip) ? skip.error : undefined,
-        status,
-        usage,
-        last_active: this._lastActivityByAgent.get(key) ?? new Date(child.updatedAt).toISOString(),
-        archived: false,
-        mounted_session_id: child.id,
-      });
-    }
     return { agents: nodes };
   }
 

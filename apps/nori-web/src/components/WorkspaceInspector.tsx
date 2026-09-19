@@ -135,6 +135,10 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
     }
     return null;
   }, [discussion, leadsADepartment, selfAgentId, departmentChatLeaderAgentId, sessionAgents]);
+  const meetingHostSessionId = discussion?.leaderAgentId
+    ?? (leadsADepartment ? selfAgentId : null)
+    ?? departmentChatLeaderAgentId
+    ?? sessionId;
   // 开会是部门语境里的常驻工具：轮次由父级自己召集，人类得随时能打开来看。
   const meetingAvailable = discussion !== null || discussionNodeAgentId !== null || leadsADepartment || chatAvailable;
   /** 开会/交流只有在这个 agent 真的处在部门里时才是可用工具。 */
@@ -254,7 +258,7 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
     if (item === 'preview') return <FilePreview path={path} file={file} loading={loading} revealLine={revealLine} onRefresh={refreshFile} />;
     if (item === 'changes') return <ChangesPanel sessionId={sessionId} projectPath={projectPath} status={gitStatus} messages={messages} codeChanges={codeChanges} onRefreshGitStatus={refreshGitStatus} onRefreshMessages={refreshMessages} onPreviewFile={onSelectFilePath ? previewFile : undefined} onCountChange={setTextChangeCount} />;
     if (item === 'git') return <GitPanel sessionId={sessionId} projectPath={projectPath} status={gitStatus} error={gitError} loading={gitLoading} onRefresh={refreshGitStatus} />;
-    if (item === 'meeting') return <DepartmentMeetingPanel sessionId={sessionId} discussionAgentId={discussionNodeAgentId} selfAgentId={selfAgentId} sessionAgents={sessionAgents} turnAgentId={discussion?.turnAgentId ?? null} revision={departmentRevision} />;
+    if (item === 'meeting') return <DepartmentMeetingPanel sessionId={meetingHostSessionId} discussionAgentId={discussionNodeAgentId} selfAgentId={selfAgentId} sessionAgents={sessionAgents} turnAgentId={discussion?.turnAgentId ?? null} revision={departmentRevision} />;
     if (item === 'chat') return <DepartmentChatPanel messages={departmentChat?.messages ?? []} selfAgentId={selfAgentId} sessionAgents={sessionAgents} />;
     if (item === 'lsp') return <LspPanel sessionId={sessionId} path={path} onDiagnosticCountChange={setDiagnosticCount} onReveal={(targetPath, line) => { if (targetPath !== path) onSelectFilePath?.(targetPath); setRevealLine(line + 1); showTool('preview'); }} />;
     // BrowserPanel owns a native WebContentsView. CSS-hidden inspector pages remain

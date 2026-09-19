@@ -122,6 +122,7 @@ export function App() {
   const [activeView, setActiveView] = useState<View>('chat');
   const [activeAgentSelection, setActiveAgentSelection] = useState<{ sessionId: string; agent: SessionAgent } | null>(null);
   const [sessionAgents, setSessionAgents] = useState<SessionAgent[]>([]);
+  const [leaderDiscussionAgents, setLeaderDiscussionAgents] = useState<SessionAgent[]>([]);
   const [sidebarExpanded, setSidebarExpanded] = useState(loadSidebarExpanded);
   const [sidebarWidth, setSidebarWidth] = useState(() => Math.max(220, Math.min(480, Number(localStorage.getItem('nori-sidebar-width')) || 256)));
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('sessions');
@@ -197,12 +198,22 @@ export function App() {
   const activeAgent = activeAgentSelection?.sessionId === sessionId ? activeAgentSelection.agent : null;
   const activeAgentId = activeAgent?.agent_id ?? 'main';
   const selectSessionAgent = useCallback((agent: SessionAgent | null) => {
+    const mountedId = agent?.mounted_session_id
+      ?? (agent?.kind === 'team' ? agent.agent_id : undefined);
+    if (agent !== null && mountedId !== undefined && mountedId !== sessionId
+      && sessions.some(session => session.id === mountedId)) {
+      setActiveAgentSelection(null);
+      switchSession(mountedId);
+      setActiveView('chat');
+      return;
+    }
     setActiveAgentSelection(agent && agent.agent_id !== 'main' && agent.kind !== 'main' && sessionId ? { sessionId, agent } : null);
     setActiveView('chat');
-  }, [sessionId]);
+  }, [sessionId, sessions, switchSession]);
   useEffect(() => {
     setActiveAgentSelection(null);
     setSessionAgents([]);
+    setLeaderDiscussionAgents([]);
   }, [sessionId]);
   useEffect(() => {
     if (activeAgentSelection === null || activeAgentSelection.sessionId !== sessionId) return;
@@ -291,7 +302,7 @@ export function App() {
     const load = async () => {
       try {
         const result = await api.sessions.getAgents(sessionId);
-        const nextAgents = result.items ?? [];
+        const nextAgents = (result.items ?? []).filter(agent => agent.kind !== 'team');
         // 每 4 秒一轮，返回内容通常与上一轮完全相同。复用上一次的数组身份，
         // 让依赖 sessionAgents 的下游 effect（部门轨的讨论拉取）不会被轮询本身唤醒。
         if (!disposed) {
@@ -305,21 +316,52 @@ export function App() {
     const timer = window.setInterval(() => { void load(); }, 4_000);
     return () => { disposed = true; window.clearInterval(timer); };
   }, [sessionId, agentTreeRevision]);
+  const departmentLeaderSessionId = activeSession === null
+    ? null
+    : parentSessionIdOf(activeSession) ?? activeSession.id;
+  useEffect(() => {
+    if (departmentLeaderSessionId === null || departmentLeaderSessionId === sessionId) {
+      setLeaderDiscussionAgents([]);
+      return;
+    }
+    let disposed = false;
+    const load = async () => {
+      try {
+        const result = await api.sessions.getAgents(departmentLeaderSessionId);
+        const nextAgents = (result.items ?? []).filter(agent => agent.kind === 'discussion');
+        if (!disposed) {
+          setLeaderDiscussionAgents(previous => sameAgentList(previous, nextAgents) ? previous : nextAgents);
+        }
+      } catch {
+        // Keep the last discussion list; the next poll retries.
+      }
+    };
+    void load();
+    const timer = window.setInterval(() => { void load(); }, 4_000);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [departmentLeaderSessionId, sessionId, agentTreeRevision]);
   const browserPermissions = useBrowserPermissions();
   const departmentAgents = useMemo(
     () => departmentAgentsFromSessions(sessions, activeSession),
     [sessions, activeSession],
   );
   const displayAgents = useMemo(
-    () => mergeSessionAgents(sessionAgents, departmentAgents),
-    [sessionAgents, departmentAgents],
+    () => mergeSessionAgents(
+      bindTreeToSession(sessionAgents, sessionId),
+      departmentAgents,
+      bindTreeToSession(leaderDiscussionAgents, departmentLeaderSessionId),
+    ),
+    [departmentAgents, departmentLeaderSessionId, leaderDiscussionAgents, sessionAgents, sessionId],
   );
   const sessionActiveAgentCount = countActiveAgents(activity, sessionId ?? undefined);
   const sessionTreeTokens = displayAgents.reduce((total, agent) => total + (agent.tokens ?? 0), 0);
-  // 与当前 agent 相关的 Discuss 轮次：它自己主持的，或它作为成员参加的。
+  // 与当前 Session 相关的 Discuss 轮次：它自己主持的，或它作为成员参加的。
   // 轮次是树里独立的节点，所以不能从被查看 agent 自己的节点上读当前发言人；
   // WS 事件给出的 discussionTurnAgentId 比轮询的树新，优先采用。
-  const activeDiscussion = findAgentDiscussion(displayAgents, activeAgentId, discussionTurnAgentId);
+  const discussionViewerId = activeAgentId !== 'main' && activeAgent?.kind !== 'team'
+    ? activeAgentId
+    : (activeSession?.id ?? activeAgentId);
+  const activeDiscussion = findAgentDiscussion(displayAgents, discussionViewerId, discussionTurnAgentId);
   const effectiveGlobalActiveAgentCount = countActiveAgents(activity);
   const sessionTitles = Object.fromEntries(sessions.map(session => [session.id, session.title || session.id]));
 
@@ -628,7 +670,8 @@ export function App() {
             onResolveBrowserPermissionOverride={browserPermissions.resolvePermission}
             onOpenApprovalSession={(sourceSessionId, sourceAgentId) => {
               const mountedId = sessions.find(session => session.id === sourceAgentId)?.id
-                ?? sessionAgents.find(agent => agent.agent_id === sourceAgentId)?.mounted_session_id;
+                ?? sessionAgents.find(agent => agent.agent_id === sourceAgentId)?.mounted_session_id
+                ?? departmentAgents.find(agent => agent.agent_id === sourceAgentId)?.mounted_session_id;
               setActiveAgentSelection(null);
               switchSession(mountedId ?? sourceSessionId);
               setActiveView('chat');
@@ -944,35 +987,70 @@ export function buildSessionBreadcrumb(
   return path;
 }
 
-function departmentAgentsFromSessions(
+export function departmentAgentsFromSessions(
   sessions: readonly Session[],
   active: Session | null,
 ): SessionAgent[] {
   if (active === null) return [];
-  const parentId = parentSessionIdOf(active) ?? active.id;
-  return sessions
-    .filter(session => parentSessionIdOf(session) === parentId)
-    .map(session => ({
+  const parentId = parentSessionIdOf(active);
+  const byId = new Map<string, SessionAgent>();
+  const addMember = (session: Session, leaderId: string) => {
+    byId.set(session.id, {
       agent_id: session.id,
-      kind: 'team' as const,
-      parent_agent_id: 'main',
-      name: session.title || session.id,
-      role: typeof session.metadata?.mount_role === 'string' ? session.metadata.mount_role : undefined,
-      mandate: typeof session.metadata?.mount_mandate === 'string' ? session.metadata.mount_mandate : undefined,
+      kind: 'team',
+      parent_agent_id: leaderId,
+      name: sessionStringMeta(session, 'mount_name') || session.title || session.id,
+      role: sessionStringMeta(session, 'mount_role'),
+      mandate: sessionStringMeta(session, 'mount_mandate'),
+      assigned_task: sessionStringMeta(session, 'department_assigned_task'),
       status: session.status,
+      last_active: session.updated_at,
       mounted_session_id: session.id,
-    }));
+    });
+  };
+  for (const session of sessions) {
+    if (parentSessionIdOf(session) === active.id) addMember(session, active.id);
+  }
+  if (parentId !== undefined) {
+    for (const session of sessions) {
+      if (parentSessionIdOf(session) === parentId) addMember(session, parentId);
+    }
+  }
+  return [...byId.values()];
+}
+
+function sessionStringMeta(session: Session, key: string): string | undefined {
+  const value = session.metadata?.[key];
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function bindTreeToSession(
+  agents: readonly SessionAgent[],
+  sessionId: string | null | undefined,
+): SessionAgent[] {
+  if (sessionId === null || sessionId === undefined || sessionId.length === 0) return [...agents];
+  return agents.map(agent => (
+    agent.parent_agent_id === 'main' ? { ...agent, parent_agent_id: sessionId } : agent
+  ));
 }
 
 function mergeSessionAgents(
   agents: readonly SessionAgent[],
   department: readonly SessionAgent[],
+  extraDiscussions: readonly SessionAgent[] = [],
 ): SessionAgent[] {
   const byId = new Map<string, SessionAgent>();
-  for (const agent of agents) byId.set(agent.agent_id, agent);
+  for (const agent of agents) {
+    if (agent.kind === 'team') continue;
+    byId.set(agent.agent_id, agent);
+  }
+  for (const agent of extraDiscussions) {
+    if (agent.kind !== 'discussion') continue;
+    byId.set(agent.agent_id, agent);
+  }
   for (const agent of department) {
     const existing = byId.get(agent.agent_id);
-    byId.set(agent.agent_id, existing === undefined ? agent : { ...agent, ...existing });
+    byId.set(agent.agent_id, existing === undefined ? agent : { ...existing, ...agent });
   }
   return [...byId.values()];
 }

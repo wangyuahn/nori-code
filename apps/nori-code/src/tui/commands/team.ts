@@ -1,7 +1,7 @@
 import { TeamBrowserComponent } from '../components/dialogs/team-browser';
 import { TeamMemberDetailComponent } from '../components/dialogs/team-member-detail';
-import { currentViewingAgentId, teamAgentsFromMountedChildren, type TeamAgentSnapshot } from '../utils/team-tree';
-import { mountMandateOf, mountRoleOf, sessionMapLabel } from '../utils/session-map-tree';
+import { currentViewingAgentId, teamAgentsFromSessionGraph, teamMemberSessionId, type TeamAgentSnapshot } from '../utils/team-tree';
+import { sessionMapLabel } from '../utils/session-map-tree';
 import { formatErrorMessage } from '../utils/event-payload';
 import type { TranscriptEntry } from '../types';
 import { showTeamSettingsPicker } from './config';
@@ -23,20 +23,11 @@ async function refreshDepartmentFromGraph(host: SlashCommandHost): Promise<void>
   try {
     const graph = await host.harness.getSessionGraph({ workDir: host.state.appState.workDir });
     const hostNode = graph.nodes.find((node) => node.id === sessionId);
-    const children = graph.edges
-      .filter((edge) => edge.parentSessionId === sessionId)
-      .map((edge) => graph.nodes.find((node) => node.id === edge.childSessionId))
-      .filter((node): node is NonNullable<typeof node> => node !== undefined);
     host.setAppState({
-      teamAgents: teamAgentsFromMountedChildren(
+      teamAgents: teamAgentsFromSessionGraph(
+        sessionId,
         hostNode === undefined ? (host.state.appState.sessionTitle ?? 'Main') : sessionMapLabel(hostNode),
-        children.map((child) => ({
-          id: child.id,
-          title: child.title,
-          name: typeof child.metadata?.['mount_name'] === 'string' ? child.metadata['mount_name'] : child.title,
-          role: mountRoleOf(child),
-          mandate: mountMandateOf(child),
-        })),
+        graph,
       ),
     });
   } catch (error) {
@@ -52,20 +43,26 @@ function showTeamBrowser(host: SlashCommandHost): void {
       discussMode: host.state.appState.discussMode,
       currentAgentId: currentViewingAgentId(host.state.appState.viewingAgentId),
       onSelect: (agent) => {
-        if (agent.mountedSessionId !== undefined && agent.mountedSessionId.length > 0) {
-          void (async () => {
-            try {
-              const session = await host.harness.resumeSession({ id: agent.mountedSessionId! });
-              await host.switchToSession(session, `Opened session (${session.id}).`);
-              host.restoreEditor();
-            } catch (error) {
-              host.showError(String(error));
-              showTeamBrowser(host);
-            }
-          })();
+        if (agent.kind === 'main') {
+          host.restoreEditor();
           return;
         }
-        void host.teamViewController.open(agent);
+        const sessionId = teamMemberSessionId(agent);
+        if (sessionId === undefined) {
+          host.showError('This member is no longer a session.');
+          showTeamBrowser(host);
+          return;
+        }
+        void (async () => {
+          try {
+            const session = await host.harness.resumeSession({ id: sessionId });
+            await host.switchToSession(session, `Opened session (${session.id}).`);
+            host.restoreEditor();
+          } catch (error) {
+            host.showError(String(error));
+            showTeamBrowser(host);
+          }
+        })();
       },
       onDetails: (agent) => {
         showTeamMemberDetail(host, agent);

@@ -133,7 +133,7 @@ import { ImageAttachmentStore, type ImageAttachment } from './utils/image-attach
 import { extractMediaAttachments } from './utils/image-placeholder';
 import { hasPatchChanges } from './utils/object-patch';
 import { sessionRowsForPicker } from './utils/session-picker-rows';
-import { teamAgentsFromSessionMetadata } from './utils/team-tree';
+import { mergeDepartmentSnapshots, teamAgentsFromSessionGraph, teamAgentsFromSessionMetadata } from './utils/team-tree';
 import { combineStartupNotice, isOAuthLoginRequiredError } from './utils/startup';
 import { thinkingEffortFromConfig } from './utils/thinking-config';
 import { installTerminalFocusTracking } from './utils/terminal-focus';
@@ -1575,6 +1575,20 @@ export class KimiTUI {
 
   async syncRuntimeState(session: Session = this.requireSession()): Promise<void> {
     const [status, goalResult] = await Promise.all([session.getStatus(), session.getGoal()]);
+    let forest = teamAgentsFromSessionMetadata(session.getResumeState()?.sessionMetadata);
+    try {
+      const graph = await this.harness.getSessionGraph({ workDir: this.state.appState.workDir });
+      forest = mergeDepartmentSnapshots(
+        forest,
+        teamAgentsFromSessionGraph(
+          session.id,
+          session.summary?.title ?? this.state.appState.sessionTitle ?? 'Main',
+          graph,
+        ),
+      );
+    } catch {
+      // Graph is best-effort; Discuss nodes still come from resume metadata.
+    }
     this.setAppState({
       sessionId: session.id,
       model: status.model ?? '',
@@ -1588,7 +1602,7 @@ export class KimiTUI {
       contextUsage: status.contextUsage,
       sessionTitle: session.summary?.title ?? null,
       goal: goalResult.goal,
-      teamAgents: teamAgentsFromSessionMetadata(session.getResumeState()?.sessionMetadata),
+      teamAgents: forest,
     });
     this.teamViewController.seedFromSession(session);
     this.syncAdditionalDirs(session);

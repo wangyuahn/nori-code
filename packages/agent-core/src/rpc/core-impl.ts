@@ -31,6 +31,7 @@ import {
 import type { Logger } from '../logging/types';
 import { resolveSessionMcpConfig, mergeCallerMcpServers, type SessionMcpConfig } from '../mcp';
 import { Session, type SessionMeta, type SessionSkillConfig, type TeamReportRecord } from '../session';
+import { remapShadowTeamAgents } from '../session/department-runtime';
 import { mountedChildrenOf } from '../session/team-tree';
 import { exportSessionDirectory } from '../session/export';
 import {
@@ -1010,16 +1011,11 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
         lastTurnSkip: shadow.lastTurnSkip ?? null,
       });
     }
-    for (const [agentId, meta] of Object.entries(host.metadata.agents)) {
-      const chat = meta.chat;
-      if (chat?.messages === undefined) continue;
-      const messages = chat.messages.map((record) => (
-        record.agentId === input.agentId
-          ? { ...record, agentId: input.childSessionId }
-          : record
-      ));
-      host.metadata.agents[agentId] = { ...meta, chat: { ...chat, messages } };
-    }
+    host.metadata.agents = remapShadowTeamAgents(
+      host.metadata.agents,
+      input.agentId,
+      input.childSessionId,
+    );
     await host.flushMetadata();
     await this.detachMountedTeamMember({
       sessionId: input.sessionId,
