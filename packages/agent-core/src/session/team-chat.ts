@@ -1,5 +1,11 @@
 /** Validation shared by the TeamChat tool and the in-process session host. */
 
+/** Strip a leading `@` so `@frontend` and `frontend` are the same mention. */
+export function normalizeTeamMention(token: string): string {
+  const trimmed = token.trim();
+  return trimmed.startsWith('@') ? trimmed.slice(1).trim() : trimmed;
+}
+
 export function validateTeamChatMentions(
   message: string,
   mentions: readonly string[],
@@ -9,7 +15,7 @@ export function validateTeamChatMentions(
   const leadingMentions: string[] = [];
   for (const token of tokens) {
     if (!token.startsWith('@')) break;
-    const id = token.slice(1);
+    const id = normalizeTeamMention(token);
     if (id.length === 0 || id.includes('@')) {
       throw new Error('TeamChat messages must begin with one or more literal @session-id (or member name) mentions.');
     }
@@ -22,7 +28,7 @@ export function validateTeamChatMentions(
     );
   }
 
-  const normalizedMentions = mentions.map((id) => id.trim()).filter(Boolean);
+  const normalizedMentions = mentions.map(normalizeTeamMention).filter(Boolean);
   const hasAll = leadingMentions.includes('all') || normalizedMentions.includes('all');
   if (hasAll) {
     if (leadingMentions.length !== 1 || leadingMentions[0] !== 'all'

@@ -2008,7 +2008,13 @@ describe('SessionService department chat', () => {
     });
 
     const parentView = await svc.getDepartmentChat(parent.id, 'main');
-    expect(parentView).toEqual({ department_leader_agent_id: null, messages: [] });
+    expect(parentView).toEqual({
+      department_leader_agent_id: parent.id,
+      department_leader_session_id: parent.id,
+      messages: [
+        { message_id: 1, agent_id: child.id, name: 'Member', message: 'cache key changed', mentions: ['all'], sent_at: '2026-08-20T00:00:00.000Z' },
+      ],
+    });
   });
 });
 

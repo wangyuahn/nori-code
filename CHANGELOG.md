@@ -2,6 +2,40 @@
 
 > **Current product:** Team Engineering (department tree, Discuss/Assign, conversation map) is the only delegation path. Older entries below that describe SubAgent DAG orchestration, `nori_swarm_launch`, or SubAgent+Team coexistence are historical. See the root [README](README.md) for an honest comparison and gap list.
 
+## v2.0.0 (2026-09-19)
+
+First official 2.0. `2.0.0-pre.0` shipped the department rules — Discuss before Assign, no silent parallel work — but members were still in-session Team Agents sitting beside a separate map. Official 2.0 makes **every member a Session**. Hire, Discuss, Chat, `/team`, `/map`, and the web Map are one forest linked by `parent_session_id`. The pre-release proved the meeting; this release makes the runtime, the canvas, and the sidebar name the same people.
+
+### Compared with 2.0.0-pre.0
+
+- **One forest instead of two trees.** `TeamCreate` creates a real child session and mounts it. A map card is that session, not a ghost Team Agent. `TeamDismiss` deletes the child; unmount on the map detaches without deleting. A session has one parent — a second parent wire remounts rather than adding a part-time hire. Existing dual-write sessions migrate on load: the shadow parent-session team agent is bound to (or materialized as) a child session, then dropped.
+- **The map is a workspace, not a picture of the department.** Open a card to work in that session. Right-click empty canvas to create; right-click a card to add a child. Filter, select, tag, stop, unmount, and delete from the canvas. Extra jobs stay visual-only until applied. Overlapping cards stay visible as a compact stacked deck with a short motion, instead of jumping across the view or hiding under each other.
+- **Meetings and chat stay on screen.** Discuss and Chat in the inspector are always shown — they are not gated on whether a tool happens to be listed. Department Chat lives on the parent session and is relayed to members. Peers address each other with `TeamDM` / `TeamChat` by session id, display name, or aliases such as `agent-1`.
+- **`nori_ask_parent` is gone.** Members already reached the parent with `TeamDM`. One path up the tree.
+- **Identity follows the session.** Each session's prompt carries `<session_self>` (id, title, depth, parent, role, mandate, tags, direct members). Mount and identity changes inject `<session_mount_changed>` / `<session_identity_changed>` on the next turn, instead of copying transcripts to impersonate a teammate.
+- **The sidebar lists every session.** The web session list used to stop at the API's default page of 20, so older conversations vanished from project groups. It now walks the full list.
+- **TUI matches the forest.** `/team` is department membership (open a partner, read reports and this-round Discuss). `/map` is mount topology. Ctrl-Y opens Chat on the lead session. Both read the same child sessions as the web Map. Discuss turns are not aborted by a timeout: members speak one short point per round and continue across later rounds.
+
+That is the advantage over pre.0: the department you hired, the cards on the map, and the rows in the sidebar are the same objects. You do not reconcile three UIs to answer who is working.
+
+### Also since pre.0
+
+- Compact tool-call cards: specialized fields first, no dumped JSON arguments or empty placeholders.
+- Overlay scrollbars in the sidebar and file tree — hidden until the pointer is nearby.
+- Distinct thinking and tool icons in chat work groups; the thinking box scrolls inside its cap.
+- Session identity drawer and map console (filters, tags, batch actions).
+- Global error center in the web app.
+- README rewritten as an honest comparison with Codex, Claude Code, and Cursor, including the gaps (LSP, Git, sandbox, docs lag).
+
+### Thinking effort — do not use the highest tier
+
+Do not set the model to its highest thinking / reasoning effort. In real use that tier spends a large amount of tokens and does not produce better work. Medium, or the provider's default, is the right setting. The point is for you to do the job well yourself — not to pay for the model to ruminate at maximum cost.
+
+### Installers
+
+- **Nori Work** (macOS arm64/x64 dmg+zip, Windows x64 exe, Linux x64 AppImage+deb): [Releases](https://github.com/wangyuahn/nori-code/releases)
+- **Nori Code CLI** (any platform with Node.js `>=24.15.0`): `npm install -g nori-code`
+
 ## v2.0.0-pre.0 (2026-08-24)
 
 The major bump is one change: delegation. The temporary SubAgent is gone, and Team Engineering — a durable department tree whose members talk to each other — is now the only way Nori hands work to another agent.

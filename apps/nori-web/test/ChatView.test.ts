@@ -1555,6 +1555,10 @@ describe('conversation presentation', () => {
     expect(compactToolCallHeadline({ name: 'Read', args: { path: 'src/a.ts' } }, tr)).toBe('Read src/a.ts');
     expect(compactToolCallHeadline({ name: 'Bash', args: { command: 'ls -la' } }, tr)).toBe('Ran ls -la');
     expect(compactToolCallHeadline({ name: 'Glob', args: { pattern: '**/*.ts' } }, tr)).toBe('Searched **/*.ts');
+    expect(compactToolCallHeadline({
+      name: 'TeamDM',
+      args: { agent_id: 'agent-1', message: 'Please confirm the cache key.' },
+    }, tr)).toBe('TeamDM · agent-1 · Please confirm the cache key.');
     expect(summarizeWorkGroup([
       { id: 't1', type: 'tool', tool: { name: 'Read', args: { path: 'x.ts' } } },
       { id: 't2', type: 'tool', tool: { name: 'Bash', args: { command: 'echo hi' } } },

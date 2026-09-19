@@ -1318,6 +1318,27 @@ export function compactToolCallHeadline(tool: ToolCall, tr: (english: string, ch
     const url = firstString(args.url);
     return url ? tr(`Opened ${url}`, `打开 ${url}`) : tr('Browser action', '浏览器操作');
   }
+  if (normalized === 'teamdm') {
+    const recipient = firstString(args.agent_id) ?? tr('member', '成员');
+    const preview = previewToolText(firstString(args.message));
+    return preview
+      ? tr(`TeamDM · ${recipient} · ${preview}`, `TeamDM · ${recipient} · ${preview}`)
+      : tr(`TeamDM · ${recipient}`, `TeamDM · ${recipient}`);
+  }
+  if (normalized === 'teamchat') {
+    const mentions = Array.isArray(args.mentions)
+      ? args.mentions.filter((item): item is string => typeof item === 'string' && item.length > 0).join(', ')
+      : '';
+    const preview = previewToolText(firstString(args.message));
+    const target = mentions.length > 0 ? mentions : tr('department', '部门');
+    return preview
+      ? tr(`TeamChat · ${target} · ${preview}`, `TeamChat · ${target} · ${preview}`)
+      : tr(`TeamChat · ${target}`, `TeamChat · ${target}`);
+  }
+  if (normalized === 'teambroadcast' || normalized === 'teamspeak') {
+    const preview = previewToolText(firstString(args.message, args.statement));
+    return preview ? `${tool.name} · ${preview}` : tool.name;
+  }
   const summary = summarizeToolCall(tool, tr);
   return summary ? `${tool.name} · ${summary}` : tool.name;
 }
@@ -1350,6 +1371,13 @@ function summarizeToolCall(tool: ToolCall, tr: (english: string, chinese: string
 
 function firstString(...values: unknown[]): string | undefined {
   return values.find((value): value is string => typeof value === 'string' && value.length > 0);
+}
+
+function previewToolText(value: string | undefined, max = 72): string | undefined {
+  if (value === undefined) return undefined;
+  const compact = value.replace(/\s+/g, ' ').trim();
+  if (compact.length === 0) return undefined;
+  return compact.length <= max ? compact : `${compact.slice(0, max - 1)}…`;
 }
 
 function countLines(value: string): number {

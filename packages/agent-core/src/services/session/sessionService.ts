@@ -184,6 +184,26 @@ function pageContextMessages(
   };
 }
 
+function toDepartmentChatMessages(
+  records: ReadonlyArray<{
+    readonly messageId: number;
+    readonly agentId: string;
+    readonly name: string;
+    readonly message: string;
+    readonly mentions: readonly string[];
+    readonly sentAt: string;
+  }> | undefined,
+): SessionAgentChatResponse['messages'] {
+  return (records ?? []).map((record) => ({
+    message_id: record.messageId,
+    agent_id: record.agentId,
+    name: record.name,
+    message: record.message,
+    mentions: [...record.mentions],
+    sent_at: record.sentAt,
+  }));
+}
+
 export class SessionService extends Disposable implements ISessionService {
   readonly _serviceBrand: undefined;
 
@@ -1442,35 +1462,25 @@ export class SessionService extends Disposable implements ISessionService {
     if (parentId !== undefined) {
       await this.core.rpc.resumeSession({ sessionId: parentId }).catch(() => undefined);
       const parentMeta = await this.tryGetMeta(parentId);
-      const messages = (parentMeta?.agents['main']?.chat?.messages ?? []).map((record) => ({
-        message_id: record.messageId,
-        agent_id: record.agentId,
-        name: record.name,
-        message: record.message,
-        mentions: [...record.mentions],
-        sent_at: record.sentAt,
-      }));
       return {
         department_leader_agent_id: parentId,
         department_leader_session_id: parentId,
-        messages,
+        messages: toDepartmentChatMessages(parentMeta?.agents['main']?.chat?.messages),
       };
     }
     const meta = await this.tryGetMeta(id);
     const member = meta?.agents[agentId];
-    const leaderAgentId = member?.kind === 'team' ? member.teamLeaderAgentId : undefined;
-    if (leaderAgentId === undefined) {
-      return { department_leader_agent_id: null, messages: [] };
+    if (member?.kind === 'team' && member.teamLeaderAgentId !== undefined) {
+      return {
+        department_leader_agent_id: member.teamLeaderAgentId,
+        messages: toDepartmentChatMessages(meta?.agents[member.teamLeaderAgentId]?.chat?.messages),
+      };
     }
-    const messages = (meta?.agents[leaderAgentId]?.chat?.messages ?? []).map((record) => ({
-      message_id: record.messageId,
-      agent_id: record.agentId,
-      name: record.name,
-      message: record.message,
-      mentions: [...record.mentions],
-      sent_at: record.sentAt,
-    }));
-    return { department_leader_agent_id: leaderAgentId, messages };
+    return {
+      department_leader_agent_id: id,
+      department_leader_session_id: id,
+      messages: toDepartmentChatMessages(meta?.agents['main']?.chat?.messages),
+    };
   }
 
   async fillIdentity(id: string, brief: string): Promise<{ title: string; role: string; mandate: string }> {

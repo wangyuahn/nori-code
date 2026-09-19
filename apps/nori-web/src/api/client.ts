@@ -930,6 +930,47 @@ export function createClient(
     }
   }
 
+  /**
+   * GET /sessions defaults to 20 items. The sidebar and global error channel
+   * need the full forest, so walk `has_more` with the protocol max page size.
+   */
+  const SESSION_LIST_PAGE_SIZE = 100;
+  const SESSION_LIST_MAX_PAGES = 100;
+
+  async function listAllSessions(params?: {
+    status?: string;
+    include_archive?: boolean;
+    exclude_empty?: boolean;
+  }): Promise<{ items: Session[] }> {
+    const items: Session[] = [];
+    const seen = new Set<string>();
+    let beforeId: string | undefined;
+    for (let page = 0; page < SESSION_LIST_MAX_PAGES; page += 1) {
+      const data = await request<{ items: Session[]; has_more?: boolean }>('/sessions', {
+        status: params?.status,
+        include_archive: params?.include_archive,
+        exclude_empty: params?.exclude_empty,
+        page_size: SESSION_LIST_PAGE_SIZE,
+        before_id: beforeId,
+      });
+      const batch = data?.items ?? [];
+      for (const session of batch) {
+        if (seen.has(session.id)) continue;
+        seen.add(session.id);
+        items.push(session);
+      }
+      const lastId = batch.at(-1)?.id;
+      const hasMore =
+        data?.has_more === true
+        || (data?.has_more === undefined && batch.length >= SESSION_LIST_PAGE_SIZE);
+      if (!hasMore || batch.length === 0 || lastId === undefined || lastId === beforeId) {
+        break;
+      }
+      beforeId = lastId;
+    }
+    return { items };
+  }
+
   // === Public API ===
 
   return {
@@ -1023,11 +1064,7 @@ export function createClient(
         ),
 
       list: (params?: { status?: string; include_archive?: boolean; exclude_empty?: boolean }) =>
-        request<{ items: Session[] }>('/sessions', {
-          status: params?.status,
-          include_archive: params?.include_archive,
-          exclude_empty: params?.exclude_empty,
-        }),
+        listAllSessions(params),
 
       getActivity: () => request<{ items: SessionActivity[] }>('/sessions/activity'),
 
@@ -1482,11 +1519,7 @@ export function createClient(
       ),
 
     listSessions: (params?: { status?: string; include_archive?: boolean; exclude_empty?: boolean }) =>
-      request<{ items: Session[] }>('/sessions', {
-        status: params?.status,
-        include_archive: params?.include_archive,
-        exclude_empty: params?.exclude_empty,
-      }),
+      listAllSessions(params),
 
     getSession: (id: string) =>
       request<Session>(`/sessions/${encodeURIComponent(id)}`),

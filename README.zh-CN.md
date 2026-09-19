@@ -11,7 +11,7 @@ Nori 是一个从 [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code)（MIT
 ![Nori Work 浏览器工作区](docs/images/nori-work-browser.png)
 
 > [!NOTE]
-> 最新发布说明见 [CHANGELOG.md](CHANGELOG.md) 的 `v2.0.0-pre.0`。那一节才是当前委派模型的源。更早条目里的 SubAgent、DAG、`nori_swarm_launch` 描述的是已经拿掉的路径。
+> 最新发布说明见 [CHANGELOG.md](CHANGELOG.md) 的 `v2.0.0`。那一节才是当前委派模型的源。更早条目里的 SubAgent、DAG、`nori_swarm_launch` 描述的是已经拿掉的路径。
 
 ---
 
@@ -139,7 +139,7 @@ nori web
 
 需要 Node.js `>=24.15.0`（仓库 `engines`；`.npmrc` 开了 `engine-strict`）。首次进入项目目录后 `/login` 或 `/provider`。团队工作流见文档站 [团队工程](docs/zh/guides/team-engineering.md)。
 
-Nori Work 提供**独立安装包**：[Releases](https://github.com/wangyuahn/nori-code/releases)。当前桌面包版本号可能仍停在 1.x 标签；**委派模型以 v2 changelog 和这份 README 为准**。
+Nori Work 提供**独立安装包**：[Releases](https://github.com/wangyuahn/nori-code/releases)。当前桌面标签是 **2.0.0**；**委派模型以 v2 changelog 和这份 README 为准**。
 
 ### 从源码运行
 

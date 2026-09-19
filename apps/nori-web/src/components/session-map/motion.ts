@@ -2,7 +2,15 @@ import type { SimulationLinkDatum, SimulationNodeDatum } from 'd3-force';
 
 import { parentSessionIdOf } from '../../utils/session-mount';
 import { lookupMapPosition } from '../sessionMapDoc';
-import { CANVAS_PAD, GAP_Y, NODE_H, NODE_W, nodeKey } from './layout';
+import {
+  CANVAS_PAD,
+  GAP_Y,
+  NODE_H,
+  NODE_W,
+  nodeKey,
+  offsetSpawnFromSiblings,
+  untangleOverlappingCenters,
+} from './layout';
 import type { MapMemberRef, PlacedNode } from './layout';
 
 export const HOME_PULL_STRENGTH = 0.22;
@@ -11,7 +19,8 @@ export const SESSION_MAP_AMBIENT_HOME_GRAVITY = false;
 export const SETTLE_ALPHA = 0.38;
 export const LINK_STRENGTH = 0.02;
 export const LINK_DISTANCE = NODE_H + GAP_Y;
-export const COLLIDE_RADIUS = Math.min(NODE_W, NODE_H) / 2 + 8;
+/** Soft exclusion so coincident unpinned cards slide a short way, not a card-width. */
+export const COLLIDE_RADIUS = 20;
 
 export interface ForceMapNode extends SimulationNodeDatum {
   id: string;
@@ -223,12 +232,21 @@ export function buildForceMapNodes(input: {
     const hostPos = provisional.get(`session:${hostId}`)
       ?? lookupMapPosition(input.positions, `session:${hostId}`);
     if (hostPos === undefined) continue;
-    provisional.set(id, resolveMapNodeSpawnPosition({
+    const base = resolveMapNodeSpawnPosition({
       id,
       hostPosition: hostPos,
       seed: seeds.get(id),
-    }));
+    });
+    const occupied = [...provisional.entries()]
+      .filter(([otherId]) => otherId !== id)
+      .map(([, pos]) => pos);
+    provisional.set(id, offsetSpawnFromSiblings(occupied, base.x, base.y));
   }
+
+  const untangled = untangleOverlappingCenters(
+    [...provisional.entries()].map(([id, pos]) => ({ id, x: pos.x, y: pos.y })),
+  );
+  for (const [id, pos] of untangled) provisional.set(id, pos);
 
   const nodes: ForceMapNode[] = input.placed.map((placed) => {
     const id = nodeKey(placed.member);
@@ -258,31 +276,28 @@ export function forceIntraComponentCollide(
   strength: number,
 ): ((alpha: number) => void) & { initialize?: (nodes: ForceMapNode[]) => void } {
   let nodes: ForceMapNode[] = [];
+  const minDist = radius * 2;
+  const minDist2 = minDist * minDist;
   function force(alpha: number): void {
     for (let i = 0; i < nodes.length; i += 1) {
       const left = nodes[i]!;
-      const leftPinned = left.fx !== null && left.fx !== undefined
-        && left.fy !== null && left.fy !== undefined;
+      const leftPinned = hasPinnedForcePosition(left);
       for (let j = i + 1; j < nodes.length; j += 1) {
         const right = nodes[j]!;
         if (componentOf(left) !== componentOf(right)) continue;
-        const rightPinned = right.fx !== null && right.fx !== undefined
-          && right.fy !== null && right.fy !== undefined;
+        const rightPinned = hasPinnedForcePosition(right);
         if (leftPinned && rightPinned) continue;
-        const ax = left.x ?? 0;
-        const ay = left.y ?? 0;
-        const bx = right.x ?? 0;
-        const by = right.y ?? 0;
-        let dx = bx - ax;
-        let dy = by - ay;
-        let distance = Math.hypot(dx, dy);
-        if (distance === 0) {
+        let dx = (right.x ?? 0) - (left.x ?? 0);
+        let dy = (right.y ?? 0) - (left.y ?? 0);
+        let dist2 = dx * dx + dy * dy;
+        if (dist2 >= minDist2) continue;
+        if (dist2 === 0) {
           dx = 0.01;
           dy = 0.01;
-          distance = Math.hypot(dx, dy);
+          dist2 = 0.0002;
         }
-        if (distance >= radius * 2) continue;
-        const push = ((radius * 2 - distance) / distance) * alpha * strength;
+        const dist = Math.sqrt(dist2);
+        const push = ((minDist - dist) / dist) * alpha * strength;
         const px = dx * push * 0.5;
         const py = dy * push * 0.5;
         if (!leftPinned) {
@@ -300,4 +315,33 @@ export function forceIntraComponentCollide(
   }
   force.initialize = (initialized: ForceMapNode[]) => { nodes = initialized; };
   return force;
+}
+
+export function applyUntangledCenters(
+  nodes: Array<{
+    id: string;
+    x?: number;
+    y?: number;
+    fx?: number | null;
+    fy?: number | null;
+    vx?: number;
+    vy?: number;
+  }>,
+): Map<string, { x: number; y: number }> {
+  const untangled = untangleOverlappingCenters(
+    nodes.map((node) => ({ id: node.id, x: node.x ?? 0, y: node.y ?? 0 })),
+  );
+  for (const node of nodes) {
+    const pos = untangled.get(node.id);
+    if (pos === undefined) continue;
+    node.x = pos.x;
+    node.y = pos.y;
+    node.vx = 0;
+    node.vy = 0;
+    if (hasPinnedForcePosition(node)) {
+      node.fx = pos.x;
+      node.fy = pos.y;
+    }
+  }
+  return untangled;
 }

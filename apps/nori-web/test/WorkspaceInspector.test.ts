@@ -181,7 +181,7 @@ describe('workspace change presentation', () => {
     }
   });
 
-  it('offers Meeting and Chat as tools only for an agent inside a department', async () => {
+  it('always offers Meeting and Chat as tools', async () => {
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
@@ -212,8 +212,8 @@ describe('workspace change presentation', () => {
     try {
       await renderInspector({ selfAgentId: 'main' });
       await act(async () => container.querySelector<HTMLButtonElement>('.inspector-launcher-pick')!.click());
-      expect(menuLabels().some(label => /Meeting|开会/.test(label))).toBe(false);
-      expect(menuLabels().some(label => /Chat|交流/.test(label))).toBe(false);
+      expect(menuLabels().some(label => /Meeting|开会/.test(label))).toBe(true);
+      expect(menuLabels().some(label => /Chat|交流/.test(label))).toBe(true);
       await act(async () => container.querySelector<HTMLButtonElement>('.inspector-launcher-pick')!.click());
 
       await renderInspector({

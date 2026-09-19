@@ -9,7 +9,7 @@ function fields(tool: ToolCall): Record<string, string> {
 }
 
 describe('tool call detail fields', () => {
-  it('exposes name, arguments, result, status, duration, and error for every tool', () => {
+  it('shows specialized fields without duplicating name, raw JSON, or empty status rows', () => {
     expect(fields({
       id: 'read-1',
       name: 'Read',
@@ -17,25 +17,17 @@ describe('tool call detail fields', () => {
       result: 'file contents',
       startedAt: 1_000,
       endedAt: 1_250,
-    })).toMatchObject({
-      name: 'Read',
-      args: JSON.stringify({ path: 'src/app.ts' }, null, 2),
-      result: 'file contents',
-      status: 'Done',
-      duration: '250ms',
-      error: 'No error',
+    })).toEqual({
       path: 'src/app.ts',
+      result: 'file contents',
+      duration: '250ms',
     });
   });
 
-  it('uses explicit empty-state copy when arguments, result, duration, or error are missing', () => {
-    expect(fields({ id: 'pending-1', name: 'Bash' })).toMatchObject({
-      args: 'No arguments',
-      result: 'No result yet',
-      status: 'Running',
-      duration: 'No duration',
-      error: 'No error',
+  it('keeps a running marker and omits empty result/error/duration placeholders', () => {
+    expect(fields({ id: 'pending-1', name: 'Bash' })).toEqual({
       command: 'No command',
+      status: 'Running',
     });
     expect(fields({
       id: 'empty-1',
@@ -44,11 +36,7 @@ describe('tool call detail fields', () => {
       result: '',
       isError: false,
       endedAt: 2,
-    })).toMatchObject({
-      args: 'No arguments',
-      result: 'No return value',
-      status: 'Done',
-      error: 'No error',
+    })).toEqual({
       pattern: 'No pattern',
       path: 'No path',
     });
@@ -57,11 +45,9 @@ describe('tool call detail fields', () => {
       name: 'WebSearch',
       isError: true,
       endedAt: 3,
-    })).toMatchObject({
-      status: 'Failed',
-      result: 'No return value',
-      error: 'Tool failed without an error message',
+    })).toEqual({
       query: 'No query',
+      error: 'Tool failed without an error message',
     });
   });
 
@@ -76,7 +62,6 @@ describe('tool call detail fields', () => {
       },
       result: '[src/hooks/useApi.ts#C3D4]\nApplied 1 line operation to src/hooks/useApi.ts.',
     })).toMatchObject({
-      name: 'Edit',
       path: 'src/hooks/useApi.ts',
       tag: 'A1B2',
       operations: 'replace lines 2-2',
@@ -90,7 +75,7 @@ describe('tool call detail fields', () => {
       id: 'write-1',
       name: 'Write',
       args: { path: 'notes.md', content: '# hi' },
-    })).toMatchObject({ path: 'notes.md', content: '# hi', applied: 'No apply result' });
+    })).toEqual({ path: 'notes.md', content: '# hi', status: 'Running' });
     expect(fields({
       id: 'glob-1',
       name: 'Glob',
@@ -123,7 +108,20 @@ describe('tool call detail fields', () => {
       id: 'team-dm-1',
       name: 'TeamDM',
       args: { agent_id: 'agent-1', message: 'Status?' },
-    })).toMatchObject({ recipient: 'agent-1', message: 'Status?' });
+    })).toEqual({ recipient: 'agent-1', message: 'Status?', status: 'Running' });
+    expect(fields({
+      id: 'team-chat-1',
+      name: 'TeamChat',
+      args: { mentions: ['agent-1', 'all'], message: 'Cache key changed.' },
+      result: '{"posted":true}',
+      startedAt: 1,
+      endedAt: 2,
+    })).toEqual({
+      mentions: 'agent-1, all',
+      message: 'Cache key changed.',
+      result: '{"posted":true}',
+      duration: '1ms',
+    });
     // TeamSpeak has no recipient — a member speaks to its whole department — so
     // the recipient row must be absent rather than rendered as "unknown".
     expect(fields({

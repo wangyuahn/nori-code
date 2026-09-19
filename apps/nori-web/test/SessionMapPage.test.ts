@@ -29,7 +29,7 @@ import {
   NODE_H,
   NODE_W,
 } from '../src/components/SessionMapPage';
-import { GAP_X, offsetSpawnFromSiblings } from '../src/components/session-map/layout';
+import { STACK_NUDGE, offsetSpawnFromSiblings, stackOffsetsForOverlappingCards, untangleOverlappingCenters } from '../src/components/session-map/layout';
 import {
   describeMapCurrentAction,
   describeMapErrorSummary,
@@ -1191,6 +1191,42 @@ describe('SessionMapPage smoke', () => {
     expect(rebuilt.nodes.find((node) => node.id === 'session:child')).toMatchObject({
       x: 800, y: 400 + NODE_H + 64,
     });
+  });
+
+  it('spreads cached card centers that would draw on top of each other', () => {
+    const root = session({ id: 'root', title: 'Root' });
+    const child = session({ id: 'child', title: 'Child', metadata: { parent_session_id: 'root' } });
+    const extra = session({ id: 'extra', title: 'Extra', metadata: { parent_session_id: 'root' } });
+    const { placed } = layoutSessionMountForest({
+      nodes: [root, child, extra],
+      edges: [
+        { child_session_id: 'child', parent_session_id: 'root' },
+        { child_session_id: 'extra', parent_session_id: 'root' },
+      ],
+    });
+    const stacked = { x: 400, y: 400 };
+    const { nodes } = buildForceMapNodes({
+      placed,
+      previousById: new Map(),
+      positions: new Map([
+        ['session:root', stacked],
+        ['session:child', stacked],
+        ['session:extra', stacked],
+      ]),
+    });
+    const centers = nodes.map((node) => `${String(node.x)},${String(node.y)}`);
+    expect(new Set(centers).size).toBe(nodes.length);
+    expect(untangleOverlappingCenters([
+      { id: 'a', x: 10, y: 10 },
+      { id: 'b', x: 10, y: 10 },
+    ]).get('b')).toEqual({ x: 10 + STACK_NUDGE, y: 10 + STACK_NUDGE });
+    expect(Math.hypot(STACK_NUDGE, STACK_NUDGE)).toBeLessThan(NODE_W / 2);
+    const visuals = stackOffsetsForOverlappingCards([
+      { id: 'a', x: 0, y: 0 },
+      { id: 'b', x: 8, y: 8 },
+    ]);
+    expect(visuals.get('a')?.stackSize).toBe(2);
+    expect(visuals.get('b')?.offsetX).toBeGreaterThan(0);
   });
 
   it.skip('LMB marquee selects; right-click selection Annotate persists a note', async () => {
@@ -4253,8 +4289,8 @@ describe('redesigned conversation map contracts', () => {
   it('offsetSpawnFromSiblings shifts a new card off occupied siblings', () => {
     expect(offsetSpawnFromSiblings([], 10, 20)).toEqual({ x: 10, y: 20 });
     expect(offsetSpawnFromSiblings([{ x: 10, y: 20 }], 10, 20)).toEqual({
-      x: 10 + NODE_W + GAP_X,
-      y: 20,
+      x: 10 + STACK_NUDGE,
+      y: 20 + STACK_NUDGE,
     });
   });
 

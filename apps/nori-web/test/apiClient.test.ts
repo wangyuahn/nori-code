@@ -207,3 +207,37 @@ describe('sessionIdFromLocation', () => {
     expect(sessionIdFromLocation('/sessions/from-path', '#session=from-hash')).toBe('from-hash');
   });
 });
+
+describe('sessions.list', () => {
+  it('walks every page so the sidebar is not capped at the API default of 20', async () => {
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({ id: `session-${index}` }));
+    const secondPage = [{ id: 'session-100' }, { id: 'session-101' }];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost:3000');
+      const beforeId = url.searchParams.get('before_id');
+      const page = beforeId ? secondPage : firstPage;
+      return new Response(JSON.stringify({
+        code: 0,
+        msg: 'ok',
+        data: { items: page, has_more: !beforeId },
+      }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = createClient('http://localhost:3000');
+
+    const result = await client.sessions.list({ include_archive: true });
+
+    expect(result.items.map(session => session.id)).toEqual([
+      ...firstPage.map(session => session.id),
+      ...secondPage.map(session => session.id),
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const firstUrl = new URL(String(fetchMock.mock.calls[0]?.[0]), 'http://localhost:3000');
+    const secondUrl = new URL(String(fetchMock.mock.calls[1]?.[0]), 'http://localhost:3000');
+    expect(firstUrl.pathname).toBe('/api/v1/sessions');
+    expect(firstUrl.searchParams.get('page_size')).toBe('100');
+    expect(firstUrl.searchParams.get('include_archive')).toBe('true');
+    expect(firstUrl.searchParams.get('before_id')).toBeNull();
+    expect(secondUrl.searchParams.get('before_id')).toBe('session-99');
+  });
+});

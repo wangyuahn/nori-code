@@ -103,6 +103,7 @@ type HostSessionMember =
   | 'parentSessionId'
   | 'listDepartmentChildIds'
   | 'listDepartmentSiblingIds'
+  | 'refreshDepartmentDirectory'
   | 'unreadTeamDiscussionStatements'
   | 'updateTeamDiscussion';
 
@@ -158,6 +159,7 @@ function teamSessionDouble(parts: Partial<Record<HostSessionMember, unknown>>): 
     parentSessionId: vi.fn(() => undefined),
     listDepartmentChildIds: vi.fn(() => []),
     listDepartmentSiblingIds: vi.fn(() => []),
+    refreshDepartmentDirectory: vi.fn(async () => undefined),
     unreadTeamDiscussionStatements: vi.fn(async () => ({ statements: [], cursor: 0 })),
     // Echoes the patch back, which is what a real persist returns: the four
     // fields the callers then read off the updated discussion.

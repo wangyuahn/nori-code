@@ -56,11 +56,8 @@ describe('ChatView tool details and context injection', () => {
       details.open = true;
       details.dispatchEvent(new Event('toggle'));
     });
-    expect(container.textContent).toContain('Tool');
-    expect(container.textContent).toContain('Edit');
-    expect(container.textContent).toContain('Arguments');
     expect(container.textContent).toContain('src/a.ts');
-    expect(container.textContent).toContain('Result');
+    expect(container.textContent).not.toContain('Arguments');
     expect(container.textContent).toContain('Applied 1 line operation');
     expect(container.textContent).toContain('Duration');
     expect(container.textContent).toContain('400ms');

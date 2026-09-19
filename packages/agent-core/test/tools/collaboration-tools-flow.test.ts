@@ -77,6 +77,7 @@ function flowSession(parts: Record<string, unknown> = {}): Session {
     parentSessionId: vi.fn(() => undefined),
     listDepartmentChildIds: vi.fn(() => []),
     listDepartmentSiblingIds: vi.fn(() => []),
+    refreshDepartmentDirectory: vi.fn(async () => undefined),
     ensureAgentResumed: vi.fn(),
     ...parts,
   } as unknown as Session;
@@ -458,6 +459,46 @@ describe('TeamDM flow', () => {
       .resolves.toEqual({ delivered: true, processing: 'queued' });
     expect(steer).toHaveBeenCalledTimes(1);
   });
+
+  it('host flow DMs a sibling by display name when only the session snapshot has it', async () => {
+    const steer = vi.fn(() => null);
+    const host = new SessionSubagentHost(flowSession({
+      options: { id: 'sess_self', departmentRuntime: {
+        ensureMain: vi.fn(async () => busyAgent(steer)),
+        memberSnapshot: vi.fn(async (id: string) => (
+          id === 'sess_frontend'
+            ? { sessionId: id, name: 'agent-1', role: 'frontend', mandate: 'Ship UI.' }
+            : undefined
+        )),
+      } },
+      parentSessionId: vi.fn(() => 'sess_parent'),
+      listDepartmentSiblingIds: vi.fn(() => ['sess_frontend']),
+      getAgentMetadata: vi.fn(() => undefined),
+    }), 'main');
+    await expect(host.directMessage('@agent-1', 'I will touch parser.ts.', signal))
+      .resolves.toEqual({ delivered: true, processing: 'queued' });
+    expect(steer).toHaveBeenCalledTimes(1);
+  });
+
+  it('host flow DMs a sibling by role when the display name is a different alias', async () => {
+    const steer = vi.fn(() => null);
+    const host = new SessionSubagentHost(flowSession({
+      options: { id: 'sess_self', departmentRuntime: {
+        ensureMain: vi.fn(async () => busyAgent(steer)),
+        memberSnapshot: vi.fn(async (id: string) => (
+          id === 'sess_frontend'
+            ? { sessionId: id, name: 'agent-1', role: 'frontend', mandate: 'Ship UI.' }
+            : undefined
+        )),
+      } },
+      parentSessionId: vi.fn(() => 'sess_parent'),
+      listDepartmentSiblingIds: vi.fn(() => ['sess_frontend']),
+      getAgentMetadata: vi.fn(() => undefined),
+    }), 'main');
+    await expect(host.directMessage('frontend', 'I will touch parser.ts.', signal))
+      .resolves.toEqual({ delivered: true, processing: 'queued' });
+    expect(steer).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('TeamChat flow', () => {
@@ -539,6 +580,47 @@ describe('TeamChat flow', () => {
       'sess_self',
       'Sender',
       '@frontend Cache key changed.',
+      ['sess_frontend'],
+    );
+    expect(steer).toHaveBeenCalledTimes(1);
+  });
+
+  it('host flow delivers Chat when mentions still carry a leading @', async () => {
+    const steer = vi.fn(() => null);
+    const postChat = vi.fn(async () => ({
+      messageId: 4,
+      agentId: 'sess_self',
+      name: 'Sender',
+      message: '@frontend Cache key changed.',
+      mentions: ['sess_frontend'],
+      sentAt: '2026-08-20T00:00:00.000Z',
+    }));
+    const host = new SessionSubagentHost(flowSession({
+      options: {
+        id: 'sess_self',
+        departmentRuntime: {
+          postChat,
+          memberSnapshot: vi.fn(async (id: string) => (
+            id === 'sess_frontend'
+              ? { sessionId: id, name: 'agent-1', role: 'frontend', mandate: 'Ship UI.' }
+              : undefined
+          )),
+          ensureMain: vi.fn(async () => busyAgent(steer)),
+        },
+      },
+      parentSessionId: vi.fn(() => 'sess_parent'),
+      listDepartmentSiblingIds: vi.fn(() => ['sess_frontend']),
+      getAgentMetadata: vi.fn((id: string) => (
+        id === 'main' ? { name: 'Sender' } : undefined
+      )),
+    }), 'main');
+    const record = await host.sendChatMessage('@agent-1 Cache key changed.', ['@agent-1'], signal);
+    expect(record.mentions).toEqual(['sess_frontend']);
+    expect(postChat).toHaveBeenCalledWith(
+      'sess_parent',
+      'sess_self',
+      'Sender',
+      '@agent-1 Cache key changed.',
       ['sess_frontend'],
     );
     expect(steer).toHaveBeenCalledTimes(1);

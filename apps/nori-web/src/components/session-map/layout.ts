@@ -11,22 +11,159 @@ export const CANVAS_PAD = 48;
 export const MIN_SCALE = 0.2;
 export const MAX_SCALE = 4;
 export const FIT_MAX_SCALE = 1.35;
+/** Diagonal stagger for a coincident pile — a deck, not a full-card jump. */
+export const STACK_NUDGE = 18;
+/** Visual fan on a pile; kept close so the stack still reads as one group. */
+export const OVERLAP_STACK_STEP = 16;
+/** Centers this close are the same pile (edge-grazing neighbors stay put). */
+export const PILE_CENTER_SLACK = 56;
+/** Exact cached duplicates: only these get a world-space stagger. */
+export const COINCIDENT_SLACK = 10;
 
-/** Shift a new child so it does not land on an existing sibling card. */
+/** True when two card rectangles would draw on top of each other. */
+export function cardsOverlap(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  nodeW = NODE_W,
+  nodeH = NODE_H,
+): boolean {
+  return Math.abs(a.x - b.x) < nodeW && Math.abs(a.y - b.y) < nodeH;
+}
+
+/** True when two centers sit in the same pile, not a near-miss at the edge. */
+export function cardsPiled(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  slack = PILE_CENTER_SLACK,
+): boolean {
+  return Math.abs(a.x - b.x) < slack && Math.abs(a.y - b.y) < slack;
+}
+
+/** Shift a new child so it does not land on the exact same center. */
 export function offsetSpawnFromSiblings(
   occupied: ReadonlyArray<{ x: number; y: number }>,
   worldX: number,
   worldY: number,
-  nodeW = NODE_W,
-  gap = GAP_X,
+  _nodeW = NODE_W,
+  gap = STACK_NUDGE,
 ): { x: number; y: number } {
   let x = worldX;
+  let y = worldY;
   let guard = 0;
-  while (occupied.some((point) => Math.hypot(point.x - x, point.y - worldY) < nodeW * 0.85) && guard < 24) {
-    x += nodeW + gap;
+  while (occupied.some((point) => cardsPiled(point, { x, y }, COINCIDENT_SLACK)) && guard < 24) {
+    x += gap;
+    y += gap;
     guard += 1;
   }
-  return { x, y: worldY };
+  return { x, y };
+}
+
+/**
+ * Break identical cached centers into a compact deck. Overlap is allowed —
+ * the render stack shows it. This must not jump by a full card width.
+ */
+export function untangleOverlappingCenters(
+  nodes: ReadonlyArray<{ id: string; x: number; y: number }>,
+  _nodeW = NODE_W,
+  _nodeH = NODE_H,
+  gapX = STACK_NUDGE,
+  gapY = STACK_NUDGE,
+): Map<string, { x: number; y: number }> {
+  const next = nodes.map((node) => ({ ...node }));
+  for (let index = 1; index < next.length; index += 1) {
+    const current = next[index]!;
+    let guard = 0;
+    while (
+      guard < 24
+      && next.slice(0, index).some((previous) => cardsPiled(previous, current, COINCIDENT_SLACK))
+    ) {
+      current.x += gapX;
+      current.y += gapY;
+      guard += 1;
+    }
+  }
+  return new Map(next.map((node) => [node.id, { x: node.x, y: node.y }]));
+}
+
+/** Keep a dragged group together while sliding it off an identical center. */
+export function nudgeGroupOffOccupied(
+  group: ReadonlyArray<{ id: string; x: number; y: number }>,
+  occupied: ReadonlyArray<{ x: number; y: number }>,
+  _nodeW = NODE_W,
+  gap = STACK_NUDGE,
+): Map<string, { x: number; y: number }> {
+  let shiftX = 0;
+  let shiftY = 0;
+  let guard = 0;
+  while (
+    guard < 24
+    && group.some((pos) => occupied.some((point) => cardsPiled(point, {
+      x: pos.x + shiftX,
+      y: pos.y + shiftY,
+    }, COINCIDENT_SLACK)))
+  ) {
+    shiftX += gap;
+    shiftY += gap;
+    guard += 1;
+  }
+  return new Map(group.map((pos) => [pos.id, { x: pos.x + shiftX, y: pos.y + shiftY }]));
+}
+
+export interface CardOverlapVisual {
+  stackIndex: number;
+  stackSize: number;
+  offsetX: number;
+  offsetY: number;
+}
+
+/**
+ * Fan stacked cards so every overlapping card stays visible. Physics may still
+ * share a center; this is a render-only cascade plus a count for the top card.
+ */
+export function stackOffsetsForOverlappingCards(
+  nodes: ReadonlyArray<{ id: string; x: number; y: number }>,
+  _nodeW = NODE_W,
+  _nodeH = NODE_H,
+  step = OVERLAP_STACK_STEP,
+): Map<string, CardOverlapVisual> {
+  const parent = new Map<string, string>();
+  const find = (id: string): string => {
+    const entry = parent.get(id);
+    if (entry === undefined || entry === id) return id;
+    const root = find(entry);
+    parent.set(id, root);
+    return root;
+  };
+  const union = (left: string, right: string) => {
+    parent.set(find(left), find(right));
+  };
+  for (const node of nodes) parent.set(node.id, node.id);
+  for (let i = 0; i < nodes.length; i += 1) {
+    for (let j = i + 1; j < nodes.length; j += 1) {
+      if (cardsPiled(nodes[i]!, nodes[j]!)) union(nodes[i]!.id, nodes[j]!.id);
+    }
+  }
+  const groups = new Map<string, string[]>();
+  for (const node of nodes) {
+    const root = find(node.id);
+    const list = groups.get(root) ?? [];
+    list.push(node.id);
+    groups.set(root, list);
+  }
+  const visuals = new Map<string, CardOverlapVisual>();
+  for (const ids of groups.values()) {
+    ids.sort();
+    for (let index = 0; index < ids.length; index += 1) {
+      const stacked = ids.length > 1;
+      visuals.set(ids[index]!, {
+        stackIndex: index,
+        stackSize: ids.length,
+        offsetX: stacked ? index * step : 0,
+        offsetY: stacked ? index * step : 0,
+      });
+    }
+  }
+  return visuals;
 }
 
 export interface TreeView {

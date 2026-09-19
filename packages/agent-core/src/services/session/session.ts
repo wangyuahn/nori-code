@@ -83,9 +83,8 @@ export interface ISessionService {
   listAgents(id: string): Promise<SessionAgentTreeResponse>;
 
   /**
-   * The department Chat log visible from `agentId`. Only a team member sees
-   * its department's log; any other node (main, a lead, unknown id) gets an
-   * empty log with a null leader — the parent never reads its members' chat.
+   * The department Chat log visible from this session. Mounted members read
+   * the parent's sibling log; the parent session reads that same log.
    */
   getDepartmentChat(id: string, agentId: string): Promise<SessionAgentChatResponse>;
 

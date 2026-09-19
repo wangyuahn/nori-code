@@ -230,8 +230,9 @@ export type TeamChatMessage = z.infer<typeof teamChatMessageSchema>;
 
 /**
  * Sibling Chat for a mounted child Session. `department_leader_agent_id` /
- * `department_leader_session_id` is the parent Session. Null when the
- * requested session is not mounted — the parent never reads this log.
+ * `department_leader_session_id` is the parent Session. When the requested
+ * session is itself a department lead, those fields are its own id and the
+ * messages are its `main` chat log.
  */
 export const sessionAgentChatResponseSchema = z.object({
   department_leader_agent_id: sessionAgentIdSchema.nullable(),

@@ -31,6 +31,7 @@ import {
   NODE_H,
   NODE_W,
   offsetSpawnFromSiblings,
+  stackOffsetsForOverlappingCards,
   ensureGraphEdges,
   fitTreeView,
   layoutSessionMountForest,
@@ -131,6 +132,7 @@ export {
   LINK_STRENGTH,
   SESSION_MAP_AMBIENT_HOME_GRAVITY,
   SETTLE_ALPHA,
+  applyUntangledCenters,
   buildMapComponents,
   forceIntraComponentCollide,
   isComponentRootPin,
@@ -1614,13 +1616,16 @@ export function SessionMapPage({
           for (const node of forceNodesRef.current) {
             const x = node.x ?? 0;
             const y = node.y ?? 0;
-            node.x = x;
-            node.y = y;
-            node.fx = x;
-            node.fy = y;
             node.vx = 0;
             node.vy = 0;
-            positionsRef.current.set(node.id, { x, y });
+            if (!hasPinnedForcePosition(node)) {
+              node.fx = x;
+              node.fy = y;
+            }
+            positionsRef.current.set(node.id, {
+              x: hasPinnedForcePosition(node) ? node.fx : x,
+              y: hasPinnedForcePosition(node) ? node.fy : y,
+            });
           }
           persistPositions(positionsRef.current);
           scheduleRedraw();
@@ -2236,10 +2241,11 @@ export function SessionMapPage({
 
     // Dropping on empty space creates a draft node. The parent edge is
     // persisted as soon as the draft appears and remains until Esc/abandon.
-    const siblings = forceNodesRef.current
-      .filter((node) => parentSessionIdOf(node.member.session) === parentSessionId)
-      .map((node) => ({ x: node.x ?? worldX, y: node.y ?? worldY }));
-    const spawn = offsetSpawnFromSiblings(siblings, worldX, worldY + NODE_H / 2);
+    const occupied = forceNodesRef.current.map((node) => ({
+      x: node.x ?? worldX,
+      y: node.y ?? worldY,
+    }));
+    const spawn = offsetSpawnFromSiblings(occupied, worldX, worldY + NODE_H / 2);
     const draftId = `draft:${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
     setDraft({
       id: draftId,
@@ -2586,8 +2592,6 @@ export function SessionMapPage({
       if (groupNode === undefined) continue;
       const x = groupNode.x ?? 0;
       const y = groupNode.y ?? 0;
-      groupNode.x = x;
-      groupNode.y = y;
       groupNode.vx = 0;
       groupNode.vy = 0;
       groupNode.fx = x;
@@ -2791,10 +2795,11 @@ export function SessionMapPage({
         ), true);
         return;
       }
-      const siblings = forceNodesRef.current
-        .filter((node) => parentSessionIdOf(node.member.session) === parentId)
-        .map((node) => ({ x: node.x ?? worldX, y: node.y ?? worldY }));
-      const spawn = offsetSpawnFromSiblings(siblings, worldX, worldY + NODE_H / 2);
+      const occupied = forceNodesRef.current.map((node) => ({
+        x: node.x ?? worldX,
+        y: node.y ?? worldY,
+      }));
+      const spawn = offsetSpawnFromSiblings(occupied, worldX, worldY + NODE_H / 2);
       const draftId = `draft:${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
       setDraft({
         id: draftId,
@@ -3836,6 +3841,10 @@ export function SessionMapPage({
   const showUnappliedJobBar = selectedUnappliedEdge !== undefined
     && isUnappliedExtraJob(selectedUnappliedEdge)
     && workEdgeMenu === null;
+  const overlapById = stackOffsetsForOverlappingCards(
+    forceNodes.map((node) => ({ id: node.id, x: node.x ?? 0, y: node.y ?? 0 })),
+  );
+  const draggingNodeIds = dragRef.current?.groupNodeIds ?? [];
 
   return (
     <div className="view-page view-page-wide session-map-page">
@@ -4086,15 +4095,7 @@ export function SessionMapPage({
                     : workEdges[0]?.role
                       || workEdges[0]?.mandate?.split(/[\n.!?。！？]/, 1)[0]?.trim()
                       || memberRole(member);
-                  const parentCwd = workEdges.length === 1
-                    ? byId.get(workEdges[0]!.source)?.metadata?.cwd
-                    : undefined;
-                  const ownCwd = member.session.metadata?.cwd;
-                  const exceptionalCwd = typeof ownCwd === 'string' && ownCwd.trim()
-                    && typeof parentCwd === 'string' && parentCwd.trim()
-                    && ownCwd.trim() !== parentCwd.trim()
-                    ? ownCwd.trim()
-                    : undefined;
+                  const projectCwd = memberProjectCwd(member, byId);
                   const statusClass = mapStatusDotClass(caps.status);
                   const runtimeTone = mapRuntimeStatus(caps.status);
                   const runtimeSince = member.session.updated_at;
@@ -4110,6 +4111,8 @@ export function SessionMapPage({
                   const statusLabel = localizedMapStatus(caps.status, tr);
                   const left = Math.round((node.x ?? 0) - NODE_W / 2);
                   const top = Math.round((node.y ?? 0) - NODE_H / 2);
+                  const overlap = overlapById.get(node.id);
+                  const stacked = overlap !== undefined && overlap.stackSize > 1;
                   const isWireTarget = wireValidTargetIds.has(node.id);
                   const isWireSnap = wireSnapTargetId === node.id;
                   const isSearchMatch = query.trim().length > 0 && visibleIds.has(node.id);
@@ -4145,8 +4148,19 @@ export function SessionMapPage({
                         + (isWireSnap ? ' wire-target-snap' : '')
                         + (isSearchMatch ? ' search-match' : '')
                         + (searchFocusId === node.id ? ' search-match-current' : '')
+                        + (stacked ? ' overlapping' : '')
+                        + (draggingNodeIds.includes(node.id) ? ' is-dragging' : '')
                       }
-                      style={{ left, top, width: NODE_W, height: NODE_H }}
+                      style={{
+                        left,
+                        top,
+                        width: NODE_W,
+                        height: NODE_H,
+                        transform: stacked && overlap !== undefined
+                          ? `translate(${String(overlap.offsetX)}px, ${String(overlap.offsetY)}px)`
+                          : undefined,
+                        zIndex: stacked && overlap !== undefined ? 5 + overlap.stackIndex : undefined,
+                      }}
                       onPointerDown={(event) => startNodeDrag(event, node)}
                       onClick={(event) => handleNodeClick(member, event)}
                       onContextMenu={(event) => openNodeContextMenu(event, member)}
@@ -4162,6 +4176,17 @@ export function SessionMapPage({
                       tabIndex={0}
                       data-session-id={caps.isRealSession ? member.session.id : undefined}
                     >
+                      {stacked && overlap !== undefined && overlap.stackIndex === overlap.stackSize - 1 && (
+                        <span
+                          className="session-map-overlap-badge"
+                          title={tr(
+                            `${String(overlap.stackSize)} overlapping cards`,
+                            `${String(overlap.stackSize)} 张卡片叠在一起`,
+                          )}
+                        >
+                          {overlap.stackSize}
+                        </span>
+                      )}
                       {caps.canWireIn && (
                         <span
                           className={
@@ -4187,7 +4212,7 @@ export function SessionMapPage({
                           {runtimeElapsed !== undefined && <small className="session-map-runtime-elapsed">{runtimeElapsed}</small>}
                         </span>
                         {role && <span className="team-node-sub" title={role}>{role}</span>}
-                        {exceptionalCwd && <span className="team-node-project" title={exceptionalCwd}>{projectFolderName(exceptionalCwd)}</span>}
+                        {projectCwd && <span className="team-node-project" title={projectCwd}>{projectFolderName(projectCwd)}</span>}
                         {errorSummary === undefined && actionLabel !== undefined && (
                           <span
                             className="session-map-current-action"

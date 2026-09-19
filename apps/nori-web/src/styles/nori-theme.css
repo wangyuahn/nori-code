@@ -116,6 +116,38 @@ body {
   background: var(--nori-text-muted);
 }
 
+/* Sidebar list: keep a gutter, but only paint the thumb when the pointer is on it. */
+.sidebar-content,
+.file-tree {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.sidebar-content:hover,
+.sidebar-content:focus-within,
+.file-tree:hover,
+.file-tree:focus-within {
+  scrollbar-color: color-mix(in srgb, var(--nori-text-muted) 70%, transparent) transparent;
+}
+.sidebar-content::-webkit-scrollbar,
+.file-tree::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.sidebar-content::-webkit-scrollbar-thumb,
+.file-tree::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+.sidebar-content:hover::-webkit-scrollbar-thumb,
+.sidebar-content:focus-within::-webkit-scrollbar-thumb,
+.file-tree:hover::-webkit-scrollbar-thumb,
+.file-tree:focus-within::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--nori-text-muted) 70%, transparent);
+}
+.sidebar-content:hover::-webkit-scrollbar-thumb:hover,
+.file-tree:hover::-webkit-scrollbar-thumb:hover {
+  background: var(--nori-text-muted);
+}
+
 /* ── Focus Ring ────────────────────────────────────────────────────────── */
 
 :focus-visible {
@@ -2529,7 +2561,7 @@ kbd {
 .compact-tool-detail { display: grid; gap: 7px; margin: 0; padding: 8px 0 2px 26px; }
 .compact-tool-detail-row { display: grid; gap: 2px; min-width: 0; }
 .compact-tool-detail-row dt { color: var(--nori-text-muted); font-size: calc(8px * var(--nori-ui-font-scale)); }
-.compact-tool-detail-row dd { margin: 0; color: var(--nori-text-secondary); font: calc(10px * var(--nori-ui-font-scale))/1.45 var(--nori-font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.compact-tool-detail-row dd { margin: 0; max-height: 160px; overflow: auto; color: var(--nori-text-secondary); font: calc(10px * var(--nori-ui-font-scale))/1.45 var(--nori-font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .tool-edit-before dd { color: color-mix(in srgb, var(--nori-danger) 80%, var(--nori-text)); }
 .tool-edit-after dd { color: color-mix(in srgb, var(--nori-success) 80%, var(--nori-text)); }
 .tool-edit-diff dd { color: var(--nori-text-muted); }
@@ -4959,6 +4991,12 @@ kbd {
   padding: 10px 10px 14px;
   cursor: grab;
   touch-action: none;
+  transform: translate(0, 0);
+  transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.session-map-node.is-dragging {
+  transition: none;
+  cursor: grabbing;
 }
 .session-map-stop-button {
   position: absolute;
@@ -4988,6 +5026,28 @@ kbd {
   top: 16px;
   font-size: 9px;
   color: var(--nori-danger, #e5534b);
+}
+.session-map-node.overlapping {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--nori-accent, #6ea8fe) 55%, transparent),
+    6px 6px 0 color-mix(in srgb, var(--nori-bg-elevated, #1b1f27) 80%, #000);
+}
+.session-map-overlap-badge {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--nori-accent, #6ea8fe);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 18px;
+  text-align: center;
+  z-index: 9;
+  pointer-events: none;
 }
 .session-map-node:hover,
 .session-map-node:focus-within {

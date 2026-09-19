@@ -1,9 +1,9 @@
 /**
  * `/sessions/{session_id}/agents/{agent_id}/chat` REST route.
  *
- * GET → the department Chat log visible from `agentId` (siblings only; the
- * parent never participates, so a non-member agent id yields an empty log
- * rather than an error). Live updates arrive as `team.chat.updated` WS events.
+ * GET → the department Chat log visible from `agentId`. Mounted members read
+ * the parent's sibling log; the parent reads that same log. Live updates
+ * arrive as `team.chat.updated` WS events on the parent and every child.
  */
 
 import { ErrorCode, sessionAgentChatResponseSchema } from '@nori-code/protocol';

@@ -113,11 +113,9 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
   const activeTab = openTabs.find(item => item.id === activeTabId);
   const tab = activeTab?.tool ?? null;
 
-  // 交流：当前 Session 挂在别人下面（部门 chat 有 leader）且自己不是那个 leader。
   const departmentChatLeaderAgentId = departmentChat?.department_leader_agent_id
     ?? departmentChat?.department_leader_session_id
     ?? null;
-  const chatAvailable = departmentChatLeaderAgentId !== null && selfAgentId !== departmentChatLeaderAgentId;
   // 自己手下有成员，就意味着自己是能召集讨论的那个父级——哪怕现在还没开过一轮。
   const leadsADepartment = sessionAgents.some(candidate =>
     candidate.parent_agent_id === selfAgentId && candidate.kind !== 'discussion' && candidate.archived !== true);
@@ -139,12 +137,7 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
     ?? (leadsADepartment ? selfAgentId : null)
     ?? departmentChatLeaderAgentId
     ?? sessionId;
-  // 开会是部门语境里的常驻工具：轮次由父级自己召集，人类得随时能打开来看。
-  const meetingAvailable = discussion !== null || discussionNodeAgentId !== null || leadsADepartment || chatAvailable;
-  /** 开会/交流只有在这个 agent 真的处在部门里时才是可用工具。 */
-  const toolAvailable = (item: InspectorTab) =>
-    item === 'meeting' ? meetingAvailable : item === 'chat' ? chatAvailable : true;
-  const availableTools = tabOrder.filter(toolAvailable);
+  const availableTools = tabOrder;
   const launcherTool = tab ?? availableTools[0] ?? 'changes';
 
   // 选中一个文件就把预览推到前面——这是「点文件自动弹预览」那个行为本身。

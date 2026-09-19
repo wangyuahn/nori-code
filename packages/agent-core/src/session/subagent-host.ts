@@ -28,7 +28,7 @@ import type {
 } from './index';
 import TEAM_AGENT_EXECUTION_PROMPT from './team-agent-execution.md?raw';
 import { directMessageRelation } from './team-tree';
-import { validateTeamChatMentions } from './team-chat';
+import { normalizeTeamMention, validateTeamChatMentions } from './team-chat';
 
 const TEAM_DISCUSSION_CANCEL_SETTLE_GRACE_MS = 5_000;
 
@@ -225,13 +225,33 @@ export class SessionSubagentHost {
     return name.localeCompare(token, undefined, { sensitivity: 'accent' }) === 0;
   }
 
+  private matchesPeerLabel(
+    labels: readonly string[] | undefined,
+    token: string,
+  ): boolean {
+    return labels?.some((label) => this.matchesDisplayName(label, token)) === true;
+  }
+
+  private metadataLabels(id: string): readonly string[] {
+    const meta = this.session.getAgentMetadata(id);
+    if (meta === undefined) return [];
+    return [meta.name, meta.title, meta.role].filter(
+      (value): value is string => typeof value === 'string' && value.length > 0,
+    );
+  }
+
   private resolveMemberId(token: string): string {
-    const trimmed = token.trim();
+    const trimmed = normalizeTeamMention(token);
     if (trimmed.length === 0) return trimmed;
     const members = this.session.teamMemberMetadata(this.ownerAgentId);
     if (members.some(([id]) => id === trimmed)) return trimmed;
-    const byName = members.find(([, meta]) => this.matchesDisplayName(meta.name, trimmed));
-    if (byName !== undefined) return byName[0];
+    const byLabel = members.find(([, meta]) => this.matchesPeerLabel(
+      [meta.name, meta.title, meta.role].filter(
+        (value): value is string => typeof value === 'string' && value.length > 0,
+      ),
+      trimmed,
+    ));
+    if (byLabel !== undefined) return byLabel[0];
     const byMounted = members.find(([, meta]) => meta.mountedSessionId === trimmed);
     if (byMounted !== undefined) return byMounted[0];
     return trimmed;
@@ -240,64 +260,104 @@ export class SessionSubagentHost {
   private resolvePeerId(
     token: string,
     peerIds: readonly string[],
-    names?: ReadonlyMap<string, string>,
+    labels?: ReadonlyMap<string, readonly string[]>,
   ): string | undefined {
-    const trimmed = token.trim();
+    const trimmed = normalizeTeamMention(token);
     if (trimmed.length === 0) return undefined;
     if (peerIds.includes(trimmed)) return trimmed;
-    return peerIds.find((id) => this.matchesDisplayName(
-      names?.get(id) ?? this.session.getAgentMetadata(id)?.name,
+    return peerIds.find((id) => this.matchesPeerLabel(
+      labels?.get(id) ?? this.metadataLabels(id),
       trimmed,
     ));
+  }
+
+  private async loadPeerLabels(peerIds: readonly string[]): Promise<Map<string, readonly string[]>> {
+    const labels = new Map<string, string[]>();
+    const add = (id: string, value: string | undefined) => {
+      if (value === undefined || value.length === 0) return;
+      const existing = labels.get(id) ?? [];
+      if (existing.some((item) => this.matchesDisplayName(item, value))) return;
+      labels.set(id, [...existing, value]);
+    };
+    for (const id of peerIds) {
+      for (const value of this.metadataLabels(id)) add(id, value);
+    }
+    const runtime = this.session.options.departmentRuntime;
+    if (runtime === undefined) return labels;
+    await Promise.all(peerIds.map(async (id) => {
+      const snapshot = await runtime.memberSnapshot(id);
+      if (snapshot === undefined) return;
+      add(id, snapshot.name);
+      add(id, snapshot.role);
+    }));
+    return labels;
   }
 
   private async resolveChatMentions(
     mentions: readonly string[],
     peerIds: readonly string[],
   ): Promise<readonly string[]> {
-    const names = new Map<string, string>();
-    for (const id of peerIds) {
-      const name = this.session.getAgentMetadata(id)?.name;
-      if (name !== undefined && name.length > 0) names.set(id, name);
-    }
-    const runtime = this.session.options.departmentRuntime;
-    if (runtime !== undefined) {
-      const missing = peerIds.filter((id) => !names.has(id));
-      if (missing.length > 0) {
-        await Promise.all(missing.map(async (id) => {
-          const snapshot = await runtime.memberSnapshot(id);
-          if (snapshot !== undefined && snapshot.name.length > 0) names.set(id, snapshot.name);
-        }));
-      }
-    }
+    const labels = await this.loadPeerLabels(peerIds);
     return mentions.map((token) => {
-      if (token.trim() === 'all') return 'all';
-      return this.resolvePeerId(token, peerIds, names) ?? token;
+      const normalized = normalizeTeamMention(token);
+      if (normalized === 'all') return 'all';
+      return this.resolvePeerId(normalized, peerIds, labels) ?? normalized;
     });
   }
 
-  private resolveDirectMessageTarget(
+  private formatReachableDirectory(
+    parentId: string | undefined,
+    children: readonly string[],
+    siblings: readonly string[],
+    labels: ReadonlyMap<string, readonly string[]>,
+  ): string {
+    const format = (id: string): string => {
+      const names = (labels.get(id) ?? []).filter((label) => !this.matchesDisplayName(label, id));
+      return names.length === 0 ? id : `${id} (${names.join(', ')})`;
+    };
+    const parts: string[] = [];
+    if (parentId !== undefined) parts.push(`parent ${format(parentId)}`);
+    if (children.length > 0) parts.push(`members ${children.map(format).join(', ')}`);
+    if (siblings.length > 0) parts.push(`peers ${siblings.map(format).join(', ')}`);
+    return parts.length === 0 ? '' : ` Reachable: ${parts.join('; ')}.`;
+  }
+
+  private async resolveDirectMessageTarget(
     targetId: string,
-  ): { readonly id: string; readonly relation: 'parent' | 'sibling' | 'member' } | undefined {
-    const token = targetId.trim();
+  ): Promise<{
+    readonly target?: { readonly id: string; readonly relation: 'parent' | 'sibling' | 'member' };
+    readonly directory: string;
+  }> {
+    await this.session.refreshDepartmentDirectory();
+    const token = normalizeTeamMention(targetId);
     const parentId = this.session.parentSessionId();
     const selfId = this.session.options.id;
     const children = this.session.listDepartmentChildIds();
-    const siblings = this.session.listDepartmentSiblingIds();
-    if (parentId !== undefined && (token === 'parent' || token === parentId)) {
-      return { id: parentId, relation: 'parent' };
+    const siblings = this.session.listDepartmentSiblingIds().filter((id) => id !== selfId);
+    const labels = await this.loadPeerLabels([
+      ...children,
+      ...siblings,
+      ...(parentId === undefined ? [] : [parentId]),
+    ]);
+    const directory = this.formatReachableDirectory(parentId, children, siblings, labels);
+    if (parentId !== undefined && (
+      token === 'parent'
+      || token === parentId
+      || this.matchesPeerLabel(labels.get(parentId), token)
+    )) {
+      return { target: { id: parentId, relation: 'parent' }, directory };
     }
-    const child = this.resolveMemberId(token);
-    if (children.includes(child)) return { id: child, relation: 'member' };
-    const sibling = this.resolvePeerId(token, siblings);
-    if (sibling !== undefined && sibling !== selfId) return { id: sibling, relation: 'sibling' };
+    const child = this.resolvePeerId(token, children, labels) ?? this.resolveMemberId(token);
+    if (children.includes(child)) return { target: { id: child, relation: 'member' }, directory };
+    const sibling = this.resolvePeerId(token, siblings, labels);
+    if (sibling !== undefined) return { target: { id: sibling, relation: 'sibling' }, directory };
     const sender = this.session.getAgentMetadata(this.ownerAgentId);
     const relation = directMessageRelation(
       { agentId: this.ownerAgentId, node: sender },
       { agentId: token, node: this.session.getAgentMetadata(token) },
     );
-    if (relation === undefined) return undefined;
-    return { id: token, relation };
+    if (relation === undefined) return { directory };
+    return { target: { id: token, relation }, directory };
   }
 
   private async resumeReachable(id: string): Promise<Agent> {
@@ -490,13 +550,14 @@ export class SessionSubagentHost {
     report?: { readonly status: 'completed' | 'blocked' | 'needs_decision'; readonly summary: string },
   ): Promise<TeamDirectMessageDelivery> {
     signal.throwIfAborted();
-    const resolved = this.resolveDirectMessageTarget(targetAgentId);
-    if (resolved === undefined) {
+    const resolved = await this.resolveDirectMessageTarget(targetAgentId);
+    if (resolved.target === undefined) {
       throw new Error(
-        `TeamDM target "${targetAgentId}" is not reachable from here. You may message your parent, the members you hired, or a peer in the same department.`,
+        `TeamDM target "${targetAgentId}" is not reachable from here. You may message your parent, the members you hired, or a peer in the same department.`
+        + resolved.directory,
       );
     }
-    const { id: resolvedId, relation } = resolved;
+    const { id: resolvedId, relation } = resolved.target;
     const sender = this.session.getAgentMetadata(this.ownerAgentId);
     const reportToParent = report;
     if (reportToParent !== undefined && relation !== 'parent') {
@@ -601,7 +662,10 @@ export class SessionSubagentHost {
     }
     const leaderAgentId = sender.teamLeaderAgentId;
     const members = this.session.teamMemberMetadata(leaderAgentId);
-    const resolvedMentions = mentions.map((id) => id === 'all' ? 'all' : this.resolveMemberId(id));
+    const resolvedMentions = mentions.map((id) => {
+      const normalized = normalizeTeamMention(id);
+      return normalized === 'all' ? 'all' : this.resolveMemberId(normalized);
+    });
     const targets = resolvedMentions.includes('all')
       ? members.filter(([agentId]) => agentId !== this.ownerAgentId)
       : members.filter(([agentId]) => agentId !== this.ownerAgentId && resolvedMentions.includes(agentId));
@@ -658,13 +722,21 @@ export class SessionSubagentHost {
     if (runtime === undefined) {
       throw new Error('Chat is only available to a member of a department.');
     }
+    await this.session.refreshDepartmentDirectory();
     const siblings = this.session.listDepartmentSiblingIds();
     const resolvedMentions = await this.resolveChatMentions(mentions, siblings);
     const unknown = resolvedMentions.filter((id) => id !== 'all' && !siblings.includes(id));
     if (unknown.length > 0) {
+      const labels = await this.loadPeerLabels(siblings);
+      const listed = siblings.length === 0
+        ? 'none'
+        : siblings.map((id) => {
+            const names = (labels.get(id) ?? []).filter((label) => label !== id);
+            return names.length === 0 ? id : `${id} (${names.join(', ')})`;
+          }).join(', ');
       throw new Error(
         `Chat mention target(s) not in this department: ${unknown.join(', ')}. `
-        + `Chat only reaches your siblings (${siblings.length > 0 ? siblings.join(', ') : 'none'}) or "all"; `
+        + `Chat only reaches your siblings (${listed}) or "all"; `
         + 'to reach your lead use TeamDM instead.',
       );
     }

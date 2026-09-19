@@ -1485,7 +1485,13 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       },
       publishDiscussionStatement: async (parentSessionId: string, speakerSessionId: string, message: string) => {
         const parent = await this.sessionRef(parentSessionId);
-        return parent.publishMountedMemberDiscussionStatement(speakerSessionId, message);
+        const result = await parent.publishMountedMemberDiscussionStatement(speakerSessionId, message);
+        await this.relayDepartmentEvent(parentSessionId, {
+          type: 'discussion.updated',
+          discussionAgentId: result.discussionAgentId,
+          kind: 'message',
+        });
+        return result;
       },
       postChat: async (
         parentSessionId: string,
@@ -1495,7 +1501,13 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
         mentions: readonly string[],
       ) => {
         const parent = await this.sessionRef(parentSessionId);
-        return parent.postTeamChatMessage('main', senderSessionId, senderName, message, mentions);
+        const record = await parent.postTeamChatMessage('main', senderSessionId, senderName, message, mentions);
+        await this.relayDepartmentEvent(parentSessionId, {
+          type: 'team.chat.updated',
+          departmentLeaderAgentId: 'main',
+          senderAgentId: senderSessionId,
+        });
+        return record;
       },
       migrateShadowTranscript: async (hostSessionId: string, agentId: string, childSessionId: string) => {
         const host = await this.sessionRef(hostSessionId);
@@ -1516,6 +1528,24 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
         );
       },
     };
+  }
+
+  private async relayDepartmentEvent(
+    parentSessionId: string,
+    event: Record<string, unknown> & { type: 'team.chat.updated' | 'discussion.updated' },
+  ): Promise<void> {
+    const parentById = await this.listMountParentById();
+    const children = mountedChildrenOf(parentById, parentSessionId);
+    if (children.length === 0) return;
+    const sdk = await this.sdk;
+    for (const sessionId of children) {
+      const agentId = event['agentId'];
+      void sdk.emitEvent({
+        ...event,
+        agentId: typeof agentId === 'string' ? agentId : 'main',
+        sessionId,
+      } as never);
+    }
   }
 
   private createTopologyRuntime(): SessionTopologyRuntime {

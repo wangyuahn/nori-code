@@ -10,15 +10,25 @@ export interface ToolDetailField {
 type Translate = (english: string, chinese: string) => string;
 
 export function toolCallDetailFields(tool: ToolCall, tr: Translate): ToolDetailField[] {
-  return [
-    { key: 'name', label: tr('Tool', '工具名'), value: tool.name.trim() || tr('Unknown tool', '未知工具') },
-    { key: 'args', label: tr('Arguments', '参数'), value: formatArguments(tool.args, tr) },
-    { key: 'result', label: tr('Result', '返回值'), value: formatResult(tool, tr) },
-    { key: 'status', label: tr('Status', '执行状态'), value: formatStatus(tool, tr) },
-    { key: 'duration', label: tr('Duration', '耗时'), value: formatDuration(tool, tr) },
-    { key: 'error', label: tr('Error', '错误'), value: formatError(tool, tr) },
-    ...specializedFields(tool, tr),
-  ];
+  const specialized = specializedFields(tool, tr);
+  const fields: ToolDetailField[] = [...specialized];
+  if (specialized.length === 0) {
+    fields.push({ key: 'args', label: tr('Arguments', '参数'), value: formatArguments(tool.args, tr) });
+  }
+  const result = tool.result?.trim();
+  const applied = specialized.find(field => field.key === 'applied')?.value;
+  if (result !== undefined && result.length > 0 && result !== applied) {
+    fields.push({ key: 'result', label: tr('Result', '返回值'), value: result });
+  }
+  if (tool.isError === true) {
+    fields.push({ key: 'error', label: tr('Error', '错误'), value: formatError(tool, tr) });
+  }
+  if (tool.startedAt !== undefined && tool.endedAt !== undefined) {
+    fields.push({ key: 'duration', label: tr('Duration', '耗时'), value: formatDuration(tool, tr) });
+  } else if (tool.result === undefined && tool.endedAt === undefined && tool.isError !== true) {
+    fields.push({ key: 'status', label: tr('Status', '执行状态'), value: tr('Running', '运行中') });
+  }
+  return fields;
 }
 
 export function formatArguments(args: unknown, tr: Translate): string {
@@ -32,22 +42,6 @@ export function formatArguments(args: unknown, tr: Translate): string {
   } catch {
     return tr('No arguments', '无参数');
   }
-}
-
-function formatResult(tool: ToolCall, tr: Translate): string {
-  if (tool.result === undefined) {
-    return tool.endedAt === undefined && tool.isError !== true
-      ? tr('No result yet', '尚未返回')
-      : tr('No return value', '无返回值');
-  }
-  if (tool.result.trim() === '') return tr('No return value', '无返回值');
-  return tool.result;
-}
-
-function formatStatus(tool: ToolCall, tr: Translate): string {
-  if (tool.isError === true) return tr('Failed', '失败');
-  if (tool.result === undefined && tool.endedAt === undefined) return tr('Running', '运行中');
-  return tr('Done', '完成');
 }
 
 function formatDuration(tool: ToolCall, tr: Translate): string {
@@ -104,6 +98,12 @@ function specializedFields(tool: ToolCall, tr: Translate): ToolDetailField[] {
   if (normalized === 'teamassign') {
     return [{ key: 'assignments', label: tr('Assignments', '任务分配'), value: assignmentSummary(args.assignments, tr) }];
   }
+  if (normalized === 'teamchat') {
+    return [
+      { key: 'mentions', label: tr('Mentions', '提及'), value: mentionSummary(args.mentions, tr) },
+      { key: 'message', label: tr('Message', '消息'), value: firstString(args.message) ?? tr('No message', '无消息') },
+    ];
+  }
   if (normalized === 'teamdm' || normalized === 'teambroadcast' || normalized === 'teamspeak') {
     return [
       ...(firstString(args.agent_id) === undefined
@@ -130,7 +130,7 @@ function editFields(args: Record<string, unknown>, tool: ToolCall, tr: Translate
       { key: 'tag', label: tr('Expected tag', '预期哈希'), value: firstString(args.expected_tag) ?? tr('No content tag', '无内容哈希') },
       { key: 'operations', label: tr('Line operations', '行操作'), value: operations.map(editOperationLabel).join('\n') },
       { key: 'diff', label: tr('Changes', '更改'), value: editLineOperationsDiff(args.line_ops).join('\n') },
-      { key: 'applied', label: tr('Apply result', '应用结果'), value: tool.result?.trim() || tr('No apply result', '无应用结果') },
+      ...appliedField(tool, tr),
     ];
   }
   const before = firstString(args.old_string, args.old_text);
@@ -140,7 +140,7 @@ function editFields(args: Record<string, unknown>, tool: ToolCall, tr: Translate
     { key: 'before', label: tr('Before', '编辑前'), value: before ?? tr('No original text', '无编辑前内容') },
     { key: 'after', label: tr('After', '编辑后'), value: after ?? tr('No replacement text', '无编辑后内容') },
     { key: 'diff', label: tr('Diff', '对照'), value: formatEditDiff(before, after, tr) },
-    { key: 'applied', label: tr('Apply result', '应用结果'), value: tool.result?.trim() || tr('No apply result', '无应用结果') },
+    ...appliedField(tool, tr),
   ];
 }
 
@@ -148,8 +148,14 @@ function writeFields(args: Record<string, unknown>, tool: ToolCall, tr: Translat
   return [
     { key: 'path', label: tr('File path', '文件路径'), value: firstString(args.path, args.file_path, args.filename) ?? tr('No file path', '无文件路径') },
     { key: 'content', label: tr('Content', '写入内容'), value: firstString(args.content, args.new_string, args.new_text) ?? tr('No content', '无写入内容') },
-    { key: 'applied', label: tr('Apply result', '应用结果'), value: tool.result?.trim() || tr('No apply result', '无应用结果') },
+    ...appliedField(tool, tr),
   ];
+}
+
+function appliedField(tool: ToolCall, tr: Translate): ToolDetailField[] {
+  const result = tool.result?.trim();
+  if (result === undefined || result.length === 0) return [];
+  return [{ key: 'applied', label: tr('Apply result', '应用结果'), value: result }];
 }
 
 function pathFields(args: Record<string, unknown>, tr: Translate, extra: ToolDetailField[]): ToolDetailField[] {
@@ -190,6 +196,12 @@ export function formatEditDiff(before: string | undefined, after: string | undef
     if (right !== undefined) lines.push(`+${right}`);
   }
   return lines.length > 0 ? lines.join('\n') : tr('No before/after text', '无前后对照');
+}
+
+function mentionSummary(value: unknown, tr: Translate): string {
+  if (!Array.isArray(value) || value.length === 0) return tr('No mentions', '无提及');
+  const names = value.filter((item): item is string => typeof item === 'string' && item.length > 0);
+  return names.length > 0 ? names.join(', ') : tr('No mentions', '无提及');
 }
 
 function memberSummary(value: unknown, tr: Translate): string {
