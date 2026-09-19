@@ -843,9 +843,10 @@ export class SessionService extends Disposable implements ISessionService {
       return updated;
     }
     await this.assertAcyclicMount(id, input.parent_session_id);
-    const role = normalizeOptionalString(input.role);
-    const mandate = normalizeOptionalString(input.mandate);
-    const name = normalizeOptionalString(input.name);
+    const identity = await this.resolveMountMemberIdentity(id, input.role, input.mandate);
+    const name = normalizeOptionalString(input.name) ?? identity.name;
+    const role = identity.role;
+    const mandate = identity.mandate;
     await this.writeMountMetadata(id, {
       parentSessionId: input.parent_session_id,
       role,

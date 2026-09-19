@@ -769,6 +769,7 @@ export class Session {
       );
     }
     validateTeamIdentity(input.identity);
+    await this.assertCanCreateDepartment(input.parentSessionId);
     return create({
       parentSessionId: input.parentSessionId,
       title: input.identity.name,

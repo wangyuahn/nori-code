@@ -93,7 +93,10 @@ export class SessionSubagentHost {
       throw new Error('TeamCreate requires a session id.');
     }
     const ownerMeta = this.session.getAgentMetadata(this.ownerAgentId);
-    const mountParentId = ownerMeta?.mountedSessionId ?? currentSessionId;
+    const forestParentId = this.ownerAgentId !== 'main' && this.ownerAgentId !== currentSessionId
+      ? this.ownerAgentId
+      : currentSessionId;
+    const mountParentId = ownerMeta?.mountedSessionId ?? forestParentId;
     const created: Array<{
       readonly agentId: string;
       readonly sessionId: string;
@@ -688,7 +691,9 @@ export class SessionSubagentHost {
     }
     const colleagues = this.departmentColleagues();
     return {
-      agent_id: this.session.options.id ?? this.ownerAgentId,
+      agent_id: this.ownerAgentId === 'main'
+        ? (this.session.options.id ?? this.ownerAgentId)
+        : this.ownerAgentId,
       ...(colleagues.parentAgentId === undefined ? {} : { parent_agent_id: colleagues.parentAgentId }),
       member_count: members.length,
       message: statusMessage(members.length, colleagues.peers.length),

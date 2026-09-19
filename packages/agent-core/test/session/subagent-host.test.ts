@@ -100,6 +100,9 @@ type HostSessionMember =
   | 'recordTeamTurnSkip'
   | 'releaseTeamAssignment'
   | 'teamMemberMetadata'
+  | 'parentSessionId'
+  | 'listDepartmentChildIds'
+  | 'listDepartmentSiblingIds'
   | 'unreadTeamDiscussionStatements'
   | 'updateTeamDiscussion';
 
@@ -119,6 +122,7 @@ type HostSessionMember =
 function teamSessionDouble(parts: Partial<Record<HostSessionMember, unknown>>): Session {
   return {
     metadata: { agents: {} },
+    options: { id: 'test-session' },
     acknowledgeTeamDiscussionStatements: vi.fn(async () => undefined),
     acknowledgeTeamReport: vi.fn(async () => undefined),
     activeTeamDiscussion: vi.fn(() => undefined),
@@ -151,6 +155,9 @@ function teamSessionDouble(parts: Partial<Record<HostSessionMember, unknown>>): 
     recordTeamTurnSkip: vi.fn(async () => undefined),
     releaseTeamAssignment: vi.fn(async () => undefined),
     teamMemberMetadata: vi.fn(() => []),
+    parentSessionId: vi.fn(() => undefined),
+    listDepartmentChildIds: vi.fn(() => []),
+    listDepartmentSiblingIds: vi.fn(() => []),
     unreadTeamDiscussionStatements: vi.fn(async () => ({ statements: [], cursor: 0 })),
     // Echoes the patch back, which is what a real persist returns: the four
     // fields the callers then read off the updated discussion.
@@ -1806,7 +1813,7 @@ describe('Session.createAgent', () => {
 
     expect(member.agent.config.systemPrompt.startsWith('<team_identity>')).toBe(true);
     expect(member.agent.config.systemPrompt).toContain('Name: Reviewer');
-    expect(member.agent.config.systemPrompt).toContain('Your **parent** is the agent that hired you');
+    expect(member.agent.config.systemPrompt).toContain('Your **parent** is the Session that hired you');
     // A member manages its own department, so the prompt must hand it the rules
     // for that rather than telling it management is somebody else's job.
     expect(member.agent.config.systemPrompt).toContain('### Managing your own department');
@@ -1814,8 +1821,8 @@ describe('Session.createAgent', () => {
     expect(member.agent.config.systemPrompt).not.toContain('Team management belongs to the main Agent');
     expect(member.agent.config.systemPrompt).toContain('`Write`, `Edit`, and `Bash` are denied until it closes');
     expect(member.agent.config.systemPrompt).not.toContain('SubAgent');
-    expect(member.agent.config.systemPrompt).toContain('exactly one agent: a peer, a member you hired, or your parent');
-    expect(member.agent.config.systemPrompt).toContain('every peer in your department, all at once');
+    expect(member.agent.config.systemPrompt).toContain('exactly one Session: a peer, a member you hired, or your parent');
+    expect(member.agent.config.systemPrompt).toContain('every peer Session in your department, all at once');
     // The routing rule the member must not get wrong: a handoff goes to the peer
     // that continues the work, never up to the parent to be passed along.
     expect(member.agent.config.systemPrompt).toContain('Your parent is a recipient in its own right, never a relay');
@@ -1833,7 +1840,7 @@ describe('Session.createAgent', () => {
     expect(member.agent.config.systemPrompt).toContain('Never overwrite verified work');
     expect(member.agent.config.systemPrompt.match(/## Team Engineering/g)).toHaveLength(1);
     expect(member.agent.config.systemPrompt).not.toContain('Swarm');
-    expect(member.agent.config.systemPrompt).not.toContain('Graph');
+    expect(member.agent.config.systemPrompt).not.toContain('DAG');
     expect(member.agent.config.systemPrompt).not.toContain('You are the main lead');
     await member.agent.refreshSystemPrompt();
     expect(member.agent.config.systemPrompt.startsWith('<team_identity>')).toBe(true);
@@ -1973,7 +1980,7 @@ describe('Session.createAgent', () => {
     // A discussion transcript records a department's discussion; it is not a
     // node in the tree, so it manages nothing.
     const transcriptHost = new SessionSubagentHost(session, transcript.id);
-    const refused = 'Only the main agent and Team Agents manage a department.';
+    const refused = 'Only a Session that chairs a department can manage it.';
     await expect(transcriptHost.inviteToDiscussion([member.id])).rejects.toThrow(refused);
     await expect(transcriptHost.kickFromDiscussion([member.id])).rejects.toThrow(refused);
     await expect(transcriptHost.decideTeamDiscussion('continue', undefined, undefined, signal))
@@ -2910,7 +2917,7 @@ describe('Session.createAgent', () => {
     const status = await new SessionSubagentHost(session, main.id).getTeamStatus();
 
     expect(status).toMatchObject({
-      agent_id: main.id,
+      agent_id: session.options.id,
       member_count: 1,
       members: [{
         agent_id: member.id,
