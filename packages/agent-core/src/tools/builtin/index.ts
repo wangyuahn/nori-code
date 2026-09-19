@@ -6,6 +6,7 @@ export * from '../cron/cron-delete';
 export * from '../cron/cron-list';
 export * from './collaboration/ask-user';
 export * from './collaboration/skill-tool';
+export * from './collaboration/session-topology';
 export * from './collaboration/team';
 export * from './collaboration/team-status';
 export * from './file/edit';

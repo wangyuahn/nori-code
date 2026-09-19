@@ -1,4 +1,4 @@
-import { Component, Fragment, lazy, Suspense, useCallback, useEffect, useRef, useState, type ErrorInfo, type ReactNode } from 'react';
+import { Component, Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode } from 'react';
 import { CronJobPanel } from './components/CronJobPanel';
 import { AccountCenter } from './components/AccountCenter';
 import { CodeView } from './components/CodeView';
@@ -11,7 +11,7 @@ import { ProjectFolderPicker } from './components/ProjectFolderPicker';
 import { useI18n } from './i18n';
 import { modelThinkingOptions } from './utils/model-thinking';
 import { sessionAgentDisplayName } from './utils/session-agent';
-import { sessionsForSidebar } from './utils/session-mount';
+import { parentSessionIdOf, sessionsForSidebar } from './utils/session-mount';
 import { findAgentDiscussion } from './utils/team-discussion';
 import { loadRewindLimit } from './rewindPreferences';
 import type { ChatSlashCommandName } from './utils/chat-slash-commands';
@@ -335,12 +335,20 @@ export function App() {
     return () => { disposed = true; window.clearInterval(timer); };
   }, [sessionId, agentTreeRevision]);
   const browserPermissions = useBrowserPermissions();
+  const departmentAgents = useMemo(
+    () => departmentAgentsFromSessions(sessions, activeSession),
+    [sessions, activeSession],
+  );
+  const displayAgents = useMemo(
+    () => mergeSessionAgents(sessionAgents, departmentAgents),
+    [sessionAgents, departmentAgents],
+  );
   const sessionActiveAgentCount = countActiveAgents(activity, sessionId ?? undefined);
-  const sessionTreeTokens = sessionAgents.reduce((total, agent) => total + (agent.tokens ?? 0), 0);
+  const sessionTreeTokens = displayAgents.reduce((total, agent) => total + (agent.tokens ?? 0), 0);
   // 与当前 agent 相关的 Discuss 轮次：它自己主持的，或它作为成员参加的。
   // 轮次是树里独立的节点，所以不能从被查看 agent 自己的节点上读当前发言人；
   // WS 事件给出的 discussionTurnAgentId 比轮询的树新，优先采用。
-  const activeDiscussion = findAgentDiscussion(sessionAgents, activeAgentId, discussionTurnAgentId);
+  const activeDiscussion = findAgentDiscussion(displayAgents, activeAgentId, discussionTurnAgentId);
   const effectiveGlobalActiveAgentCount = countActiveAgents(activity);
   const sessionTitles = Object.fromEntries(sessions.map(session => [session.id, session.title || session.id]));
 
@@ -564,10 +572,12 @@ export function App() {
                 activeSessionId={sessionId ?? undefined}
                 onOpenSession={(id) => {
                   switchSession(id);
-                  selectSessionAgent(null);
                   setActiveView('chat');
                   closeSidebarOnNarrowViewport();
                 }}
+                onAskParentIdentity={async ({ parentSessionId, brief }) => (
+                  api.sessions.fillIdentity(parentSessionId, brief)
+                )}
                 onGraphChanged={() => { void refreshSessions(); }}
                 onCreateTopLevelSession={createMapTopLevelSession}
                 onChooseProject={(options) => {
@@ -618,7 +628,7 @@ export function App() {
             streamingTurnId={activeTurnId}
             activeAgentCount={sessionActiveAgentCount}
             activeAgentTokens={sessionTreeTokens}
-            sessionAgents={sessionAgents}
+            sessionAgents={displayAgents}
             departmentChat={departmentChat}
             discussion={activeDiscussion}
             departmentRevision={agentTreeRevision}
@@ -646,19 +656,11 @@ export function App() {
             browserPermissionsOverride={browserPermissions.pending}
             onResolveBrowserPermissionOverride={browserPermissions.resolvePermission}
             onOpenApprovalSession={(sourceSessionId, sourceAgentId) => {
-              if (sourceAgentId && sourceAgentId !== 'main') {
-                setPendingAgentOpen({
-                  sessionId: sourceSessionId,
-                  agent: {
-                    agent_id: sourceAgentId,
-                    kind: 'team',
-                    status: 'unknown',
-                  },
-                });
-              } else {
-                setPendingAgentOpen(null);
-              }
-              switchSession(sourceSessionId);
+              const mountedId = sessions.find(session => session.id === sourceAgentId)?.id
+                ?? sessionAgents.find(agent => agent.agent_id === sourceAgentId)?.mounted_session_id;
+              setPendingAgentOpen(null);
+              setActiveAgentSelection(null);
+              switchSession(mountedId ?? sourceSessionId);
               setActiveView('chat');
               closeSidebarOnNarrowViewport();
             }}
@@ -749,12 +751,15 @@ export function App() {
             activeView={activeView}
             activeAgentId={activeAgentId}
             activeAgent={activeAgent}
-            agents={sessionAgents}
+            agents={displayAgents}
+            sessions={sessions}
+            sessionId={sessionId}
             sessionTitle={activeSession?.title}
             viewLabel={viewLabels[activeView]}
             locationLabel={tr('Current location', '当前位置')}
             onSelectAgent={selectSessionAgent}
             onSelectWorkspace={() => { setActiveView('chat'); selectSessionAgent(null); }}
+            onSelectSession={(id) => { switchSession(id); setActiveView('chat'); }}
           />
           <div className="top-bar-actions">
             <div className="session-chip" title={activeSession?.id ?? tr('No active session', '无活动会话')}><span className={`status-dot${activeSession ? ' active' : ' idle'}`} /><span>{activeSession?.title || tr('No session', '无会话')}</span></div>
@@ -948,27 +953,88 @@ export function buildAgentBreadcrumb(
   return path;
 }
 
+export function buildSessionBreadcrumb(
+  sessions: readonly Session[],
+  activeSessionId: string | null | undefined,
+): Session[] {
+  if (!activeSessionId) return [];
+  const byId = new Map(sessions.map(session => [session.id, session]));
+  const path: Session[] = [];
+  const visited = new Set<string>();
+  let current = byId.get(activeSessionId);
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    const parentId = parentSessionIdOf(current);
+    if (!parentId) break;
+    const parent = byId.get(parentId);
+    if (!parent) break;
+    path.unshift(parent);
+    current = parent;
+  }
+  return path;
+}
+
+function departmentAgentsFromSessions(
+  sessions: readonly Session[],
+  active: Session | null,
+): SessionAgent[] {
+  if (active === null) return [];
+  const parentId = parentSessionIdOf(active) ?? active.id;
+  return sessions
+    .filter(session => parentSessionIdOf(session) === parentId)
+    .map(session => ({
+      agent_id: session.id,
+      kind: 'team' as const,
+      parent_agent_id: 'main',
+      name: session.title || session.id,
+      role: typeof session.metadata?.mount_role === 'string' ? session.metadata.mount_role : undefined,
+      mandate: typeof session.metadata?.mount_mandate === 'string' ? session.metadata.mount_mandate : undefined,
+      status: session.status,
+      mounted_session_id: session.id,
+    }));
+}
+
+function mergeSessionAgents(
+  agents: readonly SessionAgent[],
+  department: readonly SessionAgent[],
+): SessionAgent[] {
+  const byId = new Map<string, SessionAgent>();
+  for (const agent of agents) byId.set(agent.agent_id, agent);
+  for (const agent of department) {
+    const existing = byId.get(agent.agent_id);
+    byId.set(agent.agent_id, existing === undefined ? agent : { ...agent, ...existing });
+  }
+  return [...byId.values()];
+}
+
 export function AgentBreadcrumb({
   activeView,
   activeAgentId,
   activeAgent,
   agents,
+  sessions = [],
+  sessionId,
   sessionTitle,
   viewLabel,
   locationLabel,
   onSelectAgent,
   onSelectWorkspace,
+  onSelectSession,
 }: {
   activeView: View;
   activeAgentId: string;
   activeAgent: SessionAgent | null;
   agents: readonly SessionAgent[];
+  sessions?: readonly Session[];
+  sessionId?: string | null;
   sessionTitle?: string;
   viewLabel: string;
   locationLabel: string;
   onSelectAgent: (agent: SessionAgent | null) => void;
   onSelectWorkspace: () => void;
+  onSelectSession?: (sessionId: string) => void;
 }) {
+  const sessionPath = buildSessionBreadcrumb(sessions, sessionId);
   const path = buildAgentBreadcrumb(agents, activeAgentId);
   const currentAgent = activeAgentId === 'main'
     ? null
@@ -979,9 +1045,19 @@ export function AgentBreadcrumb({
   return <div className="workspace-breadcrumb" aria-label={locationLabel}>
     <button type="button" className="workspace-breadcrumb-link" onClick={onSelectWorkspace}>Nori Work</button>
     <Icon name="chevron-right" size={13}/>
+    {activeView === 'chat' && sessionPath.map(session => (
+      <Fragment key={session.id}>
+        <button
+          type="button"
+          className="workspace-breadcrumb-link"
+          onClick={() => onSelectSession?.(session.id) ?? onSelectAgent(null)}
+        >{session.title || session.id}</button>
+        <Icon name="chevron-right" size={13}/>
+      </Fragment>
+    ))}
     {activeView === 'chat' && sessionTitle
       ? <button type="button" className="workspace-breadcrumb-link" onClick={() => onSelectAgent(null)}>{sessionTitle}</button>
-      : <strong>{viewLabel}</strong>}
+      : activeView !== 'chat' ? <strong>{viewLabel}</strong> : <strong>{viewLabel}</strong>}
     {activeView === 'chat' && visibleAgents.map(agent => <span className="workspace-breadcrumb-agent" key={agent.agent_id}>
       <Icon name="chevron-right" size={13}/>
       <button type="button" className={`workspace-breadcrumb-link${agent.agent_id === activeAgentId ? ' current' : ''}`} onClick={() => onSelectAgent(agent)} aria-current={agent.agent_id === activeAgentId ? 'page' : undefined} title={sessionAgentDisplayName(agent)}>{sessionAgentDisplayName(agent)}</button>

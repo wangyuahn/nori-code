@@ -525,6 +525,17 @@ export interface UpdateSessionIdentityPayload {
   readonly tags?: readonly string[];
 }
 
+export interface FillChildIdentityPayload {
+  readonly sessionId: string;
+  readonly brief: string;
+}
+
+export interface DropShadowTeamMemberPayload {
+  readonly sessionId: string;
+  readonly agentId: string;
+  readonly childSessionId: string;
+}
+
 type AgentAPIWithId = WithAgentId<AgentAPI>;
 
 export interface SessionAPI extends AgentAPIWithId {
@@ -540,15 +551,15 @@ export interface SessionAPI extends AgentAPIWithId {
   getSessionWarnings: (payload: EmptyPayload) => readonly SessionWarning[];
   addAdditionalDir: (payload: AddAdditionalDirPayload) => AddAdditionalDirResult;
   /**
-   * Remove dual-write team agents for a mounted child session id.
+   * Remove leftover parent-session team shadows for a mounted child session id.
    * Used when the map/API changes mount edges (mount authority).
    */
   detachMountedTeamMember: (
     payload: DetachMountedTeamMemberPayload,
   ) => DetachMountedTeamMemberResult;
   /**
-   * Ensure a dual-write team agent exists for a mounted child under a leader
-   * (default `main`). Idempotent on `mountedSessionId`.
+   * Legacy: attach a parent-session team shadow for a mounted child.
+   * Product hiring uses createMountedChild. Kept for migration tests.
    */
   attachMountedTeamMember: (
     payload: AttachMountedTeamMemberPayload,
@@ -586,6 +597,14 @@ export interface CoreAPI extends SessionAPIWithId {
   unmountSession: (payload: UnmountSessionPayload) => SessionSummary;
   /** Update name / role / mandate / tags; injects a reminder and does not prompt. */
   updateSessionIdentity: (payload: UpdateSessionIdentityPayload) => SessionSummary;
+  /** Ask the parent session to fill a child identity from a brief. */
+  fillChildIdentity: (payload: FillChildIdentityPayload) => {
+    readonly title: string;
+    readonly role: string;
+    readonly mandate: string;
+  };
+  /** Copy a leftover team-agent transcript into its child session, then detach the shadow. */
+  dropShadowTeamMember: (payload: DropShadowTeamMemberPayload) => void;
   exportSession: (payload: ExportSessionPayload) => ExportSessionResult;
   listPlugins: (payload: EmptyPayload) => readonly PluginSummary[];
   installPlugin: (payload: InstallPluginPayload) => PluginSummary;

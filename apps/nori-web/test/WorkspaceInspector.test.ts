@@ -217,12 +217,12 @@ describe('workspace change presentation', () => {
       await act(async () => container.querySelector<HTMLButtonElement>('.inspector-launcher-pick')!.click());
 
       await renderInspector({
-        selfAgentId: 'member-1',
-        departmentChat: { department_leader_agent_id: 'lead-1', messages: [] },
-        sessionAgents: [
-          { agent_id: 'lead-1', kind: 'subagent', parent_agent_id: 'main', status: 'idle' },
-          { agent_id: 'discussion-1', kind: 'discussion', parent_agent_id: 'lead-1', status: 'idle' },
-        ],
+        selfAgentId: 'sess_child',
+        departmentChat: {
+          department_leader_agent_id: 'sess_parent',
+          department_leader_session_id: 'sess_parent',
+          messages: [],
+        },
       });
       expect(await openToolFromPicker(container, /Chat|交流/)).toBe(true);
       expect(container.querySelector('.department-panel')).not.toBeNull();

@@ -2,7 +2,11 @@
 
 **Status:** Accepted (P1 in progress)  
 **Date:** 2026-08-28  
-**Depends on:** Current mount forest (`parent_session_id`), TeamCreate dual-write (`mounted_session_id`), Conversation Map (nori-web)
+**Depends on:** Current mount forest (`parent_session_id`), Conversation Map (nori-web)
+
+## Current status (Session-only members)
+
+Durable collaborators are **Sessions**. Hiring creates and resumes a mounted child Session (`parent_session_id` + identity + cwd). Team Engineering (chat, Discuss, Assign, identity) addresses that session id. Parent-session `kind:'team'` agents are leftover shadows: migrate transcript/chat into the child, then detach. The map, sidebar, `/map`, and `/team` all read the same Session forest.
 
 ## Context
 

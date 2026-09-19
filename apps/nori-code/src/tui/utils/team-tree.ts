@@ -132,6 +132,36 @@ export function teamAgentsFromSessionMetadata(metadata: unknown): TeamAgentSnaps
   return snapshots;
 }
 
+/** Department members as mounted child Sessions of `hostSessionId`. */
+export function teamAgentsFromMountedChildren(
+  hostTitle: string,
+  children: ReadonlyArray<{
+    readonly id: string;
+    readonly title?: string;
+    readonly name?: string;
+    readonly role?: string;
+    readonly mandate?: string;
+  }>,
+): TeamAgentSnapshot[] {
+  return [
+    {
+      agentId: MAIN_AGENT_ID,
+      kind: 'main',
+      name: hostTitle.trim().length > 0 ? hostTitle : 'Main',
+      parentAgentId: null,
+    },
+    ...children.map((child) => ({
+      agentId: child.id,
+      kind: 'team' as const,
+      name: child.name?.trim() || child.title?.trim() || child.id,
+      parentAgentId: MAIN_AGENT_ID,
+      role: child.role,
+      mandate: child.mandate,
+      mountedSessionId: child.id,
+    })),
+  ];
+}
+
 export function flattenTeamTree(agents: readonly TeamAgentSnapshot[]): TeamTreeRow[] {
   const byParent = new Map<string | null, TeamAgentSnapshot[]>();
   for (const agent of agents) {

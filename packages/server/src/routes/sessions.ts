@@ -26,6 +26,8 @@ import {
   startBtwSessionResponseSchema,
   unmountSessionRequestSchema,
   updateSessionIdentityRequestSchema,
+  fillSessionIdentityRequestSchema,
+  fillSessionIdentityResponseSchema,
   updateSessionProfileRequestSchema,
   undoSessionRequestSchema,
   undoSessionResponseSchema,
@@ -478,6 +480,39 @@ export function registerSessionsRoutes(
     updateIdentityRoute.path,
     updateIdentityRoute.options,
     updateIdentityRoute.handler as Parameters<SessionRouteHost['patch']>[2],
+  );
+
+  const fillIdentityRoute = defineRoute(
+    {
+      method: 'POST',
+      path: '/sessions/{session_id}:fill-identity',
+      params: sessionIdParamSchema,
+      body: fillSessionIdentityRequestSchema,
+      success: { data: fillSessionIdentityResponseSchema },
+      errors: {
+        [ErrorCode.VALIDATION_FAILED]: { detailsSchema },
+        [ErrorCode.SESSION_NOT_FOUND]: {},
+      },
+      description: 'Ask the parent session to fill a child identity from a brief',
+      tags: ['sessions'],
+    },
+    async (req, reply) => {
+      try {
+        const { session_id } = req.params;
+        const identity = await ix.invokeFunction((a) =>
+          a.get(ISessionService).fillIdentity?.(session_id, req.body.brief)
+          ?? Promise.reject(new Error('fillIdentity is not available')),
+        );
+        reply.send(okEnvelope(identity, req.id));
+      } catch (err) {
+        sendMappedError(reply, req.id, err);
+      }
+    },
+  );
+  app.post(
+    fillIdentityRoute.path,
+    fillIdentityRoute.options,
+    fillIdentityRoute.handler as Parameters<SessionRouteHost['post']>[2],
   );
 
   const updateProfileRoute = defineRoute(

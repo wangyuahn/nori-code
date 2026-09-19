@@ -13,6 +13,23 @@ export const MIN_SCALE = 0.2;
 export const MAX_SCALE = 4;
 export const FIT_MAX_SCALE = 1.35;
 
+/** Shift a new child so it does not land on an existing sibling card. */
+export function offsetSpawnFromSiblings(
+  occupied: ReadonlyArray<{ x: number; y: number }>,
+  worldX: number,
+  worldY: number,
+  nodeW = NODE_W,
+  gap = GAP_X,
+): { x: number; y: number } {
+  let x = worldX;
+  let guard = 0;
+  while (occupied.some((point) => Math.hypot(point.x - x, point.y - worldY) < nodeW * 0.85) && guard < 24) {
+    x += nodeW + gap;
+    guard += 1;
+  }
+  return { x, y: worldY };
+}
+
 export interface TreeView {
   x: number;
   y: number;
@@ -76,7 +93,7 @@ export function sessionLabel(session: Session): string {
 }
 
 export function memberLabel(member: MapMemberRef): string {
-  // A dual-write agent enriches the session card; it never replaces the
+  // Agent metadata may enrich the session card; it never replaces the
   // session identity shown on the map.
   if (member.kind === 'agent' && member.agent !== undefined) return sessionAgentDisplayName(member.agent);
   return sessionLabel(member.session);
@@ -174,7 +191,7 @@ export function layoutSessionMountForest(
       linked.push(extra);
       agentsByMountedSession.set(mounted, linked);
     }
-    // Ghost `agent:` cards are no longer placed. Dual-write members overlay the
+    // Ghost `agent:` cards are no longer placed. Department members overlay the
     // real mounted session via `agentsByMountedSession`.
     if (extra.kind === 'agent') continue;
     const hostId = extra.hostSessionId;

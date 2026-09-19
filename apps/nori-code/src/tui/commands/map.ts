@@ -3,8 +3,8 @@ import type { SessionGraphSummary, SessionSummary } from '@nori-code/sdk';
 import { SessionMapBrowserComponent } from '../components/dialogs/session-map-browser';
 import { TextInputDialogComponent } from '../components/dialogs/text-input-dialog';
 import { formatErrorMessage } from '../utils/event-payload';
-import { parentSessionIdOf } from '../utils/session-map-tree';
-import { teamAgentsFromSessionMetadata, type TeamAgentSnapshot } from '../utils/team-tree';
+import { parentSessionIdOf, mountRoleOf, mountMandateOf, sessionMapLabel } from '../utils/session-map-tree';
+import { teamAgentsFromMountedChildren, type TeamAgentSnapshot } from '../utils/team-tree';
 import type { SlashCommandHost } from './dispatch';
 
 type MappedTeamAgent = TeamAgentSnapshot & { readonly hostSessionId: string };
@@ -26,49 +26,19 @@ export async function handleMapCommand(host: SlashCommandHost): Promise<void> {
         edges: graph.edges,
         currentSessionId: host.session?.id,
         onOpen: (session) => {
-          const parentId = parentSessionIdOf(session.metadata as Record<string, unknown> | undefined);
-          if (parentId !== undefined) {
-            void (async () => {
-              let member = mappedTeamAgents.find(
-                (agent) =>
-                  agent.kind === 'team'
-                  && agent.mountedSessionId === session.id
-                  && agent.hostSessionId === parentId,
-              );
-              if (member === undefined) {
-                mappedTeamAgents = await refreshTeamAgents(host, graph.nodes);
-                member = mappedTeamAgents.find(
-                  (agent) =>
-                    agent.kind === 'team'
-                    && agent.mountedSessionId === session.id
-                    && agent.hostSessionId === parentId,
-                );
-              }
-              if (member === undefined) {
-                host.showError(`Mounted session "${session.id}" has no owning Team agent.`);
-                render();
-                return;
-              }
-              await openMountedTeamAgent(host, member, render);
-            })().catch((error) => {
-              host.showError(formatErrorMessage(error));
-              render();
-            });
-            return;
-          }
           void openSession(host, session.id, render);
         },
         onMount: (child, parent) => {
           void applyMount(host, child, parent, async () => {
             graph = await host.harness.getSessionGraph({ workDir: host.state.appState.workDir });
-            mappedTeamAgents = await refreshTeamAgents(host, graph.nodes);
+            mappedTeamAgents = await refreshTeamAgents(host, graph);
             render();
           }, render);
         },
         onUnmount: (session) => {
           void applyUnmount(host, session, async () => {
             graph = await host.harness.getSessionGraph({ workDir: host.state.appState.workDir });
-            mappedTeamAgents = await refreshTeamAgents(host, graph.nodes);
+            mappedTeamAgents = await refreshTeamAgents(host, graph);
             render();
           }, render);
         },
@@ -79,65 +49,44 @@ export async function handleMapCommand(host: SlashCommandHost): Promise<void> {
     );
   };
 
-  mappedTeamAgents = await refreshTeamAgents(host, graph.nodes);
+  mappedTeamAgents = await refreshTeamAgents(host, graph);
   render();
 }
 
 async function refreshTeamAgents(
   host: SlashCommandHost,
-  nodes: readonly SessionSummary[],
+  graph: SessionGraphSummary,
 ): Promise<MappedTeamAgent[]> {
   const mapped: MappedTeamAgent[] = [];
-  for (const node of nodes) {
-    try {
-      const metadata = await host.harness.getSessionMetadata(node.id);
-      mapped.push(
-        ...teamAgentsFromSessionMetadata(metadata).map((agent) => ({
-          ...agent,
-          hostSessionId: node.id,
-        })),
-      );
-    } catch {
-      // The graph update is still useful when one session's metadata is unavailable.
-    }
+  const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+  const childrenByParent = new Map<string, SessionSummary[]>();
+  for (const edge of graph.edges) {
+    const child = byId.get(edge.childSessionId);
+    if (child === undefined) continue;
+    const list = childrenByParent.get(edge.parentSessionId) ?? [];
+    list.push(child);
+    childrenByParent.set(edge.parentSessionId, list);
+  }
+  for (const node of graph.nodes) {
+    const children = childrenByParent.get(node.id) ?? [];
+    mapped.push(
+      ...teamAgentsFromMountedChildren(sessionMapLabel(node), children.map((child) => ({
+        id: child.id,
+        title: child.title,
+        name: typeof child.metadata?.['mount_name'] === 'string' ? child.metadata['mount_name'] : child.title,
+        role: mountRoleOf(child),
+        mandate: mountMandateOf(child),
+      }))).map((agent) => ({
+        ...agent,
+        hostSessionId: node.id,
+      })),
+    );
   }
   const currentSessionId = host.session?.id;
   host.setAppState({
     teamAgents: mapped.filter((agent) => agent.hostSessionId === currentSessionId),
   });
   return mapped;
-}
-
-async function openMountedTeamAgent(
-  host: SlashCommandHost,
-  member: MappedTeamAgent,
-  reopen: () => void,
-): Promise<void> {
-  try {
-    host.restoreEditor();
-    let session = host.session;
-    if (session?.id !== member.hostSessionId) {
-      session = await host.harness.resumeSession({ id: member.hostSessionId });
-      await host.switchToSession(session, `Opened team session (${session.id}).`);
-    }
-    if (session === undefined) {
-      throw new Error(`Team member host session "${member.hostSessionId}" is unavailable.`);
-    }
-    const metadata = await session.getSessionMetadata();
-    const currentMember = teamAgentsFromSessionMetadata(metadata).find(
-      (agent) =>
-        agent.kind === 'team'
-        && agent.agentId === member.agentId
-        && agent.mountedSessionId === member.mountedSessionId,
-    );
-    if (currentMember === undefined) {
-      throw new Error(`Team member "${member.name}" is no longer available.`);
-    }
-    await host.teamViewController.open(currentMember);
-  } catch (error) {
-    host.showError(formatErrorMessage(error));
-    reopen();
-  }
 }
 
 async function openSession(

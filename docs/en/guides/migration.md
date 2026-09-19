@@ -10,7 +10,7 @@ Nori Code **1.x** already used SubAgents and collaboration tools inside a sessio
 
 | 1.x habit | 2.0 behavior |
 | --- | --- |
-| Treat Team partners as side roles inside one chat | `TeamCreate` hires **real child sessions** (session cards on the map) and dual-writes a team agent so Discuss still works |
+| Treat Team partners as side roles inside one chat | `TeamCreate` hires **real child sessions** (session cards on the map). Discuss, chat, and identity all live on that session |
 | Expect partners to share the lead's transcript | Identity comes from **`<session_self>`** and mount-change notices — **not** transcript copying |
 | Use one slash command for “the team UI” | **`/team`** manages department membership (open a partner session, reports, Discuss speech); **`/map`** manages session mounts |
 | Unmount / dismiss interchangeably | **`TeamDismiss`** deletes the hired child session; **`/map` unmount** only clears the parent link |

@@ -19,7 +19,7 @@ export type TeamCreateInput = z.infer<typeof TeamCreateInputSchema>;
 
 export class TeamCreateTool implements BuiltinTool<TeamCreateInput> {
   readonly name = 'TeamCreate' as const;
-  readonly description = 'Hire durable members into your own department. Each hire creates a real child session (mounted under you, shown as a session card on the conversation map) and a dual-write team agent so Discuss/Assign still address this department. Each member requires a unique non-empty name, role, and mandate. Hire only who the work actually needs: every extra member is one more position to reconcile in every discussion. Fails once the configured team depth limit is reached. Dismissing a member deletes that child session; unmount on the map (user only) detaches without deleting.';
+  readonly description = 'Hire durable members into your own department. Each hire creates and resumes a child Session — the member itself, shown as a session card on the conversation map. Work, tools, cwd, sibling chat, and identity all live on that child Session. Each member requires a unique non-empty name, role, and mandate. Hire only who the work actually needs. Fails once the configured team depth limit is reached. Dismissing a member deletes that child session; SessionUnmount / unmount on the map detaches without deleting.';
   readonly parameters = toInputJsonSchema(TeamCreateInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}
@@ -50,7 +50,7 @@ export type TeamDismissInput = z.infer<typeof TeamDismissInputSchema>;
 
 export class TeamDismissTool implements BuiltinTool<TeamDismissInput> {
   readonly name = 'TeamDismiss' as const;
-  readonly description = 'Dismiss members of your own department. Each hire is a real child session: dismissing deletes that session (and the dual-write team agent). Unmount on the map is a separate user action that detaches without deleting. When a member is working, first call with confirm_active=false; retry with confirm_active=true only after confirming the interruption.';
+  readonly description = 'Dismiss members of your own department by session id (or member name). Dismissing deletes that child session. SessionUnmount on the map detaches without deleting. When a member is working, first call with confirm_active=false; retry with confirm_active=true only after confirming the interruption.';
   readonly parameters = toInputJsonSchema(TeamDismissInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}
@@ -90,7 +90,7 @@ export type TeamUpdateInput = z.infer<typeof TeamUpdateInputSchema>;
 
 export class TeamUpdateTool implements BuiltinTool<TeamUpdateInput> {
   readonly name = 'TeamUpdate' as const;
-  readonly description = 'Update name, role, mandate, or tags for this session or a member of your department. Omit agent_id to edit yourself. Related sessions receive a system reminder and do not start a turn.';
+  readonly description = 'Update name, role, mandate, or tags for this session or a member of your department. Omit agent_id to edit yourself. agent_id is a child session id (or the member name). Related sessions receive a system reminder and do not start a turn.';
   readonly parameters = toInputJsonSchema(TeamUpdateInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}
@@ -135,7 +135,7 @@ export type TeamAssignInput = z.infer<typeof TeamAssignInputSchema>;
 
 export class TeamAssignTool implements BuiltinTool<TeamAssignInput> {
   readonly name = 'TeamAssign' as const;
-  readonly description = 'Assign execution work to every member of your department. Include every member exactly once; use task=null to leave one idle. At least one task must be non-null. Give two members overlapping files only after they have agreed in Discuss who owns what. Success exits Discuss and enters Code; each member must stay within its non-null assigned task and report progress, blockers, and the final result through TeamDM.';
+  readonly description = 'Assign execution work to every member of your department. agent_id is the child session id (or the member name). Include every member exactly once; use task=null to leave one idle. At least one task must be non-null. Give two members overlapping files only after they have agreed in Discuss who owns what. Success exits Discuss and enters Code; each member must stay within its non-null assigned task and report progress, blockers, and the final result through TeamDM.';
   readonly parameters = toInputJsonSchema(TeamAssignInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}
@@ -198,7 +198,7 @@ export type TeamDMInput = z.infer<typeof TeamDMInputSchema>;
 
 export class TeamDMTool implements BuiltinTool<TeamDMInput> {
   readonly name = 'TeamDM' as const;
-  readonly description = 'Send a private message at any time, in Discuss or Code, for coordination, handoff, progress, or a question only your parent can answer (scope, priority, a trade-off between members). Three kinds of recipient are reachable by agent_id: a peer in your own department (the members your parent hired alongside you), a member you hired yourself, and your direct parent. Peers reach each other directly here — your parent is a recipient, not a relay. For a task report, set report_status to completed, blocked, or needs_decision and provide report_summary; a report always travels to your parent. Use report_status=needs_decision when you are blocked on a parent decision. Ordinary messages without report_status are never classified as reports. TeamSpeak is only for formal Discuss turns.';
+  readonly description = 'Send a private message at any time, in Discuss or Code, for coordination, handoff, progress, or a question only your parent can answer (scope, priority, a trade-off between members). Recipients are session ids (or member names): a peer in your own department, a member you hired, or your direct parent (use the parent session id or "parent"). Peers reach each other directly here — your parent is a recipient, not a relay. For a task report, set report_status to completed, blocked, or needs_decision and provide report_summary; a report always travels to your parent. Use report_status=needs_decision when you are blocked on a parent decision. Ordinary messages without report_status are never classified as reports. TeamSpeak is only for formal Discuss turns.';
   readonly parameters = toInputJsonSchema(TeamDMInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}
@@ -225,7 +225,7 @@ export type TeamChatInput = z.infer<typeof TeamChatInputSchema>;
 
 export class TeamChatTool implements BuiltinTool<TeamChatInput> {
   readonly name = 'TeamChat' as const;
-  readonly description = 'Post to your department\'s persistent group chat — the peers your parent hired alongside you, who all read it; your parent does not. This is the working channel during Code: current progress, a decision that changes another member\'s assumption, a file boundary, a handoff, or a request for another member to check or continue work. Use a concrete message such as "@agent-id I changed src/api.ts and src/client.ts; check timeout errors, type compatibility, and the tests I ran: pnpm test --filter web." Every message MUST start with @: begin the message text with @all or @agent-id1 @agent-id2 (also pass them in mentions); only mentioned members are interrupted. Keep it short and actionable. Working coordination goes here; send the parent the final status with TeamDM.';
+  readonly description = 'Post to your department\'s persistent group chat — the sibling Sessions your parent hired alongside you, who all read it; your parent does not. This is the working channel during Code. Every message MUST start with @: begin the message text with @all or @session-id (also pass them in mentions); only mentioned members are interrupted. Mentions are child session ids (or member names). Keep it short and actionable. Working coordination goes here; send the parent the final status with TeamDM.';
   readonly parameters = toInputJsonSchema(TeamChatInputSchema);
 
   constructor(private readonly host: SessionSubagentHost) {}

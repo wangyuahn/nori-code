@@ -276,7 +276,7 @@ export function mapStatusDotClass(status: string): string {
 
 /**
  * Real session id that owns an OUT/IN wire.
- * Agent ghosts are not wireable; dual-write members appear as real session cards.
+ * Agent ghosts are not wireable; department members appear as real session cards.
  */
 export function wireSourceParentSessionId(member: MapNodeMember): string | null {
   if (member.kind === 'agent') return null;
@@ -571,6 +571,22 @@ export function reconcileParentEdgesWithServer(
     return doc;
   }
   return { ...doc, version: 2, edges: nextEdges.length > 0 ? nextEdges : [] };
+}
+
+/** Drop local edges whose endpoints are no longer live Sessions (keep drafts). */
+export function pruneDeadMapEdges(
+  doc: SessionMapDoc,
+  liveSessionIds: ReadonlySet<string>,
+): SessionMapDoc {
+  const edges = (doc.edges ?? []).filter((edge) => {
+    const draft = edge.status === 'draft'
+      || edge.source.startsWith('draft:')
+      || edge.target.startsWith('draft:');
+    if (draft) return liveSessionIds.has(edge.source) || edge.source.startsWith('draft:');
+    return liveSessionIds.has(edge.source) && liveSessionIds.has(edge.target);
+  });
+  if (edges.length === (doc.edges ?? []).length) return doc;
+  return { ...doc, edges: edges.length > 0 ? edges : [] };
 }
 
 /** Disconnect: remove parent edges pointing at child; keep the session node. */

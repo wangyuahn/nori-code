@@ -23,7 +23,7 @@ Nori is a coding-agent workspace forked from [Kimi Code CLI](https://github.com/
 
 - Any agent may hire members with `TeamCreate` and chair its own department, bounded by `team.maxDepth` (default `2`, maximum `5`).
 - A Discuss round is one department: a parent plus its direct members. A node never chairs and participates at the same time.
-- Hiring uses the same path as the conversation map: create a **real child session**, mount it with `parent_session_id`, and show it as a session card. The runtime also **dual-writes** a team agent so Discuss/Assign still address this department by agent id. That dual-write is an implementation seam, not a finished unified identity (see [Honest gaps](#3-honest-gaps)).
+- Hiring uses the same path as the conversation map: create a **real child session**, mount it with `parent_session_id`, and show it as a session card. Work, tools, sibling chat, and identity live on that child session. Discuss/Assign address the session id (or display name).
 - `TeamDismiss` removes a member and **deletes** that child session. Unmount on the map is a user action: detach without deleting. A session has one parent; part-time / second-parent hire is not supported.
 
 ### Discuss, then Code
@@ -98,7 +98,7 @@ The project owner described LSP and Git as a rough shell (「毛坯房」). Afte
 ### Other gaps verified in this repo
 
 - **TUI test debt** (from the changelog): about 66 failing tests across 25 files in `apps/nori-code`. They still assert the pre-rename `kimi-code` home directory, user-agent, and command names, or slash commands the registry has not exposed for a long time. The count moved from 68 to 66 only because SubAgent’s own tests were deleted with the feature.
-- **Dual-write hire:** The product path is “empty child session + mount + a team agent on the parent.” Discuss/Assign speak agent ids; the map speaks session ids. After a crash, an idempotent sync has to reattach both sides. Known seam, not a unified identity model.
+- **Existing dual-write sessions migrate on load:** Older hires that still have a parent-session team agent are bound to (or materialized as) a child session, then the shadow is dropped. New hires never create that shadow.
 - **Kimi naming leftovers:** The TUI coordinator is still `KimiTUI`; build macros are `__KIMI_CODE_*`; native cache paths can still land under `kimi-code`; the docs theme and many VitePress pages still carry upstream branding and SubAgent copy. `pnpm check:brand` catches public brand drift; it does not mean every internal identifier is gone.
 - **Map peer/service edges live in localStorage:** Parent edges are server `parent_session_id`. Peer edges, service edges, annotations, and pinned positions live in `nori-session-map-doc`. Clearing site data drops them. Server-side graph storage has not landed (see `docs/adr/pre.1-session-node-graph.md`).
 - **`nori.yaml` is not a DAG scheduler:** The file still contains `phases:`, step lists, and leftover SubAgent rules. What the runtime actually uses is rule-prompt injection plus review / memory / bug-hunt **gates** (score activity, inject instructions). There is no `depends_on` node runner. Older README text that sold this YAML as policy-as-code DAG orchestration overclaimed.

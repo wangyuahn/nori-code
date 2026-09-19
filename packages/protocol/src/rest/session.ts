@@ -127,6 +127,18 @@ export type UpdateSessionIdentityRequest = z.infer<typeof updateSessionIdentityR
 export const updateSessionIdentityResponseSchema = sessionSchema;
 export type UpdateSessionIdentityResponse = z.infer<typeof updateSessionIdentityResponseSchema>;
 
+export const fillSessionIdentityRequestSchema = z.object({
+  brief: z.string().trim().min(1).max(8_000),
+}).strict();
+export type FillSessionIdentityRequest = z.infer<typeof fillSessionIdentityRequestSchema>;
+
+export const fillSessionIdentityResponseSchema = z.object({
+  title: z.string().min(1),
+  role: z.string().min(1),
+  mandate: z.string().min(1),
+});
+export type FillSessionIdentityResponse = z.infer<typeof fillSessionIdentityResponseSchema>;
+
 export const createSessionChildResponseSchema = sessionSchema;
 export type CreateSessionChildResponse = z.infer<typeof createSessionChildResponseSchema>;
 
@@ -193,9 +205,8 @@ export const sessionAgentTreeNodeSchema = z.object({
   /** Members taking part in this Discuss round; only discussion nodes carry it. */
   discussion_participant_agent_ids: z.array(sessionAgentIdSchema).optional(),
   /**
-   * Dual-write child session for a department member. Opening this node lets the
-   * conversation map resolve the member's owning host agent instead of opening
-   * an empty child-session shell. TeamCreate and map mounts both set this field.
+   * Child session this department member is. Durable members use the same
+   * value as `id`. Leftover during shadow-agent migration only.
    */
   mounted_session_id: z.string().min(1).optional(),
 });
@@ -218,12 +229,13 @@ export const teamChatMessageSchema = z.object({
 export type TeamChatMessage = z.infer<typeof teamChatMessageSchema>;
 
 /**
- * The department Chat log for one member. `department_leader_agent_id` is null
- * when the requested node is not a team member — the parent never sees its
- * department's chat, so a lead asking receives an empty log, not an error.
+ * Sibling Chat for a mounted child Session. `department_leader_agent_id` /
+ * `department_leader_session_id` is the parent Session. Null when the
+ * requested session is not mounted — the parent never reads this log.
  */
 export const sessionAgentChatResponseSchema = z.object({
   department_leader_agent_id: sessionAgentIdSchema.nullable(),
+  department_leader_session_id: z.string().min(1).optional(),
   messages: z.array(teamChatMessageSchema),
 });
 export type SessionAgentChatResponse = z.infer<typeof sessionAgentChatResponseSchema>;

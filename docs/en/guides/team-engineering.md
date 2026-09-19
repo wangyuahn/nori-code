@@ -1,6 +1,6 @@
 # Team engineering
 
-Nori Code CLI 2.0 treats a project as a **department tree**, not a single chat transcript with side notes. `TeamCreate` hires by creating a **mounted child session** (the same class of node the conversation map already shows) plus a dual-write team agent so Discuss still addresses this department. Discuss rounds gather statements before execution. This page explains how those pieces fit together in the terminal and in Nori Work.
+Nori Code CLI 2.0 treats a project as a **department tree**, not a single chat transcript with side notes. `TeamCreate` hires by creating and resuming a **mounted child session** — the same card the conversation map shows. Work, tools, cwd, sibling chat, and identity live on that child session. Discuss rounds gather statements before execution. This page explains how those pieces fit together in the terminal and in Nori Work.
 
 ::: warning Note
 Temporary `SubAgent` DAG orchestration was **removed** in v2.0. Team Engineering is the only way Nori hands work to another agent. Comparison with Codex / Claude Code, and an honest gap list (LSP and Git are still a rough shell), live in the GitHub [README](https://github.com/wangyuahn/nori-code/blob/master/README.md).
@@ -10,10 +10,10 @@ Temporary `SubAgent` DAG orchestration was **removed** in v2.0. Team Engineering
 
 There is one collaboration model, shown in two places:
 
-- **Team partners** (`TeamCreate`) are **real child sessions** mounted under you. They appear as session cards on the conversation map, keep Discuss/Assign until `TeamDismiss` removes them, and dual-write a team agent so Discuss still addresses this department by agent id.
+- **Team partners** (`TeamCreate`) are **real child sessions** mounted under you. They appear as session cards on the conversation map. Discuss, Assign, sibling chat, and identity all address that session id until `TeamDismiss` removes them.
 - **Map nodes** are the same class: **real child sessions** linked by `parent_session_id`. Creating or wiring a child on the Web Map canvas uses the same create-child + mount path as `TeamCreate`. A session can have only one parent (part-time / second-parent hire is not supported).
 
-The dual-write (child session + in-parent team agent) is how Discuss still speaks agent ids while the map speaks session ids. It is a seam, not a finished unified identity.
+There is no second Team Agent identity in the parent session. Durable collaborators are Sessions only.
 
 The main Agent stays a **read-only coordinator** by default: direct `Write` / `Edit` are blocked (`/setting readonly on`), while hired members execute assigned tracks after `TeamAssign` leaves Discuss. Use `/setting readonly off` only when you want the lead to edit files directly.
 
@@ -38,8 +38,8 @@ See [Interaction and input](./interaction.md#mode-switching) for approval behavi
 
 | Tool | Role |
 | --- | --- |
-| `TeamCreate` | Hire one or more partners (`name`, `role`, `mandate` each). Creates a mounted child session (a session card on the map) and a dual-write team agent so Discuss/Assign still address this department. Respects `/team settings` max department depth. |
-| `TeamDismiss` | Remove partners from your department. Dismissing deletes that child session (and the dual-write team agent). Requires a `reason`. If a member is still working, call with `confirm_active=false` first; retry with `confirm_active=true` only after you accept the interruption. |
+| `TeamCreate` | Hire one or more partners (`name`, `role`, `mandate` each). Creates and resumes a mounted child session (a session card on the map). Discuss/Assign/Chat address that session id. Respects `/team settings` max department depth. |
+| `TeamDismiss` | Remove partners from your department. Dismissing deletes that child session. Requires a `reason`. If a member is still working, call with `confirm_active=false` first; retry with `confirm_active=true` only after you accept the interruption. |
 | `TeamUpdate` | Update name, role, mandate, or tags for this session or a member. Related sessions receive a system reminder and do not start a turn. |
 
 `TeamDismiss` is the supported way to remove a hired partner. Unmounting via `/map` detaches the session from the tree but **does not** delete the child session.
@@ -63,7 +63,7 @@ Type **`/map`** to browse the mount forest for the current working directory:
 - **U** — unmount the highlighted session when it has a parent.
 - Type to search; **Esc** cancels.
 
-`/map` manages **session mounts**. **`/team`** manages **department membership** (open a partner's session, browse reports, read this-round Discuss speech).
+`/map` and **`/team`** show the **same Session forest**. `/team` is the department browser (open a partner's session, browse reports, read this-round Discuss speech); `/map` is the spatial view of those same sessions.
 
 ### Web: Map view
 
@@ -74,7 +74,7 @@ Blueprint gestures:
 - **Right-click empty canvas** — create a top-level session there; **right-drag** — pan.
 - **Drag an output port onto a card** — silent mount; drop on empty canvas — identity draft then `createChild`.
 - **Drag an input port onto another card** — remount. If the child already has a parent, confirm: this remounts, it does not add a second job.
-- **Alt+click an input port** — unmount to top-level. Mount/unmount on a busy session queues until idle.
+- **Alt+click a card (or its input port)** — unmount to top-level. Right-click a card to end its work without disconnecting. Mount/unmount on a busy session queues until idle.
 - **Box-select** — a toolbar appears for Open, Stop, Settings, Unmount, and Delete. Right-click the selection for the same batch actions.
 - **Label filters** apply to both the list and the canvas. Every visible card is a real session and can be boxed or wired.
 

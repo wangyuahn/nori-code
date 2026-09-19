@@ -46,15 +46,12 @@ export function wouldCreateMountCycle(
 }
 
 /**
- * Sidebar list: hide mounted children by default. Keep the active child visible
- * so opening a member from the map does not strand the user without context.
+ * Sidebar list: the same Session forest as the map. Mounted children stay
+ * visible so hire / map / sidebar never disagree about who exists.
  */
 export function sessionsForSidebar(
   sessions: readonly Session[],
-  activeSessionId: string | null | undefined,
+  _activeSessionId?: string | null,
 ): Session[] {
-  return sessions.filter((session) => {
-    if (!isMountedChildSession(session)) return true;
-    return activeSessionId !== undefined && activeSessionId !== null && session.id === activeSessionId;
-  });
+  return [...sessions];
 }

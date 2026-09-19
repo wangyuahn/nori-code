@@ -113,9 +113,11 @@ export function WorkspaceInspector({ sessionId, projectPath, path, file, loading
   const activeTab = openTabs.find(item => item.id === activeTabId);
   const tab = activeTab?.tool ?? null;
 
-  // 交流只存在于成员之间；开会对主持人也要出现——轮次挂在主持人名下。
-  const departmentChatLeaderAgentId = departmentChat?.department_leader_agent_id ?? null;
-  const chatAvailable = selfAgentId !== 'main' && departmentChatLeaderAgentId !== null;
+  // 交流：当前 Session 挂在别人下面（部门 chat 有 leader）且自己不是那个 leader。
+  const departmentChatLeaderAgentId = departmentChat?.department_leader_agent_id
+    ?? departmentChat?.department_leader_session_id
+    ?? null;
+  const chatAvailable = departmentChatLeaderAgentId !== null && selfAgentId !== departmentChatLeaderAgentId;
   // 自己手下有成员，就意味着自己是能召集讨论的那个父级——哪怕现在还没开过一轮。
   const leadsADepartment = sessionAgents.some(candidate =>
     candidate.parent_agent_id === selfAgentId && candidate.kind !== 'discussion' && candidate.archived !== true);

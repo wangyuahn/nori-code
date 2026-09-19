@@ -10,6 +10,7 @@ import {
   formatTeamReportsStatus,
   formatTeamRowSecondary,
   shouldPaintDiscussUtterance,
+  teamAgentsFromMountedChildren,
   teamAgentsFromSessionMetadata,
   teamChatMessagesFromMetadata,
   teamHasBlockingReports,
@@ -26,6 +27,25 @@ const main: TeamAgentSnapshot = {
   name: 'Main',
   parentAgentId: null,
 };
+
+describe('teamAgentsFromMountedChildren', () => {
+  it('builds department members from mounted child sessions', () => {
+    expect(teamAgentsFromMountedChildren('Lead', [
+      { id: 'sess_reviewer', title: 'Reviewer', role: 'reviewer', mandate: 'Review diffs' },
+    ])).toEqual([
+      { agentId: 'main', kind: 'main', name: 'Lead', parentAgentId: null },
+      {
+        agentId: 'sess_reviewer',
+        kind: 'team',
+        name: 'Reviewer',
+        parentAgentId: 'main',
+        role: 'reviewer',
+        mandate: 'Review diffs',
+        mountedSessionId: 'sess_reviewer',
+      },
+    ]);
+  });
+});
 
 describe('teamAgentsFromSessionMetadata', () => {
   it('returns an empty list when resume metadata has no agents', () => {

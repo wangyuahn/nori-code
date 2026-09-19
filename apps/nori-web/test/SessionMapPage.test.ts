@@ -31,6 +31,7 @@ import {
   NODE_H,
   NODE_W,
 } from '../src/components/SessionMapPage';
+import { GAP_X, offsetSpawnFromSiblings } from '../src/components/session-map/layout';
 import {
   describeMapCurrentAction,
   describeMapErrorSummary,
@@ -45,6 +46,7 @@ import {
   reconcileParentEdgesWithServer,
   upsertParentMapEdge,
   upsertTypedMapEdge,
+  pruneDeadMapEdges,
 } from '../src/utils/session-graph';
 import { I18nProvider } from '../src/i18n';
 import {
@@ -329,12 +331,12 @@ describe('session map layout', () => {
 });
 
 describe('sidebar mount filter', () => {
-  it('hides mounted children unless they are the active session', () => {
+  it('shows the same Session forest as the map', () => {
     const items = [
       session({ id: 'root', title: 'Root' }),
       session({ id: 'child', title: 'Child', metadata: { parent_session_id: 'root' } }),
     ];
-    expect(sessionsForSidebar(items, null).map((item) => item.id)).toEqual(['root']);
+    expect(sessionsForSidebar(items, null).map((item) => item.id)).toEqual(['root', 'child']);
     expect(sessionsForSidebar(items, 'child').map((item) => item.id)).toEqual(['root', 'child']);
   });
 });
@@ -588,7 +590,7 @@ describe('SessionMapPage smoke', () => {
     }
   });
 
-  it.skip('opens mounted members through the owning host agent', async () => {
+  it.skip('opens a mounted child session from the map card', async () => {
     const nodes = [
       session({ id: 'root', title: 'Root' }),
       session({
@@ -636,11 +638,8 @@ describe('SessionMapPage smoke', () => {
         .find((el) => el.textContent?.includes('Reviewer'));
       expect(memberNode).toBeTruthy();
       await act(async () => { memberNode!.querySelector<HTMLButtonElement>('[data-map-action="open"]')!.click(); });
-      expect(onOpenAgent).toHaveBeenCalledWith('root', expect.objectContaining({
-        agent_id: 'member_1',
-        mounted_session_id: 'child',
-      }));
-      expect(onOpenSession).not.toHaveBeenCalled();
+      expect(onOpenSession).toHaveBeenCalledWith('child');
+      expect(onOpenAgent).not.toHaveBeenCalled();
     } finally {
       await act(async () => { root.unmount(); });
       container.remove();
@@ -4415,6 +4414,29 @@ describe('redesigned conversation map contracts', () => {
       ],
     }));
     expect(doc.edges).toEqual([]);
+  });
+
+  it('offsetSpawnFromSiblings shifts a new card off occupied siblings', () => {
+    expect(offsetSpawnFromSiblings([], 10, 20)).toEqual({ x: 10, y: 20 });
+    expect(offsetSpawnFromSiblings([{ x: 10, y: 20 }], 10, 20)).toEqual({
+      x: 10 + NODE_W + GAP_X,
+      y: 20,
+    });
+  });
+
+  it('pruneDeadMapEdges drops wires whose endpoints are gone', () => {
+    const pruned = pruneDeadMapEdges({
+      version: 2,
+      annotations: [],
+      labels: [],
+      sessionLabels: {},
+      edges: [
+        { id: 'live', type: 'parent', source: 'root', target: 'child' },
+        { id: 'dead', type: 'parent', source: 'gone', target: 'child' },
+        { id: 'draft', type: 'parent', source: 'draft:x', target: 'child', status: 'draft' },
+      ],
+    }, new Set(['root', 'child']));
+    expect(pruned.edges?.map((edge) => edge.id)).toEqual(['live', 'draft']);
   });
 
   it('uses the mounted session id as the open target even when agent metadata is present', () => {

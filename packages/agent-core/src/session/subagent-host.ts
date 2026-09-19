@@ -104,27 +104,13 @@ export class SessionSubagentHost {
         const child = await this.session.createMountedChild({
           parentSessionId: mountParentId,
           identity,
-          teamLeaderAgentId: mountParentId === currentSessionId ? this.ownerAgentId : 'main',
+          teamLeaderAgentId: 'main',
         });
-        let agentId = child.agentId;
         created.push({
-          agentId,
+          agentId: child.sessionId,
           sessionId: child.sessionId,
           identity,
         });
-        if (mountParentId !== currentSessionId) {
-          const attached = await this.session.attachMountedTeamMember({
-            mountedSessionId: child.sessionId,
-            identity,
-            teamLeaderAgentId: this.ownerAgentId,
-          });
-          agentId = attached.agentId;
-          created[created.length - 1] = {
-            agentId,
-            sessionId: child.sessionId,
-            identity,
-          };
-        }
       }
     } catch (error) {
       if (created.length > 0) {
@@ -186,7 +172,12 @@ export class SessionSubagentHost {
     reason: string,
     confirmActive: boolean,
   ): Promise<void> {
-    await this.session.dismissTeamMembers(this.ownerAgentId, agentIds, reason, confirmActive);
+    await this.session.dismissTeamMembers(
+      this.ownerAgentId,
+      agentIds.map((id) => this.resolveMemberId(id)),
+      reason,
+      confirmActive,
+    );
   }
 
   async updateTeamIdentity(input: {
@@ -213,28 +204,108 @@ export class SessionSubagentHost {
     if (currentSessionId === undefined) {
       throw new Error('Session identity updates require a session id.');
     }
-    if (agentId === this.ownerAgentId) {
+    if (agentId === this.ownerAgentId || agentId === currentSessionId) {
       const self = this.session.getAgentMetadata(agentId);
       return self?.mountedSessionId ?? currentSessionId;
     }
+    const resolved = this.resolveMemberId(agentId);
     const member = this.session.teamMemberMetadata(this.ownerAgentId)
-      .find(([id]) => id === agentId);
+      .find(([id]) => id === resolved);
     if (member === undefined) {
       throw new Error(`Team member "${agentId}" is not in your department.`);
     }
-    const mounted = member[1].mountedSessionId;
-    if (mounted === undefined) {
-      throw new Error(`Team member "${agentId}" has no mounted session to update.`);
+    return member[1].mountedSessionId ?? member[0];
+  }
+
+  private resolveMemberId(token: string): string {
+    const trimmed = token.trim();
+    if (trimmed.length === 0) return trimmed;
+    const members = this.session.teamMemberMetadata(this.ownerAgentId);
+    if (members.some(([id]) => id === trimmed)) return trimmed;
+    const byName = members.find(([, meta]) =>
+      (meta.name ?? '').localeCompare(trimmed, undefined, { sensitivity: 'accent' }) === 0,
+    );
+    if (byName !== undefined) return byName[0];
+    const byMounted = members.find(([, meta]) => meta.mountedSessionId === trimmed);
+    if (byMounted !== undefined) return byMounted[0];
+    return trimmed;
+  }
+
+  private resolveDirectMessageTarget(
+    targetId: string,
+  ): { readonly id: string; readonly relation: 'parent' | 'sibling' | 'member' } | undefined {
+    const token = targetId.trim();
+    const parentId = this.session.parentSessionId();
+    const selfId = this.session.options.id;
+    const children = this.session.listDepartmentChildIds();
+    const siblings = this.session.listDepartmentSiblingIds();
+    if (parentId !== undefined && (token === 'parent' || token === parentId)) {
+      return { id: parentId, relation: 'parent' };
     }
-    return mounted;
+    const child = this.resolveMemberId(token);
+    if (children.includes(child)) return { id: child, relation: 'member' };
+    const sibling = siblings.find((id) => {
+      if (id === token) return true;
+      const meta = this.session.getAgentMetadata(id);
+      return (meta?.name ?? '').localeCompare(token, undefined, { sensitivity: 'accent' }) === 0;
+    });
+    if (sibling !== undefined && sibling !== selfId) return { id: sibling, relation: 'sibling' };
+    const sender = this.session.getAgentMetadata(this.ownerAgentId);
+    const relation = directMessageRelation(
+      { agentId: this.ownerAgentId, node: sender },
+      { agentId: token, node: this.session.getAgentMetadata(token) },
+    );
+    if (relation === undefined) return undefined;
+    return { id: token, relation };
+  }
+
+  private async resumeReachable(id: string): Promise<Agent> {
+    const runtime = this.session.options.departmentRuntime;
+    const parentId = this.session.parentSessionId();
+    if (runtime !== undefined) {
+      if (id === parentId) return runtime.ensureMain(id);
+      if (this.session.listDepartmentSiblingIds().includes(id)) return runtime.ensureMain(id);
+    }
+    return this.session.ensureAgentResumed(id);
+  }
+
+  async searchSessions(query: string) {
+    return this.session.searchSessions(query);
+  }
+
+  async mountSession(childSessionId: string, parentSessionId: string, role?: string, mandate?: string) {
+    this.assertDepartmentManager();
+    await this.session.mountPeerSession(childSessionId, parentSessionId, role, mandate);
+  }
+
+  async remountSession(childSessionId: string, parentSessionId: string, role?: string, mandate?: string) {
+    this.assertDepartmentManager();
+    await this.session.remountPeerSession(childSessionId, parentSessionId, role, mandate);
+  }
+
+  async unmountSession(sessionId: string) {
+    this.assertDepartmentManager();
+    await this.session.unmountPeerSession(sessionId);
+  }
+
+  async sessionGraph() {
+    return this.session.readSessionGraph();
+  }
+
+  currentSessionId(): string | undefined {
+    return this.session.options.id;
   }
 
   async assignTeam(
     assignments: readonly TeamAssignment[],
     signal: AbortSignal,
   ): Promise<Array<{ readonly agentId: string; readonly task: string | null; readonly turnId?: number }>> {
+    const resolvedAssignments = assignments.map((assignment) => ({
+      ...assignment,
+      agentId: this.resolveMemberId(assignment.agentId),
+    }));
     const requested = new Set(
-      assignments.filter((assignment) => assignment.task !== null).map((assignment) => assignment.agentId),
+      resolvedAssignments.filter((assignment) => assignment.task !== null).map((assignment) => assignment.agentId),
     );
     const busy: string[] = [];
     for (const [agentId] of this.session.teamMemberMetadata(this.ownerAgentId)) {
@@ -248,7 +319,7 @@ export class SessionSubagentHost {
       throw new Error(`TeamAssign cannot replace active member work: ${busy.join(', ')}.`);
     }
 
-    const assigned = await this.session.assignTeamTasks(this.ownerAgentId, assignments);
+    const assigned = await this.session.assignTeamTasks(this.ownerAgentId, resolvedAssignments);
     const unavailable = assigned.filter((assignment) => (
       assignment.task !== null && assignment.agent.turn.hasActiveTurn
     ));
@@ -378,23 +449,19 @@ export class SessionSubagentHost {
     report?: { readonly status: 'completed' | 'blocked' | 'needs_decision'; readonly summary: string },
   ): Promise<TeamDirectMessageDelivery> {
     signal.throwIfAborted();
-    const sender = this.session.getAgentMetadata(this.ownerAgentId);
-    const relation = directMessageRelation(
-      { agentId: this.ownerAgentId, node: sender },
-      { agentId: targetAgentId, node: this.session.getAgentMetadata(targetAgentId) },
-    );
-    if (relation === undefined) {
+    const resolved = this.resolveDirectMessageTarget(targetAgentId);
+    if (resolved === undefined) {
       throw new Error(
         `TeamDM target "${targetAgentId}" is not reachable from here. You may message your parent, the members you hired, or a peer in the same department.`,
       );
     }
-    // Reports travel upward only, so a report's recipient is the sender's parent
-    // by definition. `main` has no parent and therefore never reports.
+    const { id: resolvedId, relation } = resolved;
+    const sender = this.session.getAgentMetadata(this.ownerAgentId);
     const reportToParent = report;
     if (reportToParent !== undefined && relation !== 'parent') {
-      throw new Error('Team reports must be sent by a Team Agent to its direct parent.');
+      throw new Error('Team reports must be sent by a department member to its direct parent.');
     }
-    const recipient = await this.session.ensureAgentResumed(targetAgentId);
+    const recipient = await this.resumeReachable(resolvedId);
     // Do not persist a report until the recipient has accepted the message
     // path. Otherwise a failed resume/compaction wait/prompt leaves the parent
     // believing that work was reported even though no TeamDM was delivered.
@@ -406,10 +473,10 @@ export class SessionSubagentHost {
     // model context, but tag it distinctly so transcript projections can
     // avoid rendering it as a normal user/Discuss message after refresh.
     const origin = this.teamDirectMessagePromptOrigin(
-      this.ownerAgentId === 'main' ? undefined : sender,
-      this.ownerAgentId,
-      // A node chairing its own department speaks as that department's lead;
-      // otherwise it speaks as a member of its parent's.
+      this.ownerAgentId === 'main' ? { name: this.session.metadata.title } : sender,
+      this.session.parentSessionId() !== undefined && this.ownerAgentId === 'main'
+        ? (this.session.options.id ?? this.ownerAgentId)
+        : this.ownerAgentId,
       relation === 'member' ? 'lead' : 'team',
     );
     const input = [{
@@ -476,6 +543,17 @@ export class SessionSubagentHost {
   ): Promise<TeamChatMessageRecord> {
     signal.throwIfAborted();
     validateTeamChatMentions(message, mentions);
+    const parentSessionId = this.session.parentSessionId();
+    const selfSessionId = this.session.options.id;
+    if (this.ownerAgentId === 'main' && parentSessionId !== undefined && selfSessionId !== undefined) {
+      return this.sendMountedMemberChat(
+        parentSessionId,
+        selfSessionId,
+        message,
+        mentions,
+        signal,
+      );
+    }
     const sender = this.session.getAgentMetadata(this.ownerAgentId);
     if (sender?.kind !== 'team' || sender.teamLeaderAgentId === undefined) {
       throw new Error('Chat is only available to a member of a department.');
@@ -527,7 +605,67 @@ export class SessionSubagentHost {
     return record;
   }
 
+  private async sendMountedMemberChat(
+    parentSessionId: string,
+    selfSessionId: string,
+    message: string,
+    mentions: readonly string[],
+    signal: AbortSignal,
+  ): Promise<TeamChatMessageRecord> {
+    const runtime = this.session.options.departmentRuntime;
+    if (runtime === undefined) {
+      throw new Error('Chat is only available to a member of a department.');
+    }
+    const siblings = this.session.listDepartmentSiblingIds();
+    const resolvedMentions = mentions.map((id) => {
+      if (id === 'all') return 'all';
+      const match = siblings.find((siblingId) => siblingId === id);
+      if (match !== undefined) return match;
+      return id;
+    });
+    const unknown = resolvedMentions.filter((id) => id !== 'all' && !siblings.includes(id));
+    if (unknown.length > 0) {
+      throw new Error(
+        `Chat mention target(s) not in this department: ${unknown.join(', ')}. `
+        + `Chat only reaches your siblings (${siblings.length > 0 ? siblings.join(', ') : 'none'}) or "all"; `
+        + 'to reach your lead use TeamDM instead.',
+      );
+    }
+    const name = this.session.getAgentMetadata('main')?.name
+      ?? this.session.metadata.title
+      ?? '团队成员';
+    const record = await runtime.postChat(
+      parentSessionId,
+      selfSessionId,
+      name,
+      message,
+      resolvedMentions,
+    );
+    const targets = resolvedMentions.includes('all')
+      ? siblings
+      : siblings.filter((id) => resolvedMentions.includes(id));
+    const origin = this.teamChatPromptOrigin(selfSessionId, name);
+    const input = [{ type: 'text' as const, text: wrapTeamChatMessage(name, message) }];
+    await Promise.all(targets.map(async (sessionId) => {
+      const agent = await runtime.ensureMain(sessionId);
+      await waitForAgentCompaction(agent, signal);
+      if (agent.turn.hasActiveTurn) {
+        agent.turn.steer(input, origin);
+        return;
+      }
+      const start = await startAgentPrompt(agent, input, origin, signal);
+      if (start.kind === 'busy') {
+        agent.turn.steer(input, origin);
+        return;
+      }
+      if (start.kind === 'unstarted') return;
+      void runAgentTurnToCompletion(agent).catch(() => undefined);
+    }));
+    return record;
+  }
+
   async getTeamStatus(): Promise<TeamStatusResult> {
+    await this.session.refreshDepartmentDirectory();
     const directMembers = this.session.teamMemberMetadata(this.ownerAgentId);
     const members: TeamStatusMember[] = [];
     for (const [agentId, meta] of directMembers) {
@@ -542,7 +680,7 @@ export class SessionSubagentHost {
         report_status: meta.teamReport?.status ?? null,
         report_summary: meta.teamReport?.summary ?? null,
         report_received: meta.teamReport?.receivedAt !== undefined,
-        session_id: meta.mountedSessionId ?? null,
+        session_id: meta.mountedSessionId ?? agentId,
       });
       if (agent.turn.hasActiveTurn && meta.assignedAt !== undefined) {
         this.session.notifyRunningTeamMember(agentId, meta.assignedAt);
@@ -550,7 +688,7 @@ export class SessionSubagentHost {
     }
     const colleagues = this.departmentColleagues();
     return {
-      agent_id: this.ownerAgentId,
+      agent_id: this.session.options.id ?? this.ownerAgentId,
       ...(colleagues.parentAgentId === undefined ? {} : { parent_agent_id: colleagues.parentAgentId }),
       member_count: members.length,
       message: statusMessage(members.length, colleagues.peers.length),
@@ -569,6 +707,24 @@ export class SessionSubagentHost {
     readonly parentAgentId: string | undefined;
     readonly peers: readonly TeamStatusColleague[];
   } {
+    const parentSessionId = this.session.parentSessionId();
+    if (parentSessionId !== undefined) {
+      const selfId = this.session.options.id;
+      const peers = this.session.listDepartmentSiblingIds()
+        .filter((id) => id !== selfId)
+        .map((sessionId): TeamStatusColleague => {
+          const meta = this.session.getAgentMetadata(sessionId);
+          return {
+            agent_id: sessionId,
+            name: meta?.name ?? null,
+            role: meta?.role ?? null,
+            status: 'idle',
+            assigned_task: meta?.assignedTask ?? meta?.teamReport?.task ?? null,
+            report_status: meta?.teamReport?.status ?? 'unreported',
+          };
+        });
+      return { parentAgentId: parentSessionId, peers };
+    }
     const self = this.session.getAgentMetadata(this.ownerAgentId);
     const parentAgentId = self?.kind === 'team' ? self.teamLeaderAgentId : undefined;
     if (parentAgentId === undefined) return { parentAgentId: undefined, peers: [] };
@@ -593,9 +749,10 @@ export class SessionSubagentHost {
     const members = new Set(this.session.teamMemberMetadata(this.ownerAgentId).map(([id]) => id));
     const added: string[] = [];
     for (const id of agentIds) {
-      if (!members.has(id)) throw new Error(`Discussion participant "${id}" is not in the team.`);
-      if (!current.has(id)) added.push(id);
-      current.add(id);
+      const resolved = this.resolveMemberId(id);
+      if (!members.has(resolved)) throw new Error(`Discussion participant "${id}" is not in the team.`);
+      if (!current.has(resolved)) added.push(resolved);
+      current.add(resolved);
     }
     const discussion = await this.session.updateTeamDiscussion(active.id, {
       participantAgentIds: [...current],
@@ -612,7 +769,8 @@ export class SessionSubagentHost {
     const active = this.requireActiveDiscussion();
     const current = new Set(active.meta.discussion!.participantAgentIds);
     for (const id of agentIds) {
-      if (!current.delete(id)) throw new Error(`Discussion participant "${id}" is not active.`);
+      const resolved = this.resolveMemberId(id);
+      if (!current.delete(resolved)) throw new Error(`Discussion participant "${id}" is not active.`);
     }
     if (current.size === 0) throw new Error('A discussion must retain at least one participant.');
     const discussion = await this.session.updateTeamDiscussion(active.id, {
@@ -656,7 +814,8 @@ export class SessionSubagentHost {
       if (active !== undefined) throw new Error('A team discussion is already active. Use continue or archive it first.');
       const discussionTopic = topic?.trim() ?? '';
       if (discussionTopic.length === 0) throw new Error('A discussion topic is required.');
-      const participants = participantAgentIds ?? this.session.teamMemberMetadata(this.ownerAgentId).map(([id]) => id);
+      const participants = (participantAgentIds ?? this.session.teamMemberMetadata(this.ownerAgentId).map(([id]) => id))
+        .map((id) => this.resolveMemberId(id));
       // A discussion with nobody in it still locks team writes and still puts
       // the chair in Discuss, where Write/Edit/Bash are denied and the only way
       // out (TeamAssign) needs a member to assign to. Refuse instead of opening

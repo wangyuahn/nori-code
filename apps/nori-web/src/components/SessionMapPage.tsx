@@ -30,6 +30,7 @@ import {
   MIN_SCALE,
   NODE_H,
   NODE_W,
+  offsetSpawnFromSiblings,
   ensureGraphEdges,
   fitTreeView,
   layoutSessionMountForest,
@@ -78,6 +79,7 @@ import {
   mergeGraphWithMapEdges,
   pendingTopologyOpsReady,
   queuePendingTopology,
+  pruneDeadMapEdges,
   reconcileParentEdgesWithServer,
   sessionIsBusy,
   upsertParentMapEdge,
@@ -426,7 +428,9 @@ interface WorkEdgeEditor {
   childId: string;
   role: string;
   mandate: string;
+  prompt: string;
   saving: boolean;
+  parentStatus?: SessionIdentityParentStatus;
   error?: string;
 }
 
@@ -1124,8 +1128,7 @@ export function SessionMapPage({
   componentIndexRef.current = componentIndex;
 
   /**
-   * Hosts that need agent overlay: graph roots (can host team agents without
-   * dual-write children yet), parents of mounted children, the active session,
+   * Hosts that need agent overlay: graph roots, parents of mounted children,
    * and hosts we already know from prior extras — never every mounted leaf.
    */
   const agentHostIdsFor = useCallback((nodes: readonly Session[]): string[] => {
@@ -1225,7 +1228,9 @@ export function SessionMapPage({
     const revision = ++refreshRevision.current;
     try {
       const next = ensureGraphEdges(await api.sessions.getGraph({ exclude_empty: false }));
-      const reconciled = reconcileParentEdgesWithServer(mapDocRef.current, next.edges);
+      const liveIds = new Set(next.nodes.map((node) => node.id));
+      let reconciled = reconcileParentEdgesWithServer(mapDocRef.current, next.edges);
+      reconciled = pruneDeadMapEdges(reconciled, liveIds);
       if (reconciled !== mapDocRef.current) {
         mapDocRef.current = reconciled;
         setMapDoc(reconciled);
@@ -2032,6 +2037,7 @@ export function SessionMapPage({
       childId,
       role: edge?.role ?? (isCurrentServerEdge && typeof child?.metadata?.mount_role === 'string' ? child.metadata.mount_role : ''),
       mandate: edge?.mandate ?? (isCurrentServerEdge && typeof child?.metadata?.mount_mandate === 'string' ? child.metadata.mount_mandate : ''),
+      prompt: '',
       saving: false,
     });
   };
@@ -2319,6 +2325,10 @@ export function SessionMapPage({
 
     // Dropping on empty space creates a draft node. The parent edge is
     // persisted as soon as the draft appears and remains until Esc/abandon.
+    const siblings = forceNodesRef.current
+      .filter((node) => parentSessionIdOf(node.member.session) === parentSessionId)
+      .map((node) => ({ x: node.x ?? worldX, y: node.y ?? worldY }));
+    const spawn = offsetSpawnFromSiblings(siblings, worldX, worldY + NODE_H / 2);
     const draftId = `draft:${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
     setDraft({
       id: draftId,
@@ -2328,14 +2338,14 @@ export function SessionMapPage({
       mandate: '',
       prompt: '',
       status: 'editing',
-      worldX,
-      worldY: worldY + NODE_H / 2,
+      worldX: spawn.x,
+      worldY: spawn.y,
     });
     persistDoc({
       ...upsertParentMapEdge(mapDocRef.current, parentSessionId, draftId, { status: 'draft' }),
       positions: {
         ...mapDocRef.current.positions,
-        [draftId]: { x: worldX, y: worldY + NODE_H / 2 },
+        [draftId]: { x: spawn.x, y: spawn.y },
       },
     });
   }, [
@@ -2870,6 +2880,10 @@ export function SessionMapPage({
         ), true);
         return;
       }
+      const siblings = forceNodesRef.current
+        .filter((node) => parentSessionIdOf(node.member.session) === parentId)
+        .map((node) => ({ x: node.x ?? worldX, y: node.y ?? worldY }));
+      const spawn = offsetSpawnFromSiblings(siblings, worldX, worldY + NODE_H / 2);
       const draftId = `draft:${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
       setDraft({
         id: draftId,
@@ -2879,14 +2893,14 @@ export function SessionMapPage({
         mandate: '',
         prompt: '',
         status: 'editing',
-        worldX,
-        worldY: worldY + NODE_H / 2,
+        worldX: spawn.x,
+        worldY: spawn.y,
       });
       persistDoc({
         ...upsertParentMapEdge(mapDocRef.current, parentId, draftId, { status: 'draft' }),
         positions: {
           ...mapDocRef.current.positions,
-          [draftId]: { x: worldX, y: worldY + NODE_H / 2 },
+          [draftId]: { x: spawn.x, y: spawn.y },
         },
       });
       return;
@@ -3408,11 +3422,12 @@ export function SessionMapPage({
     }
   };
 
-  const saveWorkEdgeIdentity = async () => {
+  const saveWorkEdgeIdentity = async (values?: SessionIdentityDraftValues) => {
     const current = workEdgeEditor;
     if (current === null || current.saving) return;
-    const role = current.role.trim() || undefined;
-    const mandate = current.mandate.trim() || undefined;
+    const role = (values?.role ?? current.role).trim() || undefined;
+    const mandate = (values?.mandate ?? current.mandate).trim() || undefined;
+    const name = values?.name.trim();
     const existing = findParentMapEdge(mapDocRef.current.edges, current.parentId, current.childId);
     const child = byId.get(current.childId);
     const parent = byId.get(current.parentId);
@@ -3450,6 +3465,9 @@ export function SessionMapPage({
     }
     try {
       await api.sessions.remount(current.childId, current.parentId, { role, mandate });
+      if (name) {
+        await api.sessions.updateIdentity(current.childId, { name, role, mandate }).catch(() => undefined);
+      }
       if (disposedRef.current) return;
       await refresh();
       if (disposedRef.current) return;
@@ -4806,44 +4824,49 @@ export function SessionMapPage({
           );
         })()}
         {workEdgeEditor !== null && (
-          <div
-            className="session-map-work-edge-editor session-map-float"
-            role="dialog"
-            aria-label={tr('Work identity', '工作身份')}
-            onPointerDown={(event) => event.stopPropagation()}
-          >
-            <strong>{tr('Work identity', '工作身份')}</strong>
-            <span className="session-map-work-edge-editor-context">
-              {tr(
-                `For “${byId.get(workEdgeEditor.childId)?.title?.trim() || workEdgeEditor.childId}” under “${byId.get(workEdgeEditor.parentId)?.title?.trim() || workEdgeEditor.parentId}”`,
-                `「${byId.get(workEdgeEditor.childId)?.title?.trim() || workEdgeEditor.childId}」给「${byId.get(workEdgeEditor.parentId)?.title?.trim() || workEdgeEditor.parentId}」的工作`,
-              )}
-            </span>
-            <label>
-              {tr('Role', '角色')}
-              <input
-                value={workEdgeEditor.role}
-                disabled={workEdgeEditor.saving}
-                onChange={(event) => setWorkEdgeEditor({ ...workEdgeEditor, role: event.target.value })}
-              />
-            </label>
-            <label>
-              {tr('Responsibility', '职责')}
-              <textarea
-                rows={3}
-                value={workEdgeEditor.mandate}
-                disabled={workEdgeEditor.saving}
-                onChange={(event) => setWorkEdgeEditor({ ...workEdgeEditor, mandate: event.target.value })}
-              />
-            </label>
-            {workEdgeEditor.error && <span className="session-map-card-error">{workEdgeEditor.error}</span>}
-            <div className="session-map-inline-confirm">
-              <button type="button" disabled={workEdgeEditor.saving} onClick={() => setWorkEdgeEditor(null)}>{tr('Cancel', '取消')}</button>
-              <button type="button" className="primary" disabled={workEdgeEditor.saving} onClick={() => void saveWorkEdgeIdentity()}>
-                {workEdgeEditor.saving ? tr('Saving…', '正在保存…') : tr('Save', '保存')}
-              </button>
-            </div>
-          </div>
+          <SessionIdentityDrawer
+            session={byId.get(workEdgeEditor.childId)}
+            mode="edit"
+            parentTitle={byId.get(workEdgeEditor.parentId)?.title?.trim() || workEdgeEditor.parentId}
+            allowAskParent={onAskParentIdentity !== undefined}
+            initialValues={{
+              name: byId.get(workEdgeEditor.childId)?.title ?? '',
+              role: workEdgeEditor.role,
+              mandate: workEdgeEditor.mandate,
+              prompt: workEdgeEditor.prompt,
+            }}
+            parentStatus={workEdgeEditor.parentStatus ?? (workEdgeEditor.error ? 'failed' : 'idle')}
+            parentMessage={workEdgeEditor.error}
+            submitting={workEdgeEditor.saving}
+            onAskParent={(brief) => {
+              if (onAskParentIdentity === undefined) return;
+              setWorkEdgeEditor({ ...workEdgeEditor, prompt: brief, parentStatus: 'writing', error: undefined });
+              void onAskParentIdentity({ parentSessionId: workEdgeEditor.parentId, brief }).then((identity) => {
+                setWorkEdgeEditor((current) => current === null ? current : {
+                  ...current,
+                  role: identity.role,
+                  mandate: identity.mandate,
+                  parentStatus: 'idle',
+                });
+              }).catch(() => {
+                setWorkEdgeEditor((current) => current === null ? current : {
+                  ...current,
+                  parentStatus: 'failed',
+                  error: tr('父亲这次没写出来，你可以自己填。', '父亲这次没写出来，你可以自己填。'),
+                });
+              });
+            }}
+            onChange={(values) => {
+              setWorkEdgeEditor((current) => current === null ? current : {
+                ...current,
+                role: values.role,
+                mandate: values.mandate,
+                prompt: values.prompt,
+              });
+            }}
+            onSubmit={(values) => void saveWorkEdgeIdentity(values)}
+            onClose={() => setWorkEdgeEditor(null)}
+          />
         )}
         {showUnappliedJobBar && selectedWorkEdge !== null && (
           <div

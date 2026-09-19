@@ -2001,11 +2001,11 @@ describe('Session.createAgent', () => {
     };
 
     const leadId = await hire(main.id, 'Lead');
-    // Depth 1 hires depth 2: the tree grows without going through main.
     const workerId = await hire(leadId, 'Worker');
-    expect(session.getAgentMetadata(workerId)?.teamLeaderAgentId).toBe(leadId);
+    const parentById = await session.options.listMountParentById?.();
+    expect(parentById?.[leadId]).toBe(session.options.id);
+    expect(parentById?.[workerId]).toBe(leadId);
 
-    // Depth 2 is the limit, so its own hire would land at depth 3.
     await expect(hire(workerId, 'TooDeep')).rejects.toThrow('depth');
     expect(session.teamMemberMetadata(workerId)).toEqual([]);
   });
@@ -2501,7 +2501,9 @@ describe('Session.createAgent', () => {
       role: 'reviewer',
     }]);
     expect(member?.sessionId).toMatch(/^sess_Reviewer/);
-    expect(session.getAgentMetadata(member!.agentId)?.mountedSessionId).toBe(member!.sessionId);
+    expect(member?.agentId).toBe(member?.sessionId);
+    expect(session.teamMemberMetadata('main').map(([id]) => id)).toEqual([member!.sessionId]);
+    expect(Object.values(session.metadata.agents).some((meta) => meta.kind === 'team')).toBe(false);
   });
 
   it('TeamUpdate patches identity without prompting a turn', async () => {
@@ -3188,7 +3190,9 @@ function hireableSession(
   options: { id: string } & Partial<SessionOptions>,
 ): Session {
   let session!: Session;
-  const { createMountedChild, kaos, homedir, rpc, initializeMainAgent, id, ...rest } = options;
+  const mounts = new Map<string, string | undefined>();
+  mounts.set(options.id, undefined);
+  const { createMountedChild, kaos, homedir, rpc, initializeMainAgent, id, listMountParentById, ...rest } = options;
   session = new Session({
     ...rest,
     id,
@@ -3199,18 +3203,12 @@ function hireableSession(
     homedir: homedir ?? '/tmp/kimi-session',
     rpc: rpc ?? createSessionRpc(),
     initializeMainAgent: initializeMainAgent ?? false,
+    listMountParentById: listMountParentById ?? (async () => Object.fromEntries(mounts)),
     createMountedChild: createMountedChild ?? (async (input) => {
       const sessionId = `sess_${input.title.replace(/\s+/g, '_')}`;
-      const { agentId } = await session.attachMountedTeamMember({
-        mountedSessionId: sessionId,
-        identity: {
-          name: input.title,
-          role: input.role,
-          mandate: input.mandate,
-        },
-        teamLeaderAgentId: input.teamLeaderAgentId ?? 'main',
-      });
-      return { sessionId, agentId };
+      mounts.set(sessionId, input.parentSessionId);
+      await session.refreshDepartmentDirectory();
+      return { sessionId, agentId: sessionId };
     }),
   });
   return session;
