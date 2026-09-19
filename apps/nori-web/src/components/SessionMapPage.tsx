@@ -419,6 +419,7 @@ interface WorkEdgeContextMenu {
 interface WorkEdgeEditor {
   parentId: string;
   childId: string;
+  name?: string;
   role: string;
   mandate: string;
   prompt: string;
@@ -1946,6 +1947,7 @@ export function SessionMapPage({
       childId,
       role: edge?.role ?? (isCurrentServerEdge && typeof child?.metadata?.mount_role === 'string' ? child.metadata.mount_role : ''),
       mandate: edge?.mandate ?? (isCurrentServerEdge && typeof child?.metadata?.mount_mandate === 'string' ? child.metadata.mount_mandate : ''),
+      name: child?.title,
       prompt: '',
       saving: false,
     });
@@ -4712,12 +4714,13 @@ export function SessionMapPage({
         })()}
         {workEdgeEditor !== null && (
           <SessionIdentityDrawer
+            key={`work-edge:${workEdgeEditor.childId}:${workEdgeEditor.parentStatus === 'writing' ? 'writing' : 'ready'}`}
             session={byId.get(workEdgeEditor.childId)}
             mode="edit"
             parentTitle={byId.get(workEdgeEditor.parentId)?.title?.trim() || workEdgeEditor.parentId}
             allowAskParent={onAskParentIdentity !== undefined}
             initialValues={{
-              name: byId.get(workEdgeEditor.childId)?.title ?? '',
+              name: workEdgeEditor.name ?? byId.get(workEdgeEditor.childId)?.title ?? '',
               role: workEdgeEditor.role,
               mandate: workEdgeEditor.mandate,
               prompt: workEdgeEditor.prompt,
@@ -4731,6 +4734,7 @@ export function SessionMapPage({
               void onAskParentIdentity({ parentSessionId: workEdgeEditor.parentId, brief }).then((identity) => {
                 setWorkEdgeEditor((current) => current === null ? current : {
                   ...current,
+                  name: identity.title,
                   role: identity.role,
                   mandate: identity.mandate,
                   parentStatus: 'idle',
@@ -4746,12 +4750,13 @@ export function SessionMapPage({
             onChange={(values) => {
               setWorkEdgeEditor((current) => current === null ? current : {
                 ...current,
+                name: values.name,
                 role: values.role,
                 mandate: values.mandate,
                 prompt: values.prompt,
               });
             }}
-            onSubmit={(values) => void saveWorkEdgeIdentity(values)}
+            onSubmit={(values) => saveWorkEdgeIdentity(values)}
             onClose={() => setWorkEdgeEditor(null)}
           />
         )}

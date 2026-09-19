@@ -20,6 +20,7 @@ const DEFAULT_APPROVE_TOOLS = new Set([
   'TeamBroadcast',
   'TeamDM',
   'TeamChat',
+  'TeamStatus',
   'TeamDiscussInvite',
   'TeamDiscussKick',
   'TeamDecide',

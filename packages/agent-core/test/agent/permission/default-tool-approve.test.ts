@@ -72,10 +72,11 @@ describe('DefaultToolApprovePermissionPolicy', () => {
     ).toEqual({ kind: 'approve' });
   });
 
-  it('auto-approves SessionSearch, SessionMount, SessionUnmount, and SessionGraph', () => {
+  it('auto-approves SessionSearch, SessionMount, SessionUnmount, SessionGraph, and TeamStatus', () => {
     expect(policy.evaluate(policyContext('SessionSearch', { query: 'reviewer' }))).toEqual({ kind: 'approve' });
     expect(policy.evaluate(policyContext('SessionGraph', {}))).toEqual({ kind: 'approve' });
     expect(policy.evaluate(policyContext('SessionMount', { session_id: 'sess_reviewer' }))).toEqual({ kind: 'approve' });
     expect(policy.evaluate(policyContext('SessionUnmount', { session_id: 'sess_reviewer' }))).toEqual({ kind: 'approve' });
+    expect(policy.evaluate(policyContext('TeamStatus', {}))).toEqual({ kind: 'approve' });
   });
 });

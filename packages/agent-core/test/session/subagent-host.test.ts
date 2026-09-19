@@ -1283,13 +1283,120 @@ describe('SessionSubagentHost', () => {
     const host = new SessionSubagentHost(session, 'agent-member');
 
     await expect(host.sendChatMessage('Hello.', ['agent-member'], signal))
-      .rejects.toThrow('must begin with one or more literal @agent-id mentions');
+      .rejects.toThrow('must begin with one or more literal @session-id (or member name) mentions');
     await expect(host.sendChatMessage('@agent-member Hello.', ['agent-other'], signal))
       .rejects.toThrow('must exactly match');
     await expect(host.sendChatMessage('@agent-member @agent-member Hello.', ['agent-member', 'agent-member'], signal))
       .rejects.toThrow('must not contain duplicates');
     await expect(host.sendChatMessage('@all Hello.', ['agent-member'], signal))
       .rejects.toThrow('@all must be the only leading mention');
+  });
+
+  it('delivers leftover Chat mentions by member display name', async () => {
+    const mentionedSteer = vi.fn(() => null);
+    const unmentionedSteer = vi.fn(() => null);
+    const mentioned = agentDouble({ turn: { hasActiveTurn: true, prompt: vi.fn(), steer: mentionedSteer } });
+    const unmentioned = agentDouble({ turn: { hasActiveTurn: true, prompt: vi.fn(), steer: unmentionedSteer } });
+    const senderMeta = {
+      homedir: '/sender',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'team' as const,
+      teamLeaderAgentId: 'main',
+      name: 'Sender',
+    };
+    const mentionedMeta = { ...senderMeta, homedir: '/frontend', name: 'frontend' };
+    const unmentionedMeta = { ...senderMeta, homedir: '/backend', name: 'backend' };
+    const postTeamChatMessage = vi.fn(async (
+      _leaderAgentId: string,
+      senderAgentId: string,
+      senderName: string,
+      message: string,
+      mentions: readonly string[],
+    ) => ({ messageId: 8, agentId: senderAgentId, name: senderName, message, mentions, sentAt: '2026-08-20T00:00:00.000Z' }));
+    const session = teamSessionDouble({
+      getAgentMetadata: vi.fn((id: string) =>
+        id === 'agent-sender' ? senderMeta
+          : id === 'sess_frontend' ? mentionedMeta
+            : id === 'sess_backend' ? unmentionedMeta
+              : undefined,
+      ),
+      teamMemberMetadata: vi.fn(() => [
+        ['agent-sender', senderMeta],
+        ['sess_frontend', mentionedMeta],
+        ['sess_backend', unmentionedMeta],
+      ]),
+      ensureAgentResumed: vi.fn(async (id: string) =>
+        id === 'sess_frontend' ? mentioned : unmentioned,
+      ),
+      postTeamChatMessage,
+    });
+    const host = new SessionSubagentHost(session, 'agent-sender');
+
+    await host.sendChatMessage('@frontend Cache key changed.', ['frontend'], signal);
+
+    expect(postTeamChatMessage).toHaveBeenCalledWith(
+      'main',
+      'agent-sender',
+      'Sender',
+      '@frontend Cache key changed.',
+      ['sess_frontend'],
+    );
+    expect(mentionedSteer).toHaveBeenCalledTimes(1);
+    expect(unmentionedSteer).not.toHaveBeenCalled();
+  });
+
+  it('delivers mounted member Chat mentions by sibling display name', async () => {
+    const mentionedSteer = vi.fn(() => null);
+    const unmentionedSteer = vi.fn(() => null);
+    const mentioned = agentDouble({ turn: { hasActiveTurn: true, prompt: vi.fn(), steer: mentionedSteer } });
+    const unmentioned = agentDouble({ turn: { hasActiveTurn: true, prompt: vi.fn(), steer: unmentionedSteer } });
+    const postChat = vi.fn(async (
+      _parentSessionId: string,
+      senderSessionId: string,
+      senderName: string,
+      message: string,
+      mentions: readonly string[],
+    ) => ({ messageId: 9, agentId: senderSessionId, name: senderName, message, mentions, sentAt: '2026-08-20T00:00:00.000Z' }));
+    const memberSnapshot = vi.fn(async (sessionId: string) => (
+      sessionId === 'sess_frontend'
+        ? { sessionId, name: 'frontend', role: 'frontend', mandate: 'Ship UI.' }
+        : sessionId === 'sess_backend'
+          ? { sessionId, name: 'backend', role: 'backend', mandate: 'Ship API.' }
+          : undefined
+    ));
+    const session = teamSessionDouble({
+      parentSessionId: vi.fn(() => 'sess_parent'),
+      listDepartmentSiblingIds: vi.fn(() => ['sess_frontend', 'sess_backend']),
+      getAgentMetadata: vi.fn((id: string) => (
+        id === 'main' ? { homedir: '/', type: 'main' as const, parentAgentId: null, kind: 'main' as const, name: 'Sender' }
+          : undefined
+      )),
+    });
+    (session as { options: { id: string; departmentRuntime: unknown } }).options = {
+      id: 'sess_self',
+      departmentRuntime: {
+        postChat,
+        memberSnapshot,
+        ensureMain: vi.fn(async (sessionId: string) => (
+          sessionId === 'sess_frontend' ? mentioned : unmentioned
+        )),
+      },
+    };
+    const host = new SessionSubagentHost(session, 'main');
+
+    const record = await host.sendChatMessage('@frontend Cache key changed.', ['frontend'], signal);
+
+    expect(record).toMatchObject({ messageId: 9, agentId: 'sess_self', name: 'Sender' });
+    expect(postChat).toHaveBeenCalledWith(
+      'sess_parent',
+      'sess_self',
+      'Sender',
+      '@frontend Cache key changed.',
+      ['sess_frontend'],
+    );
+    expect(mentionedSteer).toHaveBeenCalledTimes(1);
+    expect(unmentionedSteer).not.toHaveBeenCalled();
   });
 
   it('does not claim delivery when an idle TeamDM cannot start or is cancelled', async () => {

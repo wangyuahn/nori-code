@@ -220,18 +220,60 @@ export class SessionSubagentHost {
     return member[1].mountedSessionId ?? member[0];
   }
 
+  private matchesDisplayName(name: string | undefined, token: string): boolean {
+    if (name === undefined || name.length === 0) return false;
+    return name.localeCompare(token, undefined, { sensitivity: 'accent' }) === 0;
+  }
+
   private resolveMemberId(token: string): string {
     const trimmed = token.trim();
     if (trimmed.length === 0) return trimmed;
     const members = this.session.teamMemberMetadata(this.ownerAgentId);
     if (members.some(([id]) => id === trimmed)) return trimmed;
-    const byName = members.find(([, meta]) =>
-      (meta.name ?? '').localeCompare(trimmed, undefined, { sensitivity: 'accent' }) === 0,
-    );
+    const byName = members.find(([, meta]) => this.matchesDisplayName(meta.name, trimmed));
     if (byName !== undefined) return byName[0];
     const byMounted = members.find(([, meta]) => meta.mountedSessionId === trimmed);
     if (byMounted !== undefined) return byMounted[0];
     return trimmed;
+  }
+
+  private resolvePeerId(
+    token: string,
+    peerIds: readonly string[],
+    names?: ReadonlyMap<string, string>,
+  ): string | undefined {
+    const trimmed = token.trim();
+    if (trimmed.length === 0) return undefined;
+    if (peerIds.includes(trimmed)) return trimmed;
+    return peerIds.find((id) => this.matchesDisplayName(
+      names?.get(id) ?? this.session.getAgentMetadata(id)?.name,
+      trimmed,
+    ));
+  }
+
+  private async resolveChatMentions(
+    mentions: readonly string[],
+    peerIds: readonly string[],
+  ): Promise<readonly string[]> {
+    const names = new Map<string, string>();
+    for (const id of peerIds) {
+      const name = this.session.getAgentMetadata(id)?.name;
+      if (name !== undefined && name.length > 0) names.set(id, name);
+    }
+    const runtime = this.session.options.departmentRuntime;
+    if (runtime !== undefined) {
+      const missing = peerIds.filter((id) => !names.has(id));
+      if (missing.length > 0) {
+        await Promise.all(missing.map(async (id) => {
+          const snapshot = await runtime.memberSnapshot(id);
+          if (snapshot !== undefined && snapshot.name.length > 0) names.set(id, snapshot.name);
+        }));
+      }
+    }
+    return mentions.map((token) => {
+      if (token.trim() === 'all') return 'all';
+      return this.resolvePeerId(token, peerIds, names) ?? token;
+    });
   }
 
   private resolveDirectMessageTarget(
@@ -247,11 +289,7 @@ export class SessionSubagentHost {
     }
     const child = this.resolveMemberId(token);
     if (children.includes(child)) return { id: child, relation: 'member' };
-    const sibling = siblings.find((id) => {
-      if (id === token) return true;
-      const meta = this.session.getAgentMetadata(id);
-      return (meta?.name ?? '').localeCompare(token, undefined, { sensitivity: 'accent' }) === 0;
-    });
+    const sibling = this.resolvePeerId(token, siblings);
     if (sibling !== undefined && sibling !== selfId) return { id: sibling, relation: 'sibling' };
     const sender = this.session.getAgentMetadata(this.ownerAgentId);
     const relation = directMessageRelation(
@@ -563,10 +601,11 @@ export class SessionSubagentHost {
     }
     const leaderAgentId = sender.teamLeaderAgentId;
     const members = this.session.teamMemberMetadata(leaderAgentId);
-    const targets = mentions.includes('all')
+    const resolvedMentions = mentions.map((id) => id === 'all' ? 'all' : this.resolveMemberId(id));
+    const targets = resolvedMentions.includes('all')
       ? members.filter(([agentId]) => agentId !== this.ownerAgentId)
-      : members.filter(([agentId]) => agentId !== this.ownerAgentId && mentions.includes(agentId));
-    const unknown = mentions.filter((id) => id !== 'all' && !members.some(([agentId]) => agentId === id));
+      : members.filter(([agentId]) => agentId !== this.ownerAgentId && resolvedMentions.includes(agentId));
+    const unknown = resolvedMentions.filter((id) => id !== 'all' && !members.some(([agentId]) => agentId === id));
     if (unknown.length > 0) {
       const siblings = members.filter(([agentId]) => agentId !== this.ownerAgentId).map(([agentId]) => agentId);
       throw new Error(
@@ -580,7 +619,7 @@ export class SessionSubagentHost {
       this.ownerAgentId,
       sender.name ?? '团队成员',
       message,
-      mentions,
+      resolvedMentions,
     );
     const origin = this.teamChatPromptOrigin(this.ownerAgentId, sender.name);
     const input = [{ type: 'text' as const, text: wrapTeamChatMessage(sender.name ?? this.ownerAgentId, message) }];
@@ -620,12 +659,7 @@ export class SessionSubagentHost {
       throw new Error('Chat is only available to a member of a department.');
     }
     const siblings = this.session.listDepartmentSiblingIds();
-    const resolvedMentions = mentions.map((id) => {
-      if (id === 'all') return 'all';
-      const match = siblings.find((siblingId) => siblingId === id);
-      if (match !== undefined) return match;
-      return id;
-    });
+    const resolvedMentions = await this.resolveChatMentions(mentions, siblings);
     const unknown = resolvedMentions.filter((id) => id !== 'all' && !siblings.includes(id));
     if (unknown.length > 0) {
       throw new Error(
@@ -773,9 +807,11 @@ export class SessionSubagentHost {
     await this.session.assertTeamDiscussionMode(this.ownerAgentId);
     const active = this.requireActiveDiscussion();
     const current = new Set(active.meta.discussion!.participantAgentIds);
+    const removed: string[] = [];
     for (const id of agentIds) {
       const resolved = this.resolveMemberId(id);
       if (!current.delete(resolved)) throw new Error(`Discussion participant "${id}" is not active.`);
+      removed.push(resolved);
     }
     if (current.size === 0) throw new Error('A discussion must retain at least one participant.');
     const discussion = await this.session.updateTeamDiscussion(active.id, {
@@ -786,7 +822,7 @@ export class SessionSubagentHost {
     // Keep the team durable while making the per-discussion removal visible
     // to the affected agents. They must not infer that they are still
     // scheduled from stale context.
-    await this.notifyDiscussionLifecycle(discussion, agentIds, 'kicked');
+    await this.notifyDiscussionLifecycle(discussion, removed, 'kicked');
     return discussion;
   }
 

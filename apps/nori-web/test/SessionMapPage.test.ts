@@ -1357,6 +1357,11 @@ describe('wire gesture click suppression (live regressions)', () => {
       activeSessionId?: string;
       onCreateTopLevelSession?: (cwd: string) => Promise<string | null>;
       preferredCreateCwd?: string;
+      onAskParentIdentity?: (input: { parentSessionId: string; brief: string }) => Promise<{
+        title: string;
+        role: string;
+        mandate: string;
+      }>;
     } = {},
     options: { keepMapDoc?: boolean } = {},
   ): Promise<RenderedMap> {
@@ -1380,6 +1385,7 @@ describe('wire gesture click suppression (live regressions)', () => {
         activeSessionId: props.activeSessionId,
         onCreateTopLevelSession: props.onCreateTopLevelSession,
         preferredCreateCwd: props.preferredCreateCwd,
+        onAskParentIdentity: props.onAskParentIdentity,
       })));
       await Promise.resolve();
       await Promise.resolve();
@@ -1872,6 +1878,83 @@ describe('wire gesture click suppression (live regressions)', () => {
       expect(drawer).not.toBeNull();
       expect(drawer?.textContent).toMatch(/Identity|身份/);
       expect(drawer?.querySelector('input')?.value).toBe('Alpha');
+    } finally {
+      await act(async () => { map.root.unmount(); });
+      map.container.remove();
+      localStorage.removeItem('nori-session-map-doc');
+    }
+  });
+
+  it('work-edge identity editor shows Prompt, asks the parent, and remounts on save', async () => {
+    const parent = session({ id: 'parent', title: 'Parent' });
+    const child = session({
+      id: 'child',
+      title: 'Child',
+      metadata: { parent_session_id: 'parent', mount_role: 'reviewer', mount_mandate: 'Review diffs.' },
+    });
+    const fillIdentity = vi.fn(async () => ({
+      title: 'Lead reviewer',
+      role: 'lead-reviewer',
+      mandate: 'Own the review bar.',
+    }));
+    const remount = vi.spyOn(api.sessions, 'remount').mockResolvedValue(child);
+    const updateIdentity = vi.spyOn(api.sessions, 'updateIdentity').mockResolvedValue({
+      ...child,
+      title: 'Lead reviewer',
+    });
+    const map = await renderMap(
+      [parent, child],
+      [{ child_session_id: 'child', parent_session_id: 'parent' }],
+      { onOpenSession: vi.fn(), onAskParentIdentity: fillIdentity },
+    );
+    try {
+      const edge = map.container.querySelector<SVGPathElement>('path[data-parent-id="parent"][data-child-id="child"]');
+      expect(edge).toBeTruthy();
+      await act(async () => {
+        edge!.dispatchEvent(new MouseEvent('contextmenu', {
+          bubbles: true, cancelable: true, clientX: 40, clientY: 40,
+        }));
+      });
+      const menu = map.container.querySelector('.session-map-context-menu');
+      const edit = [...menu!.querySelectorAll('button')].find((el) => /Edit job identity|改这份身份/.test(el.textContent ?? ''));
+      expect(edit).toBeTruthy();
+      await act(async () => { edit!.click(); });
+      let drawer = map.container.querySelector('.session-identity-drawer');
+      expect(drawer).not.toBeNull();
+      expect(drawer?.textContent).toMatch(/Prompt/);
+      expect(drawer?.textContent).toMatch(/Ask parent to fill|让父节点填写/);
+      const prompt = [...drawer!.querySelectorAll('textarea')].find((el) => (
+        (el.getAttribute('placeholder') ?? '').match(/parent|父节点/) !== null
+      ));
+      expect(prompt).toBeTruthy();
+      await act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+        setter?.call(prompt, 'Need a reviewer who owns the bar.');
+        prompt!.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      const ask = [...drawer!.querySelectorAll('button')].find((el) => /Ask parent to fill|让父节点填写/.test(el.textContent ?? ''));
+      expect(ask).toBeTruthy();
+      await act(async () => { ask!.click(); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(fillIdentity).toHaveBeenCalledWith({
+        parentSessionId: 'parent',
+        brief: 'Need a reviewer who owns the bar.',
+      });
+      drawer = map.container.querySelector('.session-identity-drawer');
+      expect(drawer?.querySelector('input')?.value).toBe('Lead reviewer');
+      const save = [...drawer!.querySelectorAll('button')].find((el) => /Save|保存/.test(el.textContent ?? ''));
+      expect(save).toBeTruthy();
+      await act(async () => { save!.click(); });
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+      expect(remount).toHaveBeenCalledWith('child', 'parent', {
+        role: 'lead-reviewer',
+        mandate: 'Own the review bar.',
+      });
+      expect(updateIdentity).toHaveBeenCalledWith('child', {
+        name: 'Lead reviewer',
+        role: 'lead-reviewer',
+        mandate: 'Own the review bar.',
+      });
     } finally {
       await act(async () => { map.root.unmount(); });
       map.container.remove();

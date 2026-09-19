@@ -113,20 +113,22 @@ export function SessionIdentityDrawer({
   }, [parentMessage, parentStatus, tr]);
 
   const save = async () => {
-    if (creating) {
-      if (!canCreate || onSubmit === undefined) return;
+    if (onSubmit !== undefined) {
+      if (creating ? !canCreate : !canSaveEdit) return;
       setBusy(true);
       setError(null);
       try {
         await onSubmit(values);
       } catch {
-        setError(tr('The session could not be created. Try again.', '没建成功，可以改完再试。'));
+        setError(creating
+          ? tr('The session could not be created. Try again.', '没建成功，可以改完再试。')
+          : tr('Identity could not be saved. Try again.', '身份没保存好，可以再试一次。'));
       } finally {
         setBusy(false);
       }
       return;
     }
-    if (session === undefined || !canSaveEdit) return;
+    if (creating || session === undefined || !canSaveEdit) return;
     setBusy(true);
     setError(null);
     try {
@@ -196,7 +198,7 @@ export function SessionIdentityDrawer({
             onChange={(event) => update({ mandate: event.target.value })}
           />
         </label>
-        {creating && allowAskParent ? (
+        {allowAskParent ? (
           <label>
             Prompt
             <textarea

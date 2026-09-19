@@ -812,9 +812,10 @@ export class Session {
       : mountedChildrenOf(parentById, this.departmentParentId).filter((id) => id !== self);
     const runtime = this.options.departmentRuntime;
     if (runtime !== undefined) {
-      for (const childId of this.departmentChildIds) {
-        const snapshot = await runtime.memberSnapshot(childId);
-        if (snapshot !== undefined) this.departmentSnapshots.set(childId, snapshot);
+      const peerIds = [...this.departmentChildIds, ...this.departmentSiblingIds];
+      for (const peerId of peerIds) {
+        const snapshot = await runtime.memberSnapshot(peerId);
+        if (snapshot !== undefined) this.departmentSnapshots.set(peerId, snapshot);
       }
     }
     const main = this.getReadyAgent('main');
@@ -1454,10 +1455,13 @@ export class Session {
       };
       if (this.isDepartmentMemberId(assignment.agentId)) {
         await this.writeDepartmentMemberState(assignment.agentId, next);
+        // Child.main already has its own profile tools plus TEAM_MEMBER_TOOLS.
+        // Do not copy the parent lead's tool set onto the durable member.
+        assignment.agent.teamWriteEnabled = true;
       } else {
         this.metadata.agents[assignment.agentId] = next;
+        this.configureTeamAgentRuntime(assignment.agent, next);
       }
-      this.configureTeamAgentRuntime(assignment.agent, next);
       this.emitTeamStatus(assignment.agentId);
     }
     await this.writeMetadata();

@@ -11,13 +11,13 @@ export function validateTeamChatMentions(
     if (!token.startsWith('@')) break;
     const id = token.slice(1);
     if (id.length === 0 || id.includes('@')) {
-      throw new Error('TeamChat messages must begin with one or more literal @agent-id mentions.');
+      throw new Error('TeamChat messages must begin with one or more literal @session-id (or member name) mentions.');
     }
     leadingMentions.push(id);
   }
   if (leadingMentions.length === 0) {
     throw new Error(
-      'TeamChat messages must begin with one or more literal @agent-id mentions; '
+      'TeamChat messages must begin with one or more literal @session-id (or member name) mentions; '
       + 'use @all only when every department member must receive the message.',
     );
   }
@@ -41,7 +41,7 @@ export function validateTeamChatMentions(
     || uniqueLeading.length !== uniqueMentions.length
     || uniqueLeading.some((id, index) => id !== uniqueMentions[index])) {
     throw new Error(
-      'TeamChat mentions must exactly match the literal @agent-id mentions at the start of the message.',
+      'TeamChat mentions must exactly match the literal @session-id (or member name) mentions at the start of the message.',
     );
   }
 }
