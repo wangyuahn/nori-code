@@ -18,6 +18,13 @@ export interface ForceMapNode extends SimulationNodeDatum {
   member: MapMemberRef;
 }
 
+/** d3 pins use both `undefined` (free) and `null` (explicitly unpinned). */
+export function hasPinnedForcePosition(
+  node: Pick<SimulationNodeDatum, 'fx' | 'fy'>,
+): node is Pick<SimulationNodeDatum, 'fx' | 'fy'> & { fx: number; fy: number } {
+  return node.fx !== undefined && node.fx !== null && node.fy !== undefined && node.fy !== null;
+}
+
 export interface ForceMapLink extends SimulationLinkDatum<ForceMapNode> {
   source: string | ForceMapNode;
   target: string | ForceMapNode;

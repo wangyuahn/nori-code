@@ -18,7 +18,6 @@ export async function handleMapCommand(host: SlashCommandHost): Promise<void> {
     return;
   }
 
-  let mappedTeamAgents: MappedTeamAgent[] = [];
   const render = (): void => {
     host.mountEditorReplacement(
       new SessionMapBrowserComponent({
@@ -31,14 +30,14 @@ export async function handleMapCommand(host: SlashCommandHost): Promise<void> {
         onMount: (child, parent) => {
           void applyMount(host, child, parent, async () => {
             graph = await host.harness.getSessionGraph({ workDir: host.state.appState.workDir });
-            mappedTeamAgents = await refreshTeamAgents(host, graph);
+            await refreshTeamAgents(host, graph);
             render();
           }, render);
         },
         onUnmount: (session) => {
           void applyUnmount(host, session, async () => {
             graph = await host.harness.getSessionGraph({ workDir: host.state.appState.workDir });
-            mappedTeamAgents = await refreshTeamAgents(host, graph);
+            await refreshTeamAgents(host, graph);
             render();
           }, render);
         },
@@ -49,7 +48,7 @@ export async function handleMapCommand(host: SlashCommandHost): Promise<void> {
     );
   };
 
-  mappedTeamAgents = await refreshTeamAgents(host, graph);
+  await refreshTeamAgents(host, graph);
   render();
 }
 

@@ -55,6 +55,7 @@ import {
   isComponentRootPin,
   resolveNodeDragGroupIds,
   buildForceMapNodes,
+  hasPinnedForcePosition,
   tidyComponentAroundRoot,
   type ForceMapLink,
   type ForceMapNode,
@@ -1525,7 +1526,7 @@ export function SessionMapPage({
     });
     seedByIdRef.current = seeds;
     for (const node of nodes) {
-      if (node.fx == null || node.fy == null) continue;
+      if (!hasPinnedForcePosition(node)) continue;
       positionsRef.current.set(node.id, { x: node.fx, y: node.fy });
     }
 
@@ -1603,7 +1604,7 @@ export function SessionMapPage({
         .velocityDecay(0.52)
         .on('tick', () => {
           for (const node of forceNodesRef.current) {
-            if (node.fx == null || node.fy == null) continue;
+            if (!hasPinnedForcePosition(node)) continue;
             positionsRef.current.set(node.id, { x: node.fx, y: node.fy });
           }
           scheduleRedraw();
@@ -1624,7 +1625,7 @@ export function SessionMapPage({
           scheduleRedraw();
         });
       simulationRef.current = simulation;
-      const needsSettle = forceNodes.some((node) => node.fx == null || node.fy == null);
+      const needsSettle = forceNodes.some((node) => !hasPinnedForcePosition(node));
       if (needsSettle) simulation.alpha(SETTLE_ALPHA);
       else simulation.alpha(0).stop();
     } else {
@@ -1632,7 +1633,7 @@ export function SessionMapPage({
       const linkForce = simulation.force('link') as ReturnType<typeof forceLink<ForceMapNode, ForceMapLink>> | undefined;
       linkForce?.links(forceLinks);
       linkForce?.strength(LINK_STRENGTH);
-      const needsSettle = forceNodes.some((node) => node.fx == null || node.fy == null);
+      const needsSettle = forceNodes.some((node) => !hasPinnedForcePosition(node));
       if (needsSettle) {
         // Mild settle for newcomers only — pinned user coords stay put.
         simulation.alpha(Math.max(simulation.alpha(), SETTLE_ALPHA * 0.45)).restart();

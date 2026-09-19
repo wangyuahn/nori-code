@@ -408,21 +408,32 @@ export function mapPositionLookupKeys(nodeId: string): string[] {
   return keys;
 }
 
+type StoredMapPositions =
+  | ReadonlyMap<string, { x: number; y: number }>
+  | Record<string, { x: number; y: number }>;
+
+function isStoredMapPositionMap(
+  positions: StoredMapPositions,
+): positions is ReadonlyMap<string, { x: number; y: number }> {
+  return positions instanceof Map;
+}
+
 export function lookupMapPosition(
-  positions: ReadonlyMap<string, { x: number; y: number }> | Record<string, { x: number; y: number }> | undefined,
+  positions: StoredMapPositions | undefined,
   nodeId: string,
 ): { x: number; y: number } | undefined {
   if (positions === undefined) return undefined;
   const keys = mapPositionLookupKeys(nodeId);
-  if (positions instanceof Map) {
+  if (isStoredMapPositionMap(positions)) {
     for (const key of keys) {
       const hit = positions.get(key);
       if (hit !== undefined) return hit;
     }
     return undefined;
   }
+  const record = positions;
   for (const key of keys) {
-    const hit = positions[key];
+    const hit = record[key];
     if (hit !== undefined) return hit;
   }
   return undefined;

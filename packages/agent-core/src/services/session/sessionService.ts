@@ -1386,7 +1386,7 @@ export class SessionService extends Disposable implements ISessionService {
     // Durable members are child Sessions on the mount forest. Drop leftover
     // parent-session team shadows; keep discussion / independent transcripts.
     // Do not re-add children as fake team nodes — GUI and Team* read the forest.
-    for (const [agentId, agent] of [...agents.entries()]) {
+    for (const [agentId, agent] of agents.entries()) {
       if (agent.kind === 'team') agents.delete(agentId);
     }
 
@@ -1442,7 +1442,7 @@ export class SessionService extends Disposable implements ISessionService {
     if (parentId !== undefined) {
       await this.core.rpc.resumeSession({ sessionId: parentId }).catch(() => undefined);
       const parentMeta = await this.tryGetMeta(parentId);
-      const messages = (parentMeta?.agents.main?.chat?.messages ?? []).map((record) => ({
+      const messages = (parentMeta?.agents['main']?.chat?.messages ?? []).map((record) => ({
         message_id: record.messageId,
         agent_id: record.agentId,
         name: record.name,
@@ -1656,7 +1656,6 @@ export class SessionService extends Disposable implements ISessionService {
       if (summary === undefined) {
         throw new SessionNotFoundError(id);
       }
-      const parentSessionId = readParentSessionId(summary.metadata);
       const promoted = await this.promoteChildrenOnDelete(id);
       try {
         // Leftover parent-session team shadows can outlive a stale parent_session_id.

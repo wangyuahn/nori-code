@@ -54,7 +54,7 @@ import { ReadInputSchema, ReadTool } from '../../src/tools/builtin/file/read';
 import { WriteInputSchema, WriteTool } from '../../src/tools/builtin/file/write';
 import { BashInputSchema, BashTool } from '../../src/tools/builtin/shell/bash';
 import type { WorkspaceConfig } from '../../src/tools/support/workspace';
-import { createFakeKaos } from './fixtures/fake-kaos';
+import { createFakeKaos, toolContentString } from './fixtures/fake-kaos';
 import { executeTool } from './fixtures/execute-tool';
 import { createBackgroundManager } from '../agent/background/helpers';
 import {
@@ -439,22 +439,22 @@ describe('current builtin collaboration tools', () => {
     expect(SessionGraphInputSchema.safeParse({}).success).toBe(true);
 
     const searched = await executeTool(search, context({ query: 'review' }));
-    expect(JSON.parse(String(searched.output))).toEqual({
+    expect(JSON.parse(toolContentString(searched))).toEqual({
       hits: [{ sessionId: 'sess_reviewer', title: 'Reviewer', role: 'reviewer' }],
     });
     const mounted = await executeTool(mount, context({
       session_id: 'sess_reviewer',
       role: 'reviewer',
     }));
-    expect(JSON.parse(String(mounted.output))).toEqual({
+    expect(JSON.parse(toolContentString(mounted))).toEqual({
       mounted: 'sess_reviewer',
       parent_session_id: 'lead',
     });
     expect(remountSession).toHaveBeenCalledWith('sess_reviewer', 'lead', 'reviewer', undefined);
     const unmounted = await executeTool(unmount, context({ session_id: 'sess_reviewer' }));
-    expect(JSON.parse(String(unmounted.output))).toEqual({ unmounted: 'sess_reviewer' });
+    expect(JSON.parse(toolContentString(unmounted))).toEqual({ unmounted: 'sess_reviewer' });
     const graphResult = await executeTool(graph, context({}));
-    expect(JSON.parse(String(graphResult.output)).nodes).toHaveLength(2);
+    expect(JSON.parse(toolContentString(graphResult)).nodes).toHaveLength(2);
   });
 
   it('AskUserQuestion exposes parameters and asks through rpc in yolo mode', async () => {

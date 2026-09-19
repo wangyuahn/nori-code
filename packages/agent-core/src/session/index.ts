@@ -849,18 +849,22 @@ export class Session {
       return undefined;
     }
     const record = entry as Record<string, unknown>;
-    const name = typeof record.name === 'string' ? record.name : id;
-    const role = typeof record.role === 'string' ? record.role : 'member';
-    const mandate = typeof record.mandate === 'string' ? record.mandate : '';
+    const name = typeof record['name'] === 'string' ? record['name'] : id;
+    const role = typeof record['role'] === 'string' ? record['role'] : 'member';
+    const mandate = typeof record['mandate'] === 'string' ? record['mandate'] : '';
+    const assignedTask = record['assignedTask'];
+    const assignedAt = record['assignedAt'];
+    const teamReport = record['teamReport'];
+    const lastTurnSkip = record['lastTurnSkip'];
     return {
       sessionId: id,
       name,
       role,
       mandate,
-      assignedTask: typeof record.assignedTask === 'string' ? record.assignedTask : undefined,
-      assignedAt: typeof record.assignedAt === 'string' ? record.assignedAt : undefined,
-      teamReport: isTeamReportRecord(record.teamReport) ? record.teamReport : undefined,
-      lastTurnSkip: isTurnSkipRecord(record.lastTurnSkip) ? record.lastTurnSkip : undefined,
+      assignedTask: typeof assignedTask === 'string' ? assignedTask : undefined,
+      assignedAt: typeof assignedAt === 'string' ? assignedAt : undefined,
+      teamReport: isTeamReportRecord(teamReport) ? teamReport : undefined,
+      lastTurnSkip: isTurnSkipRecord(lastTurnSkip) ? lastTurnSkip : undefined,
     };
   }
 
@@ -3213,13 +3217,16 @@ function isTeamReportRecord(value: unknown): value is TeamReportRecord {
     return false;
   }
   const record = value as Record<string, unknown>;
-  return typeof record.assignmentId === 'string'
-    && typeof record.task === 'string'
+  const assignmentId = record['assignmentId'];
+  const task = record['task'];
+  const status = record['status'];
+  return typeof assignmentId === 'string'
+    && typeof task === 'string'
     && (
-      record.status === 'unreported'
-      || record.status === 'completed'
-      || record.status === 'blocked'
-      || record.status === 'needs_decision'
+      status === 'unreported'
+      || status === 'completed'
+      || status === 'blocked'
+      || status === 'needs_decision'
     );
 }
 
@@ -3228,7 +3235,7 @@ function isTurnSkipRecord(value: unknown): value is { readonly reason: string; r
     return false;
   }
   const record = value as Record<string, unknown>;
-  return typeof record.reason === 'string' && typeof record.error === 'string';
+  return typeof record['reason'] === 'string' && typeof record['error'] === 'string';
 }
 
 function escapeTeamIdentity(value: string): string {

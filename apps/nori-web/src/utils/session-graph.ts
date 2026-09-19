@@ -231,12 +231,14 @@ export function describeMapErrorSummary(
   const match = live?.errors.find((item) => item.sessionId === sessionId);
   if (match !== undefined && match.message.trim().length > 0) return clipMapText(match.message);
   const report = member.session.metadata?.department_team_report;
-  const reportStatus = report !== null && typeof report === 'object' && 'status' in report
-    ? String((report as { status?: unknown }).status)
+  const reportStatusRaw = report !== null && typeof report === 'object' && 'status' in report
+    ? (report as { status?: unknown }).status
     : undefined;
-  const reportSummary = report !== null && typeof report === 'object' && 'summary' in report
-    ? String((report as { summary?: unknown }).summary ?? '')
+  const reportStatus = typeof reportStatusRaw === 'string' ? reportStatusRaw : undefined;
+  const reportSummaryRaw = report !== null && typeof report === 'object' && 'summary' in report
+    ? (report as { summary?: unknown }).summary
     : undefined;
+  const reportSummary = typeof reportSummaryRaw === 'string' ? reportSummaryRaw : undefined;
   if (
     (reportStatus === 'blocked' || reportStatus === 'needs_decision')
     && reportSummary !== undefined

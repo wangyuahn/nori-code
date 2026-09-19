@@ -31,7 +31,12 @@ import {
 import type { Logger } from '../logging/types';
 import { resolveSessionMcpConfig, mergeCallerMcpServers, type SessionMcpConfig } from '../mcp';
 import { Session, type SessionMeta, type SessionSkillConfig, type TeamReportRecord } from '../session';
-import { remapShadowTeamAgents } from '../session/department-runtime';
+import {
+  remapShadowTeamAgents,
+  type DepartmentMemberPatch,
+  type DepartmentRuntime,
+  type SessionTopologyRuntime,
+} from '../session/department-runtime';
 import { mountedChildrenOf } from '../session/team-tree';
 import { exportSessionDirectory } from '../session/export';
 import {
@@ -1407,7 +1412,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     return resumed;
   }
 
-  private createDepartmentRuntime() {
+  private createDepartmentRuntime(): DepartmentRuntime {
     return {
       listDirectChildren: async (parentSessionId: string) => {
         const parentById = await this.listMountParentById();
@@ -1441,7 +1446,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
           return undefined;
         }
       },
-      patchMember: async (sessionId, patch) => {
+      patchMember: async (sessionId: string, patch: DepartmentMemberPatch) => {
         await this.resumeSessionWithOverridesUnlocked({ sessionId }, {});
         const active = this.sessions.get(sessionId);
         const summary = await this.sessionStore.get(sessionId);
@@ -1478,15 +1483,21 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
         main.permission.setToolsReadonly(locked);
         if (locked) main.permission.setMode('manual');
       },
-      publishDiscussionStatement: async (parentSessionId, speakerSessionId, message) => {
+      publishDiscussionStatement: async (parentSessionId: string, speakerSessionId: string, message: string) => {
         const parent = await this.sessionRef(parentSessionId);
         return parent.publishMountedMemberDiscussionStatement(speakerSessionId, message);
       },
-      postChat: async (parentSessionId, senderSessionId, senderName, message, mentions) => {
+      postChat: async (
+        parentSessionId: string,
+        senderSessionId: string,
+        senderName: string,
+        message: string,
+        mentions: readonly string[],
+      ) => {
         const parent = await this.sessionRef(parentSessionId);
         return parent.postTeamChatMessage('main', senderSessionId, senderName, message, mentions);
       },
-      migrateShadowTranscript: async (hostSessionId, agentId, childSessionId) => {
+      migrateShadowTranscript: async (hostSessionId: string, agentId: string, childSessionId: string) => {
         const host = await this.sessionRef(hostSessionId);
         const child = await this.sessionRef(childSessionId);
         let shadow;
@@ -1507,7 +1518,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
     };
   }
 
-  private createTopologyRuntime() {
+  private createTopologyRuntime(): SessionTopologyRuntime {
     return {
       searchSessions: async (query: string) => {
         const needle = query.trim().toLowerCase();
@@ -1521,7 +1532,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
               summary.title ?? '',
               readMountName(custom) ?? '',
               readMountRole(custom) ?? '',
-              typeof custom?.cwd === 'string' ? custom.cwd : summary.workDir,
+              typeof custom?.['cwd'] === 'string' ? custom['cwd'] : summary.workDir,
             ].join('\n').toLowerCase();
             return hay.includes(needle);
           })
@@ -1533,17 +1544,17 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
               title: summary.title ?? summary.id,
               role: readMountRole(custom),
               parentSessionId: readParentSessionId(custom),
-              cwd: typeof custom?.cwd === 'string' ? custom.cwd : summary.workDir,
+              cwd: typeof custom?.['cwd'] === 'string' ? custom['cwd'] : summary.workDir,
             };
           });
       },
-      mountSession: async (childSessionId, parentSessionId, role, mandate) => {
+      mountSession: async (childSessionId: string, parentSessionId: string, role?: string, mandate?: string) => {
         await this.mountSession({ sessionId: childSessionId, parentSessionId, role, mandate });
       },
-      remountSession: async (childSessionId, parentSessionId, role, mandate) => {
+      remountSession: async (childSessionId: string, parentSessionId: string, role?: string, mandate?: string) => {
         await this.remountSession({ sessionId: childSessionId, parentSessionId, role, mandate });
       },
-      unmountSession: async (sessionId) => {
+      unmountSession: async (sessionId: string) => {
         await this.unmountSession({ sessionId });
       },
       sessionGraph: async () => {
@@ -1557,7 +1568,8 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
           })),
         };
       },
-      fillChildIdentity: async (parentSessionId, brief) => this.fillChildIdentityFromParent(parentSessionId, brief),
+      fillChildIdentity: async (parentSessionId: string, brief: string) =>
+        this.fillChildIdentityFromParent(parentSessionId, brief),
     };
   }
 
@@ -2338,16 +2350,31 @@ function readDepartmentTeamReport(value: unknown): TeamReportRecord | undefined 
     return undefined;
   }
   const record = value as Record<string, unknown>;
-  if (typeof record.assignmentId !== 'string' || typeof record.task !== 'string') return undefined;
+  const assignmentId = record['assignmentId'];
+  const task = record['task'];
+  const status = record['status'];
+  if (typeof assignmentId !== 'string' || typeof task !== 'string') return undefined;
   if (
-    record.status !== 'unreported'
-    && record.status !== 'completed'
-    && record.status !== 'blocked'
-    && record.status !== 'needs_decision'
+    status !== 'unreported'
+    && status !== 'completed'
+    && status !== 'blocked'
+    && status !== 'needs_decision'
   ) {
     return undefined;
   }
-  return record as TeamReportRecord;
+  const summary = record['summary'];
+  const reportedAt = record['reportedAt'];
+  const receivedAt = record['receivedAt'];
+  const missingReminderAt = record['missingReminderAt'];
+  return {
+    assignmentId,
+    task,
+    status,
+    summary: typeof summary === 'string' ? summary : undefined,
+    reportedAt: typeof reportedAt === 'string' ? reportedAt : undefined,
+    receivedAt: typeof receivedAt === 'string' ? receivedAt : undefined,
+    missingReminderAt: typeof missingReminderAt === 'string' ? missingReminderAt : undefined,
+  };
 }
 
 function isTurnSkip(value: unknown): value is { readonly reason: string; readonly error: string } {
@@ -2355,5 +2382,7 @@ function isTurnSkip(value: unknown): value is { readonly reason: string; readonl
     return false;
   }
   const record = value as Record<string, unknown>;
-  return typeof record.reason === 'string' && typeof record.error === 'string';
+  const reason = record['reason'];
+  const error = record['error'];
+  return typeof reason === 'string' && typeof error === 'string';
 }
