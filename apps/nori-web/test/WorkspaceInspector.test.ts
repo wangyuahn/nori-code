@@ -217,12 +217,12 @@ describe('workspace change presentation', () => {
       await act(async () => container.querySelector<HTMLButtonElement>('.inspector-launcher-pick')!.click());
 
       await renderInspector({
-        selfAgentId: 'member-1',
-        departmentChat: { department_leader_agent_id: 'lead-1', messages: [] },
-        sessionAgents: [
-          { agent_id: 'lead-1', kind: 'subagent', parent_agent_id: 'main', status: 'idle' },
-          { agent_id: 'discussion-1', kind: 'discussion', parent_agent_id: 'lead-1', status: 'idle' },
-        ],
+        selfAgentId: 'sess_child',
+        departmentChat: {
+          department_leader_agent_id: 'sess_parent',
+          department_leader_session_id: 'sess_parent',
+          messages: [],
+        },
       });
       expect(await openToolFromPicker(container, /Chat|交流/)).toBe(true);
       expect(container.querySelector('.department-panel')).not.toBeNull();
@@ -231,6 +231,65 @@ describe('workspace change presentation', () => {
       await act(async () => container.querySelector<HTMLButtonElement>('.inspector-add-tab')!.click());
       expect(menuLabels().some(label => /Meeting|开会/.test(label))).toBe(true);
       expect(menuLabels().some(label => /Chat|交流/.test(label))).toBe(true);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('loads meeting statements from the parent session when viewing a child', async () => {
+    vi.spyOn(api.sessions, 'getMessages').mockResolvedValue({ items: [] } as unknown as Awaited<ReturnType<typeof api.sessions.getMessages>>);
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(WorkspaceInspector, {
+          sessionId: 'sess_child',
+          projectPath: '/project',
+          path: '',
+          file: null,
+          messages: [],
+          codeChanges: [],
+          gitStatus: null,
+          gitError: null,
+          gitLoading: false,
+          refreshGitStatus: vi.fn(async () => null),
+          isStreaming: false,
+          overviewFirst: true,
+          selfAgentId: 'sess_child',
+          departmentChat: {
+            department_leader_agent_id: 'sess_parent',
+            department_leader_session_id: 'sess_parent',
+            messages: [],
+          },
+          sessionAgents: [
+            {
+              agent_id: 'sess_child',
+              kind: 'team',
+              parent_agent_id: 'sess_parent',
+              name: 'Reviewer',
+              status: 'idle',
+              mounted_session_id: 'sess_child',
+            },
+            {
+              agent_id: 'round-1',
+              kind: 'discussion',
+              parent_agent_id: 'sess_parent',
+              name: 'round-1',
+              status: 'idle',
+              summary: 'Align on the parser',
+              discussion_participant_agent_ids: ['sess_child'],
+            },
+          ],
+        })));
+        await Promise.resolve();
+      });
+      expect(await openToolFromPicker(container, /Meeting|开会/)).toBe(true);
+      await act(async () => { await Promise.resolve(); });
+      expect(api.sessions.getMessages).toHaveBeenCalledWith('sess_parent', expect.objectContaining({
+        agent_id: 'round-1',
+      }));
     } finally {
       await act(async () => root.unmount());
       container.remove();

@@ -23,7 +23,7 @@ Nori 是一个从 [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code)（MIT
 
 - 每个 Agent 可以用 `TeamCreate` 雇佣自己的成员，并主持自己的部门。深度受 `team.maxDepth` 约束（默认 `2`，上限 `5`）。
 - 一次 Discuss 的范围是**一个部门**：父节点 + 它的直接成员。节点不会同时当主席又当发言人。
-- 雇佣走的是和会话地图同一条路径：创建一个**真实子会话**，用 `parent_session_id` 挂到你下面，地图上就是一张会话卡片。同时会 **dual-write** 一个团队 Agent，好让 Discuss / Assign 仍按本部门的 agent id 寻址。这是实现上的双写，不是已经磨平的统一身份（见 [缺口](#3-诚实的缺口)）。
+- 雇佣走的是和会话地图同一条路径：创建一个**真实子会话**，用 `parent_session_id` 挂到你下面，地图上就是一张会话卡片。工作、工具、兄弟交流和身份都住在这个子会话上。Discuss / Assign 按 session id（或展示名）寻址。
 - `TeamDismiss` 移除成员并**删除**对应子会话。地图上的 Unmount 是用户操作：只拆挂载，不删会话。一个会话目前只能有一个父节点。
 
 ### 先 Discuss，再 Code
@@ -98,7 +98,7 @@ Codex 和 Claude Code 仍然提供**打磨过的一次性 subagent fan-out**（�
 ### 代码里核对过的其它缺口
 
 - **TUI 测试债**（changelog 原文）：`apps/nori-code` 里约 66 个测试、25 个文件失败。一部分还在断言改名之前的 `kimi-code` 家目录、UA、命令名；一部分在断言注册表很久没再暴露的斜杠命令。数量从 68 降到 66，只是因为 SubAgent 自己的测试随功能一起删了。
-- **雇佣 dual-write**：产品路径是「空子会话 + 挂载 + 父会话里再挂一个 team agent」。Discuss / Assign 仍按 agent id 说话；地图按 session id 说话。crash 之后要靠幂等 sync 把两边对齐。这是已知接缝，不是已经统一的身份模型。
+- **已有 dual-write 会话会在加载时迁移：** 父会话里还挂着 team agent 的旧雇佣，会绑到（或物化成）子会话，再拆掉影子。新雇佣不再创建影子。
 - **Kimi 命名残留**：TUI 协调器仍叫 `KimiTUI`；构建宏是 `__KIMI_CODE_*`；原生缓存目录仍能落到 `kimi-code`；文档站组件和不少 VitePress 页面还带着上游品牌与 SubAgent 说法。`pnpm check:brand` 管的是对外品牌漂移，不是一次清完所有内部标识。
 - **Map 的 peer / service 边只在 localStorage**：父边以服务端 `parent_session_id` 为准。对等边、服务边、标注、钉住的位置写在 `nori-session-map-doc` 里，换浏览器或清站点数据就会丢。服务端图存储还没落地（见 `docs/adr/pre.1-session-node-graph.md`）。
 - **`nori.yaml` 不是 DAG 调度器**：文件里有 `phases:`、步骤、甚至旧的 SubAgent 规则，但运行时真正读的是规则 prompt 注入，以及 review / memory / bug-hunt **闸门**（复杂度打分后往上下文里塞指令）。没有一个按 `depends_on` 跑节点的编排引擎。旧 README 把这份 YAML 写成「策略即代码的 DAG」，那是超售。

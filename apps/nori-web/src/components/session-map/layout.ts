@@ -1,5 +1,4 @@
 import type { Session, SessionGraph } from '../../api/client';
-import { sessionAgentDisplayName } from '../../utils/session-agent';
 import { parentSessionIdOf } from '../../utils/session-mount';
 import { mapMemberRoleLabel, type MapNodeMember } from '../../utils/session-graph';
 import { canonicalMapPositionKey } from '../sessionMapDoc';
@@ -12,6 +11,23 @@ export const CANVAS_PAD = 48;
 export const MIN_SCALE = 0.2;
 export const MAX_SCALE = 4;
 export const FIT_MAX_SCALE = 1.35;
+
+/** Shift a new child so it does not land on an existing sibling card. */
+export function offsetSpawnFromSiblings(
+  occupied: ReadonlyArray<{ x: number; y: number }>,
+  worldX: number,
+  worldY: number,
+  nodeW = NODE_W,
+  gap = GAP_X,
+): { x: number; y: number } {
+  let x = worldX;
+  let guard = 0;
+  while (occupied.some((point) => Math.hypot(point.x - x, point.y - worldY) < nodeW * 0.85) && guard < 24) {
+    x += nodeW + gap;
+    guard += 1;
+  }
+  return { x, y: worldY };
+}
 
 export interface TreeView {
   x: number;
@@ -76,9 +92,6 @@ export function sessionLabel(session: Session): string {
 }
 
 export function memberLabel(member: MapMemberRef): string {
-  // A dual-write agent enriches the session card; it never replaces the
-  // session identity shown on the map.
-  if (member.kind === 'agent' && member.agent !== undefined) return sessionAgentDisplayName(member.agent);
   return sessionLabel(member.session);
 }
 
@@ -116,7 +129,6 @@ export function ensureGraphEdges(graph: SessionGraph): SessionGraph {
 /** Deterministic forest seed. Live motion is owned by the map motion module. */
 export function layoutSessionMountForest(
   graph: SessionGraph,
-  agentExtras: readonly MapMemberRef[] = [],
 ): {
   placed: PlacedNode[];
   edges: Array<{ from: PlacedNode; to: PlacedNode }>;
@@ -140,69 +152,11 @@ export function layoutSessionMountForest(
     parentSessionIdOf(target) ?? parentByChild.get(target.id)
   );
 
-  const hostOwnsSession = (hostId: string, target: Session): boolean => {
-    let current: string | undefined = parentOf(target);
-    const seen = new Set<string>();
-    while (current !== undefined && !seen.has(current)) {
-      if (current === hostId) return true;
-      seen.add(current);
-      const parentNode = byId.get(current);
-      current = parentNode !== undefined ? parentOf(parentNode) : undefined;
-    }
-    return false;
-  };
-
-  const hostReachesViaEdges = (hostId: string, targetId: string): boolean => {
-    const stack = [...(children.get(hostId) ?? [])];
-    const seen = new Set<string>();
-    while (stack.length > 0) {
-      const id = stack.pop()!;
-      if (id === targetId) return true;
-      if (seen.has(id)) continue;
-      seen.add(id);
-      stack.push(...(children.get(id) ?? []));
-    }
-    return false;
-  };
-
-  const agentByHost = new Map<string, MapMemberRef[]>();
-  const agentsByMountedSession = new Map<string, MapMemberRef[]>();
-  for (const extra of agentExtras) {
-    const mounted = extra.agent?.mounted_session_id;
-    if (mounted !== undefined) {
-      const linked = agentsByMountedSession.get(mounted) ?? [];
-      linked.push(extra);
-      agentsByMountedSession.set(mounted, linked);
-    }
-    // Ghost `agent:` cards are no longer placed. Dual-write members overlay the
-    // real mounted session via `agentsByMountedSession`.
-    if (extra.kind === 'agent') continue;
-    const hostId = extra.hostSessionId;
-    if (hostId === undefined || !byId.has(hostId)) continue;
-    if (mounted !== undefined && byId.has(mounted)) continue;
-    if (byId.has(extra.session.id)) continue;
-    const list = agentByHost.get(hostId) ?? [];
-    list.push(extra);
-    agentByHost.set(hostId, list);
-  }
-
-  const sessionMember = (session: Session): MapMemberRef => {
-    const parentId = parentOf(session);
-    const candidates = agentsByMountedSession.get(session.id) ?? [];
-    const linkedAgent = candidates.find((extra) => extra.hostSessionId === parentId)
-      ?? candidates.find((extra) => (
-        extra.hostSessionId !== undefined && (
-          hostOwnsSession(extra.hostSessionId, session)
-          || hostReachesViaEdges(extra.hostSessionId, session.id)
-        )
-      ));
-    return {
-      session,
-      kind: 'session',
-      hostSessionId: linkedAgent?.hostSessionId ?? parentId,
-      agent: linkedAgent?.agent,
-    };
-  };
+  const sessionMember = (session: Session): MapMemberRef => ({
+    session,
+    kind: 'session',
+    hostSessionId: parentOf(session),
+  });
 
   for (const list of children.values()) {
     list.sort((a, b) => {
@@ -224,8 +178,7 @@ export function layoutSessionMountForest(
     if (placedSessionIds.has(session.id) || placing.has(session.id)) return undefined;
     placing.add(session.id);
     const childIds = (children.get(session.id) ?? []).filter((id) => !placing.has(id) && !placedSessionIds.has(id));
-    const extras = agentByHost.get(session.id) ?? [];
-    if (childIds.length === 0 && extras.length === 0) {
+    if (childIds.length === 0) {
       const col = nextCol++;
       const x = CANVAS_PAD + col * (NODE_W + GAP_X);
       const y = CANVAS_PAD + depth * (NODE_H + GAP_Y);
@@ -236,22 +189,12 @@ export function layoutSessionMountForest(
       return { left: col, right: col, node };
     }
 
-    const childLayouts = [
-      ...childIds.flatMap((id) => {
-        const child = byId.get(id);
-        if (child === undefined) return [];
-        const layout = placeSession(child, depth + 1);
-        return layout === undefined ? [] : [layout];
-      }),
-      ...extras.map((extra) => {
-        const col = nextCol++;
-        const x = CANVAS_PAD + col * (NODE_W + GAP_X);
-        const y = CANVAS_PAD + (depth + 1) * (NODE_H + GAP_Y);
-        const node = { member: extra, x, y, cx: x + NODE_W / 2 };
-        placed.push(node);
-        return { left: col, right: col, node };
-      }),
-    ];
+    const childLayouts = childIds.flatMap((id) => {
+      const child = byId.get(id);
+      if (child === undefined) return [];
+      const layout = placeSession(child, depth + 1);
+      return layout === undefined ? [] : [layout];
+    });
     if (childLayouts.length === 0) {
       const col = nextCol++;
       const x = CANVAS_PAD + col * (NODE_W + GAP_X);
@@ -293,14 +236,6 @@ export function layoutSessionMountForest(
     const from = byKey.get(`session:${edge.parent_session_id}`);
     const to = byKey.get(`session:${edge.child_session_id}`);
     if (from !== undefined && to !== undefined) edges.push({ from, to });
-  }
-  for (const [hostId, extras] of agentByHost) {
-    const from = byKey.get(`session:${hostId}`);
-    if (from === undefined) continue;
-    for (const extra of extras) {
-      const to = byKey.get(nodeKey(extra));
-      if (to !== undefined) edges.push({ from, to });
-    }
   }
 
   const width = Math.max(NODE_W + CANVAS_PAD * 2, ...placed.map((node) => node.x + NODE_W + CANVAS_PAD), 1);

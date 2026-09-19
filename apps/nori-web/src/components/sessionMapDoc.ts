@@ -10,8 +10,6 @@ import type { Session, SessionGraph, SessionGraphEdge } from '../api/client';
 import { parentSessionIdOf } from '../utils/session-mount';
 
 export const SESSION_MAP_DOC_KEY = 'nori-session-map-doc';
-/** Stale-while-revalidate cache so map members paint before getAgents returns. */
-export const SESSION_MAP_AGENTS_CACHE_KEY = 'nori-session-map-agents-cache';
 export const SESSION_MAP_GRAPH_CACHE_KEY = 'nori-session-map-graph-cache';
 
 /** Last successful graph response used for stale-while-revalidate first paint. */
@@ -35,17 +33,6 @@ export function saveCachedMapGraph(graph: SessionGraph): void {
   } catch {
     // Storage is best effort; the live graph remains authoritative.
   }
-}
-
-/** Lightweight agent ghost snapshot for first-paint map hydration. */
-export interface CachedMapAgent {
-  hostId: string;
-  agentId: string;
-  mounted_session_id?: string;
-  title?: string;
-  role?: string;
-  status?: string;
-  mandate?: string;
 }
 
 export interface MapAnnotationBox {
@@ -99,7 +86,7 @@ export interface SessionMapDoc {
   /** sessionId → label ids */
   sessionLabels: Record<string, string[]>;
   /**
-   * Force-node id (`session:…`, legacy `agent:…`, `draft:…`) → pinned world
+   * Force-node id (`session:…`, `draft:…`) → pinned world
    * **center**. Bare session ids are accepted on read and rewritten to
    * `session:id` on the next persist so refresh never treats them as new.
    */
@@ -318,46 +305,6 @@ export function saveSessionMapDoc(
   storage.setItem(SESSION_MAP_DOC_KEY, JSON.stringify({ ...rest, annotations }));
 }
 
-export function parseCachedMapAgents(raw: string | null | undefined): CachedMapAgent[] {
-  if (raw === null || raw === undefined || raw.trim() === '') return [];
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    const out: CachedMapAgent[] = [];
-    for (const entry of parsed) {
-      if (entry === null || typeof entry !== 'object') continue;
-      const row = entry as Partial<CachedMapAgent>;
-      if (typeof row.hostId !== 'string' || row.hostId.trim() === '') continue;
-      if (typeof row.agentId !== 'string' || row.agentId.trim() === '') continue;
-      out.push({
-        hostId: row.hostId,
-        agentId: row.agentId,
-        mounted_session_id: typeof row.mounted_session_id === 'string' ? row.mounted_session_id : undefined,
-        title: typeof row.title === 'string' ? row.title : undefined,
-        role: typeof row.role === 'string' ? row.role : undefined,
-        status: typeof row.status === 'string' ? row.status : undefined,
-        mandate: typeof row.mandate === 'string' ? row.mandate : undefined,
-      });
-    }
-    return out;
-  } catch {
-    return [];
-  }
-}
-
-export function loadCachedMapAgents(
-  storage: Pick<Storage, 'getItem'> = localStorage,
-): CachedMapAgent[] {
-  return parseCachedMapAgents(storage.getItem(SESSION_MAP_AGENTS_CACHE_KEY));
-}
-
-export function saveCachedMapAgents(
-  agents: readonly CachedMapAgent[],
-  storage: Pick<Storage, 'setItem'> = localStorage,
-): void {
-  storage.setItem(SESSION_MAP_AGENTS_CACHE_KEY, JSON.stringify(agents));
-}
-
 /** Finite positive-size world rect; rejects NaN / non-objects / zero/negative size. */
 export function isValidAnnotationRect(
   value: unknown,
@@ -442,7 +389,6 @@ export function canonicalMapPositionKey(id: string): string {
   if (
     id.startsWith(SESSION_POSITION_PREFIX)
     || id.startsWith('draft:')
-    || id.startsWith('agent:')
     || id.startsWith('creating:')
   ) {
     return id;
@@ -462,21 +408,32 @@ export function mapPositionLookupKeys(nodeId: string): string[] {
   return keys;
 }
 
+type StoredMapPositions =
+  | ReadonlyMap<string, { x: number; y: number }>
+  | Record<string, { x: number; y: number }>;
+
+function isStoredMapPositionMap(
+  positions: StoredMapPositions,
+): positions is ReadonlyMap<string, { x: number; y: number }> {
+  return positions instanceof Map;
+}
+
 export function lookupMapPosition(
-  positions: ReadonlyMap<string, { x: number; y: number }> | Record<string, { x: number; y: number }> | undefined,
+  positions: StoredMapPositions | undefined,
   nodeId: string,
 ): { x: number; y: number } | undefined {
   if (positions === undefined) return undefined;
   const keys = mapPositionLookupKeys(nodeId);
-  if (positions instanceof Map) {
+  if (isStoredMapPositionMap(positions)) {
     for (const key of keys) {
       const hit = positions.get(key);
       if (hit !== undefined) return hit;
     }
     return undefined;
   }
+  const record = positions;
   for (const key of keys) {
-    const hit = positions[key];
+    const hit = record[key];
     if (hit !== undefined) return hit;
   }
   return undefined;
@@ -492,6 +449,7 @@ export function normalizeMapPositions(
   if (positions === undefined) return undefined;
   const out: Record<string, { x: number; y: number }> = {};
   for (const [id, pos] of Object.entries(positions)) {
+    if (id.startsWith('agent:')) continue;
     const key = canonicalMapPositionKey(id);
     if (id === key || out[key] === undefined) out[key] = pos;
   }

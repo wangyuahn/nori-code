@@ -82,6 +82,12 @@ export class ContextMemory {
     });
   }
 
+  /** Copy a prior transcript into this agent (department shadow-agent migration). */
+  importMigratedHistory(messages: readonly ContextMessage[]): void {
+    if (messages.length === 0) return;
+    this.pushHistory(...messages);
+  }
+
   /**
    * Sets the single transient reminder carried at the tail of the next request.
    *

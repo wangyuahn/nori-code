@@ -340,7 +340,7 @@ max_context_size = 100000
     });
     expect(Object.values(core.sessions.get(parent.id)?.metadata.agents ?? {}).some(
       (agent) => agent.mountedSessionId === child.id,
-    )).toBe(true);
+    )).toBe(false);
 
     await expect(rpc.remountSession({
       sessionId: child.id,
@@ -351,23 +351,22 @@ max_context_size = 100000
       id: child.id,
     });
     expect(core.sessions.get(child.id)?.metadata.custom).toMatchObject({
+      parent_session_id: parent.id,
       mount_role: 'lead reviewer',
       mount_mandate: 'Review and report',
     });
 
-    const parentSession = core.sessions.get(parent.id)!;
-    for (const [agentId, agent] of Object.entries(parentSession.metadata.agents)) {
-      if (agent.mountedSessionId === child.id) delete parentSession.metadata.agents[agentId];
-    }
     await expect(rpc.remountSession({
       sessionId: child.id,
       parentSessionId: parent.id,
     })).resolves.toMatchObject({
       id: child.id,
     });
-    expect(Object.values(parentSession.metadata.agents).some(
-      (agent) => agent.mountedSessionId === child.id,
-    )).toBe(true);
+    expect(core.sessions.get(child.id)?.metadata.custom).toMatchObject({
+      parent_session_id: parent.id,
+      mount_role: 'lead reviewer',
+      mount_mandate: 'Review and report',
+    });
 
     await expect(rpc.unmountSession({ sessionId: child.id })).resolves.toMatchObject({
       id: child.id,

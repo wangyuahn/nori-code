@@ -65,9 +65,25 @@ import {
   canCreateDepartmentInTree,
   DEFAULT_TEAM_MAX_DEPTH,
   departmentDepth,
+  mountedChildrenOf,
 } from './team-tree';
 import { withMountTreeMutation } from './mount-mutation';
 import { formatSessionSelf, type SessionSelfInfo } from './session-self';
+import {
+  syntheticTeamMeta,
+  type DepartmentMemberPatch,
+  type DepartmentMemberSnapshot,
+  type DepartmentRuntime,
+  type SessionTopologyRuntime,
+} from './department-runtime';
+import {
+  DEPARTMENT_MEMBERS_KEY,
+  DEPARTMENT_TEAM_REPORT_KEY,
+  readMountMandate,
+  readMountName,
+  readMountRole,
+  readParentSessionId,
+} from './mount-metadata';
 import type { BrowserProvider, ToolServices } from '../tools/support/services';
 import TEAM_AGENT_PROMPT from './team-agent.md?raw';
 import TEAM_MEMBER_ROLE_PROMPT from './team-member-role.md?raw';
@@ -118,7 +134,7 @@ export interface SessionOptions {
   /** Rebuilds the cached session identity block after team membership changes. */
   readonly refreshSessionSelf?: () => Promise<void>;
   /**
-   * Hire path: empty child session + mount + dual-write team agent.
+   * Hire path: child session + mount. The child session is the member.
    * Same backend as map canvas createChild.
    */
   readonly createMountedChild?: (input: {
@@ -128,6 +144,10 @@ export interface SessionOptions {
     readonly mandate: string;
     readonly teamLeaderAgentId?: string;
   }) => Promise<{ readonly sessionId: string; readonly agentId: string }>;
+  /** Prompt / chat / Discuss across mounted child sessions. */
+  readonly departmentRuntime?: DepartmentRuntime;
+  /** Map topology tools (search / mount / unmount / graph / parent fill). */
+  readonly topologyRuntime?: SessionTopologyRuntime;
   /** PATCH name / role / mandate / tags; injects a reminder and does not prompt. */
   readonly updateSessionIdentity?: (input: {
     readonly sessionId: string;
@@ -347,6 +367,14 @@ export class Session {
    * `applySessionPermissionMode` 写它，招人和 Discuss 结束后的重新配置都从它取值。
    */
   private sessionPermissionMode: PermissionMode | undefined;
+  /** Direct mounted child session ids (the department this session chairs). */
+  private departmentChildIds: string[] = [];
+  /** Sibling mounted session ids when this session is itself a member. */
+  private departmentSiblingIds: string[] = [];
+  private departmentParentId: string | undefined;
+  /** sessionId → parentSessionId for the live mount forest. */
+  private mountParentById: Readonly<Record<string, string | undefined>> = {};
+  private readonly departmentSnapshots = new Map<string, DepartmentMemberSnapshot>();
 
   constructor(public readonly options: SessionOptions) {
     // Attach the per-session log sink up front so the constructor's
@@ -516,6 +544,7 @@ export class Session {
     await this.persistDefaultNoriRuntimeSettings(agent);
     this.applyNoriRuntimeSettings(this.getNoriRuntimeSettings());
 
+    await this.refreshDepartmentDirectory();
     await this.triggerSessionStart('startup');
     return agent;
   }
@@ -558,6 +587,7 @@ export class Session {
     }
     if (main !== undefined) this.enableTeamLeadTools(main);
     this.applyNoriRuntimeSettings(this.getNoriRuntimeSettings());
+    await this.refreshDepartmentDirectory();
     await this.triggerSessionStart('resume');
     return { warning };
   }
@@ -739,13 +769,143 @@ export class Session {
       );
     }
     validateTeamIdentity(input.identity);
+    await this.assertCanCreateDepartment(input.parentSessionId);
     return create({
       parentSessionId: input.parentSessionId,
       title: input.identity.name,
       role: input.identity.role,
       mandate: input.identity.mandate,
       teamLeaderAgentId: input.teamLeaderAgentId,
+    }).then(async (created) => {
+      await this.refreshDepartmentDirectory();
+      return created;
     });
+  }
+
+  parentSessionId(): string | undefined {
+    return this.departmentParentId ?? readParentSessionId(this.metadata.custom);
+  }
+
+  listDepartmentChildIds(): readonly string[] {
+    return this.departmentChildIds;
+  }
+
+  listDepartmentSiblingIds(): readonly string[] {
+    return this.departmentSiblingIds;
+  }
+
+  async refreshDepartmentDirectory(): Promise<void> {
+    const self = this.options.id;
+    const parentById = await this.options.listMountParentById?.();
+    if (self === undefined || parentById === undefined) {
+      this.departmentChildIds = [];
+      this.departmentSiblingIds = [];
+      this.departmentParentId = readParentSessionId(this.metadata.custom);
+      this.mountParentById = {};
+      return;
+    }
+    this.mountParentById = parentById;
+    this.departmentParentId = parentById[self] ?? readParentSessionId(this.metadata.custom);
+    this.departmentChildIds = mountedChildrenOf(parentById, self);
+    this.departmentSiblingIds = this.departmentParentId === undefined
+      ? []
+      : mountedChildrenOf(parentById, this.departmentParentId).filter((id) => id !== self);
+    const runtime = this.options.departmentRuntime;
+    if (runtime !== undefined) {
+      const peerIds = [...this.departmentChildIds, ...this.departmentSiblingIds];
+      for (const peerId of peerIds) {
+        const snapshot = await runtime.memberSnapshot(peerId);
+        if (snapshot !== undefined) this.departmentSnapshots.set(peerId, snapshot);
+      }
+    }
+    const main = this.getReadyAgent('main');
+    this.applyMountedMemberTools(main);
+    if (main !== undefined) void main.refreshSystemPrompt();
+    this.emitTeamAgentsUpdated();
+  }
+
+  private isDepartmentMemberId(id: string): boolean {
+    return this.departmentChildIds.includes(id);
+  }
+
+  private syntheticMember(id: string): AgentMeta | undefined {
+    const snapshot = this.departmentSnapshots.get(id) ?? this.readLocalDepartmentSnapshot(id);
+    if (snapshot === undefined && !this.isDepartmentMemberId(id)) return undefined;
+    const fallback: DepartmentMemberSnapshot = snapshot ?? {
+      sessionId: id,
+      name: id,
+      role: 'member',
+      mandate: '',
+    };
+    return syntheticTeamMeta(fallback);
+  }
+
+  private readLocalDepartmentSnapshot(id: string): DepartmentMemberSnapshot | undefined {
+    const raw = this.metadata.custom[DEPARTMENT_MEMBERS_KEY];
+    if (raw === undefined || typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+      return undefined;
+    }
+    const entry = (raw as Record<string, unknown>)[id];
+    if (entry === undefined || typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      return undefined;
+    }
+    const record = entry as Record<string, unknown>;
+    const name = typeof record['name'] === 'string' ? record['name'] : id;
+    const role = typeof record['role'] === 'string' ? record['role'] : 'member';
+    const mandate = typeof record['mandate'] === 'string' ? record['mandate'] : '';
+    const assignedTask = record['assignedTask'];
+    const assignedAt = record['assignedAt'];
+    const teamReport = record['teamReport'];
+    const lastTurnSkip = record['lastTurnSkip'];
+    return {
+      sessionId: id,
+      name,
+      role,
+      mandate,
+      assignedTask: typeof assignedTask === 'string' ? assignedTask : undefined,
+      assignedAt: typeof assignedAt === 'string' ? assignedAt : undefined,
+      teamReport: isTeamReportRecord(teamReport) ? teamReport : undefined,
+      lastTurnSkip: isTurnSkipRecord(lastTurnSkip) ? lastTurnSkip : undefined,
+    };
+  }
+
+  private async writeDepartmentMemberState(id: string, next: AgentMeta): Promise<void> {
+    const snapshot: DepartmentMemberSnapshot = {
+      sessionId: id,
+      name: next.name ?? id,
+      role: next.role ?? 'member',
+      mandate: next.mandate ?? '',
+      assignedTask: next.assignedTask,
+      assignedAt: next.assignedAt,
+      teamReport: next.teamReport,
+      lastTurnSkip: next.lastTurnSkip,
+    };
+    this.departmentSnapshots.set(id, snapshot);
+    const current = this.metadata.custom[DEPARTMENT_MEMBERS_KEY];
+    const members: Record<string, unknown> =
+      current !== undefined && typeof current === 'object' && current !== null && !Array.isArray(current)
+        ? { ...(current as Record<string, unknown>) }
+        : {};
+    members[id] = {
+      name: snapshot.name,
+      role: snapshot.role,
+      mandate: snapshot.mandate,
+      assignedTask: snapshot.assignedTask,
+      assignedAt: snapshot.assignedAt,
+      teamReport: snapshot.teamReport,
+      lastTurnSkip: snapshot.lastTurnSkip,
+    };
+    this.metadata.custom[DEPARTMENT_MEMBERS_KEY] = members;
+    const runtime = this.options.departmentRuntime;
+    if (runtime !== undefined) {
+      const patch: DepartmentMemberPatch = {
+        assignedTask: snapshot.assignedTask ?? null,
+        assignedAt: snapshot.assignedAt ?? null,
+        teamReport: snapshot.teamReport ?? null,
+        lastTurnSkip: snapshot.lastTurnSkip ?? null,
+      };
+      await runtime.patchMember(id, patch);
+    }
   }
 
   async updateSessionIdentity(input: {
@@ -854,10 +1014,23 @@ export class Session {
   }
 
   getAgentMetadata(id: string): AgentMeta | undefined {
-    return this.metadata.agents[id];
+    return this.metadata.agents[id] ?? this.syntheticMember(id);
   }
 
   teamMemberMetadata(leaderAgentId: string): Array<readonly [string, AgentMeta]> {
+    const chairsThisSession = leaderAgentId === 'main' || leaderAgentId === this.options.id;
+    const children = chairsThisSession
+      ? this.departmentChildIds.map((id) => {
+          const meta = this.syntheticMember(id);
+          return [id, meta ?? syntheticTeamMeta({
+            sessionId: id,
+            name: id,
+            role: 'member',
+            mandate: '',
+          })] as const;
+        })
+      : [];
+    if (children.length > 0) return children;
     return Object.entries(this.metadata.agents).filter(([, meta]) =>
       meta.kind === 'team' && meta.teamLeaderAgentId === leaderAgentId,
     );
@@ -1016,9 +1189,10 @@ export class Session {
     }
     for (const id of uniqueIds) {
       const meta = this.metadata.agents[id];
-      if (meta?.kind !== 'team' || meta.teamLeaderAgentId !== leaderAgentId) {
-        throw new KimiError(ErrorCodes.AGENT_NOT_FOUND, `Team member "${id}" was not found.`);
-      }
+      const mountedMember = this.isDepartmentMemberId(id) || meta?.mountedSessionId === id;
+      if (meta?.kind === 'team' && meta.teamLeaderAgentId === leaderAgentId) continue;
+      if (mountedMember && (leaderAgentId === 'main' || leaderAgentId === this.options.id)) continue;
+      throw new KimiError(ErrorCodes.AGENT_NOT_FOUND, `Team member "${id}" was not found.`);
     }
     // A dismissal owns the whole member branch. A direct member turn is not
     // the only in-flight work: an assigned partner can have temporary
@@ -1041,11 +1215,12 @@ export class Session {
     // Capture mount targets before mutating agent metadata so a later
     // persistence failure can abort without deleting map sessions first.
     const mountedSessionIds = [
-      ...new Set(
-        branchIds
+      ...new Set([
+        ...branchIds
           .map((id) => this.metadata.agents[id]?.mountedSessionId)
           .filter((id): id is string => id !== undefined),
-      ),
+        ...uniqueIds.filter((id) => this.isDepartmentMemberId(id)),
+      ]),
     ];
     const removedMetas = new Map<string, AgentMeta>();
     for (const id of branchIds) {
@@ -1258,8 +1433,14 @@ export class Session {
 
     const assignedAt = new Date().toISOString();
     for (const assignment of resolved) {
-      const current = this.metadata.agents[assignment.agentId]!;
-      this.metadata.agents[assignment.agentId] = {
+      const current = this.getAgentMetadata(assignment.agentId);
+      if (current === undefined) {
+        throw new KimiError(
+          ErrorCodes.AGENT_NOT_FOUND,
+          `Team member "${assignment.agentId}" was not found.`,
+        );
+      }
+      const next: AgentMeta = {
         ...current,
         assignedTask: assignment.task ?? undefined,
         assignedAt: assignment.task === null ? undefined : assignedAt,
@@ -1272,7 +1453,15 @@ export class Session {
               status: 'unreported',
             },
       };
-      this.configureTeamAgentRuntime(assignment.agent, this.metadata.agents[assignment.agentId]!);
+      if (this.isDepartmentMemberId(assignment.agentId)) {
+        await this.writeDepartmentMemberState(assignment.agentId, next);
+        // Child.main already has its own profile tools plus TEAM_MEMBER_TOOLS.
+        // Do not copy the parent lead's tool set onto the durable member.
+        assignment.agent.teamWriteEnabled = true;
+      } else {
+        this.metadata.agents[assignment.agentId] = next;
+        this.configureTeamAgentRuntime(assignment.agent, next);
+      }
       this.emitTeamStatus(assignment.agentId);
     }
     await this.writeMetadata();
@@ -1298,7 +1487,7 @@ export class Session {
     assignedAt: string,
   ): Promise<boolean> {
     this.assertTeamManager(leaderAgentId);
-    const current = this.metadata.agents[agentId];
+    const current = this.getAgentMetadata(agentId);
     if (
       current?.kind !== 'team'
       || current.teamLeaderAgentId !== leaderAgentId
@@ -1306,13 +1495,18 @@ export class Session {
     ) {
       return false;
     }
-    this.metadata.agents[agentId] = {
+    const next: AgentMeta = {
       ...current,
       assignedTask: undefined,
       assignedAt: undefined,
     };
+    if (this.isDepartmentMemberId(agentId)) {
+      await this.writeDepartmentMemberState(agentId, next);
+    } else {
+      this.metadata.agents[agentId] = next;
+    }
     const agent = this.getReadyAgent(agentId);
-    if (agent !== undefined) this.configureTeamAgentRuntime(agent, this.metadata.agents[agentId]!);
+    if (agent !== undefined) this.configureTeamAgentRuntime(agent, next);
     await this.writeMetadata();
     this.emitTeamStatus(agentId);
     return true;
@@ -1323,72 +1517,94 @@ export class Session {
     status: Exclude<TeamReportStatus, 'unreported'>,
     summary: string,
   ): Promise<boolean> {
-    const meta = this.metadata.agents[agentId];
-    const current = meta?.teamReport;
+    const selfMounted = agentId === 'main' && this.parentSessionId() !== undefined;
+    const targetId = selfMounted ? this.options.id : agentId;
+    const meta = targetId === undefined ? undefined : this.getAgentMetadata(targetId);
+    const current = selfMounted ? this.readSelfTeamReport() : meta?.teamReport;
     if (
-      meta?.kind !== 'team'
+      (!selfMounted && meta?.kind !== 'team')
       || current === undefined
       || current.receivedAt !== undefined
       || summary.trim().length === 0
     ) {
       return false;
     }
-    this.metadata.agents[agentId] = {
-      ...meta,
-      teamReport: {
-        ...current,
-        status,
-        summary: summary.trim(),
-        reportedAt: new Date().toISOString(),
-        missingReminderAt: undefined,
-      },
+    const nextReport: TeamReportRecord = {
+      ...current,
+      status,
+      summary: summary.trim(),
+      reportedAt: new Date().toISOString(),
+      missingReminderAt: undefined,
     };
+    if (selfMounted) {
+      this.writeSelfTeamReport(nextReport);
+    } else if (targetId !== undefined && this.isDepartmentMemberId(targetId) && meta !== undefined) {
+      await this.writeDepartmentMemberState(targetId, { ...meta, teamReport: nextReport });
+    } else if (targetId !== undefined && meta !== undefined) {
+      this.metadata.agents[targetId] = { ...meta, teamReport: nextReport };
+    }
     await this.writeMetadata();
-    this.emitTeamStatus(agentId);
+    this.emitTeamStatus(targetId ?? agentId);
     return true;
   }
 
   async acknowledgeTeamReport(agentId: string): Promise<boolean> {
-    const meta = this.metadata.agents[agentId];
-    const report = meta?.teamReport;
+    const selfMounted = agentId === 'main' && this.parentSessionId() !== undefined;
+    const targetId = selfMounted ? this.options.id : agentId;
+    const meta = targetId === undefined ? undefined : this.getAgentMetadata(targetId);
+    const report = selfMounted ? this.readSelfTeamReport() : meta?.teamReport;
     if (
-      meta?.kind !== 'team'
+      (!selfMounted && meta?.kind !== 'team')
       || report === undefined
       || report.status === 'unreported'
       || report.receivedAt !== undefined
     ) {
       return false;
     }
-    this.metadata.agents[agentId] = {
-      ...meta,
-      teamReport: {
-        ...report,
-        receivedAt: new Date().toISOString(),
-      },
+    const nextReport: TeamReportRecord = {
+      ...report,
+      receivedAt: new Date().toISOString(),
     };
+    if (selfMounted) {
+      this.writeSelfTeamReport(nextReport);
+    } else if (targetId !== undefined && this.isDepartmentMemberId(targetId) && meta !== undefined) {
+      await this.writeDepartmentMemberState(targetId, { ...meta, teamReport: nextReport });
+    } else if (targetId !== undefined && meta !== undefined) {
+      this.metadata.agents[targetId] = { ...meta, teamReport: nextReport };
+    }
     await this.writeMetadata();
-    this.emitTeamStatus(agentId);
+    this.emitTeamStatus(targetId ?? agentId);
     return true;
   }
 
   async recordTeamTurnSkip(agentId: string, reason: string, detail: string): Promise<void> {
-    const meta = this.metadata.agents[agentId];
+    const meta = this.getAgentMetadata(agentId);
     if (meta?.kind !== 'team') return;
     const error = detail.trim();
     if (error.length === 0) return;
-    this.metadata.agents[agentId] = {
+    const next: AgentMeta = {
       ...meta,
       lastTurnSkip: { reason, error },
     };
+    if (this.isDepartmentMemberId(agentId)) {
+      await this.writeDepartmentMemberState(agentId, next);
+    } else {
+      this.metadata.agents[agentId] = next;
+    }
     await this.writeMetadata();
     this.emitTeamStatus(agentId);
   }
 
   private clearTeamTurnSkip(agentId: string): void {
-    const meta = this.metadata.agents[agentId];
+    const meta = this.getAgentMetadata(agentId);
     if (meta?.kind !== 'team' || meta.lastTurnSkip === undefined) return;
-    this.metadata.agents[agentId] = { ...meta, lastTurnSkip: undefined };
-    void this.writeMetadata();
+    const next: AgentMeta = { ...meta, lastTurnSkip: undefined };
+    if (this.isDepartmentMemberId(agentId)) {
+      void this.writeDepartmentMemberState(agentId, next).then(() => this.writeMetadata());
+    } else {
+      this.metadata.agents[agentId] = next;
+      void this.writeMetadata();
+    }
   }
 
   /**
@@ -1441,7 +1657,7 @@ export class Session {
   }
 
   async notifyMissingTeamReport(agentId: string, assignmentId: string): Promise<boolean> {
-    const meta = this.metadata.agents[agentId];
+    const meta = this.getAgentMetadata(agentId);
     const report = meta?.teamReport;
     if (
       meta?.kind !== 'team'
@@ -1454,10 +1670,15 @@ export class Session {
       return false;
     }
     const missingReminderAt = new Date().toISOString();
-    this.metadata.agents[agentId] = {
+    const next: AgentMeta = {
       ...meta,
       teamReport: { ...report, missingReminderAt },
     };
+    if (this.isDepartmentMemberId(agentId)) {
+      await this.writeDepartmentMemberState(agentId, next);
+    } else {
+      this.metadata.agents[agentId] = next;
+    }
     await this.writeMetadata();
     const member = await this.ensureAgentResumed(agentId);
     const leader = await this.ensureAgentResumed(meta.teamLeaderAgentId);
@@ -1474,7 +1695,7 @@ export class Session {
   }
 
   notifyRunningTeamMember(agentId: string, assignmentId: string): void {
-    const meta = this.metadata.agents[agentId];
+    const meta = this.getAgentMetadata(agentId);
     if (
       meta?.kind !== 'team'
       || meta.teamLeaderAgentId === undefined
@@ -1498,7 +1719,7 @@ export class Session {
   }
 
   private emitTeamStatus(agentId: string): void {
-    const meta = this.metadata.agents[agentId];
+    const meta = this.getAgentMetadata(agentId);
     if (meta?.kind !== 'team') return;
     const report = meta.teamReport;
     const status = this.getReadyAgent(agentId)?.turn.hasActiveTurn === true ? 'running' : 'idle';
@@ -1539,13 +1760,21 @@ export class Session {
             assignedAt: undefined,
           };
       if (next !== current) {
-        this.metadata.agents[agentId] = next;
+        if (this.isDepartmentMemberId(agentId)) {
+          await this.writeDepartmentMemberState(agentId, next);
+        } else {
+          this.metadata.agents[agentId] = next;
+        }
         changed = true;
       }
       const agent = this.getReadyAgent(agentId);
       if (agent !== undefined) this.configureTeamAgentRuntime(agent, next);
     }
     if (changed) await this.writeMetadata();
+    const runtime = this.options.departmentRuntime;
+    if (runtime !== undefined) {
+      await Promise.all(this.departmentChildIds.map((childId) => runtime.setWriteLocked(childId, true)));
+    }
   }
 
   async assertTeamDiscussionMode(agentId: string): Promise<void> {
@@ -1744,22 +1973,52 @@ export class Session {
     agentId: string,
     message: string,
   ): Promise<{ readonly discussionAgentId: string; readonly entryId: number }> {
-    const member = this.metadata.agents[agentId];
+    const parentId = this.parentSessionId();
+    if (agentId === 'main' && parentId !== undefined && this.options.departmentRuntime !== undefined) {
+      const selfId = this.options.id;
+      if (selfId === undefined) {
+        throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'TeamSpeak requires a session id.');
+      }
+      return this.options.departmentRuntime.publishDiscussionStatement(parentId, selfId, message);
+    }
+    const member = this.metadata.agents[agentId] ?? this.syntheticMember(agentId);
     if (member?.kind !== 'team' || member.teamLeaderAgentId === undefined) {
       throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'TeamSpeak is available only to a team member.');
     }
-    const active = this.activeTeamDiscussion(member.teamLeaderAgentId);
-    if (active === undefined || !active[1].discussion!.participantAgentIds.includes(agentId)) {
+    return this.publishDiscussionStatementAs(agentId, member.name ?? '团队成员', message);
+  }
+
+  /**
+   * Record a Discuss statement from a mounted child session (speaker id = session id).
+   */
+  async publishMountedMemberDiscussionStatement(
+    speakerSessionId: string,
+    message: string,
+  ): Promise<{ readonly discussionAgentId: string; readonly entryId: number }> {
+    const snapshot = this.departmentSnapshots.get(speakerSessionId);
+    const name = snapshot?.name ?? this.syntheticMember(speakerSessionId)?.name ?? '团队成员';
+    return this.publishDiscussionStatementAs(speakerSessionId, name, message);
+  }
+
+  private async publishDiscussionStatementAs(
+    speakerId: string,
+    speakerName: string,
+    message: string,
+  ): Promise<{ readonly discussionAgentId: string; readonly entryId: number }> {
+    const member = this.metadata.agents[speakerId] ?? this.syntheticMember(speakerId);
+    const leaderAgentId = member?.teamLeaderAgentId ?? 'main';
+    const active = this.activeTeamDiscussion(leaderAgentId);
+    if (active === undefined || !active[1].discussion!.participantAgentIds.includes(speakerId)) {
       throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'This team member is not in an active discussion.');
     }
     const [discussionAgentId, discussionMeta] = active;
-    if (this.activeTeamDiscussionTurns.get(discussionAgentId) !== agentId) {
+    if (this.activeTeamDiscussionTurns.get(discussionAgentId) !== speakerId) {
       throw new KimiError(
         ErrorCodes.SESSION_STATE_INVALID,
         'TeamSpeak is available only during this member\'s scheduled discussion turn.',
       );
     }
-    const existing = this.teamDiscussionSpeaks.get(discussionAgentId)?.get(agentId);
+    const existing = this.teamDiscussionSpeaks.get(discussionAgentId)?.get(speakerId);
     if (existing !== undefined) {
       throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'Each participant may call TeamSpeak at most once per discussion turn.');
     }
@@ -1767,8 +2026,8 @@ export class Session {
     const entryId = (discussionMeta.discussion!.nextStatementId ?? 0) + 1;
     const record: TeamDiscussionStatementRecord = {
       entryId,
-      agentId,
-      name: member.name ?? '团队成员',
+      agentId: speakerId,
+      name: speakerName,
       message: message.trim(),
     };
     const discussion: TeamDiscussionMeta = {
@@ -1785,7 +2044,7 @@ export class Session {
         kind: 'system_trigger',
         name: 'team_discussion_statement',
         discussionEntryId: entryId,
-        speaker: { from: 'team', speakerId: agentId, speakerName: record.name },
+        speaker: { from: 'team', speakerId: speakerId, speakerName: record.name },
       },
     );
     transcript.emitEvent({
@@ -1794,7 +2053,7 @@ export class Session {
       kind: 'message',
     });
     const speaks = this.teamDiscussionSpeaks.get(discussionAgentId) ?? new Map<string, TeamDiscussionStatementRecord>();
-    speaks.set(agentId, record);
+    speaks.set(speakerId, record);
     this.teamDiscussionSpeaks.set(discussionAgentId, speaks);
     await this.writeMetadata();
     return { discussionAgentId, entryId };
@@ -1964,10 +2223,23 @@ export class Session {
   async ensureAgentResumed(id: string): Promise<Agent> {
     const entry = this.agents.get(id);
     if (entry !== undefined) return (await this.resolveAgentEntry(entry)).agent;
-    if (this.metadata.agents[id] === undefined) {
-      throw new KimiError(ErrorCodes.AGENT_NOT_FOUND, `Agent "${id}" was not found`);
+    if (this.metadata.agents[id] !== undefined) {
+      return (await this.resumeAgent(id)).agent;
     }
-    return (await this.resumeAgent(id)).agent;
+    if (this.isDepartmentMemberId(id)) {
+      const runtime = this.options.departmentRuntime;
+      if (runtime === undefined) {
+        throw new KimiError(ErrorCodes.AGENT_NOT_FOUND, `Agent "${id}" was not found`);
+      }
+      return runtime.ensureMain(id);
+    }
+    if (this.departmentChildIds.length === 0) {
+      await this.refreshDepartmentDirectory();
+      if (this.isDepartmentMemberId(id) && this.options.departmentRuntime !== undefined) {
+        return this.options.departmentRuntime.ensureMain(id);
+      }
+    }
+    throw new KimiError(ErrorCodes.AGENT_NOT_FOUND, `Agent "${id}" was not found`);
   }
 
   /**
@@ -2004,9 +2276,76 @@ export class Session {
       systemPrompt: (context) => {
         const base = profile.systemPrompt(context);
         const block = this.readSessionSelfBlock();
-        return block === undefined ? base : `${base}\n\n${block}`;
+        let prompt = block === undefined ? base : `${base}\n\n${block}`;
+        if (this.parentSessionId() !== undefined && !prompt.includes('<team_identity>')) {
+          const identity = {
+            name: readMountName(this.metadata.custom) ?? this.metadata.title ?? 'Team member',
+            role: readMountRole(this.metadata.custom) ?? 'member',
+            mandate: readMountMandate(this.metadata.custom) ?? '',
+          };
+          prompt = [
+            '<team_identity>',
+            `Name: ${escapeTeamIdentity(identity.name)}`,
+            `Role: ${escapeTeamIdentity(identity.role)}`,
+            `Mandate: ${escapeTeamIdentity(identity.mandate)}`,
+            '</team_identity>',
+            TEAM_MEMBER_ROLE_PROMPT.trim(),
+            prompt,
+            TEAM_AGENT_PROMPT.trim(),
+          ].join('\n');
+        }
+        return prompt;
       },
     };
+  }
+
+  private readSelfTeamReport(): TeamReportRecord | undefined {
+    const raw = this.metadata.custom[DEPARTMENT_TEAM_REPORT_KEY];
+    return isTeamReportRecord(raw) ? raw : undefined;
+  }
+
+  private writeSelfTeamReport(report: TeamReportRecord): void {
+    this.metadata.custom[DEPARTMENT_TEAM_REPORT_KEY] = report;
+  }
+
+  async searchSessions(query: string) {
+    const runtime = this.options.topologyRuntime;
+    if (runtime === undefined) {
+      throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'Session topology is not available.');
+    }
+    return runtime.searchSessions(query);
+  }
+
+  async mountPeerSession(childSessionId: string, parentSessionId: string, role?: string, mandate?: string) {
+    const runtime = this.options.topologyRuntime;
+    if (runtime === undefined) {
+      throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'Session topology is not available.');
+    }
+    await runtime.mountSession(childSessionId, parentSessionId, role, mandate);
+  }
+
+  async remountPeerSession(childSessionId: string, parentSessionId: string, role?: string, mandate?: string) {
+    const runtime = this.options.topologyRuntime;
+    if (runtime === undefined) {
+      throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'Session topology is not available.');
+    }
+    await runtime.remountSession(childSessionId, parentSessionId, role, mandate);
+  }
+
+  async unmountPeerSession(sessionId: string) {
+    const runtime = this.options.topologyRuntime;
+    if (runtime === undefined) {
+      throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'Session topology is not available.');
+    }
+    await runtime.unmountSession(sessionId);
+  }
+
+  async readSessionGraph() {
+    const runtime = this.options.topologyRuntime;
+    if (runtime === undefined) {
+      throw new KimiError(ErrorCodes.SESSION_STATE_INVALID, 'Session topology is not available.');
+    }
+    return runtime.sessionGraph();
   }
 
   private invalidateSessionSelfBlock(): void {
@@ -2033,7 +2372,17 @@ export class Session {
         .map((item) => item.trim())
         .filter((item) => item.length > 0)
       : undefined;
-    const directChildren = Object.entries(this.metadata.agents)
+    const directChildren = this.departmentChildIds
+      .map((id) => {
+        const snapshot = this.departmentSnapshots.get(id);
+        return {
+          sessionId: snapshot?.sessionId ?? id,
+          title: snapshot?.name ?? id,
+          role: snapshot?.role,
+          mandate: snapshot?.mandate,
+        };
+      });
+    const persistedChildren = Object.entries(this.metadata.agents)
       .filter(([, meta]) => meta.kind === 'team' && meta.teamLeaderAgentId === 'main')
       .map(([agentId, meta]) => ({
         sessionId: meta.mountedSessionId ?? agentId,
@@ -2041,6 +2390,12 @@ export class Session {
         role: meta.role,
         mandate: meta.mandate,
       }));
+    const seen = new Set<string>();
+    const mergedChildren = [...directChildren, ...persistedChildren].filter((child) => {
+      if (seen.has(child.sessionId)) return false;
+      seen.add(child.sessionId);
+      return true;
+    });
     const info: SessionSelfInfo = {
       sessionId,
       title: this.metadata.title || sessionId,
@@ -2050,7 +2405,7 @@ export class Session {
       tags: tags !== undefined && tags.length > 0 ? tags : undefined,
       depth: parentSessionId === undefined ? 0 : 1,
       position: parentSessionId === undefined ? 'top-level' : 'member',
-      directChildren,
+      directChildren: mergedChildren,
     };
     return formatSessionSelf(info);
   }
@@ -2299,20 +2654,23 @@ export class Session {
   }
 
   /**
-   * Shared guard for every team-management operation. Every node in the
-   * department tree manages its own department: `main` plus every durable Team
-   * Agent. A discussion transcript is a record of a department's discussion, not
-   * a node in the tree, so it manages nothing.
+   * Shared guard for every team-management operation. Every Session in the
+   * forest chairs its own department: the root `main` and every mounted child.
+   * A discussion transcript is a record of a department's discussion, not a
+   * node in the tree, so it manages nothing.
    */
   assertTeamManager(agentId: string): void {
+    if (agentId === 'main' || agentId === this.options.id) return;
+    if (this.isDepartmentMemberId(agentId) || Object.hasOwn(this.mountParentById, agentId)) return;
+    if (this.parentSessionId() !== undefined && agentId === 'main') return;
     const meta = this.metadata.agents[agentId];
     if (meta === undefined) {
       throw new KimiError(ErrorCodes.AGENT_NOT_FOUND, `Agent "${agentId}" was not found.`);
     }
-    if (agentId !== 'main' && meta.kind !== 'team') {
+    if (meta.kind !== 'team') {
       throw new KimiError(
         ErrorCodes.SESSION_STATE_INVALID,
-        'Only the main agent and Team Agents manage a department.',
+        'Only a Session that chairs a department can manage it.',
       );
     }
   }
@@ -2333,12 +2691,12 @@ export class Session {
    */
   private async assertCanCreateDepartment(leaderAgentId: string): Promise<void> {
     const maxDepth = this.teamMaxDepth();
-    const parentById = await this.options.listMountParentById?.();
+    const parentById = await this.options.listMountParentById?.() ?? this.mountParentById;
     const scope = {
       agents: this.metadata.agents,
       agentId: leaderAgentId,
       parentById,
-      sessionIdForAgent: this.metadata.agents[leaderAgentId]?.mountedSessionId ?? this.options.id,
+      sessionIdForAgent: this.sessionIdForLeader(leaderAgentId),
     };
     if (canCreateDepartmentInTree({ ...scope, maxDepth })) return;
     throw new KimiError(
@@ -2390,11 +2748,22 @@ export class Session {
     }
   }
 
+  private sessionIdForLeader(leaderAgentId: string): string | undefined {
+    if (leaderAgentId === 'main' || leaderAgentId === this.options.id) return this.options.id;
+    return this.metadata.agents[leaderAgentId]?.mountedSessionId
+      ?? (Object.hasOwn(this.mountParentById, leaderAgentId) ? leaderAgentId : this.options.id);
+  }
+
   private configureTeamMembers(leaderAgentId: string): void {
     for (const [agentId, meta] of this.teamMemberMetadata(leaderAgentId)) {
       const agent = this.getReadyAgent(agentId);
       if (agent !== undefined) this.configureTeamAgentRuntime(agent, meta);
     }
+    const runtime = this.options.departmentRuntime;
+    if (runtime === undefined) return;
+    const leader = this.getReadyAgent(leaderAgentId) ?? this.getReadyAgent('main');
+    const locked = leader?.discussMode.isActive ?? false;
+    void Promise.all(this.departmentChildIds.map((childId) => runtime.setWriteLocked(childId, locked)));
   }
 
   private enableTeamLeadTools(agent: Agent): void {
@@ -2405,6 +2774,16 @@ export class Session {
       // before a provider can initialize every builtin tool.
       ...agent.tools.activeToolNames(),
       ...TEAM_MANAGEMENT_TOOLS,
+    ]);
+    this.applyMountedMemberTools(agent);
+  }
+
+  private applyMountedMemberTools(agent: Agent | undefined): void {
+    if (agent === undefined) return;
+    if (this.parentSessionId() === undefined) return;
+    agent.tools.setActiveTools([
+      ...agent.tools.activeToolNames(),
+      ...TEAM_MEMBER_TOOLS,
     ]);
   }
 
@@ -2724,11 +3103,12 @@ export class Session {
 }
 
 export * from './subagent-host';
+export * from './department-runtime';
 
 /**
- * Tools that manage a department. Every node in the tree gets them: `main`
- * because it is the root, and every Team Agent because it may run a department
- * of its own. `team.maxDepth` bounds how deep that goes, enforced when a member
+ * Tools that manage a department. Every Session in the forest gets them: the
+ * root `main`, and every mounted child Session because it may hire its own
+ * members. `team.maxDepth` bounds how deep that goes, enforced when a member
  * is created rather than by withholding the tool.
  */
 const TEAM_MANAGEMENT_TOOLS = [
@@ -2742,6 +3122,10 @@ const TEAM_MANAGEMENT_TOOLS = [
   'TeamDiscussInvite',
   'TeamDiscussKick',
   'TeamDecide',
+  'SessionSearch',
+  'SessionMount',
+  'SessionUnmount',
+  'SessionGraph',
 ] as const;
 
 /**
@@ -2830,6 +3214,32 @@ function discussionProfile(
       '</team_discussion_transcript>',
     ].join('\n'),
   };
+}
+
+function isTeamReportRecord(value: unknown): value is TeamReportRecord {
+  if (value === undefined || typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  const assignmentId = record['assignmentId'];
+  const task = record['task'];
+  const status = record['status'];
+  return typeof assignmentId === 'string'
+    && typeof task === 'string'
+    && (
+      status === 'unreported'
+      || status === 'completed'
+      || status === 'blocked'
+      || status === 'needs_decision'
+    );
+}
+
+function isTurnSkipRecord(value: unknown): value is { readonly reason: string; readonly error: string } {
+  if (value === undefined || typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return typeof record['reason'] === 'string' && typeof record['error'] === 'string';
 }
 
 function escapeTeamIdentity(value: string): string {

@@ -328,7 +328,7 @@ export function CodeView({
         isStreaming={isStreaming}
         activeAgentCount={activeAgentCount}
         mainWorking={isStreaming}
-        selfAgentId={agentId}
+        selfAgentId={session?.id ?? agentId}
         sessionAgents={sessionAgents}
         departmentChat={departmentChat}
         discussion={discussion}

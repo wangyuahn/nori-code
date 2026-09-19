@@ -2,7 +2,6 @@ import type {
   ApprovalRequest,
   Session,
   SessionActivity,
-  SessionAgent,
   SessionGraphEdge,
 } from '../api/client';
 import type { PendingTopologyOp, SessionMapDoc, SessionMapEdge } from '../components/sessionMapDoc';
@@ -17,12 +16,11 @@ import {
 } from '../components/sessionMapDoc';
 import { parentSessionIdOf, wouldCreateMountCycle } from './session-mount';
 
-/** Map metadata for a Session card; agent data may enrich the same card. */
+/** Map metadata for a Session card. Every card is a Session. */
 export interface MapNodeMember {
   session: Session;
   hostSessionId?: string;
-  agent?: SessionAgent;
-  kind: 'session' | 'agent';
+  kind: 'session';
 }
 
 export type MapNodeStatusTone = 'running' | 'working' | 'idle' | 'error' | 'waiting' | 'stopped' | 'other';
@@ -54,9 +52,12 @@ export function sessionIsBusy(session: Session | undefined): boolean {
 }
 
 export function mapMemberStatus(member: MapNodeMember): string {
-  if (isMapTimeoutFailure(member.agent?.summary)) return 'timeout';
-  const agentStatus = member.agent?.status?.trim();
-  if (agentStatus) return agentStatus;
+  const skip = readDepartmentTurnSkip(member.session);
+  if (isMapTimeoutFailure(skip)) return 'timeout';
+  const lastError = typeof member.session.metadata?.last_error === 'string'
+    ? member.session.metadata.last_error
+    : undefined;
+  if (isMapTimeoutFailure(lastError)) return 'timeout';
   return member.session.status?.trim() || 'idle';
 }
 
@@ -169,23 +170,9 @@ function liveHintForMember(
 } {
   if (live === undefined) return {};
   const sessionId = member.session.id;
-  const hostId = member.hostSessionId;
-  const agentId = member.agent?.agent_id;
-  const approval = live.approvals.find((item) => {
-    if (item.session_id === sessionId) return true;
-    if (hostId !== undefined && item.session_id === hostId) {
-      return item.agent_id === undefined || agentId === undefined || item.agent_id === agentId;
-    }
-    return false;
-  });
-  const activity = live.activity.find((item) => {
-    if (item.session_id === sessionId) return true;
-    if (hostId !== undefined && item.session_id === hostId) {
-      return agentId === undefined || item.agent_id === agentId;
-    }
-    return false;
-  });
-  const turn = live.turns[sessionId] ?? (hostId !== undefined ? live.turns[hostId] : undefined);
+  const approval = live.approvals.find((item) => item.session_id === sessionId);
+  const activity = live.activity.find((item) => item.session_id === sessionId);
+  const turn = live.turns[sessionId];
   return { approval, activity, turn };
 }
 
@@ -211,7 +198,9 @@ export function describeMapCurrentAction(
   if (thinking !== undefined && thinking.length > 0) return { kind: 'thinking', detail: clipMapText(thinking, 48) };
   const runtime = mapRuntimeStatus(status);
   if (runtime === 'running' || runtime === 'working' || activity !== undefined) {
-    const assigned = member.agent?.assigned_task?.trim();
+    const assigned = typeof member.session.metadata?.department_assigned_task === 'string'
+      ? member.session.metadata.department_assigned_task.trim()
+      : undefined;
     if (assigned !== undefined && assigned.length > 0) return { kind: 'tool', detail: clipMapText(assigned, 48) };
     return { kind: 'thinking' };
   }
@@ -224,31 +213,40 @@ function isMapTimeoutFailure(text: string | undefined): boolean {
   return /timed out|maximum duration|retry exhausted \(timeout/i.test(text);
 }
 
+function readDepartmentTurnSkip(session: Session): string | undefined {
+  const skip = session.metadata?.department_last_turn_skip;
+  if (skip !== null && typeof skip === 'object' && 'error' in skip) {
+    const error = (skip as { error?: unknown }).error;
+    return typeof error === 'string' ? error : undefined;
+  }
+  return undefined;
+}
+
 /** Failure summary for error/blocked/timeout cards. */
 export function describeMapErrorSummary(
   member: MapNodeMember,
   live?: MapLiveHints,
 ): string | undefined {
   const sessionId = member.session.id;
-  const hostId = member.hostSessionId;
-  const agentId = member.agent?.agent_id;
-  const match = live?.errors.find((item) => {
-    if (item.sessionId === sessionId) return true;
-    if (hostId !== undefined && item.sessionId === hostId) {
-      return item.agentId === undefined || agentId === undefined || item.agentId === agentId;
-    }
-    return false;
-  });
+  const match = live?.errors.find((item) => item.sessionId === sessionId);
   if (match !== undefined && match.message.trim().length > 0) return clipMapText(match.message);
-  const report = member.agent?.team_report_summary?.trim();
+  const report = member.session.metadata?.department_team_report;
+  const reportStatusRaw = report !== null && typeof report === 'object' && 'status' in report
+    ? (report as { status?: unknown }).status
+    : undefined;
+  const reportStatus = typeof reportStatusRaw === 'string' ? reportStatusRaw : undefined;
+  const reportSummaryRaw = report !== null && typeof report === 'object' && 'summary' in report
+    ? (report as { summary?: unknown }).summary
+    : undefined;
+  const reportSummary = typeof reportSummaryRaw === 'string' ? reportSummaryRaw : undefined;
   if (
-    (member.agent?.team_report_status === 'blocked' || member.agent?.team_report_status === 'needs_decision')
-    && report !== undefined
-    && report.length > 0
+    (reportStatus === 'blocked' || reportStatus === 'needs_decision')
+    && reportSummary !== undefined
+    && reportSummary.length > 0
   ) {
-    return clipMapText(report);
+    return clipMapText(reportSummary);
   }
-  const skip = member.agent?.summary?.trim();
+  const skip = readDepartmentTurnSkip(member.session);
   if (skip !== undefined && isMapTimeoutFailure(skip)) return clipMapText(skip);
   const runtime = mapRuntimeStatus(mapMemberStatus(member));
   if (runtime !== 'error' && runtime !== 'stopped') return undefined;
@@ -257,7 +255,7 @@ export function describeMapErrorSummary(
   if (typeof metadataError === 'string' && metadataError.trim().length > 0) {
     return clipMapText(metadataError);
   }
-  const summary = member.agent?.summary?.trim() || member.session.last_prompt?.trim();
+  const summary = member.session.last_prompt?.trim();
   if (summary !== undefined && summary.length > 0) return clipMapText(summary);
   return undefined;
 }
@@ -276,10 +274,8 @@ export function mapStatusDotClass(status: string): string {
 
 /**
  * Real session id that owns an OUT/IN wire.
- * Agent ghosts are not wireable; dual-write members appear as real session cards.
  */
 export function wireSourceParentSessionId(member: MapNodeMember): string | null {
-  if (member.kind === 'agent') return null;
   const id = member.session.id.trim();
   return id.length > 0 ? id : null;
 }
@@ -321,7 +317,6 @@ export function mapParentByChildFromEdges(
 
 /**
  * Permission matrix for a single map node.
- * UI reads these flags — avoid branching on `kind === 'agent'` across the page.
  */
 export function mapNodeCapabilities(
   member: MapNodeMember,
@@ -329,17 +324,15 @@ export function mapNodeCapabilities(
 ): MapNodeCapabilities {
   const { sessions, mapEdges = [] } = context;
   const wireSessionId = wireSourceParentSessionId(member);
-  const isRealSession = member.kind === 'session';
   const parentId = parentSessionIdOf(member.session) ?? member.hostSessionId;
   const isTopLevel = parentId === undefined
-    && isRealSession
     && isTopLevelSessionNode(member.session.id, mapEdges, sessions);
   const status = mapMemberStatus(member);
   const statusTone = mapStatusTone(status);
   const canWireOut = wireSessionId !== null;
-  const canWireIn = isRealSession;
-  const canDelete = isRealSession;
-  const canDisconnect = isRealSession && (
+  const canWireIn = true;
+  const canDelete = true;
+  const canDisconnect = (
     parentSessionIdOf(member.session) !== undefined
     || incomingParentEdgeCount(member.session.id, mapEdges) > 0
   );
@@ -348,7 +341,7 @@ export function mapNodeCapabilities(
     status,
     statusTone,
     isTopLevel,
-    isRealSession,
+    isRealSession: true,
     canWireOut,
     canWireIn,
     canDelete,
@@ -360,7 +353,6 @@ export function mapNodeCapabilities(
 export function mapMemberRoleLabel(
   member: MapNodeMember,
 ): string | undefined {
-  if (typeof member.agent?.role === 'string' && member.agent.role.trim()) return member.agent.role;
   const mountRole = member.session.metadata?.mount_role;
   if (typeof mountRole === 'string' && mountRole.trim()) return mountRole;
   return undefined;
@@ -571,6 +563,22 @@ export function reconcileParentEdgesWithServer(
     return doc;
   }
   return { ...doc, version: 2, edges: nextEdges.length > 0 ? nextEdges : [] };
+}
+
+/** Drop local edges whose endpoints are no longer live Sessions (keep drafts). */
+export function pruneDeadMapEdges(
+  doc: SessionMapDoc,
+  liveSessionIds: ReadonlySet<string>,
+): SessionMapDoc {
+  const edges = (doc.edges ?? []).filter((edge) => {
+    const draft = edge.status === 'draft'
+      || edge.source.startsWith('draft:')
+      || edge.target.startsWith('draft:');
+    if (draft) return liveSessionIds.has(edge.source) || edge.source.startsWith('draft:');
+    return liveSessionIds.has(edge.source) && liveSessionIds.has(edge.target);
+  });
+  if (edges.length === (doc.edges ?? []).length) return doc;
+  return { ...doc, edges: edges.length > 0 ? edges : [] };
 }
 
 /** Disconnect: remove parent edges pointing at child; keep the session node. */

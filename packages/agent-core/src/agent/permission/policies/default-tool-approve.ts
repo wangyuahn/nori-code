@@ -20,10 +20,15 @@ const DEFAULT_APPROVE_TOOLS = new Set([
   'TeamBroadcast',
   'TeamDM',
   'TeamChat',
+  'TeamStatus',
   'TeamDiscussInvite',
   'TeamDiscussKick',
   'TeamDecide',
   'TeamSpeak',
+  'SessionSearch',
+  'SessionMount',
+  'SessionUnmount',
+  'SessionGraph',
   'Skill',
   // Goal control tools have no side effects on the world: GetGoal reads, and
   // mutation tools only record the goal's own runtime state.

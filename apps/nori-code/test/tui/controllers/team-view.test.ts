@@ -7,10 +7,11 @@ import type { TeamAgentSnapshot } from '#/tui/utils/team-tree';
 import type { Event } from '@nori-code/sdk';
 
 const reviewer: TeamAgentSnapshot = {
-  agentId: 'reviewer',
+  agentId: 'sess_reviewer',
   kind: 'team',
   name: 'Reviewer',
   parentAgentId: 'main',
+  mountedSessionId: 'sess_reviewer',
 };
 
 const discussion: TeamAgentSnapshot = {
@@ -63,31 +64,43 @@ function createController(overrides: Partial<AppState> = {}) {
     initialAppState: fakeAppState(overrides),
     startup: { continueLast: false, permission: undefined, discuss: false },
   });
-  const hydrateFromReplay = vi.fn(async () => true);
-  const prepareTranscriptForAgentView = vi.fn();
   const showStatus = vi.fn();
   const setAppState = vi.fn((patch: Partial<AppState>) => {
     Object.assign(state.appState, patch);
   });
   const session = {
-    getResumeState: vi.fn(() => ({ sessionMetadata: {}, agents: {} })),
+    getResumeState: vi.fn(() => ({
+      sessionMetadata: {
+        agents: {
+          main: {
+            chat: {
+              messages: [
+                {
+                  messageId: 1,
+                  agentId: 'sess_reviewer',
+                  name: 'Reviewer',
+                  message: 'Taking the footer.',
+                },
+              ],
+            },
+          },
+        },
+      },
+    })),
   };
   const host = {
     state,
     session,
     harness: { withInteractiveAgent: (_id: string, fn: () => unknown) => fn() },
-    sessionReplay: { hydrateFromReplay },
     setAppState,
     showStatus,
     showError: vi.fn(),
     restoreEditor: vi.fn(),
-    prepareTranscriptForAgentView,
   };
   return {
     controller: new TeamViewController(host as unknown as TeamViewHost),
     state,
-    hydrateFromReplay,
-    prepareTranscriptForAgentView,
+    session,
     showStatus,
     setAppState,
   };
@@ -101,23 +114,23 @@ function paneText(state: ReturnType<typeof createTUIState>): string {
 }
 
 describe('TeamViewController', () => {
-  it('opens a member session and hydrates that agent, not main', async () => {
-    const { controller, state, hydrateFromReplay, prepareTranscriptForAgentView } = createController();
-    await controller.open(reviewer);
-    expect(state.appState.viewingAgentId).toBe('reviewer');
-    expect(prepareTranscriptForAgentView).toHaveBeenCalledWith('reviewer');
-    expect(hydrateFromReplay).toHaveBeenCalledWith(expect.anything(), 'reviewer');
-    expect(controller.isPaneVisible()).toBe(true);
+  it('loads department Chat from the current session lead, not a member view', () => {
+    const { controller, state, session } = createController();
+    controller.reveal();
+    controller.seedFromSession(session as never);
+    expect(state.appState.viewingAgentId).toBe('main');
     expect(paneText(state)).toContain('Chat');
+    expect(paneText(state)).toContain('Taking the footer.');
   });
 
-  it('opens a discussion node by revealing the pane without switching agents', async () => {
-    const { controller, state, hydrateFromReplay, prepareTranscriptForAgentView } = createController();
-    await controller.open(discussion);
-    expect(state.appState.viewingAgentId).toBe('main');
-    expect(prepareTranscriptForAgentView).not.toHaveBeenCalled();
-    expect(hydrateFromReplay).not.toHaveBeenCalled();
-    expect(controller.isPaneVisible()).toBe(true);
+  it('tells a mounted child that Chat lives on the parent session', () => {
+    const { controller, state } = createController({
+      teamAgents: [{ agentId: 'main', kind: 'main', name: 'Reviewer', parentAgentId: null }],
+      parentSessionId: 'sess_parent',
+      sessionTitle: 'Reviewer',
+    });
+    controller.reveal();
+    expect(paneText(state)).toContain('parent session');
   });
 
   it('forces the Discuss meeting track while Discuss is on, and hide only closes the pane', () => {
@@ -151,7 +164,7 @@ describe('TeamViewController', () => {
     controller.reveal();
     controller.routeEvent({
       type: 'tool.call.started',
-      agentId: 'reviewer',
+      agentId: 'sess_reviewer',
       sessionId: 'sess-1',
       turnId: 1,
       toolCallId: 'ts-1',

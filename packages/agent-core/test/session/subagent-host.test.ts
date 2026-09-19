@@ -100,6 +100,9 @@ type HostSessionMember =
   | 'recordTeamTurnSkip'
   | 'releaseTeamAssignment'
   | 'teamMemberMetadata'
+  | 'parentSessionId'
+  | 'listDepartmentChildIds'
+  | 'listDepartmentSiblingIds'
   | 'unreadTeamDiscussionStatements'
   | 'updateTeamDiscussion';
 
@@ -119,6 +122,7 @@ type HostSessionMember =
 function teamSessionDouble(parts: Partial<Record<HostSessionMember, unknown>>): Session {
   return {
     metadata: { agents: {} },
+    options: { id: 'test-session' },
     acknowledgeTeamDiscussionStatements: vi.fn(async () => undefined),
     acknowledgeTeamReport: vi.fn(async () => undefined),
     activeTeamDiscussion: vi.fn(() => undefined),
@@ -151,6 +155,9 @@ function teamSessionDouble(parts: Partial<Record<HostSessionMember, unknown>>): 
     recordTeamTurnSkip: vi.fn(async () => undefined),
     releaseTeamAssignment: vi.fn(async () => undefined),
     teamMemberMetadata: vi.fn(() => []),
+    parentSessionId: vi.fn(() => undefined),
+    listDepartmentChildIds: vi.fn(() => []),
+    listDepartmentSiblingIds: vi.fn(() => []),
     unreadTeamDiscussionStatements: vi.fn(async () => ({ statements: [], cursor: 0 })),
     // Echoes the patch back, which is what a real persist returns: the four
     // fields the callers then read off the updated discussion.
@@ -1276,13 +1283,120 @@ describe('SessionSubagentHost', () => {
     const host = new SessionSubagentHost(session, 'agent-member');
 
     await expect(host.sendChatMessage('Hello.', ['agent-member'], signal))
-      .rejects.toThrow('must begin with one or more literal @agent-id mentions');
+      .rejects.toThrow('must begin with one or more literal @session-id (or member name) mentions');
     await expect(host.sendChatMessage('@agent-member Hello.', ['agent-other'], signal))
       .rejects.toThrow('must exactly match');
     await expect(host.sendChatMessage('@agent-member @agent-member Hello.', ['agent-member', 'agent-member'], signal))
       .rejects.toThrow('must not contain duplicates');
     await expect(host.sendChatMessage('@all Hello.', ['agent-member'], signal))
       .rejects.toThrow('@all must be the only leading mention');
+  });
+
+  it('delivers leftover Chat mentions by member display name', async () => {
+    const mentionedSteer = vi.fn(() => null);
+    const unmentionedSteer = vi.fn(() => null);
+    const mentioned = agentDouble({ turn: { hasActiveTurn: true, prompt: vi.fn(), steer: mentionedSteer } });
+    const unmentioned = agentDouble({ turn: { hasActiveTurn: true, prompt: vi.fn(), steer: unmentionedSteer } });
+    const senderMeta = {
+      homedir: '/sender',
+      type: 'sub' as const,
+      parentAgentId: 'main',
+      kind: 'team' as const,
+      teamLeaderAgentId: 'main',
+      name: 'Sender',
+    };
+    const mentionedMeta = { ...senderMeta, homedir: '/frontend', name: 'frontend' };
+    const unmentionedMeta = { ...senderMeta, homedir: '/backend', name: 'backend' };
+    const postTeamChatMessage = vi.fn(async (
+      _leaderAgentId: string,
+      senderAgentId: string,
+      senderName: string,
+      message: string,
+      mentions: readonly string[],
+    ) => ({ messageId: 8, agentId: senderAgentId, name: senderName, message, mentions, sentAt: '2026-08-20T00:00:00.000Z' }));
+    const session = teamSessionDouble({
+      getAgentMetadata: vi.fn((id: string) =>
+        id === 'agent-sender' ? senderMeta
+          : id === 'sess_frontend' ? mentionedMeta
+            : id === 'sess_backend' ? unmentionedMeta
+              : undefined,
+      ),
+      teamMemberMetadata: vi.fn(() => [
+        ['agent-sender', senderMeta],
+        ['sess_frontend', mentionedMeta],
+        ['sess_backend', unmentionedMeta],
+      ]),
+      ensureAgentResumed: vi.fn(async (id: string) =>
+        id === 'sess_frontend' ? mentioned : unmentioned,
+      ),
+      postTeamChatMessage,
+    });
+    const host = new SessionSubagentHost(session, 'agent-sender');
+
+    await host.sendChatMessage('@frontend Cache key changed.', ['frontend'], signal);
+
+    expect(postTeamChatMessage).toHaveBeenCalledWith(
+      'main',
+      'agent-sender',
+      'Sender',
+      '@frontend Cache key changed.',
+      ['sess_frontend'],
+    );
+    expect(mentionedSteer).toHaveBeenCalledTimes(1);
+    expect(unmentionedSteer).not.toHaveBeenCalled();
+  });
+
+  it('delivers mounted member Chat mentions by sibling display name', async () => {
+    const mentionedSteer = vi.fn(() => null);
+    const unmentionedSteer = vi.fn(() => null);
+    const mentioned = agentDouble({ turn: { hasActiveTurn: true, prompt: vi.fn(), steer: mentionedSteer } });
+    const unmentioned = agentDouble({ turn: { hasActiveTurn: true, prompt: vi.fn(), steer: unmentionedSteer } });
+    const postChat = vi.fn(async (
+      _parentSessionId: string,
+      senderSessionId: string,
+      senderName: string,
+      message: string,
+      mentions: readonly string[],
+    ) => ({ messageId: 9, agentId: senderSessionId, name: senderName, message, mentions, sentAt: '2026-08-20T00:00:00.000Z' }));
+    const memberSnapshot = vi.fn(async (sessionId: string) => (
+      sessionId === 'sess_frontend'
+        ? { sessionId, name: 'frontend', role: 'frontend', mandate: 'Ship UI.' }
+        : sessionId === 'sess_backend'
+          ? { sessionId, name: 'backend', role: 'backend', mandate: 'Ship API.' }
+          : undefined
+    ));
+    const session = teamSessionDouble({
+      parentSessionId: vi.fn(() => 'sess_parent'),
+      listDepartmentSiblingIds: vi.fn(() => ['sess_frontend', 'sess_backend']),
+      getAgentMetadata: vi.fn((id: string) => (
+        id === 'main' ? { homedir: '/', type: 'main' as const, parentAgentId: null, kind: 'main' as const, name: 'Sender' }
+          : undefined
+      )),
+    });
+    (session as { options: { id: string; departmentRuntime: unknown } }).options = {
+      id: 'sess_self',
+      departmentRuntime: {
+        postChat,
+        memberSnapshot,
+        ensureMain: vi.fn(async (sessionId: string) => (
+          sessionId === 'sess_frontend' ? mentioned : unmentioned
+        )),
+      },
+    };
+    const host = new SessionSubagentHost(session, 'main');
+
+    const record = await host.sendChatMessage('@frontend Cache key changed.', ['frontend'], signal);
+
+    expect(record).toMatchObject({ messageId: 9, agentId: 'sess_self', name: 'Sender' });
+    expect(postChat).toHaveBeenCalledWith(
+      'sess_parent',
+      'sess_self',
+      'Sender',
+      '@frontend Cache key changed.',
+      ['sess_frontend'],
+    );
+    expect(mentionedSteer).toHaveBeenCalledTimes(1);
+    expect(unmentionedSteer).not.toHaveBeenCalled();
   });
 
   it('does not claim delivery when an idle TeamDM cannot start or is cancelled', async () => {
@@ -1750,6 +1864,10 @@ describe('Session.createAgent', () => {
       'TeamUpdate',
       'TeamDecide',
       'TeamStatus',
+      'SessionSearch',
+      'SessionMount',
+      'SessionUnmount',
+      'SessionGraph',
     ]));
   });
 
@@ -1806,7 +1924,7 @@ describe('Session.createAgent', () => {
 
     expect(member.agent.config.systemPrompt.startsWith('<team_identity>')).toBe(true);
     expect(member.agent.config.systemPrompt).toContain('Name: Reviewer');
-    expect(member.agent.config.systemPrompt).toContain('Your **parent** is the agent that hired you');
+    expect(member.agent.config.systemPrompt).toContain('Your **parent** is the Session that hired you');
     // A member manages its own department, so the prompt must hand it the rules
     // for that rather than telling it management is somebody else's job.
     expect(member.agent.config.systemPrompt).toContain('### Managing your own department');
@@ -1814,8 +1932,8 @@ describe('Session.createAgent', () => {
     expect(member.agent.config.systemPrompt).not.toContain('Team management belongs to the main Agent');
     expect(member.agent.config.systemPrompt).toContain('`Write`, `Edit`, and `Bash` are denied until it closes');
     expect(member.agent.config.systemPrompt).not.toContain('SubAgent');
-    expect(member.agent.config.systemPrompt).toContain('exactly one agent: a peer, a member you hired, or your parent');
-    expect(member.agent.config.systemPrompt).toContain('every peer in your department, all at once');
+    expect(member.agent.config.systemPrompt).toContain('exactly one Session: a peer, a member you hired, or your parent');
+    expect(member.agent.config.systemPrompt).toContain('every peer Session in your department, all at once');
     // The routing rule the member must not get wrong: a handoff goes to the peer
     // that continues the work, never up to the parent to be passed along.
     expect(member.agent.config.systemPrompt).toContain('Your parent is a recipient in its own right, never a relay');
@@ -1833,7 +1951,7 @@ describe('Session.createAgent', () => {
     expect(member.agent.config.systemPrompt).toContain('Never overwrite verified work');
     expect(member.agent.config.systemPrompt.match(/## Team Engineering/g)).toHaveLength(1);
     expect(member.agent.config.systemPrompt).not.toContain('Swarm');
-    expect(member.agent.config.systemPrompt).not.toContain('Graph');
+    expect(member.agent.config.systemPrompt).not.toContain('DAG');
     expect(member.agent.config.systemPrompt).not.toContain('You are the main lead');
     await member.agent.refreshSystemPrompt();
     expect(member.agent.config.systemPrompt.startsWith('<team_identity>')).toBe(true);
@@ -1873,6 +1991,10 @@ describe('Session.createAgent', () => {
       'TeamDiscussInvite',
       'TeamDiscussKick',
       'TeamDecide',
+      'SessionSearch',
+      'SessionMount',
+      'SessionUnmount',
+      'SessionGraph',
     ]));
     expect(member.agent.tools.activeToolNames()).not.toContain('EnterDiscussMode');
     expect(member.agent.tools.activeToolNames()).not.toContain('ContextInjection');
@@ -1973,7 +2095,7 @@ describe('Session.createAgent', () => {
     // A discussion transcript records a department's discussion; it is not a
     // node in the tree, so it manages nothing.
     const transcriptHost = new SessionSubagentHost(session, transcript.id);
-    const refused = 'Only the main agent and Team Agents manage a department.';
+    const refused = 'Only a Session that chairs a department can manage it.';
     await expect(transcriptHost.inviteToDiscussion([member.id])).rejects.toThrow(refused);
     await expect(transcriptHost.kickFromDiscussion([member.id])).rejects.toThrow(refused);
     await expect(transcriptHost.decideTeamDiscussion('continue', undefined, undefined, signal))
@@ -2001,11 +2123,11 @@ describe('Session.createAgent', () => {
     };
 
     const leadId = await hire(main.id, 'Lead');
-    // Depth 1 hires depth 2: the tree grows without going through main.
     const workerId = await hire(leadId, 'Worker');
-    expect(session.getAgentMetadata(workerId)?.teamLeaderAgentId).toBe(leadId);
+    const parentById = await session.options.listMountParentById?.();
+    expect(parentById?.[leadId]).toBe(session.options.id);
+    expect(parentById?.[workerId]).toBe(leadId);
 
-    // Depth 2 is the limit, so its own hire would land at depth 3.
     await expect(hire(workerId, 'TooDeep')).rejects.toThrow('depth');
     expect(session.teamMemberMetadata(workerId)).toEqual([]);
   });
@@ -2501,7 +2623,52 @@ describe('Session.createAgent', () => {
       role: 'reviewer',
     }]);
     expect(member?.sessionId).toMatch(/^sess_Reviewer/);
-    expect(session.getAgentMetadata(member!.agentId)?.mountedSessionId).toBe(member!.sessionId);
+    expect(member?.agentId).toBe(member?.sessionId);
+    expect(session.teamMemberMetadata('main').map(([id]) => id)).toEqual([member!.sessionId]);
+    expect(Object.values(session.metadata.agents).some((meta) => meta.kind === 'team')).toBe(false);
+  });
+
+  it('SessionSearch, SessionMount, SessionUnmount, and SessionGraph operate on the session forest', async () => {
+    const searchSessions = vi.fn(async () => [{
+      sessionId: 'sess_reviewer',
+      title: 'Reviewer',
+      role: 'reviewer',
+    }]);
+    const remountSession = vi.fn(async () => undefined);
+    const unmountSession = vi.fn(async () => undefined);
+    const sessionGraph = vi.fn(async () => ({
+      nodes: [
+        { id: 'parent', title: 'Lead' },
+        { id: 'sess_reviewer', title: 'Reviewer', parentSessionId: 'parent' },
+      ],
+    }));
+    const session = hireableSession({
+      id: 'parent',
+      topologyRuntime: {
+        searchSessions,
+        mountSession: remountSession,
+        remountSession,
+        unmountSession,
+        sessionGraph,
+        fillChildIdentity: vi.fn(async () => ({ title: 'Reviewer', role: 'reviewer', mandate: 'Review diffs.' })),
+      },
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const host = new SessionSubagentHost(session, main.id);
+
+    expect(await host.searchSessions('review')).toEqual([
+      { sessionId: 'sess_reviewer', title: 'Reviewer', role: 'reviewer' },
+    ]);
+    await host.remountSession('sess_reviewer', 'parent', 'reviewer', 'Review diffs.');
+    expect(remountSession).toHaveBeenCalledWith('sess_reviewer', 'parent', 'reviewer', 'Review diffs.');
+    await host.unmountSession('sess_reviewer');
+    expect(unmountSession).toHaveBeenCalledWith('sess_reviewer');
+    expect(await host.sessionGraph()).toEqual({
+      nodes: [
+        { id: 'parent', title: 'Lead' },
+        { id: 'sess_reviewer', title: 'Reviewer', parentSessionId: 'parent' },
+      ],
+    });
   });
 
   it('TeamUpdate patches identity without prompting a turn', async () => {
@@ -2908,7 +3075,7 @@ describe('Session.createAgent', () => {
     const status = await new SessionSubagentHost(session, main.id).getTeamStatus();
 
     expect(status).toMatchObject({
-      agent_id: main.id,
+      agent_id: session.options.id,
       member_count: 1,
       members: [{
         agent_id: member.id,
@@ -3188,7 +3355,9 @@ function hireableSession(
   options: { id: string } & Partial<SessionOptions>,
 ): Session {
   let session!: Session;
-  const { createMountedChild, kaos, homedir, rpc, initializeMainAgent, id, ...rest } = options;
+  const mounts = new Map<string, string | undefined>();
+  mounts.set(options.id, undefined);
+  const { createMountedChild, kaos, homedir, rpc, initializeMainAgent, id, listMountParentById, ...rest } = options;
   session = new Session({
     ...rest,
     id,
@@ -3199,18 +3368,12 @@ function hireableSession(
     homedir: homedir ?? '/tmp/kimi-session',
     rpc: rpc ?? createSessionRpc(),
     initializeMainAgent: initializeMainAgent ?? false,
+    listMountParentById: listMountParentById ?? (async () => Object.fromEntries(mounts)),
     createMountedChild: createMountedChild ?? (async (input) => {
       const sessionId = `sess_${input.title.replace(/\s+/g, '_')}`;
-      const { agentId } = await session.attachMountedTeamMember({
-        mountedSessionId: sessionId,
-        identity: {
-          name: input.title,
-          role: input.role,
-          mandate: input.mandate,
-        },
-        teamLeaderAgentId: input.teamLeaderAgentId ?? 'main',
-      });
-      return { sessionId, agentId };
+      mounts.set(sessionId, input.parentSessionId);
+      await session.refreshDepartmentDirectory();
+      return { sessionId, agentId: sessionId };
     }),
   });
   return session;

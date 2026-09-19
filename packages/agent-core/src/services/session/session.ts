@@ -89,6 +89,9 @@ export interface ISessionService {
    */
   getDepartmentChat(id: string, agentId: string): Promise<SessionAgentChatResponse>;
 
+  /** Ask the parent session to fill name / role / mandate from a brief. */
+  fillIdentity?(id: string, brief: string): Promise<{ title: string; role: string; mandate: string }>;
+
   /** The effective system prompt of one agent transcript; empty when unknown. */
   getAgentSystemPrompt(id: string, agentId: string): Promise<SessionAgentSystemPromptResponse>;
 

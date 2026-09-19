@@ -1,6 +1,6 @@
 # 团队工程
 
-Nori Code CLI 2.0 把项目当作一棵**部门树**，而不是单条聊天记录加旁注。`TeamCreate` 通过创建**挂载子会话**雇佣伙伴（与会话地图上已有的节点是同一类），并双写一个团队 Agent，以便 Discuss 仍按本部门寻址。Discuss 轮次在动手前收集团队发言。本页说明终端与 Nori Work 中这些能力如何配合。
+Nori Code CLI 2.0 把项目当作一棵**部门树**，而不是单条聊天记录加旁注。`TeamCreate` 通过创建并 resume **挂载子会话**雇佣伙伴——地图上的那张卡片就是这个会话。工作、工具、cwd、兄弟交流和身份都住在这个子会话上。Discuss 轮次在动手前收集团队发言。本页说明终端与 Nori Work 中这些能力如何配合。
 
 ::: warning 注意
 临时 `SubAgent` DAG 编排已在 v2.0 **删除**。把工作交给另一个 Agent 的唯一方式是团队工程。与 Codex / Claude Code 的对照，以及 LSP、Git 仍是毛坯等缺口，见 GitHub [README](https://github.com/wangyuahn/nori-code/blob/master/README.zh-CN.md)。
@@ -10,10 +10,10 @@ Nori Code CLI 2.0 把项目当作一棵**部门树**，而不是单条聊天记�
 
 协作模型只有一套，出现在两个面上：
 
-- **团队伙伴**（`TeamCreate`）是挂在你下面的**真实子会话**。它们出现在会话地图上的会话卡片中，参与 Discuss/Assign，直到 `TeamDismiss` 移除；同时双写一个团队 Agent，以便 Discuss 仍按 agent id 寻址本部门。
-- **会话地图节点**与雇佣是同一类：**真实子会话**，通过 `parent_session_id` 链接。在 Web Map 画布上拉线或「新建会话」走的是与 `TeamCreate` 相同的「空子会话 + 挂载」路径。一个会话只能有一个父节点（暂不支持兼职）。
+- **团队伙伴**（`TeamCreate`）是挂在你下面的**真实子会话**。它们出现在会话地图上的会话卡片中。Discuss、Assign、兄弟交流和身份都按这个 session id 寻址，直到 `TeamDismiss` 移除。
+- **会话地图节点**与雇佣是同一类：**真实子会话**，通过 `parent_session_id` 链接。在 Web Map 画布上拉线或「新建会话」走的是与 `TeamCreate` 相同的「创建并 resume 挂载子会话」路径。一个会话只能有一个父节点（暂不支持兼职）。
 
-双写（子会话 + 父会话里的 team agent）是为了让 Discuss 仍按 agent id 说话、地图按 session id 说话。这是接缝，不是已经磨平的统一身份。
+持久协作者只有 Session 这一类。父会话里不再另造一套 Team Agent 身份。
 
 主 Agent 默认是**只读协调者**：直接 `Write` / `Edit` 会被拦截（`/setting readonly on`），雇佣成员在 `TeamAssign` 离开 Discuss 后执行分配任务。只有在你希望负责人直接改文件时才使用 `/setting readonly off`。
 
@@ -38,8 +38,8 @@ Discuss 是**多轮**的会。每条 `TeamSpeak` 只推进一步（一个可裁�
 
 | 工具 | 作用 |
 | --- | --- |
-| `TeamCreate` | 雇佣一名或多名伙伴（各需 `name`、`role`、`mandate`）。创建挂载子会话（地图上的会话卡片），并双写团队 Agent，以便 Discuss/Assign 仍按本部门寻址。受 `/team settings` 最大部门深度限制。 |
-| `TeamDismiss` | 从本部门移除伙伴。解雇会删除该子会话（以及双写的团队 Agent）。必须提供 `reason`。若成员仍在工作，先以 `confirm_active=false` 调用；确认中断后再以 `confirm_active=true` 重试。 |
+| `TeamCreate` | 雇佣一名或多名伙伴（各需 `name`、`role`、`mandate`）。创建并 resume 挂载子会话（地图上的会话卡片）。Discuss/Assign/Chat 按该 session id 寻址。受 `/team settings` 最大部门深度限制。 |
+| `TeamDismiss` | 从本部门移除伙伴。解雇会删除该子会话。必须提供 `reason`。若成员仍在工作，先以 `confirm_active=false` 调用；确认中断后再以 `confirm_active=true` 重试。 |
 | `TeamUpdate` | 更新本会话或成员的名称、角色、职责或标签。相关会话会收到系统提醒，但不会被唤醒。 |
 
 `TeamDismiss` 是移除雇佣伙伴的正式路径。通过 `/map` 卸载只会去掉挂载关系，**不会**删除子会话。
@@ -63,7 +63,7 @@ Discuss 是**多轮**的会。每条 `TeamSpeak` 只推进一步（一个可裁�
 - **U** — 卸载高亮会话（需已有父节点）。
 - 输入文字搜索；**Esc** 取消。
 
-`/map` 管理**会话挂载**；**`/team`** 管理**部门成员**（打开伙伴会话、浏览汇报、查看本回合 Discuss 发言）。
+`/map` 与 **`/team`** 读的是**同一棵 Session 森林**。`/team` 是部门浏览器（打开伙伴会话、浏览汇报、查看本回合 Discuss 发言）；`/map` 是同一批会话的空间视图。
 
 ### Web：Map 视图
 
@@ -74,7 +74,7 @@ Discuss 是**多轮**的会。每条 `TeamSpeak` 只推进一步（一个可裁�
 - **右键空白** — 在该处新建顶层会话；**右键拖动** — 平移画布。
 - **输出口拖到卡片** — 静默挂载；拖到空白 — 打开身份草稿后 `createChild`。
 - **输入口拖到另一张卡片** — 改挂。已有父节点时会确认：这是 remount，不是兼职。
-- **Alt+点击输入口** — 拆挂升为顶层。忙碌会话的挂载/拆挂会排队到空闲。
+- **Alt+点击卡片（或其输入口）** — 拆挂升为顶层。右键卡片结束工作，不断开挂载。忙碌会话的挂载/拆挂会排队到空闲。
 - **框选** — 出现工具条，可打开、停止、设置、拆挂、删除。右键选区可执行同样的批量操作。
 - **标签筛选**同时作用于左侧列表和画布。可见卡片都是真实会话，可以框选或拉线。
 
@@ -92,8 +92,8 @@ Discuss 是**多轮**的会。每条 `TeamSpeak` 只推进一步（一个可裁�
 
 ## 终端栏位：`/team` 与 `Ctrl-Y`
 
-- **`/team`**（别名 **`/agents`**）— 可搜索的部门浏览器。**Enter** 打开选中伙伴的会话（消息与输入都针对该成员）。**Main** 回到主会话。**Tab** 查看成员详情。讨论节点会打开 Discuss 栏。**`/team settings`** 设置最大部门深度。
-- **`Ctrl-Y`** — 显示或隐藏底部 **Discuss / Chat** 栏。Discuss 开启时为只读会议轨；否则显示部门 Chat。隐藏栏位不会离开 Discuss，也不会退出已打开的成员会话。
+- **`/team`**（别名 **`/agents`**）— 可搜索的部门浏览器。**Enter** 打开选中伙伴的会话（消息与输入都针对该成员）。**Main** 留在当前会话。**Tab** 查看成员详情。讨论节点会打开 Discuss 栏。**`/team settings`** 设置最大部门深度。
+- **`Ctrl-Y`** — 在**当前会话**显示或隐藏底部 **Discuss / Chat** 栏。部门 Chat 与 Discuss 挂在负责人会话上。Discuss 开启时为只读会议轨；否则显示部门 Chat。隐藏栏位不会离开 Discuss，也不会切换会话。若当前是没有自己部门的挂载子会话，栏位会提示 Chat 在父会话上，需用 `/map` 或 `/team` 打开父会话。
 
 完整键位见[键盘快捷键](../reference/keyboard.md#team-栏)。
 

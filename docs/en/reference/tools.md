@@ -93,10 +93,16 @@ Collaboration tools handle inter-Agent coordination, user interaction, and Skill
 | `TeamAssign` | Auto-allow | Assign work; success leaves Discuss and enters Code |
 | `TeamUpdate` | Auto-allow | Update name, role, mandate, or tags without starting a turn |
 | `TeamDismiss` | Auto-allow | Dismiss department members and delete their child sessions |
+| `SessionSearch` | Auto-allow | Search sessions by id, title, role, or working directory |
+| `SessionGraph` | Auto-allow | Read the session forest (parent/child topology) |
+| `SessionMount` | Auto-allow | Mount or remount an existing session as a department member |
+| `SessionUnmount` | Auto-allow | Detach a mounted child session without deleting it |
 | `AskUserQuestion` | Auto-allow | Ask the user a question to gather structured input |
 | `Skill` | Auto-allow | Invoke a registered inline Skill |
 
-**`TeamCreate`** requires a unique `name`, `role`, and `mandate` for every member. Each hire creates a real mounted child session (a session card on the conversation map) and a dual-write team agent so Discuss/Assign still address this department. **`TeamDismiss`** removes members from the department and deletes that child session; provide `reason`, and use `confirm_active=true` only after accepting interruption of active work. Unmount on the map is a separate user action that detaches without deleting. **`TeamUpdate`** changes name, role, mandate, or tags; related sessions receive a reminder and do not start a turn. **`TeamDecide`** `action=start` requires `topic` and the lead `statement`. Members publish only with `TeamSpeak`. After execution, `action=vote` does not require Discuss; every team member votes (`discuss_again` / `proceed` / `abstain`), including members left idle with `task=null`.
+**`TeamCreate`** requires a unique `name`, `role`, and `mandate` for every member. Each hire creates and resumes a real mounted child session (a session card on the conversation map). Discuss, Assign, and Chat address that session id (or the member display name). **`TeamDismiss`** removes members from the department and deletes that child session; provide `reason`, and use `confirm_active=true` only after accepting interruption of active work. Unmount on the map / `SessionUnmount` is a separate action that detaches without deleting. **`TeamUpdate`** changes name, role, mandate, or tags; related sessions receive a reminder and do not start a turn. **`TeamDecide`** `action=start` requires `topic` and the lead `statement`. Members publish only with `TeamSpeak`. After execution, `action=vote` does not require Discuss; every team member votes (`discuss_again` / `proceed` / `abstain`), including members left idle with `task=null`.
+
+**`SessionSearch`**, **`SessionGraph`**, **`SessionMount`**, and **`SessionUnmount`** operate on the Session forest. Search before mounting an existing session; Graph is the read-only topology. These change session mounts, not a second Team Agent identity.
 
 Session mount changes refresh **`<session_self>`** in each affected session's system prompt and may inject **`<session_mount_changed>`** on the next turn. This is identity and topology only — not transcript sharing. See [Team engineering](../guides/team-engineering.md#identity-session_self-and-mount-changes).
 

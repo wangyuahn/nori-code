@@ -10,7 +10,7 @@ Nori Code **1.x** 已在会话内使用 SubAgent 与协作工具。**2.0** 增�
 
 | 1.x 习惯 | 2.0 行为 |
 | --- | --- |
-| 把 Team 伙伴当作同一聊天里的旁注角色 | `TeamCreate` 雇佣**真实子会话**（地图上的会话卡片），并双写团队 Agent 以便 Discuss 仍可用 |
+| 把 Team 伙伴当作同一聊天里的旁注角色 | `TeamCreate` 雇佣**真实子会话**（地图上的会话卡片）。Discuss、交流和身份都住在这个会话上 |
 | 期望伙伴共享负责人 transcript | 身份来自 **`<session_self>`** 与挂载变更通知——**不是**复制 transcript |
 | 用一个斜杠命令当作「Team 主入口」 | **`/team`** 管部门成员（打开伙伴会话、汇报、Discuss 发言）；**`/map`** 管会话挂载 |
 | 卸载与解散混用 | **`TeamDismiss`** 删除雇佣来的子会话；**`/map` 卸载**只清除父链接 |
@@ -23,7 +23,7 @@ Nori Code **1.x** 已在会话内使用 SubAgent 与协作工具。**2.0** 增�
 - **`/team`**（别名 **`/agents`**）— 浏览并打开已雇佣伙伴；`/team settings` 设置最大部门深度
 - **`/map`** — 浏览挂载森林；Enter 打开会话；**M** 挂载；**U** 卸载
 - **Nori Work / Web Map** — 同一棵森林，支持平移/缩放与本地标注（不会发给模型）
-- **`Ctrl-Y`** — 在 `/team` 打开成员会话时显示或隐藏 Discuss / Chat 栏
+- **`Ctrl-Y`** — 在当前会话显示或隐藏 Discuss / Chat 栏（部门 Chat 挂在负责人会话上）
 
 ### 不变的部分
 

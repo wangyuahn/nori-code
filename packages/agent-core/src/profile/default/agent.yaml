@@ -37,6 +37,10 @@ tools:
   - TeamDiscussKick
   - TeamDecide
   - TeamSpeak
+  - SessionSearch
+  - SessionMount
+  - SessionUnmount
+  - SessionGraph
   - FetchURL
   - Browser
   - AskUserQuestion

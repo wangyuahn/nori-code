@@ -93,10 +93,16 @@ Discuss 是只读团队开会。新会话默认进入该状态（用户可关闭
 | `TeamAssign` | 自动放行 | 分配任务；成功后离开 Discuss 进入 Code |
 | `TeamUpdate` | 自动放行 | 更新名称、角色、职责或标签，不唤醒会话 |
 | `TeamDismiss` | 自动放行 | 解除部门成员并删除其子会话 |
+| `SessionSearch` | 自动放行 | 按 id、标题、角色或工作目录搜索会话 |
+| `SessionGraph` | 自动放行 | 读取会话森林（父子拓扑） |
+| `SessionMount` | 自动放行 | 将已有会话挂载或改挂为部门成员 |
+| `SessionUnmount` | 自动放行 | 拆挂载子会话，不删除 |
 | `AskUserQuestion` | 自动放行 | 向用户提问以获取结构化输入 |
 | `Skill` | 自动放行 | 调用已注册的 inline Skill |
 
-**`TeamCreate`** 每个成员必须有唯一的 `name`、`role`、`mandate`；每次雇佣会创建真实挂载子会话（地图上的会话卡片），并双写一个团队 Agent，以便 Discuss/Assign 仍按本部门寻址。**`TeamDismiss`** 从部门移除成员并删除该子会话；需提供 `reason`，仅在确认中断进行中的任务后用 `confirm_active=true` 重试。地图上的拆挂是用户操作，只断开挂载、不删除会话。**`TeamUpdate`** 可改名称、角色、职责或标签；相关会话会收到提醒，但不会被唤醒。**`TeamDecide`** `action=start` 必须有 `topic` 和主持 `statement`。成员只用 `TeamSpeak` 发言。执行后 `action=vote` 不要求 Discuss；全队投票（`discuss_again` / `proceed` / `abstain`），含 `task=null` 的成员。
+**`TeamCreate`** 每个成员必须有唯一的 `name`、`role`、`mandate`；每次雇佣会创建并 resume 真实挂载子会话（地图上的会话卡片）。Discuss、Assign、Chat 按该 session id（或展示名）寻址。**`TeamDismiss`** 从部门移除成员并删除该子会话；需提供 `reason`，仅在确认中断进行中的任务后用 `confirm_active=true` 重试。地图上的拆挂 / `SessionUnmount` 是另一条操作，只断开挂载、不删除会话。**`TeamUpdate`** 可改名称、角色、职责或标签；相关会话会收到提醒，但不会被唤醒。**`TeamDecide`** `action=start` 必须有 `topic` 和主持 `statement`。成员只用 `TeamSpeak` 发言。执行后 `action=vote` 不要求 Discuss；全队投票（`discuss_again` / `proceed` / `abstain`），含 `task=null` 的成员。
+
+**`SessionSearch`**、**`SessionGraph`**、**`SessionMount`**、**`SessionUnmount`** 操作的是 Session 森林。挂载已有会话前先搜索；Graph 是只读拓扑。这些改的是会话挂载，不是第二套 Team Agent 身份。
 
 挂载变更会刷新各会话 system prompt 中的 **`<session_self>`**，并可能在下一回合注入 **`<session_mount_changed>`**。这只是身份与拓扑，**不是** transcript 共享。详见[团队工程](../guides/team-engineering.md#身份模型session_self-与挂载变更)。
 

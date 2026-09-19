@@ -2,7 +2,7 @@
  * Department pane — read-only Discuss meeting track or sibling Chat.
  *
  * Discuss on: forced meeting UI. Discuss off: Chat. Closing the pane does not
- * exit Discuss or the viewed member session.
+ * exit Discuss or the current session.
  */
 
 import { Container, truncateToWidth, visibleWidth } from '@nori-code/pi-tui';

@@ -1,6 +1,8 @@
 import { TeamBrowserComponent } from '../components/dialogs/team-browser';
 import { TeamMemberDetailComponent } from '../components/dialogs/team-member-detail';
-import { currentViewingAgentId, type TeamAgentSnapshot } from '../utils/team-tree';
+import { currentViewingAgentId, buildDepartmentSnapshot, teamMemberSessionId, type TeamAgentSnapshot } from '../utils/team-tree';
+import { sessionMapLabel } from '../utils/session-map-tree';
+import { formatErrorMessage } from '../utils/event-payload';
 import type { TranscriptEntry } from '../types';
 import { showTeamSettingsPicker } from './config';
 import type { SlashCommandHost } from './dispatch';
@@ -11,7 +13,30 @@ export async function handleTeamCommand(host: SlashCommandHost, args: string): P
     await showTeamSettingsPicker(host);
     return;
   }
+  await refreshDepartmentFromGraph(host);
   showTeamBrowser(host);
+}
+
+async function refreshDepartmentFromGraph(host: SlashCommandHost): Promise<void> {
+  const sessionId = host.session?.id;
+  if (sessionId === undefined) return;
+  try {
+    const graph = await host.harness.getSessionGraph({ workDir: host.state.appState.workDir });
+    const hostNode = graph.nodes.find((node) => node.id === sessionId);
+    host.setAppState({
+      teamAgents: buildDepartmentSnapshot({
+        hostSessionId: sessionId,
+        hostTitle: hostNode === undefined
+          ? (host.state.appState.sessionTitle ?? 'Main')
+          : sessionMapLabel(hostNode),
+        graph,
+        metadata: host.session?.getResumeState()?.sessionMetadata,
+        live: host.state.appState.teamAgents,
+      }),
+    });
+  } catch (error) {
+    host.showError(formatErrorMessage(error));
+  }
 }
 
 function showTeamBrowser(host: SlashCommandHost): void {
@@ -22,7 +47,32 @@ function showTeamBrowser(host: SlashCommandHost): void {
       discussMode: host.state.appState.discussMode,
       currentAgentId: currentViewingAgentId(host.state.appState.viewingAgentId),
       onSelect: (agent) => {
-        void host.teamViewController.open(agent);
+        if (agent.kind === 'main') {
+          host.restoreEditor();
+          return;
+        }
+        if (agent.kind === 'discussion') {
+          host.restoreEditor();
+          host.teamViewController.reveal();
+          host.showStatus(host.state.appState.discussMode ? 'Opened Discuss' : 'Opened Chat');
+          return;
+        }
+        const sessionId = teamMemberSessionId(agent);
+        if (sessionId === undefined) {
+          host.showError('This member is no longer a session.');
+          showTeamBrowser(host);
+          return;
+        }
+        void (async () => {
+          try {
+            const session = await host.harness.resumeSession({ id: sessionId });
+            await host.switchToSession(session, `Opened session (${session.id}).`);
+            host.restoreEditor();
+          } catch (error) {
+            host.showError(String(error));
+            showTeamBrowser(host);
+          }
+        })();
       },
       onDetails: (agent) => {
         showTeamMemberDetail(host, agent);

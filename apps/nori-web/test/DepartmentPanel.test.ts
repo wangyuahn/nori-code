@@ -116,4 +116,41 @@ describe('department meeting panel', () => {
       container.remove();
     }
   });
+
+  it('drops leftover shadow agent ids that are not forest sessions', async () => {
+    vi.spyOn(api.sessions, 'getMessages').mockResolvedValue({ items: [] } as unknown as Awaited<ReturnType<typeof api.sessions.getMessages>>);
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => {
+        root.render(createElement(I18nProvider, null, createElement(DepartmentMeetingPanel, {
+          sessionId: 'sess_parent',
+          discussionAgentId: 'round-ghost',
+          selfAgentId: 'sess_child',
+          sessionAgents: [
+            { agent_id: 'sess_child', kind: 'team', parent_agent_id: 'sess_parent', name: 'Ada', status: 'idle', mounted_session_id: 'sess_child' },
+            {
+              agent_id: 'round-ghost',
+              kind: 'discussion',
+              parent_agent_id: 'sess_parent',
+              name: 'round-ghost',
+              status: 'idle',
+              summary: 'Align',
+              discussion_participant_agent_ids: ['sess_child', 'agent_ghost'],
+            },
+          ],
+          turnAgentId: null,
+          revision: 1,
+        })));
+        await Promise.resolve();
+      });
+      const chips = [...container.querySelectorAll('.meeting-header-chip')].map(node => node.textContent ?? '');
+      expect(chips.some(chip => chip.includes('Ada'))).toBe(true);
+      expect(chips.some(chip => chip.includes('agent_ghost'))).toBe(false);
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
 });

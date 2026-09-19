@@ -1,10 +1,9 @@
 /**
  * Team-engineering snapshot helpers for the TUI.
  *
- * The CLI cannot call agent-core `listAgents`. It reconstructs a department
- * tree from session resume metadata, live `agent.status.updated` /
- * `discussion.updated` events, and Team* tool results — enough to browse
- * members, roles, and reports in a terminal list.
+ * Durable members are mounted child Sessions. Resume metadata may still carry
+ * leftover parent-session team shadows and Discuss nodes; the forest comes
+ * from `getSessionGraph`, live Team* results, and status events.
  */
 
 export type TeamAgentKind = 'main' | 'team' | 'discussion' | 'independent';
@@ -119,7 +118,9 @@ export function teamAgentsFromSessionMetadata(metadata: unknown): TeamAgentSnaps
   const snapshots: TeamAgentSnapshot[] = [];
   for (const [agentId, raw] of Object.entries(agentsRecord)) {
     const snapshot = snapshotFromMetadataEntry(agentId, raw);
-    if (snapshot !== undefined) snapshots.push(snapshot);
+    // Durable members live on the Session forest. Drop leftover parent-session
+    // team shadows so /team and the footer cannot reopen a second identity.
+    if (snapshot !== undefined && snapshot.kind !== 'team') snapshots.push(snapshot);
   }
   if (!snapshots.some((agent) => agent.agentId === MAIN_AGENT_ID || agent.kind === 'main')) {
     snapshots.unshift({
@@ -130,6 +131,207 @@ export function teamAgentsFromSessionMetadata(metadata: unknown): TeamAgentSnaps
     });
   }
   return snapshots;
+}
+
+export interface SessionGraphLike {
+  readonly nodes: ReadonlyArray<{
+    readonly id: string;
+    readonly title?: string;
+    readonly metadata?: Record<string, unknown> | null;
+  }>;
+  readonly edges: ReadonlyArray<{
+    readonly parentSessionId: string;
+    readonly childSessionId: string;
+  }>;
+}
+
+export interface DepartmentSnapshotInput {
+  readonly hostTitle: string;
+  readonly hostSessionId?: string;
+  readonly metadata?: unknown;
+  readonly graph?: SessionGraphLike;
+  readonly live?: readonly TeamAgentSnapshot[];
+}
+
+/**
+ * One department snapshot for the current session: forest members, Discuss /
+ * independent nodes from metadata, and live report/status overlay.
+ *
+ * `/team`, `/map`, and `syncRuntimeState` must all call this so a graph refresh
+ * cannot drop a live Discuss round or just-updated reports.
+ */
+export function buildDepartmentSnapshot(input: DepartmentSnapshotInput): TeamAgentSnapshot[] {
+  const live = input.live ?? [];
+  const metadataAgents = teamAgentsFromSessionMetadata(input.metadata);
+  const nonTeamById = new Map<string, TeamAgentSnapshot>();
+  for (const agent of live) {
+    if (agent.kind === 'team') continue;
+    nonTeamById.set(agent.agentId, agent);
+  }
+  for (const agent of metadataAgents) {
+    if (agent.kind === 'team') continue;
+    nonTeamById.set(agent.agentId, agent);
+  }
+  const hostTitle = input.hostTitle.trim().length > 0 ? input.hostTitle : 'Main';
+  const forest =
+    input.graph !== undefined && input.hostSessionId !== undefined
+      ? teamAgentsFromSessionGraph(input.hostSessionId, hostTitle, input.graph)
+      : [];
+  const forestTeam = forest.filter((agent) => agent.kind === 'team');
+  const liveTeam = live.filter((agent) => agent.kind === 'team');
+  const teamMembers =
+    input.graph !== undefined
+      ? overlayLiveTeamFields(forestTeam, liveTeam)
+      : liveTeam;
+  return mergeDepartmentSnapshots([...nonTeamById.values()], [
+    {
+      agentId: MAIN_AGENT_ID,
+      kind: 'main',
+      name: hostTitle,
+      parentAgentId: null,
+    },
+    ...teamMembers,
+  ]);
+}
+
+/** Keep Discuss / independent transcripts from metadata; members from the forest. */
+export function mergeDepartmentSnapshots(
+  metadataAgents: readonly TeamAgentSnapshot[],
+  forestMembers: readonly TeamAgentSnapshot[],
+): TeamAgentSnapshot[] {
+  const byId = new Map<string, TeamAgentSnapshot>();
+  for (const agent of metadataAgents) {
+    if (agent.kind === 'team') continue;
+    byId.set(agent.agentId, agent);
+  }
+  if (![...byId.values()].some((agent) => agent.kind === 'main' || agent.agentId === MAIN_AGENT_ID)) {
+    byId.set(MAIN_AGENT_ID, {
+      agentId: MAIN_AGENT_ID,
+      kind: 'main',
+      name: 'Main',
+      parentAgentId: null,
+    });
+  }
+  for (const member of forestMembers) {
+    if (member.kind === 'main') {
+      const existing = [...byId.values()].find(
+        (agent) => agent.kind === 'main' || agent.agentId === MAIN_AGENT_ID,
+      );
+      if (existing !== undefined) byId.delete(existing.agentId);
+      byId.set(MAIN_AGENT_ID, {
+        agentId: MAIN_AGENT_ID,
+        kind: 'main',
+        name: member.name,
+        parentAgentId: null,
+        role: existing?.role,
+        mandate: existing?.mandate,
+        assignedTask: existing?.assignedTask,
+        reportStatus: existing?.reportStatus,
+        reportSummary: existing?.reportSummary,
+        status: existing?.status,
+      });
+      continue;
+    }
+    if (member.kind !== 'team') continue;
+    const sessionId = member.mountedSessionId ?? member.agentId;
+    if (sessionId.length === 0) continue;
+    byId.set(member.agentId, {
+      ...member,
+      mountedSessionId: sessionId,
+    });
+  }
+  return [...byId.values()];
+}
+
+/** Match a department row by agent id or mounted child session id. */
+export function findTeamAgent(
+  agents: readonly TeamAgentSnapshot[],
+  id: string,
+): TeamAgentSnapshot | undefined {
+  return agents.find((agent) => agent.agentId === id || agent.mountedSessionId === id);
+}
+
+function overlayLiveTeamFields(
+  forestTeam: readonly TeamAgentSnapshot[],
+  liveTeam: readonly TeamAgentSnapshot[],
+): TeamAgentSnapshot[] {
+  return forestTeam.map((member) => {
+    const previous =
+      findTeamAgent(liveTeam, member.agentId)
+      ?? (member.mountedSessionId === undefined
+        ? undefined
+        : findTeamAgent(liveTeam, member.mountedSessionId));
+    if (previous === undefined) return member;
+    return {
+      ...member,
+      assignedTask: member.assignedTask ?? previous.assignedTask,
+      reportStatus: member.reportStatus ?? previous.reportStatus,
+      reportSummary: member.reportSummary ?? previous.reportSummary,
+      status: member.status ?? previous.status,
+    };
+  });
+}
+
+/** Direct children of `hostSessionId` on a session graph. */
+export function teamAgentsFromSessionGraph(
+  hostSessionId: string,
+  hostTitle: string,
+  graph: SessionGraphLike,
+): TeamAgentSnapshot[] {
+  const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+  const children = graph.edges
+    .filter((edge) => edge.parentSessionId === hostSessionId)
+    .map((edge) => byId.get(edge.childSessionId))
+    .filter((node): node is NonNullable<typeof node> => node !== undefined);
+  return teamAgentsFromMountedChildren(
+    hostTitle,
+    children.map((child) => ({
+      id: child.id,
+      title: child.title,
+      name: typeof child.metadata?.['mount_name'] === 'string' ? child.metadata['mount_name'] : child.title,
+      role: typeof child.metadata?.['mount_role'] === 'string' ? child.metadata['mount_role'] : undefined,
+      mandate: typeof child.metadata?.['mount_mandate'] === 'string' ? child.metadata['mount_mandate'] : undefined,
+    })),
+  );
+}
+
+/** Department members as mounted child Sessions of `hostSessionId`. */
+export function teamAgentsFromMountedChildren(
+  hostTitle: string,
+  children: ReadonlyArray<{
+    readonly id: string;
+    readonly title?: string;
+    readonly name?: string;
+    readonly role?: string;
+    readonly mandate?: string;
+  }>,
+): TeamAgentSnapshot[] {
+  return [
+    {
+      agentId: MAIN_AGENT_ID,
+      kind: 'main',
+      name: hostTitle.trim().length > 0 ? hostTitle : 'Main',
+      parentAgentId: null,
+    },
+    ...children.map((child) => ({
+      agentId: child.id,
+      kind: 'team' as const,
+      name: child.name?.trim() || child.title?.trim() || child.id,
+      parentAgentId: MAIN_AGENT_ID,
+      role: child.role,
+      mandate: child.mandate,
+      mountedSessionId: child.id,
+    })),
+  ];
+}
+
+/** Session a `/team` row should resume. Main stays put; leftovers without a child session are skipped. */
+export function teamMemberSessionId(agent: TeamAgentSnapshot): string | undefined {
+  if (agent.kind === 'main') return undefined;
+  if (agent.mountedSessionId !== undefined && agent.mountedSessionId.length > 0) {
+    return agent.mountedSessionId;
+  }
+  return undefined;
 }
 
 export function flattenTeamTree(agents: readonly TeamAgentSnapshot[]): TeamTreeRow[] {
@@ -237,12 +439,13 @@ export function applyAgentStatusToTeam(
   const team = input.team;
   if (team === undefined && input.agentId === MAIN_AGENT_ID) return [...agents];
 
-  const existing = agents.find((agent) => agent.agentId === input.agentId);
+  const existing = findTeamAgent(agents, input.agentId);
+  const agentId = existing?.agentId ?? input.agentId;
   const next: TeamAgentSnapshot = {
-    agentId: input.agentId,
-    kind: existing?.kind ?? (input.agentId === MAIN_AGENT_ID ? 'main' : 'team'),
-    name: existing?.name ?? input.agentId,
-    parentAgentId: existing?.parentAgentId ?? (input.agentId === MAIN_AGENT_ID ? null : MAIN_AGENT_ID),
+    agentId,
+    kind: existing?.kind ?? (agentId === MAIN_AGENT_ID ? 'main' : 'team'),
+    name: existing?.name ?? agentId,
+    parentAgentId: existing?.parentAgentId ?? (agentId === MAIN_AGENT_ID ? null : MAIN_AGENT_ID),
     role: existing?.role,
     mandate: existing?.mandate,
     mountedSessionId: existing?.mountedSessionId,
@@ -409,17 +612,43 @@ export function findAgentDiscussion(
   };
 }
 
-/** Sibling Chat lives on the department lead; the lead itself is not a participant. */
+/**
+ * Sibling Chat is stored on this session's lead (`main`). Opening a member
+ * switches Sessions, so the pane always reads the current session — never a
+ * same-session agent view.
+ */
+export function departmentChatOwnerId(): string {
+  return MAIN_AGENT_ID;
+}
+
+/** Sibling Chat lives on the department lead; the lead itself is not a Chat sender. */
 export function departmentChatLeaderId(agent: TeamAgentSnapshot): string | undefined {
   if (agent.kind !== 'team') return undefined;
   return agent.parentAgentId ?? undefined;
 }
 
+export type DepartmentPaneMode = 'discuss' | 'chat';
+
+export function departmentPaneEmptyHint(input: {
+  readonly mode: DepartmentPaneMode;
+  readonly hasMembers: boolean;
+  readonly parentSessionId?: string;
+}): string {
+  const mounted = input.parentSessionId !== undefined && input.parentSessionId.length > 0;
+  if (input.mode === 'discuss') {
+    if (!input.hasMembers && mounted) {
+      return 'Discuss for this department lives on the parent session. Open it from /map.';
+    }
+    return 'No statements in this round yet.';
+  }
+  if (input.hasMembers) return 'No messages yet — members align here while working.';
+  if (mounted) return 'Department chat lives on the parent session. Open it from /map.';
+  return 'Hire partners with TeamCreate, then Chat appears here.';
+}
+
 export function currentViewingAgentId(viewingAgentId: string | undefined): string {
   return viewingAgentId === undefined || viewingAgentId.length === 0 ? MAIN_AGENT_ID : viewingAgentId;
 }
-
-export type DepartmentPaneMode = 'discuss' | 'chat';
 
 /** Discuss on → meeting track; otherwise department Chat. Closing the pane does not change this. */
 export function departmentPaneMode(discussMode: boolean): DepartmentPaneMode {
@@ -559,7 +788,7 @@ function applyTeamCreate(
         parentAgentId,
         role: member.role,
         mandate: member.mandate,
-        mountedSessionId: member.mountedSessionId,
+        mountedSessionId: member.mountedSessionId ?? member.agentId,
         status: 'idle',
       });
     }
@@ -589,10 +818,11 @@ function applyTeamAssign(
   let next = [...agents];
   for (const raw of assignments) {
     const record = asRecord(raw);
-    const agentId = readString(record['agent_id']);
-    if (agentId === undefined) continue;
+    const requestedId = readString(record['agent_id']) ?? readString(record['session_id']);
+    if (requestedId === undefined) continue;
     const task = readString(record['task']);
-    const existing = next.find((agent) => agent.agentId === agentId);
+    const existing = findTeamAgent(next, requestedId);
+    const agentId = existing?.agentId ?? requestedId;
     next = upsertTeamAgent(next, {
       agentId,
       kind: existing?.kind ?? 'team',
@@ -621,7 +851,10 @@ function applyTeamDismiss(
   const dismissed = readDismissedIds(args, output);
   if (dismissed.length === 0) return [...agents];
   const removed = new Set(dismissed);
-  const remaining = agents.filter((agent) => !removed.has(agent.agentId));
+  const remaining = agents.filter((agent) => {
+    if (removed.has(agent.agentId)) return false;
+    return agent.mountedSessionId === undefined || !removed.has(agent.mountedSessionId);
+  });
   if (teamMemberCount(remaining) > 0) return remaining;
   return remaining.filter((agent) => agent.kind !== 'discussion');
 }
@@ -752,7 +985,8 @@ function readCreatedMembers(
   for (const raw of members) {
     const record = asRecord(raw);
     const identity = asRecord(record['identity']);
-    const agentId = readString(record['agentId']) ?? readString(record['agent_id']);
+    const sessionId = readString(record['session_id']) ?? readString(record['sessionId']);
+    const agentId = sessionId ?? readString(record['agentId']) ?? readString(record['agent_id']);
     const name = readString(identity['name']) ?? readString(record['name']);
     if (agentId === undefined || name === undefined) continue;
     created.push({
@@ -760,7 +994,7 @@ function readCreatedMembers(
       name,
       role: readString(identity['role']) ?? readString(record['role']),
       mandate: readString(identity['mandate']) ?? readString(record['mandate']),
-      mountedSessionId: readString(record['session_id']),
+      mountedSessionId: sessionId ?? agentId,
     });
   }
   return created;

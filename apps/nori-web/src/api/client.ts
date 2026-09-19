@@ -155,7 +155,7 @@ export interface SessionAgent {
   discussion_turn_agent_id?: string;
   /** Members taking part in this Discuss round; only discussion nodes carry it. */
   discussion_participant_agent_ids?: readonly string[];
-  /** Dual-write child session for TeamCreate / map mount members. */
+  /** Child session that owns this durable member. */
   mounted_session_id?: string;
 }
 
@@ -495,6 +495,7 @@ export interface TeamChatMessage {
 
 export interface SessionAgentChatResponse {
   department_leader_agent_id: string | null;
+  department_leader_session_id?: string;
   messages: TeamChatMessage[];
 }
 
@@ -1117,6 +1118,13 @@ export function createClient(
           `/sessions/${encodeURIComponent(id)}/identity`,
           undefined,
           { method: 'PATCH', body: patch },
+        ),
+
+      fillIdentity: (id: string, brief: string) =>
+        request<{ title: string; role: string; mandate: string }>(
+          `/sessions/${encodeURIComponent(id)}:fill-identity`,
+          undefined,
+          { method: 'POST', body: { brief } },
         ),
 
       fork: (id: string, title?: string) => request<Session>(

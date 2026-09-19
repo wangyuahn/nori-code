@@ -56,6 +56,33 @@ describe('findAgentDiscussion', () => {
     const round = agent({ agent_id: 'round-5', kind: 'discussion', parent_agent_id: 'main', discussion_turn_agent_id: 'lead' });
     expect(findAgentDiscussion([MAIN, LEAD, round], 'main', 'outsider')?.turnAgentId).toBe('lead');
   });
+
+  it('finds the parent session round when the viewer is a mounted child session', () => {
+    const child = agent({
+      agent_id: 'sess_child',
+      kind: 'team',
+      name: 'Reviewer',
+      parent_agent_id: 'sess_parent',
+      mounted_session_id: 'sess_child',
+    });
+    const round = agent({
+      agent_id: 'round-forest',
+      kind: 'discussion',
+      parent_agent_id: 'sess_parent',
+      discussion_participant_agent_ids: ['sess_child'],
+      discussion_turn_agent_id: 'sess_child',
+    });
+    expect(findAgentDiscussion([child, round], 'sess_child')).toEqual({
+      discussionAgentId: 'round-forest',
+      leaderAgentId: 'sess_parent',
+      turnAgentId: 'sess_child',
+    });
+    expect(findAgentDiscussion([child, round], 'sess_parent')).toEqual({
+      discussionAgentId: 'round-forest',
+      leaderAgentId: 'sess_parent',
+      turnAgentId: 'sess_child',
+    });
+  });
 });
 
 describe('discussionSpeakingAgentIds', () => {

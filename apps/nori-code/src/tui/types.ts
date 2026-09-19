@@ -64,6 +64,8 @@ export interface AppState {
   teamAgents: readonly TeamAgentSnapshot[];
   /** Agent whose session the main transcript is showing. Defaults to main. */
   viewingAgentId?: string;
+  /** Parent session id when this session is a mounted department member. */
+  parentSessionId?: string;
   /** Optional banner shown below the welcome panel; null means no banner to render. */
   banner?: BannerState | null;
 }

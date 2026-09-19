@@ -482,7 +482,12 @@ describe('POST /api/v1/sessions/{session_id}/profile — update profile', () => 
     });
     expect(envelopeOf<unknown>(res.json()).code).toBe(0);
 
-    const frame = await waitFor(received, (f) => f['type'] === 'session.meta.updated');
+    const frame = await waitFor(received, (f) => {
+      if (f['type'] !== 'session.meta.updated' || f['session_id'] !== created.id) return false;
+      const payload = f['payload'];
+      if (payload === undefined || typeof payload !== 'object' || payload === null) return false;
+      return (payload as { title?: unknown }).title === 'Renamed';
+    });
     expect(frame['session_id']).toBe(created.id);
     expect(frame['payload']).toMatchObject({
       title: 'Renamed',

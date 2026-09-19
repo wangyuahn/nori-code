@@ -10,12 +10,18 @@ import {
   formatTeamReportsStatus,
   formatTeamRowSecondary,
   shouldPaintDiscussUtterance,
+  teamAgentsFromMountedChildren,
+  teamMemberSessionId,
+  teamAgentsFromSessionGraph,
   teamAgentsFromSessionMetadata,
+  mergeDepartmentSnapshots,
+  buildDepartmentSnapshot,
   teamChatMessagesFromMetadata,
   teamHasBlockingReports,
   teamMemberCount,
   teamSpeakingLabel,
   departmentChatLeaderId,
+  departmentPaneEmptyHint,
   departmentPaneMode,
   type TeamAgentSnapshot,
 } from '#/tui/utils/team-tree';
@@ -27,13 +33,52 @@ const main: TeamAgentSnapshot = {
   parentAgentId: null,
 };
 
+describe('teamAgentsFromMountedChildren', () => {
+  it('builds department members from mounted child sessions', () => {
+    expect(teamAgentsFromMountedChildren('Lead', [
+      { id: 'sess_reviewer', title: 'Reviewer', role: 'reviewer', mandate: 'Review diffs' },
+    ])).toEqual([
+      { agentId: 'main', kind: 'main', name: 'Lead', parentAgentId: null },
+      {
+        agentId: 'sess_reviewer',
+        kind: 'team',
+        name: 'Reviewer',
+        parentAgentId: 'main',
+        role: 'reviewer',
+        mandate: 'Review diffs',
+        mountedSessionId: 'sess_reviewer',
+      },
+    ]);
+  });
+
+  it('opens a forest member through its child session id', () => {
+    const [lead, reviewer] = teamAgentsFromMountedChildren('Lead', [
+      { id: 'sess_reviewer', title: 'Reviewer' },
+    ]);
+    expect(teamMemberSessionId(lead!)).toBeUndefined();
+    expect(teamMemberSessionId(reviewer!)).toBe('sess_reviewer');
+    expect(teamMemberSessionId({
+      agentId: 'agent_ghost',
+      kind: 'team',
+      name: 'Ghost',
+      parentAgentId: 'main',
+    })).toBeUndefined();
+    expect(teamMemberSessionId({
+      agentId: 'agent_ghost',
+      kind: 'discussion',
+      name: 'Round',
+      parentAgentId: 'main',
+    })).toBeUndefined();
+  });
+});
+
 describe('teamAgentsFromSessionMetadata', () => {
   it('returns an empty list when resume metadata has no agents', () => {
     expect(teamAgentsFromSessionMetadata(undefined)).toEqual([]);
     expect(teamAgentsFromSessionMetadata({})).toEqual([]);
   });
 
-  it('rebuilds the department tree from resume metadata', () => {
+  it('keeps Discuss nodes from resume metadata and drops leftover team shadows', () => {
     const agents = teamAgentsFromSessionMetadata({
       agents: {
         main: { type: 'main', name: 'Main', parentAgentId: null },
@@ -43,20 +88,143 @@ describe('teamAgentsFromSessionMetadata', () => {
           parentAgentId: 'main',
           role: 'code review',
           mountedSessionId: 'session-reviewer',
-          assignedTask: 'Review the TUI footer',
-          teamReport: { status: 'blocked', summary: 'Need a decision' },
+        },
+        'discuss-1': {
+          type: 'sub',
+          name: 'Align',
+          parentAgentId: 'main',
+          discussion: {
+            status: 'active',
+            currentTurnAgentId: 'sess_reviewer',
+            participantAgentIds: ['sess_reviewer'],
+          },
         },
       },
     });
-    expect(teamMemberCount(agents)).toBe(1);
-    const reviewer = agents.find((agent) => agent.agentId === 'reviewer');
-    expect(reviewer?.kind).toBe('team');
-    expect(reviewer?.role).toBe('code review');
-    expect(reviewer?.mountedSessionId).toBe('session-reviewer');
-    expect(reviewer?.reportStatus).toBe('blocked');
-    expect(flattenTeamTree(agents).map((row) => `${row.depth}:${row.agent.name}`)).toEqual([
-      '0:Main',
-      '1:Reviewer',
+    expect(teamMemberCount(agents)).toBe(0);
+    expect(agents.find((agent) => agent.agentId === 'reviewer')).toBeUndefined();
+    expect(agents.find((agent) => agent.kind === 'discussion')).toMatchObject({
+      agentId: 'discuss-1',
+      discussionTurnAgentId: 'sess_reviewer',
+    });
+  });
+});
+
+describe('mergeDepartmentSnapshots', () => {
+  it('keeps forest members when metadata only has Discuss', () => {
+    const forest = teamAgentsFromMountedChildren('Lead', [
+      { id: 'sess_reviewer', title: 'Reviewer', role: 'reviewer' },
+    ]);
+    const merged = mergeDepartmentSnapshots(
+      teamAgentsFromSessionMetadata({
+        agents: {
+          main: { type: 'main', name: 'Lead', parentAgentId: null },
+          'discuss-1': {
+            type: 'sub',
+            discussion: { status: 'active', participantAgentIds: ['sess_reviewer'] },
+          },
+        },
+      }),
+      forest,
+    );
+    expect(merged.map((agent) => agent.agentId).sort()).toEqual(['discuss-1', 'main', 'sess_reviewer']);
+    expect(teamMemberSessionId(merged.find((agent) => agent.agentId === 'sess_reviewer')!)).toBe('sess_reviewer');
+    expect(merged.find((agent) => agent.kind === 'main')?.name).toBe('Lead');
+  });
+});
+
+describe('buildDepartmentSnapshot', () => {
+  const graph = {
+    nodes: [
+      { id: 'sess_parent', title: 'Lead' },
+      { id: 'sess_reviewer', title: 'Reviewer', metadata: { mount_name: 'Reviewer', mount_role: 'reviewer' } },
+    ],
+    edges: [{ parentSessionId: 'sess_parent', childSessionId: 'sess_reviewer' }],
+  };
+
+  it('keeps a live Discuss node when a graph refresh only has members', () => {
+    const live: TeamAgentSnapshot[] = [
+      { agentId: 'main', kind: 'main', name: 'Lead', parentAgentId: null },
+      {
+        agentId: 'sess_reviewer',
+        kind: 'team',
+        name: 'Reviewer',
+        parentAgentId: 'main',
+        mountedSessionId: 'sess_reviewer',
+        reportStatus: 'blocked',
+        status: 'running',
+      },
+      {
+        agentId: 'discuss-1',
+        kind: 'discussion',
+        name: 'Align',
+        parentAgentId: 'main',
+        discussionTurnAgentId: 'sess_reviewer',
+      },
+    ];
+    const next = buildDepartmentSnapshot({
+      hostSessionId: 'sess_parent',
+      hostTitle: 'Lead',
+      graph,
+      live,
+    });
+    expect(next.find((agent) => agent.kind === 'discussion')?.agentId).toBe('discuss-1');
+    expect(next.find((agent) => agent.agentId === 'sess_reviewer')?.reportStatus).toBe('blocked');
+    expect(next.find((agent) => agent.agentId === 'sess_reviewer')?.status).toBe('running');
+  });
+
+  it('keeps a live Discuss node alongside a newer metadata round', () => {
+    const next = buildDepartmentSnapshot({
+      hostSessionId: 'sess_parent',
+      hostTitle: 'Lead',
+      graph,
+      metadata: {
+        agents: {
+          main: { type: 'main', name: 'Lead', parentAgentId: null },
+          'discuss-2': {
+            type: 'sub',
+            discussion: { status: 'active', currentTurnAgentId: 'sess_reviewer' },
+          },
+        },
+      },
+      live: [
+        {
+          agentId: 'discuss-1',
+          kind: 'discussion',
+          name: 'Old',
+          parentAgentId: 'main',
+        },
+      ],
+    });
+    expect(next.filter((agent) => agent.kind === 'discussion').map((agent) => agent.agentId)).toEqual([
+      'discuss-1',
+      'discuss-2',
+    ]);
+  });
+});
+
+describe('teamAgentsFromSessionGraph', () => {
+  it('reads direct children of the current session', () => {
+    expect(teamAgentsFromSessionGraph('sess_parent', 'Lead', {
+      nodes: [
+        { id: 'sess_parent', title: 'Lead' },
+        { id: 'sess_reviewer', title: 'Fallback', metadata: { mount_name: 'Reviewer', mount_role: 'reviewer' } },
+        { id: 'sess_other', title: 'Other' },
+      ],
+      edges: [
+        { parentSessionId: 'sess_parent', childSessionId: 'sess_reviewer' },
+        { parentSessionId: 'sess_other', childSessionId: 'sess_nested' },
+      ],
+    })).toEqual([
+      { agentId: 'main', kind: 'main', name: 'Lead', parentAgentId: null },
+      {
+        agentId: 'sess_reviewer',
+        kind: 'team',
+        name: 'Reviewer',
+        parentAgentId: 'main',
+        role: 'reviewer',
+        mountedSessionId: 'sess_reviewer',
+      },
     ]);
   });
 });
@@ -80,8 +248,8 @@ describe('applyTeamToolResultToTeam', () => {
     );
     expect(next.some((agent) => agent.kind === 'main')).toBe(true);
     expect(teamMemberCount(next)).toBe(1);
-    expect(next.find((agent) => agent.agentId === 'reviewer')?.mandate).toBe('Keep diffs small');
-    expect(next.find((agent) => agent.agentId === 'reviewer')?.mountedSessionId).toBe('session-reviewer');
+    expect(next.find((agent) => agent.agentId === 'session-reviewer')?.mandate).toBe('Keep diffs small');
+    expect(next.find((agent) => agent.agentId === 'session-reviewer')?.mountedSessionId).toBe('session-reviewer');
   });
 
   it('records assignments and dismissals', () => {
@@ -307,6 +475,16 @@ describe('department pane helpers', () => {
         parentAgentId: 'main',
       }),
     ).toBe('main');
+  });
+
+  it('tells a mounted child that Chat lives on the parent session', () => {
+    expect(departmentPaneEmptyHint({
+      mode: 'chat',
+      hasMembers: false,
+      parentSessionId: 'sess_parent',
+    })).toContain('parent session');
+    expect(departmentPaneEmptyHint({ mode: 'chat', hasMembers: true })).toContain('No messages yet');
+    expect(departmentPaneEmptyHint({ mode: 'chat', hasMembers: false })).toContain('TeamCreate');
   });
 
   it('reads department chat history from resume metadata', () => {

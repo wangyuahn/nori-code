@@ -1,3 +1,5 @@
+import { homedir } from 'node:os';
+
 import { Disposable, IInstantiationService, InstantiationType, registerSingleton } from '../../di';
 import { Emitter } from '../../base/common/event';
 import { ErrorCodes, KimiError } from '../../errors';
@@ -776,10 +778,8 @@ export class SessionService extends Disposable implements ISessionService {
       const mandate = normalizeOptionalString(input.mandate);
       const name = normalizeOptionalString(input.name);
       if (role === undefined && mandate === undefined && name === undefined) {
-        // A previous mount may have persisted its parent link before the
-        // dual-write attach completed. Re-run the idempotent sync on every
-        // same-parent remount so that retrying the operation repairs that
-        // drift instead of treating it as a no-op.
+        // Same-parent remount is not a no-op: refresh the department
+        // directory and drop leftover parent-session team shadows.
         await this.syncMountWithRollback({
           childSessionId: id,
           oldParentSessionId: oldParentId,
@@ -819,9 +819,10 @@ export class SessionService extends Disposable implements ISessionService {
       return updated;
     }
     await this.assertAcyclicMount(id, input.parent_session_id);
-    const role = normalizeOptionalString(input.role);
-    const mandate = normalizeOptionalString(input.mandate);
-    const name = normalizeOptionalString(input.name);
+    const identity = await this.resolveMountMemberIdentity(id, input.role, input.mandate);
+    const name = normalizeOptionalString(input.name) ?? identity.name;
+    const role = identity.role;
+    const mandate = identity.mandate;
     await this.writeMountMetadata(id, {
       parentSessionId: input.parent_session_id,
       role,
@@ -1159,14 +1160,28 @@ export class SessionService extends Disposable implements ISessionService {
     const liveIds = new Set(
       (await this.core.rpc.listSessions({ includeArchive: true })).map((summary) => summary.id),
     );
-    const ghosts = Object.entries(meta.agents).filter(([, agent]) => (
+    let migrated = false;
+    const shadows = Object.entries(meta.agents).filter(([, agent]) => (
+      agent.kind === 'team'
+      && typeof agent.mountedSessionId === 'string'
+      && liveIds.has(agent.mountedSessionId)
+    ));
+    for (const [agentId, agent] of shadows) {
+      await this.core.rpc.dropShadowTeamMember({
+        sessionId: hostSessionId,
+        agentId,
+        childSessionId: agent.mountedSessionId!,
+      });
+      migrated = true;
+    }
+    const nextMeta = await this.tryGetMeta(hostSessionId);
+    const ghosts = Object.entries(nextMeta?.agents ?? {}).filter(([, agent]) => (
       agent.kind === 'team'
       && (agent.mountedSessionId === undefined || !liveIds.has(agent.mountedSessionId))
     ));
-    if (ghosts.length === 0) return false;
+    if (ghosts.length === 0) return migrated;
 
     const remaining = new Map(ghosts);
-    let migrated = false;
     const maxPasses = remaining.size + 1;
     for (let pass = 0; pass < maxPasses && remaining.size > 0; pass++) {
       let progressed = false;
@@ -1213,9 +1228,22 @@ export class SessionService extends Disposable implements ISessionService {
     readonly parentSessionId: string;
   }): Promise<void> {
     const parent = await this.get(input.parentSessionId);
-    const cwd = typeof parent.metadata.cwd === 'string' ? parent.metadata.cwd : undefined;
+    const parentSummary = await this.requireSummary(input.parentSessionId);
+    const host = input.hostSessionId === input.parentSessionId
+      ? parent
+      : await this.get(input.hostSessionId);
+    const hostSummary = input.hostSessionId === input.parentSessionId
+      ? parentSummary
+      : await this.requireSummary(input.hostSessionId);
+    const cwd =
+      normalizeOptionalString(typeof parent.metadata.cwd === 'string' ? parent.metadata.cwd : undefined)
+      ?? normalizeOptionalString(parentSummary.workDir)
+      ?? normalizeOptionalString(typeof host.metadata.cwd === 'string' ? host.metadata.cwd : undefined)
+      ?? normalizeOptionalString(hostSummary.workDir)
+      ?? normalizeOptionalString(input.agent.homedir)
+      ?? normalizeOptionalString(homedir());
     if (cwd === undefined) {
-      throw new Error('SessionService.materializeGhostMember: parent metadata.cwd is required');
+      return;
     }
     const name = input.agent.name?.trim() || input.agentId;
     const role = input.agent.role?.trim() || DEFAULT_MOUNT_MEMBER_ROLE;
@@ -1236,6 +1264,11 @@ export class SessionService extends Disposable implements ISessionService {
         sessionId: input.hostSessionId,
         agentId: input.agentId,
         mountedSessionId: child.id,
+      });
+      await this.core.rpc.dropShadowTeamMember({
+        sessionId: input.hostSessionId,
+        agentId: input.agentId,
+        childSessionId: child.id,
       });
       await this.emitMountChanged({
         sessionId: child.id,
@@ -1258,7 +1291,7 @@ export class SessionService extends Disposable implements ISessionService {
     }
   }
 
-  /** Rebuild dual-write team agents from the mount tree. */
+  /** Refresh department directories after a mount change. Do not attach shadow Team Agents. */
   private async syncTeamAgentsFromMountChange(input: {
     readonly childSessionId: string;
     readonly oldParentSessionId: string | null;
@@ -1272,21 +1305,10 @@ export class SessionService extends Disposable implements ISessionService {
     if (!sameParent) {
       await this.detachMountedTeamAgentsEverywhere(input.childSessionId);
     }
-    if (input.newParentSessionId === null) {
-      return;
+    if (input.newParentSessionId !== null) {
+      await this.core.rpc.resumeSession({ sessionId: input.newParentSessionId });
     }
-    const identity = await this.resolveMountMemberIdentity(
-      input.childSessionId,
-      input.role,
-      input.mandate,
-    );
-    await this.core.rpc.resumeSession({ sessionId: input.newParentSessionId });
-    await this.core.rpc.attachMountedTeamMember({
-      sessionId: input.newParentSessionId,
-      mountedSessionId: input.childSessionId,
-      identity,
-      teamLeaderAgentId: MAIN_AGENT_ID,
-    });
+    await this.core.rpc.resumeSession({ sessionId: input.childSessionId }).catch(() => undefined);
   }
 
   private async detachMountedTeamAgentsEverywhere(mountedSessionId: string): Promise<void> {
@@ -1361,6 +1383,12 @@ export class SessionService extends Disposable implements ISessionService {
         parentAgentId: null,
       });
     }
+    // Durable members are child Sessions on the mount forest. Drop leftover
+    // parent-session team shadows; keep discussion / independent transcripts.
+    // Do not re-add children as fake team nodes — GUI and Team* read the forest.
+    for (const [agentId, agent] of agents.entries()) {
+      if (agent.kind === 'team') agents.delete(agentId);
+    }
 
     const nodes = await Promise.all(
       [...agents.entries()]
@@ -1400,9 +1428,6 @@ export class SessionService extends Disposable implements ISessionService {
             ...(agent.discussion === undefined
               ? {}
               : { discussion_participant_agent_ids: [...agent.discussion.participantAgentIds] }),
-            ...(typeof agent.mountedSessionId === 'string' && agent.mountedSessionId.length > 0
-              ? { mounted_session_id: agent.mountedSessionId }
-              : {}),
           };
         }),
     );
@@ -1412,6 +1437,25 @@ export class SessionService extends Disposable implements ISessionService {
   async getDepartmentChat(id: string, agentId: string): Promise<SessionAgentChatResponse> {
     await this.requireSummary(id);
     await this.core.rpc.resumeSession({ sessionId: id });
+    const summary = await this.requireSummary(id);
+    const parentId = readParentSessionId(summary.metadata);
+    if (parentId !== undefined) {
+      await this.core.rpc.resumeSession({ sessionId: parentId }).catch(() => undefined);
+      const parentMeta = await this.tryGetMeta(parentId);
+      const messages = (parentMeta?.agents['main']?.chat?.messages ?? []).map((record) => ({
+        message_id: record.messageId,
+        agent_id: record.agentId,
+        name: record.name,
+        message: record.message,
+        mentions: [...record.mentions],
+        sent_at: record.sentAt,
+      }));
+      return {
+        department_leader_agent_id: parentId,
+        department_leader_session_id: parentId,
+        messages,
+      };
+    }
     const meta = await this.tryGetMeta(id);
     const member = meta?.agents[agentId];
     const leaderAgentId = member?.kind === 'team' ? member.teamLeaderAgentId : undefined;
@@ -1427,6 +1471,11 @@ export class SessionService extends Disposable implements ISessionService {
       sent_at: record.sentAt,
     }));
     return { department_leader_agent_id: leaderAgentId, messages };
+  }
+
+  async fillIdentity(id: string, brief: string): Promise<{ title: string; role: string; mandate: string }> {
+    await this.requireSummary(id);
+    return this.core.rpc.fillChildIdentity({ sessionId: id, brief });
   }
 
   async getAgentSystemPrompt(id: string, agentId: string): Promise<SessionAgentSystemPromptResponse> {
@@ -1607,32 +1656,13 @@ export class SessionService extends Disposable implements ISessionService {
       if (summary === undefined) {
         throw new SessionNotFoundError(id);
       }
-      const parentSessionId = readParentSessionId(summary.metadata);
       const promoted = await this.promoteChildrenOnDelete(id);
       try {
-        // Dual-write agents can outlive a stale parent_session_id; detach everywhere before delete.
+        // Leftover parent-session team shadows can outlive a stale parent_session_id.
         await this.detachMountedTeamAgentsEverywhere(id);
         await this.core.rpc.deleteSession({ sessionId: id });
       } catch (error) {
         const rollbackErrors = await this.restorePromotedMounts(id, promoted);
-        if (parentSessionId !== undefined) {
-          try {
-            const identity = await this.resolveMountMemberIdentity(
-              id,
-              readMountRole(summary.metadata),
-              readMountMandate(summary.metadata),
-            );
-            await this.core.rpc.resumeSession({ sessionId: parentSessionId });
-            await this.core.rpc.attachMountedTeamMember({
-              sessionId: parentSessionId,
-              mountedSessionId: id,
-              identity,
-              teamLeaderAgentId: MAIN_AGENT_ID,
-            });
-          } catch (rollbackError) {
-            rollbackErrors.push(rollbackError);
-          }
-        }
         if (rollbackErrors.length > 0) {
           throw new AggregateError(
             [error, ...rollbackErrors],

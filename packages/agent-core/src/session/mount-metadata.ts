@@ -7,6 +7,11 @@ export const MOUNT_ROLE_KEY = 'mount_role';
 export const MOUNT_MANDATE_KEY = 'mount_mandate';
 export const MOUNT_NAME_KEY = 'mount_name';
 export const SESSION_TAGS_KEY = 'session_tags';
+export const DEPARTMENT_MEMBERS_KEY = 'department_members';
+export const DEPARTMENT_ASSIGNED_TASK_KEY = 'department_assigned_task';
+export const DEPARTMENT_ASSIGNED_AT_KEY = 'department_assigned_at';
+export const DEPARTMENT_TEAM_REPORT_KEY = 'department_team_report';
+export const DEPARTMENT_LAST_TURN_SKIP_KEY = 'department_last_turn_skip';
 
 export const DEFAULT_MOUNT_MEMBER_ROLE = 'member';
 export const DEFAULT_MOUNT_MEMBER_MANDATE = 'Member mounted on the conversation map.';

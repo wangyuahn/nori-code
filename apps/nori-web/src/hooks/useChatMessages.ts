@@ -1434,7 +1434,7 @@ export function useChatMessages(
   }, [agentId, applyHistoryItems, sessionId]);
 
   const refreshDepartmentChat = useCallback(async (targetSessionId = sessionId, targetAgentId = agentId) => {
-    if (!targetSessionId || targetAgentId === 'main') return;
+    if (!targetSessionId) return;
     try {
       const chat = await api.sessions.getDepartmentChat(targetSessionId, targetAgentId);
       if (hasCurrentScope(scopeRef, targetSessionId, targetAgentId)) {
@@ -1500,7 +1500,7 @@ export function useChatMessages(
   // was down, so poll the log as well — `preserveEqual` keeps the identity when
   // nothing changed, so an unchanged poll causes no re-render.
   useEffect(() => {
-    if (!sessionId || agentId === 'main') return;
+    if (!sessionId) return;
     const timer = window.setInterval(() => { void refreshDepartmentChat(sessionId, agentId); }, 8_000);
     return () => { window.clearInterval(timer); };
   }, [agentId, refreshDepartmentChat, sessionId]);

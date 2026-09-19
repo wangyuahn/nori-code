@@ -55,7 +55,7 @@ Some commands are only available in the idle state. Executing these commands whi
 | `/auto [on\|off]` | — | Toggle auto permission mode. When enabled, tool approvals are handled automatically and the Agent will not ask the user questions | Yes |
 | `/plan [on\|off]` | — | Toggle Discuss. Without arguments, flips the current state; explicitly passing `on`/`off` forces the setting. The command name is retained for compatibility | Yes |
 | `/discuss [on\|off]` | — | Toggle Discuss (same as `/plan`). Shift-Tab also toggles Discuss | Yes |
-| `/team [settings]` | `/agents` | Open a hired partner's session, or browse reports and this-round Discuss speech. Enter opens the selected member (Main returns to the lead session). Tab shows details. A discussion row opens the Discuss pane. `/team settings` sets max department depth | Yes |
+| `/team [settings]` | `/agents` | Open a hired partner's session, or browse reports and this-round Discuss speech. Enter opens the selected member (Main stays on this session). Tab shows details. A discussion row opens the Discuss pane. `/team settings` sets max department depth | Yes |
 | `/map` | — | Browse the conversation map (session mount forest) for the current working directory. Enter opens a session; M mount (child then parent); U unmount. See [Team engineering](../guides/team-engineering.md) | Yes |
 | `/plan clear` | — | Clear legacy plan state | No |
 | `/subagent on\|off` | — | **Removed in v2.0.** Temporary SubAgent mode is gone; use `/team`. | No |

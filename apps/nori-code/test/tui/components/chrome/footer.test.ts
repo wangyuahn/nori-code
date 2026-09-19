@@ -204,13 +204,13 @@ describe('FooterComponent displayName override', () => {
     expect(out).toContain('[team 1]');
   });
 
-  it('shows the viewed partner name in the footer', () => {
+  it('shows the mounted member title in the footer', () => {
     const footer = new FooterComponent({
       ...appState,
-      viewingAgentId: 'reviewer',
+      sessionTitle: 'Reviewer',
+      parentSessionId: 'sess_parent',
       teamAgents: [
-        { agentId: 'main', kind: 'main', name: 'Main', parentAgentId: null },
-        { agentId: 'reviewer', kind: 'team', name: 'Reviewer', parentAgentId: 'main' },
+        { agentId: 'main', kind: 'main', name: 'Reviewer', parentAgentId: null },
       ],
     });
     const out = footer.render(160).join('\n').replaceAll(/\u001B\[[0-9;]*m/g, '');

@@ -71,4 +71,12 @@ describe('DefaultToolApprovePermissionPolicy', () => {
       policy.evaluate(policyContext('TeamDecide', { action: 'start', topic: 'Cache', statement: 'Lead first.' })),
     ).toEqual({ kind: 'approve' });
   });
+
+  it('auto-approves SessionSearch, SessionMount, SessionUnmount, SessionGraph, and TeamStatus', () => {
+    expect(policy.evaluate(policyContext('SessionSearch', { query: 'reviewer' }))).toEqual({ kind: 'approve' });
+    expect(policy.evaluate(policyContext('SessionGraph', {}))).toEqual({ kind: 'approve' });
+    expect(policy.evaluate(policyContext('SessionMount', { session_id: 'sess_reviewer' }))).toEqual({ kind: 'approve' });
+    expect(policy.evaluate(policyContext('SessionUnmount', { session_id: 'sess_reviewer' }))).toEqual({ kind: 'approve' });
+    expect(policy.evaluate(policyContext('TeamStatus', {}))).toEqual({ kind: 'approve' });
+  });
 });
