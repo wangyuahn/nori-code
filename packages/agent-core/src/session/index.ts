@@ -2646,10 +2646,10 @@ export class Session {
   }
 
   /**
-   * Shared guard for every team-management operation. Every node in the
-   * department tree manages its own department: `main` plus every durable Team
-   * Agent. A discussion transcript is a record of a department's discussion, not
-   * a node in the tree, so it manages nothing.
+   * Shared guard for every team-management operation. Every Session in the
+   * forest chairs its own department: the root `main` and every mounted child.
+   * A discussion transcript is a record of a department's discussion, not a
+   * node in the tree, so it manages nothing.
    */
   assertTeamManager(agentId: string): void {
     if (agentId === 'main' || agentId === this.options.id) return;

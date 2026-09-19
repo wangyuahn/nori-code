@@ -39,6 +39,10 @@ tools:
   - TeamDiscussKick
   - TeamDecide
   - TeamSpeak
+  - SessionSearch
+  - SessionMount
+  - SessionUnmount
+  - SessionGraph
   - CronCreate
   - CronDelete
   - CronList

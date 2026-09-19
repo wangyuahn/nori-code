@@ -36,6 +36,16 @@ import {
   TeamUpdateTool,
 } from '../../src/tools/builtin/collaboration/team';
 import { TeamStatusInputSchema, TeamStatusTool } from '../../src/tools/builtin/collaboration/team-status';
+import {
+  SessionGraphInputSchema,
+  SessionGraphTool,
+  SessionMountInputSchema,
+  SessionMountTool,
+  SessionSearchInputSchema,
+  SessionSearchTool,
+  SessionUnmountInputSchema,
+  SessionUnmountTool,
+} from '../../src/tools/builtin/collaboration/session-topology';
 import { compileToolArgsValidator, validateToolArgs } from '../../src/tools/args-validator';
 import { EditInputSchema, EditTool } from '../../src/tools/builtin/file/edit';
 import { GlobInputSchema, GlobTool } from '../../src/tools/builtin/file/glob';
@@ -395,6 +405,56 @@ describe('current builtin collaboration tools', () => {
       mandate: 'Review behavior.',
     });
     expect(getTeamStatus).toHaveBeenCalledWith();
+  });
+
+  it('Session topology tools search, mount, unmount, and read the forest', async () => {
+    const searchSessions = vi.fn(async () => [{
+      sessionId: 'sess_reviewer',
+      title: 'Reviewer',
+      role: 'reviewer',
+    }]);
+    const remountSession = vi.fn(async () => undefined);
+    const unmountSession = vi.fn(async () => undefined);
+    const sessionGraph = vi.fn(async () => ({
+      nodes: [
+        { id: 'lead', title: 'Lead' },
+        { id: 'sess_reviewer', title: 'Reviewer', parentSessionId: 'lead' },
+      ],
+    }));
+    const host = mockTeamHost({
+      searchSessions,
+      remountSession,
+      unmountSession,
+      sessionGraph,
+      currentSessionId: () => 'lead',
+    });
+    const search = new SessionSearchTool(host);
+    const mount = new SessionMountTool(host);
+    const unmount = new SessionUnmountTool(host);
+    const graph = new SessionGraphTool(host);
+
+    expect(SessionSearchInputSchema.safeParse({ query: 'review' }).success).toBe(true);
+    expect(SessionMountInputSchema.safeParse({ session_id: 'sess_reviewer' }).success).toBe(true);
+    expect(SessionUnmountInputSchema.safeParse({ session_id: 'sess_reviewer' }).success).toBe(true);
+    expect(SessionGraphInputSchema.safeParse({}).success).toBe(true);
+
+    const searched = await executeTool(search, context({ query: 'review' }));
+    expect(JSON.parse(String(searched.output))).toEqual({
+      hits: [{ sessionId: 'sess_reviewer', title: 'Reviewer', role: 'reviewer' }],
+    });
+    const mounted = await executeTool(mount, context({
+      session_id: 'sess_reviewer',
+      role: 'reviewer',
+    }));
+    expect(JSON.parse(String(mounted.output))).toEqual({
+      mounted: 'sess_reviewer',
+      parent_session_id: 'lead',
+    });
+    expect(remountSession).toHaveBeenCalledWith('sess_reviewer', 'lead', 'reviewer', undefined);
+    const unmounted = await executeTool(unmount, context({ session_id: 'sess_reviewer' }));
+    expect(JSON.parse(String(unmounted.output))).toEqual({ unmounted: 'sess_reviewer' });
+    const graphResult = await executeTool(graph, context({}));
+    expect(JSON.parse(String(graphResult.output)).nodes).toHaveLength(2);
   });
 
   it('AskUserQuestion exposes parameters and asks through rpc in yolo mode', async () => {

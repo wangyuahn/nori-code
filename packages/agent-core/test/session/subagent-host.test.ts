@@ -1757,6 +1757,10 @@ describe('Session.createAgent', () => {
       'TeamUpdate',
       'TeamDecide',
       'TeamStatus',
+      'SessionSearch',
+      'SessionMount',
+      'SessionUnmount',
+      'SessionGraph',
     ]));
   });
 
@@ -1880,6 +1884,10 @@ describe('Session.createAgent', () => {
       'TeamDiscussInvite',
       'TeamDiscussKick',
       'TeamDecide',
+      'SessionSearch',
+      'SessionMount',
+      'SessionUnmount',
+      'SessionGraph',
     ]));
     expect(member.agent.tools.activeToolNames()).not.toContain('EnterDiscussMode');
     expect(member.agent.tools.activeToolNames()).not.toContain('ContextInjection');
@@ -2511,6 +2519,49 @@ describe('Session.createAgent', () => {
     expect(member?.agentId).toBe(member?.sessionId);
     expect(session.teamMemberMetadata('main').map(([id]) => id)).toEqual([member!.sessionId]);
     expect(Object.values(session.metadata.agents).some((meta) => meta.kind === 'team')).toBe(false);
+  });
+
+  it('SessionSearch, SessionMount, SessionUnmount, and SessionGraph operate on the session forest', async () => {
+    const searchSessions = vi.fn(async () => [{
+      sessionId: 'sess_reviewer',
+      title: 'Reviewer',
+      role: 'reviewer',
+    }]);
+    const remountSession = vi.fn(async () => undefined);
+    const unmountSession = vi.fn(async () => undefined);
+    const sessionGraph = vi.fn(async () => ({
+      nodes: [
+        { id: 'parent', title: 'Lead' },
+        { id: 'sess_reviewer', title: 'Reviewer', parentSessionId: 'parent' },
+      ],
+    }));
+    const session = hireableSession({
+      id: 'parent',
+      topologyRuntime: {
+        searchSessions,
+        mountSession: remountSession,
+        remountSession,
+        unmountSession,
+        sessionGraph,
+        fillChildIdentity: vi.fn(async () => ({ title: 'Reviewer', role: 'reviewer', mandate: 'Review diffs.' })),
+      },
+    });
+    const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
+    const host = new SessionSubagentHost(session, main.id);
+
+    expect(await host.searchSessions('review')).toEqual([
+      { sessionId: 'sess_reviewer', title: 'Reviewer', role: 'reviewer' },
+    ]);
+    await host.remountSession('sess_reviewer', 'parent', 'reviewer', 'Review diffs.');
+    expect(remountSession).toHaveBeenCalledWith('sess_reviewer', 'parent', 'reviewer', 'Review diffs.');
+    await host.unmountSession('sess_reviewer');
+    expect(unmountSession).toHaveBeenCalledWith('sess_reviewer');
+    expect(await host.sessionGraph()).toEqual({
+      nodes: [
+        { id: 'parent', title: 'Lead' },
+        { id: 'sess_reviewer', title: 'Reviewer', parentSessionId: 'parent' },
+      ],
+    });
   });
 
   it('TeamUpdate patches identity without prompting a turn', async () => {

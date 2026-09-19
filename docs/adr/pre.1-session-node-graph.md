@@ -10,7 +10,7 @@ Durable collaborators are **Sessions**. Hiring creates and resumes a mounted chi
 
 ## Context
 
-The Conversation Map today renders a **mount forest** derived from `parent_session_id` metadata and TeamCreate agent ghosts. Topology is implicit: one parent per child, main-agent privilege in prompts, and unmount/delete conflated in places. Users want a **unified session node graph** where:
+The Conversation Map today renders a **mount forest** of Sessions linked by `parent_session_id`. Topology is implicit: one parent per child, and unmount/delete conflated in places. Users want a **unified session node graph** where:
 
 - Every node is the same type (a session).
 - Relationships are **explicit edges** with types and service context.

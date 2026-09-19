@@ -75,6 +75,10 @@ describe('default agent profiles', () => {
       expect(tools).toContain('TeamAssign');
       expect(tools).toContain('TeamSpeak');
       expect(tools).toContain('TeamStatus');
+      expect(tools).toContain('SessionSearch');
+      expect(tools).toContain('SessionMount');
+      expect(tools).toContain('SessionUnmount');
+      expect(tools).toContain('SessionGraph');
       expect(tools).not.toContain('ExitDiscussMode');
       expect(tools).not.toContain('nori_ask_parent');
     }
@@ -158,6 +162,8 @@ describe('default agent profiles', () => {
       const prompt = DEFAULT_AGENT_PROFILES[name]?.systemPrompt(promptContext) ?? '';
       expect(prompt).toContain('silent parallel work');
       expect(prompt).toContain('TeamCreate');
+      expect(prompt).toContain('SessionSearch');
+      expect(prompt).toContain('SessionGraph');
       expect(prompt).toContain('TeamDecide action=start');
       expect(prompt).toContain('TeamSpeak');
       expect(prompt).toContain('TeamAssign');
@@ -173,7 +179,7 @@ describe('default agent profiles', () => {
       expect(prompt).not.toContain('Plan mode');
       expect(prompt).not.toContain('plan file');
       expect(prompt).not.toContain('Swarm');
-      expect(prompt).not.toContain('Graph');
+      expect(prompt).not.toContain('DAG');
     }
   });
 
@@ -207,7 +213,7 @@ describe('default agent profiles', () => {
       expect(prompt.match(/## Team Engineering/g)).toHaveLength(1);
       expect(prompt).not.toContain('EnterDiscussMode');
       expect(prompt).not.toContain('Swarm');
-      expect(prompt).not.toContain('Graph');
+      expect(prompt).not.toContain('DAG');
     }
   });
 });

@@ -121,9 +121,6 @@ export function App() {
   useGlobalErrors();
   const [activeView, setActiveView] = useState<View>('chat');
   const [activeAgentSelection, setActiveAgentSelection] = useState<{ sessionId: string; agent: SessionAgent } | null>(null);
-  // Keep the known agent object while the host session's agent list is still
-  // loading so map/team opens do not briefly bind chat to main.
-  const [pendingAgentOpen, setPendingAgentOpen] = useState<{ sessionId: string; agent: SessionAgent } | null>(null);
   const [sessionAgents, setSessionAgents] = useState<SessionAgent[]>([]);
   const [sidebarExpanded, setSidebarExpanded] = useState(loadSidebarExpanded);
   const [sidebarWidth, setSidebarWidth] = useState(() => Math.max(220, Math.min(480, Number(localStorage.getItem('nori-sidebar-width')) || 256)));
@@ -197,35 +194,16 @@ export function App() {
     refresh: refreshSessions,
   } = useSessions();
   const activeSession: Session | null = sessions.find(session => session.id === sessionId) ?? null;
-  const pendingAgent = pendingAgentOpen?.sessionId === sessionId ? pendingAgentOpen.agent : null;
-  const activeAgent = (
-    activeAgentSelection?.sessionId === sessionId ? activeAgentSelection.agent : null
-  ) ?? pendingAgent;
+  const activeAgent = activeAgentSelection?.sessionId === sessionId ? activeAgentSelection.agent : null;
   const activeAgentId = activeAgent?.agent_id ?? 'main';
   const selectSessionAgent = useCallback((agent: SessionAgent | null) => {
     setActiveAgentSelection(agent && agent.agent_id !== 'main' && agent.kind !== 'main' && sessionId ? { sessionId, agent } : null);
     setActiveView('chat');
   }, [sessionId]);
   useEffect(() => {
-    setPendingAgentOpen(current => (
-      current !== null && current.sessionId !== sessionId ? null : current
-    ));
     setActiveAgentSelection(null);
     setSessionAgents([]);
   }, [sessionId]);
-  useEffect(() => {
-    if (pendingAgentOpen === null || pendingAgentOpen.sessionId !== sessionId) return;
-    const agent = sessionAgents.find(candidate => candidate.agent_id === pendingAgentOpen.agent.agent_id);
-    if (agent === undefined) {
-      if (sessionAgents.length === 0) return;
-      // Host agents loaded, but the requested member is gone (dismissed /
-      // detached). Drop the pending open instead of leaving chat on a dead id.
-      setPendingAgentOpen(null);
-      return;
-    }
-    setActiveAgentSelection({ sessionId: pendingAgentOpen.sessionId, agent });
-    setPendingAgentOpen(null);
-  }, [pendingAgentOpen, sessionAgents, sessionId]);
   useEffect(() => {
     if (activeAgentSelection === null || activeAgentSelection.sessionId !== sessionId) return;
     const current = sessionAgents.find(agent => agent.agent_id === activeAgentSelection.agent.agent_id);
@@ -318,13 +296,6 @@ export function App() {
         // 让依赖 sessionAgents 的下游 effect（部门轨的讨论拉取）不会被轮询本身唤醒。
         if (!disposed) {
           setSessionAgents(previous => sameAgentList(previous, nextAgents) ? previous : nextAgents);
-          setPendingAgentOpen(current => (
-            current !== null
-            && current.sessionId === sessionId
-            && !nextAgents.some(agent => agent.agent_id === current.agent.agent_id)
-              ? null
-              : current
-          ));
         }
       } catch {
         // 轮询失败保持上一次列表，下一轮重试。
@@ -658,7 +629,6 @@ export function App() {
             onOpenApprovalSession={(sourceSessionId, sourceAgentId) => {
               const mountedId = sessions.find(session => session.id === sourceAgentId)?.id
                 ?? sessionAgents.find(agent => agent.agent_id === sourceAgentId)?.mounted_session_id;
-              setPendingAgentOpen(null);
               setActiveAgentSelection(null);
               switchSession(mountedId ?? sourceSessionId);
               setActiveView('chat');
