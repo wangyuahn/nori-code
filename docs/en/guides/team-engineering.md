@@ -26,7 +26,8 @@ Typical flow:
 1. **`TeamCreate`** — hire partners into your department (each is a real child session on the map).
 2. **`TeamDecide`** with `action=start` — open Discuss with a topic; members speak with **`TeamSpeak`** (skipping a turn records abstention).
 3. **`TeamAssign`** — hand out concrete tasks; success **leaves Discuss** and enters Code so members can execute.
-4. After work, **`TeamDecide`** with `action=vote` — the team votes (`discuss_again` / `proceed` / `abstain`) without re-entering full Discuss.
+4. During Code, siblings coordinate with **`TeamChat`** and **`TeamDM`**. Reports (`completed` / `blocked` / `needs_decision`) go to the parent via `TeamDM`.
+5. After work, **`TeamDecide`** with `action=vote` — the team votes (`discuss_again` / `proceed` / `abstain`) without re-entering full Discuss.
 
 Discuss is **multi-round**. Each `TeamSpeak` is one short, decidable point — not a complete plan. Keep using `TeamDecide` with `action=continue` for the next slice. A skipped member is an abstention; later speakers still take their turn.
 
@@ -43,6 +44,21 @@ See [Interaction and input](./interaction.md#mode-switching) for approval behavi
 | `TeamUpdate` | Update name, role, mandate, or tags for this session or a member. Related sessions receive a system reminder and do not start a turn. |
 
 `TeamDismiss` is the supported way to remove a hired partner. Unmounting via `/map` detaches the session from the tree but **does not** delete the child session.
+
+## TeamChat, TeamDM, and other channels
+
+Recipients are session ids or display names (aliases such as `agent-1` and `parent` also resolve). In Nori Work the inspector **Meeting** and **Chat** tabs are always visible.
+
+| Tool | Role |
+| --- | --- |
+| `TeamChat` | Persistent **group chat among siblings**. The parent does **not** read it. Every message must start with `@all` or `@session-id` (also pass `mentions`); only mentioned members are interrupted. This is the working channel during Code. Send the parent final status with `TeamDM`. |
+| `TeamDM` | Private message to a parent, sibling, or a member you hired. Task reports set `report_status` to `completed` / `blocked` / `needs_decision` plus `report_summary` — reports always go to the parent. Ordinary DMs are not reports. Formal Discuss turns use `TeamSpeak` only. |
+| `TeamBroadcast` | Wake every member of your department with the same prompt, in parallel. Members actually run a turn. |
+| `TeamStatus` | `members` you hired plus `colleagues` (peers): role, idle/running, assigned task, whether they have reported. Leave a `running` peer to finish. |
+| `TeamDiscussInvite` / `TeamDiscussKick` | Add or drop participants in the active Discuss without dismissing them. |
+| `SessionSearch` / `SessionGraph` / `SessionMount` / `SessionUnmount` | Find, read, attach, or detach sessions on the same forest as the map. Unmount detaches; `TeamDismiss` deletes. |
+
+See [Built-in tools](../reference/tools.md#collaboration-tools) for parameters. GitHub [README](https://github.com/wangyuahn/nori-code/blob/master/README.md#team-tools) has the same catalog.
 
 ## Conversation map (session mounts)
 
@@ -104,6 +120,6 @@ When Nori server or Nori Work already holds the home-directory lock, the TUI may
 ## Next steps
 
 - [Slash commands](../reference/slash-commands.md) — `/team`, `/map`, `/discuss`, `/web`
-- [Built-in tools](../reference/tools.md#collaboration-tools) — `TeamCreate`, `TeamAssign`, `TeamDismiss`, and related tools
+- [Built-in tools](../reference/tools.md#collaboration-tools) — `TeamCreate`, `TeamChat`, `TeamDM`, `TeamAssign`, `TeamDismiss`, and related tools
 - [Sessions and context](./sessions.md) — storage layout and session metadata
 - GitHub [README](https://github.com/wangyuahn/nori-code/blob/master/README.md) — what Nori is now vs Codex / Claude Code, including gaps

@@ -8,7 +8,7 @@ It fits scenarios such as:
 
 - **Writing and modifying code**: implementing new features, fixing bugs, completing refactors
 - **Understanding a project**: exploring an unfamiliar codebase and answering questions about architecture and implementation
-- **Team engineering**: hiring partners with `TeamCreate`, discussing before assigning work, and navigating sessions with `/team` and `/map`
+- **Team engineering**: hiring partners with `TeamCreate`, Discuss then `TeamAssign`, sibling `TeamChat` / `TeamDM`, and navigating with `/team` and `/map`
 - **Automating tasks**: batch-processing files, running builds and tests, chaining multiple scripts together
 
 The CLI is written in TypeScript, distributed via npm as `nori-code`, and runs on Node.js. The executable command is `nori`. Nori Work is the companion Electron desktop workbench.
@@ -105,7 +105,7 @@ You can also describe a more concrete task directly:
 Add a function in src/utils that converts any string to kebab-case, and add a unit test for it.
 ```
 
-Nori Code CLI plans the steps, hires team partners with `TeamCreate` when the task needs parallel work, runs Discuss before `TeamAssign`, and tells you what it did at each step. Temporary `SubAgent` orchestration was removed in v2.0. Use `/setting readonly off` if you want the main Agent to edit files directly after approval.
+Nori Code CLI plans the steps, hires team partners with `TeamCreate` when the task needs parallel work, runs Discuss before `TeamAssign`, and coordinates in Code with `TeamChat` / `TeamDM`. Temporary `SubAgent` orchestration was removed in v2.0. Use `/setting readonly off` if you want the main Agent to edit files directly after approval.
 
 ::: tip Not sure what to do? Type `/help`
 Type `/help` at any time to open the built-in command and keyboard shortcut panel. Use `↑`/`↓` to browse and `Esc` to close. To exit, type `/exit`, press `Ctrl-C` twice, or press `Ctrl-D` with the input box empty.

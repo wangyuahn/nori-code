@@ -8,7 +8,7 @@ Nori Code CLI 是一个运行在终端中的 AI 编程 Agent，帮助你完成�
 
 - **编写和修改代码**：实现新功能、修复 bug、完成重构
 - **理解项目**：探索陌生的代码库，解答架构和实现层面的问题
-- **团队工程**：用 `TeamCreate` 雇佣伙伴，先讨论再分配任务，并用 `/team` 与 `/map` 导航会话
+- **团队工程**：用 `TeamCreate` 雇佣伙伴，先 Discuss 再 `TeamAssign`，同级用 `TeamChat` / `TeamDM` 协调，并用 `/team` 与 `/map` 导航
 - **自动化任务**：批量处理文件、运行构建与测试、串联多个脚本
 
 整套 CLI 以 TypeScript 编写，通过 npm 以 `nori-code` 包分发，运行在 Node.js 之上。可执行命令为 `nori`。Nori Work 是配套的 Electron 桌面工作台。
@@ -105,7 +105,7 @@ Nori Code CLI 会自动调用文件读取、搜索等工具浏览相关内容后
 在 src/utils 里新增一个函数，用来把任意字符串转成 kebab-case，并补一个单元测试
 ```
 
-Nori Code CLI 会规划步骤，在需要并行推进时用 `TeamCreate` 雇佣团队伙伴，先 Discuss 再 `TeamAssign`，并在每一步告诉你它做了什么。临时 `SubAgent` 编排已在 v2.0 删除。如果希望主 Agent 在审批后直接编辑文件，可使用 `/setting readonly off`。
+Nori Code CLI 会规划步骤，在需要并行推进时用 `TeamCreate` 雇佣团队伙伴，先 Discuss 再 `TeamAssign`，Code 阶段用 `TeamChat` / `TeamDM` 协调，并在每一步告诉你它做了什么。临时 `SubAgent` 编排已在 v2.0 删除。如果希望主 Agent 在审批后直接编辑文件，可使用 `/setting readonly off`。
 
 ::: tip 不知道能做什么？输入 `/help`
 随时在输入框输入 `/help`，可以打开内置的命令和快捷键面板，按 `↑`/`↓` 翻看，`Esc` 关闭。退出时输入 `/exit`，或按 `Ctrl-C` 两次，或在输入框为空时按 `Ctrl-D`。

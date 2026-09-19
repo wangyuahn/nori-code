@@ -32,8 +32,9 @@ Take a look at this project and explain the main directories.
 
 ## What this CLI does now
 
-- **Department tree.** `TeamCreate` hires durable partners as mounted child sessions. `TeamDecide` / `TeamSpeak` run Discuss; `TeamAssign` enters Code; `TeamDismiss` removes partners and deletes their sessions.
-- **Conversation map.** Sessions link via `parent_session_id`. `/map` in the TUI and the Web **Map** view browse, open, mount, unmount, and remount nodes.
+- **Department tree.** `TeamCreate` hires durable partners as mounted child sessions. `TeamDecide` / `TeamSpeak` run Discuss; `TeamAssign` enters Code; `TeamDismiss` removes partners and deletes their sessions. `TeamUpdate` changes name / role / mandate / tags.
+- **Channels.** `TeamChat` is sibling group chat (parent does not read it; posts must `@all` or `@session-id`). `TeamDM` is private (parent / sibling / member; task reports use `report_status`). `TeamBroadcast` wakes every member with the same prompt. `TeamStatus` lists members and colleagues.
+- **Conversation map.** Sessions link via `parent_session_id`. `/map` in the TUI and the Web **Map** view browse, open, mount, unmount, and remount. `SessionSearch` / `SessionGraph` / `SessionMount` / `SessionUnmount` are the matching tools. Inspector **Meeting** and **Chat** in Nori Work are always visible.
 - **Main read-only by default.** The lead coordinates; members execute assigned tracks. Toggle with `/setting readonly off` when needed.
 - **Persistent memory.** Architecture decisions and patterns persist in a bidirectional-link vault via `nori_memory_search` / `nori_memory_write`.
 - **Inherited harness.** MCP, Skills, Hooks, and tool approvals come from the Kimi Code fork. They work; they are not the differentiator.

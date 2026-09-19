@@ -16,18 +16,18 @@ Nori Code **1.x** already used SubAgents and collaboration tools inside a sessio
 | Unmount / dismiss interchangeably | **`TeamDismiss`** deletes the hired child session; **`/map` unmount** only clears the parent link |
 | Assume the main Agent writes code freely | Main Agent stays a **read-only coordinator** by default (`Write` / `Edit` blocked); members execute after `TeamAssign`. Use `/setting readonly off` only when the lead should edit |
 
-Typical 2.0 flow: `TeamCreate` → Discuss (`TeamDecide` / `TeamSpeak`) → `TeamAssign` (enters Code) → members work and report. Details: [Team engineering](./team-engineering.md).
+Typical 2.0 flow: `TeamCreate` → Discuss (`TeamDecide` / `TeamSpeak`) → `TeamAssign` (enters Code) → members coordinate with `TeamChat` / `TeamDM` and report. Details: [Team engineering](./team-engineering.md).
 
 ### Commands and surfaces to learn
 
 - **`/team`** (alias **`/agents`**) — browse and open hired partners; `/team settings` sets max department depth
 - **`/map`** — browse the mount forest; Enter opens a session; **M** mount; **U** unmount
-- **Nori Work / Web Map** — same forest with pan/zoom and local annotations (not sent to the model)
+- **Nori Work / Web Map** — same forest with pan/zoom and local annotations (not sent to the model). Inspector **Meeting** and **Chat** stay visible (`TeamSpeak` / `TeamChat`).
 - **`Ctrl-Y`** — show or hide the Discuss / Chat pane on the current session (department Chat lives on the lead)
 
 ### What does not change
 
-- Temporary **`SubAgent`** delegates remain for bounded tasks archived under the parent session — they are not map nodes
+- Temporary **`SubAgent`** is **gone** in v2.0. Bounded parallel work is a department of child sessions, not a throwaway spawn.
 - Discuss / Code toggling (`Shift-Tab`, `/discuss`, `/plan`) still applies; `TeamAssign` leaves Discuss on success
 - Config and sessions already under `~/.nori-code/` (or `$NORI_CODE_HOME`) continue to load after upgrade
 

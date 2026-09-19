@@ -26,7 +26,8 @@ Nori Code CLI 2.0 把项目当作一棵**部门树**，而不是单条聊天记�
 1. **`TeamCreate`** — 在本部门雇佣伙伴（每人是地图上的真实子会话）。
 2. **`TeamDecide`**，`action=start` — 以主题开启 Discuss；成员用 **`TeamSpeak`** 发言（本轮不调用会记为弃权）。
 3. **`TeamAssign`** — 分配具体任务；成功后**离开 Discuss** 进入 Code，成员可以执行。
-4. 工作完成后 **`TeamDecide`**，`action=vote` — 全队投票（`discuss_again` / `proceed` / `abstain`），无需再次进入完整 Discuss。
+4. Code 阶段同级用 **`TeamChat`** 和 **`TeamDM`** 协调。汇报（`completed` / `blocked` / `needs_decision`）走给上级的 `TeamDM`。
+5. 工作完成后 **`TeamDecide`**，`action=vote` — 全队投票（`discuss_again` / `proceed` / `abstain`），无需再次进入完整 Discuss。
 
 Discuss 是**多轮**的会。每条 `TeamSpeak` 只推进一步（一个可裁决的点），不是完整方案。用 `TeamDecide` 的 `action=continue` 开下一轮。有人弃权只记为该人弃权，后面的人照常发言。
 
@@ -43,6 +44,21 @@ Discuss 是**多轮**的会。每条 `TeamSpeak` 只推进一步（一个可裁�
 | `TeamUpdate` | 更新本会话或成员的名称、角色、职责或标签。相关会话会收到系统提醒，但不会被唤醒。 |
 
 `TeamDismiss` 是移除雇佣伙伴的正式路径。通过 `/map` 卸载只会去掉挂载关系，**不会**删除子会话。
+
+## TeamChat、TeamDM 和其他通道
+
+收件人是 session id 或展示名（`agent-1`、`parent` 这类别名也能解析）。Nori Work 检查器里的 **开会** 和 **交流** 标签始终显示。
+
+| 工具 | 作用 |
+| --- | --- |
+| `TeamChat` | 同级之间的持久**群聊**。**父节点不读**。每条消息必须以 `@all` 或 `@session-id` 开头（`mentions` 里也要带上）；只有被提到的成员会被打断。这是 Code 阶段的工作频道。给上级的最终状态用 `TeamDM`。 |
+| `TeamDM` | 私信：上级、同级、或自己雇的成员。任务汇报要带 `report_status`（`completed` / `blocked` / `needs_decision`）和 `report_summary` —— 汇报一定送到上级。普通私信不算汇报。正式开会发言只用 `TeamSpeak`。 |
+| `TeamBroadcast` | 用同一段 prompt **并行唤醒**部门里每一个成员。成员会真正跑一轮。 |
+| `TeamStatus` | 自己雇的 `members`，加上同级 `colleagues`：角色、idle/running、任务、是否已向上级汇报。`running` 的同事不该被抢活。 |
+| `TeamDiscussInvite` / `TeamDiscussKick` | 把人拉进或踢出当前 Discuss，但不解雇。 |
+| `SessionSearch` / `SessionGraph` / `SessionMount` / `SessionUnmount` | 在同一棵会话森林上查找、读取、挂载或拆挂。Unmount 只拆挂载；`TeamDismiss` 会删除。 |
+
+参数见[内置工具](../reference/tools.md#协作工具)。GitHub [README](https://github.com/wangyuahn/nori-code/blob/master/README.zh-CN.md) 有同一份目录。
 
 ## 会话地图（Session 挂载树）
 
@@ -104,6 +120,6 @@ Discuss 是**多轮**的会。每条 `TeamSpeak` 只推进一步（一个可裁�
 ## 接下来
 
 - [斜杠命令](../reference/slash-commands.md) — `/team`、`/map`、`/discuss`、`/web`
-- [内置工具](../reference/tools.md#协作工具) — `TeamCreate`、`TeamAssign`、`TeamDismiss` 等
+- [内置工具](../reference/tools.md#协作工具) — `TeamCreate`、`TeamChat`、`TeamDM`、`TeamAssign`、`TeamDismiss` 等
 - [会话与上下文](./sessions.md) — 存储布局与会话元数据
 - GitHub [README](https://github.com/wangyuahn/nori-code/blob/master/README.zh-CN.md) — 现在的 Nori 相对 Codex / Claude Code，以及缺口清单

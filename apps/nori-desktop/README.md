@@ -6,6 +6,18 @@ Nori Work is the Electron desktop workspace for Nori Code. The package name is `
 
 ![Nori Work browser workspace](../../docs/images/nori-work-browser.png)
 
+## What you see
+
+This is the desktop surface of **Team Engineering**. Members are real sessions on one `parent_session_id` forest — the same people as the sidebar, the Map, and the Team tools.
+
+- **Chat** — the current session transcript (open a map card to work in that member).
+- **Map** — pan/zoom canvas of the session forest. Cards are child sessions hired with `TeamCreate` or created on the canvas.
+- **Inspector Meeting** — always shown. This is Discuss (`TeamDecide` / `TeamSpeak` / `TeamAssign`). Humans watch; they do not speak in the meeting.
+- **Inspector Chat** — always shown. This is department `TeamChat` among siblings. The parent does not read it. Private coordination and task reports use `TeamDM`.
+- **Files / preview / browser / terminal / Git / LSP** — inherited workbench surfaces. LSP and Git are still a rough shell; see the project [README](../../README.md).
+
+Full tool list (`TeamChat`, `TeamDM`, `TeamStatus`, `TeamBroadcast`, session mount tools): project [README](../../README.md#team-tools) and [Team engineering](../../docs/en/guides/team-engineering.md).
+
 ## Architecture
 
 Nori Work combines three existing boundaries instead of duplicating Agent logic:
@@ -17,10 +29,9 @@ Nori Work combines three existing boundaries instead of duplicating Agent logic:
 The current desktop workspace also includes:
 
 - A persistent `node-pty` terminal connected to the active project.
-- LSP diagnostics, hover, definitions, references, symbols, rename, and formatting.
-- Reorderable, resizable inspector tools with standalone-window support.
+- LSP diagnostics, hover, definitions, references, symbols, rename, and formatting (inspector panel; not an agent tool).
+- Reorderable, resizable inspector tools with standalone-window support — Meeting and Chat stay in the tab order.
 - Project file preview and direct `@path` references to the main Agent.
-- Custom Agent roles with explicit read, write, terminal, web, and delegation permissions.
 - Background task monitoring with stop controls.
 - Configurable completion, Agent, approval, and error notification sounds.
 

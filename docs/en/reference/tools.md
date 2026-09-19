@@ -88,11 +88,17 @@ Collaboration tools handle inter-Agent coordination, user interaction, and Skill
 | Tool | Default Approval | Description |
 | --- | --- | --- |
 | `TeamCreate` | Auto-allow | Hire durable team partners as child sessions |
-| `TeamDecide` | Auto-allow | Start/continue discussion, or vote after execution |
+| `TeamDecide` | Auto-allow | Start/continue discussion, vote after execution, or archive |
 | `TeamSpeak` | Auto-allow | Publish one short discussion point; not calling it records the turn as skipped (abstention) |
 | `TeamAssign` | Auto-allow | Assign work; success leaves Discuss and enters Code |
 | `TeamUpdate` | Auto-allow | Update name, role, mandate, or tags without starting a turn |
 | `TeamDismiss` | Auto-allow | Dismiss department members and delete their child sessions |
+| `TeamChat` | Auto-allow | Sibling group chat; parent does not read it; posts must `@all` or `@session-id` |
+| `TeamDM` | Auto-allow | Private message to parent, sibling, or a hired member; reports use `report_status` |
+| `TeamBroadcast` | Auto-allow | Wake every member with the same prompt in parallel |
+| `TeamStatus` | Auto-allow | List hired `members` and peer `colleagues` (role, idle/running, assignment, reports) |
+| `TeamDiscussInvite` | Auto-allow | Invite members into the active Discuss without hiring |
+| `TeamDiscussKick` | Auto-allow | Remove Discuss participants without dismissing them |
 | `SessionSearch` | Auto-allow | Search sessions by id, title, role, or working directory |
 | `SessionGraph` | Auto-allow | Read the session forest (parent/child topology) |
 | `SessionMount` | Auto-allow | Mount or remount an existing session as a department member |
@@ -101,6 +107,8 @@ Collaboration tools handle inter-Agent coordination, user interaction, and Skill
 | `Skill` | Auto-allow | Invoke a registered inline Skill |
 
 **`TeamCreate`** requires a unique `name`, `role`, and `mandate` for every member. Each hire creates and resumes a real mounted child session (a session card on the conversation map). Discuss, Assign, and Chat address that session id (or the member display name). **`TeamDismiss`** removes members from the department and deletes that child session; provide `reason`, and use `confirm_active=true` only after accepting interruption of active work. Unmount on the map / `SessionUnmount` is a separate action that detaches without deleting. **`TeamUpdate`** changes name, role, mandate, or tags; related sessions receive a reminder and do not start a turn. **`TeamDecide`** `action=start` requires `topic` and the lead `statement`. Members publish only with `TeamSpeak`. After execution, `action=vote` does not require Discuss; every team member votes (`discuss_again` / `proceed` / `abstain`), including members left idle with `task=null`.
+
+**`TeamChat`** is the department group channel for **siblings**. The parent does not read it. Every message must start with `@all` or `@session-id` (also pass them in `mentions`); only mentioned members are interrupted. Use it for working coordination during Code; send the parent final status with `TeamDM`. **`TeamDM`** is a private message to a parent, sibling, or a member you hired. Recipients are session ids, display names, `parent`, or aliases such as `agent-1`. Set `report_status` to `completed` / `blocked` / `needs_decision` with `report_summary` for a task report — reports always travel to the parent. Ordinary DMs are not classified as reports. **`TeamBroadcast`** wakes every member with the same prompt in parallel (they actually run a turn). **`TeamStatus`** returns hired `members` and peer `colleagues`. **`TeamDiscussInvite`** / **`TeamDiscussKick`** change who is in the active meeting without dismissing them from the department.
 
 **`SessionSearch`**, **`SessionGraph`**, **`SessionMount`**, and **`SessionUnmount`** operate on the Session forest. Search before mounting an existing session; Graph is the read-only topology. These change session mounts, not a second Team Agent identity.
 

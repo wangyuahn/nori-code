@@ -88,11 +88,17 @@ Discuss 是只读团队开会。新会话默认进入该状态（用户可关闭
 | 工具 | 默认审批 | 说明 |
 | --- | --- | --- |
 | `TeamCreate` | 自动放行 | 雇佣持久团队伙伴为子会话 |
-| `TeamDecide` | 自动放行 | 开会或在执行后投票 |
+| `TeamDecide` | 自动放行 | 开会、继续讨论、执行后投票，或 archive |
 | `TeamSpeak` | 自动放行 | 发布一条短讨论发言；不调用会将本轮记录为 skipped（弃权） |
 | `TeamAssign` | 自动放行 | 分配任务；成功后离开 Discuss 进入 Code |
 | `TeamUpdate` | 自动放行 | 更新名称、角色、职责或标签，不唤醒会话 |
 | `TeamDismiss` | 自动放行 | 解除部门成员并删除其子会话 |
+| `TeamChat` | 自动放行 | 同级群聊；父节点不读；消息必须以 `@all` 或 `@session-id` 开头 |
+| `TeamDM` | 自动放行 | 私信上级 / 同级 / 自己雇的成员；汇报用 `report_status` |
+| `TeamBroadcast` | 自动放行 | 用同一段 prompt 并行唤醒每个成员 |
+| `TeamStatus` | 自动放行 | 列出雇来的 `members` 和同级 `colleagues`（角色、idle/running、任务、汇报） |
+| `TeamDiscussInvite` | 自动放行 | 把成员拉进当前 Discuss，不新增雇佣 |
+| `TeamDiscussKick` | 自动放行 | 把人踢出 Discuss，但不解雇 |
 | `SessionSearch` | 自动放行 | 按 id、标题、角色或工作目录搜索会话 |
 | `SessionGraph` | 自动放行 | 读取会话森林（父子拓扑） |
 | `SessionMount` | 自动放行 | 将已有会话挂载或改挂为部门成员 |
@@ -101,6 +107,8 @@ Discuss 是只读团队开会。新会话默认进入该状态（用户可关闭
 | `Skill` | 自动放行 | 调用已注册的 inline Skill |
 
 **`TeamCreate`** 每个成员必须有唯一的 `name`、`role`、`mandate`；每次雇佣会创建并 resume 真实挂载子会话（地图上的会话卡片）。Discuss、Assign、Chat 按该 session id（或展示名）寻址。**`TeamDismiss`** 从部门移除成员并删除该子会话；需提供 `reason`，仅在确认中断进行中的任务后用 `confirm_active=true` 重试。地图上的拆挂 / `SessionUnmount` 是另一条操作，只断开挂载、不删除会话。**`TeamUpdate`** 可改名称、角色、职责或标签；相关会话会收到提醒，但不会被唤醒。**`TeamDecide`** `action=start` 必须有 `topic` 和主持 `statement`。成员只用 `TeamSpeak` 发言。执行后 `action=vote` 不要求 Discuss；全队投票（`discuss_again` / `proceed` / `abstain`），含 `task=null` 的成员。
+
+**`TeamChat`** 是同级之间的部门群聊。**父节点不读。** 每条消息必须以 `@all` 或 `@session-id` 开头（`mentions` 里也要带上）；只有被提到的成员会被打断。Code 阶段的工作协调走这里；给上级的最终状态用 `TeamDM`。**`TeamDM`** 是私信：上级、同级、或自己雇的成员。收件人可以是 session id、展示名、`parent`，或 `agent-1` 这类别名。任务汇报要带 `report_status`（`completed` / `blocked` / `needs_decision`）和 `report_summary` —— 汇报一定送到上级。普通私信不算汇报。**`TeamBroadcast`** 用同一段 prompt 并行唤醒每个成员（他们会真正跑一轮）。**`TeamStatus`** 返回雇来的 `members` 和同级 `colleagues`。**`TeamDiscussInvite`** / **`TeamDiscussKick`** 只改谁在开会，不解雇。
 
 **`SessionSearch`**、**`SessionGraph`**、**`SessionMount`**、**`SessionUnmount`** 操作的是 Session 森林。挂载已有会话前先搜索；Graph 是只读拓扑。这些改的是会话挂载，不是第二套 Team Agent 身份。
 

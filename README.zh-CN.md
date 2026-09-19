@@ -40,16 +40,53 @@ Discuss 开着时，包括主席在内，`Write`、`Edit`、`Bash`、`TaskStop`�
 
 主 Agent 默认是**只读协调者**（`/setting readonly on`）：自己不写文件，成员在 Assign 之后执行。需要负责人直接改代码时再用 `/setting readonly off`。
 
-### 成员之间能直接说话
+### 团队工具
 
-- **`TeamChat`**：同一父节点雇来的同事共享群聊；父节点不读这条通道。
-- **`TeamDM`**：按 agent id 找到三种关系——上级、同级、自己雇的成员。任务汇报（`completed` / `blocked` / `needs_decision`）走给上级的 DM。
-- **`TeamStatus`**：除了自己的 `members`，还报告 `colleagues`（同事的角色、idle/running、任务、是否已向上级汇报）。`running` 的同事不该被抢活。
-- 身份不靠复制 transcript。每个会话的 system prompt 注入 **`<session_self>`**（id、标题、深度、父节点、角色、职责、标签、直接成员）；挂载或身份变更时下一回合注入 **`<session_mount_changed>`** / **`<session_identity_changed>`**。
+收件人是 **session id** 或**展示名**（`agent-1`、`parent` 这类别名也能解析）。这些工具**始终可用**，不会因为「当前工具列表里有没有」而从界面消失。
 
-### 会话地图
+**雇佣与身份**
 
-会话靠 **`parent_session_id`** 连成森林。TUI 用 `/map` 浏览、打开、挂载、卸载；Nori Work / Web 侧栏有 **Map** 画布（平移、缩放、建子会话、改挂）。`/team` 管部门成员（打开伙伴会话、看汇报和本轮 Discuss）；`/map` 管挂载拓扑。二者不是同一件事。
+| 工具 | 做什么 |
+| --- | --- |
+| `TeamCreate` | 雇佣成员。每个雇用来的人都是子会话 / 地图卡片（`name` / `role` / `mandate`）。深度受 `team.maxDepth` 约束。 |
+| `TeamUpdate` | 改名称、角色、职责或标签。相关会话会收到提醒，但不会被唤醒。 |
+| `TeamDismiss` | 移除成员并**删除**对应子会话。地图 Unmount / `SessionUnmount` 只拆挂载，不删会话。 |
+
+**开会（Discuss）** — Nori Work 检查器里的 **开会** 标签，始终显示。
+
+| 工具 | 做什么 |
+| --- | --- |
+| `TeamDecide` | 主持会议：`start`（主题 + 开场）、`continue`（下一轮）、出结果后 `vote`（`discuss_again` / `proceed` / `abstain`）、`archive` 正式结束。 |
+| `TeamSpeak` | 轮到你时发一条短的正式观点。不调用记为弃权。光附和不算贡献。 |
+| `TeamDiscussInvite` / `TeamDiscussKick` | 把人拉进或踢出本轮会议，但不解雇。 |
+| `TeamAssign` | 每个成员恰好一份任务（`task=null` 表示闲置）。成功则离开 Discuss 进入 Code。之后的汇报走 `TeamDM`。 |
+
+**Code 阶段的通道** — Nori Work 检查器里的 **交流** 标签，始终显示。人看，成员写。
+
+| 工具 | 做什么 |
+| --- | --- |
+| `TeamChat` | 同级之间的部门**群聊**。**父节点不读**。每条消息必须以 `@all` 或 `@session-id` 开头（`mentions` 里也要带上）；只有被提到的成员会被打断。这是 Code 阶段的工作频道。给上级的最终状态用 `TeamDM`，不要发在 Chat 里。 |
+| `TeamDM` | 私信：上级、同级、或自己雇的成员。收件人可以是 `parent`、session id、展示名，或 `agent-1` 这类别名。任务汇报要带 `report_status`（`completed` / `blocked` / `needs_decision`）和 `report_summary` —— 汇报一定送到上级。普通私信不算汇报。正式开会发言只用 `TeamSpeak`。 |
+| `TeamBroadcast` | 用同一段 prompt **并行唤醒**部门里每一个成员。成员会真正跑一轮，不是静默追加。 |
+| `TeamStatus` | 自己雇的 `members`，加上同级 `colleagues`：角色、idle/running、任务、是否已向上级汇报。`running` 的同事不该被抢活。 |
+
+**会话森林**（和地图是同一批对象）
+
+| 工具 | 做什么 |
+| --- | --- |
+| `SessionSearch` | 按 id、标题、角色或工作目录找已有会话，再决定要不要挂进来。 |
+| `SessionGraph` | 读父子拓扑。 |
+| `SessionMount` | 把已有会话挂（或改挂）成部门成员（一个父节点；第二条父边是 remount）。 |
+| `SessionUnmount` | 拆挂载，不删除。 |
+
+身份不靠复制 transcript。每个会话的 system prompt 注入 **`<session_self>`**（id、标题、深度、父节点、角色、职责、标签、直接成员）；挂载或身份变更时下一回合注入 **`<session_mount_changed>`** / **`<session_identity_changed>`**。
+
+### 会话地图和检查器
+
+会话靠 **`parent_session_id`** 连成森林。地图卡片、侧栏行、团队工具说的是同一批人。
+
+- **TUI：** `/map` 浏览、打开、挂载、卸载。`/team` 管部门成员（打开伙伴会话、看汇报和本轮 Discuss）。`Ctrl-Y` 在**负责人会话**上显示 Discuss / Chat。二者不是同一件事。
+- **Nori Work / Web：** **Map** 是这棵树的平移/缩放画布。检查器的 **开会** 和 **交流** 标签始终在 —— 开会是 Discuss；交流是同级之间的 `TeamChat`。
 
 ---
 
@@ -75,8 +112,8 @@ Discuss 开着时，包括主席在内，`Write`、`Edit`、`Bash`、`TaskStop`�
 
 - **长期伙伴，不是一次性工人。** `TeamCreate` 雇出来的是地图上的真实会话，能开会、能改挂、能解雇。Codex / Claude Code 的 subagent 很强，但默认是「拉起来、干完、把摘要交回主线程」。
 - **会是为了对齐，不是为了收工。** Discuss 里后发言的人必须读到前面的话；Code 中途还能 `continue`。这是刻意和「各做各的，最后对账」对着干。
-- **会话树是 UI，不只是内部实现。** `/team`、`/map`、Web Map、部门 Chat / Discuss 检查器是同一套挂载森林的不同面。
-- **同事通道。** 同级用 `TeamChat` / `TeamDM` 交接文件边界，不必每件事都经过主席。
+- **会话树是 UI，不只是内部实现。** `/team`、`/map`、Web Map、检查器里的开会 / 交流是同一套挂载森林的不同面。
+- **同事通道。** 同级用 `TeamChat`（群聊，父节点不读）和 `TeamDM`（私信，含汇报）交接文件边界，不必每件事都经过主席。
 
 这些强项建立在一个仍很新的运行时上。它们还不是 Codex / Claude Code 那种打磨过的日常编码体验。
 

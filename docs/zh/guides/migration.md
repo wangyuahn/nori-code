@@ -16,18 +16,18 @@ Nori Code **1.x** 已在会话内使用 SubAgent 与协作工具。**2.0** 增�
 | 卸载与解散混用 | **`TeamDismiss`** 删除雇佣来的子会话；**`/map` 卸载**只清除父链接 |
 | 默认认为主 Agent 可自由写代码 | 主 Agent 默认是**只读协调者**（拦截 `Write` / `Edit`）；成员在 `TeamAssign` 后执行。仅在需要负责人直接改文件时用 `/setting readonly off` |
 
-典型 2.0 流程：`TeamCreate` → Discuss（`TeamDecide` / `TeamSpeak`）→ `TeamAssign`（进入 Code）→ 成员执行并汇报。详见[团队工程](./team-engineering.md)。
+典型 2.0 流程：`TeamCreate` → Discuss（`TeamDecide` / `TeamSpeak`）→ `TeamAssign`（进入 Code）→ 成员用 `TeamChat` / `TeamDM` 协调并汇报。详见[团队工程](./team-engineering.md)。
 
 ### 需要熟悉的命令与界面
 
 - **`/team`**（别名 **`/agents`**）— 浏览并打开已雇佣伙伴；`/team settings` 设置最大部门深度
 - **`/map`** — 浏览挂载森林；Enter 打开会话；**M** 挂载；**U** 卸载
-- **Nori Work / Web Map** — 同一棵森林，支持平移/缩放与本地标注（不会发给模型）
+- **Nori Work / Web Map** — 同一棵森林，支持平移/缩放与本地标注（不会发给模型）。检查器的 **开会** / **交流** 始终显示（`TeamSpeak` / `TeamChat`）。
 - **`Ctrl-Y`** — 在当前会话显示或隐藏 Discuss / Chat 栏（部门 Chat 挂在负责人会话上）
 
 ### 不变的部分
 
-- 临时 **`SubAgent`** 仍用于归档在父会话下的有界任务——它们不是地图节点
+- 临时 **`SubAgent`** 已在 v2.0 **删除**。有界并行工作走部门子会话，不是一次性 spawn。
 - Discuss / Code 切换（`Shift-Tab`、`/discuss`、`/plan`）仍然适用；`TeamAssign` 成功时离开 Discuss
 - 已在 `~/.nori-code/`（或 `$NORI_CODE_HOME`）下的配置与会话，升级后继续加载
 

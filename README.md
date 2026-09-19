@@ -40,16 +40,53 @@ While a round is open, `Write`, `Edit`, `Bash`, `TaskStop`, `CronCreate`, and `C
 
 The main Agent stays a **read-only coordinator** by default (`/setting readonly on`): it does not write files; members execute after Assign. Use `/setting readonly off` only when you want the lead to edit directly.
 
-### Members reach each other, not only upward
+### Team tools
 
-- **`TeamChat`**: peers hired by the same parent share a group channel. The parent does not read it.
-- **`TeamDM`**: three named relations by agent id — parent, sibling, member. Task reports (`completed` / `blocked` / `needs_decision`) go to the parent.
-- **`TeamStatus`**: `members` plus `colleagues` (peer role, idle/running, assigned task, whether they have reported). A `running` peer is to be left to finish.
-- Identity is not transcript copying. Each session’s system prompt gets **`<session_self>`** (id, title, depth, parent, role, mandate, tags, direct members). Mount or identity changes inject **`<session_mount_changed>`** / **`<session_identity_changed>`** on the next turn.
+Recipients are **session ids** or **display names** (aliases such as `agent-1` and `parent` also resolve). These tools are always available — they are not gated behind “is this tool listed?” checks.
 
-### Conversation map
+**Hire and identity**
 
-Sessions form a forest via **`parent_session_id`**. In the TUI, `/map` browses, opens, mounts, and unmounts. In Nori Work / the web UI, **Map** is a pan/zoom canvas for the same tree. `/team` is department membership (open a partner, read reports and this-round Discuss). `/map` is mount topology. They are not the same surface.
+| Tool | What it does |
+| --- | --- |
+| `TeamCreate` | Hire members. Each hire is a child session / map card (`name`, `role`, `mandate`). Depth is bounded by `team.maxDepth`. |
+| `TeamUpdate` | Change name, role, mandate, or tags. Related sessions get a reminder; they do not start a turn. |
+| `TeamDismiss` | Remove a member **and delete** that child session. Map unmount / `SessionUnmount` detaches without deleting. |
+
+**Meeting (Discuss)** — Nori Work inspector tab **Meeting**, always shown.
+
+| Tool | What it does |
+| --- | --- |
+| `TeamDecide` | Chair the meeting: `start` (topic + opening statement), `continue` (next round), `vote` after results (`discuss_again` / `proceed` / `abstain`), `archive` to close. |
+| `TeamSpeak` | One short formal point on your scheduled turn. Not calling it records abstention. Bare agreement is not a contribution. |
+| `TeamDiscussInvite` / `TeamDiscussKick` | Add or drop meeting participants without dismissing them from the department. |
+| `TeamAssign` | One task per member (`task=null` leaves one idle). Success leaves Discuss and enters Code. Reports after that go through `TeamDM`. |
+
+**Channels in Code** — Nori Work inspector tab **Chat**, always shown. Humans watch; members write.
+
+| Tool | What it does |
+| --- | --- |
+| `TeamChat` | Department **group chat among siblings**. The parent does **not** read it. Every post must start with `@all` or `@session-id` (also pass `mentions`); only mentioned members are interrupted. This is the working channel during Code. Final status to the parent is `TeamDM`, not Chat. |
+| `TeamDM` | Private message to a parent, sibling, or a member you hired. Use `parent`, a session id, a display name, or an alias such as `agent-1`. Task reports set `report_status` to `completed` / `blocked` / `needs_decision` plus `report_summary` — reports always go to the parent. Ordinary DMs are not classified as reports. `TeamSpeak` is only for formal Discuss turns. |
+| `TeamBroadcast` | Wake every member with the same prompt in parallel. Members actually run a turn; this is not a silent append. |
+| `TeamStatus` | `members` you hired plus `colleagues` (peers): role, idle/running, assigned task, whether they have reported. Leave a `running` peer to finish. |
+
+**Session forest** (the same objects as the map)
+
+| Tool | What it does |
+| --- | --- |
+| `SessionSearch` | Find sessions by id, title, role, or working directory before mounting an existing one. |
+| `SessionGraph` | Read parent/child topology. |
+| `SessionMount` | Attach or remount an existing session as a department member (one parent; a second parent wire remounts). |
+| `SessionUnmount` | Detach without deleting. |
+
+Identity is not transcript copying. Each session’s system prompt gets **`<session_self>`** (id, title, depth, parent, role, mandate, tags, direct members). Mount or identity changes inject **`<session_mount_changed>`** / **`<session_identity_changed>`** on the next turn.
+
+### Conversation map and inspector
+
+Sessions form a forest via **`parent_session_id`**. Map cards, sidebar rows, and Team tools name the same people.
+
+- **TUI:** `/map` browses, opens, mounts, and unmounts. `/team` is department membership (open a partner, read reports and this-round Discuss). `Ctrl-Y` shows Discuss / Chat on the **lead** session. They are not the same surface.
+- **Nori Work / web:** **Map** is a pan/zoom canvas for that forest. The inspector **Meeting** and **Chat** tabs are always visible — Meeting is Discuss; Chat is `TeamChat` among siblings.
 
 ---
 
@@ -75,8 +112,8 @@ This table is what those products publicly ship, not a wishlist. Codex, Claude C
 
 - **Durable partners, not disposable workers.** A `TeamCreate` hire is a real session on the map: it can meet, remount, and be dismissed. Codex and Claude Code subagents are strong at “spawn, finish, summarize back.”
 - **The meeting exists to catch mismatch early.** Later speakers must read earlier statements; Code can reopen Discuss mid-flight. That is the opposite of “everyone reports done, then reconcile.”
-- **The session tree is UI, not just runtime.** `/team`, `/map`, the web Map, and the Discuss/Chat inspector are faces of the same mount forest.
-- **Peer channels.** Siblings use `TeamChat` / `TeamDM` to hand off file boundaries without routing every detail through the chair.
+- **The session tree is UI, not just runtime.** `/team`, `/map`, the web Map, and the inspector Meeting / Chat tabs are faces of the same mount forest.
+- **Peer channels.** Siblings use `TeamChat` (group, parent does not read) and `TeamDM` (private, including reports) so file-boundary handoffs do not all route through the chair.
 
 Those strengths sit on a young runtime. They are not yet the polished daily coding loop Codex and Claude Code already sell.
 
