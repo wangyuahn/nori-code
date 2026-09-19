@@ -133,7 +133,8 @@ import { ImageAttachmentStore, type ImageAttachment } from './utils/image-attach
 import { extractMediaAttachments } from './utils/image-placeholder';
 import { hasPatchChanges } from './utils/object-patch';
 import { sessionRowsForPicker } from './utils/session-picker-rows';
-import { mergeDepartmentSnapshots, teamAgentsFromSessionGraph, teamAgentsFromSessionMetadata } from './utils/team-tree';
+import { parentSessionIdOf } from './utils/session-map-tree';
+import { buildDepartmentSnapshot } from './utils/team-tree';
 import { combineStartupNotice, isOAuthLoginRequiredError } from './utils/startup';
 import { thinkingEffortFromConfig } from './utils/thinking-config';
 import { installTerminalFocusTracking } from './utils/terminal-focus';
@@ -220,6 +221,7 @@ function createInitialAppState(input: KimiTUIStartupInput): AppState {
     mcpServersSummary: null,
     teamAgents: [],
     viewingAgentId: 'main',
+    parentSessionId: undefined,
     banner: undefined,
   };
 }
@@ -1575,20 +1577,19 @@ export class KimiTUI {
 
   async syncRuntimeState(session: Session = this.requireSession()): Promise<void> {
     const [status, goalResult] = await Promise.all([session.getStatus(), session.getGoal()]);
-    let forest = teamAgentsFromSessionMetadata(session.getResumeState()?.sessionMetadata);
+    let graph: Awaited<ReturnType<KimiHarness['getSessionGraph']>> | undefined;
     try {
-      const graph = await this.harness.getSessionGraph({ workDir: this.state.appState.workDir });
-      forest = mergeDepartmentSnapshots(
-        forest,
-        teamAgentsFromSessionGraph(
-          session.id,
-          session.summary?.title ?? this.state.appState.sessionTitle ?? 'Main',
-          graph,
-        ),
-      );
+      graph = await this.harness.getSessionGraph({ workDir: this.state.appState.workDir });
     } catch {
       // Graph is best-effort; Discuss nodes still come from resume metadata.
     }
+    const forest = buildDepartmentSnapshot({
+      hostSessionId: session.id,
+      hostTitle: session.summary?.title ?? this.state.appState.sessionTitle ?? 'Main',
+      metadata: session.getResumeState()?.sessionMetadata,
+      graph,
+      live: this.state.appState.teamAgents,
+    });
     this.setAppState({
       sessionId: session.id,
       model: status.model ?? '',
@@ -1603,6 +1604,9 @@ export class KimiTUI {
       sessionTitle: session.summary?.title ?? null,
       goal: goalResult.goal,
       teamAgents: forest,
+      parentSessionId: parentSessionIdOf(
+        session.summary?.metadata as Record<string, unknown> | undefined,
+      ),
     });
     this.teamViewController.seedFromSession(session);
     this.syncAdditionalDirs(session);
@@ -1727,7 +1731,7 @@ export class KimiTUI {
     this.state.footer.setBackgroundCounts({ processTasks: 0, questionTasks: 0 });
     this.streamingUI.setTodoList([]);
     this.streamingUI.setTurnId(undefined);
-    this.setAppState({ mcpServersSummary: null });
+    this.setAppState({ mcpServersSummary: null, teamAgents: [], parentSessionId: undefined, viewingAgentId: 'main' });
     this.streamingUI.setStep(0);
     this.streamingUI.resetLiveText();
     this.updateQueueDisplay();
@@ -2052,22 +2056,6 @@ export class KimiTUI {
     this.state.todoPanelContainer.clear();
     this.imageStore.clear();
     this.renderWelcome();
-  }
-
-  prepareTranscriptForAgentView(agentId: string): void {
-    this.streamingUI.discardPending();
-    this.state.transcriptEntries = [];
-    this.streamingUI.disposeActiveCompactionBlock();
-    this.streamingUI.resetLiveText();
-    this.streamingUI.resetToolUi();
-    this.sessionEventHandler.stopAllMcpServerStatusSpinners();
-    this.disposeTranscriptChildren();
-    this.state.transcriptContainer.clear();
-    this.clearTerminalInlineImages();
-    this.state.todoPanel.clear();
-    this.state.todoPanelContainer.clear();
-    this.imageStore.clear();
-    if (agentId === MAIN_AGENT_ID) this.renderWelcome();
   }
 
   private isTurnBoundaryComponent(child: Component): boolean {

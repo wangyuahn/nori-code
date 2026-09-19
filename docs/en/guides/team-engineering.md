@@ -92,8 +92,8 @@ After mount metadata changes, the runtime refreshes `<session_self>` so every pa
 
 ## Terminal panes: `/team` and `Ctrl-Y`
 
-- **`/team`** (alias **`/agents`**) — searchable department browser. **Enter** opens the selected partner's session (messages and input follow that member). **Main** returns to the lead session. **Tab** shows member details. A discussion row opens the Discuss pane. **`/team settings`** sets max department depth.
-- **`Ctrl-Y`** — show or hide the bottom **Discuss / Chat** pane. While Discuss is on, the pane is a read-only meeting track; otherwise it shows department Chat. Hiding the pane does not leave Discuss or exit the member session you opened.
+- **`/team`** (alias **`/agents`**) — searchable department browser. **Enter** opens the selected partner's session (messages and input follow that member). **Main** stays on this session. **Tab** shows member details. A discussion row opens the Discuss pane. **`/team settings`** sets max department depth.
+- **`Ctrl-Y`** — show or hide the bottom **Discuss / Chat** pane on the **current** session. Department Chat and Discuss live on the lead session. While Discuss is on, the pane is a read-only meeting track; otherwise it shows department Chat. Hiding the pane does not leave Discuss or switch sessions. On a mounted child with no department of its own, the pane says Chat lives on the parent — open that session from `/map` or `/team`.
 
 See [Keyboard shortcuts](../reference/keyboard.md#team-pane) for the full key reference.
 

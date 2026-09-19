@@ -74,9 +74,9 @@ When collapsed tool call results exist in the history, press `Ctrl-O` to toggle 
 
 ## Team pane
 
-`/team` opens a partner's own session (messages and input follow that member, within Discuss / permission limits). Press Enter on Main to return to the lead session.
+`/team` opens a partner's own session (messages and input follow that member, within Discuss / permission limits). Press Enter on Main to stay on this session.
 
-While Discuss is on, the bottom Discuss pane is a read-only meeting track (who is speaking and what they said). Otherwise it shows department Chat. `Ctrl-Y` or idle `Esc` hides the pane; hiding it does not leave Discuss or the member session.
+While Discuss is on, the bottom Discuss pane is a read-only meeting track (who is speaking and what they said). Otherwise it shows department Chat on this session. `Ctrl-Y` or idle `Esc` hides the pane; hiding it does not leave Discuss or switch sessions. A mounted child without its own department points you back to the parent session.
 
 ## Conversation map (`/map`)
 

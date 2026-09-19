@@ -89,8 +89,7 @@ import {
   extractTeamSpeechText,
   isTeamSpeechTool,
   shouldPaintDiscussUtterance,
-  mergeDepartmentSnapshots,
-  teamAgentsFromSessionMetadata,
+  buildDepartmentSnapshot,
   type TeamAgentSnapshot,
   type TeamReportStatus,
 } from '../utils/team-tree';
@@ -969,10 +968,12 @@ export class SessionEventHandler {
       this.host.updateTerminalTitle();
     }
     if (event.patch?.['agents'] !== undefined) {
-      this.setTeamAgents(mergeDepartmentSnapshots(
-        teamAgentsFromSessionMetadata(event.patch),
-        this.host.state.appState.teamAgents,
-      ));
+      this.setTeamAgents(buildDepartmentSnapshot({
+        hostTitle: this.host.state.appState.sessionTitle ?? 'Main',
+        hostSessionId: this.host.state.appState.sessionId,
+        metadata: event.patch,
+        live: this.host.state.appState.teamAgents,
+      }));
     }
   }
 
@@ -1008,10 +1009,12 @@ export class SessionEventHandler {
   }
 
   seedTeamAgentsFromSession(session: Session): void {
-    this.setTeamAgents(mergeDepartmentSnapshots(
-      teamAgentsFromSessionMetadata(session.getResumeState()?.sessionMetadata),
-      this.host.state.appState.teamAgents,
-    ));
+    this.setTeamAgents(buildDepartmentSnapshot({
+      hostTitle: session.summary?.title ?? this.host.state.appState.sessionTitle ?? 'Main',
+      hostSessionId: session.id,
+      metadata: session.getResumeState()?.sessionMetadata,
+      live: this.host.state.appState.teamAgents,
+    }));
     this.host.teamViewController.seedFromSession(session);
   }
 

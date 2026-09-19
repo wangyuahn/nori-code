@@ -92,8 +92,8 @@ Discuss 是**多轮**的会。每条 `TeamSpeak` 只推进一步（一个可裁�
 
 ## 终端栏位：`/team` 与 `Ctrl-Y`
 
-- **`/team`**（别名 **`/agents`**）— 可搜索的部门浏览器。**Enter** 打开选中伙伴的会话（消息与输入都针对该成员）。**Main** 回到主会话。**Tab** 查看成员详情。讨论节点会打开 Discuss 栏。**`/team settings`** 设置最大部门深度。
-- **`Ctrl-Y`** — 显示或隐藏底部 **Discuss / Chat** 栏。Discuss 开启时为只读会议轨；否则显示部门 Chat。隐藏栏位不会离开 Discuss，也不会退出已打开的成员会话。
+- **`/team`**（别名 **`/agents`**）— 可搜索的部门浏览器。**Enter** 打开选中伙伴的会话（消息与输入都针对该成员）。**Main** 留在当前会话。**Tab** 查看成员详情。讨论节点会打开 Discuss 栏。**`/team settings`** 设置最大部门深度。
+- **`Ctrl-Y`** — 在**当前会话**显示或隐藏底部 **Discuss / Chat** 栏。部门 Chat 与 Discuss 挂在负责人会话上。Discuss 开启时为只读会议轨；否则显示部门 Chat。隐藏栏位不会离开 Discuss，也不会切换会话。若当前是没有自己部门的挂载子会话，栏位会提示 Chat 在父会话上，需用 `/map` 或 `/team` 打开父会话。
 
 完整键位见[键盘快捷键](../reference/keyboard.md#team-栏)。
 

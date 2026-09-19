@@ -15,11 +15,13 @@ import {
   teamAgentsFromSessionGraph,
   teamAgentsFromSessionMetadata,
   mergeDepartmentSnapshots,
+  buildDepartmentSnapshot,
   teamChatMessagesFromMetadata,
   teamHasBlockingReports,
   teamMemberCount,
   teamSpeakingLabel,
   departmentChatLeaderId,
+  departmentPaneEmptyHint,
   departmentPaneMode,
   type TeamAgentSnapshot,
 } from '#/tui/utils/team-tree';
@@ -127,6 +129,77 @@ describe('mergeDepartmentSnapshots', () => {
     );
     expect(merged.map((agent) => agent.agentId).sort()).toEqual(['discuss-1', 'main', 'sess_reviewer']);
     expect(teamMemberSessionId(merged.find((agent) => agent.agentId === 'sess_reviewer')!)).toBe('sess_reviewer');
+    expect(merged.find((agent) => agent.kind === 'main')?.name).toBe('Lead');
+  });
+});
+
+describe('buildDepartmentSnapshot', () => {
+  const graph = {
+    nodes: [
+      { id: 'sess_parent', title: 'Lead' },
+      { id: 'sess_reviewer', title: 'Reviewer', metadata: { mount_name: 'Reviewer', mount_role: 'reviewer' } },
+    ],
+    edges: [{ parentSessionId: 'sess_parent', childSessionId: 'sess_reviewer' }],
+  };
+
+  it('keeps a live Discuss node when a graph refresh only has members', () => {
+    const live: TeamAgentSnapshot[] = [
+      { agentId: 'main', kind: 'main', name: 'Lead', parentAgentId: null },
+      {
+        agentId: 'sess_reviewer',
+        kind: 'team',
+        name: 'Reviewer',
+        parentAgentId: 'main',
+        mountedSessionId: 'sess_reviewer',
+        reportStatus: 'blocked',
+        status: 'running',
+      },
+      {
+        agentId: 'discuss-1',
+        kind: 'discussion',
+        name: 'Align',
+        parentAgentId: 'main',
+        discussionTurnAgentId: 'sess_reviewer',
+      },
+    ];
+    const next = buildDepartmentSnapshot({
+      hostSessionId: 'sess_parent',
+      hostTitle: 'Lead',
+      graph,
+      live,
+    });
+    expect(next.find((agent) => agent.kind === 'discussion')?.agentId).toBe('discuss-1');
+    expect(next.find((agent) => agent.agentId === 'sess_reviewer')?.reportStatus).toBe('blocked');
+    expect(next.find((agent) => agent.agentId === 'sess_reviewer')?.status).toBe('running');
+  });
+
+  it('keeps a live Discuss node alongside a newer metadata round', () => {
+    const next = buildDepartmentSnapshot({
+      hostSessionId: 'sess_parent',
+      hostTitle: 'Lead',
+      graph,
+      metadata: {
+        agents: {
+          main: { type: 'main', name: 'Lead', parentAgentId: null },
+          'discuss-2': {
+            type: 'sub',
+            discussion: { status: 'active', currentTurnAgentId: 'sess_reviewer' },
+          },
+        },
+      },
+      live: [
+        {
+          agentId: 'discuss-1',
+          kind: 'discussion',
+          name: 'Old',
+          parentAgentId: 'main',
+        },
+      ],
+    });
+    expect(next.filter((agent) => agent.kind === 'discussion').map((agent) => agent.agentId)).toEqual([
+      'discuss-1',
+      'discuss-2',
+    ]);
   });
 });
 
@@ -175,8 +248,8 @@ describe('applyTeamToolResultToTeam', () => {
     );
     expect(next.some((agent) => agent.kind === 'main')).toBe(true);
     expect(teamMemberCount(next)).toBe(1);
-    expect(next.find((agent) => agent.agentId === 'reviewer')?.mandate).toBe('Keep diffs small');
-    expect(next.find((agent) => agent.agentId === 'reviewer')?.mountedSessionId).toBe('session-reviewer');
+    expect(next.find((agent) => agent.agentId === 'session-reviewer')?.mandate).toBe('Keep diffs small');
+    expect(next.find((agent) => agent.agentId === 'session-reviewer')?.mountedSessionId).toBe('session-reviewer');
   });
 
   it('records assignments and dismissals', () => {
@@ -402,6 +475,16 @@ describe('department pane helpers', () => {
         parentAgentId: 'main',
       }),
     ).toBe('main');
+  });
+
+  it('tells a mounted child that Chat lives on the parent session', () => {
+    expect(departmentPaneEmptyHint({
+      mode: 'chat',
+      hasMembers: false,
+      parentSessionId: 'sess_parent',
+    })).toContain('parent session');
+    expect(departmentPaneEmptyHint({ mode: 'chat', hasMembers: true })).toContain('No messages yet');
+    expect(departmentPaneEmptyHint({ mode: 'chat', hasMembers: false })).toContain('TeamCreate');
   });
 
   it('reads department chat history from resume metadata', () => {

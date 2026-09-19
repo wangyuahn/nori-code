@@ -23,7 +23,7 @@ Nori Code **1.x** 已在会话内使用 SubAgent 与协作工具。**2.0** 增�
 - **`/team`**（别名 **`/agents`**）— 浏览并打开已雇佣伙伴；`/team settings` 设置最大部门深度
 - **`/map`** — 浏览挂载森林；Enter 打开会话；**M** 挂载；**U** 卸载
 - **Nori Work / Web Map** — 同一棵森林，支持平移/缩放与本地标注（不会发给模型）
-- **`Ctrl-Y`** — 在 `/team` 打开成员会话时显示或隐藏 Discuss / Chat 栏
+- **`Ctrl-Y`** — 在当前会话显示或隐藏 Discuss / Chat 栏（部门 Chat 挂在负责人会话上）
 
 ### 不变的部分
 

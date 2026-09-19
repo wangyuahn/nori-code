@@ -90,7 +90,6 @@ interface MessageDriver {
   getCurrentSessionId(): string;
   toggleToolOutputExpansion(): void;
   teamViewController: {
-    switchTo(agentId: string, name: string): Promise<void>;
     hide(): boolean;
     reveal(): boolean;
     isPaneVisible(): boolean;
@@ -2247,43 +2246,30 @@ command = "vim"
     expect(recollapsedLines.length).toBeGreaterThan(0);
   });
 
-  it('paints a partner tool into the main view after opening that member', async () => {
+  it('keeps the lead transcript on main while department members exist', async () => {
     const { driver } = await makeDriver();
     driver.state.appState.teamAgents = [
       { agentId: 'main', kind: 'main', name: 'Main', parentAgentId: null },
-      { agentId: 'reviewer', kind: 'team', name: 'Reviewer', parentAgentId: 'main' },
+      { agentId: 'sess_reviewer', kind: 'team', name: 'Reviewer', parentAgentId: 'main', mountedSessionId: 'sess_reviewer' },
     ];
 
-    await driver.teamViewController.switchTo('reviewer', 'Reviewer');
-    expect(driver.teamViewController.viewingAgentId()).toBe('reviewer');
+    expect(driver.teamViewController.viewingAgentId()).toBe('main');
 
     driver.sessionEventHandler.handleEvent(
       {
-        type: 'assistant.delta',
-        agentId: 'reviewer',
+        type: 'tool.call.started',
+        agentId: 'sess_reviewer',
         sessionId: 'ses-1',
         turnId: 2,
-        delta: 'Reviewer session text',
+        toolCallId: 'tc-1',
+        name: 'Read',
+        args: { path: 'README.md' },
       } as Event,
       vi.fn(),
     );
     driver.streamingUI.flushNow();
 
-    const transcript = stripSgr(renderTranscript(driver));
-    expect(transcript).toContain('Reviewer session text');
-
-    driver.sessionEventHandler.handleEvent(
-      {
-        type: 'assistant.delta',
-        agentId: 'main',
-        sessionId: 'ses-1',
-        turnId: 1,
-        delta: 'lead should stay off this member view',
-      } as Event,
-      vi.fn(),
-    );
-    driver.streamingUI.flushNow();
-    expect(stripSgr(renderTranscript(driver))).not.toContain('lead should stay off this member view');
+    expect(stripSgr(renderTranscript(driver))).not.toContain('README.md');
   });
 
   it('does not mix /btw answers into Discuss utterance blocks', async () => {

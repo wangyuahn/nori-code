@@ -53,7 +53,7 @@
 | `/auto [on\|off]` | — | 切换 auto 权限模式。开启后工具审批自动处理，Agent 不会向用户提问 | 是 |
 | `/plan [on\|off]` | — | 切换 Discuss。不带参数时翻转；显式传 `on`/`off` 时强制设置。命令名为兼容性保留 | 是 |
 | `/discuss [on\|off]` | — | 切换 Discuss（与 `/plan` 相同）。Shift-Tab 也可切换 | 是 |
-| `/team [settings]` | `/agents` | 打开已雇佣成员的会话，或浏览汇报与本回合 Discuss 发言。Enter 打开选中成员（Main 回到主会话）。Tab 查看详情。讨论节点打开 Discuss 栏。`/team settings` 设置最大部门深度 | 是 |
+| `/team [settings]` | `/agents` | 打开已雇佣成员的会话，或浏览汇报与本回合 Discuss 发言。Enter 打开选中成员（Main 留在当前会话）。Tab 查看详情。讨论节点打开 Discuss 栏。`/team settings` 设置最大部门深度 | 是 |
 | `/map` | — | 浏览当前工作目录的会话地图（挂载森林）。Enter 打开会话；M 挂载（先子后父）；U 卸载。详见[团队工程](../guides/team-engineering.md) | 是 |
 | `/plan clear` | — | 清除旧计划状态 | 否 |
 | `/subagent on\|off` | — | **v2.0 已删除。** 临时 SubAgent 模式已去掉；请用 `/team`。 | 否 |

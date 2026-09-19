@@ -23,7 +23,7 @@ Typical 2.0 flow: `TeamCreate` → Discuss (`TeamDecide` / `TeamSpeak`) → `Tea
 - **`/team`** (alias **`/agents`**) — browse and open hired partners; `/team settings` sets max department depth
 - **`/map`** — browse the mount forest; Enter opens a session; **M** mount; **U** unmount
 - **Nori Work / Web Map** — same forest with pan/zoom and local annotations (not sent to the model)
-- **`Ctrl-Y`** — show or hide the Discuss / Chat pane while `/team` has opened a member session
+- **`Ctrl-Y`** — show or hide the Discuss / Chat pane on the current session (department Chat lives on the lead)
 
 ### What does not change
 

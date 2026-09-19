@@ -81,7 +81,7 @@ The input box remains usable while the agent is thinking or calling tools, and s
 - **`Ctrl-S`**: inject the content in the input box into the running turn immediately, without waiting for it to finish
 - **`Esc` / `Ctrl-C`**: interrupt the current turn
 - **`Ctrl-O`**: globally toggle the collapsed/expanded state of tool output
-- **`Ctrl-Y`**: show or hide the Discuss / Chat pane (`/team` opens a partner session; hiding the pane does not leave that session)
+- **`Ctrl-Y`**: show or hide the Discuss / Chat pane on the current session (department Chat lives on the lead; hiding the pane does not switch sessions)
 
 ## Team engineering
 

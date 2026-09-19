@@ -6,14 +6,15 @@ import {
   type DepartmentPaneLine,
   type DepartmentPaneModel,
 } from '../components/panes/department-pane';
-import { MAIN_AGENT_ID, NO_ACTIVE_SESSION_MESSAGE } from '../constant/kimi-tui';
+import { MAIN_AGENT_ID } from '../constant/kimi-tui';
 import type { ColorToken } from '../theme';
 import type { AppState } from '../types';
 import type { TUIState } from '../tui-state';
 import { argsRecord } from '../utils/event-payload';
 import {
   currentViewingAgentId,
-  departmentChatLeaderId,
+  departmentChatOwnerId,
+  departmentPaneEmptyHint,
   departmentPaneMode,
   extractTeamChatPost,
   extractTeamSpeechText,
@@ -21,22 +22,20 @@ import {
   isTeamSpeechTool,
   shouldPaintDiscussUtterance,
   teamChatMessagesFromMetadata,
+  teamMemberCount,
   upsertTeamChatMessage,
   type TeamAgentSnapshot,
   type TeamChatMessage,
 } from '../utils/team-tree';
-import type { SessionReplayRenderer } from './session-replay';
 
 export interface TeamViewHost {
   state: TUIState;
   session: Session | undefined;
   readonly harness: KimiHarness;
-  readonly sessionReplay: SessionReplayRenderer;
   setAppState(patch: Partial<AppState>): void;
   showStatus(msg: string, color?: ColorToken): void;
   showError(msg: string): void;
   restoreEditor(): void;
-  prepareTranscriptForAgentView(agentId: string): void;
 }
 
 interface SpeechDraft {
@@ -120,68 +119,11 @@ export class TeamViewController {
 
   seedFromSession(session: Session): void {
     const metadata = session.getResumeState()?.sessionMetadata;
-    const leaderId = this.chatLeaderId();
-    if (leaderId !== undefined) {
-      this.chatMessages = teamChatMessagesFromMetadata(metadata, leaderId);
-      for (const message of this.chatMessages) {
-        this.nextLiveChatId = Math.max(this.nextLiveChatId, message.messageId + 1);
-      }
-    } else {
-      this.chatMessages = [];
+    this.chatMessages = teamChatMessagesFromMetadata(metadata, departmentChatOwnerId());
+    for (const message of this.chatMessages) {
+      this.nextLiveChatId = Math.max(this.nextLiveChatId, message.messageId + 1);
     }
     this.refreshPane();
-  }
-
-  async open(agent: TeamAgentSnapshot): Promise<void> {
-    this.host.restoreEditor();
-    if (agent.kind === 'discussion') {
-      this.reveal();
-      this.host.showStatus(
-        this.host.state.appState.discussMode ? 'Opened Discuss' : 'Opened Chat',
-      );
-      return;
-    }
-    if (agent.kind !== 'main') {
-      const current = this.host.state.appState.teamAgents.find(
-        (candidate) => candidate.agentId === agent.agentId,
-      );
-      if (agent.kind !== 'team' || current?.kind !== 'team' || current.archived === true) {
-        this.host.showError(`Team member "${agent.name}" is no longer available.`);
-        return;
-      }
-    }
-    const agentId = agent.kind === 'main' ? MAIN_AGENT_ID : agent.agentId;
-    await this.switchTo(agentId, agent.name);
-  }
-
-  async switchTo(agentId: string, name: string): Promise<void> {
-    const session = this.host.session;
-    if (session === undefined) {
-      this.host.showError(NO_ACTIVE_SESSION_MESSAGE);
-      return;
-    }
-    if (
-      agentId !== MAIN_AGENT_ID
-      && !this.host.state.appState.teamAgents.some((agent) =>
-        agent.agentId === agentId
-        && agent.kind === 'team'
-        && agent.archived !== true,
-      )
-    ) {
-      this.host.showError(`Team member "${name}" is no longer available.`);
-      return;
-    }
-    const previous = this.viewingAgentId();
-    if (previous !== agentId) {
-      this.host.setAppState({ viewingAgentId: agentId });
-      this.host.prepareTranscriptForAgentView(agentId);
-      await this.host.sessionReplay.hydrateFromReplay(session, agentId);
-    }
-    this.seedFromSession(session);
-    if (agentId !== MAIN_AGENT_ID || this.host.state.appState.discussMode) {
-      this.reveal();
-    }
-    this.host.showStatus(agentId === MAIN_AGENT_ID ? 'Viewing Main' : `Viewing ${name}`);
   }
 
   routeEvent(event: Event): void {
@@ -283,14 +225,6 @@ export class TeamViewController {
     this.nextSpeechId += 1;
   }
 
-  private chatLeaderId(): string | undefined {
-    const viewing = this.viewingAgentId();
-    const agents = this.host.state.appState.teamAgents;
-    const self = agents.find((agent) => agent.agentId === viewing);
-    if (self !== undefined) return departmentChatLeaderId(self);
-    return viewing === MAIN_AGENT_ID ? undefined : MAIN_AGENT_ID;
-  }
-
   private mount(): void {
     const pane = new DepartmentPaneComponent(this.paneModel(), {
       terminalRows: () => this.host.state.terminal.rows,
@@ -316,7 +250,12 @@ export class TeamViewController {
   private paneModel(): DepartmentPaneModel {
     const mode = departmentPaneMode(this.host.state.appState.discussMode);
     const agents = this.host.state.appState.teamAgents;
-    const discussion = findAgentDiscussion(agents, this.viewingAgentId());
+    const discussion = findAgentDiscussion(agents, MAIN_AGENT_ID);
+    const emptyHint = departmentPaneEmptyHint({
+      mode,
+      hasMembers: teamMemberCount(agents) > 0,
+      parentSessionId: this.host.state.appState.parentSessionId,
+    });
     if (mode === 'discuss') {
       const lines = this.speechLines.flatMap((draft) => {
         if (draft.text.trim().length === 0) return [];
@@ -338,7 +277,7 @@ export class TeamViewController {
         topic: discussion?.topic,
         speakingName: lines.some((line) => line.speaking === true) ? undefined : speakingName,
         lines,
-        emptyHint: 'No statements in this round yet.',
+        emptyHint,
       };
     }
     const lines: DepartmentPaneLine[] = this.chatMessages.map((message) => ({
@@ -350,10 +289,7 @@ export class TeamViewController {
     return {
       mode,
       lines,
-      emptyHint:
-        this.chatLeaderId() === undefined
-          ? 'Chat is for department members. Open a partner from /team.'
-          : 'No messages yet — members align here while working.',
+      emptyHint,
     };
   }
 }

@@ -3,11 +3,9 @@ import type { SessionGraphSummary, SessionSummary } from '@nori-code/sdk';
 import { SessionMapBrowserComponent } from '../components/dialogs/session-map-browser';
 import { TextInputDialogComponent } from '../components/dialogs/text-input-dialog';
 import { formatErrorMessage } from '../utils/event-payload';
-import { parentSessionIdOf, mountRoleOf, mountMandateOf, sessionMapLabel } from '../utils/session-map-tree';
-import { teamAgentsFromMountedChildren, type TeamAgentSnapshot } from '../utils/team-tree';
+import { parentSessionIdOf, sessionMapLabel } from '../utils/session-map-tree';
+import { buildDepartmentSnapshot } from '../utils/team-tree';
 import type { SlashCommandHost } from './dispatch';
-
-type MappedTeamAgent = TeamAgentSnapshot & { readonly hostSessionId: string };
 
 export async function handleMapCommand(host: SlashCommandHost): Promise<void> {
   let graph: SessionGraphSummary;
@@ -30,14 +28,14 @@ export async function handleMapCommand(host: SlashCommandHost): Promise<void> {
         onMount: (child, parent) => {
           void applyMount(host, child, parent, async () => {
             graph = await host.harness.getSessionGraph({ workDir: host.state.appState.workDir });
-            await refreshTeamAgents(host, graph);
+            refreshTeamAgents(host, graph);
             render();
           }, render);
         },
         onUnmount: (session) => {
           void applyUnmount(host, session, async () => {
             graph = await host.harness.getSessionGraph({ workDir: host.state.appState.workDir });
-            await refreshTeamAgents(host, graph);
+            refreshTeamAgents(host, graph);
             render();
           }, render);
         },
@@ -48,44 +46,25 @@ export async function handleMapCommand(host: SlashCommandHost): Promise<void> {
     );
   };
 
-  await refreshTeamAgents(host, graph);
+  refreshTeamAgents(host, graph);
   render();
 }
 
-async function refreshTeamAgents(
-  host: SlashCommandHost,
-  graph: SessionGraphSummary,
-): Promise<MappedTeamAgent[]> {
-  const mapped: MappedTeamAgent[] = [];
-  const byId = new Map(graph.nodes.map((node) => [node.id, node]));
-  const childrenByParent = new Map<string, SessionSummary[]>();
-  for (const edge of graph.edges) {
-    const child = byId.get(edge.childSessionId);
-    if (child === undefined) continue;
-    const list = childrenByParent.get(edge.parentSessionId) ?? [];
-    list.push(child);
-    childrenByParent.set(edge.parentSessionId, list);
-  }
-  for (const node of graph.nodes) {
-    const children = childrenByParent.get(node.id) ?? [];
-    mapped.push(
-      ...teamAgentsFromMountedChildren(sessionMapLabel(node), children.map((child) => ({
-        id: child.id,
-        title: child.title,
-        name: typeof child.metadata?.['mount_name'] === 'string' ? child.metadata['mount_name'] : child.title,
-        role: mountRoleOf(child),
-        mandate: mountMandateOf(child),
-      }))).map((agent) => ({
-        ...agent,
-        hostSessionId: node.id,
-      })),
-    );
-  }
+function refreshTeamAgents(host: SlashCommandHost, graph: SessionGraphSummary): void {
   const currentSessionId = host.session?.id;
+  if (currentSessionId === undefined) return;
+  const hostNode = graph.nodes.find((node) => node.id === currentSessionId);
   host.setAppState({
-    teamAgents: mapped.filter((agent) => agent.hostSessionId === currentSessionId),
+    teamAgents: buildDepartmentSnapshot({
+      hostSessionId: currentSessionId,
+      hostTitle: hostNode === undefined
+        ? (host.state.appState.sessionTitle ?? 'Main')
+        : sessionMapLabel(hostNode),
+      graph,
+      metadata: host.session?.getResumeState()?.sessionMetadata,
+      live: host.state.appState.teamAgents,
+    }),
   });
-  return mapped;
 }
 
 async function openSession(

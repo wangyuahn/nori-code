@@ -1,6 +1,6 @@
 import { TeamBrowserComponent } from '../components/dialogs/team-browser';
 import { TeamMemberDetailComponent } from '../components/dialogs/team-member-detail';
-import { currentViewingAgentId, teamAgentsFromSessionGraph, teamMemberSessionId, type TeamAgentSnapshot } from '../utils/team-tree';
+import { currentViewingAgentId, buildDepartmentSnapshot, teamMemberSessionId, type TeamAgentSnapshot } from '../utils/team-tree';
 import { sessionMapLabel } from '../utils/session-map-tree';
 import { formatErrorMessage } from '../utils/event-payload';
 import type { TranscriptEntry } from '../types';
@@ -24,11 +24,15 @@ async function refreshDepartmentFromGraph(host: SlashCommandHost): Promise<void>
     const graph = await host.harness.getSessionGraph({ workDir: host.state.appState.workDir });
     const hostNode = graph.nodes.find((node) => node.id === sessionId);
     host.setAppState({
-      teamAgents: teamAgentsFromSessionGraph(
-        sessionId,
-        hostNode === undefined ? (host.state.appState.sessionTitle ?? 'Main') : sessionMapLabel(hostNode),
+      teamAgents: buildDepartmentSnapshot({
+        hostSessionId: sessionId,
+        hostTitle: hostNode === undefined
+          ? (host.state.appState.sessionTitle ?? 'Main')
+          : sessionMapLabel(hostNode),
         graph,
-      ),
+        metadata: host.session?.getResumeState()?.sessionMetadata,
+        live: host.state.appState.teamAgents,
+      }),
     });
   } catch (error) {
     host.showError(formatErrorMessage(error));
@@ -45,6 +49,12 @@ function showTeamBrowser(host: SlashCommandHost): void {
       onSelect: (agent) => {
         if (agent.kind === 'main') {
           host.restoreEditor();
+          return;
+        }
+        if (agent.kind === 'discussion') {
+          host.restoreEditor();
+          host.teamViewController.reveal();
+          host.showStatus(host.state.appState.discussMode ? 'Opened Discuss' : 'Opened Chat');
           return;
         }
         const sessionId = teamMemberSessionId(agent);

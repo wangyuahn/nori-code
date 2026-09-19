@@ -274,11 +274,14 @@ export class FooterComponent implements Component {
     if (hired > 0) {
       core.push(chalk.hex(colors.textMuted)(`[team ${String(hired)}]`));
     }
-    const viewingId = state.viewingAgentId;
-    if (viewingId !== undefined && viewingId !== 'main') {
-      const viewingName =
-        state.teamAgents.find((agent) => agent.agentId === viewingId)?.name ?? viewingId;
-      core.push(chalk.hex(colors.primary).bold(viewingName));
+    const parentId = state.parentSessionId;
+    if (parentId !== undefined && parentId.length > 0) {
+      const mountedName = state.sessionTitle?.trim();
+      core.push(
+        chalk.hex(colors.primary).bold(
+          mountedName !== undefined && mountedName.length > 0 ? mountedName : 'member',
+        ),
+      );
     }
     const speaking = teamSpeakingLabel(state.teamAgents);
     if (speaking !== undefined) {
