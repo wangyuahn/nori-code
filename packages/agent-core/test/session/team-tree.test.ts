@@ -6,6 +6,7 @@ import {
   canCreateDepartmentInTree,
   DEFAULT_TEAM_MAX_DEPTH,
   departmentDepth,
+  departmentSessionIds,
   directMessageRelation,
   sessionMountDepth,
   teamDepth,
@@ -166,6 +167,19 @@ describe('directMessageRelation', () => {
     };
     expect(relation('main', 'discussion-1', withDiscussion)).toBeUndefined();
     expect(relation('discussion-1', 'main', withDiscussion)).toBeUndefined();
+  });
+});
+
+describe('departmentSessionIds', () => {
+  it('collects the mount tree around a session', () => {
+    const parentById = {
+      root: undefined,
+      lead: 'root',
+      member: 'lead',
+      other: 'root',
+    };
+    expect(departmentSessionIds(parentById, 'member').toSorted()).toEqual(['lead', 'member', 'other', 'root']);
+    expect(departmentSessionIds(parentById, 'missing')).toEqual(['missing']);
   });
 });
 

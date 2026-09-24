@@ -1,5 +1,5 @@
 import type { ToolCall } from '../hooks/useChatMessages';
-import { editLineOperationsDiff, editOperationLabel, parseEditLineOperations } from './edit-line-ops';
+import { editLineOperationStats, editLineOperationsDiff, editOperationLabel, parseEditLineOperations } from './edit-line-ops';
 
 export interface ToolDetailField {
   key: string;
@@ -177,6 +177,59 @@ function extraNumericFields(args: Record<string, unknown>, keys: readonly string
       : field.key === 'limit' ? { ...field, label: tr('Limit', '行数') }
         : field
   ));
+}
+
+export interface EditDiffLine {
+  kind: 'add' | 'del' | 'context' | 'meta';
+  text: string;
+}
+
+export function editChangeCounts(tool: Pick<ToolCall, 'name' | 'args' | 'result'>): { additions: number; deletions: number } {
+  const args = asRecord(tool.args);
+  const normalized = tool.name.toLowerCase();
+  const oldText = firstString(args.old_string, args.old_text) ?? '';
+  const newText = firstString(args.new_string, args.content, args.new_text) ?? '';
+  const fromResult = diffCounts(tool.result);
+  const fromOps = /edit|patch/.test(normalized) ? editLineOperationStats(args.line_ops) : undefined;
+  const hasOps = fromOps !== undefined && (fromOps.additions > 0 || fromOps.deletions > 0);
+  return {
+    additions: fromResult?.additions ?? (hasOps ? fromOps.additions : countLines(newText)),
+    deletions: fromResult?.deletions ?? (hasOps ? fromOps.deletions : normalized === 'write' ? 0 : countLines(oldText)),
+  };
+}
+
+export function editUnifiedDiff(tool: Pick<ToolCall, 'name' | 'args'>): EditDiffLine[] {
+  const args = asRecord(tool.args);
+  const operations = parseEditLineOperations(args.line_ops);
+  const raw = operations.length > 0
+    ? editLineOperationsDiff(args.line_ops)
+    : formatEditDiff(
+      firstString(args.old_string, args.old_text),
+      firstString(args.new_string, args.new_text, args.content),
+      (english) => english,
+    ).split('\n');
+  return raw.filter(line => line.length > 0).map(line => {
+    if (line.startsWith('@@')) return { kind: 'meta', text: line };
+    if (line.startsWith('+')) return { kind: 'add', text: line };
+    if (line.startsWith('-')) return { kind: 'del', text: line };
+    return { kind: 'context', text: line };
+  });
+}
+
+function diffCounts(value: string | undefined): { additions: number; deletions: number } | undefined {
+  if (!value?.includes('\n')) return undefined;
+  let additions = 0;
+  let deletions = 0;
+  for (const line of value.split(/\r?\n/)) {
+    if (line.startsWith('+') && !line.startsWith('+++')) additions += 1;
+    if (line.startsWith('-') && !line.startsWith('---')) deletions += 1;
+  }
+  return additions > 0 || deletions > 0 ? { additions, deletions } : undefined;
+}
+
+function countLines(value: string): number {
+  if (!value) return 0;
+  return value.split(/\r?\n/).length;
 }
 
 export function formatEditDiff(before: string | undefined, after: string | undefined, tr: Translate): string {

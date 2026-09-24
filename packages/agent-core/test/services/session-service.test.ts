@@ -1262,6 +1262,7 @@ describe('SessionService children', () => {
     expect(state.forkPayloads).toEqual([]);
     expect(state.createPayloads.at(-1)).toMatchObject({
       workDir: '/tmp/child',
+      permission: 'manual',
       metadata: {
         cwd: '/tmp/child',
         topic: 'btw',

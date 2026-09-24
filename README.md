@@ -11,7 +11,7 @@ Nori is a coding-agent workspace forked from [Kimi Code CLI](https://github.com/
 ![Nori Work browser workspace](docs/images/nori-work-browser.png)
 
 > [!NOTE]
-> Current delegation is documented in [CHANGELOG.md](CHANGELOG.md) under `v2.0.0`. Older entries that describe SubAgent, DAG orchestration, or `nori_swarm_launch` are historical.
+> Current delegation is documented in [CHANGELOG.md](CHANGELOG.md) under `v2.0.0`. Fixes since that release are under `v2.0.1`. Older entries that describe SubAgent, DAG orchestration, or `nori_swarm_launch` are historical.
 
 ---
 
@@ -176,7 +176,7 @@ nori web
 
 Requires Node.js `>=24.15.0` (root `engines`; `.npmrc` sets `engine-strict`). After entering a project, `/login` or `/provider`. Team workflow: [Team engineering](docs/en/guides/team-engineering.md).
 
-Nori Work ships as a **standalone installer**: [Releases](https://github.com/wangyuahn/nori-code/releases). Current desktop tag is **2.0.0**; **delegation follows the v2 changelog and this README**.
+Nori Work ships as a **standalone installer**: [Releases](https://github.com/wangyuahn/nori-code/releases). Current desktop tag is **2.0.1**; **delegation follows the v2 changelog and this README**.
 
 ### From source
 

@@ -8,12 +8,14 @@ import { LocalFetchURLProvider } from '#/tools/providers/local-fetch-url';
 import type { PromisableMethods } from '#/utils/types';
 import { getCoreVersion } from '#/version';
 import { resolveThinkingEffort } from '../agent/config/thinking';
+import type { PermissionMode } from '../agent/permission';
 import { Agent } from '../agent';
 import {
   ensureKimiHome,
   loadRuntimeConfigSafe,
   mergeConfigPatch,
-  readConfigFileForUpdate,
+  readConfigFile,
+  salvageConfigFile,
   normalizeAdditionalDirs,
   readWorkspaceAdditionalDirs,
   resolveWorkspaceAdditionalDirs,
@@ -37,7 +39,7 @@ import {
   type DepartmentRuntime,
   type SessionTopologyRuntime,
 } from '../session/department-runtime';
-import { mountedChildrenOf } from '../session/team-tree';
+import { departmentSessionIds, mountedChildrenOf } from '../session/team-tree';
 import { exportSessionDirectory } from '../session/export';
 import {
   ProviderManager,
@@ -204,6 +206,9 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
   private runtime: ToolServices | undefined;
   private config: KimiConfig;
   private configWarnings: readonly string[] = [];
+  /** Invalid sections dropped by the last salvage, written into diagnostics after a successful save. */
+  private pendingDroppedConfig: readonly string[] = [];
+  private readonly permissionPropagation = new Set<string>();
   private readonly runtimeOverride: ToolServices | undefined;
   private readonly browserProvider: BrowserProvider | undefined;
   private readonly userHomeDir: string;
@@ -735,8 +740,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
 
   async setKimiConfig(input: SetKimiConfigPayload): Promise<KimiConfig> {
     const config = mergeConfigPatch(this.readConfigForWrite(), input);
-    await writeConfigFile(this.configPath, config);
-    const updated = this.reloadRuntimeConfig();
+    const updated = await this.commitConfigWrite(config);
     if ('customAgents' in input) {
       await Promise.all(
         Array.from(this.sessions.values(), (session) =>
@@ -774,8 +778,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       config.defaultProvider = undefined;
     }
 
-    await writeConfigFile(this.configPath, config);
-    return this.reloadRuntimeConfig();
+    return this.commitConfigWrite(config);
   }
 
   prompt({ sessionId, ...payload }: SessionAgentPayload<PromptPayload>) {
@@ -1303,7 +1306,42 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
   }
 
   private readConfigForWrite(): KimiConfig {
-    return readConfigFileForUpdate(this.configPath);
+    this.pendingDroppedConfig = [];
+    try {
+      return readConfigFile(this.configPath);
+    } catch (error) {
+      if (!(error instanceof KimiError) || error.code !== ErrorCodes.CONFIG_INVALID) {
+        throw error;
+      }
+      const salvaged = salvageConfigFile(this.configPath);
+      if (salvaged.fileError !== undefined || salvaged.dropped.length === 0) {
+        const cause = salvaged.fileError ?? error;
+        const detail = cause instanceof Error && /Invalid TOML|Failed to read/.test(cause.message)
+          ? ` ${cause.message}`
+          : '';
+        throw new KimiError(
+          ErrorCodes.CONFIG_INVALID,
+          `Cannot change settings while ${this.configPath} is invalid — fix it first (run \`nori doctor\` for details).${detail}`,
+          { cause },
+        );
+      }
+      this.pendingDroppedConfig = salvaged.dropped;
+      return salvaged.config;
+    }
+  }
+
+  private async commitConfigWrite(config: KimiConfig): Promise<KimiConfig> {
+    const dropped = this.pendingDroppedConfig;
+    this.pendingDroppedConfig = [];
+    await writeConfigFile(this.configPath, config);
+    const updated = this.reloadRuntimeConfig();
+    if (dropped.length > 0) {
+      this.configWarnings = [
+        `Saved settings and removed invalid config: ${dropped.join(', ')}.`,
+        ...this.configWarnings,
+      ];
+    }
+    return updated;
   }
 
   private reloadRuntimeConfig(): KimiConfig {
@@ -1384,6 +1422,7 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
         readonly mandate: string;
         readonly teamLeaderAgentId?: string;
       }) => this.createMountedChildSession(input),
+      onDepartmentPermissionMode: (mode: PermissionMode) => this.propagateDepartmentPermission(sessionId, mode),
       updateSessionIdentity: (input: {
         readonly sessionId: string;
         readonly name?: string;
@@ -1479,9 +1518,16 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       setWriteLocked: async (sessionId: string, locked: boolean) => {
         const session = await this.sessionRef(sessionId);
         const main = await session.ensureAgentResumed('main');
-        main.teamWriteLocked = locked;
-        main.permission.setToolsReadonly(locked);
-        if (locked) main.permission.setMode('manual');
+        if (locked) {
+          session.holdDepartmentWriteLock();
+          main.teamWriteLocked = true;
+          main.permission.setToolsReadonly(true);
+          if (main.permission.mode !== 'manual') main.permission.setMode('manual');
+          return;
+        }
+        main.teamWriteLocked = false;
+        main.permission.setToolsReadonly(false);
+        session.releaseDepartmentWriteLock();
       },
       publishDiscussionStatement: async (parentSessionId: string, speakerSessionId: string, message: string) => {
         const parent = await this.sessionRef(parentSessionId);
@@ -1601,6 +1647,30 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
       fillChildIdentity: async (parentSessionId: string, brief: string) =>
         this.fillChildIdentityFromParent(parentSessionId, brief),
     };
+  }
+
+  /**
+   * YOLO / auto / manual is one switch for a department. Mounted members are
+   * other sessions, so a change on any of them has to land on the rest of the
+   * tree or their Bash calls keep asking.
+   */
+  private async propagateDepartmentPermission(originSessionId: string, mode: PermissionMode): Promise<void> {
+    if (this.permissionPropagation.has(originSessionId)) return;
+    this.permissionPropagation.add(originSessionId);
+    try {
+      const parentById = await this.listMountParentById();
+      for (const sessionId of departmentSessionIds(parentById, originSessionId)) {
+        if (sessionId === originSessionId) continue;
+        try {
+          const session = await this.sessionRef(sessionId);
+          session.applySessionPermissionMode(mode, { propagate: false });
+        } catch (error) {
+          log.warn('department permission propagation skipped a session', { sessionId, error });
+        }
+      }
+    } finally {
+      this.permissionPropagation.delete(originSessionId);
+    }
   }
 
   private async listMountParentById(): Promise<Readonly<Record<string, string | undefined>>> {
@@ -2008,9 +2078,11 @@ export class KimiCore implements PromisableMethods<CoreAPI> {
   }): Promise<{ readonly sessionId: string; readonly agentId: string }> {
     const parentSummary = await this.sessionStore.get(input.parentSessionId);
     const cwd = parentSummary.workDir;
+    const inherited = this.sessions.get(input.parentSessionId)?.currentPermissionMode();
     const child = await this.createSession({
       workDir: cwd,
       metadata: { cwd },
+      permission: inherited,
     });
     try {
       await this.renameSession({ sessionId: child.id, title: input.title });

@@ -554,7 +554,7 @@ describe('registerProviderCommand', () => {
     // Simulate the strict write path rejecting because config.toml is invalid.
     harness.removeProvider = async () => {
       throw new Error(
-        'Cannot change settings while config.toml is invalid — fix it first (run `kimi doctor` for details).',
+        'Cannot change settings while config.toml is invalid — fix it first (run `nori doctor` for details).',
       );
     };
     const { deps, stderr, exitCodes } = makeDeps(harness);

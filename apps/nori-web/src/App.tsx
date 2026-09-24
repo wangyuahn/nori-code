@@ -108,6 +108,15 @@ function loadSidebarExpanded(): boolean {
   return true;
 }
 
+function projectFolders(sessions: readonly Session[]): string[] {
+  const paths: string[] = [];
+  for (const session of sessions) {
+    const cwd = session.metadata?.cwd;
+    if (typeof cwd === 'string' && cwd.trim()) paths.push(cwd.trim());
+  }
+  return paths;
+}
+
 function persistSidebarExpanded(expanded: boolean): void {
   try {
     window.localStorage.setItem(SIDEBAR_EXPANDED_STORAGE_KEY, String(expanded));
@@ -514,15 +523,13 @@ export function App() {
   };
 
   const startNewConversation = () => {
-    const cwd = selectedProjectRoot?.trim() || activeSession?.metadata?.cwd?.trim();
-    if (!cwd) {
-      setPendingCreateSession(true);
-      void chooseProject(undefined, { createSession: true });
-      return;
-    }
-    void createTopLevelSession(cwd).then((createdId) => {
-      if (createdId) setActiveView('chat');
-    });
+    setPendingInitialMessage(null);
+    setPendingProjectParentId(null);
+    setPendingCreateStayOnMap(false);
+    pendingMapCreateRef.current = null;
+    pendingProjectSelectionRef.current = null;
+    setPendingCreateSession(true);
+    setFolderPickerOpen(true);
   };
 
   const handleSendMessage = async (text: string, attachments: PromptAttachment[] = [], behavior: 'queue' | 'steer' = 'queue', options?: PromptExecutionOptions) => {
@@ -785,6 +792,7 @@ export function App() {
       <ErrorCenter />
       <ProjectFolderPicker
         open={folderPickerOpen}
+        projects={projectFolders(sessions)}
         onClose={() => {
           pendingMapCreateRef.current?.(null);
           setFolderPickerOpen(false);

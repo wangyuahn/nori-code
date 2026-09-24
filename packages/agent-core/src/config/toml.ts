@@ -84,7 +84,7 @@ export function readConfigFileForUpdate(filePath: string): KimiConfig {
     if (error instanceof KimiError && error.code === ErrorCodes.CONFIG_INVALID) {
       throw new KimiError(
         ErrorCodes.CONFIG_INVALID,
-        `Cannot change settings while ${filePath} is invalid — fix it first (run \`kimi doctor\` for details).`,
+        `Cannot change settings while ${filePath} is invalid — fix it first (run \`nori doctor\` for details).`,
         { cause: error },
       );
     }
@@ -121,22 +121,28 @@ export interface RuntimeConfigLoadResult {
   readonly fileError?: KimiError;
 }
 
+export interface SalvagedConfigFile {
+  readonly config: KimiConfig;
+  readonly dropped: readonly string[];
+  readonly fileWarnings: readonly string[];
+  /**
+   * Set when the file cannot be used at all. `config` is then pure defaults
+   * and must not be written back over the broken file.
+   */
+  readonly fileError?: KimiError;
+}
+
 /**
- * Lenient variant of `loadRuntimeConfig` that never throws: schema errors
- * drop only the offending sections (whole entry for `providers`/`models`,
- * whole top-level section otherwise) and a bad NORI_MODEL_* env overlay is
- * skipped, each reported as a warning. A file that cannot be used at all
- * additionally sets `fileError` so startup can fail fast while mid-run
- * reloads degrade. Runtime read paths use this; write paths must keep using
- * the strict readers so a broken file is never silently rewritten.
+ * Parse config.toml for a settings write. Schema errors drop only the
+ * offending sections so the rest of the file can be saved. Syntax errors and
+ * unreadable files set `fileError` and must not be rewritten.
+ * Does not apply `NORI_MODEL_*` overlays — those must never be persisted.
  */
-export function loadRuntimeConfigSafe(
-  filePath: string,
-  env: Readonly<Record<string, string | undefined>> = process.env,
-): RuntimeConfigLoadResult {
+export function salvageConfigFile(filePath: string): SalvagedConfigFile {
   const fileWarnings: string[] = [];
   let fileError: KimiError | undefined;
   let config = getDefaultConfig();
+  let dropped: readonly string[] = [];
 
   let text: string | undefined;
   try {
@@ -155,8 +161,6 @@ export function loadRuntimeConfigSafe(
     try {
       data = parseToml(text) as Record<string, unknown>;
     } catch (error) {
-      // Same message as the strict parser, code frame included, so failing
-      // startup points straight at the offending line.
       fileError = new KimiError(
         ErrorCodes.CONFIG_INVALID,
         `Invalid TOML in ${filePath}: ${describeUnknownError(error)}`,
@@ -180,14 +184,34 @@ export function loadRuntimeConfigSafe(
         );
       } else {
         config = salvaged.config;
+        dropped = salvaged.dropped;
         if (salvaged.dropped.length > 0) {
           fileWarnings.push(
-            `Ignored invalid config in ${filePath}: ${salvaged.dropped.join(', ')}. Run \`kimi doctor\` for details.`,
+            `Ignored invalid config in ${filePath}: ${salvaged.dropped.join(', ')}. Run \`nori doctor\` for details.`,
           );
         }
       }
     }
   }
+
+  return { config, dropped, fileWarnings, fileError };
+}
+
+/**
+ * Lenient variant of `loadRuntimeConfig` that never throws: schema errors
+ * drop only the offending sections (whole entry for `providers`/`models`,
+ * whole top-level section otherwise) and a bad NORI_MODEL_* env overlay is
+ * skipped, each reported as a warning. A file that cannot be used at all
+ * additionally sets `fileError` so startup can fail fast while mid-run
+ * reloads degrade.
+ */
+export function loadRuntimeConfigSafe(
+  filePath: string,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): RuntimeConfigLoadResult {
+  const salvaged = salvageConfigFile(filePath);
+  const fileWarnings = [...salvaged.fileWarnings];
+  let config = salvaged.config;
 
   const envWarnings: string[] = [];
   try {
@@ -198,7 +222,7 @@ export function loadRuntimeConfigSafe(
     );
   }
 
-  return { config, fileWarnings, envWarnings, fileError };
+  return { config, fileWarnings, envWarnings, fileError: salvaged.fileError };
 }
 
 /** Sections keyed by user-chosen names where single entries can be dropped. */

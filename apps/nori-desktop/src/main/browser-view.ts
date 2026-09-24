@@ -19,16 +19,19 @@ import {
   type WebContents,
 } from 'electron';
 
-import { BROWSER_HOME_URL, isAllowedBrowserUrl, localHtmlPath, normalizeBrowserInput } from './browser-url';
+import { BROWSER_HOME_URL, isAllowedBrowserUrl, localHtmlPath, normalizeBrowserInput, resolveBrowserToolUrl } from './browser-url';
 import {
   captureScreenshot,
   clearPageAnnotations,
   clickPage,
   firstVisibleFileInputRef,
+  historyMoveOutcome,
   listPageAnnotations,
   pressKey,
   scrollPage,
   setPageAnnotationMode,
+  settleFinishedRequests,
+  snapshotHasContent,
   snapshotPage,
   type BrowserAnnotation,
   type NativeBrowserActionRequest,
@@ -37,6 +40,7 @@ import {
   unavailablePageResult,
   updatePageAnnotation,
   waitForPage,
+  waitForRenderedContent,
 } from './browser-automation';
 import {
   BrowserDebuggerController,
@@ -653,21 +657,38 @@ export class BrowserViewManager {
 
   private async runAction(tab: ManagedTab, request: NativeBrowserActionRequest): Promise<NativeBrowserActionResult> {
     const wc = tab.view.webContents;
+    if (LAYOUT_ACTIONS.has(request.action)) this.ensureRenderableBounds();
     switch (request.action) {
-      case 'snapshot':
-        return { ...this.pageResult(tab, 'Page snapshot captured.'), output: await snapshotPage(wc) };
+      case 'snapshot': {
+        await waitForRenderedContent(wc);
+        const output = await snapshotPage(wc);
+        if (!snapshotHasContent(output)) {
+          return {
+            ok: false,
+            output: `Page snapshot has no text yet. Wait for the page to render, scroll, or reload, then snapshot again.\n${output}`,
+          };
+        }
+        return { ...this.pageResult(tab, 'Page snapshot captured.'), output };
+      }
       case 'navigate': {
         if (request.url === undefined) return { ok: false, output: 'navigate requires url.' };
-        const target = normalizeBrowserInput(request.url);
-        if (!isAllowedBrowserUrl(target)) return { ok: false, output: `Blocked unsupported URL: ${target}` };
+        const resolved = resolveBrowserToolUrl(request.url);
+        if ('error' in resolved) return { ok: false, output: resolved.error };
+        const target = resolved.url;
+        tab.consoleMessages.length = 0;
         tab.state = { ...tab.state, url: target, error: undefined, loading: true };
+        this.syncViews();
         this.emitState();
         const loaded = await this.load(tab, target, request.timeoutMs ?? 30_000);
-        return loaded
-          ? this.pageResult(tab, `Navigated to ${target}.`)
-          : { ...this.pageResult(tab, tab.state.error ?? `Failed to navigate to ${target}.`), ok: false };
+        if (!loaded) return { ...this.pageResult(tab, tab.state.error ?? `Failed to navigate to ${target}.`), ok: false };
+        await waitForRenderedContent(wc);
+        return this.pageResult(tab, `Navigated to ${target}.`);
       }
-      case 'click': return clickPage(wc, request);
+      case 'click': {
+        const clicked = await clickPage(wc, request);
+        if (clicked.ok) await this.waitForClickNavigation(wc);
+        return clicked;
+      }
       case 'type':
         return request.ref === undefined || request.text === undefined
           ? { ok: false, output: 'type requires ref and text.' }
@@ -680,33 +701,40 @@ export class BrowserViewManager {
         return request.key === undefined ? { ok: false, output: 'keypress requires key.' } : pressKey(wc, request.key);
       case 'scroll': return scrollPage(wc, request.deltaX, request.deltaY);
       case 'wait': return waitForPage(wc, request);
-      case 'screenshot': return captureScreenshot(wc);
+      case 'screenshot':
+        await waitForRenderedContent(wc);
+        return captureScreenshot(wc);
       case 'back':
-        if (wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack();
-        return this.pageResult(tab, 'Navigated back.');
+        return this.goHistory(tab, 'back', request.timeoutMs ?? 8_000);
       case 'forward':
-        if (wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward();
-        return this.pageResult(tab, 'Navigated forward.');
-      case 'reload':
-        wc.reload();
+        return this.goHistory(tab, 'forward', request.timeoutMs ?? 8_000);
+      case 'reload': {
+        const reloaded = await this.reloadAndWait(wc, request.timeoutMs ?? 30_000);
+        if (!reloaded) return { ...this.pageResult(tab, tab.state.error ?? 'Failed to reload the page.'), ok: false };
+        await waitForRenderedContent(wc);
         return this.pageResult(tab, 'Reloaded the page.');
+      }
       case 'retry':
         tab.recoveryAttempts = 0;
         tab.state = { ...tab.state, error: undefined, loading: true };
         const loaded = await this.load(tab, tab.state.url, request.timeoutMs ?? 30_000);
-        return loaded && tab.state.error === undefined
-          ? this.pageResult(tab, 'Retried the failed page successfully.')
-          : { ...this.pageResult(tab, tab.state.error ?? 'Failed to reload the page.'), ok: false };
+        if (loaded && tab.state.error === undefined) {
+          await waitForRenderedContent(wc);
+          return this.pageResult(tab, 'Retried the failed page successfully.');
+        }
+        return { ...this.pageResult(tab, tab.state.error ?? 'Failed to reload the page.'), ok: false };
       case 'get_console':
         return this.pageResult(tab, tab.consoleMessages.length === 0 ? 'No console messages.' : tab.consoleMessages.join('\n'));
       case 'get_network': {
+        if (!wc.isLoading()) settleFinishedRequests(tab.state.network, Date.now());
         const filter = request.filter?.toLowerCase();
         const entries = tab.state.network.filter(item => filter === undefined
           || item.url.toLowerCase().includes(filter)
           || item.method.toLowerCase().includes(filter));
+        const loading = wc.isLoading() ? 'Page is loading.' : 'Page is idle.';
         return this.pageResult(tab, entries.length === 0
-          ? 'No matching network requests.'
-          : `<browser_network untrusted="true">\n${entries.slice(0, 100).map(formatNetworkEntry).join('\n')}\n</browser_network>`);
+          ? `${loading}\nNo matching network requests.`
+          : `${loading}\n<browser_network untrusted="true">\n${entries.slice(0, 100).map(formatNetworkEntry).join('\n')}\n</browser_network>`);
       }
       case 'download_list':
         return this.pageResult(tab, this.downloads.length === 0
@@ -758,6 +786,131 @@ export class BrowserViewManager {
     return this.pageResult(tab, `Selected ${String(paths.length)} file${paths.length === 1 ? '' : 's'} for upload in ${ref}.`);
   }
 
+  private ensureRenderableBounds(): void {
+    const sized = this.bounds.width > 0 && this.bounds.height > 0;
+    if (!sized) {
+      const content = this.window.getContentBounds();
+      this.bounds = {
+        x: 0,
+        y: 0,
+        width: Math.max(content.width, 1100),
+        height: Math.max(content.height - 64, 720),
+      };
+    }
+    this.visible = true;
+    this.syncViews();
+  }
+
+  private waitForIdle(wc: WebContents, timeoutMs: number): Promise<void> {
+    if (wc.isDestroyed() || !wc.isLoading()) return Promise.resolve();
+    return new Promise(resolve => {
+      const done = () => {
+        clearTimeout(timer);
+        wc.removeListener('did-stop-loading', done);
+        wc.removeListener('did-fail-load', done);
+        resolve();
+      };
+      const timer = setTimeout(done, timeoutMs);
+      timer.unref?.();
+      wc.on('did-stop-loading', done);
+      wc.on('did-fail-load', done);
+    });
+  }
+
+  private waitForClickNavigation(wc: WebContents): Promise<void> {
+    if (wc.isDestroyed()) return Promise.resolve();
+    if (wc.isLoading()) return this.waitForIdle(wc, 10_000).then(() => waitForRenderedContent(wc, 2_000));
+    return new Promise(resolve => {
+      const finish = () => {
+        clearTimeout(timer);
+        wc.removeListener('did-start-loading', onStart);
+        resolve();
+      };
+      const onStart = () => {
+        clearTimeout(timer);
+        wc.removeListener('did-start-loading', onStart);
+        void this.waitForIdle(wc, 10_000).then(() => waitForRenderedContent(wc, 2_000)).then(resolve);
+      };
+      const timer = setTimeout(finish, 200);
+      timer.unref?.();
+      wc.on('did-start-loading', onStart);
+    });
+  }
+
+  private waitForUrlChange(wc: WebContents, previous: string, timeoutMs: number): Promise<boolean> {
+    if (wc.isDestroyed()) return Promise.resolve(false);
+    if (wc.getURL() !== previous && !wc.isLoading()) return Promise.resolve(true);
+    return new Promise(resolve => {
+      let settled = false;
+      const finish = (changed: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        wc.removeListener('did-navigate', onNavigate);
+        wc.removeListener('did-navigate-in-page', onNavigate);
+        wc.removeListener('did-stop-loading', onStop);
+        wc.removeListener('did-fail-load', onFail);
+        resolve(changed);
+      };
+      const onNavigate = (_event: Electron.Event, url: string) => {
+        if (url !== previous) finish(true);
+      };
+      const onStop = () => {
+        if (wc.getURL() !== previous) finish(true);
+      };
+      const onFail = () => finish(false);
+      const timer = setTimeout(() => finish(wc.getURL() !== previous), timeoutMs);
+      timer.unref?.();
+      wc.on('did-navigate', onNavigate);
+      wc.on('did-navigate-in-page', onNavigate);
+      wc.on('did-stop-loading', onStop);
+      wc.on('did-fail-load', onFail);
+    });
+  }
+
+  private async goHistory(tab: ManagedTab, direction: 'back' | 'forward', timeoutMs: number): Promise<NativeBrowserActionResult> {
+    const wc = tab.view.webContents;
+    const canMove = direction === 'back' ? wc.navigationHistory.canGoBack() : wc.navigationHistory.canGoForward();
+    const before = wc.getURL();
+    const blocked = historyMoveOutcome(direction, canMove, before, before);
+    if (!blocked.ok) return blocked;
+    if (direction === 'back') wc.navigationHistory.goBack();
+    else wc.navigationHistory.goForward();
+    const moved = await this.waitForUrlChange(wc, before, timeoutMs);
+    const after = wc.getURL() || before;
+    const outcome = historyMoveOutcome(direction, true, before, moved ? after : before);
+    if (!outcome.ok) return outcome;
+    await waitForRenderedContent(wc);
+    return this.pageResult(tab, outcome.summary);
+  }
+
+  private reloadAndWait(wc: WebContents, timeoutMs: number): Promise<boolean> {
+    return new Promise(resolve => {
+      let sawStart = wc.isLoading();
+      let settled = false;
+      const finish = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        wc.removeListener('did-start-loading', onStart);
+        wc.removeListener('did-stop-loading', onStop);
+        wc.removeListener('did-fail-load', onFail);
+        resolve(ok);
+      };
+      const onStart = () => { sawStart = true; };
+      const onStop = () => { if (sawStart) finish(!wc.isDestroyed()); };
+      const onFail = (_event: Electron.Event, errorCode: number, _description: string, _url: string, isMainFrame: boolean) => {
+        if (isMainFrame && errorCode !== -3) finish(false);
+      };
+      const timer = setTimeout(() => finish(sawStart && !wc.isDestroyed() && !wc.isLoading()), timeoutMs);
+      timer.unref?.();
+      wc.on('did-start-loading', onStart);
+      wc.on('did-stop-loading', onStop);
+      wc.on('did-fail-load', onFail);
+      wc.reload();
+    });
+  }
+
   private pageResult(tab: ManagedTab, output: string): NativeBrowserActionResult {
     return { ok: true, output, url: tab.view.webContents.getURL(), title: tab.view.webContents.getTitle(), tabId: tab.state.id };
   }
@@ -766,6 +919,14 @@ export class BrowserViewManager {
     const tab = this.tabs.get(tabId);
     if (tab === undefined || event.requestId === '') return;
     if (event.phase === 'request') {
+      const existing = tab.state.network.find(candidate => candidate.id === event.requestId);
+      if (existing !== undefined) {
+        if (event.url !== undefined) existing.url = event.url;
+        existing.state = 'pending';
+        existing.error = undefined;
+        this.scheduleStateEmit();
+        return;
+      }
       const entry: BrowserNetworkEntry = {
         id: event.requestId,
         method: event.method ?? 'GET',
@@ -829,9 +990,10 @@ export class BrowserViewManager {
     const wc = tab.view.webContents;
     const refresh = (partial: Partial<BrowserTabState> = {}) => {
       if (wc.isDestroyed()) return;
+      const currentUrl = wc.getURL();
       tab.state = {
         ...tab.state,
-        url: wc.getURL() || tab.state.url,
+        url: currentUrl && currentUrl !== BROWSER_HOME_URL ? currentUrl : tab.state.url,
         title: wc.getTitle() || tab.state.title,
         canGoBack: wc.navigationHistory.canGoBack(),
         canGoForward: wc.navigationHistory.canGoForward(),
@@ -844,12 +1006,16 @@ export class BrowserViewManager {
 
     wc.on('page-title-updated', (_event, title) => refresh({ title }));
     wc.on('did-navigate', (_event, url) => {
+      tab.consoleMessages.length = 0;
       this.clearTabPendingState(tab.state.id);
       refresh({ url, error: undefined, annotationMode: false, annotations: [] });
     });
     wc.on('did-navigate-in-page', (_event, url) => refresh({ url, error: undefined }));
     wc.on('did-start-loading', () => refresh({ loading: true, error: undefined }));
-    wc.on('did-stop-loading', () => refresh({ loading: false }));
+    wc.on('did-stop-loading', () => {
+      refresh({ loading: false });
+      if (!wc.isLoading()) settleFinishedRequests(tab.state.network, Date.now());
+    });
     wc.on('did-finish-load', () => { tab.recoveryAttempts = 0; });
     wc.on('did-fail-load', (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
       if (!isMainFrame || errorCode === -3) return;
@@ -1015,6 +1181,20 @@ function installBrowserSessionPolicy(browserSession: Electron.Session): void {
     manager.trackDownload(item, webContents.id);
   });
 }
+
+const LAYOUT_ACTIONS = new Set<NativeBrowserActionRequest['action']>([
+  'snapshot',
+  'navigate',
+  'click',
+  'type',
+  'keypress',
+  'scroll',
+  'screenshot',
+  'back',
+  'forward',
+  'reload',
+  'retry',
+]);
 
 function sanitizeBounds(bounds: BrowserBounds): BrowserBounds {
   const number = (value: number) => Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;

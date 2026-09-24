@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ToolCall } from '../src/hooks/useChatMessages';
-import { toolCallDetailFields } from '../src/utils/tool-call-detail';
+import { editUnifiedDiff, toolCallDetailFields } from '../src/utils/tool-call-detail';
 
 const tr = (english: string) => english;
 
@@ -49,6 +49,16 @@ describe('tool call detail fields', () => {
       query: 'No query',
       error: 'Tool failed without an error message',
     });
+  });
+
+  it('renders an edit as removed and added lines', () => {
+    expect(editUnifiedDiff({
+      name: 'Edit',
+      args: { path: 'core-impl.ts', old_string: 'const a = 1;', new_string: 'const a = 2;' },
+    })).toEqual([
+      { kind: 'del', text: '-const a = 1;' },
+      { kind: 'add', text: '+const a = 2;' },
+    ]);
   });
 
   it('shows hash-anchored edit path, tag, operations, diff, and apply result', () => {

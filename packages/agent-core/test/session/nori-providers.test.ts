@@ -53,8 +53,50 @@ describe('Nori filesystem memory provider', () => {
 
     expect(content).toContain('related:\n  - "[[decision/architecture|Architecture choice]]"');
     expect(content).toContain('## Related\n- [[decision/architecture|Architecture choice]]');
+    expect(content.match(/^## Related$/gm)).toHaveLength(1);
     expect(content).toMatch(/created_at: "\d{4}-\d{2}-\d{2}T/);
     expect(content).toMatch(/updated_at: "\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('writes one Related section when the model already dumped the same links', async () => {
+    const root = await tempRoot();
+    const vault = join(root, 'nori-vault');
+    await mkdir(join(vault, 'decision'), { recursive: true });
+    await writeNote(join(vault, 'decision', 'architecture.md'), 'Architecture choice', 'Use the service boundary.');
+    const providers = createNoriProvidersFromConfig(
+      { obsidian: { vault_path: './nori-vault' } },
+      SIMPLE_CONFIG,
+      root,
+    );
+    if (providers === null) throw new Error('expected providers');
+
+    const written = await providers.memory.writeNote({
+      note_type: 'analysis',
+      title: 'Implementation notes',
+      content: [
+        'The implementation follows the decision.',
+        '',
+        '## 关联',
+        '',
+        '- [[Architecture choice]]',
+        '',
+        '## Related',
+        '',
+        '- [[Architecture choice]]',
+        '',
+        '## 设计说明',
+        '',
+        'Keep this prose.',
+      ].join('\n'),
+      links: ['Architecture choice'],
+    });
+    const content = await readFile(join(vault, written.path), 'utf-8');
+
+    expect(content.match(/^## Related$/gm)).toHaveLength(1);
+    expect(content).not.toContain('## 关联');
+    expect(content).toContain('## 设计说明');
+    expect(content).toContain('Keep this prose.');
+    expect(content).toContain('- [[decision/architecture|Architecture choice]]');
   });
 
   it('returns created_at from frontmatter and preserves it on overwrite', async () => {

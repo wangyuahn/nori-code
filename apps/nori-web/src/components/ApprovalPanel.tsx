@@ -139,14 +139,14 @@ export function ApprovalPanel({ requests, onResolve, onPermissionChange, browser
                 <button
                   className="approval-btn approval-btn--auto"
                   disabled={Boolean(activeModeSwitch)}
-                  onClick={() => { void switchModeAndResolve(request.approval_id, 'auto', () => resolve('approved')); }}
+                  onClick={() => { void switchModeAndResolve(request.approval_id, 'auto', () => resolve('approved'), request); }}
                 >
                   {activeModeSwitch === 'auto' ? tr('Switching…', '切换中…') : tr('Switch to AUTO and approve', '切换为 AUTO 并允许')}
                 </button>
                 <button
                   className="approval-btn approval-btn--yolo"
                   disabled={Boolean(activeModeSwitch)}
-                  onClick={() => { void switchModeAndResolve(request.approval_id, 'yolo', () => resolve('approved')); }}
+                  onClick={() => { void switchModeAndResolve(request.approval_id, 'yolo', () => resolve('approved'), request); }}
                 >
                   {activeModeSwitch === 'yolo' ? tr('Switching…', '切换中…') : tr('Switch to YOLO and approve', '切换为 YOLO 并允许')}
                 </button>

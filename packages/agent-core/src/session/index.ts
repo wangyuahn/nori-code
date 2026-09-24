@@ -146,6 +146,11 @@ export interface SessionOptions {
   }) => Promise<{ readonly sessionId: string; readonly agentId: string }>;
   /** Prompt / chat / Discuss across mounted child sessions. */
   readonly departmentRuntime?: DepartmentRuntime;
+  /**
+   * The permission mode is one switch for the whole department. Child sessions
+   * are separate agents, so the core fans this out after the local session applies it.
+   */
+  readonly onDepartmentPermissionMode?: (mode: PermissionMode) => Promise<void> | void;
   /** Map topology tools (search / mount / unmount / graph / parent fill). */
   readonly topologyRuntime?: SessionTopologyRuntime;
   /** PATCH name / role / mandate / tags; injects a reminder and does not prompt. */
@@ -367,6 +372,8 @@ export class Session {
    * `applySessionPermissionMode` 写它，招人和 Discuss 结束后的重新配置都从它取值。
    */
   private sessionPermissionMode: PermissionMode | undefined;
+  /** Mode to restore when a Discuss write lock clears, if the user has not chosen a newer one. */
+  private departmentWriteLockMode: PermissionMode | undefined;
   /** Direct mounted child session ids (the department this session chairs). */
   private departmentChildIds: string[] = [];
   /** Sibling mounted session ids when this session is itself a member. */
@@ -2736,16 +2743,46 @@ export class Session {
    * 唯一的例外是 Discuss 期间被强制只读的成员：那是讨论轮次的约束，不是用户的
    * 权限选择，所以 `configureTeamAgentRuntime` 仍然把他们压回 manual。
    * 临时子智能体（`sub`）不在这里改：它们没有自己的模式，本来就顺着父级继承。
+   * 挂载出去的子会话不在这个 Session 里，`onDepartmentPermissionMode` 负责铺到整棵部门树。
+   * 写锁期间主智能体保持 manual，用户选中的模式记在 `sessionPermissionMode`，解锁后再套回去。
    */
-  applySessionPermissionMode(mode: PermissionMode): void {
+  currentPermissionMode(): PermissionMode | undefined {
+    return this.sessionPermissionMode ?? this.getReadyAgent('main')?.permission.mode;
+  }
+
+  /**
+   * Remember the mode a Discuss write lock should restore. A second lock does
+   * not overwrite the mode captured before the first one.
+   */
+  holdDepartmentWriteLock(): void {
+    if (this.departmentWriteLockMode !== undefined) return;
+    this.departmentWriteLockMode = this.currentPermissionMode();
+  }
+
+  /** Re-apply the user's mode after Discuss stops forcing this session to manual. */
+  releaseDepartmentWriteLock(): void {
+    const mode = this.sessionPermissionMode ?? this.departmentWriteLockMode;
+    this.departmentWriteLockMode = undefined;
+    if (mode !== undefined) this.applySessionPermissionMode(mode, { propagate: false });
+  }
+
+  applySessionPermissionMode(mode: PermissionMode, options?: { readonly propagate?: boolean }): void {
     this.sessionPermissionMode = mode;
     const main = this.getReadyAgent('main');
-    if (main !== undefined && main.permission.mode !== mode) main.permission.setMode(mode);
+    if (main !== undefined && !main.teamWriteLocked && main.permission.mode !== mode) {
+      main.permission.setMode(mode);
+    }
     for (const [agentId, meta] of Object.entries(this.metadata.agents)) {
       if (meta.kind !== 'team') continue;
       const agent = this.getReadyAgent(agentId);
       if (agent !== undefined) this.configureTeamAgentRuntime(agent, meta);
     }
+    if (options?.propagate === false) return;
+    const notify = this.options.onDepartmentPermissionMode;
+    if (notify === undefined) return;
+    void Promise.resolve(notify(mode)).catch((error: unknown) => {
+      this.log.warn('department permission propagation failed', { error });
+    });
   }
 
   private sessionIdForLeader(leaderAgentId: string): string | undefined {

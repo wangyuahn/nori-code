@@ -956,7 +956,7 @@ max_steps_per_turn = "nope"
     } catch (error) {
       expect(error).toBeInstanceOf(KimiError);
       expect((error as KimiError).message).toContain('fix it first');
-      expect((error as KimiError).message).toContain('kimi doctor');
+      expect((error as KimiError).message).toContain('nori doctor');
       expect((error as KimiError).message).not.toContain('invalid_type');
     }
 

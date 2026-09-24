@@ -2,7 +2,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Note } from '../src/api/client';
-import { collectRelatedNotes, resolveVaultNote } from '../src/components/VaultBrowser';
+import { collectRelatedNotes, noteBodyForDisplay, resolveVaultNote } from '../src/components/VaultBrowser';
 import { forceSameType, VaultGraph } from '../src/components/VaultGraph';
 import { I18nProvider } from '../src/i18n';
 
@@ -78,6 +78,39 @@ describe('vault related-note projection', () => {
       { note: decision, direction: 'outgoing' },
       { note: review, direction: 'backlink' },
     ]);
+  });
+
+  it('omits duplicate link-only related sections from the note body', () => {
+    const body = noteBodyForDisplay({
+      title: 'Analysis',
+      type: 'analysis',
+      folder: 'analysis',
+      preview: '',
+      date: '2026-07-15',
+      path: 'analysis/analysis.md',
+      content: [
+        'Body paragraph.',
+        '',
+        '## 关联',
+        '',
+        '- [[Architecture]]',
+        '',
+        '## Related',
+        '',
+        '- [[decision/architecture|Architecture]]',
+        '',
+        '## Design',
+        '',
+        'Keep this.',
+      ].join('\n'),
+    });
+
+    expect(body).toContain('Body paragraph.');
+    expect(body).toContain('## Design');
+    expect(body).toContain('Keep this.');
+    expect(body).not.toContain('## 关联');
+    expect(body).not.toContain('## Related');
+    expect(body).not.toContain('[[Architecture]]');
   });
 });
 

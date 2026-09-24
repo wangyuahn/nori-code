@@ -446,6 +446,7 @@ export class SessionService extends Disposable implements ISessionService {
       workDir: input.metadata.cwd,
       metadata: metadataForCore,
       model: input.agent_config?.model,
+      permission: input.agent_config?.permission_mode,
       client: options?.client,
     });
     if (input.title !== undefined) {
@@ -654,12 +655,18 @@ export class SessionService extends Disposable implements ISessionService {
     delete callerMeta[MOUNT_ROLE_KEY];
     delete callerMeta[MOUNT_MANDATE_KEY];
     delete callerMeta[MOUNT_NAME_KEY];
+    await this.core.rpc.resumeSession({ sessionId: id });
+    const parentPermission = await this.core.rpc.getPermission({
+      sessionId: id,
+      agentId: MAIN_AGENT_ID,
+    });
     const child = await this.create({
       title,
       metadata: {
         cwd,
         ...callerMeta,
       },
+      agent_config: { permission_mode: parentPermission.mode },
     });
     try {
       return await this.mount(child.id, {

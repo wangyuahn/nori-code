@@ -131,7 +131,7 @@ function FileTreeNode({ entry, depth, selectedPath, onSelectFile, onContextMenu,
     <div className={`file-tree-row-wrap${selected ? ' selected' : ''}`} onContextMenu={event => { onContextMenu(entry, event); }}>
     <button type="button" className={`file-tree-row${selected ? ' selected' : ''}`} style={{ paddingLeft: 8 + depth * 14 }} onClick={() => void activate()} title={entry.path}>
       <span className="file-tree-chevron">{isDirectory ? <Icon name="chevron-right" size={12} /> : null}</span>
-      <Icon name={isDirectory ? 'files' : 'list'} size={14} />
+      <FileTypeIcon name={entry.name} isDirectory={isDirectory} />
       <span className="file-tree-name">{entry.name}</span>
       {loading && <span className="spinner spinner-small" />}
       {entry.git_status && entry.git_status !== 'clean' && <span className={`git-status git-status-${entry.git_status}`}>{STATUS_LABELS[entry.git_status] ?? '?'}</span>}
@@ -140,6 +140,45 @@ function FileTreeNode({ entry, depth, selectedPath, onSelectFile, onContextMenu,
     </div>
     {isDirectory && expanded && children?.map(child => <FileTreeNode key={child.path} entry={child} depth={depth + 1} selectedPath={selectedPath} onSelectFile={onSelectFile} onContextMenu={onContextMenu} readDir={readDir} referenceLabel={referenceLabel} />)}
   </div>;
+}
+
+export type FileTypeKind = 'folder' | 'code' | 'json' | 'markdown' | 'style' | 'html' | 'image' | 'nix' | 'config' | 'shell' | 'file';
+
+const FILE_TYPE_BY_EXTENSION: Record<string, FileTypeKind> = {
+  ts: 'code', tsx: 'code', js: 'code', jsx: 'code', mjs: 'code', cjs: 'code', py: 'code', go: 'code', rs: 'code', java: 'code',
+  json: 'json', jsonc: 'json',
+  md: 'markdown', mdx: 'markdown',
+  css: 'style', scss: 'style', less: 'style',
+  html: 'html', htm: 'html',
+  png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', webp: 'image', svg: 'image', ico: 'image',
+  nix: 'nix',
+  yml: 'config', yaml: 'config', toml: 'config', ini: 'config',
+  sh: 'shell', bash: 'shell', zsh: 'shell',
+};
+
+export function fileTypeKind(name: string, isDirectory: boolean): FileTypeKind {
+  if (isDirectory) return 'folder';
+  const extension = name.includes('.') ? name.split('.').pop()?.toLowerCase() ?? '' : '';
+  return FILE_TYPE_BY_EXTENSION[extension] ?? 'file';
+}
+
+function FileTypeIcon({ name, isDirectory }: { name: string; isDirectory: boolean }) {
+  const kind = fileTypeKind(name, isDirectory);
+  return <span className={`file-type-icon is-${kind}`} aria-hidden="true">
+    {kind === 'folder' ? <FolderGlyph /> : kind === 'image' ? <ImageGlyph /> : <FileGlyph />}
+  </span>;
+}
+
+function FolderGlyph() {
+  return <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M1.5 3.5A1.5 1.5 0 0 1 3 2h3.2l1.3 1.5H13A1.5 1.5 0 0 1 14.5 5v7.2a1.5 1.5 0 0 1-1.5 1.5H3A1.5 1.5 0 0 1 1.5 12.2Z"/></svg>;
+}
+
+function ImageGlyph() {
+  return <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.4"><rect x="1.8" y="2.5" width="12.4" height="11" rx="1.4"/><circle cx="5.4" cy="6" r="1.1" fill="currentColor" stroke="none"/><path d="m2.4 11.6 3.2-3.1 2.3 2.2 1.6-1.5 3.7 3.4"/></svg>;
+}
+
+function FileGlyph() {
+  return <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M4 1.8h5.2L13 5.6V14.2H4Z"/><path d="M9.2 1.8V5.6H13"/></svg>;
 }
 
 function projectLabel(path: string | undefined): string | undefined {

@@ -33,6 +33,11 @@ module.exports = {
   directories: { output: 'dist-app' },
   npmRebuild: false,
   asar: true,
+  // Windows installs were taking 5–15 minutes because NSIS LZMA-decompresses the
+  // language-server tree in server-runtime file by file. Store compression copies
+  // those bytes instead. macOS and Linux jobs run on their own OS, so they keep
+  // normal compression and smaller artifacts.
+  compression: process.platform === 'win32' ? 'store' : 'normal',
   files: [
     'out/**',
     '!out/server-worker.cjs',

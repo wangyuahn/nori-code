@@ -183,7 +183,7 @@ export function VaultBrowser({ mode = 'list' }: { mode?: 'list' | 'graph' }) {
         ) : detailError ? (
           <div className="vault-note-state error">{detailError}</div>
         ) : editing ? null : (
-          <MarkdownView className="vault-note-content" content={noteBodyWithoutDuplicateTitle(selectedNote)} />
+          <MarkdownView className="vault-note-content" content={noteBodyForDisplay(selectedNote)} />
         )}
         {!editing && !detailLoading && !detailError && relatedNotes.length > 0 && <section className="vault-related-notes">
           <header><strong>{tr('Related', '相关笔记')}</strong><span>{tr('Obsidian links and backlinks', 'Obsidian 链接与反向链接')}</span></header>
@@ -328,6 +328,56 @@ function normalizeVaultLink(value: string): string {
     .replace(/^\.\//, '')
     .replace(/\.md$/i, '')
     .toLowerCase();
+}
+
+const RELATED_SECTION_TITLES = new Set(['related', '关联', '相关', '相关笔记', '相关链接']);
+
+/** Body shown in the note view. Link-only Related / 关联 sections stay in the file for Obsidian and are listed once in the related-notes panel. */
+export function noteBodyForDisplay(note: Note): string {
+  return stripLinkOnlyRelatedSections(noteBodyWithoutDuplicateTitle(note));
+}
+
+function stripLinkOnlyRelatedSections(markdown: string): string {
+  const lines = markdown.split(/\r?\n/);
+  const kept: string[] = [];
+  let index = 0;
+  while (index < lines.length) {
+    const heading = relatedHeading(lines[index] ?? '');
+    if (heading === undefined) {
+      kept.push(lines[index] ?? '');
+      index += 1;
+      continue;
+    }
+    let end = index + 1;
+    const body: string[] = [];
+    while (end < lines.length) {
+      const next = /^(#{1,6})[ \t]+/.exec(lines[end] ?? '');
+      if (next !== null && (next[1]?.length ?? 0) <= heading.level) break;
+      body.push(lines[end] ?? '');
+      end += 1;
+    }
+    if (!body.every(isWikiLinkLine)) {
+      kept.push(lines[index] ?? '');
+      index += 1;
+      continue;
+    }
+    index = end;
+  }
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function relatedHeading(line: string): { level: number } | undefined {
+  const match = /^(#{1,6})[ \t]+(.+?)[ \t]*$/.exec(line);
+  if (match === null) return undefined;
+  const title = (match[2] ?? '').trim().toLowerCase();
+  if (!RELATED_SECTION_TITLES.has(title)) return undefined;
+  return { level: match[1]?.length ?? 1 };
+}
+
+function isWikiLinkLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (trimmed.length === 0 || trimmed === '_None_' || trimmed === 'None') return true;
+  return /^(?:[-*][ \t]+)?\[\[[^\]]+\]\][ \t]*$/.test(trimmed);
 }
 
 function noteBodyWithoutDuplicateTitle(note: Note): string {

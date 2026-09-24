@@ -56,20 +56,11 @@ describe('ChatView tool details and context injection', () => {
       details.open = true;
       details.dispatchEvent(new Event('toggle'));
     });
-    expect(container.textContent).toContain('src/a.ts');
+    expect(details.querySelector('.compact-tool-headline')?.textContent).toBe('Edited a.ts +1 -1');
     expect(container.textContent).not.toContain('Arguments');
-    expect(container.textContent).toContain('Applied 1 line operation');
-    expect(container.textContent).toContain('Duration');
-    expect(container.textContent).toContain('400ms');
-    expect(container.textContent).toContain('File path');
-    expect(container.textContent).toContain('Expected tag');
-    expect(container.textContent).toContain('A1B2');
-    expect(container.textContent).toContain('Line operations');
-    expect(container.textContent).toContain('replace lines 1-1');
-    expect(container.textContent).toContain('Changes');
-    expect(container.textContent).toContain('running');
-    expect(container.textContent).toContain('Apply result');
-    expect(container.querySelector('.compact-tool-detail')).not.toBeNull();
+    expect(container.textContent).not.toContain('File path');
+    expect(container.querySelector('.edit-diff-add')?.textContent).toContain('running');
+    expect(container.querySelector('.edit-diff-del')).not.toBeNull();
   });
 
   it('renders context injections as compact visible transcript rows', async () => {

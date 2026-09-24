@@ -5,6 +5,7 @@ import {
   isAllowedBrowserUrl,
   localHtmlPath,
   normalizeBrowserInput,
+  resolveBrowserToolUrl,
 } from '../src/main/browser-url';
 
 describe('embedded browser URL policy', () => {
@@ -19,6 +20,19 @@ describe('embedded browser URL policy', () => {
     expect(normalizeBrowserInput('Nori agent browser')).toBe(
       'https://www.bing.com/search?q=Nori%20agent%20browser',
     );
+  });
+
+  it('rejects invalid agent navigation instead of searching', () => {
+    expect(resolveBrowserToolUrl('https://github.com/example/repo')).toEqual({
+      url: 'https://github.com/example/repo',
+    });
+    expect(resolveBrowserToolUrl('example.com/docs')).toEqual({ url: 'https://example.com/docs' });
+    expect(resolveBrowserToolUrl('urlinot-a-real-url')).toEqual({
+      error: expect.stringContaining('does not turn invalid text into a web search'),
+    });
+    expect(resolveBrowserToolUrl('javascript:alert(1)')).toEqual({
+      error: expect.stringContaining('Refusing to navigate'),
+    });
   });
 
   it('opens local HTML files from file URLs and absolute paths', () => {

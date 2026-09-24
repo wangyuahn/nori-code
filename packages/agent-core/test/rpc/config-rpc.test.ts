@@ -71,23 +71,39 @@ max_steps_per_turn = "nope"
     expect(diagnostics.warnings[0]).toContain('loop_control');
   });
 
-  it('rejects config writes with an actionable error while the file is invalid', async () => {
+  it('saves settings by dropping invalid sections instead of locking the file', async () => {
     const home = await makeHome(`${VALID_TOML}
 [loop_control]
 max_steps_per_turn = "nope"
 `);
     const core = makeCore(home);
-    const before = await readFile(path.join(home, 'config.toml'), 'utf-8');
 
-    // Write paths stay strict: changing settings on top of a broken file
-    // must fail with a short, actionable message — not raw validation JSON —
-    // and must leave the file untouched.
-    const write = core.setKimiConfig({ thinking: { enabled: true } });
-    await expect(write).rejects.toThrow(/fix it first/i);
-    await expect(write).rejects.toThrow(/kimi doctor/);
-    await expect(write).rejects.not.toThrow(/invalid_type/);
+    const updated = await core.setKimiConfig({ thinking: { enabled: true } });
+    expect(updated.thinking?.enabled).toBe(true);
+    expect(updated.providers['kimi']).toBeDefined();
+    expect(updated.loopControl).toBeUndefined();
 
     const after = await readFile(path.join(home, 'config.toml'), 'utf-8');
+    expect(after).toContain('enabled = true');
+    expect(after).not.toContain('max_steps_per_turn');
+    const diagnostics = await core.getConfigDiagnostics({});
+    expect(diagnostics.warnings.some((warning) => warning.includes('loop_control'))).toBe(true);
+  });
+
+  it('rejects config writes when the file is not valid TOML', async () => {
+    const home = await makeHome(VALID_TOML);
+    const core = makeCore(home);
+    const configPath = path.join(home, 'config.toml');
+    await writeFile(configPath, '[[[', 'utf-8');
+    const before = await readFile(configPath, 'utf-8');
+
+    const write = core.setKimiConfig({ thinking: { enabled: true } });
+    await expect(write).rejects.toThrow(/fix it first/i);
+    await expect(write).rejects.toThrow(/nori doctor/);
+    await expect(write).rejects.toThrow(/Invalid TOML/);
+    await expect(write).rejects.not.toThrow(/invalid_type/);
+
+    const after = await readFile(configPath, 'utf-8');
     expect(after).toBe(before);
   });
 

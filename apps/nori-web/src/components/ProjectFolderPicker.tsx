@@ -5,11 +5,13 @@ import { Icon } from './Icon';
 
 interface ProjectFolderPickerProps {
   open: boolean;
+  /** Folders already used by sessions. Shown as one-click choices before browsing. */
+  projects?: readonly string[];
   onSelect: (path: string) => void;
   onClose: () => void;
 }
 
-export function ProjectFolderPicker({ open, onSelect, onClose }: ProjectFolderPickerProps) {
+export function ProjectFolderPicker({ open, projects = [], onSelect, onClose }: ProjectFolderPickerProps) {
   const { tr } = useI18n();
   const [home, setHome] = useState<WorkspaceFolderHomeResponse | null>(null);
   const [browse, setBrowse] = useState<WorkspaceFolderBrowseResponse | null>(null);
@@ -29,6 +31,13 @@ export function ProjectFolderPicker({ open, onSelect, onClose }: ProjectFolderPi
     } finally {
       setLoading(false);
     }
+  };
+
+  const shortcuts = uniqueProjectPaths([...projects, ...(home?.recent_roots ?? [])]);
+
+  const chooseNativeFolder = async () => {
+    const selected = await window.noriDesktop?.selectProjectDirectory?.();
+    if (selected) onSelect(selected);
   };
 
   useEffect(() => {
@@ -61,9 +70,9 @@ export function ProjectFolderPicker({ open, onSelect, onClose }: ProjectFolderPi
         <button type="submit" disabled={!pathInput.trim() || loading}>{tr('Go', '前往')}</button>
       </form>
 
-      {home?.recent_roots.length ? <div className="folder-picker-recents">
-        <span>{tr('Recent projects', '最近项目')}</span>
-        <div>{home.recent_roots.slice(0, 5).map(path => <button key={path} onClick={() => void openPath(path)} title={path}>{projectName(path)}</button>)}</div>
+      {shortcuts.length > 0 ? <div className="folder-picker-recents">
+        <span>{tr('Existing projects', '已有项目')}</span>
+        <div>{shortcuts.map(path => <button key={path} type="button" onClick={() => onSelect(path)} title={path}>{projectName(path)}</button>)}</div>
       </div> : null}
 
       <div className="folder-picker-list">
@@ -76,7 +85,11 @@ export function ProjectFolderPicker({ open, onSelect, onClose }: ProjectFolderPi
 
       <footer className="folder-picker-footer">
         <span title={browse?.path}>{browse?.path}</span>
-        <div><button onClick={onClose}>{tr('Cancel', '取消')}</button><button className="primary" onClick={() => browse?.path && onSelect(browse.path)} disabled={!browse?.path || loading}>{tr('Use this folder', '选择此文件夹')}</button></div>
+        <div>
+          {window.noriDesktop?.selectProjectDirectory ? <button type="button" onClick={() => { void chooseNativeFolder(); }}>{tr('Browse…', '浏览…')}</button> : null}
+          <button onClick={onClose}>{tr('Cancel', '取消')}</button>
+          <button className="primary" onClick={() => browse?.path && onSelect(browse.path)} disabled={!browse?.path || loading}>{tr('Use this folder', '选择此文件夹')}</button>
+        </div>
       </footer>
     </section>
   </div>;
@@ -84,4 +97,18 @@ export function ProjectFolderPicker({ open, onSelect, onClose }: ProjectFolderPi
 
 function projectName(path: string): string {
   return path.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) || path;
+}
+
+function uniqueProjectPaths(paths: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const raw of paths) {
+    const path = raw.trim();
+    if (!path) continue;
+    const key = path.replace(/[\\/]+$/, '').replace(/\\/g, '/').toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(path);
+  }
+  return unique;
 }

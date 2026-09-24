@@ -874,7 +874,10 @@ describe('tool permission controls', () => {
       await Promise.resolve();
     });
 
-    expect(onPermissionChange).toHaveBeenCalledWith('auto');
+    expect(onPermissionChange).toHaveBeenCalledWith('auto', expect.objectContaining({
+      approval_id: 'approval-1',
+      session_id: 'session-1',
+    }));
     expect(onResolveApproval).toHaveBeenCalledWith(
       'approval-1',
       'approved',
@@ -1553,6 +1556,10 @@ describe('conversation presentation', () => {
   it('builds compact tool headlines for common tool names', () => {
     const tr = (en: string) => en;
     expect(compactToolCallHeadline({ name: 'Read', args: { path: 'src/a.ts' } }, tr)).toBe('Read src/a.ts');
+    expect(compactToolCallHeadline({
+      name: 'Edit',
+      args: { path: 'src/core-impl.ts', old_string: 'a', new_string: 'b\nc' },
+    }, tr)).toBe('Edited core-impl.ts +2 -1');
     expect(compactToolCallHeadline({ name: 'Bash', args: { command: 'ls -la' } }, tr)).toBe('Ran ls -la');
     expect(compactToolCallHeadline({ name: 'Glob', args: { pattern: '**/*.ts' } }, tr)).toBe('Searched **/*.ts');
     expect(compactToolCallHeadline({

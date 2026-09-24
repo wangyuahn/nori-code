@@ -142,6 +142,38 @@ export function canCreateMountedDepartment(
   return sessionMountDepth(parentById, sessionId) < maxDepth;
 }
 
+/**
+ * Every session in the mount tree that contains `originId`: the root, the
+ * origin, and every descendant. Order is unspecified. A missing origin is
+ * returned alone.
+ */
+export function departmentSessionIds(
+  parentById: SessionMountTree,
+  originId: string,
+): string[] {
+  let root = originId;
+  const guard = new Set<string>();
+  while (!guard.has(root)) {
+    const parent = parentById[root];
+    if (parent === undefined || parent.length === 0) break;
+    guard.add(root);
+    root = parent;
+  }
+  const ids: string[] = [];
+  const stack = [root];
+  const visited = new Set<string>();
+  while (stack.length > 0) {
+    const id = stack.pop();
+    if (id === undefined || visited.has(id)) continue;
+    visited.add(id);
+    ids.push(id);
+    for (const [child, parent] of Object.entries(parentById)) {
+      if (parent === id) stack.push(child);
+    }
+  }
+  return ids;
+}
+
 /** Direct mounted children of `parentSessionId`. */
 export function mountedChildrenOf(
   parentById: SessionMountTree,

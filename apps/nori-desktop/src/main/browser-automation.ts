@@ -77,12 +77,125 @@ interface ElementTarget {
   readonly y: number;
   readonly tag: string;
   readonly disabled: boolean;
+  readonly inputType?: string;
+  readonly contentEditable: boolean;
+}
+
+const NON_TEXT_INPUT_TYPES = new Set([
+  'button',
+  'submit',
+  'reset',
+  'checkbox',
+  'radio',
+  'file',
+  'image',
+  'hidden',
+  'color',
+  'range',
+]);
+
+export function typeTargetRejection(tag: string, inputType: string | undefined, contentEditable: boolean): string | undefined {
+  if (contentEditable || tag === 'textarea') return undefined;
+  if (tag === 'input') {
+    const type = inputType || 'text';
+    if (!NON_TEXT_INPUT_TYPES.has(type)) return undefined;
+    return `Element is an <input type="${type}">, not a text field. Use click instead of type.`;
+  }
+  return `Element <${tag}> is not a text field. Use click instead of type.`;
+}
+
+const NAMED_KEYS = new Set([
+  'Enter', 'Escape', 'Tab', 'Backspace', 'Delete', 'Space',
+  'Up', 'Down', 'Left', 'Right', 'Home', 'End', 'PageUp', 'PageDown', 'Insert',
+  'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12',
+]);
+
+const KEY_ALIASES: Record<string, string> = {
+  arrowup: 'Up',
+  arrowdown: 'Down',
+  arrowleft: 'Left',
+  arrowright: 'Right',
+  esc: 'Escape',
+  return: 'Enter',
+  spacebar: 'Space',
+  del: 'Delete',
+};
+
+export interface ParsedKeypress {
+  readonly keyCode: string;
+  readonly modifiers: readonly ('alt' | 'control' | 'meta' | 'shift')[];
+}
+
+export function parseKeypress(key: string): ParsedKeypress | { error: string } {
+  const parts = key.split('+').map(part => part.trim()).filter(Boolean);
+  const rawKey = parts.pop();
+  if (rawKey === undefined) return { error: 'Key cannot be empty.' };
+  const modifiers: Array<'alt' | 'control' | 'meta' | 'shift'> = [];
+  for (const part of parts) {
+    const modifier = normalizeModifier(part);
+    if (modifier === undefined) {
+      return { error: unknownKeyMessage(key) };
+    }
+    modifiers.push(modifier);
+  }
+  const keyCode = canonicalKey(rawKey);
+  if (keyCode === undefined) return { error: unknownKeyMessage(key) };
+  return { keyCode, modifiers };
+}
+
+function canonicalKey(raw: string): string | undefined {
+  const alias = KEY_ALIASES[raw.toLowerCase()];
+  if (alias !== undefined) return alias;
+  if (/^[a-z]$/i.test(raw) || /^[0-9]$/.test(raw)) return raw.length === 1 && /[a-z]/i.test(raw) ? raw.toUpperCase() : raw;
+  return [...NAMED_KEYS].find(name => name.toLowerCase() === raw.toLowerCase());
+}
+
+function unknownKeyMessage(key: string): string {
+  return `Unknown key ${JSON.stringify(key)}. Use a letter, digit, F1–F12, or a named key such as Enter, Escape, Tab, Backspace, or ArrowDown. The page was not changed.`;
+}
+
+export interface NetworkSettlementEntry {
+  state: 'pending' | 'completed' | 'failed';
+  status?: number;
+  durationMs?: number;
+  startedAt: string;
+}
+
+/** Finished requests must not stay pending after the document has stopped loading. */
+export function settleFinishedRequests(entries: NetworkSettlementEntry[], now: number): void {
+  for (const entry of entries) {
+    if (entry.state !== 'pending') continue;
+    const started = Date.parse(entry.startedAt);
+    const age = Number.isFinite(started) ? now - started : 1_500;
+    if (entry.status === undefined && age < 1_500) continue;
+    entry.state = 'completed';
+    if (entry.durationMs === undefined) entry.durationMs = Number.isFinite(started) ? Math.max(0, age) : 0;
+  }
+}
+
+export function historyMoveOutcome(
+  direction: 'back' | 'forward',
+  canMove: boolean,
+  before: string,
+  after: string,
+): { ok: true; summary: string } | { ok: false; output: string } {
+  if (!canMove) return { ok: false, output: `No ${direction} history. The page URL is unchanged.` };
+  if (after === before) return { ok: false, output: `Could not go ${direction}. The page is still ${after}.` };
+  return { ok: true, summary: `Navigated ${direction} to ${after}.` };
+}
+
+export function snapshotHasContent(output: string): boolean {
+  return output.split('\n').some(line => {
+    if (line.startsWith('Text: ') && line.slice('Text: '.length).trim() !== '') return true;
+    return /^<[a-z][a-z0-9:-]* ref=/i.test(line);
+  });
 }
 
 export async function snapshotPage(webContents: WebContents): Promise<string> {
   const snapshot = await webContents.executeJavaScript(SNAPSHOT_SCRIPT, true) as {
     url: string;
     title: string;
+    pageText?: string;
     viewport: { width: number; height: number; scrollX: number; scrollY: number };
     elements: Array<{ ref: string; tag: string; role: string; text: string; type?: string; value?: string; checked?: boolean; disabled?: boolean; href?: string }>;
   };
@@ -103,8 +216,9 @@ export async function snapshotPage(webContents: WebContents): Promise<string> {
       ].filter(Boolean).join(' ');
       return `<${element.tag} ${attrs}> ${element.text}`.trim();
     }),
+    snapshot.pageText ? `Text: ${snapshot.pageText}` : '',
     '</browser_snapshot>',
-  ];
+  ].filter(line => line !== '');
   return lines.join('\n');
 }
 
@@ -137,26 +251,50 @@ export async function typePage(
   const target = await resolveRef(webContents, ref);
   if (target === null) return staleReference(ref);
   if (target.disabled) return { ok: false, output: `Element ${ref} is disabled.` };
-  await clickPage(webContents, { x: target.x, y: target.y });
-  if (clear) {
-    const modifier = process.platform === 'darwin' ? 'meta' : 'control';
-    webContents.sendInputEvent({ type: 'keyDown', keyCode: 'A', modifiers: [modifier] });
-    webContents.sendInputEvent({ type: 'keyUp', keyCode: 'A', modifiers: [modifier] });
-    webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Backspace' });
-    webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Backspace' });
+  const rejection = typeTargetRejection(target.tag, target.inputType, target.contentEditable);
+  if (rejection !== undefined) return { ok: false, output: `${rejection} Reference ${ref} was not modified.` };
+  const written = await webContents.executeJavaScript(writeEditableValueScript(ref, text, clear), true) as {
+    ok?: boolean;
+    value?: string;
+  };
+  if (written.ok !== true) {
+    return {
+      ok: false,
+      output: `Typed into ${ref} but the field value is ${JSON.stringify(written.value ?? '')}. The page did not keep the text.`,
+    };
   }
-  await webContents.insertText(text);
   return pageResult(webContents, `Typed ${String(text.length)} characters into ${ref}.`);
 }
 
 export function pressKey(webContents: WebContents, key: string): NativeBrowserActionResult {
-  const parts = key.split('+').map(part => part.trim()).filter(Boolean);
-  const keyCode = parts.pop();
-  if (keyCode === undefined) return { ok: false, output: 'Key cannot be empty.' };
-  const modifiers = parts.map(part => normalizeModifier(part)).filter((part): part is 'alt' | 'control' | 'meta' | 'shift' => part !== undefined);
-  webContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
-  webContents.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
+  const parsed = parseKeypress(key);
+  if ('error' in parsed) return { ok: false, output: parsed.error };
+  try {
+    webContents.sendInputEvent({ type: 'keyDown', keyCode: parsed.keyCode, modifiers: [...parsed.modifiers] });
+    webContents.sendInputEvent({ type: 'keyUp', keyCode: parsed.keyCode, modifiers: [...parsed.modifiers] });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, output: `Key press failed: ${message}` };
+  }
   return pageResult(webContents, `Pressed ${key}.`);
+}
+
+export async function waitForRenderedContent(webContents: WebContents, timeoutMs = 4_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let nudged = false;
+  while (Date.now() < deadline && !webContents.isDestroyed()) {
+    const probe = await readRenderProbe(webContents);
+    if (probe !== undefined && probe.width > 0 && probe.height > 0) {
+      const sparse = probe.textLength < 80 && probe.scrollHeight > probe.height + 160;
+      if (!nudged && sparse) {
+        nudged = true;
+        await nudgeScroll(webContents);
+        continue;
+      }
+      if (probe.textLength > 0 || !webContents.isLoading()) return;
+    }
+    await delay(80);
+  }
 }
 
 export async function scrollPage(webContents: WebContents, deltaX = 0, deltaY = 600): Promise<NativeBrowserActionResult> {
@@ -283,12 +421,20 @@ export async function firstVisibleFileInputRef(webContents: WebContents): Promis
 async function resolveRef(webContents: WebContents, ref: string): Promise<ElementTarget | null> {
   return webContents.executeJavaScript(`(() => {
     const element = document.querySelector('[data-nori-ref="' + CSS.escape(${JSON.stringify(ref)}) + '"]');
-    if (!(element instanceof HTMLElement)) return null;
+    if (!(element instanceof HTMLElement || element instanceof SVGElement)) return null;
     const rect = element.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return null;
     element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
     const next = element.getBoundingClientRect();
-    return { x: next.left + next.width / 2, y: next.top + next.height / 2, tag: element.tagName.toLowerCase(), disabled: Boolean(element.disabled) };
+    const tag = element.tagName.toLowerCase();
+    return {
+      x: next.left + next.width / 2,
+      y: next.top + next.height / 2,
+      tag,
+      disabled: Boolean(element.disabled),
+      inputType: element instanceof HTMLInputElement ? element.type : undefined,
+      contentEditable: element instanceof HTMLElement && element.isContentEditable,
+    };
   })()`, true) as Promise<ElementTarget | null>;
 }
 
@@ -317,12 +463,83 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-const SNAPSHOT_SCRIPT = `(() => {
+function writeEditableValueScript(ref: string, text: string, clear: boolean): string {
+  return `(() => {
+    const element = document.querySelector('[data-nori-ref="' + CSS.escape(${JSON.stringify(ref)}) + '"]');
+    if (!(element instanceof HTMLElement)) return { ok: false, value: '' };
+    const text = ${JSON.stringify(text)};
+    const clear = ${clear ? 'true' : 'false'};
+    element.focus();
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+      const next = clear ? text : element.value + text;
+      const prototype = Object.getPrototypeOf(element);
+      const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
+      if (descriptor && descriptor.set) descriptor.set.call(element, next);
+      else element.value = next;
+      element.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }));
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+      return { ok: element.value === next, value: element.value };
+    }
+    if (element.isContentEditable) {
+      if (clear) element.replaceChildren();
+      const inserted = document.execCommand('insertText', false, text);
+      if (!inserted) element.insertAdjacentText('beforeend', text);
+      const value = element.innerText || '';
+      return { ok: value.includes(text), value };
+    }
+    return { ok: false, value: '' };
+  })()`;
+}
+
+interface RenderProbe {
+  readonly width: number;
+  readonly height: number;
+  readonly textLength: number;
+  readonly scrollHeight: number;
+}
+
+const RENDER_PROBE = `(() => {
+  const bodyText = (document.body?.textContent || '').replace(/\\s+/g, ' ').trim();
+  const svgText = [...document.querySelectorAll('svg text')].map(node => node.textContent || '').join(' ');
+  return {
+    width: window.innerWidth || 0,
+    height: window.innerHeight || 0,
+    textLength: (bodyText + ' ' + svgText).trim().length,
+    scrollHeight: document.documentElement?.scrollHeight || 0,
+  };
+})()`;
+
+async function readRenderProbe(webContents: WebContents): Promise<RenderProbe | undefined> {
+  try {
+    return await webContents.executeJavaScript(RENDER_PROBE, true) as RenderProbe;
+  } catch {
+    return undefined;
+  }
+}
+
+async function nudgeScroll(webContents: WebContents): Promise<void> {
+  try {
+    const saved = await webContents.executeJavaScript(`(() => {
+      const position = { x: window.scrollX || 0, y: window.scrollY || 0 };
+      window.scrollBy({ left: 0, top: Math.max(window.innerHeight || 600, 480), behavior: 'instant' });
+      return position;
+    })()`, true) as { x: number; y: number };
+    await delay(250);
+    await webContents.executeJavaScript(
+      `window.scrollTo(${JSON.stringify(saved.x)}, ${JSON.stringify(saved.y)})`,
+      true,
+    );
+  } catch {
+    // A failed nudge still leaves the following snapshot to report whatever rendered.
+  }
+}
+
+export const SNAPSHOT_SCRIPT = `(() => {
   const root = globalThis.__noriBrowserAutomation ??= {
     nextRef: 1,
     pageId: Math.random().toString(36).slice(2, 9),
   };
-  const selector = 'a,button,input,textarea,select,summary,[role],h1,h2,h3,h4,p,li,pre,code,img';
+  const selector = 'a,button,input,textarea,select,summary,[role],h1,h2,h3,h4,p,li,pre,code,img,text';
   const visible = element => {
     const style = getComputedStyle(element);
     const rect = element.getBoundingClientRect();
@@ -330,7 +547,7 @@ const SNAPSHOT_SCRIPT = `(() => {
   };
   const elements = [];
   for (const element of document.querySelectorAll(selector)) {
-    if (!(element instanceof HTMLElement) || !visible(element)) continue;
+    if (!((element instanceof HTMLElement) || (element instanceof SVGElement)) || !visible(element)) continue;
     let ref = element.getAttribute('data-nori-ref');
     if (!ref) {
       ref = 'n' + root.pageId + '-' + String(root.nextRef++);
@@ -338,7 +555,9 @@ const SNAPSHOT_SCRIPT = `(() => {
     }
     const rawText = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
       ? (element.getAttribute('aria-label') || element.getAttribute('placeholder') || '')
-      : (element.innerText || element.getAttribute('aria-label') || element.getAttribute('alt') || '');
+      : element instanceof SVGElement
+        ? (element.textContent || '')
+        : (element.innerText || element.getAttribute('aria-label') || element.getAttribute('alt') || '');
     const item = {
       ref,
       tag: element.tagName.toLowerCase(),
@@ -353,7 +572,8 @@ const SNAPSHOT_SCRIPT = `(() => {
     elements.push(item);
     if (elements.length >= 180) break;
   }
-  return { url: location.href, title: document.title, viewport: { width: innerWidth, height: innerHeight, scrollX, scrollY }, elements };
+  const pageText = ((document.body && document.body.textContent) || '').replace(/\\s+/g, ' ').trim().slice(0, 8000);
+  return { url: location.href, title: document.title, pageText, viewport: { width: innerWidth, height: innerHeight, scrollX, scrollY }, elements };
 })()`;
 
 function annotationScript(enabled: boolean): string {

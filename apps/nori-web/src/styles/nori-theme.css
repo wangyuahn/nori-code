@@ -1525,28 +1525,28 @@ select.input option {
 }
 
 [data-theme="light"] {
-  --nori-bg: #eef2f0;
+  --nori-bg: #e7eeeb;
   --nori-surface: #ffffff;
-  --nori-surface-raised: #f8fbfa;
-  --nori-surface-hover: #e6eeeb;
+  --nori-surface-raised: #ffffff;
+  --nori-surface-hover: #eef3f1;
   --nori-bg-elevated: #ffffff;
-  --nori-border: #c6d1ce;
-  --nori-border-active: #4a9f74;
-  --nori-text: #18231f;
-  --nori-text-secondary: #3f514b;
-  --nori-text-muted: #687a73;
-  --nori-cyan: #267a52;
-  --nori-cyan-dim: rgba(38, 122, 82, 0.14);
+  --nori-border: #d5dfdb;
+  --nori-border-active: #3d8f68;
+  --nori-text: #17241f;
+  --nori-text-secondary: #2c4039;
+  --nori-text-muted: #52665e;
+  --nori-cyan: #1f7a4d;
+  --nori-cyan-dim: rgba(31, 122, 77, 0.12);
   --nori-thinking: #17633f;
-  --nori-shadow: 0 18px 50px rgba(28, 53, 41, 0.16);
+  --nori-shadow: none;
   color-scheme: light;
-  --nori-shell: #f3f6f4;
+  --nori-shell: #e7eeeb;
   --nori-topbar: #ffffff;
-  --nori-statusbar: #edf2ef;
-  --nori-control: #f8fbfa;
-  --nori-control-hover: #e8f0ed;
+  --nori-statusbar: #e7eeeb;
+  --nori-control: #ffffff;
+  --nori-control-hover: #eef3f1;
   --nori-control-active: #dce8e3;
-  --nori-border-strong: #aebfba;
+  --nori-border-strong: #b7c7c0;
 }
 
 body {
@@ -2562,9 +2562,14 @@ kbd {
 .compact-tool-detail-row { display: grid; gap: 2px; min-width: 0; }
 .compact-tool-detail-row dt { color: var(--nori-text-muted); font-size: calc(8px * var(--nori-ui-font-scale)); }
 .compact-tool-detail-row dd { margin: 0; max-height: 160px; overflow: auto; color: var(--nori-text-secondary); font: calc(10px * var(--nori-ui-font-scale))/1.45 var(--nori-font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
-.tool-edit-before dd { color: color-mix(in srgb, var(--nori-danger) 80%, var(--nori-text)); }
-.tool-edit-after dd { color: color-mix(in srgb, var(--nori-success) 80%, var(--nori-text)); }
-.tool-edit-diff dd { color: var(--nori-text-muted); }
+.edit-diff { display: grid; gap: 1px; margin: 4px 0 2px; overflow: auto; max-height: 280px; border-radius: 6px; font: calc(12px * var(--nori-ui-font-scale))/1.45 var(--nori-font-mono); }
+.edit-diff-line { padding: 1px 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.edit-diff-add { color: color-mix(in srgb, var(--nori-success) 75%, var(--nori-text)); background: color-mix(in srgb, var(--nori-success) 16%, transparent); }
+.edit-diff-del { color: color-mix(in srgb, var(--nori-danger) 78%, var(--nori-text)); background: color-mix(in srgb, var(--nori-danger) 14%, transparent); }
+.edit-diff-meta, .edit-diff-context { color: var(--nori-text-muted); }
+.edit-diff-stats { margin-left: 6px; color: var(--nori-text-muted); font-weight: 650; }
+.edit-diff-stats .add { color: var(--nori-success); }
+.edit-diff-stats .del { color: var(--nori-danger); }
 /* SubAgent navigation states and compact per-round output. */
 .sidebar-nav-item.activity-pending,
 [data-theme="light"] .codex-layout .sidebar-nav-item.activity-pending { color: var(--nori-warning); background: color-mix(in srgb, var(--nori-warning) 9%, transparent); }
@@ -3103,11 +3108,11 @@ kbd {
 .file-tree-state.error { color: var(--nori-danger); }
 .file-tree-row {
   display: grid;
-  grid-template-columns: 13px 15px minmax(0, 1fr) auto auto;
+  grid-template-columns: 14px 18px minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   width: 100%;
-  min-height: 27px;
+  min-height: 30px;
   padding: 3px 7px;
   border: 0;
   border-radius: 4px;
@@ -3130,7 +3135,19 @@ kbd {
 .file-tree-row.selected { color: var(--nori-cyan); background: var(--nori-cyan-dim); }
 .file-tree-row[aria-expanded="true"] .file-tree-chevron svg { transform: rotate(90deg); }
 .file-tree-chevron svg { transition: transform .12s ease; }
-.file-tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(10px * var(--nori-ui-font-scale)); }
+.file-tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(13px * var(--nori-ui-font-scale)); }
+.file-type-icon { display: grid; width: 16px; height: 16px; place-items: center; color: #8b939c; }
+.file-type-icon.is-folder { color: #d4a017; }
+.file-type-icon.is-code { color: #3b82f6; }
+.file-type-icon.is-json { color: #e0a100; }
+.file-type-icon.is-markdown { color: #6b93e0; }
+.file-type-icon.is-style { color: #a855f7; }
+.file-type-icon.is-html { color: #e07a3d; }
+.file-type-icon.is-image { color: #3aa76d; }
+.file-type-icon.is-nix { color: #5277c3; }
+.file-type-icon.is-config { color: #c45c5c; }
+.file-type-icon.is-shell { color: #3f9e6e; }
+.file-type-icon svg { display: block; }
 .git-status { min-width: 17px; color: var(--nori-warning); font: 700 calc(9px * var(--nori-ui-font-scale)) var(--nori-font-mono); text-align: center; }
 .git-status-added, .git-status-untracked { color: var(--nori-success); }
 .git-status-deleted, .git-status-conflicted { color: var(--nori-danger); }
@@ -4105,7 +4122,19 @@ kbd {
 .codex-layout .composer-attachments { gap: 9px; padding: 0 0 11px; }
 .codex-layout .composer-attachment { width: 94px; flex-basis: 94px; grid-template-rows: 70px auto; }
 .codex-layout .composer-attachment img, .codex-layout .composer-file-icon { width: 94px; height: 70px; border-radius: 12px; }
-[data-theme="light"] .codex-layout .chat-input-area { background: rgba(255, 255, 255, .96); box-shadow: 0 14px 34px rgba(37, 52, 49, .12); }
+[data-theme="light"] .codex-layout .chat-input-area,
+[data-theme="light"] .codex-layout .chat-input-area:focus-within,
+[data-theme="light"] .chat-input-area,
+[data-theme="light"] .chat-input-area:focus-within,
+[data-theme="light"] .goal-island,
+[data-theme="light"] .card,
+[data-theme="light"] .settings-card,
+[data-theme="light"] .starter-card:hover,
+[data-theme="light"] .welcome-mark,
+[data-theme="light"] .codex-layout .sidebar.expanded {
+  box-shadow: none;
+}
+[data-theme="light"] .codex-layout .chat-input-area { background: var(--nori-surface-raised); }
 
 @media (prefers-reduced-motion: reduce) {
   .composer-setting-trigger,
@@ -5629,15 +5658,12 @@ kbd {
   border-color: var(--nori-accent, #7aa86d);
   color: var(--nori-text);
 }
-/* 输入框上方的 Goal / Todo 条：可折叠，宽度跟着 composer 走。
-   不画边框、不铺底板 —— 原来那块 color-mix(--nori-surface 70%) 的填充和页面底色
-   几乎一样，只有 1px 边框看得见，等于在消息上多出一个跟输入框同宽的空框子。
-   改成一段渐变：顶端完全透明，往下渐渐带上输入框的色调，长度就是条子自身高度，
-   条子展开多高渐变就多长，任何位置都没有硬边。 */
+/* 输入框上方的 Goal / Todo 条：实心底和强边框，避免和消息区融成一块看不出的遮罩。 */
 .composer-context-strip {
   margin: 0 0 6px;
-  border-radius: 10px 10px 0 0;
-  background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--nori-surface) 55%, transparent));
+  border: 1px solid var(--nori-border-strong);
+  border-radius: 10px;
+  background: var(--nori-surface-raised);
 }
 .composer-context-strip > summary {
   display: flex; align-items: center; gap: 7px; min-width: 0;
@@ -5658,8 +5684,6 @@ kbd {
 .composer-context-strip .composer-todos-head { display: none; }
 .composer-context-strip .composer-goal-row + .composer-todos { margin-top: 4px; }
 .composer-context-strip .composer-todos ul { margin-top: 0; }
-/* 不加边框和半透明底板：这两块本来是浮在消息流上方的，半透明深色叠上去就是一层
-   遮罩。背景交给 .chat-composer-wrap 的渐变，条子本身只是文字。 */
 .composer-goal-row {
   display: flex; align-items: center; gap: 8px; min-width: 0;
   padding: 3px 4px;

@@ -16,7 +16,7 @@ TWO-PHASE WRITE:
 Parameters:
 - note_type: 'analysis', 'decision', 'task', or 'review'.
 - title: plain text title.
-- content: full markdown content. DO NOT manually write [[wiki-links]].
+- content: full markdown content. DO NOT manually write [[wiki-links]] or a Related / 关联 section; the vault appends one.
 - links (required): [] to trigger auto-search, ["None"] to explicitly skip
   linking, or list of note titles to link.
 - tags (optional): used as search keywords when links is empty.`;
@@ -75,16 +75,11 @@ export class NoriMemoryWriteTool implements BuiltinTool<NoriMemoryWriteInput> {
         };
       }
 
-      // Phase 2: links provided, write the note with auto-generated [[wiki-links]]
-      const relatedSection = isExplicitNone || args.links.length === 0
-        ? '_None_'
-        : args.links.map(l => `- [[${l}]]`).join('\n');
-      const fullContent = args.content + '\n\n## Related\n\n' + relatedSection;
-
+      // Phase 2: links provided. writeNote appends the single resolved Related section.
       const result = await this.memory.writeNote({
         note_type: args.note_type,
         title: args.title,
-        content: fullContent,
+        content: args.content,
         tags: args.tags,
         links: isExplicitNone ? [] : args.links,
       });

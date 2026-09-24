@@ -36,6 +36,21 @@ export function normalizeBrowserInput(input: string): string {
   return `${BROWSER_SEARCH_URL}${encodeURIComponent(value)}`;
 }
 
+/** Agent navigation. Rejects text that the address bar would silently turn into a web search. */
+export function resolveBrowserToolUrl(input: string): { url: string } | { error: string } {
+  const value = input.trim();
+  if (!value) return { error: 'navigate requires url.' };
+  const url = normalizeBrowserInput(value);
+  const searched = url.startsWith(BROWSER_SEARCH_URL);
+  const blocked = url === BROWSER_HOME_URL && value !== BROWSER_HOME_URL;
+  if (searched || blocked || !isAllowedBrowserUrl(url)) {
+    return {
+      error: `Refusing to navigate to ${JSON.stringify(value)}. Browser navigate needs an http(s) URL, a host such as example.com, or a local .html file. It does not turn invalid text into a web search.`,
+    };
+  }
+  return { url };
+}
+
 export function isAllowedBrowserUrl(input: string): boolean {
   if (input === BROWSER_HOME_URL) return true;
   try {

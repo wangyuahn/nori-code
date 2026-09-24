@@ -2,6 +2,32 @@
 
 > **Current product:** Team Engineering (department tree, Discuss/Assign, conversation map) is the only delegation path. Older entries below that describe SubAgent DAG orchestration, `nori_swarm_launch`, or SubAgent+Team coexistence are historical. See the root [README](README.md) for an honest comparison and gap list.
 
+## v2.0.1 (2026-09-24)
+
+Patch on official 2.0. The department model is unchanged. This release fixes the settings file, memory notes, permission mode, the new-session picker, the light theme, the file tree, edit cards, the in-app browser, and the Windows installer.
+
+### Fixes
+
+- **A bad config section no longer blocks settings.** An invalid section is dropped and the rest of the file is saved. A file that is not valid TOML is left untouched. The error tells you to run `nori doctor`.
+- **A memory note lists related links once.** The writer no longer pastes its own related block, and the note view hides a heading that is only links, so the related panel is the only list on screen.
+- **YOLO and AUTO follow the session that asked.** Switching mode from an approval updates that session. A hired member inherits the parent's mode. A Discuss lock still forces manual, then returns to the mode you chose when the meeting ends.
+- **New session asks for a folder first.** The + button opens the folder picker and does not create a session until a folder is chosen. Folders you already use are one click.
+- **The goal and todo strip is a card.** It has a solid fill and a stronger border, so it no longer disappears into the chat background.
+- **Light theme drops the heavy shadows.** The sidebar, composer, and cards sit flat, on a cooler higher-contrast palette. Dark mode keeps its shadow.
+- **The file tree tells file types apart.** Names are larger, and each kind — code, markdown, image, config, and the rest — has its own icon.
+- **An edit card shows the diff.** The headline is the file name plus how many lines were added and removed. The body is a colored unified diff.
+- **The browser tool stays on the page you named.** Navigate requires an http(s) URL. Typing writes only text fields. An unknown key is rejected. A snapshot includes the page text and SVG text. Back and forward fail when the address does not change.
+- **Windows install no longer deletes the whole app folder before copying.** The Windows package is stored uncompressed, so extraction is not stuck on LZMA. The installer is larger. macOS and Linux stay compressed.
+
+### Thinking effort — do not use the highest tier
+
+Same rule as 2.0.0. Do not set the model to its highest thinking / reasoning effort. That tier spends a large amount of tokens and does not produce better work. Medium, or the provider's default, is the right setting.
+
+### Installers
+
+- **Nori Work** (macOS arm64/x64 dmg+zip, Windows x64 exe, Linux x64 AppImage+deb): [Releases](https://github.com/wangyuahn/nori-code/releases)
+- **Nori Code CLI** (any platform with Node.js `>=24.15.0`): `npm install -g nori-code`
+
 ## v2.0.0 (2026-09-19)
 
 First official 2.0. `2.0.0-pre.0` shipped the department rules — Discuss before Assign, no silent parallel work — but members were still in-session Team Agents sitting beside a separate map. Official 2.0 makes **every member a Session**. Hire, Discuss, Chat, `/team`, `/map`, and the web Map are one forest linked by `parent_session_id`. The pre-release proved the meeting; this release makes the runtime, the canvas, and the sidebar name the same people.

@@ -15,8 +15,7 @@ import { SkillPicker } from './SkillPicker';
 import { SessionIdentityDrawer } from './SessionIdentityDrawer';
 import { UsageOverview } from './UsageOverview';
 import { detectImageMime, isLikelyImageFile } from '../utils/image-mime';
-import { toolCallDetailFields } from '../utils/tool-call-detail';
-import { editLineOperationStats } from '../utils/edit-line-ops';
+import { editChangeCounts, editUnifiedDiff, toolCallDetailFields } from '../utils/tool-call-detail';
 import { sessionAgentDisplayName } from '../utils/session-agent';
 
 export interface ChatViewProps {
@@ -1269,21 +1268,24 @@ function CompactToolCall({ tool }: { tool: ToolCall }) {
   const { tr } = useI18n();
   const headline = compactToolCallHeadline(tool, tr);
   const fields = toolCallDetailFields(tool, tr);
-  const isEdit = tool.name.toLowerCase() === 'edit';
+  const isEdit = /^(edit|multiedit|notebookedit|apply_?patch)$/i.test(tool.name);
+  const diff = isEdit ? editUnifiedDiff(tool) : [];
   return <details className={`compact-tool-call tool-${tool.name.toLowerCase()}${tool.isError ? ' error' : ''}`}>
     <summary title={tool.result?.slice(0, 600)}>
       <span className="compact-tool-icon"><Icon name={toolIconName(tool.name)} size={12}/></span>
       <span className="compact-tool-headline">{headline}</span>
       <Icon className="compact-tool-chevron" name="chevron-right" size={11}/>
     </summary>
-    <dl className="compact-tool-detail">
+    {isEdit && diff.length > 0 ? <div className="edit-diff">{diff.map((line, index) => (
+      <div key={`${line.kind}-${String(index)}`} className={`edit-diff-line edit-diff-${line.kind}`}>{line.text}</div>
+    ))}</div> : <dl className="compact-tool-detail">
       {fields.map(field => (
-        <div key={field.key} className={`compact-tool-detail-row${isEdit && (field.key === 'before' || field.key === 'after' || field.key === 'diff') ? ` tool-edit-${field.key}` : ''}`}>
+        <div key={field.key} className="compact-tool-detail-row">
           <dt>{field.label}</dt>
           <dd>{field.value}</dd>
         </div>
       ))}
-    </dl>
+    </dl>}
   </details>;
 }
 
@@ -1308,7 +1310,10 @@ export function compactToolCallHeadline(tool: ToolCall, tr: (english: string, ch
     return path ? tr(`Wrote ${path}`, `写入 ${path}`) : tr('Wrote file', '写入文件');
   }
   if (/^(edit|multiedit|notebookedit|apply_?patch)$/.test(normalized)) {
-    return path ? tr(`Edited ${path}`, `编辑 ${path}`) : tr('Edited file', '编辑文件');
+    const file = path === undefined ? undefined : path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path;
+    const { additions, deletions } = editChangeCounts(tool);
+    const stats = `+${String(additions)} -${String(deletions)}`;
+    return file ? tr(`Edited ${file} ${stats}`, `编辑 ${file} ${stats}`) : tr(`Edited file ${stats}`, `编辑文件 ${stats}`);
   }
   if (/^(grep|glob|search|find|list|ls)$/.test(normalized) || normalized.includes('search') || normalized.includes('grep')) {
     const target = query ?? path;
@@ -1352,19 +1357,8 @@ function summarizeToolCall(tool: ToolCall, tr: (english: string, chinese: string
   }
   const path = firstString(args.path, args.file_path, args.filename, args.file);
   if (normalized === 'edit' || normalized === 'write') {
-    const oldText = firstString(args.old_string, args.old_text) ?? '';
-    const newText = firstString(args.new_string, args.content, args.new_text) ?? '';
-    const resultCounts = diffCounts(tool.result);
-    const operationCounts = normalized === 'edit' ? editLineOperationStats(args.line_ops) : undefined;
-    const additions = resultCounts?.additions
-      ?? (operationCounts !== undefined && (operationCounts.additions > 0 || operationCounts.deletions > 0)
-        ? operationCounts.additions
-        : countLines(newText));
-    const deletions = resultCounts?.deletions
-      ?? (operationCounts !== undefined && (operationCounts.additions > 0 || operationCounts.deletions > 0)
-        ? operationCounts.deletions
-        : normalized === 'edit' ? countLines(oldText) : 0);
-    return [path, `+${additions} -${deletions}`].filter(Boolean).join(' · ');
+    const { additions, deletions } = editChangeCounts(tool);
+    return [path, `+${String(additions)} -${String(deletions)}`].filter(Boolean).join(' · ');
   }
   return path ?? firstString(args.description, args.query, args.command) ?? '';
 }
@@ -1378,22 +1372,6 @@ function previewToolText(value: string | undefined, max = 72): string | undefine
   const compact = value.replace(/\s+/g, ' ').trim();
   if (compact.length === 0) return undefined;
   return compact.length <= max ? compact : `${compact.slice(0, max - 1)}…`;
-}
-
-function countLines(value: string): number {
-  if (!value) return 0;
-  return value.split(/\r?\n/).length;
-}
-
-function diffCounts(value: string | undefined): { additions: number; deletions: number } | undefined {
-  if (!value?.includes('\n')) return undefined;
-  let additions = 0;
-  let deletions = 0;
-  for (const line of value.split(/\r?\n/)) {
-    if (line.startsWith('+') && !line.startsWith('+++')) additions++;
-    if (line.startsWith('-') && !line.startsWith('---')) deletions++;
-  }
-  return additions > 0 || deletions > 0 ? { additions, deletions } : undefined;
 }
 
 async function readImageAttachment(file: File): Promise<ComposerAttachment> {

@@ -87,7 +87,7 @@ auto_install = true
   );
 }
 
-describe('kimi doctor', () => {
+describe('nori doctor', () => {
   it('skips missing default config files without failing', async () => {
     const { deps, stdout, stderr } = makeDeps();
 

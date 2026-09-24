@@ -1,8 +1,7 @@
-; Replace the complete installed application before the new files are copied.
-; Nori user data lives outside the install directory (~/.nori-code and the
-; Electron userData directory), so removing $INSTDIR does not remove settings
-; or sessions. This also clears stale web/native resources left by older builds.
+; Refresh only the web assets. Deleting all of $INSTDIR walks the language-server
+; tree in resources\server-runtime, which is tens of thousands of files and makes
+; an upgrade sit on "installing" for many minutes before NSIS copies anything.
+; User data is outside the install directory and is not touched here.
 !macro customInit
-  RMDir /r "$INSTDIR"
-  CreateDirectory "$INSTDIR"
+  RMDir /r "$INSTDIR\resources\nori-web"
 !macroend

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { ResolvedAgentProfile } from '../../src/profile';
 import type { SDKSessionRPC } from '../../src/rpc';
-import { Session } from '../../src/session';
+import { Session, type SessionOptions } from '../../src/session';
 import { SessionAPIImpl } from '../../src/session/rpc';
 import { createFakeKaos } from '../tools/fixtures/fake-kaos';
 
@@ -18,7 +18,7 @@ function contextProfile(): ResolvedAgentProfile {
   return { name: 'context-profile', systemPrompt: () => 'test', tools: [] };
 }
 
-async function teamSession(id: string) {
+async function teamSession(id: string, extra: Partial<SessionOptions> = {}) {
   const session = new Session({
     id,
     kaos: createFakeKaos({
@@ -28,6 +28,7 @@ async function teamSession(id: string) {
     homedir: '/tmp/kimi-session',
     rpc: createSessionRpc(),
     initializeMainAgent: false,
+    ...extra,
   });
   const main = await session.createAgent({ type: 'main' }, { profile: contextProfile() });
   const hire = (leader: string, name: string) =>
@@ -94,6 +95,41 @@ describe('session-wide permission mode', () => {
       main.agent.discussMode.exit();
       session.applySessionPermissionMode('auto');
       expect(member.agent.permission.mode).toBe('auto');
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('notifies the department once, and skips that when propagation is applying the same mode', async () => {
+    const onDepartmentPermissionMode = vi.fn();
+    const { session } = await teamSession('test-session-permission-propagate', {
+      onDepartmentPermissionMode,
+    });
+    try {
+      session.applySessionPermissionMode('yolo');
+      expect(onDepartmentPermissionMode).toHaveBeenCalledWith('yolo');
+      session.applySessionPermissionMode('auto', { propagate: false });
+      expect(onDepartmentPermissionMode).toHaveBeenCalledTimes(1);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('keeps a write-locked agent manual, then restores the mode chosen during the lock', async () => {
+    const { session, main } = await teamSession('test-session-permission-write-lock');
+    try {
+      session.applySessionPermissionMode('yolo');
+      session.holdDepartmentWriteLock();
+      main.agent.teamWriteLocked = true;
+      main.agent.permission.setMode('manual');
+
+      session.applySessionPermissionMode('auto');
+      expect(main.agent.permission.mode).toBe('manual');
+      expect(session.currentPermissionMode()).toBe('auto');
+
+      main.agent.teamWriteLocked = false;
+      session.releaseDepartmentWriteLock();
+      expect(main.agent.permission.mode).toBe('auto');
     } finally {
       await session.close();
     }
