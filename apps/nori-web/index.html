@@ -6,7 +6,11 @@
     <title>Nori Work</title>
     <style>
       html, body, #root { height: 100%; overflow: hidden; }
-      body { background: #08080a; color: #e4e4e7; font-family: system-ui, -apple-system, sans-serif; }
+      /* 首屏配色跟随系统，避免主题初始化前先闪一帧深色。 */
+      body { background: #ffffff; color: #17241f; font-family: system-ui, -apple-system, sans-serif; }
+      @media (prefers-color-scheme: dark) {
+        body { background: #08080a; color: #e4e4e7; }
+      }
     </style>
   </head>
   <body>

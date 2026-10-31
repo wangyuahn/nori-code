@@ -1,10 +1,10 @@
 # Migrating from kimi-cli
 
-Nori Code is a fork of Kimi Code with its own CLI (`nori`), data root (`~/.nori-code`), and 2.0 **team engineering** model. This page covers two upgrades: moving from a single-agent / in-session Team mental model to durable department sessions and a conversation map, and (for older installs) how legacy kimi-cli data relates to Nori's home directory.
+Nori Code is a fork of Kimi Code with its own CLI (`nori`), data root (`~/.nori-code`), and 2.0 **team engineering** model. This page covers two upgrades: moving from a single-agent / in-session Team mental model to durable department sessions with one team per conversation, and (for older installs) how legacy kimi-cli data relates to Nori's home directory.
 
 ## Upgrading to 2.0 (team engineering)
 
-Nori Code **1.x** already used SubAgents and collaboration tools inside a session. **2.0** adds a department tree of **real child sessions** and a **conversation map**. Existing session transcripts under `~/.nori-code/sessions/` keep working; you do not need a separate data-format migration for the map. What changes is how team work is modeled and how you navigate it.
+Nori Code **1.x** already used SubAgents and collaboration tools inside a session. **2.0** adds a department tree of **real child sessions**, shown as a team inside each conversation. Existing session transcripts under `~/.nori-code/sessions/` keep working; you do not need a separate data-format migration for the mount metadata. What changes is how team work is modeled and how you navigate it.
 
 ### Mental model
 

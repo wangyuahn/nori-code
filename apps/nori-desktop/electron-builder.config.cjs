@@ -33,10 +33,14 @@ module.exports = {
   directories: { output: 'dist-app' },
   npmRebuild: false,
   asar: true,
-  // Windows installs were taking 5–15 minutes because NSIS LZMA-decompresses the
-  // language-server tree in server-runtime file by file. Store compression copies
-  // those bytes instead. macOS and Linux jobs run on their own OS, so they keep
-  // normal compression and smaller artifacts.
+  // app-builder-lib's configureDifferentialAwareArchiveOptions() (called from
+  // NsisTarget.buildAppPackage) forces the inner app-*.7z back to
+  // compression: "normal" for differential updates, so `store` never applies to
+  // the payload archive — it only speeds up building the outer installer.
+  // Install time is dominated by payload file count instead: NSIS
+  // extractAppPackage.nsh decompresses the 7z into $PLUGINSDIR and then
+  // CopyFiles everything into $INSTDIR, writing each file twice. Keep the
+  // payload small in before-pack.cjs. macOS/Linux keep normal compression.
   compression: process.platform === 'win32' ? 'store' : 'normal',
   files: [
     'out/**',
@@ -75,7 +79,14 @@ module.exports = {
     // Stable, Nori-only GUID prevents collisions with unrelated applications.
     guid: 'af4f85b3-4b85-5fac-8768-243f81adad55',
     oneClick: false,
-    perMachine: false,
+    // Per-user installs land under $LOCALAPPDATA\Programs (~113 chars of prefix
+    // before resources\server-runtime). The correctly staged language-server
+    // tree is up to ~182 chars deep (real version conflicts nest, e.g.
+    // @volar/language-server -> vscode-languageserver@9 -> ...), and NSIS
+    // CopyFiles is a MAX_PATH (259) API, so a per-user copy silently fails and
+    // rolls back. Per-machine "$PROGRAMFILES\Nori Work" keeps the worst case
+    // ~52 + 182 < 259. Trade-off: UAC elevation on install and update.
+    perMachine: true,
     allowToChangeInstallationDirectory: true,
     shortcutName: 'Nori Work',
     uninstallDisplayName: 'Nori Work',

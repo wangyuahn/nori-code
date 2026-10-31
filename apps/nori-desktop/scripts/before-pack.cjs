@@ -5,6 +5,7 @@ const { createRequire } = require('node:module');
 const {
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -12,7 +13,7 @@ const {
   rmSync,
   statSync,
 } = require('node:fs');
-const { dirname, join, resolve } = require('node:path');
+const { dirname, basename, join, resolve } = require('node:path');
 
 const RUNTIME_PACKAGES = [
   'node-pty',
@@ -88,13 +89,25 @@ function resolvePackageJson(requireFrom, packageName) {
   }
 }
 
+// 返回 dir 在 staged 树里的上一级安装层：即"包含当前目录的 node_modules"所在层。
+// runtimeStageDir/node_modules/a/node_modules/b 的层链是
+// [b 目录, a 目录, runtimeStageDir]。
+function upLevel(dir) {
+  if (basename(dir) === 'node_modules') return dirname(dir);
+  if (basename(dirname(dir)) === 'node_modules') return dirname(dirname(dir));
+  return dirname(dir);
+}
+
 function stagePackageTree(
   packageName,
   requireFrom,
-  modulesStageDir,
+  consumerDir,
   staged,
   ancestors = new Map(),
+  stageRoot = null,
 ) {
+  // 首次调用的 consumerDir 即 staged 树的根（runtimeStageDir）。
+  if (stageRoot === null) stageRoot = consumerDir;
   let packageJsonPath;
   try {
     packageJsonPath = resolvePackageJson(requireFrom, packageName);
@@ -103,21 +116,46 @@ function stagePackageTree(
   }
   packageJsonPath = realpathSync(packageJsonPath);
   const packageRoot = dirname(packageJsonPath);
-  const target = packageTarget(modulesStageDir, packageName);
-  const existingRoot = staged.get(target);
-  if (existingRoot !== undefined) {
-    if (existingRoot !== packageRoot) {
-      throw new Error(
-        `Conflicting server runtime package versions for ${packageName}: ` +
-          `${existingRoot} and ${packageRoot}.`,
-      );
+  // pnpm 把同名包在不同依赖分支里解析到不同的物理目录，所以环必须按解析出的
+  // package.json 路径判断：按包名比较 root 在循环依赖里永远不相等，会无限递归。
+  if (ancestors.has(packageJsonPath)) return;
+
+  // 从 consumerDir 向上逐层检查：npm 语义的最近优先 + 能提则提。
+  // - 某层已有同物理目录的副本 → 去重结束；
+  // - 某层已有不同版本 → 只能嵌套在 consumer 自己的 node_modules 里，
+  //   放更高层会被错误版本拦截；
+  // - 全链都没有 → 提到最顶层（runtimeStageDir/node_modules）。
+  let level = consumerDir;
+  let placement = null;
+  for (;;) {
+    const target = packageTarget(level, packageName);
+    const existingRoot = staged.get(target);
+    if (existingRoot !== undefined) {
+      if (existingRoot === packageRoot) return;
+      placement = packageTarget(consumerDir, packageName);
+      break;
     }
-    return;
+    if (level === stageRoot) {
+      placement = target;
+      break;
+    }
+    level = upLevel(level);
   }
+
+  const target = placement;
+  if (staged.has(target)) return;
   staged.set(target, packageRoot);
 
   mkdirSync(dirname(target), { recursive: true });
-  cpSync(packageRoot, target, { recursive: true });
+  // pnpm 包目录里的 node_modules 是指向 .pnpm 物理目录的符号链接。原样复制会把
+  // 链接目标的内容整个嵌套进 staged 树（一层层解引用），路径深度轻松超过
+  // Windows MAX_PATH，NSIS CopyFiles 到 $INSTDIR 时直接失败回滚（exit 2）。
+  // 冲突嵌套由上面的层链算法在需要时显式创建；这里跳过符号链接本身，
+  // 包自带的真实 node_modules（bundledDependencies vendored 目录）仍原样保留。
+  cpSync(packageRoot, target, {
+    recursive: true,
+    filter: (source) => !lstatSync(source).isSymbolicLink(),
+  });
 
   const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
   const packageRequire = createRequire(packageJsonPath);
@@ -126,18 +164,11 @@ function stagePackageTree(
     ...packageJson.optionalDependencies,
   };
   const nextAncestors = new Map(ancestors);
-  nextAncestors.set(packageName, packageRoot);
-  const childModulesDir = resolve(target, 'node_modules');
+  nextAncestors.set(packageJsonPath, packageRoot);
   for (const dependency of Object.keys(dependencies).sort()) {
-    if (nextAncestors.get(dependency) === packageRoot) continue;
+    if (nextAncestors.has(dependency)) continue;
     try {
-      stagePackageTree(
-        dependency,
-        packageRequire,
-        childModulesDir,
-        staged,
-        nextAncestors,
-      );
+      stagePackageTree(dependency, packageRequire, target, staged, nextAncestors, stageRoot);
     } catch (error) {
       if (packageJson.optionalDependencies?.[dependency] !== undefined) continue;
       throw error;
@@ -213,5 +244,56 @@ exports.default = async function beforePack(context) {
   cpSync(webSourceDir, webStageDir, { recursive: true });
   console.log(`[before-pack] staged nori-web assets -> ${webStageDir}`);
 
-  void context;
+  prunePayload(
+    stageRoot,
+    context.electronPlatformName ?? process.platform,
+    context.arch ?? process.arch,
+  );
 };
+
+// electron-builder hands beforePack a numeric Arch enum (0 ia32, 1 x64, 2 armv7l,
+// 3 arm64, 4 universal) while node-pty names its prebuild folders after the
+// arch string.
+const ARCH_NAMES = ['ia32', 'x64', 'armv7l', 'arm64', 'universal'];
+
+function prebuildTargets(platform, arch) {
+  const name = typeof arch === 'number' ? ARCH_NAMES[arch] : arch;
+  if (name === 'universal') return new Set([`${platform}-x64`, `${platform}-arm64`]);
+  return new Set([`${platform}-${name}`]);
+}
+
+function prunePayload(stageRoot, platform, arch) {
+  const keptPrebuilds = prebuildTargets(platform, arch);
+  let pruned = 0;
+  const visit = (directory) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === 'prebuilds' && directory.endsWith('node-pty')) {
+          for (const prebuild of readdirSync(path, { withFileTypes: true })) {
+            if (prebuild.isDirectory() && !keptPrebuilds.has(prebuild.name)) {
+              rmSync(join(path, prebuild.name), { recursive: true, force: true });
+              pruned++;
+            }
+          }
+          // 保留平台的 prebuild 目录里也有 .pdb 调试符号，仍要继续向下清理。
+          visit(path);
+          continue;
+        }
+        visit(path);
+        continue;
+      }
+      if (path.endsWith('.pdb') || path.endsWith('.map')) {
+        rmSync(path, { force: true });
+        pruned++;
+      }
+    }
+  };
+  visit(stageRoot);
+  console.log(`[before-pack] pruned ${String(pruned)} payload entries from ${stageRoot}`);
+}
+
+exports.RUNTIME_PACKAGES = RUNTIME_PACKAGES;
+exports.packageTarget = packageTarget;
+exports.prunePayload = prunePayload;
+exports.stagePackageTree = stagePackageTree;

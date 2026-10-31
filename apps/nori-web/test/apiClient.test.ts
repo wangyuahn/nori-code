@@ -208,12 +208,17 @@ describe('sessionIdFromLocation', () => {
   });
 });
 
+function requestUrl(input: RequestInfo | URL | undefined): URL {
+  const raw = input instanceof Request ? input.url : input;
+  return new URL(String(raw), 'http://localhost:3000');
+}
+
 describe('sessions.list', () => {
   it('walks every page so the sidebar is not capped at the API default of 20', async () => {
     const firstPage = Array.from({ length: 100 }, (_, index) => ({ id: `session-${index}` }));
     const secondPage = [{ id: 'session-100' }, { id: 'session-101' }];
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = new URL(String(input), 'http://localhost:3000');
+      const url = requestUrl(input);
       const beforeId = url.searchParams.get('before_id');
       const page = beforeId ? secondPage : firstPage;
       return new Response(JSON.stringify({
@@ -232,8 +237,8 @@ describe('sessions.list', () => {
       ...secondPage.map(session => session.id),
     ]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    const firstUrl = new URL(String(fetchMock.mock.calls[0]?.[0]), 'http://localhost:3000');
-    const secondUrl = new URL(String(fetchMock.mock.calls[1]?.[0]), 'http://localhost:3000');
+    const firstUrl = requestUrl(fetchMock.mock.calls[0]?.[0]);
+    const secondUrl = requestUrl(fetchMock.mock.calls[1]?.[0]);
     expect(firstUrl.pathname).toBe('/api/v1/sessions');
     expect(firstUrl.searchParams.get('page_size')).toBe('100');
     expect(firstUrl.searchParams.get('include_archive')).toBe('true');

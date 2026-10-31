@@ -32,8 +32,8 @@ class BootErrorBoundary extends Component<{ children: ReactNode }, { error: Erro
             minHeight: '100%',
             padding: 24,
             fontFamily: 'system-ui, sans-serif',
-            background: '#111',
-            color: '#f2f2f2',
+            background: 'var(--nori-bg, #111)',
+            color: 'var(--nori-text, #f2f2f2)',
           }}
         >
           <h1 style={{ fontSize: 18, margin: '0 0 8px' }}>Nori Work failed to start</h1>
@@ -63,7 +63,7 @@ window.addEventListener('error', (event) => {
   const root = document.getElementById('root');
   if (!root) return;
   const message = event.error instanceof Error ? event.error.message : event.message;
-  root.innerHTML = `<div style="padding:24px;font-family:system-ui,sans-serif;color:#f2f2f2;background:#111;min-height:100%"><h1 style="font-size:18px">Nori Work failed to load</h1><pre style="white-space:pre-wrap;font-size:12px;opacity:.75">${String(message).replace(/</g, '&lt;')}</pre></div>`;
+  root.innerHTML = `<div style="padding:24px;font-family:system-ui,sans-serif;color:var(--nori-text,#f2f2f2);background:var(--nori-bg,#111);min-height:100%"><h1 style="font-size:18px">Nori Work failed to load</h1><pre style="white-space:pre-wrap;font-size:12px;opacity:.75">${String(message).replace(/</g, '&lt;')}</pre></div>`;
 });
 window.addEventListener('unhandledrejection', (event) => {
   reportAppError({ source: 'runtime', message: event.reason, operation: 'promise' });

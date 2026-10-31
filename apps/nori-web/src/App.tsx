@@ -1,4 +1,4 @@
-import { Component, Fragment, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CronJobPanel } from './components/CronJobPanel';
 import { AccountCenter } from './components/AccountCenter';
 import { CodeView } from './components/CodeView';
@@ -20,13 +20,10 @@ import { useGlobalApprovals } from './hooks/useGlobalApprovals';
 import { useBrowserPermissions } from './hooks/useBrowser';
 import { SessionIdentityDrawer } from './components/SessionIdentityDrawer';
 import { ErrorCenter } from './components/ErrorCenter';
+import { TeamPage } from './components/TeamPage';
+import { SessionTeamBar } from './components/SessionTeamBar';
 import { reportAppError } from './utils/error-center';
 import { useGlobalErrors } from './hooks/useGlobalErrors';
-
-/** Lazy: Map must never block Chat boot if SessionMapPage/d3-force fails to evaluate. */
-const SessionMapPage = lazy(() =>
-  import('./components/SessionMapPage').then((module) => ({ default: module.SessionMapPage })),
-);
 
 type View = 'chat' | 'team' | 'cron' | 'account';
 type SidebarTab = 'sessions' | 'files';
@@ -34,7 +31,7 @@ type InitialMessage = { text: string; attachments: PromptAttachment[]; options?:
 
 const NAV_ITEMS: { key: View; icon: IconName; label: string }[] = [
   { key: 'chat', icon: 'chat', label: 'Chat' },
-  { key: 'team', icon: 'graph', label: 'Map' },
+  { key: 'team', icon: 'graph', label: 'Team' },
   { key: 'cron', icon: 'clock', label: 'Cron Job' },
 ];
 
@@ -44,58 +41,6 @@ const SIDEBAR_TABS: { key: SidebarTab; icon: IconName; label: string }[] = [
 ];
 
 const SIDEBAR_EXPANDED_STORAGE_KEY = 'nori-sidebar-expanded';
-
-/** Keeps Chat usable when Conversation Map throws during render or lazy import. */
-class MapViewBoundary extends Component<
-  {
-    children: ReactNode;
-    onBackToChat: () => void;
-    fallbackLabel: string;
-    backLabel: string;
-    retryLabel: string;
-  },
-  { error: Error | null; retryKey: number }
-> {
-  state: { error: Error | null; retryKey: number } = { error: null, retryKey: 0 };
-
-  static getDerivedStateFromError(error: Error): { error: Error } {
-    return { error };
-  }
-
-  componentDidCatch(error: Error, info: ErrorInfo): void {
-    console.error('[nori-web] Conversation Map crashed', error, info.componentStack);
-    reportAppError({ source: 'runtime', message: error, operation: 'react render', details: { componentStack: info.componentStack } });
-  }
-
-  render() {
-    if (this.state.error) {
-      // Fill content-area height — absolute/zero-height shells hide errors behind overflow:hidden.
-      return (
-        <div className="view-page view-page-wide session-map-page session-map-error-page">
-          <div className="view-stack" style={{ padding: 24, gap: 12 }}>
-            <p>{this.props.fallbackLabel}</p>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => this.setState((prev) => ({ error: null, retryKey: prev.retryKey + 1 }))}
-              >
-                {this.props.retryLabel}
-              </button>
-              <button type="button" className="btn" onClick={this.props.onBackToChat}>
-                {this.props.backLabel}
-              </button>
-            </div>
-          </div>
-        </div>
-      );
-    }
-    // Fragment+key remounts on retry WITHOUT a layout wrapper. A plain <div> breaks
-    // .session-map-page { height:100% } → stage/floats collapse to 0 under
-    // .content-area-team { overflow:hidden } (blank Map page).
-    return <Fragment key={this.state.retryKey}>{this.props.children}</Fragment>;
-  }
-}
 
 function loadSidebarExpanded(): boolean {
   try {
@@ -143,9 +88,6 @@ export function App() {
   const [folderPickerOpen, setFolderPickerOpen] = useState(false);
   const [pendingInitialMessage, setPendingInitialMessage] = useState<InitialMessage | null>(null);
   const [pendingCreateSession, setPendingCreateSession] = useState(false);
-  const [pendingProjectParentId, setPendingProjectParentId] = useState<string | null>(null);
-  const [pendingCreateStayOnMap, setPendingCreateStayOnMap] = useState(false);
-  const pendingMapCreateRef = useRef<((sessionId: string | null) => void) | null>(null);
   const pendingProjectSelectionRef = useRef<((cwd: string) => void) | null>(null);
   const [queuedFirstMessage, setQueuedFirstMessage] = useState<(InitialMessage & { sessionId: string }) | null>(null);
   const [draftAgentConfig, setDraftAgentConfig] = useState<SessionAgentConfig>({
@@ -292,7 +234,7 @@ export function App() {
   }, [activeSession?.metadata?.cwd]);
   const viewLabels: Record<View, string> = {
     chat: tr('Chat', '对话'),
-    team: tr('Map', '对话地图'),
+    team: tr('Team', '团队'),
     cron: tr('Cron Job', '定时任务'),
     account: tr('My profile', '我的'),
   };
@@ -476,13 +418,10 @@ export function App() {
 
   const createTopLevelSession = useCallback(async (
     cwd: string,
-    options?: { activate?: boolean; reportError?: boolean },
   ) => {
     return createNewSession({
       cwd,
       smart_title: true,
-      activate: options?.activate,
-      reportError: options?.reportError,
       agent_config: {
         model: draftAgentConfig.model?.trim() || undefined,
         thinking: draftAgentConfig.thinking,
@@ -490,10 +429,6 @@ export function App() {
       },
     });
   }, [createNewSession, draftAgentConfig]);
-
-  const createMapTopLevelSession = useCallback(async (cwd: string) => {
-    return createTopLevelSession(cwd, { activate: false, reportError: false });
-  }, [createTopLevelSession]);
 
   const createConversation = async (cwd: string, firstMessage?: InitialMessage) => {
     setSelectedProjectRoot(cwd);
@@ -524,9 +459,6 @@ export function App() {
 
   const startNewConversation = () => {
     setPendingInitialMessage(null);
-    setPendingProjectParentId(null);
-    setPendingCreateStayOnMap(false);
-    pendingMapCreateRef.current = null;
     pendingProjectSelectionRef.current = null;
     setPendingCreateSession(true);
     setFolderPickerOpen(true);
@@ -574,44 +506,26 @@ export function App() {
     switch (activeView) {
       case 'team':
         return (
-          <MapViewBoundary
-            onBackToChat={() => setActiveView('chat')}
-            fallbackLabel={tr('Conversation Map failed to load.', '对话地图加载失败。')}
-            backLabel={tr('Back to Chat', '返回对话')}
-            retryLabel={tr('Retry', '重试')}
-          >
-            <Suspense
-              fallback={(
-                <div className="view-page view-page-wide session-map-page">
-                  <div className="session-map-stage session-map-stage-loading" aria-busy="true" />
-                </div>
-              )}
-            >
-              <SessionMapPage
-                sessions={sessions}
-                activeSessionId={sessionId ?? undefined}
-                onOpenSession={(id) => {
-                  switchSession(id);
-                  setActiveView('chat');
-                  closeSidebarOnNarrowViewport();
-                }}
-                onAskParentIdentity={async ({ parentSessionId, brief }) => (
-                  api.sessions.fillIdentity(parentSessionId, brief)
-                )}
-                onGraphChanged={() => { void refreshSessions(); }}
-                onCreateTopLevelSession={createMapTopLevelSession}
-                onChooseProject={(options) => {
-                  setPendingCreateSession(options?.createSession === true);
-                  setPendingProjectParentId(options?.parentSessionId ?? null);
-                  setPendingCreateStayOnMap(options?.stayOnMap === true);
-                  pendingMapCreateRef.current = options?.onCreated ?? null;
-                  pendingProjectSelectionRef.current = options?.onSelected ?? null;
-                  setFolderPickerOpen(true);
-                }}
-                preferredCreateCwd={selectedProjectRoot ?? activeSession?.metadata?.cwd}
-              />
-            </Suspense>
-          </MapViewBoundary>
+          <TeamPage
+            session={activeSession}
+            members={departmentAgents}
+            onSelectAgent={(targetSessionId, agent) => {
+              const mountedId = agent.mounted_session_id
+                ?? (agent.kind === 'team' ? agent.agent_id : undefined);
+              if (mountedId !== undefined && mountedId !== targetSessionId) {
+                setActiveAgentSelection(null);
+                switchSession(mountedId);
+              } else {
+                setActiveAgentSelection(
+                  agent.agent_id === 'main' || agent.kind === 'main'
+                    ? null
+                    : { sessionId: targetSessionId, agent },
+                );
+              }
+              setActiveView('chat');
+              closeSidebarOnNarrowViewport();
+            }}
+          />
         );
       case 'cron':
         return (
@@ -782,6 +696,13 @@ export function App() {
             onSelectSession={(id) => { switchSession(id); setActiveView('chat'); }}
           />
           <div className="top-bar-actions">
+            {activeView === 'chat' && <SessionTeamBar
+              session={activeSession}
+              members={departmentAgents}
+              activeAgentId={activeAgentId}
+              onSelectAgent={selectSessionAgent}
+              onOpenTeam={() => { setActiveView('team'); }}
+            />}
             <div className="session-chip" title={activeSession?.id ?? tr('No active session', '无活动会话')}><span className={`status-dot${activeSession ? ' active' : ' idle'}`} /><span>{activeSession?.title || tr('No session', '无会话')}</span></div>
           </div>
           <WindowControls />
@@ -794,58 +715,30 @@ export function App() {
         open={folderPickerOpen}
         projects={projectFolders(sessions)}
         onClose={() => {
-          pendingMapCreateRef.current?.(null);
           setFolderPickerOpen(false);
           setPendingInitialMessage(null);
           setPendingCreateSession(false);
-          setPendingProjectParentId(null);
-          setPendingCreateStayOnMap(false);
-          pendingMapCreateRef.current = null;
           pendingProjectSelectionRef.current = null;
         }}
         onSelect={cwd => {
           const firstMessage = pendingInitialMessage ?? undefined;
           const shouldCreate = pendingCreateSession;
-          const parentId = pendingProjectParentId;
-          const stayOnMap = pendingCreateStayOnMap;
-          const onMapCreated = pendingMapCreateRef.current;
           const onProjectSelected = pendingProjectSelectionRef.current;
           setFolderPickerOpen(false);
           setPendingInitialMessage(null);
           setPendingCreateSession(false);
-          setPendingProjectParentId(null);
-          setPendingCreateStayOnMap(false);
-          pendingMapCreateRef.current = null;
           pendingProjectSelectionRef.current = null;
           if (firstMessage) {
             void createConversation(cwd, firstMessage);
           } else if (shouldCreate) {
-            if (stayOnMap) {
-              setSelectedProjectRoot(cwd);
-              void createMapTopLevelSession(cwd).then((createdId) => {
-                onMapCreated?.(createdId);
-              }, () => {
-                onMapCreated?.(null);
-              });
-            } else {
-              void createConversation(cwd).then((created) => {
-                if (created) setActiveView('chat');
-              });
-            }
-          } else if (parentId) {
-            const parent = sessions.find(session => session.id === parentId);
-            const metadata = parent?.metadata === undefined
-              ? { cwd }
-              : { ...parent.metadata, cwd };
-            void api.sessions.updateProfile(parentId, { metadata }).then(() => {
-              setSelectedProjectRoot(cwd);
-              void refreshSessions();
-              onProjectSelected?.(cwd);
+            void createConversation(cwd).then((created) => {
+              if (created) setActiveView('chat');
             });
           } else {
             setSelectedProjectRoot(cwd);
             switchSession(null);
             setActiveView('chat');
+            onProjectSelected?.(cwd);
           }
         }}
       />

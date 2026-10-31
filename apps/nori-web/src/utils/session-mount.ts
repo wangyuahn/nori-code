@@ -46,12 +46,14 @@ export function wouldCreateMountCycle(
 }
 
 /**
- * Sidebar list: the same Session forest as the map. Mounted children stay
- * visible so hire / map / sidebar never disagree about who exists.
+ * Sidebar list: top-level conversations only. A mounted child already appears
+ * inside its parent's team, so it is listed separately only while it is the
+ * conversation the user has open.
  */
 export function sessionsForSidebar(
   sessions: readonly Session[],
-  _activeSessionId?: string | null,
+  activeSessionId?: string | null,
 ): Session[] {
-  return [...sessions];
+  return sessions.filter(session =>
+    !isMountedChildSession(session) || (activeSessionId !== null && activeSessionId !== undefined && session.id === activeSessionId));
 }

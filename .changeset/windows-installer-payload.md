@@ -1,0 +1,5 @@
+---
+"nori-code": patch
+---
+
+Fix the Windows installer failing to install (silent exit 2, interactive rollback) and make it faster. The staged server-runtime tree is now built with npm-style hoisting — deduped diamonds, no symlink dereferencing — and nests only real version conflicts (e.g. typescript 6 vs 4.9). The previous layout both duplicated megabytes through pnpm symlink dereferencing and produced 400+ character paths that exceeded MAX_PATH during NSIS CopyFiles, so the installer rolled back every run. Windows now installs per-machine ("C:\Program Files\Nori Work") to keep copied paths under MAX_PATH. Upgrades are robust again: the app-running check kills the whole process tree (taskkill /t) so the server worker releases file locks, our assisted uninstaller now exits 0 instead of electron-builder's default error level 2 (which made every assisted upgrade fail with "Failed to uninstall old application files"), and a failed old-version uninstall no longer aborts the new install. The staged payload drops from 24,340 files / 365 MB to 17,330 files / 191 MB, with debug symbols, source maps, and other platforms' node-pty prebuilds still pruned.

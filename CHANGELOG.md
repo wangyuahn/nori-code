@@ -1,6 +1,36 @@
 # Changelog
 
-> **Current product:** Team Engineering (department tree, Discuss/Assign, conversation map) is the only delegation path. Older entries below that describe SubAgent DAG orchestration, `nori_swarm_launch`, or SubAgent+Team coexistence are historical. See the root [README](README.md) for an honest comparison and gap list.
+> **Current product:** Team Engineering (department tree, Discuss/Assign, per-conversation Team view) is the only delegation path. Older entries below that describe SubAgent DAG orchestration, `nori_swarm_launch`, the global conversation map, or SubAgent+Team coexistence are historical. See the root [README](README.md) for an honest comparison and gap list.
+
+## v2.0.2 (2026-10-31)
+
+Patch on 2.0.1. The department model is unchanged. Each conversation now shows only its own team, the team lives beside the conversation title, the web app defaults to a clean light theme, and the Windows installer actually installs again.
+
+### Team is per conversation
+
+- **The global conversation map is gone.** The web Map view, its force-directed layout, and the d3 dependency are removed. In its place, the Team page shows one tidy tree for the current conversation: the lead at the root, members as real child sessions under it. Switching conversations switches the tree.
+- **A team capsule sits beside the conversation title.** Open it to see the current conversation's members, jump to one, or return to the lead, without leaving the chat view.
+- **The sidebar lists conversations, not team members.** A member appears in the sidebar only if it is itself a conversation you opened.
+
+### Web UI
+
+- **The web app defaults to light.** A clean white palette with dark text; the dark theme follows `prefers-color-scheme` as before.
+
+### Windows installer
+
+- **Install works again.** The 2.0.x installer rolled back every run on Windows (silent exit 2, or "Nori Work cannot be closed" in the wizard). The staged server-runtime tree is rebuilt with npm-style hoisting — no symlink dereferencing, real version conflicts (for example typescript 6 vs 4.9) nest only where needed — so payload paths stay under MAX_PATH and the payload shrinks from 24,340 files / 365 MB to 17,330 files / 191 MB. Windows installs per-machine ("C:\Program Files\Nori Work").
+- **Upgrades close the app properly.** The installer now kills the whole process tree, so the server worker no longer keeps files locked mid-upgrade.
+- **Upgrades no longer fail at the old uninstaller.** Assisted uninstallers used to exit with error level 2 even on a clean uninstall, which made every upgrade abort with "Failed to uninstall old application files"; our uninstaller now reports success, and the installer continues even if an old-version uninstall fails.
+- **Debug symbols, source maps, and other platforms' node-pty prebuilds are pruned** from the packaged runtime, and the packaged Vue and Svelte language servers resolve their dependencies again.
+
+### Thinking effort — do not use the highest tier
+
+Same rule as 2.0.0. Do not set the model to its highest thinking / reasoning effort. That tier spends a large amount of tokens and does not produce better work. Medium, or the provider's default, is the right setting.
+
+### Installers
+
+- **Nori Work** (macOS arm64/x64 dmg+zip, Windows x64 exe, Linux x64 AppImage+deb): [Releases](https://github.com/wangyuahn/nori-code/releases)
+- **Nori Code CLI** (any platform with Node.js `>=24.15.0`): `npm install -g nori-code`
 
 ## v2.0.1 (2026-09-24)
 

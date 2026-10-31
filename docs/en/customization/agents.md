@@ -1,6 +1,6 @@
 # Agents and Sub-Agents
 
-Every session in Nori Code CLI is driven by a **main Agent**. In 2.0 the main Agent leads a **department tree** of durable **team partners** (`TeamCreate`). Partners are real child sessions on the conversation map; they Discuss, receive assignments, and execute while the lead stays read-only by default. See [Team engineering](../guides/team-engineering.md).
+Every session in Nori Code CLI is driven by a **main Agent**. In 2.0 the main Agent leads a **department tree** of durable **team partners** (`TeamCreate`). Partners are real child sessions in their parent conversation's team; they Discuss, receive assignments, and execute while the lead stays read-only by default. See [Team engineering](../guides/team-engineering.md).
 
 ::: warning Note
 The temporary `SubAgent` tool and its DAG fan-out were **removed** in v2.0. Team Engineering is the only delegation path. This page still contains leftover SubAgent copy from the Kimi Code fork and should not be read as current product. For what Nori is now versus Codex / Claude Code, see the GitHub [README](https://github.com/wangyuahn/nori-code/blob/master/README.md).
@@ -64,6 +64,6 @@ Session directories, wire files, and task records are all local debug materials 
 
 ## Next steps
 
-- [Team engineering](../guides/team-engineering.md) — department tree, conversation map, and Discuss/Assign workflow
+- [Team engineering](../guides/team-engineering.md) — department tree, per-conversation teams, and Discuss/Assign workflow
 - [Hooks](./hooks.md) — Trigger local script notifications or interceptions at key points such as sub-agent completion
 - [Agent Skills](./skills.md) — Inject specialized knowledge and workflows into sub-agents

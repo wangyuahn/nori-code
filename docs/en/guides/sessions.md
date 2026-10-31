@@ -89,7 +89,7 @@ The two resulting sessions are completely independent and do not affect each oth
 
 ## Session mount tree
 
-Beyond fork/continue, sessions can form a **conversation map** linked by `parent_session_id` in session metadata (optional `mount_role` / `mount_mandate`). `TeamCreate` hires by creating a mounted child session — the same class of node the Map canvas shows. `/map` in the TUI and the Web **Map** view let you browse, open, stop, mount, unmount, remount, or edit identity for nodes in the current working directory.
+Beyond fork/continue, sessions form a forest linked by `parent_session_id` in session metadata (optional `mount_role` / `mount_mandate`). `TeamCreate` hires by creating a mounted child session — the same member the Team tree shows. `/map` in the TUI browses, opens, mounts, unmounts, and remounts sessions in the current working directory; the Web **Team** tree and the team capsule beside the session title show one conversation's own department.
 
 Mount operations update **`<session_self>`** in each affected session and may inject **`<session_mount_changed>`** on the next turn — identity and topology only, not shared transcript history. See [Team engineering](./team-engineering.md).
 

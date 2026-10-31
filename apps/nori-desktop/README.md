@@ -8,10 +8,10 @@ Nori Work is the Electron desktop workspace for Nori Code. The package name is `
 
 ## What you see
 
-This is the desktop surface of **Team Engineering**. Members are real sessions on one `parent_session_id` forest — the same people as the sidebar, the Map, and the Team tools.
+This is the desktop surface of **Team Engineering**. Each conversation owns its own team: members are sessions mounted under a `parent_session_id`, shown inside that conversation rather than as separate sidebar entries.
 
-- **Chat** — the current session transcript (open a map card to work in that member).
-- **Map** — pan/zoom canvas of the session forest. Cards are child sessions hired with `TeamCreate` or created on the canvas.
+- **Chat** — the current session transcript. The team capsule next to the session title lists this conversation's members and switches between them.
+- **Team** — a per-conversation tree of the lead and its members. Only the active conversation's department is drawn, not the whole session forest.
 - **Inspector Meeting** — always shown. This is Discuss (`TeamDecide` / `TeamSpeak` / `TeamAssign`). Humans watch; they do not speak in the meeting.
 - **Inspector Chat** — always shown. This is department `TeamChat` among siblings. The parent does not read it. Private coordination and task reports use `TeamDM`.
 - **Files / preview / browser / terminal / Git / LSP** — inherited workbench surfaces. LSP and Git are still a rough shell; see the project [README](../../README.md).

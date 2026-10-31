@@ -1,6 +1,6 @@
 # Nori Code / Nori Work
 
-> **Early project.** What ships today is **Team Engineering**: a durable department tree, Discuss before Assign, and a conversation map linked by `parent_session_id`. The deleted SubAgent DAG is **not** the product.
+> **Early project.** What ships today is **Team Engineering**: a durable department tree, Discuss before Assign, and a per-conversation team linked by `parent_session_id`. The deleted SubAgent DAG is **not** the product.
 
 Nori is a coding-agent workspace forked from [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code) (MIT). Nori Code is the terminal CLI/TUI; Nori Work is the Electron desktop. Like Codex and Claude Code, it can read and edit files, run a shell, and connect MCP. Unlike them, handing work to another agent means hiring a **standing department**, not spawning a disposable fan-out.
 
@@ -23,7 +23,7 @@ Nori is a coding-agent workspace forked from [Kimi Code CLI](https://github.com/
 
 - Any agent may hire members with `TeamCreate` and chair its own department, bounded by `team.maxDepth` (default `2`, maximum `5`).
 - A Discuss round is one department: a parent plus its direct members. A node never chairs and participates at the same time.
-- Hiring uses the same path as the conversation map: create a **real child session**, mount it with `parent_session_id`, and show it as a session card. Work, tools, sibling chat, and identity live on that child session. Discuss/Assign address the session id (or display name).
+- Hiring creates a **real child session**, mounts it with `parent_session_id`, and shows it in the parent's team. Work, tools, sibling chat, and identity live on that child session. Discuss/Assign address the session id (or display name).
 - `TeamDismiss` removes a member and **deletes** that child session. Unmount on the map is a user action: detach without deleting. A session has one parent; part-time / second-parent hire is not supported.
 
 ### Discuss, then Code
@@ -81,12 +81,12 @@ Recipients are **session ids** or **display names** (aliases such as `agent-1` a
 
 Identity is not transcript copying. Each session’s system prompt gets **`<session_self>`** (id, title, depth, parent, role, mandate, tags, direct members). Mount or identity changes inject **`<session_mount_changed>`** / **`<session_identity_changed>`** on the next turn.
 
-### Conversation map and inspector
+### Team tree and inspector
 
-Sessions form a forest via **`parent_session_id`**. Map cards, sidebar rows, and Team tools name the same people.
+Sessions form a forest via **`parent_session_id`**. The Team tree, the title-bar team capsule, and the Team tools name the same people.
 
 - **TUI:** `/map` browses, opens, mounts, and unmounts. `/team` is department membership (open a partner, read reports and this-round Discuss). `Ctrl-Y` shows Discuss / Chat on the **lead** session. They are not the same surface.
-- **Nori Work / web:** **Map** is a pan/zoom canvas for that forest. The inspector **Meeting** and **Chat** tabs are always visible — Meeting is Discuss; Chat is `TeamChat` among siblings.
+- **Nori Work / web:** **Team** draws one conversation's own department as a tidy tree, and the capsule beside the session title switches between its members. The sidebar lists conversations, not team members. The inspector **Meeting** and **Chat** tabs are always visible — Meeting is Discuss; Chat is `TeamChat` among siblings.
 
 ---
 

@@ -1,16 +1,16 @@
 # Team engineering
 
-Nori Code CLI 2.0 treats a project as a **department tree**, not a single chat transcript with side notes. `TeamCreate` hires by creating and resuming a **mounted child session** — the same card the conversation map shows. Work, tools, cwd, sibling chat, and identity live on that child session. Discuss rounds gather statements before execution. This page explains how those pieces fit together in the terminal and in Nori Work.
+Nori Code CLI 2.0 treats a project as a **department tree**, not a single chat transcript with side notes. `TeamCreate` hires by creating and resuming a **mounted child session** — the same member the Team tree shows. Work, tools, cwd, sibling chat, and identity live on that child session. Discuss rounds gather statements before execution. This page explains how those pieces fit together in the terminal and in Nori Work.
 
 ::: warning Note
 Temporary `SubAgent` DAG orchestration was **removed** in v2.0. Team Engineering is the only way Nori hands work to another agent. Comparison with Codex / Claude Code, and an honest gap list (LSP and Git are still a rough shell), live in the GitHub [README](https://github.com/wangyuahn/nori-code/blob/master/README.md).
 :::
 
-## Department tree and the conversation map
+## Department tree and the team view
 
 There is one collaboration model, shown in two places:
 
-- **Team partners** (`TeamCreate`) are **real child sessions** mounted under you. They appear as session cards on the conversation map. Discuss, Assign, sibling chat, and identity all address that session id until `TeamDismiss` removes them.
+- **Team partners** (`TeamCreate`) are **real child sessions** mounted under you. They appear in their parent conversation's Team tree and team capsule. Discuss, Assign, sibling chat, and identity all address that session id until `TeamDismiss` removes them.
 - **Map nodes** are the same class: **real child sessions** linked by `parent_session_id`. Creating or wiring a child on the Web Map canvas uses the same create-child + mount path as `TeamCreate`. A session can have only one parent (part-time / second-parent hire is not supported).
 
 There is no second Team Agent identity in the parent session. Durable collaborators are Sessions only.
@@ -60,15 +60,13 @@ Recipients are session ids or display names (aliases such as `agent-1` and `pare
 
 See [Built-in tools](../reference/tools.md#collaboration-tools) for parameters. GitHub [README](https://github.com/wangyuahn/nori-code/blob/master/README.md#team-tools) has the same catalog.
 
-## Conversation map (session mounts)
+## Session mounts
 
-The **conversation map** is the forest of sessions linked by **`parent_session_id`** metadata (plus optional `mount_role` / `mount_mandate`). Operations:
+Sessions form a forest through **`parent_session_id`** metadata (plus optional `mount_role` / `mount_mandate`). Operations:
 
 - **Mount** — attach session B under session A.
 - **Unmount** — remove B's parent link (session data remains).
 - **Remount** — change B's parent when it already has one (replaces the parent; does not add a second job).
-
-Shift+drag from an **output** port creates a **peer** link and Alt+drag from an output port creates a **service** link: stored on the local map only, not a mount. Click the dashed wire to remove it. Input-port drags always remount (Shift/Alt do not change that).
 
 ### Terminal: `/map`
 
@@ -81,20 +79,15 @@ Type **`/map`** to browse the mount forest for the current working directory:
 
 `/map` and **`/team`** show the **same Session forest**. `/team` is the department browser (open a partner's session, browse reports, read this-round Discuss speech); `/map` is the spatial view of those same sessions.
 
-### Web: Map view
+### Web: Team tree and team capsule
 
-In Nori Work / the Web UI, open the sidebar **Map** entry (conversation map). The canvas is a session console, not a static blueprint: pan/zoom the tree, read each card's running state, open a session into Chat, create a child under a parent, stop a running turn, edit name/mandate/tags, mount or remount with role/mandate, and add local labels or annotation boxes (map-only chrome — not sent to the model).
+In Nori Work / the Web UI, the sidebar **Team** entry draws the **active conversation's own department** as a tidy tree: the lead on top, its members below. It does not draw the whole session forest, and a conversation with no members shows an empty state instead of a lone root.
 
-Blueprint gestures:
+The **team capsule** beside the session title in the top bar shows the same members as stacked avatars with a count. Its menu opens a member's conversation or returns to the main one, and **Open team** jumps to the Team tree.
 
-- **Right-click empty canvas** — create a top-level session there; **right-drag** — pan.
-- **Drag an output port onto a card** — silent mount; drop on empty canvas — identity draft then `createChild`.
-- **Drag an input port onto another card** — remount. If the child already has a parent, confirm: this remounts, it does not add a second job.
-- **Alt+click a card (or its input port)** — unmount to top-level. Right-click a card to end its work without disconnecting. Mount/unmount on a busy session queues until idle.
-- **Box-select** — a toolbar appears for Open, Stop, Settings, Unmount, and Delete. Right-click the selection for the same batch actions.
-- **Label filters** apply to both the list and the canvas. Every visible card is a real session and can be boxed or wired.
+The sidebar lists **conversations**, not team members. A member session appears there only while it is the one you have open, so it never disappears out from under you.
 
-Use **`/web`** from the TUI to hand off the current session to the browser workspace when you want the map on a large screen.
+Mount, unmount, and remount remain available in the terminal through `/map`; the model-facing session mount tools are unchanged.
 
 ## Identity: `<session_self>` and mount changes
 

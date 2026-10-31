@@ -74,7 +74,7 @@ Each session's data is stored under `sessions/<workDirKey>/<sessionId>/`, and a 
 
 Inside each session directory:
 
-- **`state.json`**: session metadata including title, `lastPrompt`, creation/update timestamps, `forkedFrom`, and mount fields such as `parent_session_id`, `mount_role`, and `mount_mandate` when the session sits on the conversation map.
+- **`state.json`**: session metadata including title, `lastPrompt`, creation/update timestamps, `forkedFrom`, and mount fields such as `parent_session_id`, `mount_role`, and `mount_mandate` when the session is mounted under another session.
 - **`upcoming-goals.json`**: the TUI-only queue created by `/goal next <objective>`. It is not part of the agent conversation until a queued goal is promoted after the current goal completes.
 - **`agents/main/wire.jsonl`**: the main Agent's complete communication record, used for session resumption and replay.
 - **`agents/agent-0/` etc.**: main and team transcript directories, each containing its own `wire.jsonl`. Temporary SubAgent archives from before v2.0 may still exist on disk; new work uses Team child sessions.
