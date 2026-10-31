@@ -1515,7 +1515,7 @@ function ComposerContextStrip({ goal, todos, onGoalControl }: {
     : (todos.find(todo => todo.status === 'in_progress') ?? todos.find(todo => todo.status !== 'done'))?.title ?? '';
   return (
     <details
-      className="composer-context-strip"
+      className={`composer-context-strip${goal !== null ? ' has-goal' : ''}`}
       open={open}
       onToggle={event => {
         const next = event.currentTarget.open;
@@ -1527,23 +1527,22 @@ function ComposerContextStrip({ goal, todos, onGoalControl }: {
         <Icon name={goal !== null ? 'target' : 'list'} size={12}/>
         <strong>{goal !== null ? tr('Goal', '目标') : tr('Todo list', '待办')}</strong>
         {summary && <span className="composer-context-summary" title={summary}>{summary}</span>}
-        {todos.length > 0 && <em>{done}/{todos.length}</em>}
-        <Icon className="composer-context-chevron" name="chevron-right" size={11}/>
-      </summary>
-      {goal !== null && <div className={`composer-goal-row goal-${goal.status}`}>
-        <Icon name="target" size={13}/>
-        <strong>{tr('Goal', '目标')}</strong>
-        <span className="composer-goal-objective" title={goal.objective}>{goal.objective}</span>
-        <em className="composer-goal-status">{goalStatusLabel}</em>
-        {onGoalControl !== undefined && goal.status !== 'complete' && (
-          <span className="composer-goal-actions">
-            {goal.status === 'active'
-              ? <button type="button" onClick={() => void onGoalControl('pause')}>{tr('Pause', '暂停')}</button>
-              : <button type="button" onClick={() => void onGoalControl('resume')}>{tr('Resume', '继续')}</button>}
-            <button type="button" className="danger" onClick={() => { if (window.confirm(tr('Cancel this goal?', '取消这个目标吗？'))) void onGoalControl('cancel'); }}>{tr('Cancel', '取消')}</button>
+        {goal !== null && (
+          <span className="composer-goal-controls">
+            <em className={`composer-goal-status goal-${goal.status}`}>{goalStatusLabel}</em>
+            {open && onGoalControl !== undefined && goal.status !== 'complete' && (
+              <span className="composer-goal-actions">
+                {goal.status === 'active'
+                  ? <button type="button" onClick={event => { event.preventDefault(); void onGoalControl('pause'); }}>{tr('Pause', '暂停')}</button>
+                  : <button type="button" onClick={event => { event.preventDefault(); void onGoalControl('resume'); }}>{tr('Resume', '继续')}</button>}
+                <button type="button" className="danger" onClick={event => { event.preventDefault(); if (window.confirm(tr('Cancel this goal?', '取消这个目标吗？'))) void onGoalControl('cancel'); }}>{tr('Cancel', '取消')}</button>
+              </span>
+            )}
           </span>
         )}
-      </div>}
+        {todos.length > 0 && <em className="composer-todo-count">{done}/{todos.length}</em>}
+        <Icon className="composer-context-chevron" name="chevron-right" size={11}/>
+      </summary>
       {todos.length > 0 && (
         <div className="composer-todos">
           <div className="composer-todos-head"><Icon name="list" size={12}/><strong>{tr('Todo list', '待办')}</strong><em>{done}/{todos.length}</em></div>

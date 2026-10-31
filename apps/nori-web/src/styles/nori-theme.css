@@ -4850,7 +4850,7 @@ kbd {
 .composer-context-strip > summary::-webkit-details-marker { display: none; }
 .composer-context-strip > summary > svg { flex: none; color: var(--nori-cyan); }
 .composer-context-strip > summary strong { flex: none; white-space: nowrap; font-weight: 600; }
-.composer-context-strip > summary em {
+.composer-context-strip > summary .composer-todo-count {
   flex: none; font-style: normal; font-size: calc(11px * var(--nori-ui-font-scale));
   line-height: 16px; padding: 0 8px; border-radius: 999px;
   color: var(--nori-text-muted);
@@ -4860,30 +4860,32 @@ kbd {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--nori-text-muted);
 }
+/* 展开且有目标时 summary 自己承载全部信息：第一行是标签、状态、操作和计数，
+   目标全文换行展开在下方，不再重复渲染第二行目标。 */
+.composer-context-strip.has-goal[open] > summary { flex-wrap: wrap; row-gap: 8px; padding-bottom: 9px; }
+.composer-context-strip.has-goal[open] > summary .composer-context-summary {
+  order: 6; flex: 1 1 100%; min-width: 0;
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal; text-overflow: clip;
+  color: var(--nori-text); line-height: 1.5;
+}
 .composer-context-chevron { flex: none; color: var(--nori-text-muted); transition: transform 120ms ease; }
 .composer-context-strip[open] > summary .composer-context-chevron { transform: rotate(90deg); }
 .composer-context-strip[open] > summary { border-bottom: 1px solid var(--nori-border); }
 /* 展开后标题行由 summary 承担，正文里的重复标题收起来 */
 .composer-context-strip .composer-todos-head { display: none; }
-.composer-goal-row {
-  display: flex; align-items: center; gap: 8px; min-width: 0;
-  padding: 8px 12px 4px;
-  color: var(--nori-text-secondary);
-  font-size: calc(12px * var(--nori-ui-font-scale));
-}
-.composer-goal-row > svg { flex: none; color: var(--nori-cyan); }
-.composer-goal-row > strong { flex: none; white-space: nowrap; font-weight: 600; }
-.composer-goal-objective { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--nori-text); }
-.composer-goal-status {
+.composer-goal-controls { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
+.composer-context-strip > summary .composer-goal-status {
   flex: none; font-style: normal; font-size: calc(11px * var(--nori-ui-font-scale));
-  line-height: 16px; padding: 1px 8px; border-radius: 999px;
+  line-height: 16px; padding: 1px 8px; border-radius: 999px; border: 0;
   color: var(--nori-cyan);
   background: color-mix(in srgb, var(--nori-cyan) 12%, transparent);
 }
-.composer-goal-row.goal-paused .composer-goal-status { color: #d9a13c; background: rgba(217, 161, 60, 0.14); }
-.composer-goal-row.goal-blocked .composer-goal-status { color: #e07a6a; background: rgba(224, 122, 106, 0.14); }
-.composer-goal-row.goal-complete .composer-goal-status { color: var(--nori-ok, #3fb27f); background: color-mix(in srgb, var(--nori-ok, #3fb27f) 12%, transparent); }
-.composer-goal-actions { display: inline-flex; gap: 6px; margin-left: auto; flex: none; }
+.composer-context-strip > summary .composer-goal-status.goal-paused { color: #d9a13c; background: rgba(217, 161, 60, 0.14); }
+.composer-context-strip > summary .composer-goal-status.goal-blocked { color: #e07a6a; background: rgba(224, 122, 106, 0.14); }
+.composer-context-strip > summary .composer-goal-status.goal-complete { color: var(--nori-ok, #3fb27f); background: color-mix(in srgb, var(--nori-ok, #3fb27f) 12%, transparent); }
+.composer-goal-actions { display: inline-flex; gap: 6px; flex: none; }
 .composer-goal-actions button {
   padding: 2px 10px; border: 1px solid var(--nori-border); border-radius: 999px;
   background: transparent; color: var(--nori-text-secondary);
